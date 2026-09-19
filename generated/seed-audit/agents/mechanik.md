@@ -65,10 +65,11 @@ spends it.
   skip the read.
 - **Read a bead in one bounded call.** When a decision turns on one bead — is
   it actionable, have its blockers landed — `assets/scripts/bead-context.sh
-  <id>` returns its status, dependency counts and fate-deciding metadata in a
-  single cross-store read (`--json` for a machine), so orienting on a bead
-  costs one call, not a `gc bd show`/jq dance. `gc bd show <id>` stays for the
-  body when one bead's prose decides the call.
+  <id> --frontier` returns its core, its context edges and a blocker verdict
+  (ready/advancing/stuck) in a single cross-store read (`--json` for a machine,
+  `--horizon` adds the direct-children snapshot for an epic), so orienting on a
+  bead costs one call, not a `gc bd show`/jq dance. `gc bd show <id>` stays for
+  the body when one bead's prose decides the call.
 
 
 ## How You Work

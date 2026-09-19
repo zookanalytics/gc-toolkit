@@ -153,51 +153,66 @@ whichever store it happened to be standing in.
 
 ## Reading a bead's whole context
 
-`assets/scripts/bead-context.sh <id>` answers "what is this bead, and is it
-actionable?" in one call, so an agent stops re-running the show/jq/cross-store
-dance to tell whether a blocked bead's blockers have landed. It prints the
-bead's status, title, type, assignee and routing; the metadata that decides an
-anchor's fate (branch, target, PR, merge_result, gate lanes, successor);
-structural dependency counts — the total, the `blocks`-blockers split
-open-vs-closed, and a tally by status — with the open blockers named and each
-resolved against the store it lives in through the prefix binding above; the
-store the bead itself lives in; and a verdict on whether an open `blocks`-blocker,
-or one whose store cannot be placed, holds it. `--store rig:<name>` and
-`--db <path>/.beads` pin the owning store when a prefix is ambiguous or names
-the city's own store, and `--json` emits the same context as one object for a
-machine. It reads only, and it runs on demand (a triage read, an unblock check,
-a hand-off) rather than driving the dispatch loop; the loop's readiness question
-is `bd`'s own.
+`assets/scripts/bead-context.sh <id>` rebuilds a subject's working context in
+one call, so an agent orienting on a bead — the converse opening claims, folds,
+then primes a subject before any work — stops re-running the show/jq/cross-store
+dance by hand. It returns, and nothing outside this:
+
+- **Subject core** — status, priority, type, task_kind, assignee; the live and
+  provenance routes; the anchor state (merge_result, pr_number, branch,
+  merged_target) when the bead carries a merge_result; the first_reaction fields;
+  gc.origin; and the distilled gc.takeaway headline with its settled flag.
+- **Context edges**, shown but never gating — the parent, the relates-to edges,
+  the tracked-by visits, and a count per class.
+- **Store** — the store that answered, and the db it read.
+
+and, each behind an opt-in flag so a caller pays only for what it needs:
+
+- **`--frontier`** — the blockers. A verdict over `ready | advancing | stuck`:
+  ready with no open blocker, else the worst open blocker's state. Each open
+  `blocks`-dep is named `{id, title, status, advance}` and the closed ones are a
+  count. `advance` is `advancing` when the blocker is itself moving — in
+  progress, or routed to a worker or pool — and `stuck` when it needs external
+  input: unrouted, parked, routed to the `human` gate, or of unknown status. It
+  reads each blocker's own row one level deep; a transitive walk drops in on the
+  same enum later.
+- **`--horizon`** — the direct children. The epic-health snapshot
+  `{total, open, closed, advancing, stuck}`, with open children named
+  `{id, title, status, advance}` on the same enum and done children counted only,
+  so a hundred-story epic stays bounded.
+
+The converse opening opts into both, so its subject slice, the readiness verdict
+and the epic-health snapshot arrive from one call. A caller that only needs
+claimability opts into `--frontier` alone. `--store rig:<name>` and `--db
+<path>/.beads` pin the owning store when a prefix is ambiguous or names the
+city's own store, which no `--rig` value reaches. `--json` emits the whole
+context as one object; the default is a human-readable block. It reads only.
 
 ### What it returns, and what it leaves out
 
-The fields it prints are the ones that decide a bead's fate. It leaves out the
-free-text body, notes, description and comments, on purpose: that text is
-unbounded, and returning it proactively is the cost this tool exists to avoid.
-So it complements `gc bd show <id>`, which the reader still runs for the one
-bead whose full body a decision turns on, and does not replace it.
+The free-text body — descriptions, notes and comments, of the subject or of any
+listed bead — is never returned, and no blocker or child is carried beyond
+`{id, title, status, advance}`. That text is unbounded, and returning it
+proactively is the context bloat this tool exists to cut. So it complements `gc
+bd show <id>`, which the reader still runs for the one bead whose full body a
+decision turns on, and does not replace it.
 
-### Dependencies, and what they cost
+### The edges, the frontier, and what they cost
 
-Dependencies are returned as counts, not a row per edge: the total, the
-`blocks`-blockers split open-vs-closed, and a tally by status. Every edge is
-inspected — the actionable verdict is computed over all of them, and a closed
-`blocks`-dep is the evidence a blocker has landed — but a graph with no OPEN
-blocker is cleared, so the closed ones are a number while only the open blockers
-are named, in `open_blockers`. That a bead has three hundred closed blockers is
-noise; that it has none open is the answer. Only `blocks`-edges gate the
-verdict; `related`, `tracks` and `parent-child` edges are counted as context and
-never hold a bead. When a decision turns on which specific bead an edge is,
-`gc bd show <id> --json` carries the full `.dependencies` list.
+A bead's own read carries its outbound edges — the parent link, the relates-to
+edges (either the `relates-to` or the older `related` spelling), and the
+`blocks`-deps. The tracked-by visits are an inbound `tracks` edge and the direct
+children an inbound `parent-child` edge, each stored on the other bead, so each
+is read with one reverse query the subject's own row cannot answer.
 
-The counts are over a bead's own outbound edges, not its descendants. A
-`parent-child` edge is stored on the child pointing up to its parent, so an
-epic carries no edge per story: running this on an epic counts the epic's own
-few edges, not its subtree.
+The counts are over a bead's own edges and its direct children, never its whole
+subtree. A `parent-child` edge is stored on the child pointing up, so an epic
+carries no edge per story; `--horizon` lists the direct children by the
+`--parent` query, asked for with closed included so a done child still counts.
 
-The cost is one `gc bd show` for the subject plus one more for each dependency
-whose status the subject's store could not embed, which is each cross-store
-dependency. Same-store dependencies carry their status inline and cost nothing
-extra, and the subject read passes `--brief-deps`, so a dependency's body is
-never fetched just to read its status. A bead with many same-store
-dependencies is still a single read.
+The subject read passes `--brief-deps`, so a listed bead's body is never fetched
+to read its status, and a same-store closed blocker's status rides the edge at no
+extra cost — the common bulk on an epic. A read is spent only where a fact is
+missing: a cross-store blocker, whose store the subject's could not join, and
+each open blocker, whose live route decides its advance. A blocker whose store no
+rig carries reads unknown and fails the verdict closed, never landed.

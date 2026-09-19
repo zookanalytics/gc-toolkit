@@ -1,42 +1,53 @@
 #!/usr/bin/env bash
-# bead-context.sh — one call answers "what is this bead, and is it actionable?"
-# for a bead id. It prints the bead's status, title, type, assignee and routing;
-# structural dependency counts (total, blocks-blockers open vs closed, and a
-# tally by status) with the OPEN blocks-blockers named, each resolved against
-# the store that dependency lives in; the metadata that decides an anchor's fate
-# (branch, target, PR, merge_result, gate lanes, successor pointer); the store
-# the bead itself lives in; and a verdict on whether an open `blocks`-blocker
-# holds it back. It exists so an agent stops re-running the show/jq/cross-store
-# dance by hand every time it needs to know whether a blocked bead's blockers
-# have landed.
+# bead-context.sh — one call rebuilds a subject's working context for an agent
+# orienting on it: the converse opening claims, folds, then primes a subject
+# before any work, and this answers that prime in a single call.
 #
-# The store is derived from each id's prefix through `gc rig list --json`, the
-# same binding assets/scripts/bead-store.sh proves, so a blocker in another
-# rig's store is read from THAT store rather than reported unknown. Three
-# `gc bd show --json` quirks are handled so the read never dies on live data: a
-# `gc bd:` notice line that can precede the JSON on stdout is stripped; raw C0
-# control bytes in accumulated notes are scrubbed before jq; and the payload
-# that is an ARRAY when the id resolves but an `{"error":…}` OBJECT when it does
-# not is discriminated on `type`, never on the exit code the two share.
+# Given a bead id it returns, and nothing outside this:
+#   A. Subject core — status, priority, issue_type, task_kind, assignee; routing
+#      (gc.routed_to, gc.execution_routed_to); anchor state when the bead carries
+#      a merge_result (merge_result, pr_number, branch, merged_target); the
+#      first_reaction fields; gc.origin; and the distilled gc.takeaway headline
+#      (with gc.takeaway_settled). The free-text body is never parsed.
+#   D. Context edges, shown but never gating — the parent, the relates-to edges,
+#      the tracked-by visits, and a count per class.
+#   E. Store — the store that answered, and the db it read.
+# and, each behind its own opt-in flag:
+#   B. --frontier — the blockers. A verdict over {ready, advancing, stuck}: ready
+#      with no open blocker, else the worst open blocker's state. Each open
+#      blocks-dep is named {id, title, status, advance}; closed blockers are a
+#      count. `advance` is advancing when the blocker is itself moving (routed or
+#      in progress) and stuck otherwise (unrouted, parked, blocked, or unknown —
+#      fail closed).
+#   C. --horizon — the direct children. The epic-health snapshot
+#      {total, open, closed, advancing, stuck}; open children named
+#      {id, title, status, advance}; done children counted only, so a
+#      hundred-story epic stays bounded.
+# The converse opening opts into both; a caller that only needs claimability
+# opts into --frontier alone.
 #
-# Reads only — it never writes the store, and a bead it cannot resolve is
-# reported, not assumed. --json prints the whole context as one object for a
-# machine; the default is a human-readable block.
+# A dependency in another rig's store comes back without an embedded status, so
+# it is read from THAT store — the prefix binding assets/scripts/bead-store.sh
+# proves — and folded in; a blocker whose store no rig carries reads unknown and
+# fails the verdict closed. Three `gc bd show --json` quirks are handled so the
+# read never dies on live data: a leading `gc bd:` notice line is stripped; raw
+# C0 control bytes are scrubbed before jq; and the ARRAY-when-resolved versus
+# `{"error":…}`-OBJECT-when-not payloads are told apart on type, not the exit
+# code they share.
 #
-# It reports the counts and fields that decide a bead's fate, not its free-text
-# body and not a row per dependency. Notes, description, comments and the full
-# per-edge list are left out on purpose, so the context stays bounded whether a
-# bead has three closed blockers or three hundred: `gc bd show <id>` still has
-# the body, and `<id> --json` the per-edge detail, for the one bead a decision
-# turns on. This complements `gc bd show`, it does not replace it.
+# Reads only. Descriptions, notes and comments — of the subject or any listed
+# bead — and any body beyond {id, title, status, advance}, and any closed
+# blocker or done child beyond its count, are omitted on purpose: that is the
+# context bloat this tool exists to cut. `gc bd show <id>` still carries the
+# body, and `<id> --json` the full per-edge detail, for the one bead a decision
+# turns on. This complements `gc bd show`; it does not replace it.
 #
 # Usage:
-#   bead-context.sh <bead-id> [--store rig:<name> | --db <path>] [--json]
+#   bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads]
+#                             [--frontier] [--horizon] [--json]
 #
 # Exit: 0 reported · 2 usage · 4 the subject id could not be resolved to a bead.
 # Doctrine: docs/bead-store-resolution.md. Test: bead-context.test.sh.
-# Run on demand to inspect one bead: a triage read, an unblock check, a
-# hand-off. It reports; it does not drive the dispatch loop.
 set -uo pipefail
 
 PROG="bead-context"
@@ -54,33 +65,38 @@ die()  { echo "$PROG: $1" >&2; exit "${2:-1}"; }
 
 usage() {
   cat >&2 <<'U'
-usage: bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads] [--json]
+usage: bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads]
+                                 [--frontier] [--horizon] [--json]
 
-Prints one bead's working context: status, structural dependency counts
-(blockers open vs closed, and a tally by status) with the open blocks-blockers
-named and each resolved from the store it lives in, the metadata that decides
-its fate, its successor pointer, and whether an open blocks-blocker holds it.
---store / --db pin the owning store when the id prefix is ambiguous or names
-the city's own store, which no --rig value reaches. --json emits the whole
-context as one object.
+Rebuilds one bead's working context in a single call: its core (status,
+priority, type, task_kind, assignee, routing, anchor state, first_reaction,
+origin, takeaway), its context edges (parent, relates-to, tracked-by visits,
+with a count per class), and the store that answered. --frontier adds the
+blocker verdict (ready/advancing/stuck) with open blockers named and closed
+counted; --horizon adds the direct-children epic-health snapshot. --store / --db
+pin the owning store when a prefix is ambiguous or names the city's own store,
+which no --rig value reaches. --json emits the whole context as one object.
 
 Examples:
-  bead-context.sh tk-8kc5dz            human-readable context and verdict
-  bead-context.sh tk-8kc5dz --json     the same context as one JSON object
-  bead-context.sh ab-1a2b3c --store rig:other   pin the store when a prefix is ambiguous
+  bead-context.sh tk-8kc5dz --json                    core + edges + store
+  bead-context.sh tk-8kc5dz --frontier --json         ... plus the blocker verdict
+  bead-context.sh tk-87nwhv --frontier --horizon --json   the converse opening's call
+  bead-context.sh ab-1a2b3c --store rig:other         pin the store when a prefix is ambiguous
 U
   exit 2
 }
 
-BEAD=""; STORE_REF=""; DB=""; JSON_OUT=""
+BEAD=""; STORE_REF=""; DB=""; JSON_OUT=""; WANT_FRONTIER=""; WANT_HORIZON=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --store) [ "$#" -ge 2 ] || die "--store needs a value (rig:<name>)" 2; STORE_REF="$2"; shift 2 ;;
-    --db)    [ "$#" -ge 2 ] || die "--db needs a value (<path>/.beads)" 2; DB="$2"; shift 2 ;;
-    --json)  JSON_OUT=1; shift ;;
-    -h|--help) usage ;;
-    -*)      die "unknown argument '$1' (try --help)" 2 ;;
-    *)       [ -z "$BEAD" ] || die "more than one bead id given ('$BEAD' and '$1')" 2; BEAD="$1"; shift ;;
+    --store)    [ "$#" -ge 2 ] || die "--store needs a value (rig:<name>)" 2; STORE_REF="$2"; shift 2 ;;
+    --db)       [ "$#" -ge 2 ] || die "--db needs a value (<path>/.beads)" 2; DB="$2"; shift 2 ;;
+    --frontier) WANT_FRONTIER=1; shift ;;
+    --horizon)  WANT_HORIZON=1; shift ;;
+    --json)     JSON_OUT=1; shift ;;
+    -h|--help)  usage ;;
+    -*)         die "unknown argument '$1' (try --help)" 2 ;;
+    *)          [ -z "$BEAD" ] || die "more than one bead id given ('$BEAD' and '$1')" 2; BEAD="$1"; shift ;;
   esac
 done
 [ -n "$BEAD" ] || usage
@@ -112,23 +128,45 @@ db_for_rig_name() {
     '[.rigs[]? | select(.name == $n)] | if length == 1 and ((.[0].path // "") != "") then .[0].path + "/.beads" else "" end' 2>/dev/null || true
 }
 
-# `gc bd [--db <db>] show <id> --json`, cleaned of the two contaminants that
+# `gc bd [--db <db>] <args...> --json`, cleaned of the two contaminants that
 # break a naive pipe to jq: the `gc bd:` notice line that can lead stdout, and
 # raw control bytes. The notice strip runs with `grep -a` (force text mode): a
 # raw NUL byte in the notes otherwise switches grep to binary and drops the
 # whole payload before scrub can remove the byte, so the read must stay text
-# through the filter and let scrub take the C0 bytes out. `--brief-deps` drops
-# each dependency's description and notes from the payload: only a dep's id,
-# type and status are read here, and a hub bead's dependencies carry large
-# bodies otherwise. `status` survives it, so the same-store fast path below is
-# intact. Prints the cleaned payload; the caller discriminates shape.
-bd_show_clean() {
-  local db="$1" id="$2"
+# through the filter and let scrub take the C0 bytes out. Prints the cleaned
+# payload; the caller discriminates shape.
+bd_json() {
+  local db="$1"; shift
   if [ -n "$db" ]; then
-    bounded gc bd --db "$db" show "$id" --json --brief-deps 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
+    bounded gc bd --db "$db" "$@" --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
   else
-    bounded gc bd show "$id" --json --brief-deps 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
+    bounded gc bd "$@" --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
   fi
+}
+# The subject and each dependency are read with --brief-deps: only a bead's own
+# fields and its edges' {id, title, status, type} are read here, never a listed
+# bead's body, and a hub bead's dependency bodies would otherwise dwarf the read.
+bd_show() { bd_json "$1" show "$2" --brief-deps; }
+
+# The advance enum, as a jq expression over a bead object, shared verbatim by the
+# frontier per-blocker read and the horizon child scan so the two cannot drift. A
+# bead moving on its own advances without external input: in progress, or routed
+# to a worker or pool that will action it. A route to the reserved `human` alias
+# is the opposite — a human gate — so it is stuck, as is an unrouted, parked (park
+# clears the route), or unknown bead. One level, one bead's own row; a transitive
+# walk (a blocker blocked by a blocker) drops in on the same enum later.
+# gc.execution_routed_to is a finished pour's provenance, not a live route, so it
+# is not consulted here.
+ADV='(.metadata["gc.routed_to"] // "") as $r | if .status == "in_progress" then "advancing" elif ($r == "" or $r == "human" or ($r | endswith("/human"))) then "stuck" else "advancing" end'
+
+# A blocker read reduced to the facts the frontier turns on: {status, advance,
+# title}, as compact JSON so an empty route survives (a tab-delimited read
+# collapses adjacent empty fields). Unreadable or absent reads unknown, which is
+# stuck and fails the verdict closed rather than passing for landed.
+read_bead() {
+  bd_show "$1" "$2" | jq -c "def adv: $ADV;"' (if type == "array" and length > 0 then .[0] else {status: "unknown", metadata: {}, title: ""} end)
+    | {status: (.status // "unknown"), advance: adv, title: (.title // "")}' 2>/dev/null \
+    || echo '{"status":"unknown","advance":"stuck","title":""}'
 }
 
 # ── Resolve the subject's store ─────────────────────────────────────────────
@@ -152,7 +190,7 @@ else
   DB=$(db_for_prefix "$SUBJ_PREFIX")
 fi
 
-RAW=$(bd_show_clean "$DB" "$BEAD")
+RAW=$(bd_show "$DB" "$BEAD")
 KIND=$(printf '%s' "$RAW" | jq -r 'type' 2>/dev/null || true)
 if [ "$KIND" != "array" ]; then
   # An object is the `{"error":…}` not-found; empty is an unreadable store. Both
@@ -163,99 +201,124 @@ fi
 
 # bd resolves a bare id as an exact-or-prefix match, so .[0] may be a longer
 # bead the prefix hit. Report whichever id actually resolved rather than echoing
-# the input, and normalize the fields in one pass.
+# the input.
 SUBJ=$(printf '%s' "$RAW" | jq -c '.[0]')
-NORM=$(printf '%s' "$SUBJ" | jq -c '
-  (.metadata // {}) as $m |
-  {
-    id, status, title,
-    type: .issue_type,
+
+# ── A. Subject core ─────────────────────────────────────────────────────────
+# absent -> null, present-but-empty -> "" is preserved: `//` alternates only on
+# null, so a metadata key that resolves to "" (a cleared route, an unsettled
+# takeaway) reads as the empty string it is, distinct from an absent key.
+SUBJECT_CORE=$(printf '%s' "$SUBJ" | jq -c '
+  (.metadata // {}) as $m | {
+    id, status,
+    priority: (.priority // null),
+    issue_type: (.issue_type // null),
+    task_kind: ($m["task_kind"] // null),
     assignee: (.assignee // null),
     routed_to: ($m["gc.routed_to"] // null),
     execution_routed_to: ($m["gc.execution_routed_to"] // null),
-    branch: ($m["branch"] // null),
-    target: ($m["target"] // $m["merged_target"] // null),
-    existing_pr: ($m["existing_pr"] // null),
-    pr_number: ($m["pr_number"] // null),
-    pr_url: ($m["pr_url"] // null),
-    merge_result: ($m["merge_result"] // null),
-    prepare_mode: ($m["prepare_mode"] // null),
-    rejection_reason: ($m["rejection_reason"] // null),
-    work_dir: ($m["work_dir"] // null),
-    check_set: ($m["check_set"] // null),
-    checks: ($m | to_entries | map(select(.key | startswith("check."))) | map({(.key): .value}) | add // {}),
-    successor: ($m["gc.superseded_by"] // $m["superseded_by"] // null),
-    successor_store: ($m["gc.superseded_by_store"] // $m["superseded_by_store"] // null),
-    supersedes: ($m["gc.supersedes"] // $m["supersedes"] // null),
-    deps_raw: [.dependencies[]? | {id, type: (.dependency_type // null), status: (.status // null)}]
+    anchor: (if (($m["merge_result"] // "") | tostring) != "" then {
+        merge_result: $m["merge_result"],
+        pr_number: ($m["pr_number"] // null),
+        branch: ($m["branch"] // null),
+        merged_target: ($m["merged_target"] // null)
+      } else null end),
+    first_reaction: {
+        reaction: ($m["gc.first_reaction"] // null),
+        at: ($m["gc.first_reaction_at"] // null),
+        reason: ($m["gc.first_reaction_reason"] // null),
+        target: ($m["gc.first_reaction_target"] // null)
+      },
+    origin: ($m["gc.origin"] // null),
+    takeaway: ($m["gc.takeaway"] // null),
+    takeaway_settled: ($m["gc.takeaway_settled"] // null)
   }')
 
-# ── Resolve each dependency against the store it lives in ───────────────────
-# An embedded status is what the subject's store could join; a dependency in
-# another store comes back without one, and THAT is the cross-store case this
-# tool exists to close. Prefer the embedded status; when it is absent, ask the
-# dependency's own store. The per-edge status feeds the counts and the verdict
-# below; it is never rendered as a row per dependency.
-DEP_RECORDS=()
-OPEN_BLOCKERS=()
-while IFS=$'\t' read -r dep_id dep_type dep_status; do
-  [ -n "$dep_id" ] || continue
-  if [ -z "$dep_status" ] || [ "$dep_status" = "null" ]; then
-    dep_db=$(db_for_prefix "${dep_id%%-*}")
-    if [ -n "$dep_db" ]; then
-      dep_raw=$(bd_show_clean "$dep_db" "$dep_id")
-      dep_status=$(printf '%s' "$dep_raw" | jq -r 'if type == "array" and length > 0 then (.[0].status // "unknown") else "unknown" end' 2>/dev/null || echo unknown)
-    else
-      dep_status="unknown"
-    fi
-  fi
-  [ -n "$dep_status" ] || dep_status="unknown"
-  # A blocks-edge that is not proven closed is what holds the bead. An
-  # unresolved status counts as holding: fail closed, never call it landed.
-  if [ "$dep_type" = "blocks" ] && [ "$dep_status" != "closed" ]; then
-    OPEN_BLOCKERS+=("$dep_id")
-  fi
-  DEP_RECORDS+=("$(jq -nc --arg type "$dep_type" --arg status "$dep_status" '{type: $type, status: $status}')")
-done < <(printf '%s' "$NORM" | jq -rc '.deps_raw[]? | [.id, (.type // ""), (.status // "")] | @tsv')
+# ── E. Store ────────────────────────────────────────────────────────────────
+STORE_JSON=$(jq -nc --arg rig "$SUBJ_RIG" --arg db "$DB" \
+  '{rig: (if $rig == "" then null else $rig end), db: (if $db == "" then null else $db end)}')
 
-# Structural counts, not a dump: the total, the blocks-blockers split
-# open-vs-closed (the verdict's own axis), and a tally across every dependency
-# status. A graph with no OPEN blocker is cleared, so the closed blockers are a
-# number rather than a list; the open ones are named in open_blockers below,
-# because those are the ids a reader acts on.
-if [ "${#DEP_RECORDS[@]}" -gt 0 ]; then
-  DEP_RECORDS_JSON=$(printf '%s\n' "${DEP_RECORDS[@]}" | jq -sc '.')
-else
-  DEP_RECORDS_JSON="[]"
-fi
-DEPS_JSON=$(printf '%s' "$DEP_RECORDS_JSON" | jq -c '{
-  total: length,
-  blockers: {
-    open:   ([.[] | select(.type == "blocks" and .status != "closed")] | length),
-    closed: ([.[] | select(.type == "blocks" and .status == "closed")] | length)
-  },
-  by_status: reduce .[] as $d ({}; .[$d.status] = ((.[$d.status] // 0) + 1))
-}')
-if [ "${#OPEN_BLOCKERS[@]}" -gt 0 ]; then
-  BLOCKERS_JSON=$(printf '%s\n' "${OPEN_BLOCKERS[@]}" | jq -R . | jq -sc '.')
-  ACTIONABLE=false
-else
-  BLOCKERS_JSON="[]"
-  ACTIONABLE=true
+# ── D. Context edges (never gating) ─────────────────────────────────────────
+# The parent link and the relates-to edges are outbound, so they come from the
+# subject's own read. Both edge spellings live in the store — `relates-to` and
+# the older `related` — so the class matches either. The tracked-by visits are
+# an INBOUND `tracks` edge (a visit tracks its subject; the subject carries no
+# reverse edge), so they are read with a reverse dep-list.
+TRACKED_BY=$(bd_json "$DB" dep list "$BEAD" --direction=up --type tracks \
+  | jq -c 'if type == "array" then [.[] | {id, status}] else [] end' 2>/dev/null || echo '[]')
+EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" '
+  (.parent // null) as $pid |
+  ([.dependencies[]? | select(.dependency_type == "parent-child" and .id == $pid) | {id, title, status}] | .[0]) as $pedge |
+  {
+    parent: (if ($pid == null or $pid == "") then null else ($pedge // {id: $pid, title: null, status: null}) end),
+    relates_to: [.dependencies[]? | select(.dependency_type == "relates-to" or .dependency_type == "related") | {id, title, status}],
+    tracked_by: $tracked
+  }
+  | . + {counts: {
+      parent: (if .parent == null then 0 else 1 end),
+      relates_to: (.relates_to | length),
+      tracked_by: (.tracked_by | length)
+    }}')
+
+# ── B. Frontier — blockers (opt-in) ─────────────────────────────────────────
+# Each blocks-edge is a blocker of the subject. A same-store closed blocker
+# carries its status in the edge and is only counted — the common bulk on an
+# epic costs no read. Every other blocker is read once: to place a cross-store
+# blocker open-vs-closed, and to read gc.routed_to for an open blocker's advance.
+FRONTIER_JSON=""
+if [ -n "$WANT_FRONTIER" ]; then
+  CLOSED_BLK=0
+  OPEN_BLK=()
+  while IFS=$'\t' read -r bid btitle bstatus; do
+    [ -n "$bid" ] || continue
+    if [ "$bstatus" = "closed" ]; then CLOSED_BLK=$((CLOSED_BLK + 1)); continue; fi
+    BJ=$(read_bead "$(db_for_prefix "${bid%%-*}")" "$bid")
+    st=$(printf '%s' "$BJ" | jq -r '.status')
+    if [ "$st" = "closed" ]; then CLOSED_BLK=$((CLOSED_BLK + 1)); continue; fi
+    adv=$(printf '%s' "$BJ" | jq -r '.advance')
+    rtitle=$(printf '%s' "$BJ" | jq -r '.title')
+    title="$btitle"; { [ -z "$title" ] || [ "$title" = "null" ]; } && title="$rtitle"
+    OPEN_BLK+=("$(jq -nc --arg id "$bid" --arg t "$title" --arg s "$st" --arg a "$adv" \
+      '{id: $id, title: (if $t == "" then null else $t end), status: $s, advance: $a}')")
+  done < <(printf '%s' "$SUBJ" | jq -rc '.dependencies[]? | select(.dependency_type == "blocks") | [.id, (.title // ""), (.status // "")] | @tsv')
+
+  if [ "${#OPEN_BLK[@]}" -gt 0 ]; then OPEN_BLK_JSON=$(printf '%s\n' "${OPEN_BLK[@]}" | jq -sc '.'); else OPEN_BLK_JSON="[]"; fi
+  OPEN_N="${#OPEN_BLK[@]}"
+  if [ "$OPEN_N" -eq 0 ]; then VERDICT=ready
+  elif printf '%s' "$OPEN_BLK_JSON" | jq -e 'any(.[]; .advance == "stuck")' >/dev/null 2>&1; then VERDICT=stuck
+  else VERDICT=advancing; fi
+  FRONTIER_JSON=$(jq -nc --arg v "$VERDICT" --argjson oc "$OPEN_N" --argjson cc "$CLOSED_BLK" --argjson open "$OPEN_BLK_JSON" \
+    '{verdict: $v, blockers: {open: $oc, closed: $cc}, open: $open}')
 fi
 
-FINAL=$(printf '%s' "$NORM" | jq -c \
-  --argjson deps "$DEPS_JSON" \
-  --argjson blockers "$BLOCKERS_JSON" \
-  --argjson actionable "$ACTIONABLE" \
-  --arg store_rig "$SUBJ_RIG" \
-  --arg store_db "$DB" \
-  'del(.deps_raw) + {
-     store: {rig: (if $store_rig == "" then null else $store_rig end), db: (if $store_db == "" then null else $store_db end)},
-     dependencies: $deps,
-     open_blockers: $blockers,
-     actionable: $actionable
-   }')
+# ── C. Horizon — direct children (opt-in) ───────────────────────────────────
+# The parent-child edge is stored on the child pointing up, so children are read
+# with a --parent listing (closed included, or a done child is dropped from the
+# count). The listing carries each child's metadata inline, so an advance state
+# costs no extra read. Done children are counted only; open children are named.
+HORIZON_JSON=""
+if [ -n "$WANT_HORIZON" ]; then
+  CHILDREN=$(bd_json "$DB" list --parent "$BEAD" --status open,in_progress,blocked,deferred,closed --limit 0)
+  HORIZON_JSON=$(printf '%s' "$CHILDREN" | jq -c "def adv: $ADV;"'
+    (if type == "array" then . else [] end) as $c |
+    [$c[] | select(.status != "closed")] as $open |
+    {
+      children: {
+        total: ($c | length),
+        open: ($open | length),
+        closed: ([$c[] | select(.status == "closed")] | length),
+        advancing: ([$open[] | select(adv == "advancing")] | length),
+        stuck: ([$open[] | select(adv == "stuck")] | length)
+      },
+      open: [$open[] | {id, title, status, advance: adv}]
+    }' 2>/dev/null || echo '{"children":{"total":0,"open":0,"closed":0,"advancing":0,"stuck":0},"open":[]}')
+fi
+
+# ── Assemble ────────────────────────────────────────────────────────────────
+FINAL=$(jq -nc --argjson subject "$SUBJECT_CORE" --argjson store "$STORE_JSON" --argjson edges "$EDGES_JSON" \
+  '{subject: $subject, store: $store, edges: $edges}')
+[ -n "$FRONTIER_JSON" ] && FINAL=$(printf '%s' "$FINAL" | jq -c --argjson f "$FRONTIER_JSON" '. + {frontier: $f}')
+[ -n "$HORIZON_JSON" ]  && FINAL=$(printf '%s' "$FINAL" | jq -c --argjson h "$HORIZON_JSON" '. + {horizon: $h}')
 
 if [ -n "$JSON_OUT" ]; then
   printf '%s\n' "$FINAL" | jq '.'
@@ -266,46 +329,62 @@ fi
 g() { printf '%s' "$FINAL" | jq -r "$1" 2>/dev/null; }
 val() { case "$1" in ""|null) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
 
-RESOLVED_ID=$(g '.id')
-printf '%s: %s\n\n' "$PROG" "$RESOLVED_ID"
-printf '  Status      %s\n' "$(g '.status')"
-printf '  Title       %s\n' "$(g '.title // ""')"
-printf '  Type        %s\n' "$(val "$(g '.type // ""')" '(none)')"
-printf '  Assignee    %s\n' "$(val "$(g '.assignee // ""')" '(unassigned)')"
+printf '%s: %s\n\n' "$PROG" "$(g '.subject.id')"
+printf '  Status      %s\n' "$(g '.subject.status')"
+printf '  Priority    %s\n' "$(val "$(g '.subject.priority // ""')" '(none)')"
+printf '  Type        %s\n' "$(val "$(g '.subject.issue_type // ""')" '(none)')"
+TK=$(g '.subject.task_kind // ""'); [ -n "$TK" ] && printf '  Task kind   %s\n' "$TK"
+printf '  Assignee    %s\n' "$(val "$(g '.subject.assignee // ""')" '(unassigned)')"
 printf '  Store       %s\n' "$(val "$(g '.store.rig // ""')" "(unresolved: prefix '$SUBJ_PREFIX')")"
 
-RT=$(g '.routed_to // ""'); XRT=$(g '.execution_routed_to // ""')
+RT=$(g '.subject.routed_to // ""'); XRT=$(g '.subject.execution_routed_to // ""')
 [ -n "$RT" ]  && printf '  Routed to   %s\n' "$RT"
 [ -n "$XRT" ] && printf '  Execution   %s  (provenance, not a live route)\n' "$XRT"
-
-printf '\n  Metadata\n'
-printf '    branch        %s\n' "$(val "$(g '.branch // ""')" '(unset)')"
-printf '    target        %s\n' "$(val "$(g '.target // ""')" '(unset)')"
-PR=$(g 'if .existing_pr then .existing_pr elif .pr_url then .pr_url elif .pr_number then (.pr_number|tostring) else "" end')
-printf '    pr            %s\n' "$(val "$PR" '(none)')"
-printf '    merge_result  %s\n' "$(val "$(g '.merge_result // ""')" '(unanchored)')"
-printf '    check_set     %s\n' "$(val "$(g '.check_set // ""')" '(default)')"
-# Gate lanes and resume markers are situational; show them only when present.
-CHECKS=$(g '.checks | to_entries[]? | "    \(.key)   \(.value)"'); [ -n "$CHECKS" ] && printf '%s\n' "$CHECKS"
-PM=$(g '.prepare_mode // ""');      [ -n "$PM" ] && printf '    prepare_mode  %s\n' "$PM"
-RR=$(g '.rejection_reason // ""');  [ -n "$RR" ] && printf '    rejection     %s\n' "$RR"
-WD=$(g '.work_dir // ""');          [ -n "$WD" ] && printf '    work_dir      %s\n' "$WD"
-
-SUCC=$(g '.successor // ""'); SUCC_STORE=$(g '.successor_store // ""')
-if [ -n "$SUCC" ]; then
-  printf '    successor     %s%s\n' "$SUCC" "$( [ -n "$SUCC_STORE" ] && printf ' in %s' "$SUCC_STORE")"
+OR=$(g '.subject.origin // ""'); [ -n "$OR" ] && printf '  Origin      %s\n' "$OR"
+TA=$(g '.subject.takeaway // ""')
+if [ -n "$TA" ]; then
+  SETTLED=$(g '.subject.takeaway_settled // ""')
+  printf '  Takeaway    %s%s\n' "$TA" "$(case "$SETTLED" in ""|null|0) ;; *) printf '  [settled]' ;; esac)"
+fi
+FR=$(g '.subject.first_reaction.reaction // ""')
+if [ -n "$FR" ]; then
+  FRT=$(g '.subject.first_reaction.target // ""')
+  printf '  First react %s%s\n' "$FR" "$( [ -n "$FRT" ] && printf ' → %s' "$FRT")"
 fi
 
-DEP_TOTAL=$(g '.dependencies.total')
-printf '\n  Dependencies (%s)\n' "$DEP_TOTAL"
-if [ "$DEP_TOTAL" != "0" ]; then
-  printf '    blockers    %s open · %s closed\n' "$(g '.dependencies.blockers.open')" "$(g '.dependencies.blockers.closed')"
-  BY_STATUS=$(g '.dependencies.by_status | to_entries | sort_by(.key) | map("\(.key) \(.value)") | join(" · ")')
-  [ -n "$BY_STATUS" ] && printf '    by status   %s\n' "$BY_STATUS"
+if [ "$(g '.subject.anchor')" != "null" ]; then
+  printf '\n  Anchor\n'
+  printf '    merge_result  %s\n' "$(g '.subject.anchor.merge_result')"
+  PRN=$(g '.subject.anchor.pr_number // ""'); [ -n "$PRN" ] && printf '    pr            #%s\n' "$PRN"
+  printf '    branch        %s\n' "$(val "$(g '.subject.anchor.branch // ""')" '(unset)')"
+  printf '    merged_target %s\n' "$(val "$(g '.subject.anchor.merged_target // ""')" '(unset)')"
 fi
 
-if [ "$ACTIONABLE" = "true" ]; then
-  printf '\n  Actionable  yes — no open blocks-blocker\n'
-else
-  printf '\n  Actionable  NO — open blocks-blocker(s): %s\n' "$(printf '%s' "$FINAL" | jq -r '.open_blockers | join(", ")')"
+printf '\n  Edges\n'
+if [ "$(g '.edges.parent')" != "null" ]; then
+  printf '    parent      %s  %s (%s)\n' "$(g '.edges.parent.id')" "$(g '.edges.parent.title // ""')" "$(g '.edges.parent.status // "?"')"
+fi
+REL_N=$(g '.edges.counts.relates_to')
+if [ "$REL_N" != "0" ]; then
+  printf '    relates-to  %s: %s\n' "$REL_N" "$(g '.edges.relates_to | map("\(.id) (\(.status))") | join(", ")')"
+fi
+TB_N=$(g '.edges.counts.tracked_by')
+if [ "$TB_N" != "0" ]; then
+  printf '    tracked-by  %s: %s\n' "$TB_N" "$(g '.edges.tracked_by | map("\(.id) (\(.status))") | join(", ")')"
+fi
+[ "$(g '.edges.parent')" = "null" ] && [ "$REL_N" = "0" ] && [ "$TB_N" = "0" ] && printf '    (none)\n'
+
+if [ -n "$WANT_FRONTIER" ]; then
+  printf '\n  Frontier\n'
+  printf '    verdict     %s\n' "$(g '.frontier.verdict')"
+  printf '    blockers    %s open · %s closed\n' "$(g '.frontier.blockers.open')" "$(g '.frontier.blockers.closed')"
+  g '.frontier.open[]? | "    open        \(.id)  \(.title // "") (\(.status), \(.advance))"'
+fi
+
+if [ -n "$WANT_HORIZON" ]; then
+  printf '\n  Horizon\n'
+  printf '    children    %s total · %s open · %s closed · %s advancing · %s stuck\n' \
+    "$(g '.horizon.children.total')" "$(g '.horizon.children.open')" "$(g '.horizon.children.closed')" \
+    "$(g '.horizon.children.advancing')" "$(g '.horizon.children.stuck')"
+  g '.horizon.open[]? | "    open        \(.id)  \(.title // "") (\(.status), \(.advance))"'
 fi

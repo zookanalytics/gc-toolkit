@@ -270,10 +270,13 @@ The loop, every visit:
    `gc bd show $SUBJECT` (body + notes; the `## Current state` block at
    the top of the notes, if present, is the distilled truth), then the
    group's visit history (`gc bd list` filtered to the group).
-   `assets/scripts/bead-context.sh $SUBJECT` folds the structural read into
-   one cross-store call — status, dependency counts (have its blockers
-   landed?), fate-deciding metadata and successor — leaving `gc bd show`
-   above for the body it omits. Then do the prep the visit body asks for.
+   `assets/scripts/bead-context.sh $SUBJECT --frontier --horizon` rebuilds the
+   subject slice, the readiness verdict and the epic-health snapshot in one
+   cross-store call — the core (status, routing, anchor state, first_reaction,
+   origin, takeaway), the frontier verdict over {ready, advancing, stuck} with
+   its open blockers named, and the direct-children snapshot when the subject is
+   an epic — leaving `gc bd show` above for the body it omits. Then do the prep
+   the visit body asks for.
 
    **A visit body is written at FILING time.** Before you prep, run the
    re-check its filer left, if it left one, with `converse-recheck-hook.sh`
@@ -613,10 +616,11 @@ spends it.
   skip the read.
 - **Read a bead in one bounded call.** When a decision turns on one bead — is
   it actionable, have its blockers landed — `assets/scripts/bead-context.sh
-  <id>` returns its status, dependency counts and fate-deciding metadata in a
-  single cross-store read (`--json` for a machine), so orienting on a bead
-  costs one call, not a `gc bd show`/jq dance. `gc bd show <id>` stays for the
-  body when one bead's prose decides the call.
+  <id> --frontier` returns its core, its context edges and a blocker verdict
+  (ready/advancing/stuck) in a single cross-store read (`--json` for a machine,
+  `--horizon` adds the direct-children snapshot for an epic), so orienting on a
+  bead costs one call, not a `gc bd show`/jq dance. `gc bd show <id>` stays for
+  the body when one bead's prose decides the call.
 
 
 
