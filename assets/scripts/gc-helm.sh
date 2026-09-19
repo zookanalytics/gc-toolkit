@@ -2104,11 +2104,14 @@ cmd_accept() {
                       | (.metadata["gc.continuation_group"] // "") | select(. != "")
                  else empty end' 2>/dev/null || true)
         if [ -z "$visit_of" ]; then
+            # `gc bd show` renders a dep as {dependency_type, id}; `gc bd list`
+            # as {type, depends_on_id}. This reads a show payload, but accept the
+            # union so the fallback holds whichever a caller passes.
             visit_of=$(printf '%s' "$subject_clean" \
                 | jq -r --arg b "$bead" \
                     'if type == "array"
                      then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
-                          | [ .dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "") ] | map(select(. != "")) | first // empty
+                          | [ .dependencies[]? | select(((.dependency_type // .type) // "") == "tracks") | ((.id // .depends_on_id) // "") ] | map(select(. != "")) | first // empty
                      else empty end' 2>/dev/null || true)
         fi
         if [ -z "$visit_of" ]; then

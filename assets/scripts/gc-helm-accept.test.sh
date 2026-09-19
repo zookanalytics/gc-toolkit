@@ -66,9 +66,19 @@ case "$sub" in
         id="$3"
         case "$id" in
           "${FAKE_VISIT_ID:-__novisit__}")
-            jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" \
-              '[{id:$i, status:"open", title:"visit on the subject",
-                 metadata:{task_kind:"visit","gc.continuation_group":$s,"gc.outcome":"dismissed"}}]' ;;
+            if [ -n "${FAKE_VISIT_EDGE:-}" ]; then
+              # The su-ab9je shape: the continuation_group stamp landed EMPTY and
+              # only the tracks edge names the subject, rendered in the bd show
+              # dep shape {dependency_type, id}.
+              jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" \
+                '[{id:$i, status:"open", title:"visit on the subject",
+                   metadata:{task_kind:"visit","gc.continuation_group":"","gc.outcome":"dismissed"},
+                   dependencies:[{id:$s, dependency_type:"tracks"}]}]'
+            else
+              jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" \
+                '[{id:$i, status:"open", title:"visit on the subject",
+                   metadata:{task_kind:"visit","gc.continuation_group":$s,"gc.outcome":"dismissed"}}]'
+            fi ;;
           "${FAKE_SUBJECT_ID:-__nosubj__}")
             case "${FAKE_SUBJECT_MODE:-found}" in
               missing) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1 ;;
@@ -144,6 +154,16 @@ grep -q "sling .*$SUBJ --on $FORMULA" <<< "$CALLS" \
   && ok "(VISITID) slings the SUBJECT the visit tracks, not the visit" || bad "(VISITID) sling targets subject (calls: $CALLS)"
 grep -q "bd close $VIS" <<< "$CALLS" \
   && ok "(VISITID) dismisses the visit" || bad "(VISITID) visit dismissed (calls: $CALLS)"
+
+# --- (VISITEDGE) an empty continuation_group stamp resolves via the tracks edge -
+# The su-ab9je shape (bd show dep {dependency_type, id}). The resolution must not
+# read the bd list dep shape here, which would silently miss the subject.
+export FAKE_VISIT_EDGE=1
+run_accept "$VIS"
+eq "$RC" "0" "(VISITEDGE) an edge-only visit id still resolves and dispatches"
+grep -q "sling .*$SUBJ --on $FORMULA" <<< "$CALLS" \
+  && ok "(VISITEDGE) slings the subject named by the tracks edge" || bad "(VISITEDGE) sling targets subject (calls: $CALLS)"
+unset FAKE_VISIT_EDGE
 
 # --- (SLINGFAIL) a failed dispatch leaves the visit, dismisses nothing ---------
 export FAKE_SLING_RC=1
