@@ -2132,10 +2132,9 @@ rcf() { awk '/^[[:space:]]*# >>> required-contexts-for[[:space:]]*$/{inb=1;next}
 [ -n "$(rcf "$HERE/pr-facts.sh")" ] && ok "block present here" || bad "block missing from pr-facts.sh"
 eq "$(rcf "$HERE/pr-facts.sh")" "$(rcf "$HERE/merge.sh")" "…byte-identical to merge.sh's copy"
 
-echo "# a red required check with nothing routing it -> ONE rework child to the fix pool"
-# The finding (tk-m130pj): a conflict-free, answered-up PR whose required CI is
-# red sits in pull_request until a person notices, because no arm turns a failing
-# required check into work. This is that arm. `test` is required by branch
+echo "# a red required check -> ONE rework child to the fix pool"
+# When a required check has terminally failed on a PR that every other arm has
+# waved through, this arm files one rework child. `test` is required by branch
 # protection and has terminally FAILED at the head; no feedback is unanswered.
 printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
 store "[$(anchor RC1 50)]"

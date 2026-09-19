@@ -51,8 +51,7 @@
 # in-flight review stands it down as well as a rework. It reads the same required
 # set merge.sh holds on (required_contexts_for) but routes on a terminal failure
 # only: a pending or missing required check has not failed, so it is left for a
-# later pass. Without this a conflict-free, answered-up PR with red CI sits in
-# pull_request until a person notices.
+# later pass.
 # Such a batch also resets signoff.sh's review-round cap, once per batch: it is
 # review the branch has never been answered against, not a round of the loop the
 # cap measures. The reset retires the dispatch tally with it, and the cap's own
@@ -1637,13 +1636,11 @@ GATES
     fi
   fi
 
-  # --- red required check, nothing routing it: file ONE rework child ------------
+  # --- red required check: file ONE rework child --------------------------------
   # Reached only when every arm above waved this anchor through: no conflict, no
   # unanswered feedback, no unresolved-thread block. A required check that has
-  # FAILED still holds the merge, and nothing above turns that into work, so a
-  # conflict-free, answered-up PR sits in `pull_request` until a person notices
-  # (tk-m130pj). This arm is that missing route: ONE rework child to fix the
-  # failing check(s), deduped so a reconcile every couple of minutes files one.
+  # FAILED still holds the merge, so this arm routes it: ONE rework child to fix
+  # the failing check(s), deduped so a reconcile every couple of minutes files one.
   #
   # merge.sh holds a merge on the same required set (its UNSTABLE arm), but its
   # `green` test also holds on a PENDING or MISSING check — right for a gate,
