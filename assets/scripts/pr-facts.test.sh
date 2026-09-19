@@ -1405,6 +1405,39 @@ out=$(run)
 eq "$(meta vp-83 reviewed_oid)" "sha-OLD" "the in-flight pass keeps its head; the batch does not move the validator's pin"
 has "$(meta Vh pr_comment_disposition)" "rework:" "…and the batch still watermarks behind the open pass"
 
+echo "# a pass whose task_kind write half-lands is invisible to the validator path, so the shape gate holds it"
+# task_kind=validation is the key gate-ensure's open_validation_pass selects a
+# pass by; a bead carrying anchor_bead and check_name but no task_kind still
+# blocks the anchor by its edge, yet no validator-path selector can see it.
+# Reading back only anchor_bead/check_name/reviewed_oid would pass it; the gate
+# reads task_kind too and skips the watermark so the batch retries.
+store "[$(anchor Vg 84)]"
+printf '%s' "$(prview 84 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_84.json"
+echo '[]' > "$GH_DIR/reviews_84.json"
+printf '[{"id":8840,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_84.json"
+out=$(STUB_DROP_KEYS="new-3:task_kind" run)
+has "$out" "did not record the batch shape" "the dropped task_kind is reported, not swallowed"
+has "$out" "task_kind=<absent>" "…naming the field that did not land"
+eq "$(meta Vg pr_comment_disposition)" "<absent>" "…the batch is not watermarked, so it retries"
+
+echo "# a same-anchor half-stamped pass (its task_kind dropped) is reclaimed and repaired, not twinned"
+# A prior pass created THIS anchor's human pass and had the task_kind half of its
+# shaping write drop, so the bead carries anchor_bead and check_name=human but no
+# task_kind. The human-lane probe (task_kind==validation) cannot see it and the
+# orphan-by-title probe (anchor_bead=="") skips it, so a naive arm would mint a
+# twin that double-blocks the anchor. The reclaim finds it by title on this anchor
+# and the shape gate restores its task_kind.
+HALF_VP='{"id":"half-85","status":"open","assignee":"","title":"Validate PR#85 feedback (through review 0, comment 8850)","notes":"","metadata":{"anchor_bead":"Vz","check_name":"human","reviewed_oid":"sha-85"}}'
+store "[$(anchor Vz 85),$HALF_VP]"
+printf '%s' "$(prview 85 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_85.json"
+echo '[]' > "$GH_DIR/reviews_85.json"
+printf '[{"id":8850,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_85.json"
+out=$(run)
+has "$out" "reclaiming half-stamped validation pass half-85" "the half-stamped pass is reclaimed by title on its anchor"
+eq "$(vpass_id Vz)" "half-85" "…and repaired into the human-lane pass — no twin minted"
+eq "$(meta half-85 task_kind)" "validation" "…its dropped task_kind is restored"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "validation")] | length' "$STUB_STORE")" "0" "no second validation pass is minted"
+
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
 store "[$(anchor P3 42)]"
 printf '%s' "$(prview 42 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_42.json"

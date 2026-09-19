@@ -58,8 +58,10 @@
 # anchor: it is review the branch has never been answered against, so it enters
 # the graph as a task_kind=validation bead from which gate-ensure's quiescence
 # holds a fresh whole-diff review off the anchor while the validator rules the
-# batch. The pass is opened unrouted here and dispatched to mol-validate by
-# gate-ensure. One live human-lane pass rules every open human finding on the
+# batch. The pass is opened unrouted here and held by gate-ensure's quiescence,
+# which reads it but does not dispatch it: routing a validating lane to
+# mol-validate is a separate change not in place here, so no validator claims
+# the pass yet. One live human-lane pass rules every open human finding on the
 # anchor, so the dedup reuses that pass while it stays open and a later batch
 # watermarks behind it rather than opening another; a pass on another lane never
 # rules the human findings.
@@ -1470,9 +1472,11 @@ $CBODY"
     # findings carry finding.lane=human, so the pass names human. The whole
     # check_set is wrong here: a multi-lane value like codex,arch is one synthetic
     # lane no finding carries and no anchor declares, so the validator would match
-    # no findings and back a lane that does not exist. It is left unrouted: a
-    # validating lane is dispatched to mol-validate by gate-ensure.sh, so the bead
-    # is opened here and armed there. The dedup is the live
+    # no findings and back a lane that does not exist. It is left unrouted:
+    # gate-ensure.sh's quiescence reads an open validation pass and holds the
+    # anchor's re-review, but routing a validating lane to mol-validate is a
+    # separate change not in place here, so the pass waits unrouted until it is.
+    # The dedup is the live
     # human-lane pass: it selects a task_kind=validation bead carrying
     # check_name=human, not any validation bead. gate-ensure's quiescence
     # (open_validation_pass) reads any lane, so a codex pass on this anchor holds
@@ -1488,30 +1492,52 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num validation-pass probe unreadable; nothing opened or watermarked (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     else
+      # The batch coordinate the title, note and log lines render, widened to name
+      # the Conversation-tab comment only when the batch carries one — the same
+      # conditional shape the comment-rework arm's title uses.
+      vcoord="review $max_r, comment $max_c"
+      [ "$max_i" -gt 0 ] && vcoord="$vcoord, issue $max_i"
       VPASS=$(printf '%s' "$vpass_rows" | jq -r '
         [ .[] | select(((.metadata.task_kind // "") | tostring) == "validation")
               | select(((.metadata.check_name // "") | tostring) == "human") | .id ] | .[0] // empty' 2>/dev/null)
       if [ -n "$VPASS" ]; then
         echo "$PROG: $id — PR#$num already carries a human-lane validation pass $VPASS; re-checking its shape before watermarking"
       else
-        vtitle="Validate PR#$num feedback (through review $max_r, comment $max_c)"
-        # A prior pass that created the bead but failed to stamp anchor_bead left
-        # an orphan the probe above cannot see; adopt it by title rather than mint
-        # a twin. Live-only: a closed orphan is already dispositioned.
-        if vorphans=$(bd_list --title-contains "$vtitle" --status="$LIVE_STATUSES"); then
-          VPASS=$(printf '%s' "$vorphans" | jq -r '
-            [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-        fi
+        vtitle="Validate PR#$num feedback (through $vcoord)"
+        # Reclaim a same-anchor half-stamped pass before minting. A prior pass may
+        # have created THIS anchor's human pass and had the task_kind or check_name
+        # half of its one shaping write drop; the bead then carries anchor_bead=$id
+        # — so the probe above lists it — but the human-lane selector skips it
+        # because task_kind is not "validation", or check_name is unset. It is this
+        # anchor's pass by title, distinct from a real codex-lane pass (check_name
+        # set to another lane), so reclaim only a title match whose lane is unset or
+        # already human and let the shape gate below repair the missing key, rather
+        # than mint a twin that would double-block the anchor.
+        VPASS=$(printf '%s' "$vpass_rows" | jq -r --arg t "Validate PR#$num feedback" '
+          [ .[] | select(((.title // "") | tostring) | startswith($t))
+                | select(((.metadata.check_name // "") | tostring) as $l | $l == "" or $l == "human")
+                | .id ] | .[0] // empty' 2>/dev/null)
         if [ -n "$VPASS" ]; then
-          echo "$PROG: $id adopting unstamped validation-pass orphan $VPASS for PR#$num"
+          echo "$PROG: $id reclaiming half-stamped validation pass $VPASS for PR#$num (a prior pass's shaping write half-landed)"
         else
-          vbody=""
-          [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules a human feedback batch on PR#$num (through review $max_r, comment $max_c; $live_url). The findings to rule are the open task_kind=finding beads on anchor $id." 2>/dev/null) || vbody=""
-          if [ -n "$vbody" ]; then
-            VPASS=$(printf '%s' "$vbody" | gc bd create "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+          # A prior pass that created the bead but failed to stamp anchor_bead left
+          # an orphan the probe above cannot see; adopt it by title rather than mint
+          # a twin. Live-only: a closed orphan is already dispositioned.
+          if vorphans=$(bd_list --title-contains "$vtitle" --status="$LIVE_STATUSES"); then
+            VPASS=$(printf '%s' "$vorphans" | jq -r '
+              [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+          fi
+          if [ -n "$VPASS" ]; then
+            echo "$PROG: $id adopting unstamped validation-pass orphan $VPASS for PR#$num"
           else
-            echo "$PROG: WARN validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass" >&2
-            VPASS=$(gc bd create "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+            vbody=""
+            [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules a human feedback batch on PR#$num (through $vcoord; $live_url). The findings to rule are the open task_kind=finding beads on anchor $id." 2>/dev/null) || vbody=""
+            if [ -n "$vbody" ]; then
+              VPASS=$(printf '%s' "$vbody" | gc bd create "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+            else
+              echo "$PROG: WARN validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass" >&2
+              VPASS=$(gc bd create "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+            fi
           fi
         fi
         if [ -z "$VPASS" ]; then
@@ -1520,42 +1546,50 @@ $CBODY"
         fi
       fi
       # Watermark only once the pass the validator will actually consume carries
-      # the shape mol-validate reads: anchor_bead scopes the findings, check_name
-      # is the lane it selects them by (a missing one defaults to codex, so the
-      # human findings would go unruled), and reviewed_oid is the pin it needs to
-      # back the lane. Every source of $VPASS reaches this one check — the probe's
-      # existing pass, an adopted orphan, a freshly minted bead — so a pass whose
-      # reviewed_oid write dropped on an earlier pass cannot slip past by matching
-      # the (task_kind, anchor_bead, check_name) probe on a later reconcile: it is
-      # re-read and repaired here, not trusted on the probe's word. Repair a field
-      # the pass lacks, read all three back, and skip the watermark unless each
-      # holds — a proxy check on anchor_bead alone would mark the batch handled
-      # behind a pass the validator cannot rule. Skipping holds the batch to retry;
-      # the rework child is already filed, so it costs nothing. reviewed_oid is
-      # only ADDED when absent, never overwritten: head_oid is the live PR head,
-      # not a per-batch constant, and a live human pass adopted across batches
-      # keeps the head it was opened at so a validator mid-rule does not have its
-      # back-lane pin moved under it.
+      # the shape mol-validate reads: task_kind=validation is the key the
+      # validator-path selectors read — gate-ensure's open_validation_pass keys its
+      # quiescence on it, and the mol-validate dispatch (a separate change, not in
+      # place here yet) will select passes by it — anchor_bead scopes the findings,
+      # check_name is the lane it selects them by (a missing one defaults to codex,
+      # so the human findings would go unruled), and reviewed_oid is the pin it
+      # needs to back the lane. The one write below stamps all four together, so any
+      # can be the half that drops; a pass missing task_kind still matches an
+      # anchor_bead probe and still blocks the anchor by its edge, yet
+      # open_validation_pass cannot see it, so it would watermark the batch behind a
+      # pass no validator-path selector reads. Every source of $VPASS reaches this
+      # one check — the probe's existing pass, a reclaimed half-stamped pass, an
+      # adopted orphan, a freshly minted bead — so it is re-read and repaired here,
+      # not trusted on the probe's word. Repair a field the pass lacks, read them
+      # all back, and skip the watermark unless each holds — a proxy check on
+      # anchor_bead alone would mark the batch handled behind a pass the validator
+      # cannot rule. Skipping holds the batch to retry; the rework child is already
+      # filed, so it costs nothing. reviewed_oid is only ADDED when absent, never
+      # overwritten: head_oid is the live PR head, not a per-batch constant, and a
+      # live human pass adopted across batches keeps the head it was opened at so a
+      # validator mid-rule does not have its back-lane pin moved under it.
       vmeta=$(gc bd show "$VPASS" --json 2>/dev/null | scrub)
+      v_kind=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.task_kind // empty')
       v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
       v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
       v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
       vfix=()
+      [ "$v_kind" != "validation" ] && vfix+=(--set-metadata task_kind=validation)
       [ "$v_anchor" != "$id" ] && vfix+=(--set-metadata anchor_bead="$id")
       [ "$v_lane" != "human" ] && vfix+=(--set-metadata check_name=human)
       [ -z "$v_oid" ] && [ -n "$head_oid" ] && vfix+=(--set-metadata reviewed_oid="$head_oid")
       if [ "${#vfix[@]}" -gt 0 ]; then
-        gc bd update "$VPASS" --set-metadata task_kind=validation "${vfix[@]}" >/dev/null 2>&1
+        gc bd update "$VPASS" "${vfix[@]}" >/dev/null 2>&1
         vmeta=$(gc bd show "$VPASS" --json 2>/dev/null | scrub)
+        v_kind=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.task_kind // empty')
         v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
         v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
         v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
       fi
-      if [ "$v_anchor" != "$id" ] || [ "$v_lane" != "human" ] || { [ -n "$head_oid" ] && [ -z "$v_oid" ]; }; then
-        echo "$PROG: WARN $id — PR#$num validation pass $VPASS did not record the batch shape (want anchor_bead=$id check_name=human${head_oid:+ reviewed_oid set}; got anchor_bead=${v_anchor:-<absent>} check_name=${v_lane:-<absent>} reviewed_oid=${v_oid:-<absent>}); nothing watermarked, the batch retries next pass" >&2
+      if [ "$v_kind" != "validation" ] || [ "$v_anchor" != "$id" ] || [ "$v_lane" != "human" ] || { [ -n "$head_oid" ] && [ -z "$v_oid" ]; }; then
+        echo "$PROG: WARN $id — PR#$num validation pass $VPASS did not record the batch shape (want task_kind=validation anchor_bead=$id check_name=human${head_oid:+ reviewed_oid set}; got task_kind=${v_kind:-<absent>} anchor_bead=${v_anchor:-<absent>} check_name=${v_lane:-<absent>} reviewed_oid=${v_oid:-<absent>}); nothing watermarked, the batch retries next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
-      echo "$PROG: $id — PR#$num human-lane validation pass $VPASS carries the feedback batch shape (review $max_r, comment $max_c)"
+      echo "$PROG: $id — PR#$num human-lane validation pass $VPASS carries the feedback batch shape ($vcoord)"
       # The pass must HOLD the anchor, not merely sit beside it. merge.sh reads
       # every live blocks blocker of the anchor into its in-flight hold and bd
       # refuses to close a blocked anchor, so a blocks edge from the pass keeps an
