@@ -127,6 +127,12 @@ func engagedSitting(subject string) Sitting {
 	return Sitting{Subject: subject, Status: "in_progress", Session: "converse-1"}
 }
 
+// pendingSitting is the window between engage binding the visit and the hook
+// claim promoting it: still open, no session stamped yet, but bound by assignee.
+func pendingSitting(subject string) Sitting {
+	return Sitting{Subject: subject, Status: "open", Assignee: "converse-1"}
+}
+
 // TestRecommendationSubjectIsAcceptable: a subject carrying a recommended
 // formula whose visit stands un-engaged is Acceptable, and names the formula
 // Accept would dispatch. The visit wrapper folds away and never carries it.
@@ -163,6 +169,22 @@ func TestRecommendationWithLiveSittingIsNotAcceptable(t *testing.T) {
 	subj := mustTile(t, b, "tk-subj")
 	if subj.Acceptable || subj.AcceptFormula != "" {
 		t.Errorf("a live sitting suppresses Accept: Acceptable=%v formula=%q", subj.Acceptable, subj.AcceptFormula)
+	}
+}
+
+// TestRecommendationWithPendingEngagementIsNotAcceptable: engage binds the visit
+// by assignee while it is still open, before the hook claim promotes it to
+// in_progress and stamps the session. In that window the sitting reads open with
+// no session but a bound assignee, and Accept must already be suppressed —
+// otherwise the board offers Accept on a visit a converse is about to hold, and
+// the recommendation is actuated twice.
+func TestRecommendationWithPendingEngagementIsNotAcceptable(t *testing.T) {
+	anchors := []Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{pendingSitting("tk-subj")}})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable || subj.AcceptFormula != "" {
+		t.Errorf("a pending engagement (open + assigned) suppresses Accept: Acceptable=%v formula=%q", subj.Acceptable, subj.AcceptFormula)
 	}
 }
 

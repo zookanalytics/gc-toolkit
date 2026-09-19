@@ -474,6 +474,14 @@ type Sitting struct {
 	// which is what an operator attaches to while it is still open.
 	Session string `json:"session"`
 
+	// Assignee is the visit bead's assignee. engage binds the visit by assignee
+	// while it is still open, before the hook claim promotes it to in_progress
+	// and stamps Session; an open visit with an assignee is therefore a pending
+	// engagement a sitting is about to hold, which [unengagedVisit] treats as
+	// engaged so it suppresses Accept in that window. It is a derivation input,
+	// not part of the record the web renders, so it carries no wire tag.
+	Assignee string `json:"-"`
+
 	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back
 	// to the bead's creation time for a visit that was never claimed. ClosedAt
 	// is zero while the sitting runs. The pair is also the span the takeaway

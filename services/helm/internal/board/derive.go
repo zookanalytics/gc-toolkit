@@ -351,10 +351,13 @@ const (
 )
 
 // unengagedVisit reports whether subject has a visit no one has engaged: a
-// non-closed sitting standing OPEN on it, and none a converse has claimed
-// (in_progress) or bound a session to. It reads facts.Sittings rather than
-// Tile.Held because Held does not distinguish an open visit from a claimed one
-// — both are non-closed sittings. This is the passive half of the
+// non-closed sitting standing OPEN on it that carries neither a claim
+// (in_progress), a bound session, nor a bound assignee. engage binds the visit
+// by assignee while it is still open and before the hook claim promotes it to
+// in_progress and stamps the session, so an open visit with an assignee is a
+// pending engagement, not an un-engaged one. It reads facts.Sittings rather
+// than Tile.Held because Held does not distinguish an open visit from a claimed
+// one — both are non-closed sittings. This is the passive half of the
 // Accept/Discuss invalidation rule: a live sitting suppresses Accept, and
 // leaving the sitting without a ruling (the visit reverts to open) restores it.
 func unengagedVisit(subject string, sittings []Sitting) bool {
@@ -363,10 +366,12 @@ func unengagedVisit(subject string, sittings []Sitting) bool {
 		if s.Subject != subject {
 			continue
 		}
-		// A claimed sitting, or one with a session bound before the claim
-		// promotes it, is a live conversation the operator is holding: it
-		// suppresses Accept whatever else is on the subject.
-		if s.Status == sittingInProgress || (s.Status != sittingClosed && s.Session != "") {
+		// A claimed sitting, or a non-closed one a session or an assignee is
+		// bound to, is a live conversation the operator is holding: it
+		// suppresses Accept whatever else is on the subject. The assignee arm
+		// covers the pending-engagement window — engage binds the visit by
+		// assignee while it is still open, before the claim stamps the session.
+		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
 			return false
 		}
 		if s.Status == sittingOpen {

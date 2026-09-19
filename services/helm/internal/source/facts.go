@@ -118,6 +118,7 @@ func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 		Status:   string(iss.Status),
 		Outcome:  md["gc.outcome"],
 		Session:  md["gc.session_name"],
+		Assignee: iss.Assignee,
 		OpenedAt: iss.CreatedAt,
 	}
 	// A visit exists from the moment it is filed, but the CONVERSATION starts
