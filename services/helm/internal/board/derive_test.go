@@ -1758,21 +1758,17 @@ func TestClosedRowLeavesTheQueue(t *testing.T) {
 	}
 }
 
-// TestCapQueueDoesNotRationParkedRows: CapRows gives `parked` a small separate
-// budget because those rows are floored to LOW and would fall off the end of a
-// ranked board. Inside the queue a parked row is a conversation waiting on the
-// operator and earned its place by age, so that budget would cut the queue
-// exactly where it carries the most.
-func TestCapQueueDoesNotRationParkedRows(t *testing.T) {
+// TestCapQueueKeepsEveryOwedRow: the operator's queue stays FLAT and owed-first,
+// so CapQueue is a straight head-truncation — every owed row up to the limit,
+// parked ones included. A parked row here is a conversation waiting on the
+// operator that earned its place by age, not a straggler to ration.
+func TestCapQueueKeepsEveryOwedRow(t *testing.T) {
 	var tiles []Tile
-	for i := 0; i < DefaultMaxParked+5; i++ {
+	for i := 0; i < 20; i++ {
 		tiles = append(tiles, Tile{ID: fmt.Sprintf("tk-p%02d", i), Kind: "parked", Owed: true})
 	}
 	if got := len(CapQueue(tiles, DefaultMaxRows)); got != len(tiles) {
 		t.Errorf("CapQueue kept %d of %d parked rows", got, len(tiles))
-	}
-	if got := len(CapRows(tiles, DefaultMaxRows, DefaultMaxParked, DefaultMaxDone)); got != DefaultMaxParked {
-		t.Fatalf("fixture: CapRows must ration these to %d, got %d", DefaultMaxParked, got)
 	}
 	if got := len(CapQueue(tiles, 3)); got != 3 {
 		t.Errorf("CapQueue still honors its own limit: got %d", got)
@@ -2000,38 +1996,30 @@ func TestDoneLaneStaysBoundedForAnAncientClosure(t *testing.T) {
 	}
 }
 
-// CapRows: three budgets, because a shared one drops the whole of the band
-// that sorts last — and the band that sorts last is the one whose rows were
-// about to disappear on their own.
-func TestCapRowsBudgetsAreSeparate(t *testing.T) {
-	var tiles []Tile
-	for i := range 4 {
-		tiles = append(tiles, Tile{ID: "a" + string(rune('0'+i)), Kind: "epic", Severity: SevHigh})
-	}
-	for i := range 4 {
-		tiles = append(tiles, Tile{ID: "p" + string(rune('0'+i)), Kind: "parked", Severity: SevLow})
-	}
-	for i := range 4 {
-		tiles = append(tiles, Tile{ID: "d" + string(rune('0'+i)), Kind: "parked", Severity: SevDone})
+// CapFamilies never splits a family — a member is never shown without the root
+// that heads it — and rations the closed-anchor (DONE) families on a budget of
+// their own so a week of closures cannot crowd out the live board.
+func TestCapFamiliesKeepsFamiliesWhole(t *testing.T) {
+	tiles := []Tile{
+		{ID: "a", Kind: "epic", Severity: SevHigh, Section: SectionStalled, GroupRoot: "a"},
+		{ID: "a2", Kind: "human", Severity: SevElevated, Section: SectionGate, GroupRoot: "a"},
+		{ID: "b", Kind: "epic", Severity: SevNormal, Section: SectionActive, GroupRoot: "b"},
+		{ID: "b2", Kind: "human", Severity: SevElevated, Section: SectionGate, GroupRoot: "b"},
+		{ID: "d0", Kind: "parked", Severity: SevDone, Section: SectionDone, GroupRoot: "d0"},
+		{ID: "d1", Kind: "parked", Severity: SevDone, Section: SectionDone, GroupRoot: "d1"},
+		{ID: "d2", Kind: "parked", Severity: SevDone, Section: SectionDone, GroupRoot: "d2"},
 	}
 
-	shown := CapRows(tiles, 2, 1, 3)
-	var attention, parked, done int
-	for _, tile := range shown {
-		switch {
-		case tile.Severity == SevDone:
-			done++
-		case tile.Kind == "parked":
-			parked++
-		default:
-			attention++
-		}
+	// A live-row budget of 2 admits family a (2 rows) whole; family b would push
+	// past it, so b is dropped WHOLE, never half-shown. A done budget of 2 keeps
+	// two closed families and rations the third.
+	got := ids(CapFamilies(tiles, 2, 2))
+	want := []string{"a", "a2", "d0", "d1"}
+	if !equalIDs(got, want) {
+		t.Errorf("family-whole cap: got %v, want %v (b dropped whole, d2 rationed)", got, want)
 	}
-	if attention != 2 || parked != 1 || done != 3 {
-		t.Errorf("each budget is spent on its own band: attention=%d parked=%d done=%d, want 2/1/3", attention, parked, done)
-	}
-	if got := len(CapRows(tiles, 0, 1, 1)); got != len(tiles) {
-		t.Errorf("limit<=0 stays uncapped for every band: got %d of %d", got, len(tiles))
+	if got := len(CapFamilies(tiles, 0, 1)); got != len(tiles) {
+		t.Errorf("limit<=0 stays uncapped: got %d of %d", got, len(tiles))
 	}
 }
 

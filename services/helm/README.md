@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 49 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 50 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -67,7 +67,7 @@ stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
-section cluster_key
+section cluster_key group_root
 ```
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
@@ -84,7 +84,19 @@ longest-waiting first, then everything else by `rank_score` descending.
 request), `gate` (a person must answer), `stalled` (open work nothing is
 moving), `active` (healthy in-flight), `cleanup` (finished/empty), `done`
 (closed) — read in `board.SectionOrder`. It is orthogonal to `severity`'s
-how-badly, and both renderers group by it rather than each re-deriving a split.
+how-badly.
+
+`group_root` is the board's PRIMARY grouping axis, and every tile carries one:
+the id of the dependency family the row belongs to — the top-most anchor its
+parent-child and `blocks` edges climb to, its own id when it climbs to nothing
+(`board.assignGroupRoots`). The city overview groups by it — `helm-svc board
+--all` and the web dashboard body render one block per family
+(`board.GroupByFamily`), the root as the header and its members beneath it in
+`board.SectionOrder`, with `●` on the rows that want a person; there `section`
+is the within-family band. The default operator queue (`helm-svc board`) stays
+flat and owed-first, banded by `section` (`board.GroupBySection`).
+`specs/tk-492ssx/` records the family model.
+
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
 that are one template (a visit family, a signoff cap); a renderer folds them
 into one entry while the wire keeps every member. `specs/tk-9tbbk.4/` records
@@ -145,11 +157,14 @@ helm-svc board --all --json --limit=0   # uncapped, for tooling
 `--json` emits a bare **array**, not the service's envelope, because that array
 is what `assets/scripts/tmux-pick-helm.sh` consumes — it runs `jq 'length'` and
 `.[]` over this output, and the `{generated_at,total,tiles}` envelope would make
-every row invisible while still parsing cleanly. Overview rows are capped at 50
-by default with separate budgets of 15 for `parked` rows and 10 for `DONE` rows
-(`--limit=0` opts out of all three); the queue takes the same 50 with neither
-sub-budget, because there a parked row is a conversation waiting on the operator
-rather than a straggler, and no closed row reaches it at all. Exit codes: `0`
+every row invisible while still parsing cleanly. Overview rows are grouped into
+dependency families and capped by `CapFamilies`, which never splits a family. It
+admits whole families in rank order until the live rows reach the limit, 50 by
+default and set by `--limit=N`, and rations the terminal DONE families, each a
+closed anchor, against a separate budget of 10. `--limit=0` opts out of both. The
+queue takes the same 50 as a flat, ungrouped truncation with no DONE budget,
+because there a parked row is a conversation waiting on the operator rather than
+a straggler, and no closed row reaches it at all. Exit codes: `0`
 rendered, `2` usage, `3` gather failed or an empty queue could not be stood
 behind — a failed gather is never rendered as an empty "nothing needs you".
 

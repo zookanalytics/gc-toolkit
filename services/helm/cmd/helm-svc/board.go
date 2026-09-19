@@ -222,7 +222,7 @@ type boardView struct {
 // selectView answers the flag: the operator's queue, or the city overview.
 func selectView(b board.Board, all bool, limit int) boardView {
 	if all {
-		return boardView{rows: board.CapRows(board.CityOverview(b.Tiles), limit, board.DefaultMaxParked, board.DefaultMaxDone), render: renderTable}
+		return boardView{rows: board.CapFamilies(board.CityOverview(b.Tiles), limit, board.DefaultMaxDone), render: renderTable}
 	}
 	rows := board.CapQueue(board.OperatorQueue(b.Tiles), limit)
 	return boardView{rows: rows, render: renderQueue, unprovable: len(rows) == 0 && b.Partial}
@@ -391,19 +391,20 @@ func renderPackHealth(w io.Writer, rows []board.PackBuild) {
 }
 
 // renderTable writes the city overview: the header, the pack-build lines, the
-// ranked table, and the legend that says what the bands and the held glyph mean.
+// dependency-family blocks, and the legend that says what a family and its
+// within-family bands mean.
 func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, rigCount int) {
 	fmt.Fprint(w, "gc-helm — cross-rig human-attention board\n")
 	stamp := now.Format("2006-01-02T15:04:05Z")
 	// Both sides of "showing N of M" drop the DONE band, per [closedRows].
-	// CapRows returns DONE and parked rows on top of its live budget, so
+	// CapFamilies returns the closed-anchor families on their own budget, so
 	// len(shown) is a whole board and can exceed the live count it would
 	// otherwise be printed against.
 	//
-	// The band carries its own budget, so it can be capped while the live rows
-	// are not. Printing the closed TOTAL against a capped band says the whole
-	// of it is on screen, which is the completeness this band exists to stop a
-	// reader assuming — so a capped band names both numbers.
+	// The DONE families carry their own budget, so they can be capped while the
+	// live rows are not. Printing the closed TOTAL against a capped band says the
+	// whole of it is on screen, which is the completeness this band exists to stop
+	// a reader assuming — so a capped band names both numbers.
 	done := closedRows(b.Tiles)
 	var shownLive, shownDone int
 	for _, t := range shown {
@@ -440,9 +441,9 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 		return
 	}
 
-	renderRows(w, shown)
+	renderFamilyRows(w, shown)
 	renderSittings(w, b.Sittings, now)
-	renderLegend(w)
+	renderFamilyLegend(w)
 }
 
 // renderRows writes the table proper — the sized header and one line per tile.
@@ -500,7 +501,7 @@ func renderRows(w io.Writer, shown []board.Tile) {
 		fmt.Fprintf(w, "\n%s\n", sectionBanner(g.Key, len(g.Tiles)))
 		for _, cr := range board.ClusterRows(g.Tiles) {
 			if len(cr.Members) > 1 {
-				renderClusterLine(w, cr)
+				renderClusterLine(w, cr, idW, rigW)
 				continue
 			}
 			renderTileLine(w, cr.Tile, idW, rigW)
@@ -514,45 +515,117 @@ func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 	if t.Held {
 		glyph = "●"
 	}
-	// "—" means THIS ROW has no roll-up, not that its KIND never has one: a
-	// decision never does, and a human/parked bead does exactly when it
-	// decomposed. Printing "—" over a real child set is what hid the open
-	// children of a parked subject (tk-a9k0l); printing 0/0 for a bead that
-	// owns no set at all would be a fabricated count.
-	nm := fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
+	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
+		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+}
+
+// nmCell is the "N/M" progress cell. "—" means THIS ROW has no roll-up, not that
+// its KIND never has one: a decision never does, and a human/parked bead does
+// exactly when it decomposed. Printing "—" over a real child set is what hid the
+// open children of a parked subject (tk-a9k0l); printing 0/0 for a bead that owns
+// no set at all would be a fabricated count.
+func nmCell(t board.Tile) string {
 	if t.MTotal == 0 {
 		switch t.Kind {
 		case "decision", "human", "parked":
-			nm = "—"
+			return "—"
 		}
 	}
-	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
-		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-		rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+	return fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
 }
 
-// renderClusterLine writes one line for a run of rows that share a template: the
-// count, the shared needs, and the member ids so the operator can still act on
-// each. The ids are the whole point of folding here rather than dropping them —
-// the wire keeps every member, and this line names them so nothing is hidden,
-// only gathered.
-func renderClusterLine(w io.Writer, cr board.ClusterRow) {
-	ids := make([]string, 0, len(cr.Members))
-	for _, m := range cr.Members {
-		ids = append(ids, m.ID)
+// wantsPerson reports whether a row's next move is the operator's — the review
+// and gate bands. Model C highlights these within a family with a ● glyph.
+func wantsPerson(t board.Tile) bool {
+	return t.Section == board.SectionReview || t.Section == board.SectionGate
+}
+
+// renderFamilyRows writes the city overview as dependency-family blocks: each
+// family is a header naming its root, then the members beneath it ordered by the
+// move they want (board.SectionOrder), with a ● on the rows that want a person.
+// Dependency structure is the top-level axis; the attention band orders and
+// highlights within a family.
+func renderFamilyRows(w io.Writer, shown []board.Tile) {
+	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
+	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
+
+	// One column header for the member rows; the family banner names the root.
+	// BAND replaces SEV: within a family the attention band is the axis.
+	fmt.Fprint(w, rpad(" ", colHeld)+rpad("BAND", colSeverity)+rpad("ID", idW)+
+		rpad("RIG", rigW)+rpad("KIND", colKind)+rpad("N/M", colNM)+
+		rpad("FRONTIER", colFrontier)+"NEEDS\n")
+
+	for _, fam := range board.GroupByFamily(shown) {
+		fmt.Fprintf(w, "\n%s\n", familyBanner(fam.Root))
+		for _, m := range fam.Members {
+			renderMemberLine(w, m, idW, rigW)
+		}
 	}
-	const maxIDs = 6
-	shown := ids
-	suffix := ""
-	if len(ids) > maxIDs {
-		shown = ids[:maxIDs]
-		suffix = fmt.Sprintf(" … (+%d)", len(ids)-maxIDs)
+}
+
+// familyBanner is the labelled divider that opens a family block: the root's id,
+// kind, roll-up, frontier and needs, with a ● when the root itself wants a
+// person. The root is the family header rather than a member row, so its own ask
+// rides here.
+func familyBanner(root board.Tile) string {
+	glyph := " "
+	if wantsPerson(root) {
+		glyph = "●"
 	}
-	// Indented under the band, with the count where a severity would sit, so a
-	// scan down the column still finds it. The needs is the shared template.
-	fmt.Fprintf(w, "%s%s%s\n     %s%s\n",
-		rpad(" ", colHeld), rpad(fmt.Sprintf("%d×", len(cr.Members)), colSeverity),
-		clip(cr.Tile.Needs, colNeedsMax), strings.Join(shown, " "), suffix)
+	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", glyph, root.ID, root.Kind, nmCell(root), root.Frontier)
+	if root.Needs != "" {
+		line += " · " + root.Needs
+	}
+	return clip(line, colHeld+2+colNeedsMax)
+}
+
+// renderMemberLine writes one family member: its within-family band, the ● that
+// marks a person's move, and the same columns as an anchor row.
+func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
+	glyph := " "
+	if wantsPerson(t) {
+		glyph = "●"
+	}
+	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(t.Section, colSeverity)+
+		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+}
+
+// renderFamilyLegend is the overview's trailer: what a family is, and what the
+// within-family band column and the ● glyph mean.
+func renderFamilyLegend(w io.Writer) {
+	fmt.Fprint(w, "\nFamilies (▌) group by dependency structure: a top-level anchor and the children, blockers, reviews and rework that hang off it, so a family reads as one thing\n")
+	fmt.Fprint(w, "BAND orders each family by the move a member wants: review=a pull request · gate=a person must answer · stalled=nothing moving · active=in-flight · cleanup=finished/empty · done=closed\n")
+	fmt.Fprint(w, "● marks the rows that want YOU (review, gate). A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
+	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway · review/rework=a gate child in flight (resume: prefix+a, then the id)\n")
+	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
+	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
+	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy\n")
+}
+
+// clusterMemberCap bounds how many members a folded cluster spells out before it
+// says how many more it held. Enough that an ordinary cluster is listed in full,
+// bounded so a fifty-member template does not become the whole board.
+const clusterMemberCap = 8
+
+// renderClusterLine writes a run of rows that share a deterministic template: the
+// count and the shared needs, then ONE line per member carrying its own id, rig
+// and title. A bare id list is a soup that names nothing actionable; folding
+// gathers the rows, it must not strip their context.
+func renderClusterLine(w io.Writer, cr board.ClusterRow, idW, rigW int) {
+	// The count sits where a band/severity would, so a scan down the column still
+	// finds it; the shared needs is the template.
+	fmt.Fprintf(w, "%s%s%s\n", rpad(" ", colHeld),
+		rpad(fmt.Sprintf("%d×", len(cr.Members)), colSeverity), clip(cr.Tile.Needs, colNeedsMax))
+	indent := strings.Repeat(" ", colHeld+colSeverity)
+	for i, m := range cr.Members {
+		if i >= clusterMemberCap {
+			fmt.Fprintf(w, "%s… (+%d more, all in --json)\n", indent, len(cr.Members)-clusterMemberCap)
+			break
+		}
+		fmt.Fprintf(w, "%s%s%s%s\n", indent, rpad(m.ID, idW), rpad(m.Rig, rigW), clip(m.Title, colNeedsMax))
+	}
 }
 
 // sectionBanner is the labeled divider between attention bands. It carries the
@@ -590,7 +663,7 @@ func sectionLabel(key string) (label, desc string) {
 // held glyph mean.
 func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "\nBands (▌) group by the KIND of move a row wants: REVIEW=a pull request · GATE=a person must answer · STALLED=open work nothing is moving · ACTIVE=healthy in-flight · CLEANUP=finished/empty · DONE=closed\n")
-	fmt.Fprint(w, "A \"N×\" line folds N rows that share one needs sentence (a visit template, a signoff cap); the ids under it are the members — the JSON carries every one\n")
+	fmt.Fprint(w, "A \"N×\" line folds N rows that share one deterministic needs sentence; each member is listed under it with its id, rig and title. A row carrying a takeaway never folds — its sentence is per-bead\n")
 	fmt.Fprint(w, "Legend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")

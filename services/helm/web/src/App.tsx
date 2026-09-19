@@ -15,28 +15,13 @@ import type { Board, PackBuild, Sitting, Tile } from './contract';
 // refreshes in place and never notifies.
 const REFRESH_MS = 30_000;
 
-// The board arrives as ONE ranked list, and every row carries the band it
-// belongs to in `tile.section` and — when it is one of several sharing a
-// template — the `tile.cluster_key` that folds them. Those are derived once, in
-// the shared Go layer, so the CLI board and this app cannot each invent their
-// own split; this file READS the fields, it does not re-derive them. The order
-// the bands read in is the derive layer's SectionOrder, mirrored here.
+// The board arrives as ONE ranked list, and every row carries its dependency
+// family in `tile.group_root` and the band it wants within that family in
+// `tile.section`. Both are derived once, in the shared Go layer, so the CLI
+// board and this app cannot each invent their own split; this file READS the
+// fields, it does not re-derive them. The order the bands read in WITHIN a
+// family is the derive layer's SectionOrder, mirrored here.
 const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done'] as const;
-
-// The heading and one-line promise each band makes. The `done` band keeps the
-// "recently closed" heading and the window copy it carries.
-const SECTION_META: Record<string, { title: string; blurb: string }> = {
-  review: { title: 'review', blurb: 'a pull request wants you' },
-  gate: { title: 'gate', blurb: 'a person must answer — a decision, a demand, or a routed bead' },
-  stalled: { title: 'stalled', blurb: 'open work nothing is moving' },
-  active: { title: 'active', blurb: 'healthy in-flight work' },
-  cleanup: { title: 'cleanup', blurb: 'finished, empty, or ruled — dispose of it' },
-  done: { title: 'recently closed', blurb: 'closed while you were away' },
-};
-
-function sectionMeta(key: string): { title: string; blurb: string } {
-  return SECTION_META[key] ?? { title: key, blurb: 'uncategorised' };
-}
 
 // A sitting is finished when its visit bead closed; anything else is a
 // conversation someone is still in. Reading the status rather than the presence
@@ -192,34 +177,50 @@ function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void })
   );
 }
 
-// A render line for a section: a single tile, or the head of a cluster with
-// every member behind it. Mirrors board.ClusterRow in the Go layer; the members
-// list has length one for an unclustered row.
-type RenderRow = { tile: Tile; members: Tile[] };
+// A dependency family: the root anchor it hangs off, and the member tiles
+// beneath it ordered by the move they want. Mirrors board.FamilyGroup in the Go
+// layer.
+type Family = { root: Tile; members: Tile[] };
 
-// clusterRows folds a section's tiles into render lines. Rows sharing a
-// non-empty cluster_key become ONE line whose members are all of them, placed
-// where the first member fell; an empty key is always its own line. This is the
-// TypeScript twin of board.ClusterRows, kept trivial so the two cannot diverge:
-// the hard decision — which rows share a key — was made once on the wire.
-function clusterRows(tiles: Tile[]): RenderRow[] {
-  const out: RenderRow[] = [];
-  const at = new Map<string, number>();
+// wantsPerson reports whether a row's next move is the operator's — the review
+// and gate bands. Model C highlights these within a family with a ● glyph.
+function wantsPerson(tile: Tile): boolean {
+  return tile.section === 'review' || tile.section === 'gate';
+}
+
+// sectionRank is a section's position in SECTION_ORDER; an unknown one sorts
+// after every known band, matching the derive layer's GroupByFamily.
+function sectionRank(section: string): number {
+  const i = SECTION_ORDER.indexOf(section as (typeof SECTION_ORDER)[number]);
+  return i === -1 ? SECTION_ORDER.length : i;
+}
+
+// groupByFamily buckets the ranked list into dependency families by reading
+// tile.group_root — the split the derive layer already made. Families read in
+// the input's order (owed-first, so the oldest-owed family leads); within a
+// family the root is the header and the members read in SECTION_ORDER. This is
+// the TypeScript twin of board.GroupByFamily, kept trivial so the two cannot
+// diverge: the hard decision — which root a tile climbs to — was made on the wire.
+function groupByFamily(tiles: Tile[]): Family[] {
+  const order: string[] = [];
+  const members = new Map<string, Tile[]>();
   for (const tile of tiles) {
-    const key = tile.cluster_key;
-    if (!key) {
-      out.push({ tile, members: [tile] });
-      continue;
+    const root = tile.group_root || tile.id;
+    const bucket = members.get(root);
+    if (bucket) bucket.push(tile);
+    else {
+      members.set(root, [tile]);
+      order.push(root);
     }
-    const i = at.get(key);
-    if (i !== undefined) {
-      out[i].members.push(tile);
-      continue;
-    }
-    at.set(key, out.length);
-    out.push({ tile, members: [tile] });
   }
-  return out;
+  return order.map((root) => {
+    const fam = members.get(root)!;
+    const rootTile = fam.find((t) => t.id === root) ?? fam[0];
+    const rest = fam
+      .filter((t) => t !== rootTile)
+      .sort((a, b) => sectionRank(a.section) - sectionRank(b.section));
+    return { root: rootTile, members: rest };
+  });
 }
 
 // The "N/M" progress cell. "—" means the row owns no child set at all — a
@@ -233,89 +234,91 @@ function progressCell(tile: Tile): string {
   return `${tile.n_closed}/${tile.m_total}`;
 }
 
-// One attention band, rendered as a table under a heading that names the move
-// its rows want. A run of rows sharing a template folds to a single line that
-// names the count and lists the members, so the operator reads one entry rather
-// than N identical peers.
-function SectionTable({
-  sectionKey,
-  tiles,
+// One dependency family, rendered as a block: a header naming its root — with a
+// ● when the root's own next move is the operator's — and a table of its members
+// beneath, each in the band that says the move it wants, a ● marking the rows
+// that want a person. Dependency structure is the top-level axis; the attention
+// band orders and highlights within a family.
+function FamilyBlock({
+  family,
   drillTarget,
   onOpen,
 }: {
-  sectionKey: string;
-  tiles: Tile[];
+  family: Family;
   drillTarget: string | null;
   onOpen: (id: string) => void;
 }) {
-  const meta = sectionMeta(sectionKey);
-  const rows = clusterRows(tiles);
-  const headingId = `section-${sectionKey}`;
+  const { root, members } = family;
+  const headingId = `family-${root.id}`;
   return (
-    <section className={`board-section board-section--${sectionKey}`} aria-labelledby={headingId}>
-      <h2 id={headingId}>{meta.title}</h2>
+    <section className="board-family" aria-labelledby={headingId}>
+      <h2 id={headingId}>
+        {wantsPerson(root) && <span aria-hidden="true">● </span>}
+        <DrillOpen id={root.id} onOpen={onOpen} />
+      </h2>
       <p className="sub">
-        {meta.blurb} · {tiles.length}
-        {sectionKey === 'done' && (
+        <span className="family-title">{root.title}</span> · {root.kind} · {root.section} ·{' '}
+        {progressCell(root)} · {root.frontier}
+        {isPRRow(root) && (
           <>
-            . They sit below every live band, and no row leaves for being answered. A row
-            leaves only by ageing out of this band on a clock, once it has been closed longer
-            than <code>GC_HELM_DONE_WINDOW</code> (default 7d,{' '}
+            {' · '}
+            <PRLink tile={root} />
+          </>
+        )}
+        {root.needs && <> · {root.needs}</>}
+        {root.section === 'done' && (
+          <>
+            . A closed family sits below every live one; a row leaves only by ageing out on a
+            clock, once it has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d,{' '}
             <code>0</code> off).
           </>
         )}
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th>sev</th>
-            <th>id</th>
-            <th>rig</th>
-            <th>kind</th>
-            <th>pr</th>
-            <th>title</th>
-            <th>progress</th>
-            <th>frontier</th>
-            <th>needs</th>
-            <th>owed since</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) =>
-            row.members.length > 1 ? (
-              <tr key={row.tile.cluster_key} className="cluster-row">
-                <td>{row.members.length}×</td>
-                {/* The shared needs spans the row's descriptive columns; the
-                    member ids follow so each is still one drill click away —
-                    folding gathers the rows, it does not hide them. */}
-                <td colSpan={7}>{row.tile.needs}</td>
-                <td colSpan={2} className="cluster-members">
-                  {row.members.map((m) => (
-                    <DrillOpen key={m.id} id={m.id} onOpen={onOpen} />
-                  ))}
-                </td>
-              </tr>
-            ) : (
-              <tr key={row.tile.id} className={row.tile.id === drillTarget ? 'drilled' : undefined}>
-                <td>{row.tile.severity}</td>
+      {members.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>band</th>
+              <th>id</th>
+              <th>rig</th>
+              <th>kind</th>
+              <th>pr</th>
+              <th>title</th>
+              <th>progress</th>
+              <th>frontier</th>
+              <th>needs</th>
+              <th>owed since</th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m) => (
+              <tr key={m.id} className={m.id === drillTarget ? 'drilled' : undefined}>
                 <td>
-                  <DrillOpen id={row.tile.id} onOpen={onOpen} />
+                  {wantsPerson(m) && (
+                    <span className="wants-person" aria-hidden="true">
+                      ●{' '}
+                    </span>
+                  )}
+                  <span className="band">{m.section}</span>
                 </td>
-                <td>{row.tile.rig}</td>
-                <td>{row.tile.kind}</td>
                 <td>
-                  <PRLink tile={row.tile} />
+                  <DrillOpen id={m.id} onOpen={onOpen} />
                 </td>
-                <td>{row.tile.title}</td>
-                <td>{progressCell(row.tile)}</td>
-                <td>{row.tile.frontier}</td>
-                <td>{row.tile.needs}</td>
-                <td>{sectionKey === 'done' ? '' : owedSince(row.tile)}</td>
+                <td>{m.rig}</td>
+                <td>{m.kind}</td>
+                <td>
+                  <PRLink tile={m} />
+                </td>
+                <td>{m.title}</td>
+                <td>{progressCell(m)}</td>
+                <td>{m.frontier}</td>
+                <td>{m.needs}</td>
+                <td>{m.section === 'done' ? '' : owedSince(m)}</td>
               </tr>
-            ),
-          )}
-        </tbody>
-      </table>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }
@@ -429,32 +432,11 @@ export function App() {
     return Number.isNaN(t) ? Date.now() : t;
   }, [board]);
 
-  // Group the ranked list into its bands by reading tile.section — the split
-  // the derive layer already made. The wire order (owed rows first, oldest
-  // first) is preserved within each band, so a band never disagrees with the
-  // order that produced it.
-  const bands = useMemo(() => {
-    const buckets = new Map<string, Tile[]>();
-    for (const t of tiles) {
-      const arr = buckets.get(t.section);
-      if (arr) arr.push(t);
-      else buckets.set(t.section, [t]);
-    }
-    const ordered: { key: string; tiles: Tile[] }[] = [];
-    for (const key of SECTION_ORDER) {
-      const bt = buckets.get(key);
-      if (bt && bt.length > 0) {
-        ordered.push({ key, tiles: bt });
-        buckets.delete(key);
-      }
-    }
-    // A band a newer derivation added shows under its own key rather than
-    // vanishing, after the known ones.
-    for (const key of [...buckets.keys()].sort()) {
-      ordered.push({ key, tiles: buckets.get(key)! });
-    }
-    return ordered;
-  }, [tiles]);
+  // Group the ranked list into dependency families by reading tile.group_root —
+  // the split the derive layer already made. The wire order (owed rows first,
+  // oldest first) is preserved, so the oldest-owed family leads; within a family
+  // the members read in SECTION_ORDER.
+  const families = useMemo(() => groupByFamily(tiles), [tiles]);
 
   const owed = tiles.filter((t) => t.owed);
   const coverage = prCoverage(tiles);
@@ -536,11 +518,10 @@ export function App() {
         <p>{owed.length > 0 ? 'No other anchors need attention.' : 'No anchors need attention.'}</p>
       )}
 
-      {bands.map((band) => (
-        <SectionTable
-          key={band.key}
-          sectionKey={band.key}
-          tiles={band.tiles}
+      {families.map((family) => (
+        <FamilyBlock
+          key={family.root.id}
+          family={family}
           drillTarget={drillTarget}
           onOpen={setDrillTarget}
         />

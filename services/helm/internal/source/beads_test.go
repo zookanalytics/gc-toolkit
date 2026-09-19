@@ -399,7 +399,9 @@ func populatedStore() *fakeStore {
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
 			"tk-cv": {
 				withDepType(child("tk-m1", "in_progress", testNow, ""), "tracks"),
-				// A convoy's own blocks-edges are not membership.
+				// A convoy's own blocks-edge is a WAIT, not membership: it stays
+				// out of Children and is gathered into WaitingOn so the family
+				// grouping can climb a blocked convoy to what it blocks.
 				withDepType(child("tk-m2", "open", testNow, ""), "blocks"),
 			},
 			// The `--waiting-on` edges. Every kind that spends them gets one
@@ -415,8 +417,8 @@ func populatedStore() *fakeStore {
 			},
 			"tk-human":  {withDepType(child("tk-w3", "open", testNow, ""), "blocks")},
 			"tk-parked": {withDepType(child("tk-w4", "closed", testNow, ""), "blocks")},
-			// An epic is banded by a child roll-up that already says whether
-			// its work is moving, so its edges are deliberately NOT read.
+			// An epic gathers its blocks edges, so a blocked epic can join the
+			// dependency family it hangs off.
 			"tk-epic": {withDepType(child("tk-w5", "closed", testNow, ""), "blocks")},
 		},
 	}
@@ -696,8 +698,11 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 // stand down anyway. Nothing errors, no field goes missing, and the only
 // visible symptom is a row that quietly stopped asking too early.
 //
-// `epic` and `convoy` deliberately do not pay it: they are banded by a child
-// roll-up that already reports whether their work is moving.
+// `epic` and `convoy` pay it for a different consumer: the dependency-family
+// grouping climbs a tile to the anchor it blocks, so a blocked epic or convoy
+// must gather its `blocks` edges to join the family it hangs off. A convoy's
+// come from the same outbound read that already
+// fetched its `tracks` members — a blocker there is a wait, not membership.
 func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()})
@@ -727,8 +732,10 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 			"so does a human-routed bead — and this one is still outstanding"},
 		{"tk-parked", "parked", []string{"tk-w4"}, []string{"tk-w4"},
 			"the parked read tk-2plde added is unchanged"},
-		{"tk-epic", "epic", nil, nil,
-			"an epic is banded by its roll-up; it does not pay the extra read"},
+		{"tk-epic", "epic", []string{"tk-w5"}, []string{"tk-w5"},
+			"an epic now gathers its blocks edges for the dependency-family grouping"},
+		{"tk-cv", "convoy", []string{"tk-m2"}, nil,
+			"a convoy's blocks edge is a wait it now gathers, separate from its tracks members"},
 	} {
 		idx, ok := find(c.id, c.kind)
 		if !ok {
@@ -749,6 +756,55 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 		if len(a.WaitingOnClosed) != len(c.closed) {
 			t.Errorf("%s/%s: waiting_on_closed=%v, want %v", c.id, c.kind, a.WaitingOnClosed, c.closed)
 		}
+	}
+}
+
+// TestReviewReworkChildrenAreAdmittedAsTiles pins the in-flight review/rework
+// selector: a not-closed bead carrying metadata.anchor_bead
+// with task_kind review or rework earns a tile so the operator sees the review
+// or rework in flight as a member of its merge anchor's family. Open OR
+// in_progress — a review is slung open, a rework is claimed — but never closed
+// (its anchor carries the DONE row), and never without an anchor to join.
+func TestReviewReworkChildrenAreAdmittedAsTiles(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	rev := issue("tk-rev", "Review branch polecat/tk-anc -> main", "task", 2, testNow,
+		`{"task_kind":"review","anchor_bead":"tk-anc","check_name":"codex"}`)
+	rwk := issue("tk-rwk", "Rework branch polecat/tk-anc", "task", 2, testNow,
+		`{"task_kind":"rework","anchor_bead":"tk-anc"}`)
+	rwk.Status = beads.StatusInProgress // a claimed rework runs in_progress
+	orphan := issue("tk-orphan", "A review bead naming no anchor", "task", 2, testNow,
+		`{"task_kind":"review"}`)
+	done := issue("tk-revdone", "A review round that closed", "task", 2, testNow,
+		`{"task_kind":"review","anchor_bead":"tk-anc"}`)
+	done.Status = beads.StatusClosed
+	closedAt := testNow.Add(-time.Hour)
+	done.ClosedAt = &closedAt
+
+	st := &fakeStore{issues: map[string][]*beads.Issue{"task": {rev, rwk, orphan, done}}}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	kindOf := func(id string) (string, bool) {
+		for _, a := range res.Anchors {
+			if a.ID == id {
+				return a.Kind, true
+			}
+		}
+		return "", false
+	}
+	if k, ok := kindOf("tk-rev"); !ok || k != "review" {
+		t.Errorf("open review child: kind=%q ok=%v, want a review tile", k, ok)
+	}
+	if k, ok := kindOf("tk-rwk"); !ok || k != "rework" {
+		t.Errorf("in_progress rework child: kind=%q ok=%v, want a rework tile", k, ok)
+	}
+	if _, ok := kindOf("tk-orphan"); ok {
+		t.Error("a review bead with no anchor_bead cannot join a family and must be dropped")
+	}
+	if _, ok := kindOf("tk-revdone"); ok {
+		t.Error("a closed review round is not gathered on the live pass — its anchor carries the DONE row")
 	}
 }
 

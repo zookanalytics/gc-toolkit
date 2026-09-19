@@ -414,6 +414,14 @@ type Tile struct {
 	// Empty is the common case — a row with an LLM-authored takeaway is unique
 	// and never clusters — so the field is omitted when it does not apply.
 	ClusterKey string `json:"cluster_key,omitempty"`
+
+	// GroupRoot is the id of the family this row belongs to — the top-most anchor
+	// its parent-child and blocked edges climb to, equal to the row's OWN id when
+	// it climbs to nothing. Every tile carries one, so a surface buckets families
+	// the way both renderers already bucket [Section]. Dependency structure is the
+	// board's primary grouping axis and the attention band orders and highlights
+	// WITHIN a family; [GroupByFamily] is that partition.
+	GroupRoot string `json:"group_root"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

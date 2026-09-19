@@ -510,6 +510,9 @@ func fixtureBoard() board.Board {
 				RankScore: 3014004,
 				// A dead owner under it, so classifySection bands it stalled.
 				Section: board.SectionStalled,
+				// A top-level epic with no in-fixture parent or blocker: its own
+				// family root, which is the common shape (group_root == id).
+				GroupRoot: "tk-eemvf",
 			},
 			{
 				ID:       "gt-1a2b3",
@@ -565,6 +568,7 @@ func fixtureBoard() board.Board {
 				// a live board it is set only when at least three rows share it.
 				Section:    board.SectionCleanup,
 				ClusterKey: "all 2 closed — graduate",
+				GroupRoot:  "gt-1a2b3",
 			},
 			// A merge anchor: the PR round-trip's row. Wedged at the convergence
 			// cap's exception, which is the live shape six of the seven wedged
@@ -634,7 +638,8 @@ func fixtureBoard() board.Board {
 				PROwedSince: time.Date(2026, 8, 8, 11, 2, 0, 0, time.UTC),
 				// A merge anchor is a pull request's row, so it bands review even
 				// while it is wedged on the operator.
-				Section: board.SectionReview,
+				Section:   board.SectionReview,
+				GroupRoot: "tk-01n5cc",
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into
@@ -686,6 +691,7 @@ func fixtureBoard() board.Board {
 				Needs:     "closed — ages out",
 				RankScore: -1_000_000 + 998, // the DONE lane: closed 1 day ago
 				Section:   board.SectionDone,
+				GroupRoot: "tk-9tbbk",
 			},
 		},
 		Partial:       true,

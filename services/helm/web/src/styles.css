@@ -77,6 +77,37 @@ th {
 }
 
 /*
+ * Dependency families. Each family is a titled block — its
+ * root anchor, then the members that hang off it — bracketed with a left rule so
+ * it reads as one thing. The attention band rides a per-row column; a ● marks
+ * the rows whose next move is the operator's.
+ */
+.board-family {
+  border-left: 2px solid rgb(128 128 128 / 35%);
+  margin-top: 1.5rem;
+  padding-left: 0.75rem;
+}
+
+.board-family h2 {
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.family-title {
+  font-weight: 600;
+}
+
+.band {
+  font-size: 0.8125rem;
+  opacity: 0.8;
+  text-transform: uppercase;
+}
+
+.wants-person {
+  color: #8a6100;
+}
+
+/*
  * Parked conversations (tk-2v08m). A second section rather than more rows: these
  * are findable-not-urgent, and the whole point is that they do not compete with
  * the ranked table above.
