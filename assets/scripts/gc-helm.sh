@@ -45,6 +45,7 @@ Usage:
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted)
+  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue) and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
 The board is `helm-svc board` (services/helm). This script carries only the
@@ -2041,6 +2042,118 @@ cmd_dismiss() {
     return 0
 }
 
+# ── Verb: accept ─────────────────────────────────────────────────────
+# Accept a recommendation straight off the board: dispatch the subject's
+# gc.recommended_formula at the subject and dismiss its visit, in one procedural
+# order with no sitting. It is the low-friction actuation of a ruling the human
+# has made (Accept/Discuss flow, design tk-hsm4d9); the board renders the
+# affordance on a subject whose visit is un-engaged, and this verb performs it.
+# Discuss (engage) stays the path for a recommendation the operator wants to
+# weigh instead.
+#
+# The subject is passed as gc.var.issue so the worker reads its card; a slung
+# formula does not receive the subject's description. Sling FIRST: only a landed
+# dispatch dismisses the visit, so a sling that fails leaves the visit for the
+# operator to retry or Discuss.
+cmd_accept() {
+    bead=""; accept_reason=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --reason=*) accept_reason="${1#--reason=}"; shift ;;
+            --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: accept: --reason requires a value" >&2; exit 2; }
+                        accept_reason="$1"; shift ;;
+            -h|--help)  usage; exit 0 ;;
+            -*) echo "$PROG: accept: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: accept takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    case "$bead" in "") echo "$PROG: accept needs <bead-id>" >&2; usage; exit 2 ;; esac
+
+    # Resolve a PR reference or a settled disposition to the live owning bead,
+    # the same way open/engage/dismiss do.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
+
+    # The subject must resolve before anything is dispatched: fail CLOSED on an
+    # unverified read — the alternative is a sling on a bead that may not exist.
+    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
+    subject=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
+             else empty end' 2>/dev/null || true)
+    if [ -z "$subject" ]; then
+        echo "$PROG: accept: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing dispatched." >&2
+        exit 4
+    fi
+
+    # A VISIT id names the recommendation's subject. The board renders Accept on
+    # the folded subject tile, so the common input is the subject id; a visit id
+    # resolves to its subject the way dismiss does — the gc.continuation_group
+    # stamp, else the tracks edge.
+    subject_kind=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.metadata.task_kind // "")
+             else empty end' 2>/dev/null || true)
+    if [ "$subject_kind" = "visit" ]; then
+        visit_of=$(printf '%s' "$subject_clean" \
+            | jq -r --arg b "$bead" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
+                      | (.metadata["gc.continuation_group"] // "") | select(. != "")
+                 else empty end' 2>/dev/null || true)
+        if [ -z "$visit_of" ]; then
+            visit_of=$(printf '%s' "$subject_clean" \
+                | jq -r --arg b "$bead" \
+                    'if type == "array"
+                     then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
+                          | [ .dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "") ] | map(select(. != "")) | first // empty
+                     else empty end' 2>/dev/null || true)
+        fi
+        if [ -z "$visit_of" ]; then
+            echo "$PROG: accept: $bead is a visit that names no subject (no gc.continuation_group stamp and no tracks edge) — nothing to accept. Nothing dispatched." >&2
+            exit 4
+        fi
+        bead="$visit_of"
+        # Re-read so the recommended-formula check reads the SUBJECT, not the
+        # visit that pointed at it.
+        subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
+    fi
+
+    # No gc.recommended_formula means discuss-only: there is nothing to dispatch,
+    # so accept refuses rather than dismissing a decision the operator has not
+    # made. This is the same key the board derives Accept-ability from, so a
+    # refusal here is a row the board would not have offered Accept on.
+    formula=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
+                  | (.metadata["gc.recommended_formula"] // "")
+             else empty end' 2>/dev/null || true)
+    if [ -z "$formula" ]; then
+        echo "$PROG: accept: $bead carries no gc.recommended_formula — it is discuss-only. Engage it to decide. Nothing dispatched." >&2
+        exit 2
+    fi
+
+    # Pin the subject's rig so the sling and the dismiss both act in its store.
+    rig=$(rig_name_for_bead "$bead")
+    [ -n "$rig" ] && export GC_RIG="$rig"
+
+    # Dispatch the recommendation AT the subject: the subject is the routed
+    # anchor (--on) and is also passed as gc.var.issue so a formula that reads
+    # its card by that var finds it.
+    if ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula" --var "issue=$bead"; then
+        echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed." >&2
+        exit 1
+    fi
+    echo "$PROG: accept: dispatched $formula at $bead"
+
+    # The recommendation is dispatched, so the operator's decision is made:
+    # dismiss the visit. The dismiss verb closes every open visit on the subject.
+    cmd_dismiss "$bead" --reason "${accept_reason:-accepted: dispatched $formula}"
+}
+
 # ── Verb: engage ─────────────────────────────────────────────────────
 # The operator's "I want to talk about this now" — the spawn-on-engagement
 # entry point. The converse routed-pool is retired: a filed visit PARKS on the
@@ -2449,7 +2562,8 @@ case "${1:-}" in
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
+    accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm); this script keeps only the write verbs" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac
