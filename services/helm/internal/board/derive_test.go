@@ -909,35 +909,67 @@ func TestRuledStandsDown(t *testing.T) {
 	}
 }
 
-// TestRuledNeedsTheWaitToHaveLanded is the guard. "Answered" is not "answered
-// and the work landed": a decision whose `--waiting-on` edge is still open has
-// not finished being a decision, and must keep its band.
+// TestRuledInFlightIsInProgress covers the in-flight ruling. "Answered" is not
+// "answered and the work landed", so a human-gated row whose ruling slung work
+// still open is not settled — [ruled] does not fire. But it is not un-ruled
+// either: the operator decided and an agent now holds the next move. It reads as
+// work in progress — NORMAL, below the ELEVATED an un-answered gate gets and
+// above the LOW a settled ruling sinks to — and frontier agrees with NEEDS
+// rather than reporting the un-ruled "no agent will take it" (or, for a
+// decision, "human-gated decision") on a row that already carries its ruling.
 //
-// This is also what makes the wait clause non-vacuous, and it only holds
-// because the gather reads waiting edges for these kinds at all — see
-// source.waitingEdges.
-func TestRuledNeedsTheWaitToHaveLanded(t *testing.T) {
-	a := Anchor{ID: "tk-hs2e8", Title: "clean-exit rate", Kind: "decision", Source: "decision",
-		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
-		Takeaway:  "answered NO — real bug is stranded holds, routed tk-jsyci7",
-		WaitingOn: []string{"tk-jsyci7"}}
-	tile := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+// The wait clause is only non-vacuous because the gather reads waiting edges for
+// these kinds at all — see source.needsWaitingEdges. Both human-gated shapes are
+// covered: a decision, and a human-routed bead (the Pino row on the bead).
+func TestRuledInFlightIsInProgress(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-hs2e8", Title: "clean-exit rate", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway:  "answered NO — real bug is stranded holds, routed tk-jsyci7",
+			WaitingOn: []string{"tk-jsyci7"}},
+		{ID: "sl-fm1xp", Title: "bring Pino back", Kind: "human", Source: "human",
+			Rig: "signal-loom", Prefix: "sl", Priority: ptr(1), UpdatedAt: daysAgo(1),
+			Takeaway:  "ruled: bring Pino back — work slung sl-9kd2, awaiting implementation",
+			WaitingOn: []string{"sl-9kd2"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 
-	if tile.Severity != SevElevated {
-		t.Errorf("the routed work is still open — the row keeps its band, got %s", tile.Severity)
-	}
-	if tile.Frontier != "human-gated decision" {
-		t.Errorf("frontier unchanged while the wait is live: %q", tile.Frontier)
-	}
-	if tile.Needs != "answered NO — real bug is stranded holds, routed tk-jsyci7" {
-		t.Errorf("its takeaway still answers for it: %q", tile.Needs)
+	for _, c := range []struct{ id, needs string }{
+		{"tk-hs2e8", "answered NO — real bug is stranded holds, routed tk-jsyci7"},
+		{"sl-fm1xp", "ruled: bring Pino back — work slung sl-9kd2, awaiting implementation"},
+	} {
+		tile, ok := tileByID(b, c.id)
+		if !ok {
+			t.Fatalf("%s is missing from the board", c.id)
+		}
+		if tile.Severity != SevNormal {
+			t.Errorf("%s: a ruled row with work in flight is in progress, got %s", c.id, tile.Severity)
+		}
+		if tile.Frontier != "ruled — work in flight" {
+			t.Errorf("%s frontier: %q", c.id, tile.Frontier)
+		}
+		// The ruling still answers, so NEEDS no longer contradicts frontier.
+		if tile.Needs != c.needs {
+			t.Errorf("%s needs: %q", c.id, tile.Needs)
+		}
+		// An agent holds the next move, so the operator is owed nothing and the
+		// row leaves their queue.
+		if tile.Owed {
+			t.Errorf("%s: a ruled, in-flight row is not the operator's to move", c.id)
+		}
+		// The outstanding slung work stays named on the wire.
+		if len(tile.WaitingOnOpen) != 1 {
+			t.Errorf("%s: the outstanding slung work is named: %v", c.id, tile.WaitingOnOpen)
+		}
 	}
 }
 
-// TestRuledNeedsTheWaitsToBeLegible is the same guard against the other way an
-// empty `waiting_on_open` can arise. TestRuledNeedsTheWaitToHaveLanded covers a
+// TestRuledNeedsTheWaitsToBeLegible is the fail-closed guard for the other way
+// an empty `waiting_on_open` can arise. TestRuledInFlightIsInProgress covers a
 // wait that WAS read and is still open; this covers a wait set the source could
-// not read at all.
+// not read at all — where neither [ruled] nor [ruledInFlight] fires, so the row
+// falls to the un-ruled arm and keeps its band rather than being read as
+// in-flight on a graph the board never checked.
 //
 // The two look identical on the anchor — WaitingOn is empty in both the
 // "nothing outstanding" case and the "never learned" one — and reading the

@@ -407,9 +407,10 @@ func isDemand(a Anchor) bool {
 //
 // The wait clause is what keeps it honest — "answered" is not "answered and
 // the work landed". A decision whose `--waiting-on` edge is still open has not
-// finished being a decision, so it keeps its band. Those edges are gathered for
-// these kinds precisely so this clause can fire; without them it would be a
-// guard that guards nothing.
+// finished being a decision, so [ruled] does not fire and [ruledInFlight] holds
+// its band instead, reading it as work in progress rather than as a settled
+// ruling owed a disposition. Those edges are gathered for these kinds precisely
+// so this clause can fire; without them it would be a guard that guards nothing.
 //
 // And the clause counts only when the source actually READ those edges. An
 // empty waitingOpen means "every recorded wait has landed" if and only if the
@@ -426,6 +427,22 @@ func isDemand(a Anchor) bool {
 func ruled(a Anchor, takeaway string, waitingOpen []string) bool {
 	return humanGated(a) && takeaway != "" && !isDemand(a) &&
 		!a.WaitingUnknown && len(waitingOpen) == 0
+}
+
+// ruledInFlight is [ruled]'s in-progress twin: a human-gated row that has been
+// answered, but whose ruling slung work that is still open. It is ruled — the
+// operator decided and is owed nothing right now — but not settled, because a
+// recorded wait has not landed. [ruled] holds the band for the settled case,
+// where a disposition is owed; this holds it for the in-flight one, so a
+// ruled-and-slung row bands as work in progress rather than as an un-ruled
+// human gate.
+//
+// It shares [ruled]'s guards for the same reasons: a demand's takeaway is the
+// question, not an answer, and an unread wait graph cannot prove work is in
+// flight — so both fall through to the un-ruled arm, which keeps asking.
+func ruledInFlight(a Anchor, takeaway string, waitingOpen []string) bool {
+	return humanGated(a) && takeaway != "" && !isDemand(a) &&
+		!a.WaitingUnknown && len(waitingOpen) > 0
 }
 
 // dispositionDue is the state the waiting edges exist to express: a parked
@@ -495,7 +512,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, stalledGate bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, stalledGate bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -515,7 +532,14 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, stalle
 		sev0 = SevNormal
 	case isRuled && r.mTotal == 0:
 		sev0 = SevLow
-	case !isRuled && humanGated(a):
+	// A ruled row whose slung work is still open is in progress, not an
+	// un-answered gate: it bands as in-flight work, below the ELEVATED an
+	// un-ruled human gate gets and above the LOW a settled ruling sinks to.
+	// Childless like the settled arm; a decomposed one is banded by its roll-up
+	// through the count branches, exactly as a decomposed ruled row is.
+	case isRuledInFlight && r.mTotal == 0:
+		sev0 = SevNormal
+	case !isRuled && !isRuledInFlight && humanGated(a):
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
@@ -575,7 +599,7 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled bool,
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
@@ -606,7 +630,13 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 	// ruled row that decomposed skips this and reports its counts.
 	case isRuled && r.mTotal == 0:
 		return "ruled — takeaway recorded"
-	case !isRuled && a.Source == "decision":
+	// A ruled row whose slung work is still open reports that its ruling is
+	// being acted on — distinct from the settled phrase above and from the
+	// un-ruled arm below. Childless like the settled case; a decomposed one
+	// reports its counts.
+	case isRuledInFlight && r.mTotal == 0:
+		return "ruled — work in flight"
+	case !isRuled && !isRuledInFlight && a.Source == "decision":
 		return "human-gated decision"
 	// A merge anchor names the pull request instead, and OUTRANKS the
 	// human-routed phrase below, which is not a competing fact but a less
@@ -627,7 +657,7 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return prFrontier(a, owedSince, now)
 	// The marker, not the kind, for the reason [severity] gives: a bead's
 	// `human` and `parked` rows are one bead and must not describe it two ways.
-	case !isRuled && humanGated(a):
+	case !isRuled && !isRuledInFlight && humanGated(a):
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
@@ -1471,6 +1501,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	takeaway := collapseWS(a.Takeaway)
 	dispDue := dispositionDue(a, waiting, waitingOpen)
 	isRuled := ruled(a, takeaway, waitingOpen)
+	isRuledInFlight := ruledInFlight(a, takeaway, waitingOpen)
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
@@ -1498,7 +1529,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		}
 	}
 
-	sev := severity(a, r, held, stale, dispDue, isRuled, stalled)
+	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
 	// progress_mismatch: the convoy's own closed/total claim disagrees with the
@@ -1525,7 +1556,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		// would hoist it above every live demand — the exact opposite of the
 		// terminal band [rankScore] floors it into. It gates every cause,
 		// the merge anchor's included.
-		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled) || dispDue || prIsOwed),
+		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight) || dispDue || prIsOwed),
 
 		Weight: w,
 		Held:   held,
@@ -1547,11 +1578,12 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		// An UNANSWERED human gate is excluded for the same reason `held` is:
 		// stranded means open work nobody's attention is on, and a row routed
-		// to the operator has the operator's. Once [ruled] the gate is
-		// discharged and open children under it are ordinary idle work again,
-		// so the exemption ends exactly where the band's does.
+		// to the operator has the operator's. Once ruled — settled, or with
+		// slung work still in flight — the gate is discharged and open children
+		// under it are ordinary idle work again, so the exemption ends exactly
+		// where the band's does.
 		Stranded: r.mTotal > 0 && r.idle() > 0 && len(r.liveHeads) == 0 && !held &&
-			!(humanGated(a) && !isRuled),
+			!(humanGated(a) && !isRuled && !isRuledInFlight),
 		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
 			a.Source != "human" && a.Source != "parked" && a.Source != "merge" &&
 			!isReviewReworkKind(a.Source),
@@ -1575,7 +1607,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, closedDays, owedSince, now),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, closedDays, owedSince, now),
 		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed, stalledReason),
 		RankScore: rankScore(sev, w, stale, closedDays),
 

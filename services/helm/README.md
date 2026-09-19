@@ -216,9 +216,9 @@ Six kinds are gathered. The first three are selected by the bead's issue
 | kind | selected by | band | why |
 |---|---|---|---|
 | `epic` | `issue_type=epic` | derived from the roll-up | durable per-rig anchor |
-| `decision` | `issue_type=decision` | ELEVATED, LOW once *ruled* | human-gated |
+| `decision` | `issue_type=decision` | ELEVATED; NORMAL or LOW once *ruled* | human-gated |
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
-| `human` | `gc.routed_to=human` | ELEVATED, LOW once *ruled* | the operator owns it; no agent will take it |
+| `human` | `gc.routed_to=human` | ELEVATED; NORMAL or LOW once *ruled* | the operator owns it; no agent will take it |
 | `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
 | `merge` | `merge_result` present | derived from the roll-up, so LOW while childless | a branch the city is trying to land — the PR round-trip's row |
 
@@ -377,22 +377,26 @@ since converse never closes a subject by contract, nothing in the city could
 ever have retired them. Two constants that never stand down are not
 *unmissable*; uniform is the same thing as invisible.
 
-A row is **ruled** when all four hold:
+A row is **ruled** — the operator has answered it — when all four hold:
 
 1. it is human-gated — kind `decision` or `human`, or a bead carrying
    `gc.routed_to=human` (which is how the `parked` twin of one is recognised);
 2. it carries a `gc.takeaway`;
-3. its `blocks` waits were READ, and none of them is still open; and
+3. its `blocks` waits were READ (an unread graph proves nothing); and
 4. it is not a demand — no `gc.demand_for`.
+
+A ruled row then reads by whether the work its ruling slung has landed: **in
+flight** while a `blocks` wait is still open — an agent holds the next move — and
+**settled** once every wait has landed, when the operator owes a disposition.
 
 | shape | row |
 |---|---|
-| no takeaway | unchanged: ELEVATED, frontier "human-gated decision"; NEEDS names the silence (below) |
-| takeaway, waits unreadable | unchanged — an unread graph proves nothing |
-| takeaway, a wait still open | unchanged — answering is not finishing |
-| open demand (`gc.demand_for`) | unchanged — its takeaway is the question, not an answer to it |
+| no takeaway | ELEVATED, frontier "human-gated decision" or "routed to the operator — no agent will take it"; NEEDS names the silence (below) |
+| takeaway, waits unreadable | as un-ruled — an unread graph proves nothing |
+| open demand (`gc.demand_for`) | as un-ruled — its takeaway is the question, not an answer to it |
+| takeaway, a wait still open, no children | NORMAL, "ruled — work in flight": answered, but an agent holds the slung work — neither the settled stand-down below nor an un-ruled gate |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
-| takeaway, every wait landed, *with* children | banded by the roll-up, like a decomposed `parked` subject |
+| takeaway, *with* children (wait open or landed) | banded by the roll-up, like a decomposed `parked` subject |
 
 The last row is the `tk-a9k0l` lesson one kind over: "answered" is a claim about
 the BEAD, and open work hanging under it falsifies the claim. A ruling must not
@@ -415,9 +419,11 @@ Three properties carry over from the disposition rule, and one is new:
   (tk-fhd705). `gc-helm.sh` needs no counterpart: there `waiting_on` rides on
   the same payload that produced the anchor, so a failed read drops the row
   rather than leaving it standing with its edges missing.
-- **LOW, not NORMAL.** NORMAL is stale-bumped past fourteen days, which would
-  put `tk-z130v` — thirty days old — straight back in the band it was standing
-  down from.
+- **The settled stand-down is LOW, not NORMAL.** NORMAL is stale-bumped past
+  fourteen days, which would put `tk-z130v` — thirty days old — straight back in
+  the band it was standing down from. The in-flight case above is deliberately
+  NORMAL instead: its slung work is live, so a ruling whose work has stalled for
+  weeks SHOULD re-elevate — exactly what the settled case must not do.
 - **A demand is exempt.** `gc-helm demand` stamps the authored ask as the
   demand bead's own `gc.takeaway` so the board has a sentence to show, and the
   demand carries no blocker of its own — it *is* the blocker, and the edge
