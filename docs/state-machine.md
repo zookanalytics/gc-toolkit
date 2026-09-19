@@ -620,10 +620,13 @@ the PR. `pr-facts.sh`'s close arm reads that marker when the PR reaches CLOSED
 and runs `bead-rehome.sh` to consummate the terminal close, so `bead-rehome.sh`
 stays the sole writer of `gc.superseded_by` and the disposition reaches the
 same terminal state through the same verb. The same consummation disposes the
-branch's parked rebase and rework children: each exists only to carry a branch
-the closed PR will never merge, so an open, unheld one is closed through
-`bead-rehome.sh` as `not-needed` against the anchor's successor, leaving no husk
-to re-offer to a pool; a child a worker still holds (`in_progress`) or one an
-operator froze (`rebase_hold`) is left alone. A close with no recorded
-disposition still transitions to `abandoned` and files the rework-or-close
-visit.
+branch's parked rebase and rework children BEFORE it closes the anchor: a rework
+child holds a `blocks` edge on the anchor, so an open one refuses the anchor's
+own non-force close and would strand it open with its pointer already stamped.
+Each exists only to carry a branch the closed PR will never merge, so an open,
+unheld one is closed through `bead-rehome.sh` as `not-needed` against the
+anchor's successor — clearing that hold and leaving no husk to re-offer to a
+pool; a child a worker still holds (`in_progress`) or one an operator froze
+(`rebase_hold`) is left alone, and its hold then keeps the anchor open until it
+resolves. A close with no recorded disposition still transitions to `abandoned`
+and files the rework-or-close visit.
