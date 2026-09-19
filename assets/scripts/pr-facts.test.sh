@@ -2065,6 +2065,65 @@ out=$(run_posture)
 eq "$(meta_pinned UT6 pr_posture)" "commented@sha-66" "a standing visit keeps the merge held on the next posture pass"
 hasnt "$(gh_since "$mark")" "graphql" "…without re-reading the threads"
 
+echo "# Conversation tab: an operator issue comment files a rework child on its own watermark"
+# The sweep read only reviews and inline comments, so operator direction posted
+# as an ISSUE comment routed nowhere. Its ids are a separate space, so it earns
+# its own watermark rather than sharing the inline mark's.
+store "[$(anchor IC1 92)]"
+printf '%s' "$(prview 92 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_92.json"
+echo '[]' > "$GH_DIR/reviews_92.json"
+echo '[]' > "$GH_DIR/comments_92.json"
+printf '[{"id":770001,"user":{"login":"human1"},"body":"Rework: split the sweep into its own function"}]' > "$GH_DIR/issue_comments_92.json"
+out=$(run)
+has "$out" "watermark: review 0, comment 0, issue 770001" "the issue comment routes and advances its own mark"
+CID=$(jq -r '[.[] | select(.id | startswith("new-"))][0].id // ""' "$STUB_STORE")
+eq "$(meta IC1 pr_issue_comment_watermark)" "770001" "the issue watermark advances to the comment"
+eq "$(meta IC1 pr_comment_watermark)" "0" "…the inline mark is untouched"
+eq "$(meta IC1 pr_review_watermark)" "0" "…and the review mark is untouched"
+eq "$(meta_pinned IC1 pr_posture)" "commented@sha-92" "…the merge is held as commented, not left progressing"
+eq "$(meta IC1 pr_comment_disposition)" "rework:$CID" "…the disposition names the child"
+eq "$(meta "$CID" anchor_bead)" "IC1" "the child is stamped to its anchor"
+eq "$(meta "$CID" 'gc.routed_to')" "$FIX" "…routed to the fix pool"
+eq "$(meta "$CID" task_kind)" "rework" "…as a rework"
+has "$(jq -r --arg c "$CID" '.[] | select(.id == $c) | .title' "$STUB_STORE")" "issue 770001" "the title carries the issue coordinate"
+has "$(jq -r --arg c "$CID" '.[] | select(.id == $c) | .description' "$STUB_STORE")" "## Conversation comments" "the body renders the conversation section"
+has "$(jq -r --arg c "$CID" '.[] | select(.id == $c) | .description' "$STUB_STORE")" "split the sweep into its own function" "…carrying the operator's words verbatim"
+grep -qxF "$CID|blocks|IC1" "$STUB_DEPS" && ok "…and it holds the merge via a blocks edge" || bad "blocks edge missing"
+
+echo "# …idempotent: the same conversation batch mints no twin and moves no mark"
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "still exactly one child"
+eq "$(meta IC1 pr_issue_comment_watermark)" "770001" "…and the mark holds"
+
+echo "# …a newer conversation comment above the mark re-fires"
+printf '[{"id":770001,"user":{"login":"human1"},"body":"old"},{"id":770002,"user":{"login":"human1"},"body":"and one more thing"}]' > "$GH_DIR/issue_comments_92.json"
+out=$(run)
+has "$out" "issue 770002" "the newer conversation comment routes"
+eq "$(meta IC1 pr_issue_comment_watermark)" "770002" "…and the mark advances past it"
+
+echo "# …our own conversation comment is not feedback and routes nothing"
+store "[$(anchor IC2 93)]"
+printf '%s' "$(prview 93 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_93.json"
+echo '[]' > "$GH_DIR/reviews_93.json"
+echo '[]' > "$GH_DIR/comments_93.json"
+printf '[{"id":880001,"user":{"login":"gc-city-bot"},"body":"landed abc123"}]' > "$GH_DIR/issue_comments_93.json"
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "our own conversation comment mints no child"
+eq "$(meta IC2 pr_issue_comment_watermark)" "<absent>" "…and moves no mark"
+
+echo "# …an unreadable Conversation read holds the posture rather than clearing it"
+# Reviews and inline comments read clean; only the Conversation space breaks. A
+# clean posture written here would let merge.sh through over an unread comment,
+# which is the very failure the fix exists to stop, so the pass records nothing.
+store "[$(anchor IC3 94)]"
+printf '%s' "$(prview 94 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_94.json"
+echo '[]' > "$GH_DIR/reviews_94.json"
+echo '[]' > "$GH_DIR/comments_94.json"
+printf '[{"id":990001,"user":{"login":"human1"},"body":"decide X"}]' > "$GH_DIR/issue_comments_94.json"
+out=$(STUB_ISSUE_LIST_RC=1 run)
+has "$out" "feedback history unreadable" "the unreadable Conversation read defers the pass"
+eq "$(meta IC3 pr_posture)" "<absent>" "…and records no clean posture over the unread comment"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

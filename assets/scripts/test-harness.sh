@@ -542,6 +542,17 @@ case "$sub" in
         [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
         case "$path" in *comments*) f="$G/comments_$n.json" ;; *) f="$G/reviews_$n.json" ;; esac
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
+      */issues/*/comments*)
+        # The Conversation tab, a separate REST space from the /pulls comment
+        # rows above. An absent fixture is an EMPTY conversation, the shape most
+        # PRs have; STUB_GH_LIST_RC fails it the same way it fails the others,
+        # and STUB_ISSUE_LIST_RC fails ONLY this space, to model a Conversation
+        # read that breaks while the reviews and inline comments still read.
+        n="${path##*/issues/}"; n="${n%%/*}"
+        [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
+        [ -z "${STUB_ISSUE_LIST_RC:-}" ] || exit "$STUB_ISSUE_LIST_RC"
+        f="$G/issue_comments_$n.json"
+        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */rules/branches/*)
         b="${path##*/rules/branches/}"
         f="$G/rules_$(san "$b").json"

@@ -273,11 +273,13 @@ postures = ["changes_requested", "commented", "approved", "review_required", "no
 merge_state_key = "pr_merge_state"
 # The watermarks separate a comment already routed from a new one. Each is the
 # highest id routed in its own id space, and advances only after the routing
-# reads back, so a comment nothing answered cannot fall below the mark. Two
-# spaces, never merged: a reply can land on an old review, so review ids cannot
-# stand in for comment ids.
+# reads back, so a comment nothing answered cannot fall below the mark. Three
+# spaces, never merged: a reply can land on an old review, and a Conversation-tab
+# issue comment draws ids from a range unrelated to either, so no one space
+# stands in for another.
 comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
+issue_comment_watermark_key = "pr_issue_comment_watermark"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
 # the merge until it closes — the child through a blocks edge, the visit through
@@ -622,7 +624,7 @@ keys = [
 # key). pr-facts.sh is the sole writer of this group.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
-  "pr_review_watermark", "pr_comment_disposition",
+  "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",
   # The comment-batch disposition history: one
   # `<disposition>|<exclusive floor>|<inclusive mark>` record per batch, oldest
   # first, joined by ";". It outlives the single-valued pr_comment_disposition

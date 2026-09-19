@@ -341,8 +341,9 @@ gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
 # to know what was asked without a second GitHub read, and a review BODY is not
 # on the /files page its inline comments live on, so an objection stated in the
 # body alone reaches a page-pointing work order as nothing at all.
-feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> — markdown on stdout
+feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> <issue-comments-json> <issue-mark> — markdown on stdout
   jq -nr --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
+         --argjson icmts "$5" --argjson imark "$6" \
          --arg self "$SELF_LOGIN" '
     def clip($n): if (length) > $n then (.[0:$n] + "\n\n_(truncated — the rest is on the PR)_") else . end;
     def body: ((.body // "") | tostring);
@@ -353,11 +354,16 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
               | select(((.id // 0) | tonumber) > $rmark) ] | sort_by(.id)) as $R
   | ([ $cmts[] | select(((.user.login // "") | tostring) != $self)
               | select(((.id // 0) | tonumber) > $cmark) ] | sort_by(.id)) as $C
+  | ([ $icmts[] | select(((.user.login // "") | tostring) != $self)
+              | select(((.id // 0) | tonumber) > $imark) ] | sort_by(.id)) as $I
   | ((if ($R | length) > 0 then ["## Review bodies"]
         + [ $R[] | "### \(.user.login // "?") — \(.state // "?") (review \(.id))\n\n\(body | clip(4000))" ]
       else [] end)
    + (if ($C | length) > 0 then ["## Inline comments"]
         + [ $C[] | "### \(.path // "?")\(if ((.line // .original_line) != null) then ":\(.line // .original_line)" else "" end) — \(.user.login // "?") (comment \(.id))\n\n\(body | clip(2000))" ]
+      else [] end)
+   + (if ($I | length) > 0 then ["## Conversation comments"]
+        + [ $I[] | "### \(.user.login // "?") (comment \(.id))\n\n\(body | clip(2000))" ]
       else [] end)
    | join("\n\n")) | clip(16000)' 2>/dev/null
 }
@@ -741,13 +747,15 @@ CHILDREN_EOF
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
-  revs_raw=""; cmts_raw=""; cmts_live=""
+  posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
+  revs_raw=""; cmts_raw=""; cmts_live=""; icmts_raw=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
+  iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
   obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
   case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
+  case "$iwm" in ''|*[!0-9]*) iwm=0 ;; esac
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id — PR#$num live head unresolved; posture not recorded (a posture pins to a head or says nothing)" >&2
   elif [ -z "$SELF_LOGIN" ]; then
@@ -758,15 +766,20 @@ CHILDREN_EOF
   else
     revs_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100") || revs_raw=""
     cmts_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/comments?per_page=100") || cmts_raw=""
-    if [ -z "$revs_raw" ] || [ -z "$cmts_raw" ]; then
+    # The Conversation tab is a third feedback space in its own id range: operator
+    # direction posted there is neither a review nor an inline comment. An empty
+    # read of it holds the posture the same way the other two do, or a clean
+    # posture written here would let merge.sh through over unread direction.
+    icmts_raw=$(gh_rows "repos/$ORIGIN_REPO/issues/$num/comments?per_page=100") || icmts_raw=""
+    if [ -z "$revs_raw" ] || [ -z "$cmts_raw" ] || [ -z "$icmts_raw" ]; then
       # A standing CHANGES_REQUESTED is settled by reviewDecision alone, so the
       # posture is still recorded; only the dispatch below needs the lists, and
       # it holds for a pass that can read them.
       if [ "$rd" = "CHANGES_REQUESTED" ]; then
         posture="changes_requested"
-        echo "$PROG: $id — PR#$num review history unreadable; posture read from the review decision, the feedback under it not routed (retry next pass)" >&2
+        echo "$PROG: $id — PR#$num feedback history unreadable; posture read from the review decision, the feedback under it not routed (retry next pass)" >&2
       else
-        echo "$PROG: $id — PR#$num review history unreadable; posture not recorded (retry next pass)" >&2
+        echo "$PROG: $id — PR#$num feedback history unreadable; posture not recorded (retry next pass)" >&2
       fi
     else
       # The comment space drops what a dismissal retired before anything counts
@@ -793,9 +806,16 @@ CHILDREN_EOF
           | (.id // 0) ] | max // 0' 2>/dev/null)
       max_c=$(printf '%s' "$cmts_live" | jq -r --arg self "$SELF_LOGIN" '
         [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
+      # An issue comment carries no review state and no inline path; every one
+      # under a login other than ours is feedback the loop has to answer, the
+      # same test the inline space uses. Its ids are a separate range, so it
+      # earns its own watermark rather than sharing max_c's.
+      max_i=$(printf '%s' "$icmts_raw" | jq -r --arg self "$SELF_LOGIN" '
+        [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
       case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
       case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
-      if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ]; then unanswered=1; fi
+      case "$max_i" in ''|*[!0-9]*) max_i=0 ;; esac
+      if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # A review posted under OUR OWN login leaves unresolved finding threads arm 4
       # never counts — it reads other logins — so `unanswered` stays 0 while the
       # gate stays green, and the posture would read review_required/none. merge.sh
@@ -1172,7 +1192,11 @@ GATES
     # floor at the next verdict, keyed on the batch stamped here. The batch
     # coordinates are the dedup: a reconcile every two minutes sees the same
     # comments until they are answered, and a reset per pass would be no cap.
+    # The issue coordinate joins the key only when there is one, so a batch with
+    # no Conversation feedback keys the reset exactly as before and re-resets
+    # nothing already recorded under the two-part key.
     reset_key="$max_r.$max_c"
+    [ "$max_i" -gt 0 ] && reset_key="$max_r.$max_c.$max_i"
     if [ "$(printf '%s' "$row" | jq -r '(.metadata.signoff_rounds_reset // "") | tostring')" != "$reset_key" ]; then
       RSET=(--set "signoff_rounds_reset=$reset_key")
       undo=""; unparked=0; park_note=""
@@ -1217,7 +1241,7 @@ TALLY
           # closed; when it cannot, leave the park standing — the anchor reads
           # held, the feedback below routes to the person holding it, and a
           # later pass retries.
-          if close_cap_demand "$id" "pr-facts: cap reset by operator feedback on PR#$num (review $max_r, comment $max_c); the park is retired, so the demand that recorded it closes with it."; then
+          if close_cap_demand "$id" "pr-facts: cap reset by operator feedback on PR#$num (review $max_r, comment $max_c, issue $max_i); the park is retired, so the demand that recorded it closes with it."; then
             RSET+=(--unset merge_hold --unset blocked_reason --unset signoff_cap --route "")
             undo="${undo:+$undo, }the merge_hold park on gate $cap, blocked_reason and the human route"
             if [ "$takeaway_by" = signoff ]; then
@@ -1235,7 +1259,7 @@ TALLY
         park_note=" No park was retired: merge_hold does not carry the cap's own park value, so it is a person's and stays (signoff_cap=$cap stands beside it, unclaimed by this reset)."
       fi
       if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c; answered through review $rwm, comment $cwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence.${park_note}" >/dev/null; then
+           "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c, issue $max_i; answered through review $rwm, comment $cwm, issue $iwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence.${park_note}" >/dev/null; then
         # The row was read before this write, and the routing choice below
         # reads both fields: a park retired here must not still hold as one. Only
         # unparked when close_cap_demand proved the demand closed above, so the
@@ -1277,9 +1301,14 @@ TALLY
       # pass whose stamp dropped, and re-creating either mints a twin. The title
       # IS that probe's key, so rewording it strands every child in flight under
       # the old one.
+      # The issue-comment coordinate joins the key only when there is one, so a PR
+      # with no Conversation feedback keeps the exact title a child already in
+      # flight was filed under, and only a batch that actually carries an issue
+      # comment gets the wider key.
       CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c)"
-      CBODY=$(feedback_body "$revs_raw" "$cmts_live" "$rwm" "$cwm")
-      [ -n "$CBODY" ] || CBODY="Unanswered review feedback on PR#$num (through review $max_r, comment $max_c). The bodies could not be rendered; read them at $live_url."
+      [ "$max_i" -gt 0 ] && CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c, issue $max_i)"
+      CBODY=$(feedback_body "$revs_raw" "$cmts_live" "$rwm" "$cwm" "$icmts_raw" "$iwm")
+      [ -n "$CBODY" ] || CBODY="Unanswered review feedback on PR#$num (through review $max_r, comment $max_c, issue $max_i). The bodies could not be rendered; read them at $live_url."
       CBODY="## Unanswered review feedback on PR#$num
 
 $live_url — head $head_oid${CSRC:+, review $CSRC}
@@ -1390,9 +1419,12 @@ $CBODY"
       fi
       DISP="rework:$CFIX"
     else
+      # Same conditional coordinate as the child's title: a batch with no issue
+      # comment keeps the key an open visit was filed under.
       VKEY="pr-comments.$num.$max_r.$max_c"
+      [ "$max_i" -gt 0 ] && VKEY="pr-comments.$num.$max_r.$max_c.$max_i"
       escalate "$id" "$VKEY" \
-        "PR#$num ($live_url) carries review feedback nothing has answered (highest: review $max_r, comment $max_c; answered through review $rwm, comment $cwm${CSRC:+; reviews $CSRC}), and the city cannot route work for it because $why. Answer it on the PR, file the rework by hand, or close this visit once it is addressed — the merge is held until then."
+        "PR#$num ($live_url) carries review feedback nothing has answered (highest: review $max_r, comment $max_c, issue $max_i; answered through review $rwm, comment $cwm, issue $iwm${CSRC:+; reviews $CSRC}), and the city cannot route work for it because $why. Answer it on the PR, file the rework by hand, or close this visit once it is addressed — the merge is held until then."
       VID=$(visit_for "$id" "$VKEY") || VID=""
       if [ -z "$VID" ]; then
         echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
@@ -1437,10 +1469,11 @@ $CBODY"
     fi
     if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
          --set "pr_comment_watermark=$max_c" --set "pr_review_watermark=$max_r" \
+         --set "pr_issue_comment_watermark=$max_i" \
          --set "pr_comment_batch=$NBATCH" \
          --set "pr_comment_disposition=$DISP" >/dev/null; then
       answered=$((answered + 1))
-      echo "$PROG: $id — PR#$num review comments routed to $DISP (watermark: review $max_r, comment $max_c)"
+      echo "$PROG: $id — PR#$num review comments routed to $DISP (watermark: review $max_r, comment $max_c, issue $max_i)"
     else
       echo "$PROG: WARN $id — PR#$num comments routed to $DISP but the watermark did NOT record; the same batch re-dispatches next pass onto $DISP" >&2
       skipped=$((skipped + 1))
