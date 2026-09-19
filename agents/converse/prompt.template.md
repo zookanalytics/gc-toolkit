@@ -574,6 +574,17 @@ Rules:
   `doctor/check-closed-implies-landed` exempts a disposed bead, so nothing
   downstream re-checks the `merge_result` you did not. Doctrine:
   `docs/state-machine.md` → "Disposition".
+- **Invalidating a recommendation: strip it, never edit it in place.** A
+  first-reaction visit can carry a recommendation — `gc.recommended_formula` on
+  the subject, the execution mol the operator's Accept runs. When the sitting
+  judges that recommendation no longer the right course but the subject still
+  needs discussion, withdraw Accept and keep Discuss with
+  `SUBJECT="$SUBJECT" VISIT="$VISIT" "$CONV/converse-invalidate-recommendation.sh" "<why it is no longer valid>"`
+  (`$CONV` as resolved in step 1). It strips the key, so the board stops offering
+  Accept once this visit un-engages, and leaves the visit, so Discuss remains.
+  This is disagreement short of disposal: where the ruling is that the subject
+  itself should go, use the disposition writer above — that closes the subject
+  and its gate, and a closed gate offers no Accept, so it needs no strip.
 - **What reaches the operator is the point where the OPERATOR is needed
   for a judgment — not judgment as such, and never work.** Driving a
   judgment is yours: gather the evidence, do the analysis, frame the
