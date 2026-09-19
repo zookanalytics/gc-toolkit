@@ -65,7 +65,7 @@ has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTO
 # identity it does not need is authority it must not be able to spend.
 stack_line=$(grep '^pr-stack' "$ARM_LOG")
 eq "$stack_line" "pr-stack.sh|||" "pr-stack ran last, unprojected and with no args"
-has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
+has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat --validate-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review, fix AND validate pools"
 hasnt "$(grep '^gate-ensure' "$ARM_LOG")" "--review-formula" "gate-ensure gets no --review-formula by default (the two-lane quorum pilot is opt-in)"
 has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--fix-pool myrig/gc-toolkit.polecat" "pre-open-rebase got the derived fix pool"
 case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
@@ -320,8 +320,8 @@ export MERGE_SENTINEL="$TMP/merge-ran"; : > "$MERGE_SENTINEL"
 export BLOCK_SENTINEL="$TMP/block-order"; : > "$BLOCK_SENTINEL"
 {
   printf 'set -u\nSCRIPTS_DIR=%q\nLOG_SINK=""\nNOTED=""\nFAILED=""\n' "$GSD"
-  printf 'AGENT=%q\nCHECK_SET_DEFAULT=%q\nREVIEW_POOL=%q\nFIX_POOL=%q\n' \
-    'myrig/gc-toolkit.refinery' codex 'myrig/p-codex' 'myrig/p'
+  printf 'AGENT=%q\nCHECK_SET_DEFAULT=%q\nREVIEW_POOL=%q\nFIX_POOL=%q\nVALIDATE_POOL=%q\n' \
+    'myrig/gc-toolkit.refinery' codex 'myrig/p-codex' 'myrig/p' 'myrig/p'
   printf '%s\n' "$GATE"
   printf 'echo "MERGE_HELD=$MERGE_HELD"\n'
 } > "$TMP/gaterun.sh"
