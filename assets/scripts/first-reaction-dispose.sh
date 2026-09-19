@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # first-reaction-dispose.sh — the disposition a first reaction ends in.
-# mol-first-reaction's terminal step chooses one of three exits from the card
+# mol-first-reaction's terminal step chooses one of four exits from the card
 # it just wrote, and this script performs it. Each exit advances the subject
 # and records what was chosen and why; none of them closes it.
 #
@@ -10,6 +10,9 @@
 #   blocked     the bead is waiting -> the wait becomes a `blocks` edge on a
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts.
+#   close       there is nothing to do -> sling the bead to a validating-closer
+#               pool (mol-validate-close), which re-checks the call and closes
+#               the bead or escalates. A first reaction never closes a bead.
 #   ruling      only the operator can answer -> the visit its caller filed.
 #
 # The route/edge/visit is the act; gc.first_reaction* is the record of it, and
@@ -45,6 +48,8 @@ Usage:
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
                             [--then-route <rig>/<agent>]
+  first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
+                            [--route <rig>/<agent>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
                             --visit <visit-bead-id>
   common: [--by <who>] [--db <path>] [--dry-run]
@@ -52,8 +57,10 @@ Usage:
   --reason is required on every exit: a disposition nobody can second-guess is
   a silent classification. It lands on the bead beside the choice.
   --takeaway is the board headline (≤140 chars, enforced by gc-helm.sh).
-  --route defaults to ${GC_RIG}/gc-toolkit.polecat, and fails closed when the
-  target cannot be rig-qualified.
+  --route (actionable, close) defaults to ${GC_RIG}/gc-toolkit.polecat, and
+  fails closed when the target cannot be rig-qualified. On close it is the
+  validating-closer pool: the bead is slung there carrying mol-validate-close,
+  which re-checks the no-work conclusion and closes the bead or escalates.
   --blocker files (once) the bead the subject is waiting on, when the wait is
   not a bead yet; --blocker-key dedups repeats of one recurring cause onto
   that single bead instead of one bead per instance.
@@ -101,9 +108,9 @@ done
 # ── Validation: refuse before writing anything ───────────────────────
 [ -n "$BEAD" ] || usage_die "needs <bead-id>"
 case "$DISPOSITION" in
-    actionable|blocked|ruling) : ;;
-    "") usage_die "needs --disposition actionable|blocked|ruling" ;;
-    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|blocked|ruling)" ;;
+    actionable|blocked|close|ruling) : ;;
+    "") usage_die "needs --disposition actionable|blocked|close|ruling" ;;
+    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|blocked|close|ruling)" ;;
 esac
 [ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
 [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
@@ -121,6 +128,17 @@ case "$DISPOSITION" in
         case "$ROUTE" in
             */*) : ;;
             *) usage_die "cannot rig-qualify the route target '$ROUTE': set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody." ;;
+        esac
+        ;;
+    close)
+        # close routes to a validating closer, so it takes --route like
+        # actionable; the closer re-checks the no-work call and closes the bead.
+        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE" ] \
+            || usage_die "close takes --route only (--waiting-on/--blocker/--then-route/--visit belong to the other exits)"
+        [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
+        case "$ROUTE" in
+            */*) : ;;
+            *) usage_die "cannot rig-qualify the closer target '$ROUTE': set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody." ;;
         esac
         ;;
     blocked)
@@ -215,7 +233,7 @@ fi
 # `deliverable` already answers exactly this question against the agent
 # roster, for any rig-qualified target, and it answers no only on a positive
 # finding — so a probe that cannot run leaves the disposition alone.
-if [ "$DISPOSITION" = "actionable" ] && [ -x "$PROACTIVE" ]; then
+if { [ "$DISPOSITION" = "actionable" ] || [ "$DISPOSITION" = "close" ]; } && [ -x "$PROACTIVE" ]; then
     DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$ROUTE" 2>/dev/null)" || {
         usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. File the visit instead (--disposition ruling)."
     }
@@ -232,25 +250,22 @@ if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -x "$PROACTIVE" ]
     }
 fi
 
-# ── The one subject that is always a conversation ────────────────────
-# gc.origin=operator means a human typed this topic into gc-visit-open and is
-# waiting to talk about it (docs/gascity-human-engagement.md). Routing or
-# holding it answers a question nobody asked and leaves the operator with a
-# topic that looks filed and is silently forgotten — the outcome that intake
-# path exists to prevent. Positive finding only: a read that fails or comes
-# back empty proceeds, because an unreadable bead is not evidence of anything.
-if [ "$DISPOSITION" != "ruling" ]; then
-    ORIGIN=$(subject_meta "gc.origin")
-    if [ "$ORIGIN" = "operator" ]; then
-        usage_die "$BEAD carries gc.origin=operator: a human commissioned this topic and is waiting on the conversation, so the visit IS the answer. Take --disposition ruling. If the work is also real, the operator schedules it from the visit."
-    fi
-fi
+# Origin does not decide the exit. A bead's `gc.origin` is a fact the reacting
+# agent weighs in its triage — an operator capture with a clear, reversible
+# action moves forward like any other bead — but it gates nothing here. The
+# guardrail that a genuine fork, an irreversible or destructive action, or a
+# policy call still goes to a human lives in the reacting agent's rubric
+# (formulas/mol-first-reaction.toml), which is what chooses the disposition;
+# this script performs the one it was given. The route-deliverability and
+# same-store guards above are the checks that stay, because they catch a
+# disposition that cannot land whatever the reacting agent intended.
 
 if [ -n "$DRY" ]; then
     printf 'disposition=%s bead=%s reason=%s\n' "$DISPOSITION" "$BEAD" "$REASON"
     case "$DISPOSITION" in
         actionable) printf 'would release %s to %s\n' "$BEAD" "$ROUTE" ;;
         blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" ;;
+        close)      printf 'would sling %s to validating closer %s (mol-validate-close)\n' "$BEAD" "$ROUTE" ;;
         ruling)     printf 'would record visit %s on %s\n' "$VISIT" "$BEAD" ;;
     esac
     exit 0
@@ -295,6 +310,7 @@ TARGET=""
 case "$DISPOSITION" in
     actionable) TARGET="$ROUTE" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
+    close)      TARGET="$ROUTE" ;;
     ruling)     TARGET="$VISIT" ;;
 esac
 gc_bd update "$BEAD" \
@@ -303,6 +319,34 @@ gc_bd update "$BEAD" \
     --set-metadata "gc.first_reaction_target=$TARGET" \
     --set-metadata "gc.first_reaction_at=$(now_utc)" >/dev/null 2>&1 \
     || die "could not record the disposition on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
+
+# ── The close exit: route to a validating closer, never close here ────
+# The reaction concluded there is nothing to do. first-reaction never closes a
+# bead — a cheap model must not have the last word on a close — so this hands
+# the bead to a capable pool running mol-validate-close, which re-checks the
+# conclusion against live state and closes the bead only when it agrees,
+# escalating to a human or re-routing when it does not. Slinging the formula
+# pours its workflow onto the subject and routes the workflow root to the pool;
+# the subject is claimed there as the workflow's tracked member, not via a raw
+# pool route — a raw route runs mol-polecat-work, which never closes a bead.
+if [ "$DISPOSITION" = "close" ]; then
+    SLING_RIG_ARG=""
+    [ -n "${GC_RIG:-}" ] && SLING_RIG_ARG="--rig $GC_RIG"
+    # shellcheck disable=SC2086  # $SLING_RIG_ARG expands to 0 or 2 space-free fields
+    gc sling $SLING_RIG_ARG "$ROUTE" "$BEAD" --on mol-validate-close >/dev/null 2>&1 \
+        || die "could not sling $BEAD to the validating closer $ROUTE (gc sling --on mol-validate-close failed). The disposition record stands — clear the cause and re-run this command."
+    # The reaction has landed. gc.proactive_reaction=1 is what the second-dispose
+    # guard above and the scan read; the other exits get it from takeaway
+    # --release, but this exit does not release, so it stamps it here — without
+    # it a re-offered advance-and-drain would sling a second closer.
+    gc_bd update "$BEAD" --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 \
+        || die "slung $BEAD to $ROUTE but could not stamp gc.proactive_reaction=1; a re-run would sling a second closer. Stamp it by hand: gc bd update $BEAD --set-metadata gc.proactive_reaction=1"
+    # The board headline, for the moment the closer escalates back to a visit.
+    "$HELM" takeaway "$BEAD" "$TAKEAWAY" --by "$BY" >/dev/null 2>&1 \
+        || note "slung $BEAD to $ROUTE but the board takeaway did not set; the closer holds the bead regardless"
+    printf '%s: %s disposed as %s (%s)\n' "$PROG" "$BEAD" "$DISPOSITION" "${TARGET:-no target}"
+    exit 0
+fi
 
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
