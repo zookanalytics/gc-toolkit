@@ -5,8 +5,8 @@
 # `gc bd show --json` quirks and across stores, so the assertions target each:
 # a `gc bd:` notice line leading stdout is stripped; the ARRAY-vs-`{"error":…}`
 # OBJECT shapes are told apart; a dependency in ANOTHER rig's store is read from
-# THAT store (with its status and owning rig), not reported unknown; and an
-# open — or unresolvable — blocks-blocker fails the actionable verdict closed.
+# THAT store and folded into the counts, not reported unknown; and an open — or
+# unresolvable — blocks-blocker fails the actionable verdict closed.
 #
 # `gc` is stubbed over a file-per-bead ledger under each fake rig; a direct `bd`
 # is the regression the stub fails on. No live city, Dolt, or network.
@@ -25,12 +25,12 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esa
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
 # --- fake city --------------------------------------------------------------
-R_TK="$TMP/rigs/gc-toolkit"; R_SU="$TMP/rigs/su"; HQ="$TMP/hq"
-mkdir -p "$TMP/bin" "$R_TK/.beads" "$R_SU/.beads" "$HQ/.beads"
+R_TK="$TMP/rigs/gc-toolkit"; R_OR="$TMP/rigs/otherrig"; HQ="$TMP/hq"
+mkdir -p "$TMP/bin" "$R_TK/.beads" "$R_OR/.beads" "$HQ/.beads"
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
   {"name":"gc-toolkit","path":"$R_TK","prefix":"tk","hq":false},
-  {"name":"shutupandlisten","path":"$R_SU","prefix":"su","hq":false},
+  {"name":"otherrig","path":"$R_OR","prefix":"or","hq":false},
   {"name":"loomington","path":"$HQ","prefix":"lx","hq":true}
 ]}
 JSON
@@ -43,8 +43,9 @@ export STUB_PREFACE=""
 bead() { cat > "$1/.beads/$2.json"; }   # bead <store-repo> <id>  (object on stdin)
 
 # tk-main: a metadata-rich anchor. Its blocks deps are one same-store closed
-# (embedded status), one FOREIGN closed in the su store (no embedded status —
-# the cross-store case), and a same-store open parent-child (never a blocker).
+# (embedded status), one FOREIGN closed in the otherrig store (no embedded
+# status — the cross-store case), and a same-store open parent-child (never a
+# blocker).
 bead "$R_TK" tk-main <<'J'
 {"id":"tk-main","title":"main anchor","status":"open","issue_type":"task","assignee":null,
  "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
@@ -53,7 +54,7 @@ bead "$R_TK" tk-main <<'J'
    "gc.superseded_by":"tk-succ","gc.superseded_by_store":"rig:gc-toolkit"},
  "dependencies":[
    {"id":"tk-c1","dependency_type":"blocks","status":"closed"},
-   {"id":"su-far","dependency_type":"blocks"},
+   {"id":"or-far","dependency_type":"blocks"},
    {"id":"tk-par","dependency_type":"parent-child","status":"open"}]}
 J
 bead "$R_TK" tk-c1  <<'J'
@@ -62,8 +63,8 @@ J
 bead "$R_TK" tk-par <<'J'
 {"id":"tk-par","title":"parent","status":"open","issue_type":"epic","metadata":{}}
 J
-bead "$R_SU" su-far <<'J'
-{"id":"su-far","title":"foreign closed blocker","status":"closed","issue_type":"task","metadata":{}}
+bead "$R_OR" or-far <<'J'
+{"id":"or-far","title":"foreign closed blocker","status":"closed","issue_type":"task","metadata":{}}
 J
 # tk-blocked: one same-store OPEN blocks dep — actionable must be NO.
 bead "$R_TK" tk-blocked <<'J'
@@ -174,36 +175,49 @@ eq "$RC" 0 "a leading \`gc bd:\` notice line does not break the read (rc)"
 has "$OUT" "Status      open" "  ... and the bead still renders"
 STUB_PREFACE=""
 
-# --- dependency statuses, and the cross-store one ---------------------------
-JQF='.dependencies[] | select(.id=="tk-c1") | .status'         runj tk-main
-eq "$JQ" closed "a same-store dep carries its embedded status"
-JQF='.dependencies[] | select(.id=="su-far") | .status'        runj tk-main
-eq "$JQ" closed "a FOREIGN dep with no embedded status is resolved from its own store"
-JQF='.dependencies[] | select(.id=="su-far") | .store'         runj tk-main
-eq "$JQ" shutupandlisten "  ... and is annotated with the rig that owns it"
-JQF='.dependencies[] | select(.id=="su-far") | .resolved_via'  runj tk-main
-eq "$JQ" cross-store "  ... marked resolved cross-store"
-has "$(cat "$FAKE_GC_LOG")" "bd --db $R_SU/.beads show su-far" \
-  "  ... because the su store was the one asked about su-far"
+# --- dependency counts, and the cross-store resolution folded into them -----
+# tk-main's blocks deps are one same-store closed (embedded status) and one
+# FOREIGN closed in the otherrig store (no embedded status). The output is
+# counts, not a row per edge; the cross-store read still happens to produce the
+# closed-blocker count, proven by the gc-log line below.
+JQF='.dependencies.total'            runj tk-main
+eq "$JQ" 3 "every dependency is counted (two blocks, one parent-child)"
+JQF='.dependencies.blockers.closed'  runj tk-main
+eq "$JQ" 2 "both blocks-blockers count closed — the same-store and the cross-store one"
+JQF='.dependencies.blockers.open'    runj tk-main
+eq "$JQ" 0 "no blocks-blocker is open"
+JQF='.dependencies.by_status.closed' runj tk-main
+eq "$JQ" 2 "the by-status tally counts the two closed edges"
+JQF='.dependencies.by_status.open'   runj tk-main
+eq "$JQ" 1 "  ... and the one open parent-child edge"
+has "$(cat "$FAKE_GC_LOG")" "bd --db $R_OR/.beads show or-far" \
+  "the cross-store blocker's status is read from the otherrig store it lives in"
 
 # --- actionability ----------------------------------------------------------
 JQF='.actionable'  runj tk-main
 eq "$JQ" true "all blocks-blockers closed (one of them cross-store) reads actionable"
 
 run tk-blocked
-has "$OUT" "Actionable  NO" "an open blocks-blocker fails the verdict"
-has "$OUT" "tk-op"          "  ... and names the open blocker"
-JQF='.open_blockers | join(",")'  runj tk-blocked
-eq "$JQ" tk-op "  ... in open_blockers"
-JQF='.actionable'                 runj tk-blocked
+has "$OUT" "Actionable  NO"    "an open blocks-blocker fails the verdict"
+has "$OUT" "tk-op"             "  ... and names the open blocker"
+has "$OUT" "blockers    1 open · 0 closed" "  ... and the human block shows the blocker counts"
+JQF='.dependencies.blockers.open'  runj tk-blocked
+eq "$JQ" 1 "  ... counted as one open blocker"
+JQF='.open_blockers | join(",")'   runj tk-blocked
+eq "$JQ" tk-op "  ... named in open_blockers"
+JQF='.actionable'                  runj tk-blocked
 eq "$JQ" false "  ... actionable=false"
 
 # A blocker whose store no rig carries, with no embedded status, is UNKNOWN, and
-# unknown must fail closed — never counted as landed.
-JQF='.dependencies[] | select(.id=="zz-ghost") | .status'  runj tk-failclosed
-eq "$JQ" unknown "an unplaceable blocker's status is unknown, not assumed closed"
-JQF='.actionable'                                          runj tk-failclosed
-eq "$JQ" false "  ... and an unknown blocker fails the actionable verdict closed"
+# unknown must fail closed — counted as an open blocker, never as landed.
+JQF='.dependencies.by_status.unknown'  runj tk-failclosed
+eq "$JQ" 1 "an unplaceable blocker's status is unknown, not assumed closed"
+JQF='.dependencies.blockers.open'      runj tk-failclosed
+eq "$JQ" 1 "  ... and it counts as an open blocker (fail closed)"
+JQF='.open_blockers | join(",")'       runj tk-failclosed
+eq "$JQ" zz-ghost "  ... named in open_blockers"
+JQF='.actionable'                      runj tk-failclosed
+eq "$JQ" false "  ... so the actionable verdict fails closed"
 
 # --- the object-vs-array shape, and store pinning ---------------------------
 run tk-missing
@@ -214,7 +228,7 @@ run lx-city --db "$HQ/.beads"
 eq "$RC" 0 "--db reaches the HQ store, which no --rig value names"
 has "$OUT" "Store       loomington" "  ... and the rig is recovered from the db path"
 
-JQF='.status'  runj su-far --store rig:shutupandlisten
+JQF='.status'  runj or-far --store rig:otherrig
 eq "$JQ" closed "--store rig:<name> pins the read to that rig's store"
 
 # --- control bytes in notes do not abort the read ---------------------------

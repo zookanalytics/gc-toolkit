@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # bead-context.sh — one call answers "what is this bead, and is it actionable?"
 # for a bead id. It prints the bead's status, title, type, assignee and routing;
-# every dependency WITH its own status, resolved from the store that dependency
-# lives in; the metadata that decides an anchor's fate (branch, target, PR,
-# merge_result, gate lanes, successor pointer); the store the bead itself lives
-# in; and a verdict on whether an open `blocks`-blocker holds it back. It exists
-# so an agent stops re-running the show/jq/cross-store dance by hand every time
-# it needs to know whether a blocked bead's blockers have landed.
+# structural dependency counts (total, blocks-blockers open vs closed, and a
+# tally by status) with the OPEN blocks-blockers named, each resolved against
+# the store that dependency lives in; the metadata that decides an anchor's fate
+# (branch, target, PR, merge_result, gate lanes, successor pointer); the store
+# the bead itself lives in; and a verdict on whether an open `blocks`-blocker
+# holds it back. It exists so an agent stops re-running the show/jq/cross-store
+# dance by hand every time it needs to know whether a blocked bead's blockers
+# have landed.
 #
 # The store is derived from each id's prefix through `gc rig list --json`, the
 # same binding assets/scripts/bead-store.sh proves, so a blocker in another
@@ -21,9 +23,12 @@
 # reported, not assumed. --json prints the whole context as one object for a
 # machine; the default is a human-readable block.
 #
-# It reports the fields that decide a bead's fate, not its free-text body. Notes,
-# description and comments are left out on purpose, so the context stays bounded
-# and this complements `gc bd show <id>` rather than replacing it.
+# It reports the counts and fields that decide a bead's fate, not its free-text
+# body and not a row per dependency. Notes, description, comments and the full
+# per-edge list are left out on purpose, so the context stays bounded whether a
+# bead has three closed blockers or three hundred: `gc bd show <id>` still has
+# the body, and `<id> --json` the per-edge detail, for the one bead a decision
+# turns on. This complements `gc bd show`, it does not replace it.
 #
 # Usage:
 #   bead-context.sh <bead-id> [--store rig:<name> | --db <path>] [--json]
@@ -51,17 +56,18 @@ usage() {
   cat >&2 <<'U'
 usage: bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads] [--json]
 
-Prints one bead's working context: status, dependencies each with their own
-status (resolved from the store the dependency lives in), the metadata that
-decides its fate, its successor pointer, and whether an open blocks-blocker
-holds it. --store / --db pin the owning store when the id prefix is ambiguous
-or names the city's own store, which no --rig value reaches. --json emits the
-whole context as one object.
+Prints one bead's working context: status, structural dependency counts
+(blockers open vs closed, and a tally by status) with the open blocks-blockers
+named and each resolved from the store it lives in, the metadata that decides
+its fate, its successor pointer, and whether an open blocks-blocker holds it.
+--store / --db pin the owning store when the id prefix is ambiguous or names
+the city's own store, which no --rig value reaches. --json emits the whole
+context as one object.
 
 Examples:
   bead-context.sh tk-8kc5dz            human-readable context and verdict
   bead-context.sh tk-8kc5dz --json     the same context as one JSON object
-  bead-context.sh su-1a2b3c --store rig:shutupandlisten   pin a foreign store
+  bead-context.sh ab-1a2b3c --store rig:other   pin the store when a prefix is ambiguous
 U
   exit 2
 }
@@ -188,23 +194,19 @@ NORM=$(printf '%s' "$SUBJ" | jq -c '
 # An embedded status is what the subject's store could join; a dependency in
 # another store comes back without one, and THAT is the cross-store case this
 # tool exists to close. Prefer the embedded status; when it is absent, ask the
-# dependency's own store. Every dependency is annotated with its owning rig.
-DEP_LINES=()
+# dependency's own store. The per-edge status feeds the counts and the verdict
+# below; it is never rendered as a row per dependency.
+DEP_RECORDS=()
 OPEN_BLOCKERS=()
 while IFS=$'\t' read -r dep_id dep_type dep_status; do
   [ -n "$dep_id" ] || continue
-  dep_prefix="${dep_id%%-*}"
-  dep_rig=$(rig_name_for_prefix "$dep_prefix")
-  resolved_via="embedded"
   if [ -z "$dep_status" ] || [ "$dep_status" = "null" ]; then
-    dep_db=$(db_for_prefix "$dep_prefix")
+    dep_db=$(db_for_prefix "${dep_id%%-*}")
     if [ -n "$dep_db" ]; then
       dep_raw=$(bd_show_clean "$dep_db" "$dep_id")
       dep_status=$(printf '%s' "$dep_raw" | jq -r 'if type == "array" and length > 0 then (.[0].status // "unknown") else "unknown" end' 2>/dev/null || echo unknown)
-      resolved_via="cross-store"
     else
       dep_status="unknown"
-      resolved_via="unresolved-store"
     fi
   fi
   [ -n "$dep_status" ] || dep_status="unknown"
@@ -213,17 +215,27 @@ while IFS=$'\t' read -r dep_id dep_type dep_status; do
   if [ "$dep_type" = "blocks" ] && [ "$dep_status" != "closed" ]; then
     OPEN_BLOCKERS+=("$dep_id")
   fi
-  DEP_LINES+=("$(jq -nc \
-    --arg id "$dep_id" --arg type "$dep_type" --arg status "$dep_status" \
-    --arg rig "$dep_rig" --arg via "$resolved_via" \
-    '{id: $id, type: $type, status: $status, store: (if $rig == "" then null else $rig end), resolved_via: $via}')")
+  DEP_RECORDS+=("$(jq -nc --arg type "$dep_type" --arg status "$dep_status" '{type: $type, status: $status}')")
 done < <(printf '%s' "$NORM" | jq -rc '.deps_raw[]? | [.id, (.type // ""), (.status // "")] | @tsv')
 
-if [ "${#DEP_LINES[@]}" -gt 0 ]; then
-  DEPS_JSON=$(printf '%s\n' "${DEP_LINES[@]}" | jq -sc '.')
+# Structural counts, not a dump: the total, the blocks-blockers split
+# open-vs-closed (the verdict's own axis), and a tally across every dependency
+# status. A graph with no OPEN blocker is cleared, so the closed blockers are a
+# number rather than a list; the open ones are named in open_blockers below,
+# because those are the ids a reader acts on.
+if [ "${#DEP_RECORDS[@]}" -gt 0 ]; then
+  DEP_RECORDS_JSON=$(printf '%s\n' "${DEP_RECORDS[@]}" | jq -sc '.')
 else
-  DEPS_JSON="[]"
+  DEP_RECORDS_JSON="[]"
 fi
+DEPS_JSON=$(printf '%s' "$DEP_RECORDS_JSON" | jq -c '{
+  total: length,
+  blockers: {
+    open:   ([.[] | select(.type == "blocks" and .status != "closed")] | length),
+    closed: ([.[] | select(.type == "blocks" and .status == "closed")] | length)
+  },
+  by_status: reduce .[] as $d ({}; .[$d.status] = ((.[$d.status] // 0) + 1))
+}')
 if [ "${#OPEN_BLOCKERS[@]}" -gt 0 ]; then
   BLOCKERS_JSON=$(printf '%s\n' "${OPEN_BLOCKERS[@]}" | jq -R . | jq -sc '.')
   ACTIONABLE=false
@@ -284,12 +296,12 @@ if [ -n "$SUCC" ]; then
   printf '    successor     %s%s\n' "$SUCC" "$( [ -n "$SUCC_STORE" ] && printf ' in %s' "$SUCC_STORE")"
 fi
 
-DEP_COUNT=$(g '.dependencies | length')
-printf '\n  Dependencies (%s)\n' "$DEP_COUNT"
-if [ "$DEP_COUNT" != "0" ]; then
-  printf '    %-12s %-13s %-12s %s\n' STATUS TYPE STORE ID
-  printf '%s' "$FINAL" | jq -r '.dependencies[] | "\(.status // "unknown")\t\(.type // "?")\t\(.store // "?")\t\(.id)"' \
-    | while IFS=$'\t' read -r s t st i; do printf '    %-12s %-13s %-12s %s\n' "$s" "$t" "$st" "$i"; done
+DEP_TOTAL=$(g '.dependencies.total')
+printf '\n  Dependencies (%s)\n' "$DEP_TOTAL"
+if [ "$DEP_TOTAL" != "0" ]; then
+  printf '    blockers    %s open · %s closed\n' "$(g '.dependencies.blockers.open')" "$(g '.dependencies.blockers.closed')"
+  BY_STATUS=$(g '.dependencies.by_status | to_entries | sort_by(.key) | map("\(.key) \(.value)") | join(" · ")')
+  [ -n "$BY_STATUS" ] && printf '    by status   %s\n' "$BY_STATUS"
 fi
 
 if [ "$ACTIONABLE" = "true" ]; then

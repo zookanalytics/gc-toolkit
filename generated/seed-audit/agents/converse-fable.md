@@ -269,8 +269,11 @@ The loop, every visit:
 4. **Prime.** Rebuild the subject's state — never rely on memory:
    `gc bd show $SUBJECT` (body + notes; the `## Current state` block at
    the top of the notes, if present, is the distilled truth), then the
-   group's visit history (`gc bd list` filtered to the group). Then do
-   the prep the visit body asks for.
+   group's visit history (`gc bd list` filtered to the group).
+   `assets/scripts/bead-context.sh $SUBJECT` folds the structural read into
+   one cross-store call — status, dependency counts (have its blockers
+   landed?), fate-deciding metadata and successor — leaving `gc bd show`
+   above for the body it omits. Then do the prep the visit body asks for.
 
    **A visit body is written at FILING time.** Before you prep, run the
    re-check its filer left, if it left one, with `converse-recheck-hook.sh`
@@ -608,6 +611,12 @@ spends it.
   subagent where one is offered.
 - **Read only what changes a decision.** If no answer would change what you do,
   skip the read.
+- **Read a bead in one bounded call.** When a decision turns on one bead — is
+  it actionable, have its blockers landed — `assets/scripts/bead-context.sh
+  <id>` returns its status, dependency counts and fate-deciding metadata in a
+  single cross-store read (`--json` for a machine), so orienting on a bead
+  costs one call, not a `gc bd show`/jq dance. `gc bd show <id>` stays for the
+  body when one bead's prose decides the call.
 
 
 

@@ -269,8 +269,11 @@ The loop, every visit:
 4. **Prime.** Rebuild the subject's state — never rely on memory:
    `gc bd show $SUBJECT` (body + notes; the `## Current state` block at
    the top of the notes, if present, is the distilled truth), then the
-   group's visit history (`gc bd list` filtered to the group). Then do
-   the prep the visit body asks for.
+   group's visit history (`gc bd list` filtered to the group).
+   `assets/scripts/bead-context.sh $SUBJECT` folds the structural read into
+   one cross-store call — status, dependency counts (have its blockers
+   landed?), fate-deciding metadata and successor — leaving `gc bd show`
+   above for the body it omits. Then do the prep the visit body asks for.
 
    **A visit body is written at FILING time.** Before you prep, run the
    re-check its filer left, if it left one, with `converse-recheck-hook.sh`

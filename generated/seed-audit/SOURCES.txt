@@ -14,7 +14,7 @@ agents/converse/PROVENANCE.md
 agents/converse/agent.toml
 09b47a4ec2eb7117ff67f585751f98a95b48c192e422bcbaa86ed64b56627ca7
 agents/converse/prompt.template.md
-dba83b07c614568f62ab1d2e9e65308f10661d8a10af5669dca783ab0210a922
+e79e19ef2ceab23cd1f1233502102182386b2814a3a342f76ed210ea7b1b138c
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
@@ -104,7 +104,7 @@ template-fragments/bead-disposition.template.md
 template-fragments/canonical-self-rename.template.md
 ec1b86f6decc993dee9f71167f67eadf4c262bfa72c22c06d800aec57d88f6f6
 template-fragments/context-discipline.template.md
-d7e2609dde1f3e6bc0ca30e77a3ebe7c3f01d65a69537a54329edb3d96f73fdf
+c06f8b2045f7a2452201420f0612a8e1984c82b2d408b63aa31571dcb03ab2c2
 template-fragments/file-feedback-observations.template.md
 2d7eb174c3372448239b65356dee4f1d101e17e7b28ed51bbcc136aecca0f8e6
 template-fragments/file-work-records.template.md
