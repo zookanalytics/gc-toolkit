@@ -104,7 +104,7 @@ template-fragments/bead-disposition.template.md
 template-fragments/canonical-self-rename.template.md
 ec1b86f6decc993dee9f71167f67eadf4c262bfa72c22c06d800aec57d88f6f6
 template-fragments/context-discipline.template.md
-12554c50589fb290371a764a71a640db4d1b6e540ab5a1f25ccee380bff7c50a
+d7e2609dde1f3e6bc0ca30e77a3ebe7c3f01d65a69537a54329edb3d96f73fdf
 template-fragments/file-feedback-observations.template.md
 2d7eb174c3372448239b65356dee4f1d101e17e7b28ed51bbcc136aecca0f8e6
 template-fragments/file-work-records.template.md

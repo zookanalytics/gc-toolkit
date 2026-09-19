@@ -1,7 +1,5 @@
 {{ define "context-discipline" }}
-{{/* Elected by the human-facing coordination roles, mechanik and converse. A
-     pool worker gets the same context-and-delegation doctrine through its own
-     role prompt and does not elect this one. */ -}}
+{{/* Elected by the human-facing coordination roles. */ -}}
 ## Context discipline
 
 Your context is the operator's channel across a long session, and every read
