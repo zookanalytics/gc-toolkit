@@ -9,7 +9,10 @@
 # the rig ff-s cleanly; (e) the HQ root is excluded; (f) a divergence is raised
 # through escalate.sh, an advanced/HQ rig is not, and a recovered rig is not
 # re-escalated; (g) a configured pool that does not route falls back to the
-# human board.
+# human board; (h) an already-upstream divergence (SHA churn) auto-heals via
+# reset --hard while a genuine divergence still escalates, RECONCILE_NO_AUTOHEAL
+# disables the heal, and a dirty tracked file blocks it only when its content is
+# not yet upstream.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -148,6 +151,112 @@ RECONCILE_ESCALATION_POOL="rig/absent.pool" FAKE_BAD_POOL="rig/absent.pool" \
   bash "$SCRIPT" >/dev/null
 eq "$(esc_count beta)" "2" "an unroutable pool triggers a second, fallback escalate call"
 eq "$(esc_last_pool beta)" "" "the fallback escalation carries no pool (human helm board)"
+
+# ===========================================================================
+# Auto-heal an already-upstream divergence (SHA churn from a rebase/squash/
+# force-push): reset --hard is lossless, so the checkout re-syncs without a
+# human. A genuine divergence still escalates, RECONCILE_NO_AUTOHEAL disables
+# the heal, and a dirty tracked file blocks the heal only when its content is
+# not yet upstream. Each rig below gets its own remote so its history rewrite is
+# isolated. beta above already proves a genuine unique-commit divergence is left
+# untouched; these cases exercise the new branch directly.
+# ===========================================================================
+
+# gamma sits on the pre-rewrite commit; origin carries the same tree under a new
+# SHA (an amend/force-push), so ff refuses but git cherry finds nothing unique.
+git init -q -b main "$TMP/gamma.src"; commit "$TMP/gamma.src" g1; commit "$TMP/gamma.src" g2
+git clone -q --bare "$TMP/gamma.src" "$TMP/gamma.git"
+git clone -q "$TMP/gamma.git" "$TMP/gamma"                       # gamma HEAD = g2 (pre-rewrite SHA)
+GAMMA_OLD="$(git -C "$TMP/gamma" rev-parse HEAD)"
+git -C "$TMP/gamma.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # g2': same tree/patch, new SHA
+git -C "$TMP/gamma.src" push -qf "$TMP/gamma.git" main
+GAMMA_REMOTE="$(git -C "$TMP/gamma.git" rev-parse main)"
+echo keep-me > "$TMP/gamma/untracked.txt"                        # untracked; reset --hard must keep it
+
+# delta: a genuine unique local commit whose content is not upstream -> escalate.
+git init -q -b main "$TMP/delta.src"; commit "$TMP/delta.src" d1; commit "$TMP/delta.src" d2
+git clone -q --bare "$TMP/delta.src" "$TMP/delta.git"
+git clone -q "$TMP/delta.git" "$TMP/delta"
+commit "$TMP/delta" d3-local                                     # a local commit...
+DELTA_DIVERGED="$(git -C "$TMP/delta" rev-parse HEAD)"
+commit "$TMP/delta.src" d3-remote                                # ...while origin advances elsewhere
+git -C "$TMP/delta.src" push -q "$TMP/delta.git" main
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"gamma","path":"$TMP/gamma"},
+  {"name":"delta","path":"$TMP/delta"}
+]}
+JSON
+
+# Escape hatch first: with auto-heal disabled, even an already-upstream rig is
+# escalated and left untouched. This run files gamma's reconcile bead.
+: > "$TMP/escalations"
+RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/gamma" rev-parse HEAD)" "$GAMMA_OLD" "RECONCILE_NO_AUTOHEAL leaves an already-upstream checkout unmutated"
+eq "$(esc_count gamma)" "1" "RECONCILE_NO_AUTOHEAL escalates instead of healing"
+eq "$(open_count gamma)" "1" "RECONCILE_NO_AUTOHEAL files a reconcile bead"
+
+# Now with auto-heal enabled (default): gamma resets --hard to origin, keeps its
+# untracked file, closes the bead the escape-hatch run filed, and is not
+# re-escalated; delta's genuine divergence still escalates and is not mutated.
+GAMMA_ESC_BEFORE="$(esc_count gamma)"
+OUT="$(bash "$SCRIPT")"
+eq "$(git -C "$TMP/gamma" rev-parse HEAD)" "$GAMMA_REMOTE" "already-upstream rig is reset --hard to origin"
+[ -f "$TMP/gamma/untracked.txt" ] && ok "auto-heal preserves untracked files" || bad "auto-heal preserves untracked files"
+eq "$(open_count gamma)" "0" "auto-heal closes the open reconcile bead"
+eq "$(esc_count gamma)" "$GAMMA_ESC_BEFORE" "auto-healed rig is not re-escalated"
+grep -q '1 auto-healed' <<< "$OUT" && ok "summary line reports the auto-heal count" || bad "summary line reports the auto-heal count (got '$OUT')"
+eq "$(git -C "$TMP/delta" rev-parse HEAD)" "$DELTA_DIVERGED" "a genuine unique-commit divergence is not mutated"
+eq "$(open_count delta)" "1" "a genuine unique-commit divergence keeps its reconcile bead"
+
+# epsilon: an already-upstream SHA churn PLUS a dirty tracked change whose
+# content is NOT upstream -> the per-file guard blocks the heal and escalates.
+git init -q -b main "$TMP/eps.src"; commit "$TMP/eps.src" ep1; commit "$TMP/eps.src" ep2
+git clone -q --bare "$TMP/eps.src" "$TMP/eps.git"
+git clone -q "$TMP/eps.git" "$TMP/epsilon"
+EPS_HEAD="$(git -C "$TMP/epsilon" rev-parse HEAD)"
+git -C "$TMP/eps.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"
+git -C "$TMP/eps.src" push -qf "$TMP/eps.git" main               # SHA churn: ff refuses, cherry clean
+echo local-wip > "$TMP/epsilon/f.txt"                            # dirty; differs from remote (f.txt=ep2)
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"epsilon","path":"$TMP/epsilon"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/epsilon" rev-parse HEAD)" "$EPS_HEAD" "a dirty tracked change not upstream blocks the heal"
+eq "$(esc_count epsilon)" "1" "a dirty tracked change not upstream escalates"
+eq "$(cat "$TMP/epsilon/f.txt")" "local-wip" "the un-upstreamed dirty change is left untouched"
+
+# zeta: the .husky case — an already-upstream divergence PLUS a dirty tracked
+# file the checkout regenerated to the *upstream* content, so its per-file
+# `git diff --quiet <remote>` is empty and the heal proceeds.
+git init -q -b main "$TMP/zeta.src"
+commit "$TMP/zeta.src" z1
+echo H1 > "$TMP/zeta.src/hook.txt"; git -C "$TMP/zeta.src" add -A; git -C "$TMP/zeta.src" commit -qm z2
+git clone -q --bare "$TMP/zeta.src" "$TMP/zeta.git"
+git clone -q "$TMP/zeta.git" "$TMP/zeta"                         # zeta HEAD carries hook.txt=H1
+git -C "$TMP/zeta.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"   # churn z2's SHA
+echo H2 > "$TMP/zeta.src/hook.txt"; git -C "$TMP/zeta.src" add -A; git -C "$TMP/zeta.src" commit -qm z3
+git -C "$TMP/zeta.src" push -qf "$TMP/zeta.git" main
+ZETA_REMOTE="$(git -C "$TMP/zeta.git" rev-parse main)"
+echo H2 > "$TMP/zeta/hook.txt"                                   # dirty vs HEAD(H1); already == remote(H2)
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"zeta","path":"$TMP/zeta"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/zeta" rev-parse HEAD)" "$ZETA_REMOTE" "an already-upstream dirty tracked file (diffs empty) still heals"
+eq "$(esc_count zeta)" "0" "the already-upstream dirty file case is not escalated"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
