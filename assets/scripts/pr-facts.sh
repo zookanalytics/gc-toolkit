@@ -58,10 +58,8 @@
 # anchor: it is review the branch has never been answered against, so it enters
 # the graph as a task_kind=validation bead from which gate-ensure's quiescence
 # holds a fresh whole-diff review off the anchor while the validator rules the
-# batch. The pass is opened unrouted here and held by gate-ensure's quiescence,
-# which reads it but does not dispatch it: routing a validating lane to
-# mol-validate is a separate change not in place here, so no validator claims
-# the pass yet. One live human-lane pass rules every open human finding on the
+# batch. The pass is opened unrouted here and dispatched to mol-validate by
+# gate-ensure. One live human-lane pass rules every open human finding on the
 # anchor, so the dedup reuses that pass while it stays open and a later batch
 # watermarks behind it rather than opening another; a pass on another lane never
 # rules the human findings.
@@ -1472,11 +1470,9 @@ $CBODY"
     # findings carry finding.lane=human, so the pass names human. The whole
     # check_set is wrong here: a multi-lane value like codex,arch is one synthetic
     # lane no finding carries and no anchor declares, so the validator would match
-    # no findings and back a lane that does not exist. It is left unrouted:
-    # gate-ensure.sh's quiescence reads an open validation pass and holds the
-    # anchor's re-review, but routing a validating lane to mol-validate is a
-    # separate change not in place here, so the pass waits unrouted until it is.
-    # The dedup is the live
+    # no findings and back a lane that does not exist. It is left unrouted: a
+    # validating lane is dispatched to mol-validate by gate-ensure.sh, so the bead
+    # is opened here and armed there. The dedup is the live
     # human-lane pass: it selects a task_kind=validation bead carrying
     # check_name=human, not any validation bead. gate-ensure's quiescence
     # (open_validation_pass) reads any lane, so a codex pass on this anchor holds

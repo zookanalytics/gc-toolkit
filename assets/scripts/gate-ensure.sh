@@ -27,9 +27,18 @@
 # left — a reviewer that dies after claim, a fix unit filed with its edge
 # reversed — stop the PR moving and are caught by liveness-sweep.sh's stale-gate
 # pass, not by a count on the gate.
+# A lane entering validating — an open task_kind=validation bead on the anchor
+# (quiescence clause c), opened by pr-facts.sh on a human feedback batch or the
+# machine-review path — gets mol-validate dispatched ONTO that pass so the
+# validator runs and rules the batch. That is a second dispatch shape in the
+# same authority, not a second authority: the pass already holds a fresh
+# whole-diff review off the anchor. It slings exactly once (a pass already
+# carrying gc.execution_routed_to was poured by a prior pass) and holds, like an
+# armed gate with no --review-pool, when no --validate-pool is given.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>]
-#       [--review-formula <name>] [--sling-var k=v ...]. The formula defaults to
-#       mol-review; --sling-var forwards formula vars verbatim to the pour.
+#       [--validate-pool <pool>] [--review-formula <name>] [--sling-var k=v ...].
+#       The formula defaults to mol-review; --sling-var forwards formula vars
+#       verbatim to the pour.
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
 set -u
@@ -46,7 +55,9 @@ scrub() { tr -d '\000-\037'; }
 
 DEFAULT_CHECK_SET="codex"
 REVIEW_FORMULA="mol-review"
+VALIDATE_FORMULA="mol-validate"
 REVIEW_POOL=""
+VALIDATE_POOL=""
 FIX_POOL=""
 # Extra formula vars forwarded verbatim to the pour (repeatable --sling-var
 # k=v). Empty on the default mol-review path; the caller passes the two-lane
@@ -56,6 +67,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --default)        DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
     --review-pool)    REVIEW_POOL="${2:-}"; shift 2 ;;
+    --validate-pool)  VALIDATE_POOL="${2:-}"; shift 2 ;;
     --fix-pool)       FIX_POOL="${2:-}"; shift 2 ;;
     --review-formula) REVIEW_FORMULA="${2:-mol-review}"; shift 2 ;;
     --sling-var)      SLING_VARS+=("${2:-}"); shift 2 ;;
@@ -422,7 +434,7 @@ for MR in pre_open_gate pull_request; do
 done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0
+stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -753,6 +765,46 @@ STRAY
 $gates
 GATES
 
+  # --- dispatch the validator onto an open, undispatched validation pass --------
+  # A lane enters validating when an open task_kind=validation bead sits on the
+  # anchor — opened by pr-facts.sh on a human feedback batch (or the machine-
+  # review path), and detected by open_validation_pass above for quiescence
+  # clause (c), which holds every review off the anchor while it is open. That
+  # pass IS the fresh whole-diff review; this arm dispatches mol-validate ONTO it
+  # so the validator runs and rules the batch's findings, a second dispatch shape
+  # in the same authority rather than a second authority. The pass carries its
+  # own dispatch note (its opener built it from validate-dispatch-body.sh) and
+  # its shape (anchor_bead, check_name, reviewed_oid), and the sling attaches the
+  # method, so nothing is created or re-noted here. It slings exactly once: the
+  # pour retires gc.routed_to and stamps gc.execution_routed_to (pour_ok), so a
+  # pass already carrying that stamp was poured by a prior pass and a re-sling
+  # would mint a second workflow root. With no --validate-pool the pass holds the
+  # merge with nothing to release it — the same stuck shape an armed gate has
+  # with no --review-pool — so it warns rather than dispatching blind.
+  if ! VPASS_D=$(open_validation_pass "$id"); then
+    echo "$PROG: $id validation-pass probe unreadable; no validator dispatched this pass (merge stays held, retry next pass)" >&2
+    skipped=$((skipped + 1))
+  elif [ -n "$VPASS_D" ]; then
+    vp_exec=$(gc bd show "$VPASS_D" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.execution_routed_to"] // empty' 2>/dev/null)
+    if [ -n "$vp_exec" ]; then
+      echo "$PROG: $id validation pass $VPASS_D already dispatched (poured to $vp_exec); no re-sling"
+    elif [ -z "$VALIDATE_POOL" ]; then
+      echo "$PROG: $id has an open validation pass $VPASS_D but no --validate-pool was given; no dispatch (the pass holds the merge until one is)" >&2
+      skipped=$((skipped + 1))
+    else
+      gc sling ${GC_RIG:+--rig "$GC_RIG"} "$VALIDATE_POOL" "$VPASS_D" --on "$VALIDATE_FORMULA" >/dev/null 2>&1
+      if pour_ok "$VPASS_D" "$VALIDATE_POOL"; then
+        gc session wake "$VALIDATE_POOL" >/dev/null 2>&1 || true
+        gc session nudge "$VALIDATE_POOL" "Validation pass $VPASS_D for anchor $id" >/dev/null 2>&1 || true
+        validated=$((validated + 1))
+        echo "$PROG: $id dispatched validation pass $VPASS_D to $VALIDATE_POOL — $VALIDATE_FORMULA"
+      else
+        echo "$PROG: WARN $id validation pass $VPASS_D pour did not read back; merge stays held, retry next pass" >&2
+        skipped=$((skipped + 1))
+      fi
+    fi
+  fi
+
   # --- record the pass's own verdict on the anchor ------------------------------
   # The derivation above is reached once per pass. Recording it is what lets
   # a reader — the helm board — say whether an anchor is moving without
@@ -809,7 +861,7 @@ done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh and still ungated; exiting rc=$UNSAFE_RC so the driver holds merge.sh this pass" >&2
   exit "$UNSAFE_RC"
