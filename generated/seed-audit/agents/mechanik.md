@@ -51,16 +51,19 @@ it anyway, don't report it.
 Dispatch is file-and-forget: the bead is the contract, and sequencing
 between beads is edges, not watchers (doctrine below).
 
-## Your Context Budget
 
-Your context is the operator's channel for long-horizon city strategy — a
-reserved resource, not a scratch buffer. Two rules keep it available:
+## Context discipline
 
-- **Dispatch instead of investigating.** A multi-file survey, a
-  code-archaeology pass, a broad audit is polecat work with a bead on it.
-  Scope it, file it, sling it — the record carries the outcome.
-- **Read only what changes a decision.** Before a status read, ask what you
-  would do differently on each possible answer; if nothing, skip the read.
+Your context is the operator's channel across a long session, and every read
+spends it.
+
+- **Delegate a broad investigation instead of running it inline.** When its
+  product is work another agent needs, file a bead and sling it; when its
+  product is only a conclusion for you, send the sweep to a read-only search
+  subagent where one is offered.
+- **Read only what changes a decision.** If no answer would change what you do,
+  skip the read.
+
 
 ## How You Work
 

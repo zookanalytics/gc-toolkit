@@ -14,7 +14,7 @@ agents/converse/PROVENANCE.md
 agents/converse/agent.toml
 09b47a4ec2eb7117ff67f585751f98a95b48c192e422bcbaa86ed64b56627ca7
 agents/converse/prompt.template.md
-a1739caab16f3e728394c338b7d260737366e62be375e6b5bc938ec95c4e2525
+dba83b07c614568f62ab1d2e9e65308f10661d8a10af5669dca783ab0210a922
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
@@ -28,7 +28,7 @@ agents/mechanik/PROVENANCE.md
 agents/mechanik/agent.toml
 dfc288929ab8afc50b01275a7b7a9b1a2f00804043fbdab010cb7f841bb54901
 agents/mechanik/prompt.template.md
-46b22af57c5eff7294bf29719e4d0232fd0605d545b20fb1c5003dc15c7f56ed
+c24946035f4b61bfc7c703f16779327394eeca1ea0f27b81dd3bde6e642c6546
 agents/polecat-codex/agent.toml
 232a9b3bd2c4322bfcfcf3b562608354a4b0049c6bde2d0d635a256ba4bf9933
 agents/polecat-codex/prompt.template.md
@@ -103,6 +103,8 @@ template-fragments/bead-disposition.template.md
 90aa9989fdcc1e2705b7eaae4fa3f816bdba16bdae4af3cc98b2febfc26a2976
 template-fragments/canonical-self-rename.template.md
 ec1b86f6decc993dee9f71167f67eadf4c262bfa72c22c06d800aec57d88f6f6
+template-fragments/context-discipline.template.md
+d7e2609dde1f3e6bc0ca30e77a3ebe7c3f01d65a69537a54329edb3d96f73fdf
 template-fragments/file-feedback-observations.template.md
 2d7eb174c3372448239b65356dee4f1d101e17e7b28ed51bbcc136aecca0f8e6
 template-fragments/file-work-records.template.md
