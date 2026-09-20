@@ -1489,6 +1489,9 @@ out=$(run)
 eq "$(meta_pinned P3 pr_posture)" "commented@sha-42" "a review body with no inline comment still counts"
 eq "$(meta P3 pr_review_watermark)" "7001" "the review id space carries it"
 eq "$(meta P3 pr_comment_watermark)" "0" "…and the comment id space stays at zero"
+FID3=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "P3") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID3" "<none>" "a review body with no inline comment becomes a finding too, not only inline comments"
+eq "$(meta "$FID3" 'finding.source')" "human:human1" "…sourced to the review's author"
 
 echo "# …an EMPTY-bodied COMMENTED review is not a posture no id can answer"
 store "[$(anchor P4 43)]"
@@ -1543,6 +1546,10 @@ has "$(desc new-2)" "WHY IS THIS HERE?" "the child carries the comment verbatim"
 has "$(desc new-2)" "docs/file-structure.md:12" "…and where it was left"
 hasnt "$(desc new-2)" "## Review bodies" "an empty review body renders no section"
 grep -qxF "new-2|blocks|P6" "$STUB_DEPS" && ok "…and the child holds the merge" || bad "blocks edge missing"
+FID6=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "P6") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID6" "<none>" "an operator's CHANGES_REQUESTED produces a finding — the tk-zina89 gap closed"
+eq "$(meta "$FID6" 'finding.source')" "human:human1" "…sourced to the operator who raised it, so it reaches the validator like any finding"
+grep -qxF "new-2|blocks|$FID6" "$STUB_DEPS" && ok "…and a must-fix ruling holds the merge through the fix unit that blocks it" || bad "fix unit does not block the CHANGES_REQUESTED finding"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 
 echo "# …the same standing review is not filed twice"
