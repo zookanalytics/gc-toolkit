@@ -264,25 +264,47 @@ handful of localized must-fixes has converged. A batch that overturns an
 assumption the diff rests on, touches many files, or shows the reviewer and the
 diff still disagree about intent has not.
 
-**If it HAS converged — no further review needed.** Back the lane: file the
-closed approve outcome lane-state.sh reads to derive green. The lane still holds
-at `fixing` until its must-fix findings close; it derives green when they do,
-with no re-review — that is the whole point of judged convergence.
+This pass rules one of two shapes, and `$LANE` names which: a `check_set` lane
+(`codex`) for a reviewer's batch, or `human` for an operator feedback batch. A
+human batch is anchor-wide — it is input the whole diff has never been answered
+against, so its ruling moves every lane the anchor's `check_set` declares, not
+the `human` pseudo-lane no gate reader derives green from
+(specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane backwards").
+Record the ruling with the line matching this pass's shape and your judgement;
+the `$LANE` guard on each makes the wrong line a no-op.
+
+**If it HAS converged — no further review needed.**
+
+A reviewer's lane batch backs its lane: file the closed approve outcome
+lane-state.sh reads to derive green. The lane holds at `fixing` until its
+must-fix findings close, then derives green with no re-review.
 ```bash
-"$SCRIPTS/review-outcome.sh" back-lane --anchor "$ANCHOR" --lane "$LANE" --oid "${REVIEWED_OID:?reviewed_oid required to back a lane}" --reason "<one line: why the batch converged>"
+[ "$LANE" != human ] && "$SCRIPTS/review-outcome.sh" back-lane --anchor "$ANCHOR" --lane "$LANE" --oid "${REVIEWED_OID:?reviewed_oid required to back a lane}" --reason "<one line: why the batch converged>"
+```
+A human batch writes no approve outcome: every declared lane keeps the green it
+already held when the batch arrived, and the must-fix findings `triage-findings`
+wrote hold the merge until they close. Backing a lane here would green it on a
+comment its reviewer never read, so a converged human batch runs neither line.
+
+**If it has NOT converged — a fresh whole-diff review is warranted.**
+
+A reviewer's lane batch supersedes its own lane, returning it to `unreviewed` so
+the gate authority pours a fresh review at the live head. On a request-changes
+batch there is no approve backing yet; supersede-lane is then a no-op success and
+the lane already owes its review.
+```bash
+[ "$LANE" != human ] && "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "<one line: what still needs a whole-diff look>"
+```
+A human batch supersedes EVERY declared lane, since the whole diff owes a fresh
+look. Superseding only the `human` pseudo-lane would leave the real gates green
+and let the anchor merge without the review this ruling requires.
+```bash
+[ "$LANE" = human ] && "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --reason "<one line: what the operator's input overturns>"
 ```
 
-**If it has NOT converged — a fresh whole-diff review is warranted.** Supersede
-any approve outcome backing this lane, returning it to `unreviewed` so the gate
-authority pours a fresh review at the live head. On a batch the reviewer raised
-with request-changes there is no approve backing yet; supersede-lane is then a
-no-op success and the lane already owes its review.
-```bash
-"$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "<one line: what still needs a whole-diff look>"
-```
-
-Write exactly one of the two. Neither leaves the lane in a state a reader can
-resolve, and both leave the anchor untouched.
+Record exactly one outcome: back-lane or supersede-lane on a reviewer's lane
+batch, supersede-anchor on a human batch that has not converged, and nothing on a
+human batch that has. Every path leaves the anchor untouched.
 
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `finalize-and-drain`:
@@ -293,9 +315,10 @@ done
 "${SC:?step-close.sh not found in the pack}" --step mol-validate.rule-convergence --outcome pass
 ```
 
-**Exit criteria:** convergence ruled and recorded through review-outcome.sh
-(back-lane on converged, supersede-lane on not), the anchor untouched, this step
-closed.
+**Exit criteria:** convergence ruled and recorded through review-outcome.sh — a
+reviewer's batch backs (converged) or supersedes (not) its lane; a human batch
+supersedes every lane (not converged) or writes nothing (converged) — the anchor
+untouched, this step closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
