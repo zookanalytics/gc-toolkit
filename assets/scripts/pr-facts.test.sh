@@ -435,6 +435,40 @@ printf '%s' "$(prview 17 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_17.json"
 out=$(run)
 has "$out" "filed rebase-mode rework new-3 routed to $FIX" "a closed demand holds nothing"
 
+echo "# …but a closed demand is not the only hold: any OTHER live blocker on the anchor freezes the dispatch too (tk-nak6pb)"
+# takeaway_is_holding reads only the demand channel. A closed demand is a
+# decision made, yet the anchor can still be blocked on an ordinary
+# prerequisite — here PB1, a bead it depends on carrying no demand marker at all.
+# Rebasing blind would run ahead of a merge already held on it. The
+# foreign-blocker guard reads every live blocker merge.sh holds the merge on.
+store "[$(anchor FBK1 96),{\"id\":\"PB1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"prerequisite the anchor depends on\",\"metadata\":{}}]"
+gc bd dep PB1 --blocks FBK1 >/dev/null 2>&1
+printf '%s' "$(prview 96 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_96.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "the anchor is held by PB1 (a merge is held on it); no rework dispatched" "a plain depends-on blocker vetoes the stale-base dispatch"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …but the arm's OWN rework child is the mechanism, not a hold: it blocks the anchor yet the dedup still runs (tk-nak6pb)"
+# A live rework child of THIS anchor blocks it — that is how the merge waits for
+# the fix. Excluding it by task_kind+anchor_bead is what lets a stranded child be
+# re-routed and a covering one dedup, rather than the guard burying both.
+store "[$(anchor FBK2 97),$(child CW1 polecat/x97 ',"task_kind":"rework","anchor_bead":"FBK2"')]"
+gc bd dep CW1 --blocks FBK2 >/dev/null 2>&1
+printf '%s' "$(prview 97 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_97.json"
+out=$(run)
+has "$out" "rework CW1 already covers branch 'polecat/x97' at this head, no new child" "the anchor's own rework child is excluded from the guard, so the dedup runs"
+
+echo "# …and an unreadable blocker list holds the dispatch, the safe side for a rewrite (tk-nak6pb)"
+store "[$(anchor FBK3 98)]"
+printf '%s' "$(prview 98 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_98.json"
+STUB_DEP_GARBAGE=1
+out=$(run)
+STUB_DEP_GARBAGE=""
+has "$out" "the anchor is held by an unreadable blocker (a merge is held on it); no rework dispatched" "an unreadable edge list fails closed"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+
 echo "# …and so does an operator's own merge_hold — the cap never wrote it, so it is not the park's carve-out"
 store "[$(anchor F5d 90 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 90 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_90.json"

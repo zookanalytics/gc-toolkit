@@ -261,6 +261,49 @@ close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = 
 }
 # <<< takeaway-hold-discriminator
 
+# >>> anchor-foreign-blocker-guard
+# The stale-base rework dispatch brings a conflicted branch current, which is
+# routine hygiene only when the anchor is otherwise heading to merge. An anchor a
+# live blocker holds is not: a plain depends-on edge on another PR, an in-flight
+# review, a demand a person owes. Rebasing under one performs work the merge is
+# already held on ("a dep-edge holder holds regardless" — merge.sh), one horn of a
+# decision the operator has not made, or a head moved out from under a live
+# review. takeaway_is_holding catches the demand; a closed demand on an anchor
+# still blocked by an ordinary prerequisite does not read there, and this reads
+# that gap — every blocker merge.sh would hold the merge on.
+#
+# The arm's OWN children are the mechanism, not a hold: each blocks its anchor so
+# the merge waits for the fix, and the dedup below re-routes a stranded one or
+# adopts an orphaned one, so none may suppress the dispatch. So a blocker is
+# foreign unless the dispatch below would recognize it as its own — by the same
+# three signals it uses: it is on this branch (the dedup key), OR it carries this
+# anchor's rework marker (task_kind=rework, anchor_bead=<anchor>), OR it keeps the
+# deterministic dispatch title the orphan adoption matches. Any one survives a
+# half-landed stamp that drops the others, so the guard never reads a child whose
+# stamp partly failed as a foreign freeze. The cap's own demand
+# (gc.takeaway_by=signoff) is excluded for the reason takeaway_is_holding excludes
+# it: reading the park's own record as a hold wedges the park. Prints the holding
+# ids; fails CLOSED — an unreadable edge list holds the dispatch, the safe side
+# for a rewrite.
+anchor_foreign_blocker() { # <anchor-id> <own-branch> <own-title>; prints foreign live blocker ids; 0 = at least one holds
+  local rows out
+  rows=$(gc bd dep list "${1:-}" --direction=down -t blocks --json 2>/dev/null) || return 0
+  rows=$(printf '%s' "$rows" | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  out=$(printf '%s' "$rows" | jq -r --arg a "${1:-}" --arg b "${2:-}" --arg t "${3:-}" --arg live "$LIVE_STATUSES" '
+    ($live | split(",")) as $ls
+    | [ .[]
+        | select(((.status // "open") | ascii_downcase) as $st | ($ls | index($st)) != null)
+        | select( (($b != "") and ((.metadata.branch // "") == $b)) | not )
+        | select( ((.metadata.task_kind // "") == "rework" and (.metadata.anchor_bead // "") == $a) | not )
+        | select( (($t != "") and (((.title // "") | contains($t)))) | not )
+        | select( ((.metadata["gc.takeaway_by"] // "") | tostring) != "signoff" )
+        | .id ] | join(" ")' 2>/dev/null)
+  printf '%s' "$out"
+  [ -n "$out" ]
+}
+# <<< anchor-foreign-blocker-guard
+
 # >>> pr-posture-vocabulary
 # Mirrors lifecycle/lifecycle.toml [posture]; pr-facts.test.sh fails on drift.
 # Listed in the precedence the derivation applies, strongest human signal first.
@@ -1027,6 +1070,18 @@ GATES
       fix_instruction="Resume in prepare_mode=rebase: rebase '$fix_branch' onto origin/$base, resolve conflicts, and force-push with --force-with-lease."
     fi
     # <<< stale-base-dispatch-mode
+    # Do not bring the branch current while the anchor is held for a reason other
+    # than the rework itself. anchor_foreign_blocker reads every live blocker on
+    # the anchor and excludes this arm's own children (this branch, this anchor's
+    # rework marker, or the dispatch title the orphan adoption below matches), so
+    # a covering child still dedups and a stranded or orphaned one is still
+    # re-routed — while a sibling PR it depends on, a live review, or a demand a
+    # closed one left standing holds the dispatch.
+    fblockers=$(anchor_foreign_blocker "$id" "$fix_branch" "$FIX_TITLE"); fbrc=$?
+    if [ "$fbrc" -eq 0 ]; then
+      echo "$PROG: $id — PR#$num conflicts but the anchor is held by ${fblockers:-an unreadable blocker} (a merge is held on it); no rework dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
     # Dedup on branch+head via the child's own metadata (no bookkeeping key on
     # the anchor): a child of ANY status whose rejection_reason names this head
     # means this head was already routed; a LIVE child on the branch means a
