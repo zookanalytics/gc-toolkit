@@ -266,10 +266,10 @@ current_section() { # <body-file>
   ' "$1"
 }
 
-# 0 = exactly one well-formed pair (replace in place); 1 = neither marker (a body
-# a create wrote before these markers existed — left alone rather than duplicated);
-# 2 = any other shape (a lone marker, a second pair, a close above its open) — a
-# body cut into a shape this cannot reason about, left alone.
+# 0 = exactly one well-formed pair (replace in place); 1 = neither marker (a body a
+# create wrote before these markers existed); 2 = any other shape (a lone marker, a
+# second pair, a close above its open) — a body cut into a shape this cannot reason
+# about. What each state earns before the flip is refresh_pr_body's call.
 marker_state() { # <body-file>
   local o c oi ci
   o=$(grep -cxF "$MARK_OPEN" "$1" 2>/dev/null || true)
@@ -291,17 +291,62 @@ splice_in_place() { # <body-file> <section-file> <out-file>
   ' "$1" > "$3"
 }
 
+# Establish the region in a body a create wrote before these markers existed. That
+# create put the managed content first — `## Summary`, the demoted dispatch, then
+# the `## Refinery handoff` bullet block — so wrap a freshly composed region in the
+# markers over exactly that prefix and keep whatever follows it: an operator note,
+# pr-stack's own marked section. The handoff block is contiguous (compose writes no
+# blank between its bullets), so the first line after it that is not a `- ` bullet
+# ends the prefix. Exits nonzero, having written nothing usable, when the body does
+# not carry that prefix (no `## Summary`, or no `## Refinery handoff` after it), so
+# the caller holds rather than mangle a shape it did not write.
+establish_region() { # <body-file> <section-file> <out-file>
+  awk -v o="$MARK_OPEN" -v c="$MARK_CLOSE" -v s="$2" '
+    BEGIN { state = "lead"; opened = 0 }
+    state == "lead" {
+      if ($0 ~ /^##[ \t]+Summary[ \t]*$/) {
+        print o
+        while ((getline line < s) > 0) print line
+        close(s)
+        print c
+        opened = 1
+        state = "to_handoff"
+        next
+      }
+      print; next                        # keep anything before the managed prefix
+    }
+    state == "to_handoff" {               # drop the stale summary/dispatch block
+      if ($0 ~ /^##[ \t]+Refinery handoff[ \t]*$/) state = "handoff_head"
+      next
+    }
+    state == "handoff_head" {
+      if ($0 ~ /^[ \t]*$/) next           # the blank after the handoff heading
+      if ($0 ~ /^-[ \t]/) { state = "bullets"; next }
+      state = "tail"; print; next         # no bullets — everything here is tail
+    }
+    state == "bullets" {                  # the contiguous handoff bullet block
+      if ($0 ~ /^-[ \t]/) next
+      state = "tail"; print; next         # first non-bullet ends the managed prefix
+    }
+    state == "tail" { print }
+    END { exit (opened && state != "to_handoff") ? 0 : 1 }
+  ' "$1" > "$3"
+}
+
 # Refresh an OPEN PR's published body from the anchor's current pr_summary before
 # the adoption flip, the read-modify-write pr-stack.sh uses: read the body
-# \r-stripped, and only when it carries exactly one well-formed marker pair replace
-# what is between the markers, leaving operator edits and pr-stack's section in
-# place. A body that predates the markers or was cut into an unreadable shape is
-# left as it stands. 0 = current, refreshed, or deliberately left alone (predates
-# the markers, or an unreadable marker shape) — proceed to the flip. 1 = the body
-# could not be verified or refreshed: a missing head oid, an unreadable or
-# unparseable body, a scratch or compose failure, or a failed edit — hold at
-# pre_open_gate and retry rather than flip a body that may be stale, the miss the
-# adoption path exists to close.
+# \r-stripped, then bring the managed region current. A well-formed marker pair has
+# what is between the markers replaced, leaving operator edits and pr-stack's section
+# in place. A markerless body carrying the shape a create wrote before these markers
+# (## Summary … ## Refinery handoff) has the region established over that legacy
+# prefix, keeping whatever follows — the stale-body case adoption exists to close. A
+# body with no managed region — empty, hand-written, or a malformed marker shape —
+# has no stale MANAGED summary to republish and is adopted as it stands. 0 = current,
+# refreshed, established, or carries no managed region; proceed to the flip. 1 = the
+# reworked summary could not be proven onto a MANAGED body: a missing head oid, an
+# unreadable or unparseable body, a scratch or compose failure, or a failed edit —
+# hold at pre_open_gate and retry rather than flip a managed body known to be behind,
+# the miss the refresh exists to close.
 refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid>
   local id="$1" num="$2" row="$3" branch="$4" target="$5" head_oid="$6"
   local summary desc checkset body_json CUR SECTION NEW ms rc
@@ -342,20 +387,30 @@ refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid>
     return 1
   fi
   marker_state "$CUR"; ms=$?
-  if [ "$ms" = 1 ]; then
+  if [ "$ms" = 0 ]; then
+    # A well-formed region: replace what is between the markers, no-op when the
+    # render already matches so no edit is spent.
+    if [ "$(current_section "$CUR")" = "$(cat "$SECTION")" ]; then
+      rm -f "$CUR" "$SECTION" "$NEW"; return 0
+    fi
+    splice_in_place "$CUR" "$SECTION" "$NEW"
+  elif [ "$ms" = 1 ] && establish_region "$CUR" "$SECTION" "$NEW"; then
+    # A markerless body carrying the shape a create wrote before these markers
+    # (## Summary … ## Refinery handoff) IS the stale-body case adoption exists to
+    # close: establish the region over that legacy prefix, keeping what follows.
+    # establish_region fails for a markerless body WITHOUT that prefix, which falls
+    # through to the leave-alone arm below.
+    :
+  else
+    # No managed region to refresh: the markers are absent and the body is not a
+    # legacy managed prefix (an empty or hand-written body), or they are malformed
+    # (a lone marker, a second pair). There is no stale MANAGED summary to
+    # republish, and rewriting a body the arm did not compose would clobber an
+    # operator's own text, so adopt it as it stands.
     rm -f "$CUR" "$SECTION" "$NEW"
-    echo "$PROG: $id PR#$num body predates the gc:pr-summary markers; left as it stands (only a marked region is spliced)"
+    echo "$PROG: $id PR#$num body carries no managed gc:pr-summary region to refresh; adopted as it stands"
     return 0
   fi
-  if [ "$ms" = 2 ]; then
-    rm -f "$CUR" "$SECTION" "$NEW"
-    echo "$PROG: $id PR#$num body carries no well-formed gc:pr-summary marker pair; left alone (an operator edit this cannot reason about)" >&2
-    return 0
-  fi
-  if [ "$(current_section "$CUR")" = "$(cat "$SECTION")" ]; then
-    rm -f "$CUR" "$SECTION" "$NEW"; return 0
-  fi
-  splice_in_place "$CUR" "$SECTION" "$NEW"
   if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$NEW" </dev/null >/dev/null 2>&1; then
     rm -f "$CUR" "$SECTION" "$NEW"
     echo "$PROG: $id PR#$num body refreshed from the anchor's current pr_summary"

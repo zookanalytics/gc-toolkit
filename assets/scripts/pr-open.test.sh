@@ -3,7 +3,9 @@
 # Covers: adopting an existing OPEN or MERGED PR (one lifecycle transition, never
 # a twin) and refreshing an OPEN PR's body from the anchor's current pr_summary
 # before the flip (the marked region re-spliced, operator text and pr-stack's
-# section kept, a failed edit holding the anchor, a pre-markers body left alone);
+# section kept, a failed edit holding the anchor, a pre-markers body having its
+# region established over the legacy prefix, an unrecognizable or malformed shape
+# holding rather than flipping stale);
 # refusing fork/foreign/uncertifiable rows; the closed-unmerged headstone (fresh
 # PR + supersede note; same-head close is a human decision left alone); holds
 # gating the create path; the all-lanes-green gate over every gate the anchor
@@ -112,16 +114,77 @@ out=$(STUB_PR_EDIT_RC=1 "$SUT" 2>&1)
 eq "$(meta RF2 merge_result)" "pre_open_gate" "a failed body edit leaves the anchor at pre_open_gate"
 has "$out" "body refresh failed to land" "…and says why"
 
-echo "# a pre-markers body is adopted untouched, never duplicated"
-store "[$(pre RF3 polecat/rf3 ',"pr_summary":"NEW: the summary a legacy body predates."')]"
-STALE3=$(printf '%s\n' '## Summary' '' 'Legacy body with no markers.')
+echo "# a pre-markers body has the region ESTABLISHED over its legacy prefix, not left stale"
+# A create that predates the markers wrote the managed content first (## Summary
+# through the ## Refinery handoff bullets) with no markers. That IS the stale-body
+# case adoption exists to close, so the refresh wraps a fresh region over that
+# prefix and keeps what follows it — here an operator note — rather than flipping
+# the stale summary through untouched.
+store "[$(pre RF3 polecat/rf3 ',"pr_summary":"NEW: the republished summary after the rework."')]"
+STALE3=$(printf '%s\n' \
+  '## Summary' '' 'OLD: the summary a legacy body predates.' '' \
+  '## Refinery handoff' '' '- Issue: RF3' '- Source branch: polecat/rf3' '- Target: main' '' \
+  'Operator note: keep this legacy line.')
 prrow 73 OPEN polecat/rf3 sha-rf3 main | jq --arg b "$STALE3" '. + {body:$b}' > "$GH_DIR/pr_view_73.json"
 printf '[%s]' "$(prrow 73 OPEN polecat/rf3 sha-rf3 main)" > "$GH_DIR/pr_list_polecat_rf3.json"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-eq "$(meta RF3 merge_result)" "pull_request" "a legacy body still flips (adoption is not blocked on it)"
-has "$out" "predates the gc:pr-summary markers" "…and reports it was left alone"
-hasnt "$(cat "$STUB_GH_LOG")" "pr edit 73" "no edit to a body it cannot splice"
+eq "$(meta RF3 merge_result)" "pull_request" "the anchor flips after the region is established"
+newbody=$(jq -r '.body' "$GH_DIR/pr_view_73.json")
+has "$newbody" "NEW: the republished summary after the rework." "the current pr_summary reached the published body"
+hasnt "$newbody" "OLD: the summary a legacy body predates." "…and the stale legacy summary is gone"
+has "$newbody" "Operator note: keep this legacy line." "text after the legacy prefix is preserved"
+has "$newbody" "<!-- gc:pr-summary -->" "the region is now marked, so a later pass splices in place"
+has "$(cat "$STUB_GH_LOG")" "pr edit 73" "the body was edited in place, not re-created"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no twin PR"
+
+echo "# a markerless body with no managed region is adopted as it stands, not rewritten"
+# A hand-written body carries neither ## Summary nor the handoff block, so no MANAGED
+# region has gone stale — only the operator's own text. Even with a differing
+# pr_summary, adoption leaves it untouched and flips rather than clobber a body this
+# arm never composed.
+store "[$(pre RF3B polecat/rf3b ',"pr_summary":"NEW: a summary that must not overwrite a hand-written body."')]"
+STALE3B=$(printf '%s\n' 'A free-form operator body.' '' 'No headings this arm can anchor on.')
+prrow 78 OPEN polecat/rf3b sha-rf3b main | jq --arg b "$STALE3B" '. + {body:$b}' > "$GH_DIR/pr_view_78.json"
+printf '[%s]' "$(prrow 78 OPEN polecat/rf3b sha-rf3b main)" > "$GH_DIR/pr_list_polecat_rf3b.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF3B merge_result)" "pull_request" "a body with no managed region still flips"
+has "$out" "no managed gc:pr-summary region to refresh" "…and reports it was adopted as it stands"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 78" "the hand-written body is not rewritten"
+has "$(jq -r '.body' "$GH_DIR/pr_view_78.json")" "A free-form operator body." "the operator's text is left intact"
+
+echo "# a malformed marker shape is adopted as it stands, not rewritten"
+# A lone open marker is neither a well-formed pair to splice nor a legacy prefix to
+# establish — a shape the arm cannot reason about. It owns no region this refresh
+# composed, so adoption leaves the broken markers untouched and flips.
+store "[$(pre RF3C polecat/rf3c ',"pr_summary":"NEW: a summary a broken marker shape must not trigger a rewrite."')]"
+STALE3C=$(printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'A body with a lone open marker.')
+prrow 82 OPEN polecat/rf3c sha-rf3c main | jq --arg b "$STALE3C" '. + {body:$b}' > "$GH_DIR/pr_view_82.json"
+printf '[%s]' "$(prrow 82 OPEN polecat/rf3c sha-rf3c main)" > "$GH_DIR/pr_list_polecat_rf3c.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF3C merge_result)" "pull_request" "a malformed marker shape still flips"
+has "$out" "no managed gc:pr-summary region to refresh" "…and reports it was adopted as it stands"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 82" "the malformed markers are left untouched"
+
+echo "# a legacy body with NOTHING after the handoff is established cleanly (the common freshly-created shape)"
+# Every PR opened before this branch added the markers carries exactly this: the
+# managed content and nothing else. The region is established over the whole body.
+store "[$(pre RF3D polecat/rf3d ',"pr_summary":"NEW: the freshly-established summary."')]"
+STALE3D=$(printf '%s\n' \
+  '## Summary' '' 'OLD: a legacy body with nothing after the handoff.' '' \
+  '## Refinery handoff' '' '- Issue: RF3D' '- Source branch: polecat/rf3d' '- Target: main')
+prrow 84 OPEN polecat/rf3d sha-rf3d main | jq --arg b "$STALE3D" '. + {body:$b}' > "$GH_DIR/pr_view_84.json"
+printf '[%s]' "$(prrow 84 OPEN polecat/rf3d sha-rf3d main)" > "$GH_DIR/pr_list_polecat_rf3d.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF3D merge_result)" "pull_request" "the anchor flips after the region is established"
+newbody3d=$(jq -r '.body' "$GH_DIR/pr_view_84.json")
+has "$newbody3d" "NEW: the freshly-established summary." "the current pr_summary reached the published body"
+hasnt "$newbody3d" "OLD: a legacy body with nothing after the handoff." "…and the stale legacy summary is gone"
+has "$newbody3d" "<!-- gc:pr-summary -->" "the region is now marked, so a later pass splices in place"
+has "$(cat "$STUB_GH_LOG")" "pr edit 84" "the body was edited in place"
 
 echo "# an unreadable OPEN PR body holds the anchor rather than flipping a stale one"
 # The reworked pr_summary must reach the published body before the flip. A body
