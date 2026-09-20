@@ -47,20 +47,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    reads `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
    back). A lane that reads `green` ends the arm's interest however far the
-   branch has advanced since — nothing here compares a marker to a head. The
-   convergence cap's park also ends it with no dispatch: `signoff.sh` set
-   `merge_hold=signoff_cap` (the literal string, distinct from an operator's
-   own `merge_hold=true`) with `signoff_cap=<gate>` beside it,
-   `gc.routed_to=human`, a `blocked_reason` naming the cap, and
-   the shorter `gc.takeaway` headline the helm board renders, in one act. No
-   visit is filed for it, so the anchor is parked rather than queued. New
-   operator feedback does not undo the park: arm 5 routes the batch and opens a
-   validation pass on the anchor, but leaves the park standing, because the cap
-   counts non-convergence and a review the branch has never answered is not that
-   ([state-machine.md](state-machine.md#the-round-cap-and-operator-feedback)).
-   `signoff.sh reset <anchor> --reason <why>` is the release; an anchor capped
-   before its PR was opened can receive no feedback at all and says so in its
-   `blocked_reason`.
+   branch has advanced since — nothing here compares a marker to a head. An
+   operator's own `merge_hold` also ends the arm with no dispatch: gate-ensure
+   raises no review under a hold.
    A review whose only reach is the pour stamp is qualified before it counts
    as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict
@@ -225,13 +214,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    routes also opens one validation pass on the anchor — a
    `task_kind=validation` bead, unrouted, blocking the anchor — from which
    `gate-ensure.sh`'s quiescence holds a fresh whole-diff review while the
-   validator rules the batch, so operator feedback is answered without spending
-   a review-round cap
-   ([state-machine.md](state-machine.md#the-round-cap-and-operator-feedback)).
+   validator rules the batch.
    The batch is watermarked only once that pass records the shape the validator
    reads — `anchor_bead`, `check_name=human`, `reviewed_oid` — and its `blocks`
-   edge holds. Retiring the round cap and its park is `signoff.sh reset`'s, not
-   this arm's.
+   edge holds.
    A write-back sweep then answers the operator in the PR itself. On an anchor
    carrying `pr_comment_disposition`, every comment at or below the recorded
    watermark gets an EYES reaction, and once the bead that disposition names

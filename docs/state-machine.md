@@ -98,9 +98,9 @@ the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
 entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
 still at `status=open`.
 
-The route exception is `park_route` (`human`), which `signoff.sh` writes when
-the review round cap is spent. No pool claims that value, so a transition that
-finds it leaves it in place. Any other route on a detached anchor is pool demand
+The route exception is `park_route` (`human`), the sentinel a visit or an
+operator hold leaves for a person. No pool claims that value, so a transition
+that finds it leaves it in place. Any other route on a detached anchor is pool demand
 for work that is already in the merge queue. A worker claims it, the claim moves
 the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
 from there.
@@ -225,90 +225,26 @@ a word outside the lane vocabulary, it is a state no reader knows and nothing
 could retire, and gate-ensure clears it. A well-formed one stays as history —
 a narrowed `check_set` keeps what its lanes recorded.
 
-### The round cap and operator feedback
+### Operator feedback
 
-`GC_MAX_REVIEW_ROUNDS` (default 3) bounds one thing — the city failing to
-converge against its own reviewer — and a round is an attempted rework child,
-never a review dispatch. Feedback from a person is not that loop. It is review
-the branch has never been answered against, so counting it against the budget
-lets an operator's own review exhaust the allowance for reviewing the response
-to it.
-
-`pr-facts.sh` keeps operator feedback out of that budget by opening a validation
-pass on the batch (see "Review cycle",
-`specs/tk-ztapg/review-cycle-architecture.md`): the batch enters the
-finding/validation graph, from which `gate-ensure.sh`'s quiescence holds a fresh
-whole-diff review off the anchor while the validator rules it, rather than
-spending a cap round. What makes a batch operator feedback is the author: the
-posture derivation counts only ids written by a login other than the city's own,
-so `signoff.sh`'s verdicts (posted under that login), re-reviews, and rework
+Feedback from a person is review the branch has never been answered against.
+`pr-facts.sh` enters it into the finding/validation graph by opening a
+validation pass on the batch (see "Review cycle",
+`specs/tk-ztapg/review-cycle-architecture.md`): `gate-ensure.sh`'s quiescence
+holds a fresh whole-diff review off the anchor while the validator rules the
+batch. What makes a batch operator feedback is the author — the posture
+derivation counts only ids written by a login other than the city's own, so
+`signoff.sh`'s verdicts (posted under that login), re-reviews, and rework
 hand-backs (which post nothing) are not it.
 
-`signoff.sh` subtracts a floor rather than resetting a counter, since the
-rework children stay on the anchor: at the first verdict after a new batch it
-writes `signoff_round_floor=<children then>@<batch>`, and counts what follows.
-The floor is written, not re-derived, because that verdict files a child of its
-own, and a floor recomputed each pass would swallow every new round and the cap
-would never trip.
-
-Retiring the cap and retiring its park are one act, because a cap that resets
-while its own park stands has not reset: `signoff.sh reset` clears `merge_hold`,
-`blocked_reason`, the human route, and the `gc.takeaway` the cap wrote for the
-board in the same write that advances the floor. `signoff.sh` parks the anchor
-by stamping `merge_hold=signoff_cap` — the literal string, not `true` —
-together with `signoff_cap=<gate>`, and `signoff.sh reset` acts only while that
-exact pairing still stands: `merge_hold`'s value reads
-`signoff_cap` AND `signoff_cap` is non-empty. That is the one predicate every
-reader uses — `merge.sh`'s and gate-ensure's `wedged-exception` machine axis
-included — so an anchor a person parked by hand (`merge_hold=true`) is never
-mistaken for the cap's, and an operator's later `merge_hold=true` is never
-lifted by this reset even if an orphan `signoff_cap` still stands beside it: a
-hold that does not read exactly `signoff_cap` is theirs and stays. A sitting
-still waiting on a person outranks the reset the same way, and what says so is
-the demand bead `gc-helm.sh demand` filed (`gc.demand_for=<anchor>`), never
-`gc.takeaway`. That field is stamped when a sitting begins and replaced by its
-outcome at sign-off, so it dates the last sitting rather than naming a live
-wait; read as a hold it parks an anchor from its first conversation onward,
-whatever the PR goes on to say. Which takeaway the retire clears follows from
-the same fact. `gc.takeaway_by` names the writer, so the cap's own sentence
-goes with the park it describes, and a sitting's stays. The dispatch tally
-(`dispatch_count` and any `dispatch_backstop.<g>`) goes with the park, since
-rounds nobody may dispatch are no release.
-
-`signoff.sh reset` is the only path that retires a cap park, and an anchor
-capped before its PR was opened needs it most: it has no conversation to be
-commented on, so no batch and no validation pass ever reach it, and clearing
-the exception by hand only lets the next pass recompute the same rounds and cap
-again. The cap says which case it is: `blocked_reason` names the rounds as
-spent pre-open and names the verb that ends them. That verb is
-`signoff.sh reset <anchor> --reason <why>`. It writes the floor itself —
-`signoff_round_floor=<children now>@<a minted batch>` with
-`signoff_rounds_reset` carrying the same batch, so the next verdict does not
-re-derive it — and retires the park in the same call, under the same
-`signoff_cap` agreement and live-demand guard. It reads
-no PR and touches no review bead, records the ruling on the anchor, and
-verifies every key it wrote, the retired tally keys included: `gate-ensure.sh`
-no longer reads `dispatch_count` or `dispatch_backstop.<g>` now that it derives
-quiescence, so a leftover holds no dispatch, but the release clears the keys so a
-release that reported success leaves the anchor carrying no stale marker.
-Because the floor comes from the rework ledger rather than from a batch
-someone else recorded, the count is read strictly — a walk that does not parse,
-or one naming no round at all, refuses the whole verb before it writes. Reading
-such a walk as zero rounds would write a floor of 0 and let the next pass count
-the real children from it and cap again, which is the deadlock the verb exists
-to end.
-
-`pr-facts.sh` records each batch once — it opens the validation pass, routes
-the batch, and advances the watermark — but retires no park: the watermark
-stops the batch being re-read once its comments are answered and the posture
-stops being `commented`, while the park waits for `signoff.sh reset`.
+`pr-facts.sh` records each batch once: it opens the validation pass, routes the
+batch, and advances the watermark, which stops the batch being re-read once its
+comments are answered and the posture stops being `commented`.
 
 A standing `CHANGES_REQUESTED` from the city's own reviewer raises no batch:
 every id in a batch is authored by a login other than the city's, so a codex
 veto is not operator feedback. A human's is, on the same terms as any other
-feedback — it routes to a rework child or a visit and opens a validation pass,
-though the cap's own park still waits for `signoff.sh reset`. Such an anchor is
-held by the reviewer directly as well as by the cap.
+feedback — it routes to a rework child or a visit and opens a validation pass.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -563,18 +499,13 @@ review's result set.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child and clears the gate marker, returning the
   lane to `unreviewed`, so gate-ensure re-arms the dispatch when the child
-  lands. The round cap (default 3) is enforced by `signoff.sh` itself: cap
-  spent ⇒ the anchor is parked under `merge_hold`, stamped `signoff_cap`, and
-  routed to human. A round is one attempted rework child, counted off the
-  anchor's own children — a review dispatch is not a round, however many read
-  the same commit. One writer, one terminal verdict: no second component writes
-  a verdict. `pr-facts.sh` and `gate-ensure.sh` also clear a marker, each under
-  a condition [authority-map.md](authority-map.md) states, but a clear
-  withdraws evidence and cannot assert it. gate-ensure bounds nothing per
-  round: a dispatch-side refusal per round would fire the cap early and
-  withhold the very review whose verdict settles the gate. The park cannot
-  self-feed: the cap arm files no rework
-  child, and nothing inside the cadence lifts a `merge_hold`.
+  lands. Convergence is judged by the validator, not counted in rounds
+  (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
+  child every round and nothing in the cadence bounds them. One writer, one
+  verdict: no second component writes a verdict. `pr-facts.sh` and
+  `gate-ensure.sh` also clear a marker, each under a condition
+  [authority-map.md](authority-map.md) states, but a clear withdraws evidence
+  and cannot assert it.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — an open `must-fix` finding on any lane, a fix unit in
   flight, a validation pass in flight, or a full review already in flight on
