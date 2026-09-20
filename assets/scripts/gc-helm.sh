@@ -2042,12 +2042,78 @@ cmd_dismiss() {
     return 0
 }
 
+# subject_unengaged <subject> — the shell mirror of unengagedVisit in
+# services/helm/internal/board/derive.go. A subject is un-engaged when it has an
+# OPEN visit no one has taken up: none of its visits is in_progress, and none is
+# non-closed while bound to a session (gc.session_name) or an assignee. The
+# assignee arm covers the pending-engagement window — engage binds the visit by
+# assignee while it is still open, before the hook claim promotes it to
+# in_progress and stamps the session.
+#
+# It is the predicate the board derives Accept from, re-read LIVE so accept
+# cannot actuate a recommendation from a stale board row, a copied command, or
+# the window after engage bound the visit. It reads the same union dismiss lists
+# — task_kind=visit matched on the gc.continuation_group stamp OR the tracks edge
+# — under whatever store BEADS_DIR names, which the caller pins at the subject's
+# rig.
+#
+# Fails CLOSED: a listing that did not answer a JSON array is UNKNOWN, not
+# un-engaged. Sets UNENGAGED_STATE (unengaged|engaged|absent|unreadable) and
+# UNENGAGED_WHY for the caller's message; returns 0 only when un-engaged.
+UNENGAGED_STATE=""; UNENGAGED_WHY=""
+subject_unengaged() {
+    _subj="$1"; UNENGAGED_STATE=""; UNENGAGED_WHY=""
+    if ! _uv_json=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+        UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="'gc bd list' failed"; return 1
+    fi
+    _uv_json=$(printf '%s' "$_uv_json" | scrub)
+    if ! printf '%s' "$_uv_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="'gc bd list' did not answer a JSON array"; return 1
+    fi
+    # One jq pass mirroring unengagedVisit: the subject's visits, then the
+    # in_progress and bound suppressor tests and the open test over them, in that
+    # order. A jq failure is a listing this cannot read, not an un-engaged
+    # subject. Output is the state token, and for the engaged case a tab and why.
+    _uv_out=$(printf '%s' "$_uv_json" | jq -r --arg s "$_subj" '
+        [ .[] | objects | . as $v
+          | select((($v.metadata // {}) | objects | .task_kind // "") == "visit")
+          | select($s != ""
+                   and ((($v.metadata["gc.continuation_group"] // "") == $s)
+                        or ([ ($v.dependencies // [])[] | objects
+                              | select((.type // "") == "tracks")
+                              | (.depends_on_id // "") ] | index($s) != null)))
+          | { status: ($v.status // ""), assignee: ($v.assignee // ""),
+              session: ($v.metadata["gc.session_name"] // "") } ] as $V
+        | ([ $V[] | select(.status != "closed" and (.session != "" or .assignee != "")) ] | first) as $bound
+        | if   ([ $V[] | select(.status == "in_progress") ] | length) > 0
+          then "engaged\ta visit is in progress — a conversation is claimed on it"
+          elif $bound != null
+          then if $bound.session != ""
+               then "engaged\ta visit is bound to session \($bound.session)"
+               else "engaged\ta visit is bound to assignee \($bound.assignee) — a pending engagement" end
+          elif ([ $V[] | select(.status == "open") ] | length) > 0
+          then "unengaged"
+          else "absent" end' 2>/dev/null) || {
+        UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="'gc bd list' answered nothing this verb could parse"; return 1
+    }
+    _uv_tab=$(printf '\t')
+    UNENGAGED_STATE=${_uv_out%%"$_uv_tab"*}
+    UNENGAGED_WHY=${_uv_out#*"$_uv_tab"}
+    [ "$UNENGAGED_WHY" = "$_uv_out" ] && UNENGAGED_WHY=""
+    case "$UNENGAGED_STATE" in
+        unengaged) return 0 ;;
+        engaged)   return 1 ;;
+        absent)    UNENGAGED_WHY="no open visit on the subject"; return 1 ;;
+        *) UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="the visit state did not resolve to a known token"; return 1 ;;
+    esac
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
 # Accept a recommendation straight off the board: dispatch the subject's
 # gc.recommended_formula at the subject and dismiss its visit, in one procedural
 # order with no sitting. It is the low-friction actuation of a ruling the human
-# has made (Accept/Discuss flow, design tk-hsm4d9); the board renders the
-# affordance on a subject whose visit is un-engaged, and this verb performs it.
+# has made (Accept/Discuss flow); the board renders the affordance on a subject
+# whose visit is un-engaged, and this verb performs it.
 # Discuss (engage) stays the path for a recommendation the operator wants to
 # weigh instead.
 #
@@ -2139,9 +2205,31 @@ cmd_accept() {
         exit 2
     fi
 
-    # Pin the subject's rig so the sling and the dismiss both act in its store.
+    # Pin the subject's rig so the sling, the visit lookup, and the dismiss all
+    # act in its store. `gc bd list` answers whatever BEADS_DIR names, so pin it
+    # at the subject's rig the way dismiss does, or a cross-rig subject's visits
+    # read the wrong ledger and the guard below would misjudge them.
     rig=$(rig_name_for_bead "$bead")
     [ -n "$rig" ] && export GC_RIG="$rig"
+    path=$(rig_path_for_bead "$bead")
+    [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+
+    # The board offers Accept only on a subject whose visit is un-engaged, but
+    # gc.recommended_formula alone does not prove that state: accept can be run
+    # from a stale board row, a copied command, or the window after engage bound
+    # the visit by assignee. Re-read the live visit state and require the same
+    # un-engaged predicate the board derives Accept from, refusing BEFORE the
+    # sling — and before the dismiss below could force-close a held visit over
+    # its holder's claim. Fail closed: a state this cannot read is not proof the
+    # visit is un-engaged.
+    if ! subject_unengaged "$bead"; then
+        case "$UNENGAGED_STATE" in
+            engaged) echo "$PROG: accept: $bead has an engaged visit — $UNENGAGED_WHY. The board offers Accept only on an un-engaged visit; take it up in the sitting (Discuss) or dismiss it there. Nothing dispatched." >&2 ;;
+            absent)  echo "$PROG: accept: $bead has no un-engaged open visit — $UNENGAGED_WHY. Accept actuates a recommendation the board is offering; there is nothing here to accept. Nothing dispatched." >&2 ;;
+            *)       echo "$PROG: accept: could not read $bead's live visit state — $UNENGAGED_WHY. Refusing rather than dispatching on an unread state. Nothing dispatched." >&2 ;;
+        esac
+        exit 4
+    fi
 
     # Dispatch the recommendation AT the subject: the subject is the routed
     # anchor (--on) and is also passed as gc.var.issue so a formula that reads

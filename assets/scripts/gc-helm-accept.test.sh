@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for the gc-helm `accept` verb (Accept/Discuss recommendation
-# flow, design tk-hsm4d9; work tk-qulxvk).
+# flow).
 #
 # WHAT accept DOES: accept a recommendation straight off the board — dispatch
 # the subject's gc.recommended_formula AT the subject and dismiss its visit, in
@@ -18,6 +18,10 @@
 #   - a subject with NO gc.recommended_formula is discuss-only: accept refuses,
 #     dispatching and dismissing nothing (the same key the board derives
 #     Accept-ability from, so a refusal here is a row the board would not offer).
+#   - a subject whose visit is already ENGAGED (in_progress, or open and bound to
+#     a session or an assignee) — or that has no open visit at all — is refused,
+#     dispatching and dismissing nothing: accept mirrors the board's un-engaged
+#     predicate (unengagedVisit) and fails closed on a visit state it cannot read.
 #   - a visit id resolves to its subject the way dismiss does.
 #   - fail CLOSED on an unverifiable subject.
 #
@@ -49,8 +53,12 @@ mkdir -p "$TMP/bin"
 #   the VISIT id   -> a task_kind=visit bead tracking the subject, and carrying
 #     gc.outcome=dismissed so dismiss's stamp read-back (meta_now) is satisfied
 #     without the stub having to model state.
-# `bd list` (dismiss's visit lookup) yields the one open visit when $FAKE_VISIT
-# is set. sling/close/update are recorded; sling's exit is $FAKE_SLING_RC.
+# `bd list` (the accept guard's live-visit read AND dismiss's visit lookup)
+# yields one visit on the subject when $FAKE_VISIT is set, with status
+# $FAKE_VISIT_STATUS (default open), assignee $FAKE_VISIT_ASSIGNEE and
+# gc.session_name $FAKE_VISIT_SESSION — the fields the un-engaged predicate
+# reads; $FAKE_LIST_MODE=notarray/fail drives the fail-closed path. sling/close/
+# update are recorded; sling's exit is $FAKE_SLING_RC.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 sub="${1:-}"; verb="${2:-}"
@@ -89,9 +97,17 @@ case "$sub" in
           *) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1 ;;
         esac ;;
       list)
+        case "${FAKE_LIST_MODE:-ok}" in
+          notarray) printf '{"not":"an array"}\n'; exit 0 ;;
+          fail)     exit 1 ;;
+        esac
         if [ -n "${FAKE_VISIT:-}" ]; then
           jq -n --arg v "$FAKE_VISIT_ID" --arg s "$FAKE_SUBJECT_ID" \
-            '[{id:$v, metadata:{task_kind:"visit","gc.continuation_group":$s}}]'
+                --arg st "${FAKE_VISIT_STATUS:-open}" \
+                --arg as "${FAKE_VISIT_ASSIGNEE:-}" \
+                --arg se "${FAKE_VISIT_SESSION:-}" \
+            '[{id:$v, status:$st, assignee:$as,
+               metadata:{task_kind:"visit","gc.continuation_group":$s,"gc.session_name":$se}}]'
         else printf '[]\n'; fi ;;
       close)  printf '%s\n' "$*" >> "$FAKE_CALLS" ;;
       update) printf '%s\n' "$*" >> "$FAKE_CALLS" ;;
@@ -184,6 +200,64 @@ eq "$RC" "4" "(MISSING) an unresolvable subject exits 4"
 [ -z "$CALLS" ] \
   && ok "(MISSING) nothing slung on an unverified subject" || bad "(MISSING) must dispatch nothing (calls: $CALLS)"
 export FAKE_SUBJECT_MODE=found
+
+# --- (PENDINGENGAGE) an open visit already BOUND by engage's assignee ----------
+# The pending-engagement window: engage binds the visit by assignee while it is
+# still open, before the claim stamps the session. The board suppresses Accept
+# here, and so must the verb — else a copied command actuates after the operator
+# has moved to Discuss. This is the case the P1 finding named.
+export FAKE_VISIT_ASSIGNEE="gc-toolkit.converse-opus"
+run_accept "$SUBJ"
+eq "$RC" "4" "(PENDINGENGAGE) an assignee-bound open visit is refused (exit 4)"
+[ -z "$CALLS" ] \
+  && ok "(PENDINGENGAGE) nothing slung and nothing dismissed" || bad "(PENDINGENGAGE) must dispatch nothing (calls: $CALLS)"
+grep -qi 'pending engagement' <<< "$ERR" \
+  && ok "(PENDINGENGAGE) names the pending engagement" || bad "(PENDINGENGAGE) message (err: $ERR)"
+unset FAKE_VISIT_ASSIGNEE
+
+# --- (CLAIMED) an in_progress visit is a live conversation -> refuse -----------
+export FAKE_VISIT_STATUS="in_progress"
+run_accept "$SUBJ"
+eq "$RC" "4" "(CLAIMED) an in_progress visit is refused (exit 4)"
+[ -z "$CALLS" ] \
+  && ok "(CLAIMED) nothing slung and nothing dismissed" || bad "(CLAIMED) must dispatch nothing (calls: $CALLS)"
+grep -qi 'in progress' <<< "$ERR" \
+  && ok "(CLAIMED) names the live conversation" || bad "(CLAIMED) message (err: $ERR)"
+unset FAKE_VISIT_STATUS
+
+# --- (SESSIONBOUND) an open visit with a bound session -> refuse --------------
+export FAKE_VISIT_SESSION="gc-toolkit--gc-toolkit__converse-opus-1"
+run_accept "$SUBJ"
+eq "$RC" "4" "(SESSIONBOUND) a session-bound visit is refused (exit 4)"
+[ -z "$CALLS" ] \
+  && ok "(SESSIONBOUND) nothing slung and nothing dismissed" || bad "(SESSIONBOUND) must dispatch nothing (calls: $CALLS)"
+grep -qi 'bound to session' <<< "$ERR" \
+  && ok "(SESSIONBOUND) names the bound session" || bad "(SESSIONBOUND) message (err: $ERR)"
+unset FAKE_VISIT_SESSION
+
+# --- (ABSENT) no open visit on the subject -> refuse, dispatch nothing ---------
+# accept actuates a recommendation the board is OFFERING; with no un-engaged
+# visit there is no offer, and slinging would then dismiss nothing.
+FAKE_VISIT=""
+run_accept "$SUBJ"
+eq "$RC" "4" "(ABSENT) a subject with no open visit is refused (exit 4)"
+[ -z "$CALLS" ] \
+  && ok "(ABSENT) nothing slung and nothing dismissed" || bad "(ABSENT) must dispatch nothing (calls: $CALLS)"
+grep -qi 'no open visit' <<< "$ERR" \
+  && ok "(ABSENT) says there is nothing to accept" || bad "(ABSENT) message (err: $ERR)"
+export FAKE_VISIT=1
+
+# --- (UNREADABLE) the visit listing does not parse -> FAIL CLOSED --------------
+# A state the verb cannot read is not proof the visit is un-engaged, so it
+# refuses rather than dispatching on an unread state.
+export FAKE_LIST_MODE="notarray"
+run_accept "$SUBJ"
+eq "$RC" "4" "(UNREADABLE) an unreadable visit listing fails closed (exit 4)"
+[ -z "$CALLS" ] \
+  && ok "(UNREADABLE) nothing slung on an unread state" || bad "(UNREADABLE) must dispatch nothing (calls: $CALLS)"
+grep -qi 'unread state' <<< "$ERR" \
+  && ok "(UNREADABLE) names the unread state" || bad "(UNREADABLE) message (err: $ERR)"
+unset FAKE_LIST_MODE
 
 # --- (NOARG) accept with no bead is a usage error -----------------------------
 run_accept
