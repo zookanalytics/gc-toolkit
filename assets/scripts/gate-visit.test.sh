@@ -50,7 +50,7 @@ echo "── every consumer copy carries the invariants ──"
 # SCRIPT_CONSUMERS split that by surface so each census can assert its own
 # floor (a formula copy going missing must not be masked by a script copy
 # appearing, or the reverse).
-CONSUMERS=0; FORMULA_CONSUMERS=0; SCRIPT_CONSUMERS=0; PROMPT_CONSUMERS=0
+CONSUMERS=0; FORMULA_CONSUMERS=0; SCRIPT_CONSUMERS=0
 # check_file <path> — assert the invariants on every marked copy in one file.
 # Fed by a heredoc, NOT a pipe: a pipe would run the loop in a subshell and
 # the counters would come back zero.
@@ -62,9 +62,8 @@ check_file() {
     while IFS= read -r -d $'\x1e' block; do
         [ -n "$(printf '%s' "$block" | tr -d '[:space:]')" ] || continue
         n=$((n + 1)); CONSUMERS=$((CONSUMERS + 1))
-        case "$f" in *.toml)              FORMULA_CONSUMERS=$((FORMULA_CONSUMERS + 1)) ;;
-                     *prompt.template.md) PROMPT_CONSUMERS=$((PROMPT_CONSUMERS + 1)) ;;
-                     *)                   SCRIPT_CONSUMERS=$((SCRIPT_CONSUMERS + 1)) ;; esac
+        case "$f" in *.toml) FORMULA_CONSUMERS=$((FORMULA_CONSUMERS + 1)) ;;
+                     *)       SCRIPT_CONSUMERS=$((SCRIPT_CONSUMERS + 1)) ;; esac
         name="$(basename "$f") block $n"
         tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
         # neutralize template placeholders so bash can parse the copy
@@ -166,13 +165,10 @@ for f in "$SDIR"/*.sh; do
     case "$f" in *.test.sh) continue ;; esac    # tests quote the block; they do not ship it
     check_file "$f"
 done
-# ...and the PROMPT surface: agents/proactive ships a marked copy to an agent
-# the same way a formula copy ships to a molecule, and an unswept copy is
-# where a fix lands everywhere and still misses one.
-for f in "$REPO"/agents/*/prompt.template.md; do
-    [ -r "$f" ] || continue
-    check_file "$f"
-done
+# Worker prompts carry no gate-visit copy: they are doctrine and defer the
+# dispose mechanics to their formula (proactive → mol-first-reaction's
+# advance-and-drain), so the formula and script sweeps above cover every
+# shipped copy.
 
 echo "── the read-back actually repairs (executed, not grepped) ──"
 # The assertions above prove the TEXT is present; none proves the logic works,
@@ -264,11 +260,6 @@ if [ "$SCRIPT_CONSUMERS" -ge 1 ]; then
     ok "the script surface carries marked copies ($SCRIPT_CONSUMERS found)"
 else
     bad "the script surface carries marked copies" "expected >=1 (gc-helm.sh open files the operator's visit); found $SCRIPT_CONSUMERS — did a copy get unmarked or hand-rolled?"
-fi
-if [ "$PROMPT_CONSUMERS" -ge 1 ]; then
-    ok "the prompt surface carries marked copies ($PROMPT_CONSUMERS found)"
-else
-    bad "the prompt surface carries marked copies" "expected >=1 (agents/proactive files a first-reaction visit); found $PROMPT_CONSUMERS — an unswept copy is where a fix lands everywhere and still misses one"
 fi
 
 echo

@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- agents: 17 · formulas: 23
+- agents: 17 · formulas: 24
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -45,7 +45,7 @@ covers that dimension.
 | [`mechanik`](agents/mechanik.md) | 26,122 | 6,530 |
 | [`polecat`](agents/polecat.md) | 22,948 | 5,737 |
 | [`polecat-codex`](agents/polecat-codex.md) | 22,978 | 5,744 |
-| [`proactive`](agents/proactive.md) | 13,377 | 3,344 |
+| [`proactive`](agents/proactive.md) | 9,335 | 2,333 |
 | [`refinery`](agents/refinery.md) | 10,107 | 2,526 |
 | [`witness`](agents/witness.md) | 14,348 | 3,587 |
 
@@ -65,7 +65,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,470 | 1,117 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,156 | 539 |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,220 | 555 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
@@ -80,6 +80,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 4,050 | 1,012 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 3,554 | 888 |
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,867 | 966 |
+| [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,949 | 737 |
 

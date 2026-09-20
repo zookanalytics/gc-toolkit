@@ -312,8 +312,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 7: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
-| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of three dispositions: route the bead to a pool, hold it on an edge, or file a visit. It sits in visit because its product is a bead the human no longer has to triage. |
-| `assets/scripts/first-reaction-dispose.sh` | visit | Performs that disposition and records which one and why. The only writer of `gc.first_reaction*`. |
+| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of four dispositions: route the bead to a pool, hold it on an edge, route it to a validating closer, or file a visit. It sits in visit because its product is a bead the human no longer has to triage. |
+| `assets/scripts/first-reaction-dispose.sh` | visit | Performs that disposition and records which one and why. The only writer of `gc.first_reaction*`. It never closes a bead: the close disposition slings the bead to a validating closer. |
+| `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds, or files a visit when it does not. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
 | `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, engage, react, dismiss, demand. |

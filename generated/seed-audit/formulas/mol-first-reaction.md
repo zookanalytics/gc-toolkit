@@ -14,10 +14,10 @@ reaction, and drains.
 2. **Write a CARD**, not prose: `Understanding · Found (freshness-stamped)
    · Proposal · Decision needed · Disposition` — the shape the board lands the
    human on, ending in the one line the terminal step acts on.
-3. **Dispose, don't close.** The reaction ends in ONE of three exits — route
-   the bead to a pool, hold it on an edge, or file a visit — chosen from the
-   card. The work bead stays OPEN either way; closing it would claim the work
-   is done.
+3. **Dispose, don't close.** The reaction ends in ONE of four exits — route
+   the bead to a pool, hold it on an edge, route it to a validating closer, or
+   file a visit — chosen from the card. The reaction never closes the bead
+   itself; where a bead should close, the closer pool confirms and closes it.
 4. **mr-only for code.** A reaction is notes-only by default; code it
    produces takes the gated `mr` path, never `direct`, never a push to main.
 
