@@ -979,7 +979,7 @@ fi
 # The key is exact — a genuine next round is a new review bead with a different
 # source_review_bead — so subsequent reworks are untouched, and the adopt reads
 # the same down/blocks walk the round cap counts from. An unreadable walk yields
-# nothing and falls through to create, the behavior before this guard existed.
+# no adopted child and falls through to create.
 FIX_BEAD=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
   | jq -r --arg r "$REVIEW_BEAD" '
       [ .[]? | select(((.metadata.source_review_bead // "") == $r)
