@@ -949,10 +949,45 @@ if [ -n "$POST_OPEN" ]; then
 else
   TITLE="Rework branch $BRANCH: address pre-open signoff findings"
 fi
-FIX_BEAD=$(gc bd create "$TITLE" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
-if [ -z "$FIX_BEAD" ]; then
-  warn "could not create the rework child; review left open for a retry"
-  exit 2
+# One review bead owns at most one rework child. This path is fully re-runnable
+# — close_review is its last write, and every exit-2 above it (work-order
+# verify, an unproven pour) leaves the review OPEN with a child already filed
+# and its blocks edge already hung. A re-pool then re-enters here, so a create
+# keyed to the same review mints a SECOND child for one finding: the dispatched
+# one lands, the other never dispatches yet still holds a merge-hold edge no
+# close cancels. Adopt the open child that already answers this review instead.
+# The key is exact — a genuine next round is a new review bead with a different
+# source_review_bead — so subsequent reworks are untouched, and the adopt reads
+# the same down/blocks walk the round cap counts from. An unreadable walk yields
+# nothing and falls through to create, the behavior before this guard existed.
+FIX_BEAD=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
+  | jq -r --arg r "$REVIEW_BEAD" '
+      [ .[]? | select(((.metadata.source_review_bead // "") == $r)
+                       and (((.status // "open") | ascii_downcase) != "closed")) ]
+      | sort_by(.created_at // .id) | (.[0].id // empty)' 2>/dev/null)
+if [ -n "$FIX_BEAD" ]; then
+  # A child that already read back a pour (gc.execution_routed_to stamped) is in
+  # flight: only close_review was still owed. Re-stamping or re-slinging it would
+  # stomp a live worktree or double-dispatch the molecule, so close and stop.
+  ADOPT_ROUTE=$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")
+  if [ -n "$ADOPT_ROUTE" ]; then
+    echo "signoff: rework child $FIX_BEAD (source_review_bead=$REVIEW_BEAD) was already dispatched to $ADOPT_ROUTE; closing the review it left open, filing no second child"
+    close_review
+    echo "signoff: request-changes recorded on $ANCHOR (round $((ROUNDS + 1))/$CAP) — rework $FIX_BEAD already dispatched to $ADOPT_ROUTE"
+    exit 0
+  fi
+  # Never dispatched: adopt it and finish the dispatch this pass owes. The work
+  # order is re-stamped below, repairing a partial prior write; the round the
+  # child already records is this same round, so it is preserved rather than
+  # advanced, and refilled only if that prior write never landed one.
+  echo "signoff: adopting existing open rework child $FIX_BEAD for review $REVIEW_BEAD (a prior attempt filed it but never dispatched); filing no second child"
+  [ -n "$(row_meta "$(bd_json show "$FIX_BEAD")" rejection_reason)" ] && REJECTION_REASON=""
+else
+  FIX_BEAD=$(gc bd create "$TITLE" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+  if [ -z "$FIX_BEAD" ]; then
+    warn "could not create the rework child; review left open for a retry"
+    exit 2
+  fi
 fi
 
 # The stamped fields ARE the work order: branch/target say what to resume and
@@ -966,10 +1001,12 @@ META=(
   --set-metadata "anchor_bead=$ANCHOR"
   --set-metadata "branch=$BRANCH"
   --set-metadata "target=$FIX_TARGET"
-  --set-metadata "rejection_reason=$REJECTION_REASON"
   --set-metadata "source_review_bead=$REVIEW_BEAD"
   --set-metadata "merge_strategy=mr"
 )
+# Always set on a fresh child; empty only when adopting one that already records
+# its round, which is kept rather than overwritten with a later round's number.
+[ -n "$REJECTION_REASON" ] && META+=(--set-metadata "rejection_reason=$REJECTION_REASON")
 if [ -n "$POST_OPEN" ]; then
   META+=(--set-metadata "existing_pr=$PR_URL" --set-metadata "pr_url=$PR_URL" --set-metadata "pr_number=$PR_NUMBER")
 fi
@@ -978,7 +1015,13 @@ gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 # The child must BLOCK the anchor. Recorded the other way round it waits on an
 # anchor that closes only once the rework lands, so nothing ever claims it, and
 # count_rounds, which walks the anchor's dependencies, cannot see it either.
-gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
+# Skip when the edge is already there: an adopted child carries it from the
+# prior attempt, and a second identical edge is one the round-count walk sees
+# twice.
+if ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
+     | jq -e --arg f "$FIX_BEAD" 'any(.[]?; .id == $f)' >/dev/null 2>&1; then
+  gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
+fi
 
 # Point the fix unit at every finding it answers: the many-to-one relation and
 # the close ordering (bd refuses to close a blocked issue, so no finding closes

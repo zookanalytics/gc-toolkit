@@ -336,6 +336,11 @@ anchor_meta() { # <k=v>... — stamp the anchor before the run
     mv "$STUB_STORE.n" "$STUB_STORE"
   done
 }
+# A rework child of tk-anc as store JSON, and the blocks edge that hangs it on
+# the anchor. The round cap counts these children, and the idempotency guard
+# reads the same walk to find an open child that already answers a review.
+kid() { printf ',{"id":"c%s","status":"%s","assignee":"","metadata":{%s},"notes":""}' "$1" "$2" "$3"; }
+seed_cap_deps() { for c in "$@"; do printf 'tk-anc|%s|blocks\n' "$c" >> "$STUB_DEPS"; done; }
 
 # --- approve, post-open --------------------------------------------------------
 echo "# approve post-open"
@@ -704,10 +709,68 @@ eq "$rc" 2 "a child with no blocks edge exits 2"
 has "$out" "blocks_edge" "the refusal names the missing edge"
 eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
 
-# --- the round cap ---------------------------------------------------------------
-kid() { printf ',{"id":"c%s","status":"%s","assignee":"","metadata":{%s},"notes":""}' "$1" "$2" "$3"; }
-seed_cap_deps() { for c in "$@"; do printf 'tk-anc|%s|blocks\n' "$c" >> "$STUB_DEPS"; done; }
+# --- request-changes is idempotent on source_review_bead ------------------------
+# One review owns one rework child. The verdict path is re-runnable — close is
+# its last write, and the exits above it leave the review OPEN with a child
+# already filed and its edge already hung — so a re-pool must adopt that child,
+# never mint a twin the landing sibling's close cannot cancel.
 
+echo "# the exit-2-then-retry sequence adopts the orphan instead of filing a second child"
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+# First pass: the pour reports success but never stamps the route, so signoff
+# files the child, hangs its edge, and exits 2 with the review left open.
+out=$(STUB_SLING_NOPOUR=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "first pass exits 2 — the pour did not read back"
+eq "$(status rv-1)" "in_progress" "the review is left open for a retry"
+eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "the first pass filed exactly one child"
+eq "$(meta fix-1 source_review_bead)" "rv-1" "the orphan names this review"
+eq "$(meta fix-1 gc.execution_routed_to)" "<absent>" "the orphan was never dispatched"
+# Second pass: the same review, re-pooled and re-claimed, re-enters here. Forget
+# the first pass's create/sling logs so the assertions read only the retry.
+: > "$STUB_CREATED"; : > "$STUB_GC_LOG"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the retry exits 0"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "the retry files NO second child"
+has "$out" "adopting existing open rework child fix-1" "…it adopts the orphan by name"
+eq "$(meta fix-1 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the adopted orphan is dispatched on the retry"
+has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat fix-1 --on mol-polecat-work" "…the retry slings the SAME child"
+eq "$(status rv-1)" "closed" "the review closes once the adopted child is dispatched"
+eq "$(grep -c 'tk-anc|fix-1|blocks' "$STUB_DEPS")" "1" "exactly one edge holds the anchor — no duplicate accrued"
+
+echo "# an open child for a DIFFERENT review is not adopted — a genuine next round files its own"
+reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-OLD","branch":"polecat/tk-1","target":"main"')"
+seed_cap_deps c9
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes for a new review exits 0"
+eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "a fresh child is filed for this review"
+eq "$(meta fix-1 source_review_bead)" "rv-1" "…naming THIS review, not the older one"
+eq "$(meta c9 gc.execution_routed_to)" "<absent>" "the other review's child is left untouched"
+eq "$(meta c9 task_kind)" "<absent>" "…and its work order is not rewritten"
+
+echo "# an adopted child a prior pass already dispatched is not re-slung (no double-dispatch)"
+reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main","gc.execution_routed_to":"rig/gc-toolkit.polecat"')"
+seed_cap_deps c9
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "exits 0 — only the review close was still owed"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no second child is filed"
+hasnt "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat c9" "the in-flight child is not re-slung"
+has "$out" "already dispatched" "…the notice says the child was already dispatched"
+eq "$(status rv-1)" "closed" "the review is closed"
+
+echo "# the orphan's recorded round survives adoption — it is not advanced to the next"
+reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main","rejection_reason":"signoff requested changes (round 1): first pass"')"
+seed_cap_deps c9
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "adopt-and-dispatch exits 0"
+eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the orphan is adopted and dispatched"
+eq "$(meta c9 rejection_reason)" "signoff requested changes (round 1): first pass" "its recorded round is preserved, not overwritten"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no second child is filed"
+
+# --- the round cap ---------------------------------------------------------------
 echo "# round cap trips at 3 (default)"
 reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
 seed_cap_deps c1 c2 c3
