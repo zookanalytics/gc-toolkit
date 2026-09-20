@@ -60,7 +60,7 @@ REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
 CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-codex}"
 INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
 
-# Review dispatch formula (tk-ehhpkh two-lane pilot). Default mol-review — the
+# Review dispatch formula (two-lane pilot). Default mol-review — the
 # single-agent lifecycle. Opt into the quorum by setting
 # REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff: reviews then run
 # as two provider lanes (codex + claude by default) plus a synthesizer that

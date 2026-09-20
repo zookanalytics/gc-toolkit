@@ -879,7 +879,7 @@ oid x11 > "$GH_DIR/head_polecat_x11"
 run >/dev/null
 eq "$(pinned X11)" "progressing@$(oid x11)" "a green lane with an open validation pass records progressing, not settled"
 
-echo "# --review-formula + --sling-var forward the two-lane quorum pilot through the pour (tk-ehhpkh)"
+echo "# --review-formula + --sling-var forward the two-lane quorum pilot through the pour"
 store "[$(anchor P1 pre_open_gate "" "" polecat/p1)]"
 oid p1 > "$GH_DIR/head_polecat_p1"
 : > "$STUB_GC_LOG"

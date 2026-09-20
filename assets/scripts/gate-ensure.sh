@@ -50,7 +50,7 @@ REVIEW_POOL=""
 FIX_POOL=""
 # Extra formula vars forwarded verbatim to the pour (repeatable --sling-var
 # k=v). Empty on the default mol-review path; the caller passes the two-lane
-# quorum pilot's lane config when --review-formula fans out (tk-ehhpkh).
+# quorum pilot's lane config when --review-formula fans out.
 SLING_VARS=()
 while [ $# -gt 0 ]; do
   case "$1" in
