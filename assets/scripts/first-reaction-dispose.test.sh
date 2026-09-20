@@ -29,7 +29,32 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
-  "bd update") printf 'UPDATE %s\n' "$*" >> "$FAKE_LOG" ;;
+  "bd update")
+    printf 'UPDATE %s\n' "$*" >> "$FAKE_LOG"
+    # Model read-after-write for gc.recommended_formula so the script's read-back
+    # guard can be exercised: apply the set/unset to the state file a later
+    # `bd show` reflects. FAKE_DROP_RECO models a silent drop — the update still
+    # reports success but the key does not move: =once drops only the first
+    # recommendation write (so a retry lands), any other value drops them all.
+    _prev=""; _reco_set=""; _reco_unset=""
+    for _a in "$@"; do
+      case "$_prev" in
+        --set-metadata)   case "$_a" in gc.recommended_formula=*) _reco_set="${_a#gc.recommended_formula=}" ;; esac ;;
+        --unset-metadata) [ "$_a" = "gc.recommended_formula" ] && _reco_unset=1 ;;
+      esac
+      _prev="$_a"
+    done
+    if [ -n "$_reco_set" ] || [ -n "$_reco_unset" ]; then
+      _drop=""
+      case "${FAKE_DROP_RECO:-}" in
+        once) [ -e "$FAKE_STATE.dropped" ] || { _drop=1; : > "$FAKE_STATE.dropped"; } ;;
+        ?*)   _drop=1 ;;
+      esac
+      if [ -z "$_drop" ]; then
+        [ -n "$_reco_set" ]   && printf '%s' "$_reco_set" > "$FAKE_STATE"
+        [ -n "$_reco_unset" ] && : > "$FAKE_STATE"
+      fi
+    fi ;;
   "bd create")
     printf 'CREATE %s\n' "$*" >> "$FAKE_LOG"
     [ -n "${FAKE_CREATE_FAILS:-}" ] && { printf '{"error":"nope"}\n'; exit 0; }
@@ -40,7 +65,15 @@ case "$1 ${2:-}" in
     printf '{"rigs":[{"name":"gc-toolkit","path":"%s","prefix":"tk"}]}\n' "${FAKE_RIG_PATH:-/nonexistent-rig}" ;;
   "bd show")
     printf 'SHOW %s\n' "$*" >> "$FAKE_LOG"
-    printf '%s\n' "${FAKE_SHOW_JSON:-[{\"id\":\"tk-sub\",\"metadata\":{}}]}" ;;
+    # Overlay the current gc.recommended_formula state (set by bd update above)
+    # onto the fixture, so a read-back sees what the last write actually did.
+    _base="${FAKE_SHOW_JSON:-$DEFAULT_SHOW}"
+    _reco="$(cat "$FAKE_STATE" 2>/dev/null || printf '')"
+    if [ -n "$_reco" ]; then
+      printf '%s' "$_base" | jq -c --arg v "$_reco" '.[0].metadata = ((.[0].metadata // {}) + {"gc.recommended_formula": $v})' 2>/dev/null || printf '%s\n' "$_base"
+    else
+      printf '%s' "$_base" | jq -c '.[0].metadata = ((.[0].metadata // {}) | del(.["gc.recommended_formula"]))' 2>/dev/null || printf '%s\n' "$_base"
+    fi ;;
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
     printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
@@ -93,10 +126,22 @@ chmod +x "$TMP/deferred"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/log"
+export FAKE_STATE="$TMP/reco_state"
+# The subject fixture when a test sets no FAKE_SHOW_JSON. Held in a variable
+# because a literal `{}` inside a ${var:-default} confuses brace matching and
+# yields malformed JSON.
+export DEFAULT_SHOW='[{"id":"tk-sub","metadata":{}}]'
 export GC_HELM_TOOL="$TMP/helm" GC_DEFERRED_DISPATCH_TOOL="$TMP/deferred" \
        GC_PROACTIVE_TOOL="$TMP/proactive"
 
-run() { : > "$FAKE_LOG"; RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"; }
+# Reset per run, then seed the recommendation state from the fixture so the first
+# `bd show` matches FAKE_SHOW_JSON and later writes mutate it from there.
+run() {
+  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.dropped"
+  printf '%s' "${FAKE_SHOW_JSON:-$DEFAULT_SHOW}" \
+    | jq -r '(.[0].metadata // {})["gc.recommended_formula"] // ""' > "$FAKE_STATE" 2>/dev/null || : > "$FAKE_STATE"
+  RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")";
+}
 
 # ── Usage: refuse before writing ─────────────────────────────────────────────
 # Every refusal below happens with an empty log: a disposition that cannot be
@@ -338,8 +383,10 @@ run tk-sub --disposition ruling --reason "retire the PR, supersede its anchor �
 eq "$RC" "0" "(RECO) a ruling that carries a recommendation succeeds"
 has "gc.recommended_formula=mol-x" "$LOG" "(RECO) the recommended formula is stamped on the subject"
 has "gc.first_reaction=ruling" "$LOG" "(RECO) …alongside the disposition record"
-eq "$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1)" "$(( $(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1) - 1 ))" \
-   "(RECO) …in the record write, before the act"
+RECO_UL=$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1); RECO_HL=$(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1)
+{ [ -n "$RECO_UL" ] && [ -n "$RECO_HL" ] && [ "$RECO_UL" -lt "$RECO_HL" ]; } \
+   && ok "(RECO) …in the record write, before the act" \
+   || bad "(RECO) …in the record write, before the act (UPDATE=$RECO_UL HELM=$RECO_HL)"
 has "--waiting-on tk-visit1" "$LOG" "(RECO) …and the visit still holds the subject"
 
 # Discuss-only ruling: no --recommended-formula, nothing is stamped, the visit
@@ -371,6 +418,45 @@ eq "$RC" "0" "(RECO) a retry that re-recommends succeeds"
 has "gc.recommended_formula=mol-new" "$LOG" "(RECO) …and the record carries the new recommendation"
 hasnt "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …with no stale-clear, because the ruling names one"
 unset FAKE_SHOW_JSON
+
+# ── The recommendation must land before the act (read-back guard) ─────────────
+# gc.recommended_formula is presence-sensitive downstream, so a silently dropped
+# write is a wrong operator affordance, not a cosmetic miss. The bulk record
+# write reports success without proving this one key moved, so the exit reads it
+# back, retries the lone set/unset once, and refuses before the act if it is
+# still wrong — the record stands, so the command re-runs.
+export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+
+# A set that silently drops and never recovers: the act is withheld, so nothing
+# files a recommendation visit the operator could only Discuss.
+export FAKE_DROP_RECO=1
+run tk-sub --disposition ruling --reason "operator authority" \
+    --takeaway "recommend: execute via mol-x — Accept or Discuss" \
+    --visit tk-visit1 --recommended-formula mol-x
+eq "$RC" "4" "(RECOGUARD) a silently dropped recommendation set refuses the exit"
+hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so no Discuss-only visit is filed"
+has "did not land" "$ERR" "(RECOGUARD) …and the refusal names the key that did not land"
+unset FAKE_DROP_RECO
+
+# The same drop, but the lone retry lands it: the act proceeds.
+export FAKE_DROP_RECO=once
+run tk-sub --disposition ruling --reason "operator authority" \
+    --takeaway "recommend: execute via mol-x — Accept or Discuss" \
+    --visit tk-visit1 --recommended-formula mol-x
+eq "$RC" "0" "(RECOGUARD) a set that lands on the retry lets the act proceed"
+has "HELM takeaway tk-sub" "$LOG" "(RECOGUARD) …the act runs once the recommendation is confirmed"
+unset FAKE_DROP_RECO
+
+# A stale-clear that silently drops and never recovers: the act is withheld, so a
+# Discuss-only retry never leaves a superseded Accept executable.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"ruling","gc.recommended_formula":"mol-old"}}]'
+export FAKE_DROP_RECO=1
+run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
+    --takeaway "needs a ruling: which default" --visit tk-visit1
+eq "$RC" "4" "(RECOGUARD) a silently dropped stale-clear refuses the exit"
+hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so the superseded Accept is never left executable"
+has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the stale key that did not clear"
+unset FAKE_DROP_RECO FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests reuse the visit edge
 
 # --recommended-formula belongs to the ruling exit only: the other two route or
 # hold the bead, neither gates a visit the operator Accepts.

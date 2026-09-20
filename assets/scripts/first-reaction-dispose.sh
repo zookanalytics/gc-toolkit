@@ -318,13 +318,51 @@ set -- --set-metadata "gc.first_reaction=$DISPOSITION" \
        --set-metadata "gc.first_reaction_reason=$REASON" \
        --set-metadata "gc.first_reaction_target=$TARGET" \
        --set-metadata "gc.first_reaction_at=$(now_utc)"
+# RECO_WANT is what gc.recommended_formula must read back as after this write:
+# the named mol on a recommending ruling, empty (absent) when a disposition
+# names none and clears a stale one. RECO_TOUCHED marks that this write changed
+# the key, so the read-back below runs only when it did.
+RECO_WANT=""; RECO_TOUCHED=""
 if [ -n "$RECOMMENDED_FORMULA" ]; then
     set -- "$@" --set-metadata "gc.recommended_formula=$RECOMMENDED_FORMULA"
+    RECO_WANT="$RECOMMENDED_FORMULA"; RECO_TOUCHED=1
 elif [ -n "$(subject_meta gc.recommended_formula)" ]; then
     set -- "$@" --unset-metadata "gc.recommended_formula"
+    RECO_TOUCHED=1
 fi
 gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
     || die "could not record the disposition on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
+
+# ── The recommendation must be true before the act ───────────────────
+# gc.recommended_formula is presence-sensitive: the operator's Accept and
+# converse-invalidate-recommendation.sh read it with has(). The bulk update
+# above reports success without proving this one key moved, and a silent drop
+# is invisible until the operator meets the wrong affordance — a dropped set
+# files a recommendation visit that offers only Discuss, a dropped stale-clear
+# leaves a superseded Accept executable. So read it back, retry the lone
+# set/unset once, and refuse before the act if it is still wrong; the record
+# stands, so this command re-runs.
+if [ -n "$RECO_TOUCHED" ]; then
+    reco_now() {
+        gc_bd show "$BEAD" --json 2>/dev/null | scrub \
+            | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.recommended_formula"] // "") else "" end' 2>/dev/null || printf ''
+    }
+    if [ "$(reco_now)" != "$RECO_WANT" ]; then
+        if [ -n "$RECO_WANT" ]; then
+            gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$RECO_WANT" >/dev/null 2>&1 || true
+        else
+            gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 || true
+        fi
+    fi
+    RECO_GOT="$(reco_now)"
+    if [ "$RECO_GOT" != "$RECO_WANT" ]; then
+        if [ -n "$RECO_WANT" ]; then
+            die "the recommendation did not land on $BEAD: gc.recommended_formula reads '${RECO_GOT:-<unset>}', not '$RECO_WANT'. The operator's Accept reads this key, so the act is withheld rather than leave the operator a recommendation visit that offers only Discuss. The record stands — clear the cause and re-run this command."
+        else
+            die "the stale recommendation did not clear on $BEAD: gc.recommended_formula still reads '$RECO_GOT'. A Discuss-only ruling must not leave a superseded Accept executable, so the act is withheld. The record stands — clear the cause and re-run this command."
+        fi
+    fi
+fi
 
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
