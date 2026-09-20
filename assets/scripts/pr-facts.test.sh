@@ -1253,6 +1253,23 @@ eq "$(meta "$FID1" 'finding.disposition')" "unvalidated" "…unruled until the v
 grep -qxF "new-2|blocks|$FID1" "$STUB_DEPS" && ok "…and the rework child (the fix unit) blocks it, so closing the fix closes the finding" || bad "rework child does not block the finding (wire-fix-unit missing)"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1")] | length' "$STUB_STORE")" "1" "…one comment, one finding — no twin"
 
+echo "# a wire-fix-unit that fails holds the batch unwatermarked, so the next pass re-attempts the edge"
+# The fix-unit -> finding wire is a required write, not the anchor edge's
+# best-effort companion: a finding later ruled must-fix blocks the anchor, and
+# only this edge lets closing the child release it. A failed wire holds the
+# batch — the finding is filed (upsert re-adopts it next pass) and the mark does
+# not advance past the comment it answers, so the wire is retried before it does.
+store "[$(anchor Vw 87)]"
+printf '%s' "$(prview 87 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_87.json"
+echo '[]' > "$GH_DIR/reviews_87.json"
+printf '[{"id":8870,"user":{"login":"human1"},"body":"still not what I asked for"}]' > "$GH_DIR/comments_87.json"
+out=$(STUB_DEP_FAIL="new-2" run)
+has "$out" "could not wire rework child new-2" "the failed wire is reported, not swallowed"
+has "$out" "NOT watermarking" "…and the batch is held to retry"
+eq "$(meta Vw pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the wire holds, so it retries"
+FIDW=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "Vw") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FIDW" "<none>" "…while the finding is already filed, so the next pass re-adopts it rather than twinning"
+
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic codex,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
 # finding.lane == check_name and a human batch's findings are finding.lane=human,

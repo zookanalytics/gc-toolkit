@@ -1703,10 +1703,18 @@ $CBODY"
     # A rework child carrying the batch is the fix unit for the findings it
     # answers: it blocks each one, so closing it unblocks them the way a codex
     # rework child does (specs/tk-ztapg/review-cycle-architecture.md, "The fix
-    # unit"). A visit-routed batch has no fix unit; a human answers it.
+    # unit"). A visit-routed batch has no fix unit; a human answers it. The wire
+    # is a required write, fail-closed like the finding filing above: a finding
+    # the validator later rules must-fix blocks the anchor, and only the fix-unit
+    # edge lets closing the child release it, so a lost wire strands the anchor
+    # blocked with nothing to unblock it. A failed wire holds the batch
+    # unwatermarked — upsert re-adopts the filed findings and wire-fix-unit,
+    # idempotent, re-attempts only the missing edges next pass.
     if [ "$choice" = rework ] && [ -n "${CFIX:-}" ] && [ -n "$FINDING_IDS" ]; then
-      "$FINDING" wire-fix-unit --fix-unit "$CFIX" --anchor "$id" --findings "$FINDING_IDS" >/dev/null 2>&1 \
-        || echo "$PROG: WARN $id — could not wire rework child $CFIX to findings $FINDING_IDS; it still holds the merge by its anchor edge" >&2
+      if ! "$FINDING" wire-fix-unit --fix-unit "$CFIX" --anchor "$id" --findings "$FINDING_IDS" >/dev/null 2>&1; then
+        echo "$PROG: WARN $id — PR#$num could not wire rework child $CFIX to findings $FINDING_IDS; NOT watermarking (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
     fi
 
     # The batch boundary goes down WITH the disposition that names it. Derived
