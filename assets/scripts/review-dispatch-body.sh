@@ -12,23 +12,30 @@ set -uo pipefail
 
 usage() {
   cat >&2 <<'U'
-usage: review-dispatch-body.sh [--note <text>]
+usage: review-dispatch-body.sh [--note <text>] [--formula <name>]
 
 Prints the review bead's dispatch note on stdout.
 
-  --note <text>   Dispatch-specific context appended as a final section.
+  --note <text>      Dispatch-specific context appended as a final section.
+  --formula <name>   The review formula being attached (default mol-review).
+                     mol-review emits the single-agent method note; any other
+                     formula (e.g. the two-lane quorum) emits a note that
+                     defers method and verdict path to that formula's steps.
 U
 }
 
 NOTE=""
+FORMULA="mol-review"
 while [ $# -gt 0 ]; do
   case "$1" in
     --note) NOTE="${2-}"; shift 2 || shift ;;
+    --formula) FORMULA="${2:-mol-review}"; shift 2 || shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "review-dispatch-body: unknown argument '$1'" >&2; usage; exit 2 ;;
   esac
 done
 
+if [ "$FORMULA" = "mol-review" ]; then
 cat <<'H'
 ## Method: `formulas/mol-review.toml`
 
@@ -56,6 +63,24 @@ because a rebase took your pinned commit off the branch, do not re-submit the
 same verdict: review the head it names and write the verdict that commit
 earns.
 H
+else
+cat <<'H' | sed "s|__FORMULA__|$FORMULA|g"
+## Method: `formulas/__FORMULA__.toml`
+
+This is a **dispatched signoff review** conducted by the `__FORMULA__`
+formula, attached to this bead at dispatch (`gc sling --on __FORMULA__`). The
+formula's step descriptions ARE the method — follow the step you hold, in
+order. Do not substitute a review-shaped skill from your catalog, and do not
+improvise a verdict path: the formula decides how the review is conducted,
+how many lanes read the diff, and which of its steps makes the single verdict.
+
+**Recovery:** if you hold this bead with no poured workflow, run
+`gc formula show __FORMULA__` and follow its steps in order.
+
+**What to review** is on this bead's metadata: `pr_number` (post-open) or
+`review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
+H
+fi
 
 if [ -n "$NOTE" ]; then
   echo
