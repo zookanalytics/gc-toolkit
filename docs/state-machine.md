@@ -441,10 +441,13 @@ so a key written only for open pull requests would miss the majority of them.
 | `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
 | `settled` | every declared gate reads `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `wedged-exception` | `merge_hold` stands with `signoff_cap` beside it: the convergence cap parked the anchor and routed it to a person, and no automated actor will lift it |
-| `wedged-veto` | a non-city `CHANGES_REQUESTED` stands with the signoff round cap spent, so nothing will file further rework |
 
-The two wedge shapes are separate values because they are released by different
-things, and a reader that has to act on one must not re-derive which it is.
+`wedged-exception` names the anchor's wedge in the value itself: no automated
+actor will move it, and the value says what releases it, so a reader acts
+without re-deriving the shape. A standing non-city `CHANGES_REQUESTED` is not a
+wedge — the city answers it by filing rework every round without bound, so the
+anchor reads `progressing`, and the standing review is carried on the posture
+axis.
 
 **Dated keys.** `pr.machine` and `pr_posture` carry a third component,
 `<value>@<oid>@<since>`, under one write rule that `lifecycle.sh --set-dated`

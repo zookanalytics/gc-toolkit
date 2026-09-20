@@ -828,11 +828,12 @@ export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 
-echo "# machine axis: a standing veto is a wedge only once the round cap is spent"
-# The live shape of the seventh wedged anchor: gates green at the live head, a
-# non-city CHANGES_REQUESTED standing, and the signoff round cap spent, so
-# nothing will file further rework and nothing reads the review to decide
-# whether it was answered.
+echo "# machine axis: a standing veto is progressing — the city reworks without bound"
+# Gates green at the live head, a non-city CHANGES_REQUESTED standing. Answering
+# it is the city's move: signoff files a rework child every round and bounds
+# nothing, so the anchor is moving whatever the count of past rework children.
+# The standing review is read off the posture axis; the machine axis says only
+# that an automated actor will act.
 store "[$(anchor V1 80), $(rev V1),
         {\"id\":\"rw-v1a\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-a\"}},
         {\"id\":\"rw-v1b\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-b\"}},
@@ -842,61 +843,11 @@ printf '%s' "$(prview 80 OPEN CLEAN)" > "$GH_DIR/pr_view_80.json"
 printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_80.json"
 out=$("$SUT" 2>&1)
 has "$out" "standing CHANGES_REQUESTED" "the veto still holds"
-has "$out" "rework rounds 3/3" "…and the pass names the round count it decided on"
-eq "$(pinned V1)" "wedged-veto@sha-80" "a veto past the cap records the veto wedge"
+eq "$(pinned V1)" "progressing@sha-80" "a standing veto records progressing, whatever the past rework-child count"
 case "$(machine V1)" in
   *@*@20[0-9][0-9]-*Z) ok "…dated at the turn it began" ;;
   *) bad "no @<since> component: '$(machine V1)'" ;;
 esac
-
-echo "# …and under the cap it is a hold something will still answer"
-store "[$(anchor V2 81), $(rev V2),
-        {\"id\":\"rw-v2a\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-a\"}}]"
-printf 'rw-v2a|blocks|V2\n' > "$STUB_DEPS"
-printf '%s' "$(prview 81 OPEN CLEAN)" > "$GH_DIR/pr_view_81.json"
-printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_81.json"
-out=$("$SUT" 2>&1)
-eq "$(pinned V2)" "progressing@sha-81" "a veto under the cap is progressing — signoff can still file rework"
-
-echo "# the cap a veto is measured against is signoff's, floor and all"
-# signoff.sh counts rework rounds since the operator's last feedback: the rounds
-# filed before it are a floor it subtracts, because they answered a review that
-# feedback had not yet given. A veto weighed against the raw total wedges an
-# anchor whose next verdict would file another round.
-kid() { printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"source_review_bead":"%s"}}' "$1" "$2"; }
-store "[$(anchor V8 87 ',"signoff_round_floor":"3@batch-1","signoff_rounds_reset":"batch-1"'), $(rev V8),
-        $(kid rw-v8a rev-a), $(kid rw-v8b rev-b), $(kid rw-v8c rev-c), $(kid rw-v8d rev-d)]"
-printf 'rw-v8a|blocks|V8\nrw-v8b|blocks|V8\nrw-v8c|blocks|V8\nrw-v8d|blocks|V8\n' > "$STUB_DEPS"
-printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
-printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_87.json"
-out=$("$SUT" 2>&1)
-has "$out" "rework rounds 1/3" "the rounds a floor retired are not counted against the cap"
-eq "$(pinned V8)" "progressing@sha-87" "…so a veto signoff will answer again is progressing, not a wedge"
-
-echo "# …and feedback signoff has not answered yet retires every round so far"
-# pr-facts.sh records the batch the moment it routes the feedback; the floor is
-# written by the verdict after it. Between the two the anchor carries rounds the
-# cap no longer counts and a floor that predates them.
-store "[$(anchor V9 88 ',"signoff_round_floor":"0@batch-1","signoff_rounds_reset":"batch-2"'), $(rev V9),
-        $(kid rw-v9a rev-a), $(kid rw-v9b rev-b), $(kid rw-v9c rev-c)]"
-printf 'rw-v9a|blocks|V9\nrw-v9b|blocks|V9\nrw-v9c|blocks|V9\n' > "$STUB_DEPS"
-printf '%s' "$(prview 88 OPEN CLEAN)" > "$GH_DIR/pr_view_88.json"
-printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_88.json"
-out=$("$SUT" 2>&1)
-has "$out" "rework rounds 0/3" "a batch no verdict has answered retires the rounds filed before it"
-eq "$(pinned V9)" "progressing@sha-88" "…and the anchor reads as progressing until the cap is spent again"
-eq "$(meta V9 signoff_round_floor)" "0@batch-1" "the floor is signoff's stamp; this pass only reads it"
-
-echo "# …and the cap still trips on the rounds that answer the feedback"
-store "[$(anchor V10 89 ',"signoff_round_floor":"3@batch-1","signoff_rounds_reset":"batch-1"'), $(rev V10),
-        $(kid rw-v10a rev-a), $(kid rw-v10b rev-b), $(kid rw-v10c rev-c),
-        $(kid rw-v10d rev-d), $(kid rw-v10e rev-e), $(kid rw-v10f rev-f)]"
-printf 'rw-v10a|blocks|V10\nrw-v10b|blocks|V10\nrw-v10c|blocks|V10\nrw-v10d|blocks|V10\nrw-v10e|blocks|V10\nrw-v10f|blocks|V10\n' > "$STUB_DEPS"
-printf '%s' "$(prview 89 OPEN CLEAN)" > "$GH_DIR/pr_view_89.json"
-printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_89.json"
-out=$("$SUT" 2>&1)
-has "$out" "rework rounds 3/3" "rounds above the floor spend the cap"
-eq "$(pinned V10)" "wedged-veto@sha-89" "…and a veto nothing will answer is the veto wedge"
 
 echo "# a lane short of green is progressing; the cap's park is the wedge"
 # The shared predicate (also gate-ensure.sh's): merge_hold is the literal

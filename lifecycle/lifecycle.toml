@@ -294,9 +294,9 @@ disposition_key = "pr_comment_disposition"
 # pass and prints it to a log; this key is where the answer is kept, so a reader
 # never re-implements two scripts' predicates to learn it.
 machine_key = "pr.machine"
-# The wedge shape is part of the value: both shapes mean no automated actor can
-# move the anchor, and they are released by different things, so a reader that
-# has to act on one must not have to re-derive which it is.
+# The wedge names itself in the value: it means no automated actor can move the
+# anchor, and the value says what releases it, so a reader acts without
+# re-deriving the shape.
 #   progressing       some automated actor will act — a pool-routed blocker is
 #                     open, or a declared lane is short of green
 #   settled           every declared gate reads green; the cadence
@@ -305,9 +305,7 @@ machine_key = "pr.machine"
 #   wedged-exception  merge_hold stands with signoff_cap beside it: the cap
 #                     parked the anchor and routed it to a person, and no
 #                     automated actor will lift it
-#   wedged-veto       a non-city CHANGES_REQUESTED stands with the signoff round
-#                     cap spent, so nothing will file further rework
-machines = ["progressing", "settled", "wedged-exception", "wedged-veto"]
+machines = ["progressing", "settled", "wedged-exception"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
 writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"

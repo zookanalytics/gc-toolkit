@@ -2203,13 +2203,13 @@ func TestClosedMergeAnchorIsNotACoverageGap(t *testing.T) {
 	}
 }
 
-// TestWedgedAnchorIsOwedAndNamed covers both wedge shapes.
+// TestWedgedAnchorIsOwedAndNamed covers the exception wedge.
 //
-// The exception wedge is the state six of the seven wedged anchors were in, and
-// five of those six had no pull request open, which is why the row is keyed on
-// the anchor and carries the branch instead. The veto wedge is the seventh.
-// Neither was visible as anything but "routed to a person", which reads the
-// same for an anchor awaiting a ruling and for one nothing will ever move.
+// It is the state six of the seven wedged anchors were in, and five of those
+// six had no pull request open, which is why the row is keyed on the anchor and
+// carries the branch instead. It was visible as nothing but "routed to a
+// person", which reads the same for an anchor awaiting a ruling and for one
+// nothing will ever move.
 func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	wedgedAt := fixtureNow.Add(-72 * time.Hour)
 	anchors := []Anchor{
@@ -2220,12 +2220,6 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 			"merge_hold":     "true",
 			"signoff_cap":    "codex",
 			"blocked_reason": "signoff did not converge after 3 rework rounds (cap 3)",
-		}),
-		mergeAnchor("tk-veto", map[string]string{
-			"pr.machine": dated(MachineWedgedVeto, headLive, wedgedAt),
-			"pr_number":  "513",
-			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
-			"pr_posture": dated(postureChangesRequested, headLive, wedgedAt),
 		}),
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
@@ -2256,24 +2250,37 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	if !strings.Contains(exc.Frontier, "owed 3d") {
 		t.Errorf("the row carries the age the queue is sorted by, got %q", exc.Frontier)
 	}
+}
+
+// TestStandingVetoIsProgressingNotOwed. A non-city CHANGES_REQUESTED is not a
+// wedge: the city answers it by filing rework every round without bound, so
+// merge.sh records `progressing`, and the row is not the operator's until a fix
+// moves the head and the posture returns it as review_required. The standing
+// review travels on the posture axis; the machine axis says only that the
+// anchor is moving. An open PR still leads with its number and link.
+func TestStandingVetoIsProgressingNotOwed(t *testing.T) {
+	at := fixtureNow.Add(-72 * time.Hour)
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-veto", map[string]string{
+			"pr.machine": dated(MachineProgressing, headLive, at),
+			"pr_number":  "513",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
+			"pr_posture": dated(postureChangesRequested, headLive, at),
+		}),
+	}, fixtureNow, false, nil, Facts{})
 
 	veto := mustTile(t, b, "tk-veto")
-	if veto.PRMachine != MachineWedgedVeto {
-		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineWedgedVeto)
+	if veto.PRMachine != MachineProgressing {
+		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineProgressing)
 	}
-	if !veto.Owed {
-		t.Error("a veto past the rework cap is owed: signoff will file nothing further")
+	if veto.Owed {
+		t.Error("a standing CHANGES_REQUESTED is the city's move to answer, not the operator's")
 	}
-	if !strings.Contains(veto.Needs, "CHANGES_REQUESTED") {
-		t.Errorf("needs must name the veto, got %q", veto.Needs)
+	if !strings.Contains(veto.Needs, "merge cadence") {
+		t.Errorf("needs reads as progressing, got %q", veto.Needs)
 	}
 	if veto.PRNumber != 513 || veto.PRURL == "" {
 		t.Errorf("an open PR carries its number and link, got %d / %q", veto.PRNumber, veto.PRURL)
-	}
-	// The branch does not stop being true once the PR opens: the number is what
-	// a surface leads with, not the only thing it may hold.
-	if veto.PRBranch != "polecat/tk-veto" {
-		t.Errorf("pr_branch = %q, want the branch an open PR is still cut from", veto.PRBranch)
 	}
 }
 
@@ -2665,7 +2672,7 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 	old := fixtureNow.Add(-96 * time.Hour)
 	recent := fixtureNow.Add(-2 * time.Hour)
 	b := BuildBoard([]Anchor{
-		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedVeto, headLive, recent)}),
+		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedException, headLive, recent)}),
 		{ID: "tk-big", Title: "a container that outranks everything", Kind: "epic", Source: "epic",
 			Rig: "gc-toolkit", Prefix: "tk", Children: func() []Child {
 				out := make([]Child, 40)

@@ -1,6 +1,6 @@
 ---
 name: Round-cap retirement and park migration
-description: Record of retiring the signoff review-round cap (tk-p82tvo) — what was removed from signoff.sh, pr-facts.sh, and the docs; the live migration of the five parked anchors to merge_hold + a visit; the reader surface left to the marker-removal beads; and the wedged-veto follow-up. Implements the "What this retires" list in specs/tk-ztapg/review-cycle-architecture.md.
+description: Record of retiring the signoff review-round cap (tk-p82tvo) — what was removed from signoff.sh, pr-facts.sh, and the docs; the live migration of the five parked anchors to merge_hold + a visit; the reader surface left to the marker-removal beads; and the retirement of merge.sh's wedged-veto machine value. Implements the "What this retires" list in specs/tk-ztapg/review-cycle-architecture.md.
 ---
 
 # Round-cap retirement and park migration
@@ -86,11 +86,26 @@ carries `signoff_cap`, but they belong to the marker-removal carves, not here:
 - `assets/scripts/migrate-lane-states.sh` and the `exception@` marker grammar
   (`doctor/check-gate-integrity`) are the marker layer's to delete.
 
-## Follow-up: wedged-veto reads the retired round fields
+## Retiring the wedged-veto machine value
 
-`merge.sh`'s `wedged-veto` arm reads `signoff_round_floor` /
-`signoff_rounds_reset` / `GC_MAX_REVIEW_ROUNDS` to classify a standing non-city
-`CHANGES_REQUESTED`. With the writers gone it degrades to counting raw rework
-children from a floor of 0 against the default cap of 3 — it does not break, but
-"rounds spent" is no longer a maintained concept. Filed as tk-3ydcmp so the
-design owner rules whether `wedged-veto` retires too or re-bases on a raw count.
+`merge.sh`'s veto arm classified a standing non-city `CHANGES_REQUESTED` by
+counting `source_review_bead` rework children against `GC_MAX_REVIEW_ROUNDS`,
+subtracting a floor read from `signoff_round_floor` / `signoff_rounds_reset`.
+With the cap's writers gone the floor never advances, so the count degrades to a
+raw child count against a default of 3 — the retired round-cap conclusion under
+a new name, which the design's "no sixth state for a human"
+(`specs/tk-ztapg/review-cycle-architecture.md`) rules out. So the value retires
+with the count rather than re-basing on it (the question tk-3ydcmp raised).
+
+The veto arm records `progressing`: the city answers a rejecting review by
+filing rework every round without bound, so an automated actor will act until
+the reviewer clears the review or a fix moves the head. The standing review is
+carried on the posture axis (`pr_posture=changes_requested`), which `prOwed`
+excludes from the operator's queue on purpose — answering it is the city's move.
+
+Removed: `GC_MAX_REVIEW_ROUNDS` and the round arithmetic in `merge.sh`; the
+`wedged-veto` value from `lifecycle/lifecycle.toml` `[machine_axis]`,
+`services/helm` (`derive.go`, `model.go`, `web/src/contract.ts`), `docs/state-machine.md`
+and `services/helm/README.md`; and the tests that pinned it. Only
+`wedged-exception` remains, still produced by the `merge_hold=signoff_cap` reader
+this bead leaves for the marker-removal carves.
