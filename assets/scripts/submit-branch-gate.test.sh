@@ -10,7 +10,7 @@
 #      fresh work; nothing resolvable fails closed (never a self-merge).
 #   3. ATOMIC HANDOFF — one gc bd update carries target + refinery assignee
 #      + cleared route + APPENDED notes; a partial handoff cannot ship.
-#   4. CHAIN CLOSE — six session-owned steps close forward via step-close.sh
+#   4. CHAIN CLOSE — five session-owned steps close forward via step-close.sh
 #      at ALL THREE terminal exits (handoff, the auto_push=false halt, and the
 #      store-only exit), and workflow-finalize is never touched.
 #   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
@@ -769,7 +769,12 @@ esac
 if [ -n "${FAKE_REFUSE:-}" ] && [ "$step" = "$FAKE_REFUSE" ]; then
   echo "step-close: FATAL — not this session's bead for $step" >&2; exit 2
 fi
-if [ -n "$blocker" ] && ! grep -qx "mol-polecat-work.$blocker" "$FAKE_CLOSED"; then
+# self-review is not in the polecat's chain-close list — the orchestrator closes
+# the ralph control on convergence — so a blocker of self-review counts as closed
+# when it is recorded in FAKE_ENGINE_CLOSED, which stands in for that engine close.
+if [ -n "$blocker" ] \
+  && ! grep -qx "mol-polecat-work.$blocker" "$FAKE_CLOSED" \
+  && ! grep -qx "mol-polecat-work.$blocker" "${FAKE_ENGINE_CLOSED:-/dev/null}"; then
   echo "  ${step}: updating issue: cannot close blocked issue: blocked by [$blocker]" >&2
   exit 2
 fi
@@ -781,6 +786,12 @@ printf '%s\n' "$step" >> "$FAKE_CLOSED"
 exit 0
 STEPCLOSE
 chmod +x "$TMP/pack/assets/scripts/step-close.sh"
+
+# The orchestrator closes the self-review ralph control on convergence, before
+# submit-and-exit's session runs its chain-close, so self-review is not in the
+# loop's list. This file stands in for that engine close: it satisfies the
+# submit-and-exit blocker the fake enforces, without the loop having closed it.
+printf 'mol-polecat-work.self-review\n' > "$TMP/engine-closed"
 
 printf '%s\n' "$CLOSE" > "$TMP/close.sh"
 bash -n "$TMP/close.sh" \
@@ -802,19 +813,23 @@ run_close() {
   local rc=0
   GC_PACK_DIR="${2-$TMP/pack}" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_REFUSE="${1-}" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
-    FAKE_LOG="$TMP/log" \
+    FAKE_LOG="$TMP/log" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$TMP/close-run.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')"
 }
 # steps the loop TRIED, regardless of outcome — proves it did not abort early.
 attempted() { sed 's/^mol-polecat-work\.//' "$TMP/attempted" | tr '\n' ',' | sed 's/,$//'; }
 
-ALL_SIX="load-context,workspace-setup,preflight-tests,implement,self-review,submit-and-exit"
+# The five steps this session owns and closes forward. self-review is absent by
+# design: it is the ralph control the orchestrator closes on convergence, and the
+# fake treats it as engine-closed (FAKE_ENGINE_CLOSED above), which is what lets
+# submit-and-exit — blocked by self-review — close at the end of the loop.
+LOOP_STEPS="load-context,workspace-setup,preflight-tests,implement,submit-and-exit"
 
 # THE ORDER. Forward is the only order bd permits: the chain can unwind only
 # from the unblocked end, and closing each step is what unblocks the next.
-eq "$(run_close)" "0|$ALL_SIX" \
-   "closes all six session-owned steps, forward order, load-context first"
+eq "$(run_close)" "0|$LOOP_STEPS" \
+   "closes the five session-owned steps, forward order, load-context first"
 
 # submit-and-exit closes LAST. It is workflow-finalize's only blocker, so
 # reaching it is what arms the control-dispatcher finalizer as the backstop.
@@ -834,19 +849,21 @@ esac
 eq "$(run_close >/dev/null; sed -n '/^UPDATE|/p' "$TMP/log" | tr '\n' ';')" "" \
    "writes nothing to any bead (the work bead stays the refinery's)"
 
-# A refusal must not abort the loop. Refusing the FIRST step is the worst case:
-# every later step is then blocked, so nothing closes at all — but all six must
-# still be attempted and the block must exit 0.
+# A refusal must not abort the loop. Refusing the FIRST step blocks its inline
+# successors (workspace-setup..implement), but submit-and-exit still closes — its
+# blocker is self-review, which the engine closed — so one step closes, all five
+# are still attempted, and the block still exits 0.
 REFUSED_FIRST="$(run_close mol-polecat-work.load-context)"
-eq "$REFUSED_FIRST|$(attempted)" "0||$ALL_SIX" \
-   "a refusal on the first step: nothing closes, but all six are still attempted"
+eq "$REFUSED_FIRST|$(attempted)" "0|submit-and-exit|$LOOP_STEPS" \
+   "a refused load-context blocks its inline successors, but submit-and-exit still closes; all five attempted"
 
-# A refusal mid-chain closes everything up to it and blocks the rest, and still
-# must not abort.
+# A refusal mid-chain closes the inline steps up to it. submit-and-exit is not an
+# inline successor of implement — its blocker is the engine's self-review — so it
+# still closes; only the refused implement is skipped. The loop must not abort.
 REFUSED_MID="$(run_close mol-polecat-work.implement)"
 eq "$REFUSED_MID|$(attempted)" \
-   "0|load-context,workspace-setup,preflight-tests|$ALL_SIX" \
-   "a refusal mid-chain: predecessors close, successors block, loop continues"
+   "0|load-context,workspace-setup,preflight-tests,submit-and-exit|$LOOP_STEPS" \
+   "a refused implement skips only itself; submit-and-exit closes via the engine's self-review; loop continues"
 
 # No step-close.sh on any candidate path must fail loudly rather than drain
 # with the chain silently open — that is the failure this whole section exists
@@ -860,14 +877,15 @@ eq "$(run_close '' "$TMP/nonexistent")" "1|" \
 # being "simplified" back.
 : > "$TMP/closed"; : > "$TMP/attempted"; : > "$TMP/log"
 printf 'set -e\n%s\n' "$CLOSE" \
-  | sed 's/^for STEP in .*; do$/for STEP in submit-and-exit self-review implement preflight-tests workspace-setup load-context; do/' \
+  | sed 's/^for STEP in .*; do$/for STEP in submit-and-exit implement preflight-tests workspace-setup load-context; do/' \
   > "$TMP/close-rev.sh"
 GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
   FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_LOG="$TMP/log" \
+  FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
   bash "$TMP/close-rev.sh" > "$TMP/out" 2>&1 || true
 eq "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')" \
-   "load-context" \
-   "control: dependent-first closes only load-context (bd refuses blocked issues)"
+   "submit-and-exit,load-context" \
+   "control: dependent-first closes only the two unblocked ends (submit-and-exit via the engine's self-review, load-context via no blocker); the middle stays blocked"
 
 # The done sequence lives ONLY in this formula now (the native polecat prompt
 # points at it instead of duplicating it), so there is no prompt-fragment copy
@@ -889,7 +907,7 @@ run_halt() {
   local rc=0
   FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
     GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
-    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$1" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
 }
@@ -902,15 +920,15 @@ bash -n "$TMP/halt.sh" \
   && ok "extracted auto_push=false arm is syntactically valid bash" \
   || bad "extracted halt arm failed bash -n"
 
-# THE REGRESSION. The six closes must happen, and they must happen after the
+# THE REGRESSION. The five closes must happen, and they must happen after the
 # bead is parked and before the session drains.
 HALT_RC="$(run_halt "$TMP/halt.sh")"
 eq "$HALT_RC" "0" "halt arm exits 0"
-eq "$(trace)" "UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
-   "halt arm parks the bead, closes six steps, THEN drains"
+eq "$(trace)" "UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "halt arm parks the bead, closes five steps, THEN drains"
 eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
-   "$ALL_SIX" \
-   "halt arm closes the same six steps, forward order"
+   "$LOOP_STEPS" \
+   "halt arm closes the same five steps, forward order"
 
 # The bead write is the halt's whole point and is unchanged by this: branch and
 # target recorded, assignee cleared, branch_ready + halt_reason set so the
@@ -969,7 +987,7 @@ run_store() {
   local script="$1"; shift
   local rc=0
   env "$@" FAKE_BRANCH=main GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
-    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$script" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
 }
@@ -991,15 +1009,15 @@ bash -n "$TMP/store.sh" \
 eq "$(run_store "$TMP/store.sh")|$(trace)" "0|" \
    "empty STORE_ONLY_RECORD: falls through, writes nothing, does not drain"
 
-# THE ARM. Three writes, then the six closes, then the drain — the order is the
+# THE ARM. Three writes, then the five closes, then the drain — the order is the
 # contract, not an accident: metadata bypasses the claim guard, --status=open is
 # accepted from the holder, and only then does the plain --assignee write land.
 eq "$(run_store "$TMP/store-armed.sh")" "0" "store-only arm exits 0"
-eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
-   "store-only arm releases in three writes, closes six steps, THEN drains"
+eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "store-only arm releases in three writes, closes five steps, THEN drains"
 eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
-   "$ALL_SIX" \
-   "store-only arm closes the same six steps, forward order"
+   "$LOOP_STEPS" \
+   "store-only arm closes the same five steps, forward order"
 
 # The writes themselves, and their ORDER, which is the whole reason there are
 # three. A gc bd update that moves the assignee while this session still holds
@@ -1063,7 +1081,7 @@ fi
 
 # CONTROL: the same arm with its chain-close removed still exits 0 and still
 # releases the bead, so only the trace above tells a complete arm from one that
-# leaves six step beads open to be re-offered as new work.
+# leaves five step beads open to be re-offered as new work.
 awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-close$/{f=0; next} !f' \
   "$TMP/store-armed.sh" > "$TMP/store-nochain.sh"
 eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \

@@ -50,11 +50,13 @@ alias, which resolves in every city. Cities that staff a work-health role
   {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
 
-Steps (7):
+Steps (9):
   ├── mol-polecat-work.load-context: Load context and verify assignment
   ├── mol-polecat-work.workspace-setup: Set up worktree and feature branch [needs: mol-polecat-work.load-context]
   ├── mol-polecat-work.preflight-tests: Verify pre-flights pass on base branch [needs: mol-polecat-work.workspace-setup]
   ├── mol-polecat-work.implement: Implement the solution [needs: mol-polecat-work.preflight-tests]
-  ├── mol-polecat-work.self-review: Self-review and run tests (affected-aware) [needs: mol-polecat-work.implement]
+  ├── mol-polecat-work.self-review.spec: Step spec for Self-review and verify green (affected-aware, bounded check loop) (spec)
+  ├── mol-polecat-work.self-review.iteration.1: Self-review and verify green (affected-aware, bounded check loop) [needs: mol-polecat-work.implement]
+  ├── mol-polecat-work.self-review: Self-review and verify green (affected-aware, bounded check loop) [needs: mol-polecat-work.implement, mol-polecat-work.self-review.iteration.1]
   ├── mol-polecat-work.submit-and-exit: Submit work to refinery and exit [needs: mol-polecat-work.self-review]
   └── mol-polecat-work.workflow-finalize: Finalize workflow [needs: mol-polecat-work.submit-and-exit]
