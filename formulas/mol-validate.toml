@@ -195,10 +195,22 @@ dependency edge by hand:
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition deferred --reason "<why fixing now is riskier than deferring>"
   ```
 - **declined** — not a real objection: cosmetic, already handled on this branch,
-  or mistaken. `finding.sh` closes it with the reason and no edge.
+  or mistaken. A MACHINE finding is closed with the reason and no edge:
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined --reason "<why this is not an objection>"
   ```
+  A HUMAN finding you would decline is escalated, never declined. When this pass's
+  lane is `human` — each finding's `finding.source` begins `human:` — the person
+  who raised the objection is the only one who may withdraw it, so you do not
+  overrule it. Hold it must-fix, so it keeps holding the merge, and file a visit
+  that refers it to that person to confirm or withdraw:
+  ```bash
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition must-fix
+  "$SCRIPTS/escalate.sh" --subject <F> --key "human-finding-referred.<F>" --message "The validator judged this operator-raised finding not actionable: <why>. A human objection is not the validator's to dismiss, so it is held must-fix and referred to you: confirm it and it becomes work, or withdraw it by closing finding <F>."
+  ```
+  A human comment that states no objection at all — an acknowledgement, praise, or
+  a question the diff already answers — is not an objection to hold: decline it
+  with that reason, the same as a machine finding.
 
 **Check every exit status.** `finding.sh set-disposition` stamps the
 disposition FIRST and wires the edge second, so a non-zero exit can leave a
@@ -207,7 +219,10 @@ looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
 exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
-leave the chain open for the next claim to resume.
+leave the chain open for the next claim to resume. A non-zero exit from an
+`escalate.sh` referral stops the pass the same way: the finding holds the merge
+must-fix, but the person it was referred to never heard, so leave the chain open
+to retry rather than closing over a referral that did not file.
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
 to the merge predicate, so an objection you neither must-fixed nor declined is

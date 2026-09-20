@@ -69,7 +69,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -1243,6 +1243,15 @@ eq "$(meta V1 signoff_rounds_reset)" "<absent>" "the round-cap reset is gone —
 eq "$(meta V1 'check.codex')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
 eq "$(meta V1 pr_comment_disposition)" "rework:new-2" "the comments still route to work (the pass is opened after, as new-3)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+# …and the comment becomes a finding the validator rules, the shape a machine
+# review's finding has (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
+FID1=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID1" "<none>" "the comment becomes a task_kind=finding bead on the anchor"
+eq "$(meta "$FID1" 'finding.lane')" "human" "…on the human lane the validator's finding query selects (finding.lane == check_name)"
+eq "$(meta "$FID1" 'finding.source')" "human:human1" "…sourced to the login that raised it, so a decline is escalated to them, not overruled"
+eq "$(meta "$FID1" 'finding.disposition')" "unvalidated" "…unruled until the validator rules it"
+grep -qxF "new-2|blocks|$FID1" "$STUB_DEPS" && ok "…and the rework child (the fix unit) blocks it, so closing the fix closes the finding" || bad "rework child does not block the finding (wire-fix-unit missing)"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1")] | length' "$STUB_STORE")" "1" "…one comment, one finding — no twin"
 
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic codex,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by

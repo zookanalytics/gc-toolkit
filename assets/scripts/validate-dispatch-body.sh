@@ -55,7 +55,9 @@ anchor), `check_name` (the lane whose batch this pass rules), and `reviewed_oid`
 
 **What the pass writes**: a `finding.disposition` on each finding via
 `finding.sh set-disposition` (must-fix, deferred, or declined — decisions 1 and
-2), and one convergence outcome via `review-outcome.sh` whose shape follows
+2; a human-sourced finding it would decline is held must-fix and referred to the
+operator by a visit instead, since only they may withdraw their own objection),
+and one convergence outcome via `review-outcome.sh` whose shape follows
 `check_name` (decision 3). A reviewer's lane batch backs its lane (`back-lane`)
 on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
 review is warranted. A `human` batch is anchor-wide: unconverged, it supersedes
