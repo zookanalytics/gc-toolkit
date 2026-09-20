@@ -282,8 +282,14 @@ measures it met. That is what this primitive is.
 To goal-keeper v1 (tk-tutb46), pack-level formulas and scripts, no engine
 change:
 
-- The contract serialization: a `goal.toml` block or bead metadata. This spec
-  fixes the required fields, not the file format.
+- The contract serialization. The locked contract (oracle, invariants, and
+  budget) is written to a target-branch committed artifact (for example
+  `specs/<goal-bead>/goal.toml`) that the keeper reads for itself; those
+  fields never live in worker-writable bead metadata, where an iteration
+  could forge the lock. Only mutable operational state (iteration count,
+  verdict trail, budget consumed, the last not-yet reason) lives in bead
+  metadata or the repo trail. This spec fixes the required fields and where
+  each lives, not the file format.
 - The spawn-on-not-yet wiring: which formula pours the next iteration, and how
   the reason is threaded into the next work bead's dispatch note.
 - Session policy: iterations are pool-routed for fresh context; the iteration
