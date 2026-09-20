@@ -533,8 +533,10 @@ Rules:
   `max_active_sessions` slot; it reaps only an UNATTACHED pane, so a
   closed-visit sitting you are still attached to waits until it is no
   longer attended. A health restart can still take a held sitting
-  mid-thread, and `wake_mode = "fresh"` means the respawn starts clean
-  with the thread gone. So the sign-off has to land before you close, not after;
+  mid-thread, and the kill clears the scrollback; whether the respawn
+  replays the thread or starts clean depends on the template's
+  `wake_mode`, so no sitting may rely on the thread surviving. The
+  sign-off has to land before you close, not after;
   stamp the takeaway when the hold BEGINS (step 5); append the
   outcome as soon as a sitting settles anything (step 6); and never leave
   a decision live only in the thread. Assume every message may be the last
