@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/pr-open.sh — pre_open_gate -> pull_request.
-# Covers: adopting an existing OPEN or MERGED PR (flip only, one lifecycle
-# transition, never a twin); refusing fork/foreign/uncertifiable rows; the
-# closed-unmerged headstone (fresh PR + supersede note; same-head close is a
-# human decision left alone); holds gating the create path; the all-lanes-green
-# gate over every gate the anchor declares, which no head move disturbs; the
-# moved-head refusal on the created PR; and the comment-not-approval verdict
-# replay.
+# Covers: adopting an existing OPEN or MERGED PR (one lifecycle transition, never
+# a twin) and refreshing an OPEN PR's body from the anchor's current pr_summary
+# before the flip (the marked region re-spliced, operator text and pr-stack's
+# section kept, a failed edit holding the anchor, a pre-markers body left alone);
+# refusing fork/foreign/uncertifiable rows; the closed-unmerged headstone (fresh
+# PR + supersede note; same-head close is a human decision left alone); holds
+# gating the create path; the all-lanes-green gate over every gate the anchor
+# declares, which no head move disturbs; the moved-head refusal on the created
+# PR; the comment-not-approval verdict replay; and the de-duplicated ## Summary
+# heading.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -72,6 +75,52 @@ out=$("$SUT" 2>&1)
 has "$out" "none is ours (name collision)" "the fork row is refused, not adopted"
 eq "$(meta A3 merge_result)" "pre_open_gate" "the anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR is opened into the collision"
+
+echo "# adopting an OPEN PR refreshes its stale body from the current pr_summary"
+# A rework restamped pr_summary and the anchor returned to pre_open_gate with the
+# original PR still open. The body the create wrote carries the OLD summary
+# between its markers; adoption re-splices the current one before the flip and
+# leaves text outside the markers — an operator note, pr-stack's own section —
+# in place.
+store "[$(pre RF1 polecat/rf1 ',"pr_summary":"NEW: the republished summary after the rework."')]"
+STALE1=$(printf '%s\n' \
+  '<!-- gc:pr-summary -->' '## Summary' '' 'OLD: the summary from before the rework.' '' \
+  '## Refinery handoff' '' '- Issue: RF1' '<!-- /gc:pr-summary -->' '' \
+  '<!-- gc:branch-beads -->' '## Beads on this branch' '- RF1' '<!-- /gc:branch-beads -->' '' \
+  'Operator note: keep this line.')
+prrow 71 OPEN polecat/rf1 sha-rf1 main | jq --arg b "$STALE1" '. + {body:$b}' > "$GH_DIR/pr_view_71.json"
+printf '[%s]' "$(prrow 71 OPEN polecat/rf1 sha-rf1 main)" > "$GH_DIR/pr_list_polecat_rf1.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF1 merge_result)" "pull_request" "the anchor flips after the refresh"
+newbody=$(jq -r '.body' "$GH_DIR/pr_view_71.json")
+has "$newbody" "NEW: the republished summary after the rework." "the current pr_summary reached the published body"
+hasnt "$newbody" "OLD: the summary from before the rework." "…and the stale summary is gone"
+has "$newbody" "Operator note: keep this line." "operator text outside the markers is preserved"
+has "$newbody" "## Beads on this branch" "pr-stack's appended section is preserved"
+has "$(cat "$STUB_GH_LOG")" "pr edit 71" "the body was edited in place, not re-created"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no twin PR"
+
+echo "# a body refresh that fails to land holds the anchor at pre_open_gate"
+store "[$(pre RF2 polecat/rf2 ',"pr_summary":"NEW: a summary that never lands."')]"
+STALE2=$(printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'OLD summary.' '<!-- /gc:pr-summary -->')
+prrow 72 OPEN polecat/rf2 sha-rf2 main | jq --arg b "$STALE2" '. + {body:$b}' > "$GH_DIR/pr_view_72.json"
+printf '[%s]' "$(prrow 72 OPEN polecat/rf2 sha-rf2 main)" > "$GH_DIR/pr_list_polecat_rf2.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_EDIT_RC=1 "$SUT" 2>&1)
+eq "$(meta RF2 merge_result)" "pre_open_gate" "a failed body edit leaves the anchor at pre_open_gate"
+has "$out" "body refresh failed to land" "…and says why"
+
+echo "# a pre-markers body is adopted untouched, never duplicated"
+store "[$(pre RF3 polecat/rf3 ',"pr_summary":"NEW: the summary a legacy body predates."')]"
+STALE3=$(printf '%s\n' '## Summary' '' 'Legacy body with no markers.')
+prrow 73 OPEN polecat/rf3 sha-rf3 main | jq --arg b "$STALE3" '. + {body:$b}' > "$GH_DIR/pr_view_73.json"
+printf '[%s]' "$(prrow 73 OPEN polecat/rf3 sha-rf3 main)" > "$GH_DIR/pr_list_polecat_rf3.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF3 merge_result)" "pull_request" "a legacy body still flips (adoption is not blocked on it)"
+has "$out" "predates the gc:pr-summary markers" "…and reports it was left alone"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 73" "no edit to a body it cannot splice"
 
 echo "# holds gate the create path"
 store "[$(pre B1 polecat/b1 ',"merge_hold":"true"')]"
@@ -179,6 +228,21 @@ has "$body" "## Summary"$'\n'$'\n'"Compares heads instead of branch names, so a 
 has "$body" "<summary>Dispatch — what this work was asked to do</summary>" "the dispatch text is demoted, not dropped"
 has "$body" "d E1" "…and it is still in the body"
 has "$body" "## Refinery handoff" "the handoff block is unchanged"
+has "$body" "<!-- gc:pr-summary -->" "the composed body is wrapped in a managed-region marker"
+has "$body" "<!-- /gc:pr-summary -->" "…closed by its end marker, so an adoption can re-splice it"
+
+echo "# a pr_summary that repeats the ## Summary heading is not published under two"
+# Some polecats open their pr_summary with a Summary heading of their own; the
+# region writes one already, so the stored one is stripped rather than doubled.
+store "[$(pre E4 polecat/e4 ',"pr_summary":"## Summary\n\nDe-duplicates the heading the region writes."'), $(rev E4)]"
+echo "sha-e4" > "$GH_DIR/head_polecat_e4"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/84"
+printf '%s' "$(prrow 84 OPEN polecat/e4 sha-e4 main)" > "$GH_DIR/pr_view_84.json"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#84" "the PR was opened"
+body=$(cat "$GH_DIR/pr_create_body.txt")
+has "$body" "## Summary"$'\n'$'\n'"De-duplicates the heading the region writes." "the stored heading is stripped; the region's own remains"
+hasnt "$body" "## Summary"$'\n'$'\n'"## Summary" "no doubled Summary heading"
 
 echo "# no carried summary keeps today's body"
 # The current text is a poor summary, not an empty one: an anchor whose handoff
