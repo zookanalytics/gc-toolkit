@@ -18,11 +18,11 @@ this bead.*
 ## Amendments
 
 *This doc is the live design authority for `agents/converse/`
-(`agents/converse/PROVENANCE.md`), so it has to read true. Three things in it
-were overtaken by decisions recorded after it landed. The body below is left as
-written — it is the point-in-time record of what was designed on 2026-07-29 —
-and these are the deltas. Each is a decision already recorded elsewhere; nothing
-here is new judgment.*
+(`agents/converse/PROVENANCE.md`), so it has to read true. Four things in it
+were overtaken or refined by decisions recorded after it landed. The body below
+is left as written — it is the point-in-time record of what was designed on
+2026-07-29 — and these are the deltas. Each is a decision already recorded
+elsewhere; nothing here is new judgment.*
 
 - **The `gc.attention` flag is gone; the board is not.** Operator decision
   2026-08-08 removed the flag and the flag-this-for-attention concept
@@ -49,6 +49,18 @@ here is new judgment.*
   addendum; glossary in `docs/gascity-human-engagement.md`). The pack's two nouns
   are **subject** and **visit** — `mol-visit.toml`, `task_kind=visit`. Read every
   "turn" below as "visit". Mechanism unchanged.
+- **The per-visit procedure loads as on-demand skills.** The converse prompt
+  (`agents/converse/prompt.template.md`) holds the preamble, the Definitions
+  (including the shared hand-back shape), the entry claim (step 1), the Rules,
+  and an explicit step-to-skill routing table; steps 2–8 — the working
+  procedure for each visit — live in `skills/converse-*`, loaded when the step
+  runs. This is packaging, not new semantics: Key Component 3's step table
+  still governs what each step does. The routing table names each step's skill
+  explicitly, so the two correctness-critical steps — step 5's demand gate and
+  step 7's stamp-then-close — are reached by instruction, never by
+  description-matching. Operator ruling on tk-jntzwt: a structure that loads on
+  demand beats holding a prose diet in the always-on prompt, because a diet
+  decays and a structure does not.
 
 ---
 
