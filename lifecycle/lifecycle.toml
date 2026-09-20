@@ -554,8 +554,8 @@ keys = [
 #   the review BEAD it filed the child from, and gate-ensure's already-answered
 #   probe counts a child by that key. pr-facts.sh
 #   stamps source_review = the comma-joined GitHub review ids whose bodies its
-#   child carries verbatim, a comment batch rather than a signoff round, so it
-#   counts against no cap. Neither is cleared.
+#   child carries verbatim, a comment batch rather than a signoff round.
+#   Neither is cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a
@@ -577,9 +577,8 @@ keys = [
 #   these now. Registered so that residue on a pre-retirement bead reads as
 #   known, not as a stray.
 # dispatch_count / dispatch_backstop.<g> — RETIRED. gate-ensure.sh removed the
-#   review dispatch ceiling, so nothing writes these now; the cap-reset sweep in
-#   signoff.sh and pr-facts.sh still `--unset`s any residue a pre-retirement
-#   store carries. Registered so that residue reads as known, not as a stray.
+#   review dispatch ceiling, so nothing writes these now. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
 
 [metadata.review_findings]
 # A finding is a review objection with an identity of its own, so it outlives

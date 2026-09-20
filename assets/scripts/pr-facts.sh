@@ -1439,8 +1439,7 @@ $CBODY"
     # pass and holds a fresh whole-diff review off the anchor while the validator
     # rules the batch, so the batch buys no re-review of its own
     # (specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane backwards").
-    # This arm does not touch signoff.sh's cap, floor or park; those are retired
-    # on signoff.sh's own side.
+    # This arm does not touch an operator's own hold.
     #
     # The pass is a task_kind=validation bead anchored to $id — the shape
     # gate-ensure.sh's open_validation_pass reads — carrying check_name=human and
