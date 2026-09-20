@@ -489,6 +489,27 @@ out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "an operator's own hold still vetoes the dispatch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 
+echo "# …and so does an armed re-dispatch: the anchor is parked, waiting to re-offer when ready (tk-79ffoh)"
+# gc.dispatch_when_ready is deferred-dispatch's arm marker. While it is set the
+# anchor is deliberately parked and this branch is superseded by a pending
+# re-pour, so a rework minted here would be non-hand-offable: a polecat can only
+# refuse it, and the pool re-offers the refusal until a human clears it.
+store "[$(anchor FA1 95 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]"
+printf '%s' "$(prview 95 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_95.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "the anchor is armed to re-dispatch when ready (gc.dispatch_when_ready=rig/gc-toolkit.polecat); no rework dispatched" "an armed anchor vetoes the stale-base dispatch"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+eq "$(meta FA1 merge_result)" "pull_request" "…while the anchor keeps gating, so the merge still waits"
+
+echo "# …and the SAME anchor without the arm dispatches a rework — the arm is the only thing holding it"
+store "[$(anchor FA1 95)]"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "filed rebase-mode rework" "with no arm, the conflict dispatches a rework"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…exactly one child, now that nothing holds it"
+
 echo "# CONFLICTING under the cap's own park: no conflict rework, and the feedback opens a pass"
 # The cap park (merge_hold=signoff_cap paired with signoff_cap) is not a person's
 # hold, so `continue`ing on it the way a person's hold does would skip the
@@ -1154,6 +1175,17 @@ out=$(run)
 has "$(cat "$STUB_ESC_LOG")" "rebase_hold freezes the branch" "an operator branch freeze routes to the human, not the pool"
 eq "$(meta H5 pr_comment_disposition)" "visit:new-2" "…and the visit is what is recorded"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work dispatched against the frozen branch"
+
+echo "# …and so does an armed re-dispatch: feedback goes to a visit, never a rework on a superseded branch (tk-79ffoh)"
+store "[$(anchor FA2 76 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]"
+printf '%s' "$(prview 76 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_76.json"
+echo '[]' > "$GH_DIR/reviews_76.json"
+printf '[{"id":8600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_76.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
+out=$(run)
+has "$(cat "$STUB_ESC_LOG")" "the anchor is armed to re-dispatch when ready" "an armed anchor routes feedback to the human, not the pool"
+has "$(meta FA2 pr_comment_disposition)" "visit:" "…and the visit is what is recorded, not a rework"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no rework dispatched against the superseded branch"
 
 echo "# …a visit that did not take the stamp is NOT watermarked past"
 store "[$(anchor H4 53 ',"gc.routed_to":"human"')]"
@@ -2291,6 +2323,23 @@ store "[$(anchor RC6 55 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 55 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_55.json"
 out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "a held anchor dispatches nothing"
+
+echo "# …and an armed re-dispatch files no red-check rework either — the branch is superseded (tk-79ffoh)"
+# GH_DIR fixtures outlive the per-case store reset, so PR#75's feedback batch
+# from upthread is still present; clear it so this case exercises the red-check
+# arm alone. Feedback on an armed anchor is FA2's case, where it routes to a
+# visit and opens a validation pass that this plain new- count would catch.
+rm -f "$GH_DIR/comments_75.json" "$GH_DIR/reviews_75.json"
+store "[$(anchor FA3 75 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]"
+printf '%s' "$(prview 75 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_75.json"
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "an armed anchor dispatches no red-check rework"
+
+echo "# …and the SAME anchor without the arm files one — the arm is the only thing standing the red check down"
+store "[$(anchor FA3 75)]"
+out=$(run)
+has "$out" "required check(s) failing (test); filed rebase-mode rework" "with no arm, the red check dispatches a rework"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…exactly one child, now that nothing holds it"
 
 echo "# …a BLOCKED PR on a red required check routes too (the filed incident's state)"
 store "[$(anchor RC8 57)]"

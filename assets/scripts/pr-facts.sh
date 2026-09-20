@@ -644,6 +644,15 @@ while IFS= read -r row; do
   # A graduation is the integration-to-main case whatever its branch is named, so
   # the CONFLICTING arm classifies on this as well as on the branch.
   grad=$(printf '%s' "$row" | jq -r '.metadata.graduation // ""')
+  # deferred-dispatch's arm marker (deferred-dispatch.sh): the pool this work
+  # re-offers to once it reads bd-ready, set while the anchor waits and cleared
+  # when the reconcile pass slings it. While set, the anchor is deliberately
+  # parked and this PR's branch is superseded by the pending re-dispatch, so the
+  # dispatch arms below stand down on it as they do for a merge_hold or a live
+  # demand: a rework minted against a branch about to re-pour is non-hand-offable,
+  # so a polecat can only refuse it and the pool re-offers the refusal until a
+  # human clears it.
+  armed=$(printf '%s' "$row" | jq -r '.metadata["gc.dispatch_when_ready"] // ""')
 
   # --- pinned identity read (same shape as merge.sh) ----------------------------
   PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
@@ -1041,6 +1050,10 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but an open demand holds it for a person's decision; no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
+    if [ -n "$armed" ]; then
+      echo "$PROG: $id — PR#$num conflicts but the anchor is armed to re-dispatch when ready (gc.dispatch_when_ready=$armed); no rework dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
     fix_branch="${head_ref:-$branch}"
     if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
       echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
@@ -1285,6 +1298,7 @@ GATES
     is_held "$hold"         && why="merge_hold is set"
     [ "$routed" = "human" ] && why="the anchor is already routed to a human"
     [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
+    [ -n "$armed" ]         && why="the anchor is armed to re-dispatch when ready"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
     CSRC=$(feedback_reviews "$revs_raw" "$rwm")
     DISP=""
@@ -1794,6 +1808,7 @@ GATES
       [ "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')" = "human" ] \
         && rc_why="the anchor is already routed to a human"
       takeaway_is_holding "$id" && rc_why="a sitting holds it for an operator ruling"
+      [ -n "$armed" ]           && rc_why="the anchor is armed to re-dispatch when ready"
       # A held or human-steered anchor is theirs; file nothing under it, exactly
       # as the conflict and feedback arms stand down on the same gates.
       if [ -z "$rc_why" ]; then
