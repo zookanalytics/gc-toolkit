@@ -27,7 +27,9 @@
 # left — a reviewer that dies after claim, a fix unit filed with its edge
 # reversed — stop the PR moving and are caught by liveness-sweep.sh's stale-gate
 # pass, not by a count on the gate.
-# Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
+# Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>]
+#       [--review-formula <name>] [--sling-var k=v ...]. The formula defaults to
+#       mol-review; --sling-var forwards formula vars verbatim to the pour.
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
 set -u
@@ -46,14 +48,24 @@ DEFAULT_CHECK_SET="codex"
 REVIEW_FORMULA="mol-review"
 REVIEW_POOL=""
 FIX_POOL=""
+# Extra formula vars forwarded verbatim to the pour (repeatable --sling-var
+# k=v). Empty on the default mol-review path; the caller passes the two-lane
+# quorum pilot's lane config when --review-formula fans out.
+SLING_VARS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --default)     DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
-    --review-pool) REVIEW_POOL="${2:-}"; shift 2 ;;
-    --fix-pool)    FIX_POOL="${2:-}"; shift 2 ;;
+    --default)        DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
+    --review-pool)    REVIEW_POOL="${2:-}"; shift 2 ;;
+    --fix-pool)       FIX_POOL="${2:-}"; shift 2 ;;
+    --review-formula) REVIEW_FORMULA="${2:-mol-review}"; shift 2 ;;
+    --sling-var)      SLING_VARS+=("${2:-}"); shift 2 ;;
     *) shift ;;
   esac
 done
+# Pre-build the repeatable --var args once; every review dispatched this pass
+# reuses them. The +"${..[@]}" guard keeps set -u happy on the empty default.
+SLING_VAR_ARGS=()
+for _v in ${SLING_VARS[@]+"${SLING_VARS[@]}"}; do SLING_VAR_ARGS+=(--var "$_v"); done
 
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
@@ -628,8 +640,10 @@ STRAY
           # Zero roots: a tracking convoy exists but carries no workflow root, so
           # nothing drives the review. Re-sling — this mints the FIRST root; the
           # empty convoy is left in place, contributing none to a later pass's
-          # union.
-          gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" >/dev/null 2>&1
+          # union. Forward the same SLING_VAR_ARGS the fresh dispatch passes: a
+          # --review-formula that marks its lane and synthesis vars required
+          # cannot mint that first root without them.
+          gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} >/dev/null 2>&1
           if pour_ok "$rid" "$REVIEW_POOL"; then
             gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
             dispatched=$((dispatched + 1))
@@ -688,7 +702,7 @@ STRAY
       echo "$PROG: $id adopting unstamped review orphan $RID for gate '$g' (created by a prior pass whose stamp failed)"
     else
       body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$why" 2>/dev/null) || body=""
+      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --note "$why" 2>/dev/null) || body=""
       if [ -n "$body" ]; then
         RID=$(printf '%s' "$body" \
           | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
@@ -726,7 +740,7 @@ STRAY
     # One sling, no retry: a re-pour mints a second workflow root. A pour that
     # does not read back is held; the next pass's stranded arm probes for its
     # tracking convoy before deciding to re-sling.
-    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on "$REVIEW_FORMULA" >/dev/null 2>&1
+    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} >/dev/null 2>&1
     if ! pour_ok "$RID" "$REVIEW_POOL"; then
       echo "$PROG: WARN review $RID pour did not read back; merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue

@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- agents: 17 · formulas: 24
+- agents: 17 · formulas: 25
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -72,8 +72,9 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,568 | 1,142 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 4,781 | 1,195 |
-| [`mol-review`](formulas/mol-review.md) | `city` | 2,627 | 656 |
+| [`mol-review`](formulas/mol-review.md) | `city` | 2,912 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
+| [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,181 | 795 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,840 | 1,210 |
 | [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |
