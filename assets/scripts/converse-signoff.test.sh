@@ -1148,8 +1148,10 @@ have "…and a close that will not take ends the pane rather than re-deriving" \
      'escalate and `gc runtime drain-ack` instead of returning to step 8' "$PROMPT"
 # The turn is being disposed of, not entered. Letting its group land in
 # $SUBJECT re-scopes step 8's re-claim onto a subject this thread never had.
-have "…and a finish does not become what the thread is about" \
-     'action=finish*) ;;' "$PROMPT"
+# The prompt evals the verdict, so the claimer's --sh mode is what keeps the
+# caller's group across a finish (behavior pinned in converse-claim.test.sh).
+have "…and a finish keeps the caller's group, not its own" \
+     '"$_A" = "finish" ] && _G="$_CG"' "$CLAIMER"
 have "the central doc states the fourth verdict" 'action=finish' "$ENGAGE"
 
 

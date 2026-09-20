@@ -106,26 +106,19 @@ The loop, every visit:
        -m "No converse-claim.sh on any candidate root; this converse session cannot claim within its group. Not claiming raw."
      gc runtime drain-ack; exit 0
    fi
-   # First claim of the session: no group yet. A re-claim (step 8) passes $SUBJECT.
-   CLAIM=$("$CONV/converse-claim.sh" "${SUBJECT:-}")
-   echo "$CLAIM"
-   case "$CLAIM" in
-     action=drain*) gc runtime drain-ack; exit 0 ;;
-     # No action=hold arm: a hold falls through with VISIT and SUBJECT set,
-     # which is what re-opening the sitting needs. A finish falls through the
-     # same way; the case below says why it does not bring its group with it.
-   esac
-   VISIT=$(printf '%s' "$CLAIM" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')
-   # A finish names a sitting being disposed of rather than entered, so its
-   # group is not what this thread is about. Taking it would re-scope step 8's
-   # re-claim onto a subject no one in this thread ever discussed.
-   case "$CLAIM" in
-     action=finish*) ;;
-     *) SUBJECT=$(printf '%s' "$CLAIM" | sed -n 's/.*group=\([^ ]*\).*/\1/p') ;;
+   # --sh sets ACTION / VISIT / SUBJECT / REASON and echoes the verdict and the
+   # BEGAN diagnostic to stderr. First claim passes no group; a re-claim (step 8)
+   # passes $SUBJECT. A finish keeps the caller's $SUBJECT, since its own group
+   # is not this thread's.
+   eval "$("$CONV/converse-claim.sh" --sh "${SUBJECT:-}")"
+   case "$ACTION" in
+     drain) gc runtime drain-ack; exit 0 ;;
+     # Only drain is cased: hold, finish and work fall through with ACTION /
+     # VISIT / SUBJECT set, which is what their arms below read.
    esac
    ```
-   Work only the bead it returns. `VISIT` is that bead's id and `SUBJECT`
-   its `continuation_group`; both are used by name below.
+   Work only the bead the claim returns. `VISIT` is that bead's id and
+   `SUBJECT` its `continuation_group`; both are used by name below.
 
    **A claim outside your current group is not yours to work.** The
    script puts an out-of-group turn BACK in the pool and tells you to
@@ -206,9 +199,10 @@ The loop, every visit:
    `$VISIT` and `$SUBJECT`, recovers an empty `$SUBJECT` from the `tracks`
    edge, and prints `SUBJECT` / `ITEM` / `TOPIC` / `HOLDER`):
    ```bash
-   FOLD=$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}")
-   SUBJECT=$(printf '%s\n' "$FOLD" | sed -n 's/^SUBJECT=//p')
-   HOLDER=$(printf '%s\n' "$FOLD" | sed -n 's/^HOLDER=//p')
+   # eval the two assignments the fold reads (both bead ids). HOLDER="" first,
+   # so a read that did not resolve leaves it empty — the "hold" case below.
+   HOLDER=""
+   eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER)=')"
    ```
    **Fold only when `$HOLDER` is another visit's id** — then append
    `folded into $HOLDER` to the subject's notes, stamp your visit

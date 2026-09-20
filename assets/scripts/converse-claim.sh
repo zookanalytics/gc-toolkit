@@ -7,12 +7,16 @@
 # Usage:
 #   converse-claim.sh                 first claim of a session: any group
 #   converse-claim.sh <current-group> re-claim: only this group is workable
+#   converse-claim.sh --sh [group]    the verdict as eval-able assignments
 # Output: one key=value line; exit status says what to do:
 #   action=work   bead=<id> group=<g> [reason=unreleasable]    exit 0
 #   action=hold   bead=<id> group=<g> reason=already-underway [adopted=<ids>] exit 3
 #   action=finish bead=<id> group=<g> reason=outcome-stamped [adopted=<ids>] exit 4
 #   action=drain  reason=no-work                               exit 1
 #   action=drain  reason=out-of-group bead=<id> group=<g>      exit 1
+# With --sh the same verdict prints as shell assignments to eval —
+#   ACTION=<verb> VISIT=<bead> SUBJECT=<group> REASON=<reason>; the exit status
+#   is unchanged and the verdict line still shows on stderr.
 # On the HOLD verdict it ALSO prints, to stderr, a premise-gate diagnostic
 # `premise-gate: BEGAN=<yes|unknown|recheck|no>`: existing_assignment cannot
 # tell a sitting that reached its hold from a claim that died before step 2 ever
@@ -39,15 +43,47 @@ set -u
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
+# >>> eval-safe-quote
+# --sh output is eval'd by the caller, and its ACTION/VISIT/SUBJECT/REASON carry
+# claim- and metadata-derived data. Single-quote every emitted value so eval
+# reads it as one literal string: a group like `g;rm -rf x` stays data, never
+# shell syntax. An embedded single quote becomes the '\'' idiom.
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# <<< eval-safe-quote
+
 PROG="converse-claim"
 
 usage() {
-    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1-}" in
     -h|--help) usage; exit 0 ;;
 esac
+
+# --sh: emit the verdict as eval-able shell assignments rather than the default
+# key=value line, so a caller can `eval "$(converse-claim.sh --sh "$SUBJECT")"`
+# instead of parsing it. This runs the claim ONCE, in the default mode, and
+# translates its one stdout line; the child's stderr (the BEGAN diagnostic and
+# the group-recovery note) flows straight through, and the verdict is echoed
+# there too so the caller still reads it. ACTION / VISIT / SUBJECT / REASON are
+# the four the caller branches on; adopted stays on the verdict echo.
+if [ "${1-}" = "--sh" ]; then
+    shift
+    _CG="${1-}"
+    _OUT=$("$0" "$@")
+    _RC=$?
+    printf '%s: %s\n' "$PROG" "$_OUT" >&2
+    _A=$(printf '%s' "$_OUT" | sed -n 's/.*action=\([^ ]*\).*/\1/p')
+    _V=$(printf '%s' "$_OUT" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')
+    _G=$(printf '%s' "$_OUT" | sed -n 's/.*group=\([^ ]*\).*/\1/p')
+    _R=$(printf '%s' "$_OUT" | sed -n 's/.*reason=\([^ ]*\).*/\1/p')
+    # A finish names a sitting being disposed of, not entered, so its group is
+    # not this thread's — keep the caller's group across it.
+    [ "$_A" = "finish" ] && _G="$_CG"
+    printf 'ACTION=%s\nVISIT=%s\nSUBJECT=%s\nREASON=%s\n' "$(shq "$_A")" "$(shq "$_V")" "$(shq "$_G")" "$(shq "$_R")"
+    exit "$_RC"
+fi
 
 CURRENT_GROUP="${1-}"
 
