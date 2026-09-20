@@ -231,13 +231,16 @@ ROOT=$(gc bd show "$SYNTH_BEAD" --json | jq -r '.[0].metadata["gc.root_bead_id"]
 
 **2. Read both lanes' durable output.** Each lane wrote a
 `review-quorum.lane.v1` object to its step bead's `gc.output_json`. Find the
-two lane step beads under this workflow root by their `gc.review_quorum_lane`
-stamp (`{{lane_one_id}}`, `{{lane_two_id}}`) and read `gc.output_json`
-(`--status closed` is required — a metadata-field query defaults to open only):
+two lane step beads by their `gc.review_quorum_lane` stamp (`{{lane_one_id}}`,
+`{{lane_two_id}}`), scoped to this workflow root in the query. `--status closed`
+is required (a metadata-field query defaults to open only), and `--limit=0`
+lifts the default 50-row cap: lane ids are constant across pours, so a capped
+lookup can fill its page with other molecules' lane beads and read this root's
+completed lane as missing.
 ```bash
 for LANE in {{lane_one_id}} {{lane_two_id}}; do
-  gc bd list --metadata-field gc.review_quorum_lane="$LANE" --status closed --json \
-    | jq -r --arg r "$ROOT" '[.[] | select(.metadata["gc.root_bead_id"]==$r)][0].metadata["gc.output_json"] // empty'
+  gc bd list --metadata-field gc.review_quorum_lane="$LANE" --metadata-field gc.root_bead_id="$ROOT" --status closed --limit=0 --json \
+    | jq -r '.[0].metadata["gc.output_json"] // empty'
 done
 ```
 A lane that is missing, unreadable, or closed `fail` is REDUCED COVERAGE, not
