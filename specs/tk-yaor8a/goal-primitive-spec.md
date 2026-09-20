@@ -87,20 +87,40 @@ which bound tripped.
 live in a committed artifact (for example `specs/<goal-bead>/goal.toml`),
 committed to the target branch before the work that chases it. The lock is
 enforced against that committed copy, never against a value the iteration
-worker can rewrite. An iteration worker can write bead metadata, so a contract
-hash stored there is forgeable: a worker that loosens the oracle updates the
-recorded hash to match, and the keeper would compare a tampered artifact to a
-tampered hash. The keeper instead reads the contract from the target commit,
-which no iteration can rewrite, and compares the iteration's copy against it.
-Measuring every iteration against that immutable original is the
-failing-test-first discipline generalized from a test suite to any oracle: an
-edit to the oracle is a real diff against the target and fails the iteration.
+worker can rewrite. An iteration worker can write bead metadata, so the
+contract is forgeable when stored there, as is any hash or commit pointer that
+names it: a worker that loosens the oracle rewrites the stored value to match,
+and the keeper would compare a tampered artifact to a tampered reference.
+
+**The lock is one pinned commit.** The keeper measures against a single
+immutable commit, the lock commit, pinned when the goal is armed and before the
+first iteration runs. It is not the moving tip of the target branch: that tip
+advances as unrelated work merges over the goal's life, and a keeper that read
+the tip would adopt whatever oracle, invariants, or budget a later merge left
+there, silently moving the definition of done. A commit is content-addressed,
+so the lock commit always yields the same contract and no iteration can make
+that name resolve to different content. The pin itself lives in a keeper-owned
+reference the iteration worker cannot rewrite, such as a protected ref under
+`refs/goals/<goal-bead>/`, never bead metadata, which is disqualified for the
+pointer for the same reason it is disqualified for the contract. Each iteration
+the keeper reads the contract at the lock commit and compares the iteration's
+copy against it; any difference is a real edit to the oracle and fails the
+iteration. This is the failing-test-first discipline generalized from a test
+suite to any oracle.
+
+**A live goal changes only by a deliberate re-lock.** Editing the oracle,
+invariants, or budget commits a new contract and moves the pin to the new lock
+commit through that same keeper-owned reference, recorded in the verdict trail
+as its own event with its provenance. The lock never moves as a side effect of
+the target branch advancing, so a worker's edit to the contract artifact reads
+as gaming while an operator's re-lock reads as a new agreement.
 
 The operational state (current iteration, verdict trail, budget consumed, the
 last not-yet reason) lives on the goal bead's metadata and a repo trail file.
-It is durable so any iteration can crash and the next resumes from it. The
-lock's reference is not part of this mutable state; it is the contract as
-committed on the target branch, which the keeper reads for itself.
+It is durable so any iteration can crash and the next resumes from it. The lock
+commit is not part of this mutable state: its pin is the keeper-owned reference
+above, and the contract is the copy at that commit, which the keeper reads for
+itself.
 
 **Deterministic example.** Goal: p99 read-path latency under 200ms. `oracle` is
 a benchmark command whose measured p99 is compared to 200ms, exit 0 only when
@@ -143,12 +163,13 @@ the judge.
   of its own success as evidence. Agents plant self-assessments and edit tests
   to pass; evidence the judge did not gather itself is not evidence.
 - **The oracle is locked.** Each iteration the keeper compares the contract
-  artifact against the copy committed on the target branch, gathering that
-  reference itself rather than trusting a hash on worker-writable metadata.
-  Because no iteration can rewrite the target, an edit to the oracle shows up
-  as a real diff and cannot move the definition of done. A mismatch means an
-  iteration edited the oracle: a hard fail and a gaming signal, routed to a
-  human.
+  artifact against the copy at the lock commit: the immutable commit pinned when
+  the goal was armed (Section 2), read through a keeper-owned reference no
+  iteration can rewrite, never the moving tip of the target branch. Because the
+  lock commit is immutable and its pin is not worker-writable, neither an
+  iteration's edit nor a later merge to the target branch can move the definition
+  of done. A mismatch means an iteration edited the oracle: a hard fail and a
+  gaming signal, routed to a human.
 
 ## 4. Verdict taxonomy
 
@@ -188,7 +209,9 @@ cheap. The goal loop is event-driven.
   blocking iteration closes, and its clone for a pool target is assigned to no
   one, so the next iteration is a fresh session (docs/gascity-packs.md). The
   in-city sweep concluded this substrate covers the goal loop with no engine
-  change.
+  change. The control bead is the keeper's, assigned to no iteration worker;
+  arming the goal, before the first iteration is spawned, is when the keeper
+  pins the lock commit in its keeper-owned reference (Section 2).
 - On re-arm, the judge fires: the deterministic oracle, the rubric lanes, or
   both, gathering evidence and rendering a verdict.
 - The verdict drives the next action: `met` closes the goal, `not-yet` spawns
@@ -270,8 +293,8 @@ design. The full surveys are in tk-nt5uda's notes.
   while this judge is durable and gathers its own evidence.
 - **Kiro, Spec Kit, Factory.** Teaches spec-as-contract and failing-test-first.
   The oracle lock is that discipline: the definition of done is committed before
-  the work, and every iteration is measured against that committed copy, so no
-  worker can move the definition of done.
+  the work, pinned to an immutable commit, and every iteration is measured
+  against that pinned copy, so no worker can move the definition of done.
 
 No surveyed construct is a standing goal at epic altitude, stated as a
 measurable condition about the world, that generates work until reality
@@ -282,14 +305,20 @@ measures it met. That is what this primitive is.
 To goal-keeper v1 (tk-tutb46), pack-level formulas and scripts, no engine
 change:
 
-- The contract serialization. The locked contract (oracle, invariants, and
-  budget) is written to a target-branch committed artifact (for example
-  `specs/<goal-bead>/goal.toml`) that the keeper reads for itself; those
-  fields never live in worker-writable bead metadata, where an iteration
-  could forge the lock. Only mutable operational state (iteration count,
-  verdict trail, budget consumed, the last not-yet reason) lives in bead
-  metadata or the repo trail. This spec fixes the required fields and where
-  each lives, not the file format.
+- The contract serialization and its lock. The locked contract (oracle,
+  invariants, and budget) is written to a target-branch committed artifact (for
+  example `specs/<goal-bead>/goal.toml`) that the keeper reads for itself; those
+  fields never live in worker-writable bead metadata, where an iteration could
+  forge the lock. The keeper pins one immutable lock commit when the goal is
+  armed, before the first iteration, and reads the contract from that commit
+  rather than the moving target-branch tip; the pin lives in a keeper-owned
+  reference the iteration worker cannot rewrite, and a legitimate contract change
+  is a deliberate re-lock to a new commit, not a silent adoption of a moved tip.
+  Only mutable operational state (iteration count, verdict trail, budget
+  consumed, the last not-yet reason) lives in bead metadata or the repo trail.
+  This spec fixes the required fields, where each lives, and that the lock is a
+  pinned immutable commit; it leaves the file format and the pinning reference's
+  scheme to the implementation.
 - The spawn-on-not-yet wiring: which formula pours the next iteration, and how
   the reason is threaded into the next work bead's dispatch note.
 - Session policy: iterations are pool-routed for fresh context; the iteration
