@@ -16,11 +16,18 @@
 # deployment mirror (commits are authored in worktrees and the refinery clone,
 # never here), so its tracked content is already fully represented in origin.
 # That case is provably lossless to reset, so the refusal branch first tries to
-# auto-heal: when the checkout has no unique local commit (git cherry, by
-# patch-id, so a rebased/squashed commit with a new SHA still matches) and no
-# uncommitted tracked change whose content still differs from the remote, it
-# resets --hard to the remote (untracked files are preserved) and closes the
-# divergence bead. Set RECONCILE_NO_AUTOHEAL=1 to disable this and escalate
+# auto-heal. The reset runs only when every check holds, and fails closed
+# (escalates, mutates nothing) on anything it cannot prove:
+#   - git cherry (patch-id) finds no unique local commit, so a rebased or
+#     squashed commit with a new SHA still matches;
+#   - git rev-list --merges finds no merge commit unique to local — git cherry
+#     ignores merges, so a local merge's tree content is not provably upstream
+#     and the guard refuses rather than reset it away;
+#   - git status --porcelain is readable (a failed read is not proof of a clean
+#     tree), and no uncommitted tracked change whose content still differs from
+#     the remote is present.
+# It then resets --hard to the remote (untracked files are preserved) and closes
+# the divergence bead. Set RECONCILE_NO_AUTOHEAL=1 to disable this and escalate
 # every divergence instead.
 #
 # A genuine divergence — a unique local commit, or a tracked change not yet
@@ -97,21 +104,26 @@ while IFS=$'\t' read -r name path; do
 
     # ff-only refused. Almost always this is SHA churn from an upstream
     # rebase/squash/force-push and the checkout's content is already upstream, so
-    # try to auto-heal before escalating: reset --hard is lossless when git cherry
-    # (patch-id) finds no unique local commit AND no dirty tracked file still
-    # differs from the remote. Untracked files are never touched by reset --hard.
-    # Any real divergence fails this guard and falls through to the escalation
-    # path unchanged. RECONCILE_NO_AUTOHEAL=1 disables the heal.
+    # try to auto-heal before escalating. reset --hard is lossless only when the
+    # guard proves it: git cherry (patch-id) finds no unique local commit, no
+    # merge commit is unique to local (git cherry ignores merges, so a local
+    # merge's tree content is not provably upstream), the status read succeeds,
+    # and no dirty tracked file still differs from the remote. Untracked files are
+    # never touched by reset --hard. Anything the guard cannot prove — a real
+    # divergence, an unreadable status, a local merge — falls through to the
+    # escalation path unchanged. RECONCILE_NO_AUTOHEAL=1 disables the heal.
     if [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
        && cherry_out=$(git -C "$path" cherry "$remote" HEAD 2>/dev/null) \
-       && [ -z "$(printf '%s' "$cherry_out" | grep '^+' || true)" ]; then
+       && [ -z "$(printf '%s' "$cherry_out" | grep '^+' || true)" ] \
+       && merges=$(git -C "$path" rev-list --merges "$remote"..HEAD 2>/dev/null) \
+       && [ -z "$merges" ] \
+       && status_out=$(git -C "$path" -c core.quotepath=false status --porcelain 2>/dev/null); then
         unique_tracked=0
         while IFS= read -r changed; do
             [ -n "$changed" ] || continue
             git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null \
                 || unique_tracked=$((unique_tracked + 1))
-        done < <(git -C "$path" -c core.quotepath=false status --porcelain 2>/dev/null \
-                 | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
+        done < <(printf '%s\n' "$status_out" | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
         if [ "$unique_tracked" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
             healed=$((healed + 1))
             bead=$(open_bead "$name")

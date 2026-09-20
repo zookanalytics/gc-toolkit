@@ -12,7 +12,10 @@
 # human board; (h) an already-upstream divergence (SHA churn) auto-heals via
 # reset --hard while a genuine divergence still escalates, RECONCILE_NO_AUTOHEAL
 # disables the heal, and a dirty tracked file blocks it only when its content is
-# not yet upstream.
+# not yet upstream; (i) a unique local merge commit (invisible to git cherry)
+# fails the guard closed and escalates rather than being reset away; (j) an
+# unreadable git status fails the guard closed rather than healing on an
+# unproven-clean tree.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -257,6 +260,67 @@ JSON
 bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/zeta" rev-parse HEAD)" "$ZETA_REMOTE" "an already-upstream dirty tracked file (diffs empty) still heals"
 eq "$(esc_count zeta)" "0" "the already-upstream dirty file case is not escalated"
+
+# eta: an already-upstream SHA churn whose local HEAD is a MERGE commit carrying
+# tree content (evil.txt) that is NOT upstream. git cherry ignores merge commits,
+# so the committed-content proof is incomplete: the guard must refuse via the
+# merge check and escalate rather than reset the merge content away.
+git init -q -b main "$TMP/eta.src"
+commit "$TMP/eta.src" et1
+git -C "$TMP/eta.src" checkout -q -b side
+echo side-content > "$TMP/eta.src/side.txt"; git -C "$TMP/eta.src" add -A
+git -C "$TMP/eta.src" commit -qm et-side
+git -C "$TMP/eta.src" checkout -q main
+git -C "$TMP/eta.src" merge -q --no-ff side -m et-merge          # merge commit; tree gains side.txt
+git clone -q --bare "$TMP/eta.src" "$TMP/eta.git"
+git clone -q "$TMP/eta.git" "$TMP/eta"                           # local HEAD = et-merge
+echo evil > "$TMP/eta/evil.txt"; git -C "$TMP/eta" add -A
+git -C "$TMP/eta" commit -q --amend --no-edit                    # local merge now carries evil.txt
+ETA_LOCAL="$(git -C "$TMP/eta" rev-parse HEAD)"
+git -C "$TMP/eta.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # churn the merge SHA upstream, WITHOUT evil.txt
+git -C "$TMP/eta.src" push -qf "$TMP/eta.git" main
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"eta","path":"$TMP/eta"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/eta" rev-parse HEAD)" "$ETA_LOCAL" "a unique local merge commit blocks the heal (git cherry ignores merges)"
+eq "$(esc_count eta)" "1" "a unique local merge commit escalates"
+[ -f "$TMP/eta/evil.txt" ] && ok "the merge commit's unique tree content is preserved" || bad "the merge commit's unique tree content is preserved"
+
+# theta: an already-upstream SHA churn where git status cannot be read. An
+# unreadable status is not proof of a clean tree, so the dirty-tracked proof must
+# fail closed and escalate rather than reset --hard. A git shim on PATH fails
+# `git status` and passes every other subcommand through to real git.
+git init -q -b main "$TMP/theta.src"; commit "$TMP/theta.src" th1; commit "$TMP/theta.src" th2
+git clone -q --bare "$TMP/theta.src" "$TMP/theta.git"
+git clone -q "$TMP/theta.git" "$TMP/theta"
+THETA_HEAD="$(git -C "$TMP/theta" rev-parse HEAD)"
+git -C "$TMP/theta.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # SHA churn: ff refuses, cherry clean
+git -C "$TMP/theta.src" push -qf "$TMP/theta.git" main
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"theta","path":"$TMP/theta"}
+]}
+JSON
+: > "$TMP/escalations"
+REAL_GIT="$(PATH="${PATH#"$TMP/bin:"}" command -v git)"
+cat > "$TMP/bin/git" <<GITSHIM
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "status" ] && exit 128; done
+exec "$REAL_GIT" "\$@"
+GITSHIM
+chmod +x "$TMP/bin/git"
+bash "$SCRIPT" >/dev/null
+rm -f "$TMP/bin/git"
+eq "$(git -C "$TMP/theta" rev-parse HEAD)" "$THETA_HEAD" "an unreadable git status blocks the heal (fail closed)"
+eq "$(esc_count theta)" "1" "an unreadable git status escalates instead of healing"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
