@@ -2149,6 +2149,15 @@ cmd_engage() {
                  | .[] | [.id, (.status // ""), (.assignee // "")] | @tsv' 2>/dev/null || true
     }
     visit_row=""
+    # bound_existing marks the path where `engage <subject>` binds a visit that
+    # already existed, as opposed to an explicit visit id or one freshly filed
+    # here. Only that path gets the extra output below: the bound visit's subject
+    # and the --reason alternative. It stays 0 everywhere else.
+    bound_existing=0
+    # A blocks-dep that has since closed is a satisfied gate, so the visit's
+    # premise may be moot. Read once from the pre-spawn dep list, surfaced only on
+    # the bound_existing output.
+    visit_closed_gates=""
     if [ "$bead_kind" = "visit" ]; then
         # --reason files a NEW visit, which only makes sense for a subject. An
         # explicit visit id names one exact visit, so a reason has nowhere to go
@@ -2163,6 +2172,9 @@ cmd_engage() {
         visit_row="$bead_row"
     else
         VISIT=""
+        # filed_fresh records that cmd_open below filed a NEW visit, so the bind
+        # block does not misreport a freshly filed visit as a pre-existing one.
+        filed_fresh=0
         candidates=$(engage_find_visits "$bead")
         # --reason names a fresh, likely-distinct concern, so file a NEW visit
         # for it and engage that — even when the subject already has one.
@@ -2179,9 +2191,13 @@ cmd_engage() {
             fi
             # cmd_open runs in this shell and leaves the new id in VISIT.
             cmd_open "$@" >&2 || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            filed_fresh=1
             [ -n "$VISIT" ] || candidates=$(engage_find_visits "$bead")
         fi
         if [ -z "$VISIT" ] && [ -n "$candidates" ]; then
+            # Reached without a freshly filed visit means the visit engaged here
+            # already existed on the subject — the bind-a-pre-existing-visit path.
+            [ "$filed_fresh" = 0 ] && bound_existing=1
             parked=$(printf '%s\n' "$candidates" | awk -F'\t' '$2=="open" && $3=="" {print $1}')
             parked_n=$(printf '%s\n' "$parked" | grep -c . || true)
             if [ "$parked_n" -gt 1 ]; then
@@ -2283,18 +2299,24 @@ cmd_engage() {
             echo "$PROG: engage: visit $VISIT is '${visit_status:-unknown}', not open${visit_owner:+ (last held by '$visit_owner')} — a spawned sitting adopts only ready (open, unblocked) assigned work, so it would hold nothing. Nothing spawned." >&2
             exit 4 ;;
     esac
-    if ! visit_blockers=$(gc bd dep list "$VISIT" --direction=down --json 2>/dev/null | scrub \
-        | jq -er 'if type == "array" then
-               [ .[] | select((.dependency_type // "") == "blocks")
-                     | select((.status // "") != "closed") | .id ] | join(" ")
-             else error("not an edge array") end' 2>/dev/null); then
+    if ! visit_deps_json=$(gc bd dep list "$VISIT" --direction=down --json 2>/dev/null | scrub \
+        | jq -ce 'if type == "array" then . else error("not an edge array") end' 2>/dev/null); then
         echo "$PROG: engage: could not read the blockers on visit $VISIT ('gc bd dep list' failed or did not answer with an edge array), so its claimable state is UNPROVEN — refusing to spawn a sitting that may hold nothing. Nothing spawned; retry once the store answers." >&2
         exit 4
     fi
+    visit_blockers=$(printf '%s' "$visit_deps_json" \
+        | jq -r '[ .[] | select((.dependency_type // "") == "blocks")
+                       | select((.status // "") != "closed") | .id ] | join(" ")' 2>/dev/null || true)
     if [ -n "$visit_blockers" ]; then
         echo "$PROG: engage: visit $VISIT is blocked by $visit_blockers — a blocked bead is not in 'bd ready', so a spawned sitting could not adopt it and would hold nothing. Nothing spawned; engage it once its blockers clear." >&2
         exit 4
     fi
+    # A blocks-dep that is now CLOSED is a satisfied gate: whatever this visit was
+    # waiting on has resolved, so its premise may be moot and a bound sitting may
+    # self-dismiss it. Derived from the same read the blocker guard used above.
+    visit_closed_gates=$(printf '%s' "$visit_deps_json" \
+        | jq -r '[ .[] | select((.dependency_type // "") == "blocks")
+                       | select((.status // "") == "closed") | .id ] | join(" ")' 2>/dev/null || true)
 
     # Spawn the manual sitting WITHOUT attaching, so the visit is assigned before
     # the session's claim loop runs. Capture the runtime identity from --json:
@@ -2397,6 +2419,17 @@ cmd_engage() {
     bust_cache
 
     echo "$PROG: engage: sitting $sname ($template) holds visit $VISIT on $bead"
+    # `engage <subject>` with no --reason binds a visit that already existed, which
+    # may be narrower or already-purposed than the fresh discussion the operator
+    # meant to start. Name what was bound and offer --reason, so the operator can
+    # tell a bound existing thread from a new one rather than reading a bare id.
+    if [ "$bound_existing" = "1" ]; then
+        visit_title=$(printf '%s' "$visit_row" | jq -r '.title // ""' 2>/dev/null || true)
+        visit_label="visit $VISIT"
+        [ -n "$visit_title" ] && visit_label="\"$visit_title\""
+        echo "$PROG: engage: bound the pre-existing $visit_label on $bead, not a fresh discussion. To open a new visit instead, re-run: $PROG engage $bead --reason \"<topic>\""
+        [ -n "$visit_closed_gates" ] && echo "$PROG: engage: heads up: this visit's gate(s) $visit_closed_gates have since closed, so its premise may be satisfied and the sitting may find it moot and self-dismiss."
+    fi
 
     # A freshly spawned sitting self-starts from the prompt its launch delivers.
     # `gc session new` puts the rendered converse prompt on argv (every converse

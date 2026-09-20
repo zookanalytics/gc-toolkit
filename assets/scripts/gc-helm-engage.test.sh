@@ -35,6 +35,11 @@
 #             loser sitting (a suspended one keeps its alias, so the re-run the
 #             message advertises would be refused at `session new`), and exits 4
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
+#   (BOUND-EXISTING) engaging a SUBJECT that binds a pre-existing visit names that
+#             visit's subject and offers --reason to open a fresh one instead; an
+#             explicit visit id and a freshly filed visit get no such hint
+#   (MOOT-GATE) a bound pre-existing visit whose blocks-gate has since closed is
+#             flagged possibly-moot from a read-only check of its blocks-deps
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,7 +94,7 @@ case "$1 ${2:-}" in
       st="$(cat "$VIS_STATUS" 2>/dev/null || echo open)"
       who="$(cat "$ASSIGNEE" 2>/dev/null)"; [ -n "$who" ] || who="$VIS_OWNER"
       jq -n --arg i "$id" --arg s "$st" --arg a "$who" \
-        '[{id:$i, status:$s, assignee:$a, metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
+        '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
     else
       jq -n --arg i "$id" --arg k "${BEAD_KIND:-task}" \
         '[{id:$i, status:"open", assignee:"", metadata:{task_kind:$k}}]'
@@ -159,12 +164,13 @@ case "$1 ${2:-}" in
     printf 'bd create %s\n' "$*" >> "$CALLS"; jq -n '{id:"tk-vis"}' ;;
   "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS"
               # engage probes the visit's blockers (dep list --direction=down)
-              # before spawning: default no blockers, $VIS_BLOCKERS injects open
-              # "blocks" edges so a blocked visit can be exercised.
-              if [ -n "${VIS_BLOCKERS:-}" ]; then
-                jq -n --arg ids "$VIS_BLOCKERS" \
-                  '[$ids | split(" ")[] | {id:., dependency_type:"blocks", status:"open"}]'
-              else printf '[]\n'; fi ;;
+              # before spawning: default none. $VIS_BLOCKERS injects OPEN "blocks"
+              # edges so a blocked visit can be exercised; $VIS_CLOSED_GATES injects
+              # CLOSED "blocks" edges — a satisfied gate whose closure means the
+              # visit's premise may be moot. Both empty yields the [] default.
+              jq -n --arg open "${VIS_BLOCKERS:-}" --arg closed "${VIS_CLOSED_GATES:-}" \
+                '[ ($open   | split(" ")[] | select(. != "") | {id:., dependency_type:"blocks", status:"open"}),
+                   ($closed | split(" ")[] | select(. != "") | {id:., dependency_type:"blocks", status:"closed"}) ]' ;;
 esac
 exit 0
 GC
@@ -207,6 +213,9 @@ has "$CALLED" "--assignee gc-toolkit__converse-1" "(BIND) …by name, the identi
 # argv, so engage sends it no kick. A kick here would land as a deferred reminder
 # after the sitting has already framed — the stale "begin now" this removes.
 hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its prompt and is not kicked"
+# An explicit visit id is engaged as-is; it is not the subject-binds-a-pre-existing
+# case, so it gets no "bound the pre-existing …" hint or --reason alternative.
+hasnt "$OUT" "bound the pre-existing" "(VISIT) an explicit visit id is not reported as a subject-bound pre-existing visit"
 
 echo "# --model selects the tier; codex is the one provider that keeps the kick"
 run_engage tk-vis --model codex --no-attach
@@ -255,6 +264,7 @@ has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and its body (the claim-t
 hasnt "$OUT" "already open" "(REASON-NEW) …bypassing the one-visit-per-subject dedup on purpose"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(REASON-NEW) …then spawns a sitting for the new visit"
 hasnt "$CALLED" "session nudge" "(REASON-NEW) …and the opus sitting is not kicked; it reads the reason from the body"
+hasnt "$OUT" "bound the pre-existing" "(REASON-NEW) …and no pre-existing-bind hint: --reason filed a fresh visit, it did not bind an old one"
 # codex keeps the kick, so the reason also rides it — the sitting has it without
 # waiting to read the body.
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
@@ -271,6 +281,10 @@ run_engage tk-subj --no-attach
 eq "$RC" 0 "(NOREASON-EXISTING) engaging a subject-with-visit and no reason exits 0"
 hasnt "$CALLED" "bd create" "(NOREASON-EXISTING) …no new visit is filed"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(NOREASON-EXISTING) …the existing visit is engaged"
+has "$OUT" "bound the pre-existing" "(BOUND-EXISTING) …and the output flags that a visit that already existed was bound"
+has "$OUT" "compare notes on the WIP proposals" "(BOUND-EXISTING) …naming the bound visit's subject, not just its id"
+has "$OUT" "engage tk-subj --reason" "(BOUND-EXISTING) …and offering --reason on the subject to open a fresh visit instead"
+hasnt "$OUT" "moot" "(BOUND-EXISTING) …with no moot warning when the visit gates nothing"
 unset HAVE_VISIT
 
 echo "# --reason on an EXPLICIT visit id is refused — a fresh visit needs a subject"
@@ -424,7 +438,24 @@ export HAVE_VISIT=held
 run_engage tk-subj --no-attach
 eq "$RC" 0 "(PARKED-FIRST) the parked visit is engaged, not the held sibling"
 has "$CALLED" "session new converse-opus --alias tk-vis " "(PARKED-FIRST) …spawning for the parked visit"
+has "$OUT" "bound the pre-existing" "(PARKED-FIRST) …and reports binding the pre-existing parked visit"
 export BEAD_KIND=visit HAVE_VISIT=""
+
+echo "# a bound pre-existing visit whose gate has since closed is flagged possibly-moot"
+# escalate.sh files conditional visits that wait on a gate; once that gate closes
+# the premise may no longer hold and the sitting can self-dismiss. engage does a
+# read-only check of the bound visit's blocks-deps and warns when one is already
+# closed, so the operator is not surprised when the thread self-dismisses.
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER="" VIS_CLOSED_GATES="tk-gate9"
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --no-attach
+eq "$RC" 0 "(MOOT-GATE) engaging a subject whose visit has a closed gate still exits 0"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(MOOT-GATE) …the existing visit is still engaged — a closed gate is not an open blocker"
+has "$OUT" "tk-gate9" "(MOOT-GATE) …and the output names the closed gate"
+has "$OUT" "moot" "(MOOT-GATE) …warning the premise may be satisfied and the sitting may self-dismiss"
+unset VIS_CLOSED_GATES HAVE_VISIT
+export BEAD_KIND=visit
+printf 'open' > "$VIS_STATUS"
 
 echo "# a spawn failure carries gc's reason"
 # gc says WHY only on stderr; a template a rig does not carry (the converse
