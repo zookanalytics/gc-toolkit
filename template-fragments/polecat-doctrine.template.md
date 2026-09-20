@@ -1,7 +1,9 @@
 {{ define "polecat-doctrine" }}
 {{ template "operator-profile" . }}
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-polecats" . }}
 
 ## Execute immediately
 
