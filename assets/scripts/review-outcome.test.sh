@@ -78,5 +78,50 @@ eq "$rc" 2 "an unreadable store fails closed on back-lane (exit 2)"
 STUB_LIST_FAIL=1 "$SUT" supersede-lane --anchor tk-anc --lane codex >/dev/null 2>&1; rc=$?
 eq "$rc" 2 "an unreadable store fails closed on supersede-lane (exit 2)"
 
+# ---------------------------------------------------------------------------
+# supersede-anchor: a human feedback batch is anchor-wide. Its non-convergence
+# must return every declared check_set lane to unreviewed — not the
+# check_name=human pseudo-lane the validation pass carries, which no gate reader
+# derives green from. Regression for the P0 where the validator superseded lane
+# `human`, left the codex gate green, and the anchor could merge without the
+# fresh whole-diff review the ruling required.
+# ---------------------------------------------------------------------------
+CODEX_ANCHOR='{"id":"tk-hanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"7"}}'
+store "[$CODEX_ANCHOR]"
+"$SUT" back-lane --anchor tk-hanc --lane codex --oid deadbeef >/dev/null
+if green tk-hanc codex; then ok "codex lane green before the human batch is ruled"; else bad "setup: codex did not green"; fi
+# The validator rules the human batch NOT converged -> supersede-anchor.
+NA=$("$SUT" supersede-anchor --anchor tk-hanc --reason "operator overturned a diff assumption"); rc=$?
+eq "$rc" 0 "supersede-anchor succeeds on a check_set=codex anchor"
+eq "$NA" "1" "…and reports the one codex backing retired"
+if green tk-hanc codex; then bad "the codex gate stayed green after a human non-convergence (the P0)"; else ok "supersede-anchor returns the real codex lane to unreviewed"; fi
+
+# It fans out over EVERY declared lane, not just the first.
+TWO_ANCHOR='{"id":"tk-2anc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex,arch","pr_number":"8"}}'
+store "[$TWO_ANCHOR]"
+"$SUT" back-lane --anchor tk-2anc --lane codex --oid deadbeef >/dev/null
+"$SUT" back-lane --anchor tk-2anc --lane arch  --oid deadbeef >/dev/null
+if green tk-2anc codex && green tk-2anc arch; then ok "both lanes green before the human batch"; else bad "setup: two lanes did not green"; fi
+N2=$("$SUT" supersede-anchor --anchor tk-2anc)
+eq "$N2" "2" "supersede-anchor retires a backing on every declared lane"
+if green tk-2anc codex; then bad "codex stayed green after anchor-wide supersede"; else ok "codex returned to unreviewed"; fi
+if green tk-2anc arch;  then bad "arch stayed green after anchor-wide supersede";  else ok "arch returned to unreviewed"; fi
+
+# A gateless anchor (check_set=none) has no lane to move: no-op success, not error.
+NONE_ANCHOR='{"id":"tk-nanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"none"}}'
+store "[$NONE_ANCHOR]"
+if NN=$("$SUT" supersede-anchor --anchor tk-nanc); then ok "supersede-anchor succeeds on a gateless (none) anchor"; else bad "supersede-anchor failed on a none anchor"; fi
+eq "$NN" "0" "…and reports zero lanes retired"
+
+# Fail closed: an unreadable anchor is never a silent no-op that leaves a gate green.
+store "[$CODEX_ANCHOR]"
+STUB_SHOW_FAIL=1 "$SUT" supersede-anchor --anchor tk-hanc >/dev/null 2>&1; rc=$?
+eq "$rc" 2 "an unreadable anchor fails closed on supersede-anchor (exit 2)"
+# An anchor that declares no check_set at all is anomalous, not gateless.
+NOCS_ANCHOR='{"id":"tk-xanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request"}}'
+store "[$NOCS_ANCHOR]"
+"$SUT" supersede-anchor --anchor tk-xanc >/dev/null 2>&1; rc=$?
+eq "$rc" 2 "an anchor with no check_set fails closed (exit 2)"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

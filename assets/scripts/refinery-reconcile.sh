@@ -57,6 +57,11 @@ BINDING_PREFIX="${AGENT#"$RIG"/}"
 BINDING_PREFIX="${BINDING_PREFIX%refinery}"
 FIX_POOL="$RIG/${BINDING_PREFIX}polecat"
 REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
+# mol-validate is a judgment pass — it rules a review's findings, it does not
+# re-review — so it defaults to the general claude worker pool where fix units
+# land, not REVIEW_POOL (the codex pool the merge cadence routes mol-review to).
+# A rig that staffs a dedicated validate pool points this there without an edit.
+VALIDATE_POOL="${REFINERY_RECONCILE_VALIDATE_POOL:-$FIX_POOL}"
 CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-codex}"
 INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
 
@@ -175,7 +180,7 @@ fi
 # Extracted and EXECUTED by refinery-reconcile.test.sh against stub arms: an
 # unsafe gate-ensure must HOLD merge.sh in the same pass. Keep it executable
 # with only a prologue supplying SCRIPTS_DIR, LOG_SINK, NOTED, FAILED, AGENT,
-# CHECK_SET_DEFAULT, REVIEW_POOL and FIX_POOL.
+# CHECK_SET_DEFAULT, REVIEW_POOL, FIX_POOL and VALIDATE_POOL.
 note() { NOTED="${NOTED}$*"$'\n'; }
 log()  { [ -n "$LOG_SINK" ] && printf '%s\n' "$*" >> "$LOG_SINK"; return 0; }
 run_pass() { # <label> <script> [args...]
@@ -202,7 +207,7 @@ MERGE_HELD_WHY=""
 gate_rc=0
 run_pass "(1) gate-ensure" gate-ensure.sh \
   --default "$CHECK_SET_DEFAULT" --review-pool "$REVIEW_POOL" \
-  --fix-pool "$FIX_POOL" ${GATE_REVIEW_FORMULA_ARGS[@]+"${GATE_REVIEW_FORMULA_ARGS[@]}"} || gate_rc=$?
+  --fix-pool "$FIX_POOL" --validate-pool "$VALIDATE_POOL" ${GATE_REVIEW_FORMULA_ARGS[@]+"${GATE_REVIEW_FORMULA_ARGS[@]}"} || gate_rc=$?
 if [ "$gate_rc" = "$GATE_UNSAFE_RC" ]; then
   MERGE_HELD=1
   MERGE_HELD_WHY="${MERGE_HELD_WHY:+$MERGE_HELD_WHY, }gate-ensure unsafe"

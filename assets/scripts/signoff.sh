@@ -14,14 +14,17 @@
 # marker, returning the lane to unreviewed, and file ONE routed rework child —
 # or, at the round cap, park the anchor under merge_hold and route it to a
 # human instead.
-# The cap counts rework rounds since the last operator feedback, not since the
-# branch was cut: pr-facts.sh records each batch of feedback on the anchor, and
-# the rounds spent before it become a floor this script subtracts. An anchor
-# capped before its PR was opened has no review conversation whose next comment
-# could record such a batch, so the cap also has a verb:
+# The cap bounds one thing — the city failing to converge against its own
+# reviewer — so a round is an attempted rework child, never a review dispatch,
+# and operator feedback is not one either. pr-facts.sh keeps a feedback batch out
+# of the cap's budget by opening a validation pass on the anchor rather than
+# spending a round (docs/state-machine.md, "The round cap and operator
+# feedback"). A cap already spent is retired under a ruling by
 #   signoff.sh reset <anchor> --reason <why>
-# advances the floor to the rounds already spent and retires the park the cap
-# wrote, in one audited write, with the ruling recorded on the anchor.
+# which advances signoff_round_floor to the rounds already filed and retires the
+# park the cap wrote, in one audited write with the ruling recorded on the
+# anchor. An anchor capped before its PR was opened has no conversation to carry
+# feedback, so that verb is its only release.
 # The city never approves its own PRs: nothing here ever passes --approve.
 # A lane state is a state of the lane, never a claim about a commit: the marker
 # is one bare word, a verdict binds to no oid, and a commit landing on the
@@ -809,18 +812,19 @@ if [ "$CAP_ROUNDS" -ge "$CAP" ]; then
   # dispatch, and merge_hold is what every arm of the cadence already reads for
   # that — gate-ensure refuses a dispatch under it, pr-open opens nothing, and
   # merge.sh holds. The lane is left as the request-changes rounds left it.
-  # A cap before the PR is open is a different report. The release this cap is
-  # designed for is the next operator comment on the PR, and an anchor with no
-  # PR has no conversation that could carry one — its rounds were spent
-  # answering the city's own reviewer pre-open. Name which case this is, and
-  # name the verb that retires the one nothing else can.
+  # A cap before the PR is open is a different report, but the release is the same
+  # verb either way: operator feedback opens a validation pass and leaves this
+  # park standing, so only signoff.sh reset retires it. An anchor with no PR has
+  # no conversation that could carry feedback at all — its rounds were spent
+  # answering the city's own reviewer pre-open. Name which case this is, and name
+  # the verb.
   if [ -n "$POST_OPEN" ]; then
-    CAP_WHY="findings are in the review beads under this anchor; new operator feedback on PR#$PR_NUMBER retires this cap and its park"
+    CAP_WHY="findings are in the review beads under this anchor; operator feedback on PR#$PR_NUMBER opens a validation pass but leaves this cap and its park standing. Retire it with: signoff.sh reset $ANCHOR --reason '<ruling>'"
   else
     CAP_WHY="these rounds were spent pre-open, on a branch with no PR, so no review comment can retire this cap; findings are in the review beads under this anchor. Retire it with: signoff.sh reset $ANCHOR --reason '<ruling>'"
   fi
-  # signoff_cap names the gate whose rounds ran out. Operator feedback and the
-  # reset verb each retire the park with the cap, and only this stamp tells the
+  # signoff_cap names the gate whose rounds ran out. signoff.sh reset retires
+  # the park with the cap, and only this stamp tells the
   # cap's own merge_hold and gc.routed_to=human from a person's, so an anchor a
   # human parked by hand stays parked. It is written and verified with them: a
   # park nothing proves is the cap's can be lifted only by a person.
@@ -834,11 +838,11 @@ if [ "$CAP_ROUNDS" -ge "$CAP" ]; then
   # at every round count the cap can reach.
   #
   # gc.takeaway_by carries the same provenance the cap stamp does, one level
-  # down: pr-facts.sh retires the cap's own sentence with the park and leaves a
-  # sitting's alone, and it tells them apart by that field. A takeaway whose
-  # writer did not land reads as the sitting's, so the feedback meant to lift
-  # the park leaves the hold and the human route standing. The whole triple is
-  # verified below, not just the text a person would see.
+  # down: signoff.sh reset retires the cap's own sentence with the park and
+  # leaves a sitting's alone, telling them apart by that field. A takeaway whose
+  # writer did not land reads as a sitting's, so a later reset clears the hold and
+  # the human route but leaves this headline standing on the board. The whole
+  # triple is verified below, not just the text a person would see.
   #
   # The timestamp is captured before the write and verified against that exact
   # value. An anchor can already carry an older gc.takeaway_at from a previous
@@ -910,7 +914,7 @@ if [ "$CAP_ROUNDS" -ge "$CAP" ]; then
   CAP_WHERE="pre-open (no PR)"
   [ -z "$POST_OPEN" ] || CAP_WHERE="PR#$PR_NUMBER"
   echo "signoff: round cap on $ANCHOR ($ROUNDS/$CAP, $CAP_WHERE) — merge_hold set on gate $CHECK_NAME, anchor routed to human, no rework filed"
-  [ -n "$POST_OPEN" ] || echo "signoff: no PR means no review conversation can release this cap — retire it with: signoff.sh reset $ANCHOR --reason '<ruling>'"
+  echo "signoff: this cap is released only by a ruling — retire it with: signoff.sh reset $ANCHOR --reason '<ruling>'"
   exit 0
 fi
 

@@ -70,7 +70,9 @@ SUT="$SD/gate-ensure.sh"
 unset GC_RIG 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
+VALP="rig/gc-toolkit.polecat-validate"
 run() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
+run_val() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" --validate-pool "$VALP" 2>&1; }
 
 anchor() { # id mr checkset marker branch extra-json
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"main"%s%s%s}}' \
@@ -314,6 +316,59 @@ oid q4 > "$GH_DIR/head_polecat_q4"
 out=$(run)
 has "$out" "1 reviews dispatched" "a closed validation pass holds nothing, so the unreviewed lane dispatches"
 
+echo "# the validator is dispatched onto an open, undispatched validation pass"
+# The pass quiesces the lane (no review), and this arm slings mol-validate ONTO
+# it so the validator runs. pr-facts.sh (or the machine path) opened it unrouted;
+# the pour stamps gc.execution_routed_to.
+store "[$(anchor VD1 pull_request codex "" polecat/vd1), $(validation vp-1 VD1)]"
+oid vd1 > "$GH_DIR/head_polecat_vd1"
+out=$(run_val)
+has "$out" "dispatched validation pass vp-1 to $VALP" "the open pass is dispatched to the validate pool"
+eq "$(meta vp-1 'gc.execution_routed_to')" "$VALP" "…and the pour read back (gc.execution_routed_to)"
+has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
+has "$out" "0 reviews dispatched" "…and no review is dispatched: the open pass quiesces the lane"
+
+echo "# …a second reconcile over the same pass re-slings nothing (dedup on the pour stamp)"
+# pr-facts leaves the pass unrouted; the pour stamps gc.execution_routed_to, so a
+# pass already carrying it was dispatched by a prior pass and re-slinging would
+# mint a second workflow root.
+store "[$(anchor VD2 pull_request codex "" polecat/vd2), {\"id\":\"vp-2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"validation\",\"anchor_bead\":\"VD2\",\"check_name\":\"codex\",\"gc.execution_routed_to\":\"$VALP\"}}]"
+oid vd2 > "$GH_DIR/head_polecat_vd2"
+out=$(run_val)
+has "$out" "validation pass vp-2 already dispatched" "an already-poured pass is not re-slung"
+has "$out" "0 validation passes dispatched" "…so no second dispatch"
+
+echo "# a dispatched codex pass does not shadow an undispatched human pass beside it"
+# pr-facts.sh opens a human-lane pass beside a codex pass — a codex pass holds the
+# merge but cannot rule human findings. The codex pass is already dispatched and
+# lists first; iterating every pass is what still reaches the human one, which a
+# first-only read would leave blocked forever.
+store "[$(anchor VD5 pull_request codex "" polecat/vd5), {\"id\":\"vp-5c\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"validation\",\"anchor_bead\":\"VD5\",\"check_name\":\"codex\",\"gc.execution_routed_to\":\"$VALP\"}}, $(validation vp-5h VD5 human)]"
+oid vd5 > "$GH_DIR/head_polecat_vd5"
+out=$(run_val)
+has "$out" "validation pass vp-5c already dispatched" "the already-poured codex pass is recognised, not re-slung"
+has "$out" "dispatched validation pass vp-5h to $VALP" "…and the undispatched human pass beside it is still dispatched"
+eq "$(meta vp-5h 'gc.execution_routed_to')" "$VALP" "…its pour read back"
+has "$out" "1 validation passes dispatched" "…exactly one new dispatch this pass"
+
+echo "# an open validation pass with no --validate-pool holds — nothing releases it"
+# The same stuck shape an armed gate has with no --review-pool: the pass blocks
+# the merge and there is no pool to dispatch the validator to.
+store "[$(anchor VD3 pull_request codex "" polecat/vd3), $(validation vp-3 VD3)]"
+oid vd3 > "$GH_DIR/head_polecat_vd3"
+out=$(run)
+has "$out" "open validation pass vp-3 but no --validate-pool" "the pass is named as held for want of a validate pool"
+eq "$(meta vp-3 'gc.execution_routed_to')" "<absent>" "…and nothing is poured onto it"
+
+echo "# a validation-pass pour that does not read back holds the batch and retries"
+# One sling, no in-pass retry: a pour that does not stamp gc.execution_routed_to
+# is held, and the next pass re-slings because the dedup stamp never landed.
+store "[$(anchor VD4 pull_request codex "" polecat/vd4), $(validation vp-4 VD4)]"
+oid vd4 > "$GH_DIR/head_polecat_vd4"
+out=$(STUB_DROP_KEYS="vp-4:gc.execution_routed_to" run_val)
+has "$out" "validation pass vp-4 pour did not read back" "the failed pour is reported, not swallowed"
+has "$out" "0 validation passes dispatched" "…and not counted as dispatched"
+
 echo "# an unreadable live head neither settles a lane nor stops a dispatch"
 # gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit. The
 # derivation never consulted it, so the only thing the head decides now is the
@@ -388,6 +443,18 @@ store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"
 out=$(run)
 eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray marker cleared"
 has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
+
+echo "# …nor from the validation-pass dispatch: a gateless anchor's open pass still gets the validator"
+# pr-facts.sh opens a human feedback pass without consulting check_set, so a
+# check_set=none anchor can carry one. The dispatch that releases its blocks edge
+# runs before the none|off opt-out; after it, the pass would hold the merge with
+# nothing to sling mol-validate onto.
+store "[$(anchor N4v pull_request none "" polecat/n4v), $(validation vp-n4v N4v human)]"
+out=$(run_val)
+has "$out" "dispatched validation pass vp-n4v to $VALP" "a gateless anchor's open validation pass is dispatched to the validate pool"
+eq "$(meta vp-n4v 'gc.execution_routed_to')" "$VALP" "…and the pour read back"
+has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
+has "$out" "0 reviews dispatched" "…while check_set=none still dispatches no review"
 
 echo "# …a clear that does not persist is reported, not counted"
 store "[$(anchor N5 pull_request codex green polecat/n5 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n5 N5)]"

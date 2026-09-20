@@ -1036,9 +1036,10 @@ has "$out" "signoff_round_floor did not read back" "…naming the write that did
 eq "$(status rv-1)" "in_progress" "…and the review bead stays open, the gate still owed"
 
 # --- a cap that fires before the PR exists ---------------------------------------
-# The release the cap is designed for is the next operator comment on the PR.
-# An anchor capped pre-open has no conversation that could carry one, so the
-# park it writes has to say which case it is.
+# A spent cap is released by signoff.sh reset either way: operator feedback opens
+# a validation pass and leaves the park standing, and an anchor capped pre-open
+# has no conversation that could carry feedback at all, so the park it writes has
+# to say which case it is.
 echo "# a cap fired pre-open reports as pre-open and names the verb that retires it"
 spent 3 "$ANCHOR_PRE"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
@@ -1053,11 +1054,11 @@ eq "$(printf '%s' "$(meta tk-anc gc.takeaway)" | jq -Rsr 'length <= 140')" "true
 has "$(meta tk-anc gc.takeaway)" "did not converge" "…and still says what is owed"
 has "$out" "pre-open (no PR)" "the report tells a pre-open cap from a PR one"
 
-echo "# …while a cap on an open PR still points at the conversation that releases it"
+echo "# …and a cap on an open PR names the verb too: feedback there opens a validation pass, not a release"
 spent 3
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-has "$(meta tk-anc blocked_reason)" "operator feedback on PR#42" "a post-open cap names the feedback that retires it"
-hasnt "$(meta tk-anc blocked_reason)" "signoff.sh reset" "…and does not send a human to the verb"
+has "$(meta tk-anc blocked_reason)" "signoff.sh reset tk-anc" "a post-open cap names the verb that retires it"
+has "$(meta tk-anc blocked_reason)" "opens a validation pass" "…because operator feedback on the PR opens a validation pass, not a release"
 
 # --- reset: the cap retirement a PR cannot deliver -------------------------------
 # Clearing the exception by hand leaves the rounds standing, so the next pass

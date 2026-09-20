@@ -53,13 +53,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    own `merge_hold=true`) with `signoff_cap=<gate>` beside it,
    `gc.routed_to=human`, a `blocked_reason` naming the cap, and
    the shorter `gc.takeaway` headline the helm board renders, in one act. No
-   visit is filed for it, so the anchor is parked rather than queued. What
-   undoes that is new operator feedback, which arm 5 records: the cap counts
-   non-convergence, and a review the branch has never answered is not that
-   ([state-machine.md](state-machine.md#the-round-cap-counts-from-the-last-operator-feedback)).
-   An anchor capped before its PR was opened can receive neither, and says so
-   in its `blocked_reason`; `signoff.sh reset <anchor> --reason <why>` is its
-   release.
+   visit is filed for it, so the anchor is parked rather than queued. New
+   operator feedback does not undo the park: arm 5 routes the batch and opens a
+   validation pass on the anchor, but leaves the park standing, because the cap
+   counts non-convergence and a review the branch has never answered is not that
+   ([state-machine.md](state-machine.md#the-round-cap-and-operator-feedback)).
+   `signoff.sh reset <anchor> --reason <why>` is the release; an anchor capped
+   before its PR was opened can receive no feedback at all and says so in its
+   `blocked_reason`.
    A review whose only reach is the pour stamp is qualified before it counts
    as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict
@@ -208,11 +209,16 @@ the cadence — the arms run whether or not any refinery session is awake.
    rework child or a visit. The posture write is idempotent, so re-running it
    here after arm 3 costs nothing when nothing changed. Routing lives only in
    this arm: arm 3 records, this one decides what answers it. Each batch it
-   routes also resets `signoff.sh`'s round cap, once per batch, retiring the
-   cap's own park with it — but only while `merge_hold` still reads the
-   literal `signoff_cap` with a non-empty `signoff_cap=<gate>` beside it; an
-   operator's own `merge_hold=true` is never that pairing and is never lifted
-   by this reset, even past an orphan `signoff_cap`.
+   routes also opens one validation pass on the anchor — a
+   `task_kind=validation` bead, unrouted, blocking the anchor — from which
+   `gate-ensure.sh`'s quiescence holds a fresh whole-diff review while the
+   validator rules the batch, so operator feedback is answered without spending
+   a review-round cap
+   ([state-machine.md](state-machine.md#the-round-cap-and-operator-feedback)).
+   The batch is watermarked only once that pass records the shape the validator
+   reads — `anchor_bead`, `check_name=human`, `reviewed_oid` — and its `blocks`
+   edge holds. Retiring the round cap and its park is `signoff.sh reset`'s, not
+   this arm's.
    A write-back sweep then answers the operator in the PR itself. On an anchor
    carrying `pr_comment_disposition`, every comment at or below the recorded
    watermark gets an EYES reaction, and once the bead that disposition names
