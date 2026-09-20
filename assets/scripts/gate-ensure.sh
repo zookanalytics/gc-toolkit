@@ -171,11 +171,11 @@ inflight_review() { # <anchor-id> <gate>
 
 # An open rework child already filed under <anchor>? Echoes its id. A rework
 # child is a blocks-dep bead whose metadata carries a non-empty
-# source_review_bead — exactly what signoff.sh's count_rework_children walks —
-# and request-changes clears check.<g> and files exactly one such child, so a
-# lane back to unreviewed with one of these still open is owed the rework
-# landing, not a fresh review. Non-zero rc = the ledger could not answer; the
-# caller holds the dispatch, the same as an unreadable in-flight-review lookup.
+# source_review_bead, which request-changes stamps on the one child it files as
+# it clears check.<g>, so a lane back to unreviewed with one of these still
+# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
+# could not answer; the caller holds the dispatch, the same as an unreadable
+# in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
