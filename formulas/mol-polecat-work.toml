@@ -657,16 +657,48 @@ gc runtime request-restart
 This blocks until the controller kills your session. The next session
 resumes from context (re-reads formula steps, checks git/bead state).
 
-**Exit criteria:** Implementation complete, all changes committed."""
+**Close the inline step chain and drain.** self-review is a bounded check loop,
+not an inline step: its iterations are claimed fresh from the pool so each runs
+in its own session. So this inline session ends here, and it must close the
+steps it completed before it drains — an open, routed step left behind by a
+drained session is re-offered to a fresh polecat, and `load-context` re-offered
+walks that polecat back through workspace-setup onto a branch this run already
+built. Close forward (each step blocks the next, and `bd` refuses to close a
+blocked issue), then drain; the self-review loop and submit-and-exit close
+themselves.
+```bash
+SC=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
+for STEP in load-context workspace-setup preflight-tests implement; do
+  "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+done
+gc runtime drain-ack
+```
+
+**Exit criteria:** Implementation complete, all changes committed, the inline
+step chain closed forward, and this session drained. The self-review loop takes
+it from here."""
 
 [[steps]]
 id = "self-review"
-title = "Self-review and run tests (affected-aware)"
+title = "Self-review and verify green (affected-aware, bounded check loop)"
 needs = ["implement"]
-metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 description = """
-Review your changes and verify they work before handing off. Overrides the
-base self-review to support affected-test detection.
+Prove the change is green before it can hand off. This step is a bounded check
+loop: each iteration runs the declared checks in its own session and, on green,
+stamps the verified HEAD on the work bead; the exit condition
+(assets/scripts/self-review-check.sh) converges the loop only when the stamp
+names the live HEAD. A red iteration spawns the next, up to `max_attempts`, so a
+failure the refinery would have bounced a hop later — deleting the workflow and
+repouring a fresh molecule — is fixed here instead. The refinery still re-runs
+the real gate as the backstop.
+
+Each iteration runs in a FRESH pooled session with none of the previous one's
+context — the loop clears session affinity on every pool retry, by design.
+Recover what you need from durable state; assume nothing carried over.
 
 **Config: setup_command = {{setup_command}}**
 **Config: typecheck_command = {{typecheck_command}}**
@@ -675,15 +707,32 @@ base self-review to support affected-test detection.
 **Config: test_command = {{test_command}}**
 **Config: affected_tests_command = {{affected_tests_command}}**
 
-**1. Review the diff:**
+**1. Recover the work bead and worktree.** `CLAIMED_ITER_BEAD` is the `bead_id`
+your `gc hook --claim --json` returned for this iteration; it is the only id
+that names this attempt unambiguously, and you close it in step 6.
+```bash
+CLAIMED_ITER_BEAD="<the bead_id your gc hook --claim returned>"
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "cannot derive work bead from convoy {{convoy_id}}" >&2; exit 1; }
+WORK_JSON=$(gc bd show "$WORK_BEAD_ID" --json)
+WORKTREE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.work_dir // empty')
+BRANCH=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.branch // empty')
+cd "$WORKTREE" || { echo "recorded work_dir is missing: $WORKTREE" >&2; exit 1; }
+[ -n "$BRANCH" ] && git checkout "$BRANCH" 2>/dev/null || true
+```
+
+**2. Review the diff:**
 ```bash
 git diff origin/{{base_branch}}...HEAD
 git log --oneline origin/{{base_branch}}..HEAD
 ```
 Check for bugs, security issues, missing error handling, debug cruft,
-unintended file changes. Fix what you find.
+unintended file changes. Fix what you find. On a retry, the previous attempt's
+failure reproduces in the checks below — run them and read the failure rather
+than re-deriving from scratch.
 
-**2. Quality checks (skip empty commands):**
+**3. Quality checks (skip empty commands):**
 ```bash
 {{setup_command}}
 {{typecheck_command}}
@@ -691,7 +740,7 @@ unintended file changes. Fix what you find.
 {{build_command}}
 ```
 
-**3. Tests — affected subset when the rig provides one, full suite otherwise:**
+**4. Tests — affected subset when the rig provides one, full suite otherwise:**
 ```bash
 if [ -n "{{affected_tests_command}}" ]; then
     {{affected_tests_command}}
@@ -700,22 +749,66 @@ else
 fi
 ```
 
-**ALL CHECKS MUST PASS.** Your change caused the failure -> fix it.
-Pre-existing -> file a bead. A PR that fails locally fails in CI too — fix
-before submitting.
+**A failure your diff introduced blocks the stamp — fix it and commit.** A
+failure that reproduces on `origin/{{base_branch}}` is pre-existing:
+preflight-tests already filed it, so it neither blocks your stamp nor earns a
+second bead. `git status` must be clean before you stamp.
 
-**4. Commit everything.** If uncommitted changes remain, commit them with a
-body explaining what slipped through implement (self-review touch-up, test
-addition, formatter run). NEVER discard implementation changes with
-`git checkout -- .`
+**5. Stamp the verified HEAD — only when every check above is green.** The exit
+condition converges on `self_review_passed_sha == live HEAD`, so the stamp
+certifies exactly the tree whose checks you saw pass. `gc.var.issue` on the root
+gives the exit condition a resilient handle on this bead when the store is
+degraded.
+```bash
+HEAD_SHA=$(git rev-parse HEAD)
+ROOT=$(gc bd show "$CLAIMED_ITER_BEAD" --json | jq -r '.[0].metadata."gc.root_bead_id" // empty')
+gc bd update "$WORK_BEAD_ID" --set-metadata self_review_passed_sha="$HEAD_SHA"
+[ -n "$ROOT" ] && gc bd update "$ROOT" --set-metadata gc.var.issue="$WORK_BEAD_ID"
+```
+If it is not green after your best effort this iteration, stamp nothing: an
+absent or stale stamp is exactly what the exit condition reads as "not yet", and
+the loop iterates. Never stamp a HEAD whose checks you did not watch pass — the
+refinery re-runs them, and a forged green only wastes the round.
 
-**Exit criteria:** all checks pass, all changes committed, tree clean."""
+**6. Close this iteration bead — closing is what runs the exit condition.**
+Close by the explicit id you claimed; `$GC_BEAD_ID` is unset for a pool-claimed
+polecat, and a guarded close silently no-ops and stalls the loop.
+```bash
+gc bd close "$CLAIMED_ITER_BEAD" --reason "self-review iteration complete"
+gc runtime drain-ack
+```
+Never close the work bead, and never close the `self-review` control bead: the
+orchestrator closes the control on convergence, and on the final failing attempt
+the exit condition hands the work bead back itself
+(`aborted_at=self-review-exhausted`), because nothing runs after the budget is
+spent.
+
+**Exit criteria (for the loop, not for you):** the declared checks are green at
+HEAD, `self_review_passed_sha` names that HEAD, and this iteration bead is
+closed. Any iteration that leaves the tree closer to that has done its job."""
+
+[steps.check]
+# Total attempts including the first. A red iteration spawns the next; this
+# bounds the churn a self-review fix usually takes, not any goal count.
+# Exhaustion closes the control bead gc.outcome=fail and the exit condition
+# hands the work bead back on that last failing attempt — it reads this budget
+# off the control bead's gc.max_attempts, so changing the number here needs no
+# other edit.
+max_attempts = 3
+
+[steps.check.check]
+mode = "exec"
+path = "../assets/scripts/self-review-check.sh"
+# The script verifies a sha-bound stamp; it does not run the gate (its header
+# explains why — the exec is inline in the control dispatcher, sandboxed, and
+# time-bounded, so a real test suite would time out and stall the city). 2m is
+# slack for a few bead reads and the exhaustion handback, not a test budget.
+timeout = "2m"
 
 [[steps]]
 id = "submit-and-exit"
 title = "Submit work to refinery and exit"
 needs = ["self-review"]
-metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 description = """
 Hand off your work and self-clean. You cease to exist after this step.
 
@@ -791,7 +884,7 @@ if [ -n "$STORE_ONLY_RECORD" ]; then
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
   : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
-  for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+  for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
     "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
   # <<< submit-store-only-chain-close
@@ -961,7 +1054,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
   : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
-  for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+  for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
     "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
   # <<< submit-halt-chain-close
@@ -1129,7 +1222,7 @@ for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
-for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
   "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
 done
 # <<< submit-chain-close
