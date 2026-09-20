@@ -84,16 +84,23 @@ but blow the token budget at eight should stop at eight, and the operator sees
 which bound tripped.
 
 **Where the contract lives.** The locked parts (oracle, invariants, budget)
-live in a committed artifact (for example `specs/<goal-bead>/goal.toml`) whose
-hash is recorded on the goal bead. No iteration's worker may modify that
-artifact. Committing the definition of done before the work that chases it, in
-a file the chaser cannot edit, means tampering shows up in the diff. This is
-the failing-test-first discipline generalized from a test suite to any oracle.
+live in a committed artifact (for example `specs/<goal-bead>/goal.toml`),
+committed to the target branch before the work that chases it. The lock is
+enforced against that committed copy, never against a value the iteration
+worker can rewrite. An iteration worker can write bead metadata, so a contract
+hash stored there is forgeable: a worker that loosens the oracle updates the
+recorded hash to match, and the keeper would compare a tampered artifact to a
+tampered hash. The keeper instead reads the contract from the target commit,
+which no iteration can rewrite, and compares the iteration's copy against it.
+Measuring every iteration against that immutable original is the
+failing-test-first discipline generalized from a test suite to any oracle: an
+edit to the oracle is a real diff against the target and fails the iteration.
 
 The operational state (current iteration, verdict trail, budget consumed, the
-last not-yet reason, the recorded oracle hash) lives on the goal bead's
-metadata and a repo trail file. It is durable so any iteration can crash and
-the next resumes from it.
+last not-yet reason) lives on the goal bead's metadata and a repo trail file.
+It is durable so any iteration can crash and the next resumes from it. The
+lock's reference is not part of this mutable state; it is the contract as
+committed on the target branch, which the keeper reads for itself.
 
 **Deterministic example.** Goal: p99 read-path latency under 200ms. `oracle` is
 a benchmark command whose measured p99 is compared to 200ms, exit 0 only when
@@ -135,9 +142,13 @@ the judge.
   branch, artifacts, and metrics directly. It never reads the worker's summary
   of its own success as evidence. Agents plant self-assessments and edit tests
   to pass; evidence the judge did not gather itself is not evidence.
-- **The oracle is locked.** Each iteration the keeper checks the contract
-  artifact's hash against the recorded value. A mismatch means an iteration
-  edited the oracle: a hard fail and a gaming signal, routed to a human.
+- **The oracle is locked.** Each iteration the keeper compares the contract
+  artifact against the copy committed on the target branch, gathering that
+  reference itself rather than trusting a hash on worker-writable metadata.
+  Because no iteration can rewrite the target, an edit to the oracle shows up
+  as a real diff and cannot move the definition of done. A mismatch means an
+  iteration edited the oracle: a hard fail and a gaming signal, routed to a
+  human.
 
 ## 4. Verdict taxonomy
 
@@ -195,8 +206,8 @@ formula graph.
 
 **Fresh context, durable state.** Each iteration runs in a fresh pool session
 and does one task against the current reason, then closes. All loop state (the
-iteration count, the verdict trail, the budget consumed, the last reason, the
-oracle hash) lives on the goal bead and in the repo, and each iteration writes
+iteration count, the verdict trail, the budget consumed, the last reason) lives
+on the goal bead and in the repo, and each iteration writes
 its artifacts as it goes. Nothing the loop needs lives only in a session's
 context, so any iteration can crash and the next resumes from durable state.
 
@@ -259,7 +270,8 @@ design. The full surveys are in tk-nt5uda's notes.
   while this judge is durable and gathers its own evidence.
 - **Kiro, Spec Kit, Factory.** Teaches spec-as-contract and failing-test-first.
   The oracle lock is that discipline: the definition of done is committed before
-  the work, in an artifact the worker cannot modify.
+  the work, and every iteration is measured against that committed copy, so no
+  worker can move the definition of done.
 
 No surveyed construct is a standing goal at epic altitude, stated as a
 measurable condition about the world, that generates work until reality
