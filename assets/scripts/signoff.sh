@@ -783,7 +783,27 @@ ROUNDS=$((TOTAL - FLOOR))
 [ "$ROUNDS" -ge 0 ] || ROUNDS=0
 post_artifact
 
-if [ "$ROUNDS" -ge "$CAP" ]; then
+# This review's own open rework child counts in TOTAL, but it is not a spent
+# convergence round. A crashed prior attempt of THIS verdict can have filed and
+# stamped it before it dispatched the child or closed the review; the adopt path
+# below takes it over at the round it already records, so it is this round, not a
+# new one. Counting it against the cap parks the anchor for a round nobody spent
+# and strands the very rework the adopt was about to dispatch, so the cap decides
+# on TOTAL minus that child. TOTAL and the floor it feeds keep the true ledger
+# count. The walk is the down/blocks walk count_rework_children reads and the
+# select is the adopt path's, so the round excluded here is exactly the one
+# adopted there; an unreadable walk excludes nothing, matching TOTAL's own
+# fail-open-low count.
+OWN_OPEN_ROUND=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
+  | jq -r --arg r "$REVIEW_BEAD" '
+      [ .[]? | select(((.metadata.source_review_bead // "") == $r)
+                      and (((.status // "open") | ascii_downcase) != "closed")) ]
+      | (if length > 0 then 1 else 0 end)' 2>/dev/null)
+case "$OWN_OPEN_ROUND" in ''|*[!0-9]*) OWN_OPEN_ROUND=0 ;; esac
+CAP_ROUNDS=$((ROUNDS - OWN_OPEN_ROUND))
+[ "$CAP_ROUNDS" -ge 0 ] || CAP_ROUNDS=0
+
+if [ "$CAP_ROUNDS" -ge "$CAP" ]; then
   # Terminal verdict: the anchor is PARKED, not gated. A lane state says what
   # this reviewer owes and nothing more, so the thing that has to stop is the
   # dispatch, and merge_hold is what every arm of the cadence already reads for

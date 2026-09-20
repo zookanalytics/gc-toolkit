@@ -804,6 +804,26 @@ eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no rework child is filed past t
 eq "$(status rv-1)" "closed" "the review bead still closes (verdict recorded)"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…carrying signoff_verdict=request-changes, same as any other request-changes close"
 
+# The cap counts convergence rounds — prior reviews that each spent a rework —
+# so this review's own open child is the round in progress, not a prior one.
+# When a crashed attempt of the last-allowed round already filed that child, the
+# retry must adopt and dispatch it, not read it as one round too many and park
+# the anchor on the very rework it was about to send out. Two prior rounds plus
+# this review's own orphan makes three children, but only two rounds have been
+# spent: the cap must not trip.
+echo "# a retry of the last-allowed round adopts its own child, it does not park on it"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main"')"
+seed_cap_deps c1 c2 c9
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the cap-boundary retry exits 0"
+eq "$(meta tk-anc merge_hold)" "<absent>" "the anchor is NOT parked — its own in-flight round does not count against the cap"
+eq "$(meta tk-anc signoff_cap)" "<absent>" "…and no cap gate is stamped"
+has "$out" "adopting existing open rework child c9" "the retry adopts its own child by name"
+eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "…and dispatches the adopted child"
+has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat c9 --on mol-polecat-work" "…slinging that same child, not a new one"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no second child is filed at the boundary"
+eq "$(status rv-1)" "closed" "the review closes once the adopted child is dispatched"
+
 # The park is a wait on a person, and I1 wants a wait recorded as a `blocks`
 # edge, not a marker alone. The cap files a demand the anchor blocks on, stamped
 # as its own so the reset arm can tell it from a converse sitting's.
