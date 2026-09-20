@@ -16,7 +16,8 @@
 # Inputs (environment, or positional fallback):
 #   VISIT    the visit bead just claimed (required; $1)
 #   SUBJECT  its continuation group; may be empty and recovered here ($2)
-# Output: four key=value lines on stdout —
+# Output: four eval-able assignments on stdout, each value single-quoted so a
+# caller can `eval` them without a metacharacter in the data becoming syntax —
 #   SUBJECT=<recovered-or-passed group>
 #   ITEM=<the bead step 5 writes to>
 #   TOPIC=<what decides sameness>
@@ -31,6 +32,15 @@ set -u
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# >>> eval-safe-quote
+# The caller evals the SUBJECT/HOLDER assignments below, and SUBJECT is a
+# continuation group recovered from claim/metadata, so it can carry any byte.
+# Single-quote every emitted value so eval reads it as one literal string: a
+# group like `g;rm -rf x` stays data, never shell syntax. An embedded single
+# quote becomes the '\'' idiom.
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# <<< eval-safe-quote
 
 VISIT="${VISIT:-${1:-}}"
 SUBJECT="${SUBJECT:-${2:-}}"
@@ -96,7 +106,7 @@ else
         + [$v] | unique | .[0]')
 fi
 
-printf 'SUBJECT=%s\n' "$SUBJECT"
-printf 'ITEM=%s\n' "$ITEM"
-printf 'TOPIC=%s\n' "$TOPIC"
-printf 'HOLDER=%s\n' "$HOLDER"
+printf 'SUBJECT=%s\n' "$(shq "$SUBJECT")"
+printf 'ITEM=%s\n' "$(shq "$ITEM")"
+printf 'TOPIC=%s\n' "$(shq "$TOPIC")"
+printf 'HOLDER=%s\n' "$(shq "$HOLDER")"

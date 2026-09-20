@@ -43,6 +43,14 @@ set -u
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
+# >>> eval-safe-quote
+# --sh output is eval'd by the caller, and its ACTION/VISIT/SUBJECT/REASON carry
+# claim- and metadata-derived data. Single-quote every emitted value so eval
+# reads it as one literal string: a group like `g;rm -rf x` stays data, never
+# shell syntax. An embedded single quote becomes the '\'' idiom.
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# <<< eval-safe-quote
+
 PROG="converse-claim"
 
 usage() {
@@ -73,7 +81,7 @@ if [ "${1-}" = "--sh" ]; then
     # A finish names a sitting being disposed of, not entered, so its group is
     # not this thread's — keep the caller's group across it.
     [ "$_A" = "finish" ] && _G="$_CG"
-    printf 'ACTION=%s\nVISIT=%s\nSUBJECT=%s\nREASON=%s\n' "$_A" "$_V" "$_G" "$_R"
+    printf 'ACTION=%s\nVISIT=%s\nSUBJECT=%s\nREASON=%s\n' "$(shq "$_A")" "$(shq "$_V")" "$(shq "$_G")" "$(shq "$_R")"
     exit "$_RC"
 fi
 

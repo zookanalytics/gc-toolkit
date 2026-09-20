@@ -168,7 +168,9 @@ runsh() {
     SH_RC=$?
     SH_ERR="$(cat "$TMPD/sh.err")"
 }
-shval() { printf '%s\n' "$SH_OUT" | sed -n "s/^$1=//p"; }
+# Read a field the way the prompt does — eval the assignments, echo the var —
+# so the test asserts the value the caller ends up with, not the raw quoted text.
+shval() { SH_OUT="$SH_OUT" bash -c "eval \"\$SH_OUT\"; printf '%s' \"\${$1-}\""; }
 
 SH_GROUP="" runsh CLAIM_REASON=claimed
 is    "--sh WORK sets ACTION=work"  "$(shval ACTION)"  "work"
@@ -193,6 +195,21 @@ has   "--sh HOLD still prints BEGAN on stderr" "premise-gate: BEGAN=" "$SH_ERR"
 SH_GROUP="" runsh CLAIM_MODE=nowork
 is    "--sh DRAIN sets ACTION=drain" "$(shval ACTION)" "drain"
 is    "--sh DRAIN exits 1"           "$SH_RC"          "1"
+
+# eval-safety: SUBJECT is a continuation group from `gc hook --claim` and bead
+# metadata, and the prompt runs `eval "$(converse-claim.sh --sh ...)"`. A group
+# carrying shell metacharacters must reach the caller as one literal string, not
+# as syntax the eval executes. `;` would end the assignment and start a command;
+# `$(...)` would substitute — both are inert once the value is single-quoted.
+# (Space-free by construction: the default verdict line is space-delimited, so a
+# group with a space is already truncated before the quote; injection does not
+# need one, as `g;INJECTED=$(whoami)` shows.)
+INJ='g;INJECTED=$(whoami)'
+SH_GROUP="" runsh CLAIM_REASON=claimed CLAIM_GROUP="$INJ"
+is    "--sh passes a metacharacter group through as one literal" "$(shval SUBJECT)" "$INJ"
+INJ_VAR="$(SH_OUT="$SH_OUT" bash -c 'eval "$SH_OUT"; printf %s "${INJECTED-}"')"
+is    "--sh eval neither splits the assignment nor substitutes" "$INJ_VAR"         ""
+has   "--sh emits SUBJECT single-quoted"                         "SUBJECT='"       "$SH_OUT"
 
 echo
 echo "converse-claim: $PASS passed, $FAIL failed"

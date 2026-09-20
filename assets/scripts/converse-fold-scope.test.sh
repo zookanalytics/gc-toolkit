@@ -143,7 +143,10 @@ run_block() {
                 bash "$FOLD_SUT" 2>/dev/null
     )
 }
-field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | tail -1; }
+# Read a field the way the prompt does — eval the quoted assignments in a
+# subshell (so they do not leak into the test), echo the var — so a single-quoted
+# value round-trips to its literal.
+field() { ( eval "$1"; eval "printf '%s' \"\${$2-}\"" ); }
 # holder <visit> <subject> — just the resolved holder.
 holder() { field "$(run_block "$1" "$2")" HOLDER; }
 # legacy_holds <subject> — what the OLD group-only rule saw: the count of
@@ -393,6 +396,26 @@ if grep -qF "sed -n 's/.*bead=" "$PROMPT"; then
 else
     ok "step 1 no longer hand-parses the raw claim line"
 fi
+
+echo "── eval-safety: a metacharacter subject reaches the caller as data ──"
+# The prompt runs `eval "$(converse-fold.sh ... | grep -E '^(SUBJECT|HOLDER)=')"`,
+# and SUBJECT is a continuation group recovered from claim/metadata, so it can
+# carry any byte. A group with shell metacharacters must arrive as one literal
+# string, never syntax the eval executes: `;` would end the assignment and start
+# a command, `$(...)` would substitute. Single-quoting the emitted value neuters
+# both. Space-free by construction (see converse-claim.test.sh).
+INJ='g;INJECTED=$(whoami)'
+fixture "$(visit v-inj "$INJ" item-x '')"
+out="$(run_block v-inj "$INJ")"
+is "fold passes a metacharacter subject through as one literal" "$(field "$out" SUBJECT)" "$INJ"
+INJECTED_SEEN="$(out="$out" bash -c '
+    eval "$(printf "%s\n" "$out" | grep -E "^(SUBJECT|HOLDER)=")"
+    printf %s "${INJECTED-}"')"
+is "fold eval neither splits the assignment nor substitutes" "$INJECTED_SEEN" ""
+case "$out" in
+    *"SUBJECT='"*) ok "fold emits SUBJECT single-quoted" ;;
+    *) bad "fold emits SUBJECT single-quoted" "not quoted in: $out" ;;
+esac
 
 # ── HOLD-ARM PREMISE GATE (visit-hold-premise-gate) ──────────────────────────
 # Deliberately housed in this suite, not a converse-hold-*.test.sh of its own:
