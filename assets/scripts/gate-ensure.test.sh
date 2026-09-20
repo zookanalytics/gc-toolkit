@@ -174,6 +174,7 @@ eq "$(meta "$rid" 'gc.routed_to')" "<absent>" "the pour retired gc.routed_to (ne
 eq "$(meta "$rid" review_pool)" "$POOL" "durable route copy stamped in the metadata stamp"
 grep -qxF "$rid|blocks|A1" "$STUB_DEPS" && ok "review blocks the anchor" || bad "blocks edge missing"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL $rid --on mol-review" "the review formula is attached by an explicit gc sling --on (no default hijack)"
+hasnt "$(cat "$STUB_GC_LOG")" "--var" "the default mol-review path forwards no formula vars (the quorum pilot is opt-in)"
 eq "$(meta A1 dispatch_count)" "<absent>" "no dispatch tally is written on the anchor — the ceiling is retired"
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
@@ -877,6 +878,23 @@ store "[$(anchor X11 pull_request codex "" polecat/x11), $(backed rev-x11 X11), 
 oid x11 > "$GH_DIR/head_polecat_x11"
 run >/dev/null
 eq "$(pinned X11)" "progressing@$(oid x11)" "a green lane with an open validation pass records progressing, not settled"
+
+echo "# --review-formula + --sling-var forward the two-lane quorum pilot through the pour (tk-ehhpkh)"
+store "[$(anchor P1 pre_open_gate "" "" polecat/p1)]"
+oid p1 > "$GH_DIR/head_polecat_p1"
+: > "$STUB_GC_LOG"
+out=$("$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" \
+  --review-formula mol-review-quorum-signoff \
+  --sling-var lane_one_id=codex --sling-var lane_one_provider=codex --sling-var "lane_one_target=$POOL" \
+  --sling-var lane_two_id=claude --sling-var lane_two_provider=claude --sling-var "lane_two_target=$FIXP" \
+  --sling-var "synthesis_target=$FIXP" 2>&1); rc=$?
+eq "$rc" 0 "a pilot dispatch exits 0"
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" task_kind)" "review" "the pilot review bead still carries task_kind=review (metadata stamp unchanged)"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL $prid --on mol-review-quorum-signoff" "the pilot formula is attached by --review-formula, not the mol-review default"
+has "$(cat "$STUB_GC_LOG")" "--var lane_one_provider=codex" "lane one's provider var is forwarded to the pour"
+has "$(cat "$STUB_GC_LOG")" "--var lane_two_provider=claude" "lane two's provider var is forwarded to the pour"
+has "$(cat "$STUB_GC_LOG")" "--var synthesis_target=$FIXP" "the synthesis target var is forwarded to the pour"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

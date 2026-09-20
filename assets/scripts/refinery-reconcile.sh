@@ -60,6 +60,28 @@ REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
 CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-codex}"
 INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
 
+# Review dispatch formula (tk-ehhpkh two-lane pilot). Default mol-review — the
+# single-agent lifecycle. Opt into the quorum by setting
+# REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff: reviews then run
+# as two provider lanes (codex + claude by default) plus a synthesizer that
+# makes the single signoff. Reverting is unsetting the env — no code change.
+# Lane config is constant across the pass; the per-review base is read from
+# each review bead's review_base by the lanes, so base_ref stays defaulted.
+REVIEW_FORMULA="${REFINERY_RECONCILE_REVIEW_FORMULA:-mol-review}"
+GATE_REVIEW_FORMULA_ARGS=()
+if [ "$REVIEW_FORMULA" != "mol-review" ]; then
+  GATE_REVIEW_FORMULA_ARGS=(
+    --review-formula "$REVIEW_FORMULA"
+    --sling-var "lane_one_id=${REFINERY_RECONCILE_LANE_ONE_ID:-codex}"
+    --sling-var "lane_one_provider=${REFINERY_RECONCILE_LANE_ONE_PROVIDER:-codex}"
+    --sling-var "lane_one_target=${REFINERY_RECONCILE_LANE_ONE_TARGET:-$REVIEW_POOL}"
+    --sling-var "lane_two_id=${REFINERY_RECONCILE_LANE_TWO_ID:-claude}"
+    --sling-var "lane_two_provider=${REFINERY_RECONCILE_LANE_TWO_PROVIDER:-claude}"
+    --sling-var "lane_two_target=${REFINERY_RECONCILE_LANE_TWO_TARGET:-$FIX_POOL}"
+    --sling-var "synthesis_target=${REFINERY_RECONCILE_SYNTHESIS_TARGET:-$FIX_POOL}"
+  )
+fi
+
 # Graduation target = this rig's own origin/HEAD (one [order.env] serves every
 # rig, so a constant here would be per-rig drift).
 TARGET="${REFINERY_RECONCILE_TARGET:-}"
@@ -180,7 +202,7 @@ MERGE_HELD_WHY=""
 gate_rc=0
 run_pass "(1) gate-ensure" gate-ensure.sh \
   --default "$CHECK_SET_DEFAULT" --review-pool "$REVIEW_POOL" \
-  --fix-pool "$FIX_POOL" || gate_rc=$?
+  --fix-pool "$FIX_POOL" ${GATE_REVIEW_FORMULA_ARGS[@]+"${GATE_REVIEW_FORMULA_ARGS[@]}"} || gate_rc=$?
 if [ "$gate_rc" = "$GATE_UNSAFE_RC" ]; then
   MERGE_HELD=1
   MERGE_HELD_WHY="${MERGE_HELD_WHY:+$MERGE_HELD_WHY, }gate-ensure unsafe"

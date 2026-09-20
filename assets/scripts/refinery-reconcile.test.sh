@@ -66,6 +66,7 @@ has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTO
 stack_line=$(grep '^pr-stack' "$ARM_LOG")
 eq "$stack_line" "pr-stack.sh|||" "pr-stack ran last, unprojected and with no args"
 has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
+hasnt "$(grep '^gate-ensure' "$ARM_LOG")" "--review-formula" "gate-ensure gets no --review-formula by default (the two-lane quorum pilot is opt-in)"
 has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--fix-pool myrig/gc-toolkit.polecat" "pre-open-rebase got the derived fix pool"
 case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
   *"|myrig/gc-toolkit.refinery|"*) bad "pre-open-rebase must NOT inherit BEADS_ACTOR (it closes nothing)" ;;
@@ -392,6 +393,19 @@ if grep -qE '^[[:space:]]*no_work_gate' "$ORDER"; then
 else
   ok "no_work_gate is not set"
 fi
+
+echo "# REFINERY_RECONCILE_REVIEW_FORMULA opts reviews into the two-lane quorum pilot (tk-ehhpkh)"
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+: > "$ARM_LOG"
+GC_RIG=myrig GC_RIG_ROOT="$TMP" REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff "$SD/refinery-reconcile.sh" >/dev/null 2>&1
+gate_pilot=$(grep '^gate-ensure' "$ARM_LOG")
+has "$gate_pilot" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "the base gate-ensure args are unchanged under the pilot"
+has "$gate_pilot" "--review-formula mol-review-quorum-signoff" "gate-ensure gets the pilot formula from the env"
+has "$gate_pilot" "--sling-var lane_one_provider=codex" "lane one runs on the codex provider"
+has "$gate_pilot" "--sling-var lane_one_target=myrig/gc-toolkit.polecat-codex" "lane one targets the codex pool"
+has "$gate_pilot" "--sling-var lane_two_provider=claude" "lane two runs on the claude provider"
+has "$gate_pilot" "--sling-var lane_two_target=myrig/gc-toolkit.polecat" "lane two targets the claude pool"
+has "$gate_pilot" "--sling-var synthesis_target=myrig/gc-toolkit.polecat" "the synthesis runs on the claude pool"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

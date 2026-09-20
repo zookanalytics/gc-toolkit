@@ -27,7 +27,9 @@
 # left — a reviewer that dies after claim, a fix unit filed with its edge
 # reversed — stop the PR moving and are caught by liveness-sweep.sh's stale-gate
 # pass, not by a count on the gate.
-# Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
+# Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>]
+#       [--review-formula <name>] [--sling-var k=v ...]. The formula defaults to
+#       mol-review; --sling-var forwards formula vars verbatim to the pour.
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
 set -u
@@ -46,14 +48,24 @@ DEFAULT_CHECK_SET="codex"
 REVIEW_FORMULA="mol-review"
 REVIEW_POOL=""
 FIX_POOL=""
+# Extra formula vars forwarded verbatim to the pour (repeatable --sling-var
+# k=v). Empty on the default mol-review path; the caller passes the two-lane
+# quorum pilot's lane config when --review-formula fans out (tk-ehhpkh).
+SLING_VARS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --default)     DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
-    --review-pool) REVIEW_POOL="${2:-}"; shift 2 ;;
-    --fix-pool)    FIX_POOL="${2:-}"; shift 2 ;;
+    --default)        DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
+    --review-pool)    REVIEW_POOL="${2:-}"; shift 2 ;;
+    --fix-pool)       FIX_POOL="${2:-}"; shift 2 ;;
+    --review-formula) REVIEW_FORMULA="${2:-mol-review}"; shift 2 ;;
+    --sling-var)      SLING_VARS+=("${2:-}"); shift 2 ;;
     *) shift ;;
   esac
 done
+# Pre-build the repeatable --var args once; every review dispatched this pass
+# reuses them. The +"${..[@]}" guard keeps set -u happy on the empty default.
+SLING_VAR_ARGS=()
+for _v in ${SLING_VARS[@]+"${SLING_VARS[@]}"}; do SLING_VAR_ARGS+=(--var "$_v"); done
 
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
@@ -726,7 +738,7 @@ STRAY
     # One sling, no retry: a re-pour mints a second workflow root. A pour that
     # does not read back is held; the next pass's stranded arm probes for its
     # tracking convoy before deciding to re-sling.
-    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on "$REVIEW_FORMULA" >/dev/null 2>&1
+    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} >/dev/null 2>&1
     if ! pour_ok "$RID" "$REVIEW_POOL"; then
       echo "$PROG: WARN review $RID pour did not read back; merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
