@@ -44,6 +44,10 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-recheck.sh"
 SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
 PROMPT="$ROOT/agents/converse/prompt.template.md"
+# The claim-time re-check lives in the converse prep skill (steps 3–4); it calls
+# the hook script, which reads the visit.recheck stamp as a path and runs it.
+PREP="$ROOT/skills/converse-prep/SKILL.md"
+RECHECK_SUT="$ROOT/assets/scripts/converse-recheck-hook.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-recheck-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -57,6 +61,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 [ -s "$SCRIPT" ]  || { echo "missing $SCRIPT" >&2; exit 1; }
 [ -s "$SWEEP" ]  || { echo "missing $SWEEP" >&2; exit 1; }
 [ -s "$PROMPT" ]  || { echo "missing $PROMPT" >&2; exit 1; }
+[ -s "$PREP" ]  || { echo "missing $PREP" >&2; exit 1; }
 
 echo "── the script is shipped executable and syntactically valid ──"
 [ -x "$SCRIPT" ] && ok "liveness-recheck.sh is executable" \
@@ -302,22 +307,22 @@ for key in sweep.new_ids sweep.carried_ids sweep.pass_at visit.recheck; do
 done
 
 # --- 5. the claim-time hook in the converse loop -----------------------------
-# The stamp only matters if something runs it. The sitting is where the body is
-# read, so the hook lives in the prep step — before any prep, not after.
+# The stamp only matters if something runs it. The sitting reads the body, so
+# the prep skill (steps 3–4) invokes the re-check before any prep; the hook
+# script it calls reads the stamp as a path and runs it, never eval-ing it.
 echo "── the converse loop runs the re-check at claim time ──"
-has "the prep step reads visit.recheck"      'visit.recheck'            "$PROMPT"
-has "the prep step runs the re-check hook"   'converse-recheck-hook.sh' "$PROMPT"
-grep -qE 'eval +"?\$RECHECK' "$PROMPT" \
+has "the prep step reads visit.recheck"      'visit.recheck'            "$PREP"
+has "the prep step runs the re-check hook"   'converse-recheck-hook.sh' "$PREP"
+grep -qE 'eval +"?\$RECHECK' "$RECHECK_SUT" \
     && bad "the hook never evals a metadata string" "found an eval of \$RECHECK — the stamp is a path, so read-then-run is available" \
     || ok "the hook never evals a metadata string"
-has "the corrected census supersedes the body" "supersedes the body's lists" "$PROMPT"
+has "the corrected census supersedes the body" "supersedes the body's lists" "$PREP"
 
 # The seam between the two files is where this fix can rot without either side
 # looking wrong, so the hook is EXECUTED rather than grepped: the stamp key the
 # sweep writes and the key the sitting reads have to be the same string, and a
 # text assertion on each file separately would not notice them drifting apart.
-# The hook now ships as converse-recheck-hook.sh; the converse prompt calls it.
-RECHECK_SUT="$ROOT/assets/scripts/converse-recheck-hook.sh"
+# The hook ships as converse-recheck-hook.sh; the converse prep skill calls it.
 [ -x "$RECHECK_SUT" ] && ok "converse-recheck-hook.sh is present and executable" \
     || bad "converse-recheck-hook.sh is present and executable" "missing or not +x: $RECHECK_SUT"
 bash -n "$RECHECK_SUT" && ok "converse-recheck-hook: valid bash" \
