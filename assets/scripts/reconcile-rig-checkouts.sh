@@ -9,7 +9,30 @@
 # --ff-only is safe by construction: it advances only on a clean fast-forward,
 # preserves a non-conflicting dirty file for free, and REFUSES (mutates
 # nothing) on any divergence or conflicting dirty file. So this ships enabled —
-# it cannot clobber work. The refusal is the exception signal: the checkout is
+# it cannot clobber work.
+#
+# When --ff-only refuses, the divergence is almost always SHA churn from an
+# upstream rebase/squash/force-push: the live rigs/* checkout is a pure
+# deployment mirror (commits are authored in worktrees and the refinery clone,
+# never here), so its tracked content is already fully represented in origin.
+# That case is provably lossless to reset, so the refusal branch first tries to
+# auto-heal. The reset runs only when every check holds, and fails closed
+# (escalates, mutates nothing) on anything it cannot prove:
+#   - git cherry (patch-id) finds no unique local commit, so a rebased or
+#     squashed commit with a new SHA still matches;
+#   - git rev-list --merges finds no merge commit unique to local — git cherry
+#     ignores merges, so a local merge's tree content is not provably upstream
+#     and the guard refuses rather than reset it away;
+#   - git status --porcelain is readable (a failed read is not proof of a clean
+#     tree), and no dirty tracked path carries local-only content: its working
+#     tree differs from the remote, or its staged index matches neither the
+#     remote nor the committed HEAD.
+# It then resets --hard to the remote (untracked files are preserved) and closes
+# the divergence bead. Set RECONCILE_NO_AUTOHEAL=1 to disable this and escalate
+# every divergence instead.
+#
+# A genuine divergence — a unique local commit, or a tracked change not yet
+# upstream — fails that guard and takes the exception path: the checkout is
 # left untouched, one idempotent bead per blocked rig records the divergence,
 # and escalate.sh raises it so someone actually acts.
 #
@@ -63,7 +86,7 @@ escalate_divergence() {
         --subject "$subject" --key "$key" --message "$message"
 }
 
-advanced=0; blocked=0
+advanced=0; healed=0; blocked=0
 rigs=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"') || exit 0
 
 while IFS=$'\t' read -r name path; do
@@ -80,7 +103,53 @@ while IFS=$'\t' read -r name path; do
         continue
     fi
 
-    # ff-only refused: the checkout diverged. Do NOT touch it — escalate.
+    # ff-only refused. Almost always this is SHA churn from an upstream
+    # rebase/squash/force-push and the checkout's content is already upstream, so
+    # try to auto-heal before escalating. reset --hard is lossless only when the
+    # guard proves it: git cherry (patch-id) finds no unique local commit, no
+    # merge commit is unique to local (git cherry ignores merges, so a local
+    # merge's tree content is not provably upstream), the status read succeeds,
+    # and no dirty tracked path carries local-only content (a working tree that
+    # differs from the remote, or a staged index matching neither remote nor
+    # HEAD). Untracked files are
+    # never touched by reset --hard. Anything the guard cannot prove — a real
+    # divergence, an unreadable status, a local merge — falls through to the
+    # escalation path unchanged. RECONCILE_NO_AUTOHEAL=1 disables the heal.
+    if [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
+       && cherry_out=$(git -C "$path" cherry "$remote" HEAD 2>/dev/null) \
+       && [ -z "$(printf '%s' "$cherry_out" | grep '^+' || true)" ] \
+       && merges=$(git -C "$path" rev-list --merges "$remote"..HEAD 2>/dev/null) \
+       && [ -z "$merges" ] \
+       && status_out=$(git -C "$path" -c core.quotepath=false status --porcelain 2>/dev/null); then
+        unique_tracked=0
+        while IFS= read -r changed; do
+            [ -n "$changed" ] || continue
+            # reset --hard overwrites both the working tree and the staged index
+            # for this path, so neither may carry content the reset would lose.
+            # Working tree: safe only when it already equals the remote (the
+            # regenerated-to-upstream case). Index: safe when it equals the remote,
+            # or equals HEAD — committed content, proven upstream by the cherry
+            # check above. Content staged but never committed (differs from both
+            # HEAD and the remote) is discarded with no way back, even when an
+            # upstream-matching worktree copy hides it from a diff against remote.
+            if ! git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null; then
+                unique_tracked=$((unique_tracked + 1))
+            elif ! git -C "$path" diff --cached --quiet "$remote" -- "$changed" 2>/dev/null \
+                 && ! git -C "$path" diff --cached --quiet HEAD -- "$changed" 2>/dev/null; then
+                unique_tracked=$((unique_tracked + 1))
+            fi
+        done < <(printf '%s\n' "$status_out" | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
+        if [ "$unique_tracked" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
+            healed=$((healed + 1))
+            bead=$(open_bead "$name")
+            [ -n "$bead" ] && gc bd --rig "$RECONCILE_RIG" close "$bead" \
+                --reason "rigs/$name auto-healed: already-upstream, reset --hard to $remote" >/dev/null 2>&1 || true
+            continue
+        fi
+    fi
+
+    # ff-only refused and the divergence is genuine (or auto-heal is disabled):
+    # do NOT touch the checkout — escalate.
     blocked=$((blocked + 1))
     body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): already-upstream -> git -C %s reset --hard %s; machine-local\nconfig -> leave it; real work -> handle it.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
         "$name" "$remote" "$path" "$path" "$remote" \
@@ -106,4 +175,4 @@ while IFS=$'\t' read -r name path; do
     fi
 done <<< "$rigs"
 
-echo "reconcile-rig-checkouts: $advanced advanced, $blocked blocked"
+echo "reconcile-rig-checkouts: $advanced advanced, $healed auto-healed, $blocked blocked"
