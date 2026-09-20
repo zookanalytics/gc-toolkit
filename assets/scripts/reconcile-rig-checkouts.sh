@@ -24,8 +24,9 @@
 #     ignores merges, so a local merge's tree content is not provably upstream
 #     and the guard refuses rather than reset it away;
 #   - git status --porcelain is readable (a failed read is not proof of a clean
-#     tree), and no uncommitted tracked change whose content still differs from
-#     the remote is present.
+#     tree), and no dirty tracked path carries local-only content: its working
+#     tree differs from the remote, or its staged index matches neither the
+#     remote nor the committed HEAD.
 # It then resets --hard to the remote (untracked files are preserved) and closes
 # the divergence bead. Set RECONCILE_NO_AUTOHEAL=1 to disable this and escalate
 # every divergence instead.
@@ -108,7 +109,9 @@ while IFS=$'\t' read -r name path; do
     # guard proves it: git cherry (patch-id) finds no unique local commit, no
     # merge commit is unique to local (git cherry ignores merges, so a local
     # merge's tree content is not provably upstream), the status read succeeds,
-    # and no dirty tracked file still differs from the remote. Untracked files are
+    # and no dirty tracked path carries local-only content (a working tree that
+    # differs from the remote, or a staged index matching neither remote nor
+    # HEAD). Untracked files are
     # never touched by reset --hard. Anything the guard cannot prove — a real
     # divergence, an unreadable status, a local merge — falls through to the
     # escalation path unchanged. RECONCILE_NO_AUTOHEAL=1 disables the heal.
@@ -121,8 +124,20 @@ while IFS=$'\t' read -r name path; do
         unique_tracked=0
         while IFS= read -r changed; do
             [ -n "$changed" ] || continue
-            git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null \
-                || unique_tracked=$((unique_tracked + 1))
+            # reset --hard overwrites both the working tree and the staged index
+            # for this path, so neither may carry content the reset would lose.
+            # Working tree: safe only when it already equals the remote (the
+            # regenerated-to-upstream case). Index: safe when it equals the remote,
+            # or equals HEAD — committed content, proven upstream by the cherry
+            # check above. Content staged but never committed (differs from both
+            # HEAD and the remote) is discarded with no way back, even when an
+            # upstream-matching worktree copy hides it from a diff against remote.
+            if ! git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null; then
+                unique_tracked=$((unique_tracked + 1))
+            elif ! git -C "$path" diff --cached --quiet "$remote" -- "$changed" 2>/dev/null \
+                 && ! git -C "$path" diff --cached --quiet HEAD -- "$changed" 2>/dev/null; then
+                unique_tracked=$((unique_tracked + 1))
+            fi
         done < <(printf '%s\n' "$status_out" | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
         if [ "$unique_tracked" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
             healed=$((healed + 1))

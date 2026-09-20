@@ -15,7 +15,9 @@
 # not yet upstream; (i) a unique local merge commit (invisible to git cherry)
 # fails the guard closed and escalates rather than being reset away; (j) an
 # unreadable git status fails the guard closed rather than healing on an
-# unproven-clean tree.
+# unproven-clean tree; (k) a path staged with local-only content whose worktree
+# copy matches the remote fails the guard closed, so reset --hard cannot discard
+# the staged content.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -321,6 +323,34 @@ bash "$SCRIPT" >/dev/null
 rm -f "$TMP/bin/git"
 eq "$(git -C "$TMP/theta" rev-parse HEAD)" "$THETA_HEAD" "an unreadable git status blocks the heal (fail closed)"
 eq "$(esc_count theta)" "1" "an unreadable git status escalates instead of healing"
+
+# iota: an already-upstream SHA churn PLUS a tracked path staged with local-only
+# content whose worktree copy was then restored to the upstream bytes. git status
+# reports it (MM f.txt), but the per-file worktree diff against the remote is
+# empty, so a worktree-only proof counts it clean and reset --hard would discard
+# the staged content. The proof must also compare the staged index against the
+# remote (git diff --cached) and refuse. Twin of the zeta case, which heals
+# because the dirty content is genuinely upstream; here only the worktree is.
+git init -q -b main "$TMP/iota.src"; commit "$TMP/iota.src" i1; commit "$TMP/iota.src" i2
+git clone -q --bare "$TMP/iota.src" "$TMP/iota.git"
+git clone -q "$TMP/iota.git" "$TMP/iota"                         # iota HEAD carries f.txt=i2
+IOTA_LOCAL="$(git -C "$TMP/iota" rev-parse HEAD)"
+git -C "$TMP/iota.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # churn i2's SHA, tree unchanged
+git -C "$TMP/iota.src" push -qf "$TMP/iota.git" main
+printf 'staged-local-only\n' > "$TMP/iota/f.txt"; git -C "$TMP/iota" add f.txt    # index: local-only content
+echo i2 > "$TMP/iota/f.txt"                                     # worktree: restored to the upstream bytes
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"iota","path":"$TMP/iota"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/iota" rev-parse HEAD)" "$IOTA_LOCAL" "staged local-only content (hidden by an upstream-matching worktree) blocks the heal"
+eq "$(esc_count iota)" "1" "staged local-only content escalates instead of healing"
+eq "$(git -C "$TMP/iota" show :f.txt)" "staged-local-only" "the staged local-only content is left untouched"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
