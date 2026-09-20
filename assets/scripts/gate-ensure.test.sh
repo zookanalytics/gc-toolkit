@@ -896,6 +896,24 @@ has "$(cat "$STUB_GC_LOG")" "--var lane_one_provider=codex" "lane one's provider
 has "$(cat "$STUB_GC_LOG")" "--var lane_two_provider=claude" "lane two's provider var is forwarded to the pour"
 has "$(cat "$STUB_GC_LOG")" "--var synthesis_target=$FIXP" "the synthesis target var is forwarded to the pour"
 
+echo "# …and forward through the STRANDED zero-root re-sling too, not only the fresh dispatch"
+store "[$(anchor P2 pull_request codex "" polecat/p2),
+        $(stranded_review_row rev-p2 P2)]"
+oid p2 > "$GH_DIR/head_polecat_p2"
+: > "$STUB_GC_LOG"
+out=$("$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" \
+  --review-formula mol-review-quorum-signoff \
+  --sling-var lane_one_id=codex --sling-var lane_one_provider=codex --sling-var "lane_one_target=$POOL" \
+  --sling-var lane_two_id=claude --sling-var lane_two_provider=claude --sling-var "lane_two_target=$FIXP" \
+  --sling-var "synthesis_target=$FIXP" 2>&1); rc=$?
+eq "$rc" 0 "a pilot stranded zero-root re-sling exits 0"
+has "$out" "STRANDED review rev-p2" "the zero-root stranded review is named"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-p2 --on mol-review-quorum-signoff" "the stranded re-sling attaches the pilot formula, not the mol-review default"
+eq "$(meta rev-p2 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
+has "$(cat "$STUB_GC_LOG")" "--var lane_one_provider=codex" "lane one's provider var is forwarded through the stranded re-sling"
+has "$(cat "$STUB_GC_LOG")" "--var lane_two_provider=claude" "lane two's provider var is forwarded through the stranded re-sling"
+has "$(cat "$STUB_GC_LOG")" "--var synthesis_target=$FIXP" "the synthesis target var is forwarded through the stranded re-sling"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
