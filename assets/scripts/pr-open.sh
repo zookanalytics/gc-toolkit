@@ -296,14 +296,18 @@ splice_in_place() { # <body-file> <section-file> <out-file>
 # \r-stripped, and only when it carries exactly one well-formed marker pair replace
 # what is between the markers, leaving operator edits and pr-stack's section in
 # place. A body that predates the markers or was cut into an unreadable shape is
-# left as it stands. 0 = current, refreshed, or left alone — proceed to the flip;
-# 1 = a composed refresh failed to land — hold at pre_open_gate and retry.
+# left as it stands. 0 = current, refreshed, or deliberately left alone (predates
+# the markers, or an unreadable marker shape) — proceed to the flip. 1 = the body
+# could not be verified or refreshed: a missing head oid, an unreadable or
+# unparseable body, a scratch or compose failure, or a failed edit — hold at
+# pre_open_gate and retry rather than flip a body that may be stale, the miss the
+# adoption path exists to close.
 refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid>
   local id="$1" num="$2" row="$3" branch="$4" target="$5" head_oid="$6"
   local summary desc checkset body_json CUR SECTION NEW ms rc
   if [ -z "$head_oid" ]; then
-    echo "$PROG: $id PR#$num head oid unknown from the PR row; flipped without a refresh" >&2
-    return 0
+    echo "$PROG: $id PR#$num head oid unknown from the PR row; body refresh cannot be composed, anchor stays pre_open_gate (retry next pass)" >&2
+    return 1
   fi
   summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty')
   [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || summary=""
@@ -311,14 +315,32 @@ refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid>
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   body_json=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json body </dev/null 2>/dev/null); rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$body_json" ]; then
-    echo "$PROG: $id PR#$num body unreadable; flipped without a refresh (retry on the next re-gate)" >&2
-    return 0
+    echo "$PROG: $id PR#$num body unreadable; anchor stays pre_open_gate (retry next pass)" >&2
+    return 1
   fi
-  CUR=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-cur.XXXXXX") || return 0
-  SECTION=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-sec.XXXXXX") || { rm -f "$CUR"; return 0; }
-  NEW=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-new.XXXXXX") || { rm -f "$CUR" "$SECTION"; return 0; }
+  CUR=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-cur.XXXXXX") \
+    || { echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
+  SECTION=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-sec.XXXXXX") \
+    || { rm -f "$CUR"; echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
+  NEW=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-new.XXXXXX") \
+    || { rm -f "$CUR" "$SECTION"; echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
+  # Read the current body into scratch and compose its replacement. A payload that
+  # slipped past the read check but does not parse, or a compose that writes
+  # nothing, is a render failure that holds rather than flips a body it could not
+  # rebuild. The parse is proven first — jq is the last stage of its own pipeline,
+  # so its status stands without pipefail — then the body is spliced as before.
+  if ! printf '%s' "$body_json" | jq -e . >/dev/null 2>&1; then
+    rm -f "$CUR" "$SECTION" "$NEW"
+    echo "$PROG: $id PR#$num published body did not parse; anchor stays pre_open_gate (retry next pass)" >&2
+    return 1
+  fi
   printf '%s' "$body_json" | jq -r '.body // ""' 2>/dev/null | tr -d '\r' > "$CUR"
-  compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" > "$SECTION"
+  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" > "$SECTION" \
+     || [ ! -s "$SECTION" ]; then
+    rm -f "$CUR" "$SECTION" "$NEW"
+    echo "$PROG: $id PR#$num refreshed body could not be composed; anchor stays pre_open_gate (retry next pass)" >&2
+    return 1
+  fi
   marker_state "$CUR"; ms=$?
   if [ "$ms" = 1 ]; then
     rm -f "$CUR" "$SECTION" "$NEW"

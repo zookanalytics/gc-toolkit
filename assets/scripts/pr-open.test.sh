@@ -51,6 +51,7 @@ finding() { # id anchor [disposition] [lane]
 echo "# adopt an existing OPEN PR"
 store "[$(pre A1 polecat/a1)]"
 printf '[%s]' "$(prrow 41 OPEN polecat/a1 sha-a1 main)" > "$GH_DIR/pr_list_polecat_a1.json"
+prrow 41 OPEN polecat/a1 sha-a1 main | jq '. + {body:"A body with no managed markers, left as it stands."}' > "$GH_DIR/pr_view_41.json"
 out=$("$SUT" 2>&1); rc=$?
 eq "$rc" 0 "adoption pass exits 0"
 has "$out" "already has PR#41 (OPEN); flipped to pull_request" "the open PR was adopted"
@@ -121,6 +122,51 @@ out=$("$SUT" 2>&1)
 eq "$(meta RF3 merge_result)" "pull_request" "a legacy body still flips (adoption is not blocked on it)"
 has "$out" "predates the gc:pr-summary markers" "…and reports it was left alone"
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit 73" "no edit to a body it cannot splice"
+
+echo "# an unreadable OPEN PR body holds the anchor rather than flipping a stale one"
+# The reworked pr_summary must reach the published body before the flip. A body
+# that cannot even be read leaves the current one possibly stale, so flipping
+# would pass it through the very gate the refresh exists to close; the anchor
+# holds for the next pass instead.
+store "[$(pre RF4 polecat/rf4 ',"pr_summary":"NEW: a summary that must not flip past a stale body."')]"
+printf '[%s]' "$(prrow 74 OPEN polecat/rf4 sha-rf4 main)" > "$GH_DIR/pr_list_polecat_rf4.json"
+# no pr_view_74.json fixture, so `gh pr view` exits nonzero: the body is unreadable
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF4 merge_result)" "pre_open_gate" "an unreadable body leaves the anchor at pre_open_gate"
+has "$out" "body unreadable" "…and says why"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 74" "no body was edited past an unreadable read"
+
+echo "# an OPEN PR row with no head oid holds rather than flipping without a refresh"
+# certify_row does not require headRefOid, so an OPEN row can arrive with none.
+# Without a head the handoff section cannot be composed, so the anchor holds.
+store "[$(pre RF5 polecat/rf5 ',"pr_summary":"NEW: a summary needing a head to compose."')]"
+printf '[%s]' "$(prrow 75 OPEN polecat/rf5 '' main)" > "$GH_DIR/pr_list_polecat_rf5.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF5 merge_result)" "pre_open_gate" "a missing head oid leaves the anchor at pre_open_gate"
+has "$out" "head oid unknown" "…and says why"
+
+echo "# an unparseable OPEN PR body holds rather than flipping past a body it cannot splice"
+store "[$(pre RF6 polecat/rf6 ',"pr_summary":"NEW: a summary the render never reaches."')]"
+printf '[%s]' "$(prrow 76 OPEN polecat/rf6 sha-rf6 main)" > "$GH_DIR/pr_list_polecat_rf6.json"
+printf '%s' 'not-json{' > "$GH_DIR/pr_view_76.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RF6 merge_result)" "pre_open_gate" "an unparseable body leaves the anchor at pre_open_gate"
+has "$out" "did not parse" "…and says why"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 76" "no body was edited past a parse failure"
+
+echo "# a scratch file that cannot be created holds rather than flipping unrefreshed"
+store "[$(pre RF7 polecat/rf7 ',"pr_summary":"NEW: a summary the scratch failure never composes."')]"
+STALE7=$(printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'OLD summary.' '<!-- /gc:pr-summary -->')
+prrow 79 OPEN polecat/rf7 sha-rf7 main | jq --arg b "$STALE7" '. + {body:$b}' > "$GH_DIR/pr_view_79.json"
+printf '[%s]' "$(prrow 79 OPEN polecat/rf7 sha-rf7 main)" > "$GH_DIR/pr_list_polecat_rf7.json"
+: > "$STUB_GH_LOG"
+out=$(TMPDIR=/nonexistent/scratch-fail "$SUT" 2>&1)
+eq "$(meta RF7 merge_result)" "pre_open_gate" "a scratch-file failure leaves the anchor at pre_open_gate"
+has "$out" "scratch file unavailable" "…and says why"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 79" "no body was edited when scratch was unavailable"
 
 echo "# holds gate the create path"
 store "[$(pre B1 polecat/b1 ',"merge_hold":"true"')]"
