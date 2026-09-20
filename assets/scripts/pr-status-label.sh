@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
 # pr-status-label.sh — the single writer of the workflow-owned `status:` GitHub
-# PR label. It projects the human-attention half of the two-signal model onto
-# GitHub's PR list, where "Changes requested" is sticky and cannot say whether a
-# PR was reworked-and-handed-back or is still in rework. specs/tk-6bji7k.1
-# (PR #793) owns the WIP/ready model and the machine axis; this owns the label
-# taxonomy and the projection.
+# PR label. It projects the city's own workflow state — who must act on a PR
+# next — onto GitHub's pull request list, where that state is otherwise invisible
+# until you open the PR. One filterable value per open PR says whether the city
+# is working it, a human should review it, or a human must unstick it.
 #
 # The label is one value from a mutually-exclusive `status:` group. Setting one
-# value removes any other `status:` value, so future phases are a value addition,
-# not a redesign. Seed values: `in-rework`, `ready-for-review`.
+# value removes any other `status:` value, so a future phase is a value addition,
+# not a redesign. The three values answer one question — who must act next:
+#   working         the city holds the ball: a rework child stands on the reviewed
+#                   commit, or an approved PR is merging. No human input needed.
+#   needs-review    settled at the current head: a human review or re-review of
+#                   this commit is the next action.
+#   needs-attention the city stopped without settling: a signoff-cap park, a
+#                   hold/park marker, or an approved PR wedged with no live work.
+#                   The ask is "unstick us", not "review the diff".
+# Precedence when inputs overlap: needs-attention > working > needs-review.
 #
-# The signal is the city's OWN rework state, never GitHub's sticky posture and
-# never a commit-agnostic lane marker:
-#   in-rework        an open rework child stands on the anchor, or the anchor is
-#                    parked by the signoff round cap (merge_hold=signoff_cap)
-#   ready-for-review otherwise (born gate-green, reworked-and-handed-back,
-#                    awaiting or past a human review)
-# A rework child is filed against the reviewed commit and resolved when the fix
-# lands, so the flip tracks the reviewed commit rather than a `green` that
-# survives a rewrite (the stale-green bug this deliberately does not read). The
-# label carries human attention only: machine-readiness/CI stays on pr.machine
-# and the future draft flag, and this never asserts a PR may merge.
+# The signal is the city's own state, read from the refinery-computed facts on
+# the anchor (pr_posture, pr_merge_state, the merge/rebase holds) and its rework
+# children — never GitHub's review posture directly and never a lane's green. The
+# working->needs-review flip rests on the rework child, which is filed against the
+# reviewed commit and closes when the fix lands, so it tracks the reviewed commit
+# rather than a marker that outlives a rewrite of it (tk-4zsj1p). The label is
+# workflow state, never an approval, and never asserts a PR may merge:
+# machine-readiness/CI rides pr.machine and the draft flag.
 #
 # Every GitHub write is pinned to a repository the caller resolved (--repo), the
 # same origin-pinning pr-open.sh and pr-facts.sh already apply; gh-origin-guard.sh
@@ -28,7 +32,7 @@
 #
 # Verbs:
 #   ensure   --repo Q [--host H]                          create the status: labels if missing
-#   derive   --anchor ID                                  print in-rework | ready-for-review
+#   derive   --anchor ID                                  print working | needs-review | needs-attention
 #   set      --pr N --value V --repo Q [--host H] [--current-labels CSV]
 #   reconcile --anchor ID --pr N --repo Q [--host H] [--current-labels CSV]
 #
@@ -43,23 +47,25 @@ warn() { echo "$PROG: $*" >&2; }
 # the list apart from human triage labels, following Rust `S-`/Kubernetes
 # `do-not-merge/`/colon-grouping practice.
 LABEL_PREFIX="status: "
-STATUS_VALUES="in-rework
-ready-for-review"
+STATUS_VALUES="working
+needs-review
+needs-attention"
 # One shared colour for the whole group so the values read as one dimension;
 # override for a city that wants another. A 6-hex value, no leading '#'.
 GROUP_COLOR="${GC_PR_STATUS_LABEL_COLOR:-1D76DB}"
 
-label_desc() { # <value> — the label's GitHub description
+label_desc() { # <value> — the label's GitHub description (GitHub caps these at 100 chars)
   case "$1" in
-    in-rework)        printf 'Workflow: the city is reworking this PR (changes requested and not yet handed back).' ;;
-    ready-for-review) printf 'Workflow: ready for review — freshly gate-green, or reworked and handed back.' ;;
-    *)                printf 'Workflow status label.' ;;
+    working)         printf 'Workflow: the city holds the ball — rework or merge in flight; no human input needed.' ;;
+    needs-review)    printf 'Workflow: settled at the current head; awaiting a human review or re-review.' ;;
+    needs-attention) printf 'Workflow: stopped without settling (signoff cap, hold, blocked merge); needs a human to unstick.' ;;
+    *)               printf 'Workflow status label.' ;;
   esac
 }
 
 is_status_value() { # <value>
   case "$1" in
-    in-rework|ready-for-review) return 0 ;;
+    working|needs-review|needs-attention) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -128,14 +134,37 @@ ensure_labels() { # uses ORIGIN_*
 
 # --- the projection derivation --------------------------------------------
 
-# Print the status value the anchor's state projects to. in-rework when the city
-# is reworking (an open rework child, task_kind=rework + anchor_bead=<anchor>) or
-# the signoff cap parked the anchor (merge_hold=signoff_cap); ready-for-review
-# otherwise. Reads neither GitHub posture (sticky) nor check.<lane>=green
-# (commit-agnostic). Exit 2 when a read does not resolve, so a caller does not
-# flip the label on a guess.
+# The truthiness rule pr-facts.sh and pr-open.sh read holds by, so a hold means
+# the same thing in all three.
+is_set() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
+# The round cap's park pairs merge_hold=signoff_cap with a non-empty signoff_cap
+# (pr-facts.sh is_cap_park); that one pairing is the cap park, distinct from an
+# operator freeze (merge_hold=true) which is_set below still catches as a hold.
+is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
+
+# Print the status value the anchor projects to, answering one question: who must
+# act next. Precedence needs-attention > working > needs-review.
+#
+#   needs-attention  the city stopped without settling — a signoff-cap park, any
+#                    merge/rebase hold on the anchor, or an approved PR wedged
+#                    (merge state BLOCKED) with no rework in flight.
+#   working          the city holds the ball — an open rework child stands on the
+#                    reviewed commit, or an approved PR is merging.
+#   needs-review     settled at the head, a human (re)review is next: posture
+#                    review_required/commented/none, no hold, no open rework.
+#
+# Reads only refinery-computed state off the anchor — the pr-facts.sh posture
+# (pr_posture, stored dated as value@oid@instant) and merge state (pr_merge_state,
+# value@oid), the merge/rebase holds — and the rework children. It does NOT read
+# GitHub's review posture directly or check.<lane>=green: the working->needs-review
+# flip rests on the rework child, which is scoped to the reviewed commit, so
+# GitHub's sticky changes_requested never traps the label in `working` after a
+# rework hands back, and a green that outlives a rewritten commit (tk-4zsj1p)
+# cannot read the label ready. pr_posture is read only to split the approved case
+# (merging vs wedged) and to name the awaiting-review states. Exit 2 when a read
+# does not resolve, so a caller does not flip the label on a guess.
 derive_value() { # <anchor-id>
-  local anchor="$1" arow hold kids
+  local anchor="$1" arow hold cap rhold posture mstate kids nkids
   [ -n "$anchor" ] || { warn "derive needs --anchor"; return 1; }
   arow=$(gc bd show "$anchor" --json 2>/dev/null)
   if ! printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
@@ -143,9 +172,13 @@ derive_value() { # <anchor-id>
     return 2
   fi
   hold=$(printf '%s' "$arow" | jq -r '(.[0].metadata.merge_hold // "") | tostring' 2>/dev/null)
-  if [ "$hold" = "signoff_cap" ]; then
-    printf 'in-rework\n'; return 0
-  fi
+  cap=$(printf '%s' "$arow" | jq -r '(.[0].metadata.signoff_cap // "") | tostring' 2>/dev/null)
+  rhold=$(printf '%s' "$arow" | jq -r '(.[0].metadata.rebase_hold // "") | tostring' 2>/dev/null)
+  # The value is the part before the first '@'; the oid (and, for posture, the
+  # instant) follow it.
+  posture=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_posture // "") | tostring | split("@")[0])' 2>/dev/null)
+  mstate=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_merge_state // "") | tostring | split("@")[0])' 2>/dev/null)
+
   # An open rework child stands on the anchor. metadata-field selection lists
   # non-closed by default; the explicit --status keeps it robust if that default
   # changes. Repeated --status flags drop earlier values, so it is one list.
@@ -155,10 +188,21 @@ derive_value() { # <anchor-id>
     warn "could not read rework children for $anchor; cannot derive a status"
     return 2
   fi
-  if [ "$(printf '%s' "$kids" | jq 'length' 2>/dev/null)" -gt 0 ] 2>/dev/null; then
-    printf 'in-rework\n'; return 0
+  nkids=$(printf '%s' "$kids" | jq 'length' 2>/dev/null); case "$nkids" in ''|*[!0-9]*) nkids=0 ;; esac
+
+  # needs-attention: the city stopped without settling; a human must unstick it.
+  if is_cap_park "$hold" "$cap"; then printf 'needs-attention\n'; return 0; fi
+  if is_set "$hold" || is_set "$rhold"; then printf 'needs-attention\n'; return 0; fi
+  if [ "$posture" = "approved" ] && [ "$mstate" = "BLOCKED" ] && [ "$nkids" -eq 0 ]; then
+    printf 'needs-attention\n'; return 0
   fi
-  printf 'ready-for-review\n'; return 0
+
+  # working: the city holds the ball; no human input needed.
+  if [ "$nkids" -gt 0 ]; then printf 'working\n'; return 0; fi
+  if [ "$posture" = "approved" ]; then printf 'working\n'; return 0; fi
+
+  # needs-review: settled at the head, a human review or re-review is next.
+  printf 'needs-review\n'; return 0
 }
 
 # --- setting the label ----------------------------------------------------
@@ -243,7 +287,7 @@ case "$VERB" in
 usage: pr-status-label.sh <verb> [options]
   ensure    --repo Q [--host H]
   derive    --anchor ID
-  set       --pr N --value in-rework|ready-for-review --repo Q [--host H] [--current-labels CSV]
+  set       --pr N --value working|needs-review|needs-attention --repo Q [--host H] [--current-labels CSV]
   reconcile --anchor ID --pr N --repo Q [--host H] [--current-labels CSV]
 USAGE
     [ -n "$VERB" ] && exit 0 || exit 1 ;;

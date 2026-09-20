@@ -833,11 +833,11 @@ CHILDREN_EOF
   [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
 
   # --- status label: project the human-attention axis onto the PR list ----------
-  # Above the draft-skip on purpose: the label projects human attention, which a
-  # draft-early PR (specs/tk-6bji7k.1's future half) needs as much as an open
-  # one, so this seam stays independent of the draft gate below. Best-effort and
-  # idempotent — pr-status-label.sh derives in-rework/ready-for-review from the
-  # anchor's own rework state and writes only on a change. Full pass only: the
+  # Above the draft-skip on purpose: the label projects the city's workflow state,
+  # which a draft-early PR (specs/tk-6bji7k.1's future half) needs as much as an
+  # open one, so this seam stays independent of the draft gate below. Best-effort
+  # and idempotent — pr-status-label.sh derives working/needs-review/needs-attention
+  # from the anchor's own state and writes only on a change. Full pass only: the
   # --posture-only pre-merge arm records posture and touches no PR label.
   if [ "$POSTURE_ONLY" != 1 ]; then
     cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)

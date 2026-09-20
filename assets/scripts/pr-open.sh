@@ -32,7 +32,7 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
 # The single writer of the workflow-owned `status:` PR label. A PR is born
-# gate-green, so its initial human-attention state is ready-for-review; the
+# gate-green with no review yet, so its initial state is needs-review; the
 # reconcile derives that (and self-heals an adopted PR mid-rework).
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 

@@ -455,28 +455,30 @@ options.
 
 ## The status label (GitHub projection)
 
-Posture is recorded on the bead. The one piece of the human-attention state
-projected back onto GitHub's pull request list is a workflow-owned label from a
-mutually-exclusive `status:` group, so a person scanning the list tells a PR being
-reworked from one ready to look at — the distinction GitHub's own
-`CHANGES_REQUESTED` cannot make, because it is sticky and does not clear when the
-rework lands. The group is extensible: one value is set at a time, and setting one
-removes any other `status:` value.
+Posture is recorded on the bead. Its projection onto GitHub's pull request list is
+a workflow-owned label from a mutually-exclusive `status:` group, so a person
+scanning the list sees who must act on each PR next without opening it. The group
+is extensible: one value is set at a time, and setting one removes any other
+`status:` value.
 
-| Label | When |
-|---|---|
-| `status: in-rework` | an open rework child stands on the anchor, or the signoff cap parked it (`merge_hold=signoff_cap`) |
-| `status: ready-for-review` | otherwise: opened gate-green, reworked and handed back, waiting on a human review, or approved |
+| Label | Who acts next | When |
+|---|---|---|
+| `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
+| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened gate-green, reworked and handed back, or a non-blocking review left comments |
+| `status: needs-attention` | a human unsticks the city | the signoff cap parked it (`merge_hold=signoff_cap`), a merge/rebase hold stands, or an approved PR is wedged with no rework in flight |
 
-The label reads the city's own rework state, not GitHub's posture and not a lane
-marker. `pr_posture` carries the sticky `CHANGES_REQUESTED`, so a label derived
-from it would never flip back; `check.<g>=green` survives a rewritten reviewed
-commit ([Green survives new commits](#gates)), so a label derived from it would
-read ready over work no one has re-reviewed. A rework child is scoped to the
-reviewed commit and closes when the fix lands, so the label flips back exactly
-when the work does.
+Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
 
-It carries human attention only and never says a PR may merge: machine readiness
+The label reads the city's own state — the refinery-computed posture and merge
+state on the anchor, its holds, and its rework children — not GitHub's review
+posture directly and not a lane marker. The `working`->`needs-review` flip rests on
+the rework child, which is scoped to the reviewed commit and closes when the fix
+lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
+rework hands back, and a `check.<g>=green` that outlives a rewritten reviewed
+commit ([Green survives new commits](#gates), the bug tk-4zsj1p) cannot read the
+label settled.
+
+The label is workflow state and never says a PR may merge: machine readiness
 rides `pr.machine` and the draft flag, the two-signal split
 [specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md) works out.
 `assets/scripts/pr-status-label.sh` is the single writer; `pr-open.sh` sets it at
