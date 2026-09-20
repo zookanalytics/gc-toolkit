@@ -15,6 +15,15 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esa
 
 harness_init() {
   PASS=0; FAIL=0
+  # These suites run from a tree inside a live city, whose session environment
+  # exports GC_* and BEADS_* — the rig, the city path, the actor, the bead under
+  # work. Scripts under test branch on those: a set GC_RIG adds `--rig <rig>` to
+  # a logged sling argv, so an inherited value would settle a hermetic assertion
+  # on the operator's shell rather than on the code. Clear both namespaces so the
+  # harness owns the environment; a suite that wants a rig exports it after
+  # harness_init returns. GCTK_* is left alone: GCTK_BIN is pinned just below,
+  # and a suite may build a port binary before harness_init (lifecycle.test.sh).
+  unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
   # Pin the merge cadence to its shell implementations. The scripts prefer a
