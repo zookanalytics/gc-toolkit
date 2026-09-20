@@ -378,6 +378,22 @@ else
     ok "no takeaway stamps the shared bucket"
 fi
 
+echo "── step 1 lifts the claim and the fold into one script call each ──"
+# The two bash blocks the operator flagged (PR#475) are compressed to one `eval`
+# apiece; these fail if a future edit reverts to inline parsing or drops the
+# wiring. --sh is what makes the claim verdict eval-able (its default key=value
+# line is not), and the fold eval reads converse-fold.sh's own assignments.
+have "step 1 claims via 'converse-claim.sh --sh', evaled" \
+    'eval "$("$CONV/converse-claim.sh" --sh' "$PROMPT"
+have "step 1 folds via converse-fold.sh, evaled" \
+    'eval "$("$CONV/converse-fold.sh" "$VISIT"' "$PROMPT"
+if grep -qF "sed -n 's/.*bead=" "$PROMPT"; then
+    bad "step 1 no longer hand-parses the raw claim line" \
+        "the prompt still carries the sed parse the --sh eval replaced"
+else
+    ok "step 1 no longer hand-parses the raw claim line"
+fi
+
 # ── HOLD-ARM PREMISE GATE (visit-hold-premise-gate) ──────────────────────────
 # Deliberately housed in this suite, not a converse-hold-*.test.sh of its own:
 # the pack has no test discovery, so a fresh file is a suite nobody runs

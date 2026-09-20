@@ -158,6 +158,42 @@ run OUTCOME=settled SHOW_STATUS=closed
 has  "an existing_assignment visit carrying gc.outcome FINISHes" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
 is   "…exit 4" "$RC" "4"
 
+echo "── --sh: the same verdict as eval-able shell assignments ──"
+# The converse prompt runs `eval "$(converse-claim.sh --sh "$SUBJECT")"`, so the
+# stdout must be assignments only (nothing to execute), the verdict must still
+# show on stderr, and the exit status must match the default mode.
+SH_OUT=""; SH_ERR=""; SH_RC=0
+runsh() {
+    SH_OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" GIT_CEILING_DIRECTORIES="$TMPD" "$@" bash "$SUT" --sh "${SH_GROUP-}" 2>"$TMPD/sh.err")"
+    SH_RC=$?
+    SH_ERR="$(cat "$TMPD/sh.err")"
+}
+shval() { printf '%s\n' "$SH_OUT" | sed -n "s/^$1=//p"; }
+
+SH_GROUP="" runsh CLAIM_REASON=claimed
+is    "--sh WORK sets ACTION=work"  "$(shval ACTION)"  "work"
+is    "--sh WORK sets VISIT"        "$(shval VISIT)"   "v-x"
+is    "--sh WORK sets SUBJECT=group" "$(shval SUBJECT)" "g"
+is    "--sh WORK exits 0"           "$SH_RC"           "0"
+has   "--sh echoes the verdict to stderr"        "bead=v-x" "$SH_ERR"
+hasnt "--sh keeps the raw key=value OFF stdout"  "bead="    "$SH_OUT"
+EVAL_VISIT="$(SH_OUT="$SH_OUT" bash -c 'eval "$SH_OUT"; printf %s "${VISIT-}"')"
+is    "--sh stdout evals cleanly (VISIT resolves)" "$EVAL_VISIT" "v-x"
+
+SH_GROUP="mine" runsh OUTCOME=settled SHOW_STATUS=closed
+is    "--sh FINISH sets ACTION=finish" "$(shval ACTION)" "finish"
+is    "--sh FINISH keeps the caller's group, not the child's" "$(shval SUBJECT)" "mine"
+is    "--sh FINISH exits 4" "$SH_RC" "4"
+
+SH_GROUP="g" runsh
+is    "--sh HOLD sets ACTION=hold" "$(shval ACTION)" "hold"
+is    "--sh HOLD exits 3"          "$SH_RC"          "3"
+has   "--sh HOLD still prints BEGAN on stderr" "premise-gate: BEGAN=" "$SH_ERR"
+
+SH_GROUP="" runsh CLAIM_MODE=nowork
+is    "--sh DRAIN sets ACTION=drain" "$(shval ACTION)" "drain"
+is    "--sh DRAIN exits 1"           "$SH_RC"          "1"
+
 echo
 echo "converse-claim: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
