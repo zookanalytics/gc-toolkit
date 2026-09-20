@@ -28,11 +28,13 @@
 #   source         delegate to `gc workflow delete-source --apply` plus
 #                  `gc workflow reopen-source`, the contract those commands were
 #                  built for, then clear the session pins so the pooled bead
-#                  stops naming a dead owner. EXCEPT when the work already reached
-#                  a downstream court — an in-flight PR (merge_result
-#                  pre_open_gate/pull_request) the refinery owns landing, or a
-#                  human gate (gc.routed_to=human) a person owns clearing:
-#                  reopening would return that work to the pool — skip it.
+#                  stops naming a dead owner, and restore gc.routed_to from the
+#                  durable gc.execution_routed_to stamp so the reopened bead is
+#                  offered again rather than left bd-ready but unrouted. EXCEPT
+#                  when the work already reached a downstream court — an in-flight
+#                  PR (merge_result pre_open_gate/pull_request) the refinery owns
+#                  landing, or a human gate (gc.routed_to=human) a person owns
+#                  clearing: reopening would return that work to the pool — skip it.
 #
 # The root read is what separates the two step arms, and it is a read of the
 # root itself — not of the input convoy, and not of the anchors it tracks. A
@@ -172,6 +174,7 @@ REPORT_OWNER="$ASSIGNEE"
 
 FAILED=""
 LANDED=""
+EXPECT_ROUTE=""
 
 note_failed() { FAILED="${FAILED:+$FAILED,}$1"; }
 note_landed() { LANDED="${LANDED:+$LANDED,}$1"; }
@@ -190,6 +193,38 @@ clear_pins() {
         note_landed pins
     else
         note_failed pins
+    fi
+}
+
+# restore_route puts gc.routed_to back on a source bead reopen-source returned
+# to the pool. reopen-source reopens the bead but preserves the route it finds,
+# and a bead reaches recovery with gc.routed_to already emptied by its own claim,
+# so the reopened bead lands open, unassigned and unrouted. gc.routed_to is half
+# a pool's offer predicate, so that bead is bd-ready yet never offered again —
+# the strand this restore prevents. The claim that emptied gc.routed_to left
+# gc.execution_routed_to, the durable dispatch route stamped at the pour, in
+# place, so the offer route is restored from it. A route already present is left
+# alone: reopen-source or a source-id workflow may have set one, and a live route
+# is never clobbered. With no execution route to copy the bead cannot be offered,
+# and leaving it silent recreates the strand, so that case is a failed release
+# the patrol surfaces rather than a clean disposal. Metadata bypasses the claim
+# guard, so the write always lands; verify confirms it against EXPECT_ROUTE.
+restore_route() {
+    local after routed_now exec_route
+    after="$(read_bead "$BEAD")"
+    printf '%s' "$after" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || { note_failed route-reread; return; }
+    routed_now="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.routed_to"] // ""')"
+    [ -n "$routed_now" ] && return 0
+    exec_route="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.execution_routed_to"] // ""')"
+    if [ -z "$exec_route" ]; then
+        note_failed route-unrecoverable
+        return
+    fi
+    if gc bd update "$BEAD" --set-metadata gc.routed_to="$exec_route" >/dev/null 2>&1; then
+        note_landed route
+        EXPECT_ROUTE="$exec_route"
+    else
+        note_failed route
     fi
 }
 
@@ -258,6 +293,13 @@ verify() {
             [ -n "$sname" ] && note_failed "gc.session_name(still=$sname)"
             ;;
     esac
+    # A restored route must survive the re-read: a gc.routed_to that reports set
+    # and rolls back would strand the reopened bead exactly as before.
+    if [ -n "$EXPECT_ROUTE" ]; then
+        local rt
+        rt="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.routed_to"] // ""')"
+        [ "$rt" = "$EXPECT_ROUTE" ] || note_failed "gc.routed_to(want=$EXPECT_ROUTE,got=${rt:-empty})"
+    fi
     return 0
 }
 
@@ -393,6 +435,11 @@ case "$CLASS" in
                             # orphan recovery re-detects it every cycle. verify catches a
                             # pin that reports cleared and rolled back.
                             clear_pins
+                            # reopen-source also preserves the route it finds, and the
+                            # dead session's own claim already emptied it, so the
+                            # reopened bead is unrouted and unofferable until the route
+                            # is put back from the durable execution stamp.
+                            restore_route
                             verify
                         else
                             note_failed reopen-source
