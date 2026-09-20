@@ -68,6 +68,10 @@ FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
 # The route gate (pool-route.sh) lives beside this script; the rework route is
 # proved through it before the fix child is filed.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+# The single writer of the workflow-owned `status:` PR label. A verdict is the
+# event-precise flip: request-changes puts the PR in-rework, an approve that
+# leaves no rework outstanding hands it back ready-for-review. Post-open only.
+PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 
 usage() {
   cat >&2 <<'U'
@@ -746,6 +750,11 @@ if [ "$VERDICT" = "approve" ]; then
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
   close_review
+  # Hand the PR back ready-for-review — but reconcile rather than assert it, so an
+  # open rework child on ANOTHER lane still reads in-rework. The gone-pin refusal
+  # above already scoped this verdict to the reviewed commit.
+  [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
+    --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
   # The lane found nothing this round, so its still-unruled findings from
   # earlier rounds are answered: close them. Validated findings (the validator's)
   # and any a fix unit still blocks are left alone. Best-effort — this is
@@ -911,6 +920,10 @@ if [ "$CAP_ROUNDS" -ge "$CAP" ]; then
     exit 2
   fi
   close_review
+  # The cap parked the anchor for a person; changes stand unresolved, so the PR
+  # list must not read it as ready.
+  [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value in-rework \
+    --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
   CAP_WHERE="pre-open (no PR)"
   [ -z "$POST_OPEN" ] || CAP_WHERE="PR#$PR_NUMBER"
   echo "signoff: round cap on $ANCHOR ($ROUNDS/$CAP, $CAP_WHERE) — merge_hold set on gate $CHECK_NAME, anchor routed to human, no rework filed"
@@ -997,6 +1010,9 @@ if [ -n "$FIX_BEAD" ]; then
   if [ -n "$ADOPT_ROUTE" ]; then
     echo "signoff: rework child $FIX_BEAD (source_review_bead=$REVIEW_BEAD) was already dispatched to $ADOPT_ROUTE; closing the review it left open, filing no second child"
     close_review
+    # The in-flight rework child holds the anchor in-rework; keep the label so.
+    [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value in-rework \
+      --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
     echo "signoff: request-changes recorded on $ANCHOR (round $((ROUNDS + 1))/$CAP) — rework $FIX_BEAD already dispatched to $ADOPT_ROUTE"
     exit 0
   fi
@@ -1106,5 +1122,8 @@ else
   exit 2
 fi
 close_review
+# A rework child now stands on the anchor; the PR is in-rework until it lands.
+[ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value in-rework \
+  --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
 echo "signoff: request-changes recorded on $ANCHOR (round $((ROUNDS + 1))/$CAP) — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD $DISPATCH $FIX_POOL"
 exit 0

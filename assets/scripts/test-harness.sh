@@ -354,10 +354,14 @@ case "$sub" in
     v="${1:-}"; shift || true
     case "$v" in
       view)
-        n="${1:-}"
+        n="${1:-}"; shift || true
         f="$G/pr_view_$n.json"
         [ -s "$f" ] || { echo "gh: no such pr" >&2; exit 1; }
-        cat "$f" ;;
+        # Honour -q/--jq like real gh, so a caller reading one field (e.g.
+        # `--json labels -q '.labels[].name'`) gets that field, not the whole row.
+        vq=""
+        while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; vq="${1:-}" ;; esac; shift || true; done
+        if [ -n "$vq" ]; then jq -r "$vq" "$f"; else cat "$f"; fi ;;
       list)
         br=""
         while [ $# -gt 0 ]; do
@@ -377,6 +381,7 @@ case "$sub" in
         f="$G/pr_view_$n.json"
         [ -s "$f" ] || { echo "gh: no such pr" >&2; exit 1; }
         [ "${STUB_PR_EDIT_RC:-0}" = "0" ] || exit "${STUB_PR_EDIT_RC:-0}"
+        LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
         while [ $# -gt 0 ]; do
           case "$1" in
             --body-file)
@@ -386,6 +391,32 @@ case "$sub" in
               jq --rawfile b "$1" '.body = $b' "$f" > "$t" && mv "$t" "$f" ;;
             --title) shift; t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
               jq --arg v "${1:-}" '.title = $v' "$f" > "$t" && mv "$t" "$f" ;;
+            # Labels mutate .labels so the next `pr view` reads them back — a
+            # second reconcile over an unchanged store is a no-op because the
+            # caller read its own write. --add-label refuses a label that does
+            # not exist in the repo (labels.json), exactly as real gh does, so a
+            # test proves the writer created the label first.
+            --add-label)
+              shift
+              IFS=',' read -r -a _adds <<< "${1:-}"
+              for _l in ${_adds[@]+"${_adds[@]}"}; do
+                _l="${_l#"${_l%%[![:space:]]*}"}"; _l="${_l%"${_l##*[![:space:]]}"}"
+                [ -n "$_l" ] || continue
+                if ! jq -e --arg n "$_l" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
+                  echo "gh: label '$_l' not found in repo" >&2; exit 1
+                fi
+                t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+                jq --arg n "$_l" '.labels = ((.labels // []) | if any(.[]?; .name == $n) then . else . + [{name: $n}] end)' "$f" > "$t" && mv "$t" "$f"
+              done ;;
+            --remove-label)
+              shift
+              IFS=',' read -r -a _rms <<< "${1:-}"
+              for _l in ${_rms[@]+"${_rms[@]}"}; do
+                _l="${_l#"${_l%%[![:space:]]*}"}"; _l="${_l%"${_l##*[![:space:]]}"}"
+                [ -n "$_l" ] || continue
+                t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+                jq --arg n "$_l" '.labels = ((.labels // []) | map(select(.name != $n)))' "$f" > "$t" && mv "$t" "$f"
+              done ;;
           esac
           shift || true
         done
@@ -576,6 +607,26 @@ case "$sub" in
       *) echo "gh api stub: unsupported '$path'" >&2; exit 2 ;;
     esac
     if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi ;;
+  label)
+    # The repo's label set, so `pr edit --add-label` can refuse one that was
+    # never created. `list` serves it (honouring -q); `create` appends if absent.
+    v="${1:-}"; shift || true
+    LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
+    case "$v" in
+      list)
+        lq=""
+        while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; lq="${1:-}" ;; esac; shift || true; done
+        if [ -n "$lq" ]; then jq -r "$lq" "$LBLS"; else cat "$LBLS"; fi ;;
+      create)
+        name="${1:-}"; shift || true
+        [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
+        if ! jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
+          t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
+          jq --arg n "$name" '. + [{name: $n}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+        fi
+        exit 0 ;;
+      *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;
+    esac ;;
   *) echo "gh stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 STUB

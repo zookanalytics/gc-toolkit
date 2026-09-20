@@ -453,6 +453,37 @@ files it *depending on* its subject, so an edge back would be a cycle.
 `pr_comment_disposition` records which was chosen. Silence is not one of the
 options.
 
+## The status label (GitHub projection)
+
+Posture is recorded on the bead. The one piece of the human-attention state
+projected back onto GitHub's pull request list is a workflow-owned label from a
+mutually-exclusive `status:` group, so a person scanning the list tells a PR being
+reworked from one ready to look at — the distinction GitHub's own
+`CHANGES_REQUESTED` cannot make, because it is sticky and does not clear when the
+rework lands. The group is extensible: one value is set at a time, and setting one
+removes any other `status:` value.
+
+| Label | When |
+|---|---|
+| `status: in-rework` | an open rework child stands on the anchor, or the signoff cap parked it (`merge_hold=signoff_cap`) |
+| `status: ready-for-review` | otherwise: opened gate-green, reworked and handed back, waiting on a human review, or approved |
+
+The label reads the city's own rework state, not GitHub's posture and not a lane
+marker. `pr_posture` carries the sticky `CHANGES_REQUESTED`, so a label derived
+from it would never flip back; `check.<g>=green` survives a rewritten reviewed
+commit ([Green survives new commits](#gates)), so a label derived from it would
+read ready over work no one has re-reviewed. A rework child is scoped to the
+reviewed commit and closes when the fix lands, so the label flips back exactly
+when the work does.
+
+It carries human attention only and never says a PR may merge: machine readiness
+rides `pr.machine` and the draft flag, the two-signal split
+[specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md) works out.
+`assets/scripts/pr-status-label.sh` is the single writer; `pr-open.sh` sets it at
+open, `signoff.sh` flips it on each verdict, and `pr-facts.sh` reconciles it every
+pass so a missed event self-heals. Every write is pinned to the origin, and a
+label is not an approval.
+
 ## The machine axis
 
 Gates say whether one review passed. **`pr.machine`** says what the merge cadence

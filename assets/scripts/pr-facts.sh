@@ -90,6 +90,10 @@ PROG="pr-facts"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# The single writer of the workflow-owned `status:` PR label. This pass is its
+# authoritative reconcile: it runs for every open anchor and already mutates the
+# PR, so a label a signoff or open event missed self-heals here.
+PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # The merged-record retry cap, shared with merge.sh: this arm and merge.sh's two
@@ -647,7 +651,7 @@ while IFS= read -r row; do
 
   # --- pinned identity read (same shape as merge.sh) ----------------------------
   PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
-    --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url 2>/dev/null)
+    --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url,labels 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "$PROG: PR#$num view failed; NOTHING recorded for $id (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
@@ -827,6 +831,21 @@ CHILDREN_EOF
     continue
   fi
   [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
+
+  # --- status label: project the human-attention axis onto the PR list ----------
+  # Above the draft-skip on purpose: the label projects human attention, which a
+  # draft-early PR (specs/tk-6bji7k.1's future half) needs as much as an open
+  # one, so this seam stays independent of the draft gate below. Best-effort and
+  # idempotent — pr-status-label.sh derives in-rework/ready-for-review from the
+  # anchor's own rework state and writes only on a change. Full pass only: the
+  # --posture-only pre-merge arm records posture and touches no PR label.
+  if [ "$POSTURE_ONLY" != 1 ]; then
+    cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
+    "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$num" \
+      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "$cur_labels" \
+      >/dev/null 2>&1 || true
+  fi
+
   [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
 
   # --- posture: record what the PR is doing (a record, never a dispatch) --------

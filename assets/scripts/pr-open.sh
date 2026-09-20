@@ -31,6 +31,10 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # disagree), and finding reads the anchor's open must-fix findings.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The single writer of the workflow-owned `status:` PR label. A PR is born
+# gate-green, so its initial human-attention state is ready-for-review; the
+# reconcile derives that (and self-heals an adopted PR mid-rework).
+PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -227,6 +231,10 @@ while IFS= read -r row; do
     0)
       if flip "$id" "$CERT_URL" "$CERT_NUM" "$target"; then
         flipped=$((flipped + 1))
+        # Adopting an existing PR: reconcile its label from the anchor's current
+        # rework state rather than assuming ready. Best-effort.
+        "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$CERT_NUM" \
+          --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
         echo "$PROG: $id branch '$branch' already has PR#$CERT_NUM ($CERT_STATE); flipped to pull_request"
       else
         echo "$PROG: $id PR#$CERT_NUM adoption transition failed; anchor stays pre_open_gate (retry next pass)" >&2
@@ -392,6 +400,10 @@ GATES
 
   if flip "$id" "$CERT_URL" "$CERT_NUM" "$target"; then
     opened=$((opened + 1))
+    # Born gate-green: seed the initial status label (and its group). Best-effort
+    # — a label failure never unwinds an opened PR; pr-facts.sh reconciles it.
+    "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$CERT_NUM" \
+      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
     echo "$PROG: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (check_set '$checkset' green)${SUP_NUM:+, superseding closed PR#$SUP_NUM}; flipped to pull_request"
   else
     echo "$PROG: $id opened PR#$PR_NUMBER but did NOT reach pull_request; anchor stays pre_open_gate and adopts this PR next pass" >&2
