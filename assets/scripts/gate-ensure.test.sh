@@ -444,6 +444,18 @@ out=$(run)
 eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray marker cleared"
 has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
 
+echo "# …nor from the validation-pass dispatch: a gateless anchor's open pass still gets the validator"
+# pr-facts.sh opens a human feedback pass without consulting check_set, so a
+# check_set=none anchor can carry one. The dispatch that releases its blocks edge
+# runs before the none|off opt-out; after it, the pass would hold the merge with
+# nothing to sling mol-validate onto.
+store "[$(anchor N4v pull_request none "" polecat/n4v), $(validation vp-n4v N4v human)]"
+out=$(run_val)
+has "$out" "dispatched validation pass vp-n4v to $VALP" "a gateless anchor's open validation pass is dispatched to the validate pool"
+eq "$(meta vp-n4v 'gc.execution_routed_to')" "$VALP" "…and the pour read back"
+has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
+has "$out" "0 reviews dispatched" "…while check_set=none still dispatches no review"
+
 echo "# …a clear that does not persist is reported, not counted"
 store "[$(anchor N5 pull_request codex green polecat/n5 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n5 N5)]"
 oid n5 > "$GH_DIR/head_polecat_n5"
