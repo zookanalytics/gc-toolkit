@@ -58,9 +58,7 @@ elsewhere; nothing here is new judgment.*
   still governs what each step does. The routing table names each step's skill
   explicitly, so the two correctness-critical steps — step 5's demand gate and
   step 7's stamp-then-close — are reached by instruction, never by
-  description-matching. Operator ruling on tk-jntzwt: a structure that loads on
-  demand beats holding a prose diet in the always-on prompt, because a diet
-  decays and a structure does not.
+  description-matching.
 
 ---
 
