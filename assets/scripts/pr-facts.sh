@@ -1544,8 +1544,8 @@ $CBODY"
       # Watermark only once the pass the validator will actually consume carries
       # the shape mol-validate reads: task_kind=validation is the key the
       # validator-path selectors read — gate-ensure's open_validation_pass keys its
-      # quiescence on it, and the mol-validate dispatch (a separate change, not in
-      # place here yet) will select passes by it — anchor_bead scopes the findings,
+      # quiescence on it, and gate-ensure's validation-pass dispatch selects the
+      # passes it slings mol-validate onto by it — anchor_bead scopes the findings,
       # check_name is the lane it selects them by (a missing one defaults to codex,
       # so the human findings would go unruled), and reviewed_oid is the pin it
       # needs to back the lane. The one write below stamps all four together, so any
