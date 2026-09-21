@@ -642,7 +642,7 @@ has "$OUT" "pending engagement" "(GONE-UNREADABLE) …keeping the pending-engage
 unset SESSION_LIST_BROKEN
 export VIS_OWNER=""
 
-# ── Interactive TTY flow + starter/model/debug (tk-jemz0z) ───────────
+# ── Interactive TTY flow + starter/model/debug ───────────────────────
 echo
 echo "# the model set is the configured converse-* variants; bare 'converse' is excluded"
 # --model validates against the globbed variants (opus/fable/codex from the
@@ -678,6 +678,7 @@ printf 'open' > "$VIS_STATUS"
 run_engage_tty '1\n\n' tk-subj --no-attach
 eq "$RC" 0 "(IA-VISIT-EXISTING) picking the existing visit exits 0"
 has "$OUT" "Subject has open visit" "(IA-VISIT-EXISTING) …after listing the open visit(s)"
+has "$OUT" "[d] discuss broadly" "(IA-VISIT-EXISTING) …in one prompt that also offers the new-visit seed letters"
 hasnt "$CALLED" "bd create" "(IA-VISIT-EXISTING) …files nothing"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISIT-EXISTING) …and engages it"
 unset HAVE_VISIT
@@ -693,11 +694,11 @@ has "$OUT" "tk-vis2" "(IA-VISIT-MULTI) …both parked visits are listed"
 has "$CALLED" "session new converse-opus --alias tk-vis " "(IA-VISIT-MULTI) …spawning for the picked visit"
 unset HAVE_VISIT
 
-echo "# choosing NEW + a template starter files a second visit carrying the seed"
+echo "# a seed letter at the one prompt files a NEW visit carrying that seed, even with a visit present"
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
-# [N] new visit · [1] discuss-broadly template · Enter model (Opus)
-run_engage_tty 'N\n1\n\n' tk-subj --no-attach
+# [d] new visit seeded discuss-broadly (one prompt, no separate starter) · Enter model (Opus)
+run_engage_tty 'd\n\n' tk-subj --no-attach
 eq "$RC" 0 "(IA-NEW-TEMPLATE) new visit + template exits 0"
 has "$CALLED" "bd create" "(IA-NEW-TEMPLATE) …a new visit is filed"
 hasnt "$OUT" "already open" "(IA-NEW-TEMPLATE) …deliberately, past the one-visit dedup"
@@ -706,11 +707,11 @@ has "$CALLED" "visit: tk-subj — discuss broadly" "(IA-NEW-TEMPLATE) …titled 
 has "$CALLED" "session new converse-opus" "(IA-NEW-TEMPLATE) …then a sitting is spawned"
 unset HAVE_VISIT
 
-echo "# a NEW visit with free-text starter carries it verbatim as the opener"
+echo "# free text at the one prompt opens a NEW visit carrying it verbatim as the opener"
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
-# [N] new · free text · Enter model
-run_engage_tty 'N\nlets revisit the scope\n\n' tk-subj --no-attach
+# free text (not a number or seed letter) · Enter model
+run_engage_tty 'lets revisit the scope\n\n' tk-subj --no-attach
 eq "$RC" 0 "(IA-NEW-FREETEXT) new visit + free text exits 0"
 has "$CALLED" "bd create" "(IA-NEW-FREETEXT) …a new visit is filed"
 has "$CALLED" "lets revisit the scope" "(IA-NEW-FREETEXT) …with the typed message as its body"

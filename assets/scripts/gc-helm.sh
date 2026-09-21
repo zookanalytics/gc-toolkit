@@ -2168,83 +2168,84 @@ EOF
     done
 }
 
-# engage_prompt_visit <subject> — show the subject's open visits and ask
-# engage-existing vs new. Held visits are shown for context but not offered.
-# Sets ENGAGE_VISIT_CHOICE to a visit id (engage it) or "new".
-engage_prompt_visit() {
-    _epv_rows=$(engage_find_visits "$1")
-    [ -n "$_epv_rows" ] || { ENGAGE_VISIT_CHOICE="new"; return 0; }
+# engage_prompt_visit_or_starter <subject> — ONE prompt covering both the
+# existing-visit choice and the new-visit starter. Open visits are listed
+# numbered; the starter seeds follow, each keyed by its letter. The single reply
+# resolves as: a number engages that visit; a seed letter opens a new visit on
+# that seed; any other text opens a new visit with that text as its opener;
+# Enter opens a blank new visit. Numbers and letters never collide, so both live
+# in one prompt. Held visits are shown for context but are not selectable. Sets
+# ENGAGE_VISIT_CHOICE to a visit id (engage it) or "new"; on "new" it also sets
+# ENGAGE_STARTER_BODY (the visit body; empty = blank) and ENGAGE_STARTER_TAIL
+# (a short title tail).
+engage_prompt_visit_or_starter() {
+    ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""
     _epv_i=0; _epv_map=""
-    printf '  Subject has open visit(s):\n'
-    # Read whole lines and cut the columns: an empty middle field (an unassigned
-    # visit's assignee) collapses under a whitespace IFS in `read`, so split with
-    # cut, which keeps empty fields.
-    while IFS= read -r _epv_row; do
-        [ -n "$_epv_row" ] || continue
-        _epv_id=$(printf '%s' "$_epv_row" | cut -f1)
-        _epv_st=$(printf '%s' "$_epv_row" | cut -f2)
-        _epv_who=$(printf '%s' "$_epv_row" | cut -f3)
-        _epv_title=$(printf '%s' "$_epv_row" | cut -f4-)
-        [ -n "$_epv_id" ] || continue
-        if [ "$_epv_st" = open ] && [ -z "$_epv_who" ]; then
-            _epv_i=$((_epv_i + 1))
-            printf '    [%s] %s — "%s"\n' "$_epv_i" "$_epv_id" "$_epv_title"
-            _epv_map="$_epv_map$_epv_i $_epv_id
+    _epv_rows=$(engage_find_visits "$1")
+    if [ -n "$_epv_rows" ]; then
+        printf '  Subject has open visit(s):\n'
+        # Read whole lines and cut the columns: an empty middle field (an
+        # unassigned visit's assignee) collapses under a whitespace IFS in
+        # `read`, so split with cut, which keeps empty fields.
+        while IFS= read -r _epv_row; do
+            [ -n "$_epv_row" ] || continue
+            _epv_id=$(printf '%s' "$_epv_row" | cut -f1)
+            _epv_st=$(printf '%s' "$_epv_row" | cut -f2)
+            _epv_who=$(printf '%s' "$_epv_row" | cut -f3)
+            _epv_title=$(printf '%s' "$_epv_row" | cut -f4-)
+            [ -n "$_epv_id" ] || continue
+            if [ "$_epv_st" = open ] && [ -z "$_epv_who" ]; then
+                _epv_i=$((_epv_i + 1))
+                printf '    [%s] %s — "%s"\n' "$_epv_i" "$_epv_id" "$_epv_title"
+                _epv_map="$_epv_map$_epv_i $_epv_id
 "
-        else
-            printf '    ( ) %s — "%s"  ⚠ held by %s\n' "$_epv_id" "$_epv_title" "${_epv_who:-a sitting}"
-        fi
-    done <<EOF
+            else
+                printf '    ( ) %s — "%s"  ⚠ held by %s\n' "$_epv_id" "$_epv_title" "${_epv_who:-a sitting}"
+            fi
+        done <<EOF
 $_epv_rows
 EOF
-    if [ "$_epv_i" -eq 0 ]; then
-        printf '  (every open visit is held) — a new visit will be filed\n'
-        ENGAGE_VISIT_CHOICE="new"; return 0
     fi
-    printf '  [1-%s] engage it · [N] new visit on this subject › ' "$_epv_i"
-    IFS= read -r _epv_reply || return 1
-    case "$_epv_reply" in
-        ""|[Nn]|[Nn][Ee][Ww]) ENGAGE_VISIT_CHOICE="new"; return 0 ;;
-        *[!0-9]*) ENGAGE_VISIT_CHOICE="new"; return 0 ;;
-    esac
-    _epv_sel=$(printf '%s' "$_epv_map" | awk -v n="$_epv_reply" '$1==n{print $2}')
-    if [ -n "$_epv_sel" ]; then ENGAGE_VISIT_CHOICE="$_epv_sel"; else ENGAGE_VISIT_CHOICE="new"; fi
-    return 0
-}
-
-# engage_prompt_starter <subject> — a numbered template, Enter (none), or free
-# text sent verbatim as the opening message. Sets ENGAGE_STARTER_BODY (visit
-# body; empty=none) and ENGAGE_STARTER_TAIL (short title tail).
-engage_prompt_starter() {
-    _ept_i=0; _ept_map=""; _ept_menu=""
-    while IFS="$TAB" read -r _ept_key _ept_label; do
-        [ -n "$_ept_key" ] || continue
-        _ept_i=$((_ept_i + 1))
-        [ -n "$_ept_menu" ] && _ept_menu="$_ept_menu · "
-        _ept_menu="$_ept_menu[$_ept_i] $_ept_label"
-        _ept_map="$_ept_map$_ept_i $_ept_key
+    # The new-visit starters, keyed by letter; build the menu and a letter->key map.
+    _epv_smenu=""; _epv_smap=""
+    while IFS="$TAB" read -r _eps_key _eps_label _eps_letter; do
+        [ -n "$_eps_key" ] && [ -n "$_eps_letter" ] || continue
+        [ -n "$_epv_smenu" ] && _epv_smenu="$_epv_smenu · "
+        _epv_smenu="$_epv_smenu[$_eps_letter] $_eps_label"
+        _epv_smap="$_epv_smap$_eps_letter $_eps_key
 "
     done <<EOF
 $(engage_starter_list)
 EOF
-    [ -n "$_ept_menu" ] && printf '  Starter — %s\n' "$_ept_menu"
-    printf '            (Enter = none · or type your own opening message) › '
-    IFS= read -r _ept_reply || return 1
-    case "$_ept_reply" in
-        "") ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""; return 0 ;;
-        *[!0-9]*)
-            ENGAGE_STARTER_BODY="$_ept_reply"
-            ENGAGE_STARTER_TAIL=$(printf '%s' "$_ept_reply" | cut -c1-60)
-            return 0 ;;
-    esac
-    _ept_key=$(printf '%s' "$_ept_map" | awk -v n="$_ept_reply" '$1==n{print $2}')
-    if [ -n "$_ept_key" ]; then
-        ENGAGE_STARTER_BODY=$(engage_starter_seed "$_ept_key" "$1")
-        ENGAGE_STARTER_TAIL=$(engage_starter_list | awk -F"$TAB" -v k="$_ept_key" '$1==k{print $2}')
+    [ -n "$_epv_smenu" ] && printf '    new:  %s · or type your own opener\n' "$_epv_smenu"
+    if [ "$_epv_i" -gt 0 ]; then
+        printf '  [1-%s] engage a listed visit · a letter or text starts a new one · Enter = new, blank › ' "$_epv_i"
     else
-        ENGAGE_STARTER_BODY="$_ept_reply"
-        ENGAGE_STARTER_TAIL=$(printf '%s' "$_ept_reply" | cut -c1-60)
+        printf '  a letter or text starts a new visit · Enter = new, blank › '
     fi
+    IFS= read -r _epv_reply || return 1
+    # Enter → a blank new visit (the default).
+    if [ -z "$_epv_reply" ]; then ENGAGE_VISIT_CHOICE="new"; return 0; fi
+    # A seed letter (case-insensitive) → a new visit on that seed.
+    _epv_lc=$(printf '%s' "$_epv_reply" | tr 'A-Z' 'a-z')
+    _epv_seed=$(printf '%s' "$_epv_smap" | awk -v l="$_epv_lc" '$1==l{print $2}')
+    if [ -n "$_epv_seed" ]; then
+        ENGAGE_VISIT_CHOICE="new"
+        ENGAGE_STARTER_BODY=$(engage_starter_seed "$_epv_seed" "$1")
+        ENGAGE_STARTER_TAIL=$(engage_starter_list | awk -F"$TAB" -v k="$_epv_seed" '$1==k{print $2}')
+        return 0
+    fi
+    # A number naming a listed visit → engage it.
+    case "$_epv_reply" in
+        *[!0-9]*) : ;;
+        *)
+            _epv_sel=$(printf '%s' "$_epv_map" | awk -v n="$_epv_reply" '$1==n{print $2}')
+            if [ -n "$_epv_sel" ]; then ENGAGE_VISIT_CHOICE="$_epv_sel"; return 0; fi ;;
+    esac
+    # Anything else → a new visit with the reply verbatim as its opener.
+    ENGAGE_VISIT_CHOICE="new"
+    ENGAGE_STARTER_BODY="$_epv_reply"
+    ENGAGE_STARTER_TAIL=$(printf '%s' "$_epv_reply" | cut -c1-60)
     return 0
 }
 
@@ -2405,14 +2406,14 @@ cmd_engage() {
         engage_file_new=1
     fi
 
-    # Interactive decisions for a SUBJECT: an existing visit vs a new one, and
-    # (for a new one) its opening starter. An explicit visit id names its own
-    # visit, and a pre-filled --reason/--template already chose a new one.
+    # Interactive decision for a SUBJECT, in one prompt: engage an existing visit,
+    # or open a new one (blank, on a seed, or with a typed opener). An explicit
+    # visit id names its own visit, and a pre-filled --reason/--template already
+    # chose a new one.
     if [ "$engage_interactive" = 1 ] && [ "$bead_kind" != "visit" ] && [ "$starter_prefilled" = 0 ]; then
-        engage_prompt_visit "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
+        engage_prompt_visit_or_starter "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
         if [ "$ENGAGE_VISIT_CHOICE" = "new" ]; then
             engage_file_new=1
-            engage_prompt_starter "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
             engage_reason="$ENGAGE_STARTER_TAIL"
             engage_body="$ENGAGE_STARTER_BODY"
         else

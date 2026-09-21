@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Hermetic test for gc-helm-engage-starters.sh — the starter-seed table engage
-# reads for its interactive "Starter" prompt and its --template flag (tk-jemz0z).
+# reads for its interactive visit/starter prompt and its --template flag.
 # Runs the REAL emitter via `sh` (POSIX, as gc-helm.sh invokes it). No gc, store,
 # or network. Covered:
-#   (LIST)   `list` prints one "<key>\t<label>" row per seed, in menu order
+#   (LIST)   `list` prints one "<key>\t<label>\t<letter>" row per seed, in order
 #   (SEED)   `seed <key> <subject>` substitutes __SUBJECT__ and reads as a
 #            topic+readiness opener, not an agenda
 #   (NOSUBJ) `seed <key>` with no subject leaves the placeholder
@@ -34,7 +34,9 @@ run list
 eq "$RC" 0 "(LIST) list exits 0"
 KEYS="$(printf '%s' "$OUT" | cut -f1 | tr '\n' ' ')"
 eq "$KEYS" "discuss-broadly pr-feedback unstick-a-stall " "(LIST) the three seed keys in order"
-has "$OUT" "$(printf 'discuss-broadly\tdiscuss broadly')" "(LIST) key and label are tab-separated"
+has "$OUT" "$(printf 'discuss-broadly\tdiscuss broadly\td')" "(LIST) key, label, and accelerator letter are tab-separated"
+LETTERS="$(printf '%s' "$OUT" | cut -f3 | tr '\n' ' ')"
+eq "$LETTERS" "d p s " "(LIST) the three seed accelerator letters in order"
 
 echo "# seed substitutes the subject and reads as topic + readiness"
 run seed discuss-broadly tk-6bji7k

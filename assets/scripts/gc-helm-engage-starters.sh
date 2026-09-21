@@ -8,7 +8,7 @@
 # tuned without touching the CLI. `__SUBJECT__` is replaced with the subject
 # bead id at emit time.
 # Interface:
-#   gc-helm-engage-starters.sh list                 -> "<key>\t<label>" per seed
+#   gc-helm-engage-starters.sh list                 -> "<key>\t<label>\t<letter>" per seed
 #   gc-helm-engage-starters.sh seed <key> [subject] -> the seed body on stdout
 # Exit: 0 ok, 2 unknown key / usage.
 # Caller: assets/scripts/gc-helm.sh (cmd_engage).
@@ -16,13 +16,15 @@ set -eu
 
 PROG="gc-helm-engage-starters"
 
-# The seed rows, in menu order. A seed's key is its stable --template token; its
-# label is the one-line menu caption. The bodies are emitted by seed_body below,
-# keyed on the same tokens.
+# The seed rows, in menu order. A seed's key is its stable --template token, its
+# label is the one-line menu caption, and its letter is the accelerator engage's
+# consolidated visit/starter prompt reads — numbers there pick existing visits,
+# so a letter never collides with a visit choice. The bodies are emitted by
+# seed_body below, keyed on the same tokens.
 seed_list() {
-    printf '%s\t%s\n' discuss-broadly "discuss broadly"
-    printf '%s\t%s\n' pr-feedback     "PR feedback"
-    printf '%s\t%s\n' unstick-a-stall "unstick a stall"
+    printf '%s\t%s\t%s\n' discuss-broadly "discuss broadly" d
+    printf '%s\t%s\t%s\n' pr-feedback     "PR feedback"     p
+    printf '%s\t%s\t%s\n' unstick-a-stall "unstick a stall" s
 }
 
 # seed_body <key> — the raw seed text on stdout, with the literal __SUBJECT__
@@ -74,7 +76,7 @@ case "${1:-}" in
 usage: gc-helm-engage-starters.sh list
        gc-helm-engage-starters.sh seed <key> [subject]
 
-  list   print "<key>\t<label>" for each starter seed, in menu order.
+  list   print "<key>\t<label>\t<letter>" for each starter seed, in menu order.
   seed   print the named seed's body, replacing __SUBJECT__ with [subject].
 U
         [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || exit 2
