@@ -13,23 +13,21 @@ import (
 
 // The `gc` CLI is the third sanctioned Gas City interface this package reads,
 // alongside the in-process beads library and the supervisor HTTP API. It exists
-// here because two of the board's facts live nowhere else:
+// here because one board fact lives nowhere else:
 //
 //   - SESSION LIVENESS. Whether the session that claimed a child is still alive
 //     is what separates work in flight from an orphan, and no bead carries it.
 //     The supervisor API has no sessions endpoint and the beads library cannot
 //     see sessions at all; `gc session list` is the only reader.
-//   - CONVOY OWNERSHIP. `owned` and `progress` are convoy-level facts the
-//     library's issue rows do not carry.
 //
-// These are the same reads gc-helm.sh makes (`gcq session list`, `gc convoy
-// list`), so the two boards agree by construction rather than by two
-// independent derivations. Convoy MEMBERSHIP — the work bead a root's input
-// convoy tracks — is read in-process from the rig store instead (see
-// convoyMembers), the one `tracks` edge being local to the root's own rig. This
-// source honours the package's data-access contract for the same reason the
-// other two backends do: it is a Gas City interface, not raw Dolt. There is no
-// sql.Open here.
+// This is the same read gc-helm.sh makes (`gcq session list`), so the two
+// boards agree by construction rather than by two independent derivations.
+// Convoy ownership and membership are read in-process from the rig store: a
+// convoy is `owned` when its bead carries the "owned" label — the test gascity
+// itself applies for the `gc convoy list` owned flag — and its members are the
+// `tracks` edges out of it. This source honours the package's data-access
+// contract for the same reason the other two backends do: it is a Gas City
+// interface, not raw Dolt. There is no sql.Open here.
 //
 // EVERY CALL IS BEST-EFFORT. A board that loses its liveness join is narrower
 // (nothing reads as in flight) but still correct about what it does show, so a
@@ -37,9 +35,9 @@ import (
 // gather.
 
 // defaultGCTimeout bounds one `gc` invocation. `gc rig list` alone has been
-// measured at ~10s on this host (tk-lzdty), and the session and convoy reads
-// hit the same supervisor, so the bound is generous rather than snappy: the
-// cost of guessing too low is a board that silently loses its liveness join.
+// measured at ~10s on this host (tk-lzdty), and the session read hits the same
+// supervisor, so the bound is generous rather than snappy: the cost of guessing
+// too low is a board that silently loses its liveness join.
 const defaultGCTimeout = 30 * time.Second
 
 // gcClient is the slice of the `gc` CLI this source uses. It is an interface so
@@ -48,25 +46,6 @@ type gcClient interface {
 	// Sessions maps every session's NAME and its ALIAS to that session's state.
 	// Both forms are keys because a child's assignee may be written either way.
 	Sessions(ctx context.Context) (map[string]string, error)
-	// Convoys lists every convoy in the city with its ownership and progress.
-	Convoys(ctx context.Context) ([]convoyRow, error)
-}
-
-// convoyRow is one entry of `gc convoy list --json`.
-type convoyRow struct {
-	ID       string          `json:"id"`
-	Title    string          `json:"title"`
-	Status   string          `json:"status"`
-	Owned    bool            `json:"owned"`
-	Progress *convoyProgress `json:"progress"`
-}
-
-// convoyProgress mirrors the `progress` object on a convoy row. It is declared
-// here rather than reused from the board package so this file stays a pure
-// transport decode; the gather converts it.
-type convoyProgress struct {
-	Closed int `json:"closed"`
-	Total  int `json:"total"`
 }
 
 // gcExec is the production gcClient: it shells out to the `gc` binary.
@@ -182,15 +161,4 @@ func (g *gcExec) Sessions(ctx context.Context) (map[string]string, error) {
 		}
 	}
 	return out, nil
-}
-
-// Convoys implements gcClient.
-func (g *gcExec) Convoys(ctx context.Context) ([]convoyRow, error) {
-	var payload struct {
-		Convoys []convoyRow `json:"convoys"`
-	}
-	if err := g.run(ctx, &payload, "convoy", "list", "--json"); err != nil {
-		return nil, err
-	}
-	return payload.Convoys, nil
 }

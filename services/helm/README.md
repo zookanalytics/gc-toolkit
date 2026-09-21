@@ -62,7 +62,7 @@ and the order is now simply the wire's:
 id rig kind title severity owed weight held
 n_closed m_total open in_progress assigned
 in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
-stranded empty complete progress_mismatch
+stranded empty complete
 stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
@@ -1410,7 +1410,7 @@ same-origin reachability confirmed and detach-not-kill verified — see
   the actionable one, because a silent demand means whoever routed or parked
   the row never finished the handoff; a generic "operator action" reads like a
   valid ask and leaves the operator nothing to act on.
-- **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans, and `held`.
+- **`stranded`/`empty`/`complete`** booleans, and `held`.
 - **The in-flight / dead-owner join.** A child counts as moving only when its
   owning session is demonstrably live, or a live graph.v2 workflow stands over
   it. This is the false-stranded defect `tk-fkeft` fixed in `gc-helm.sh`, fixed

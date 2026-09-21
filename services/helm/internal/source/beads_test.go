@@ -314,6 +314,14 @@ func withDepType(c *beads.IssueWithDependencyMetadata, t string) *beads.IssueWit
 	return c
 }
 
+// withLabels stamps labels on an issue fixture. A convoy's ownership is read
+// from its own "owned" label — the same label gascity keys the `gc convoy
+// list` owned flag on.
+func withLabels(iss *beads.Issue, labels ...string) *beads.Issue {
+	iss.Labels = labels
+	return iss
+}
+
 // cityWithRigs lays out <tmp>/rigs/<name>/.beads/config.yaml for each rig so the
 // on-disk discovery path is exercised for real.
 func cityWithRigs(t *testing.T, rigs map[string]string) string {
@@ -353,7 +361,7 @@ func populatedStore() *fakeStore {
 			"decision": {issue("tk-dec", "Pick a path", "decision", 1, testNow.Add(-2*24*time.Hour),
 				`{"gc.routed_to":"human","retries":3,"blocked":true}`)},
 			"convoy": {
-				issue("tk-cv", "real convoy", "convoy", 2, testNow.Add(-time.Hour), ""),
+				withLabels(issue("tk-cv", "real convoy", "convoy", 2, testNow.Add(-time.Hour), ""), "owned"),
 				issue("tk-sling", "sling-tk-x", "convoy", 2, testNow, ""),
 				issue("tk-inputcv", "input convoy for tk-sy3vj", "convoy", 2, testNow, ""),
 			},
@@ -430,20 +438,18 @@ func populatedStore() *fakeStore {
 // happens to be running.
 type fakeGC struct {
 	sessions map[string]string
-	convoys  []convoyRow
 	err      error // when set, every call fails with it
-	// sessionsN and convoysN are every external command a gather runs — convoy
-	// membership is an in-process store read now, not a subprocess — which is
-	// what lets a test assert the cost of the board rather than only its
-	// contents.
+	// sessionsN is every external command a gather runs — session liveness is
+	// the only `gc` subprocess left, convoy ownership and membership being
+	// in-process store reads — which is what lets a test assert the cost of the
+	// board rather than only its contents.
 	sessionsN int
-	convoysN  int
 }
 
 // externalCalls is every subprocess this gather made. The gather's whole
 // external surface is this interface: the rest is the bead store, opened
 // in-process.
-func (f *fakeGC) externalCalls() int { return f.sessionsN + f.convoysN }
+func (f *fakeGC) externalCalls() int { return f.sessionsN }
 
 func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 	f.sessionsN++
@@ -451,14 +457,6 @@ func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 		return nil, f.err
 	}
 	return f.sessions, nil
-}
-
-func (f *fakeGC) Convoys(context.Context) ([]convoyRow, error) {
-	f.convoysN++
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.convoys, nil
 }
 
 func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore, opts ...BeadsOption) *BeadsSource {
@@ -1259,11 +1257,11 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 	if got, ok := res.Facts.Inflight["tk-work3"]; ok {
 		t.Errorf("a husk (archived session) must not read as in flight: got %v", got)
 	}
-	// Member resolution is an in-process store read now, not a `gc convoy
-	// status` per live root: the only subprocesses a gather spends are the one
-	// session list and the one convoy list, however many roots are in flight.
-	if calls := gc.externalCalls(); calls != 2 {
-		t.Errorf("gather spent %d subprocesses, want 2 (session list + convoy list; member resolution is in-process)", calls)
+	// Member resolution and convoy ownership are in-process store reads now, so
+	// the only subprocess a gather spends is the one session list, however many
+	// roots are in flight.
+	if calls := gc.externalCalls(); calls != 1 {
+		t.Errorf("gather spent %d subprocesses, want 1 (session list; membership and ownership are in-process)", calls)
 	}
 	if res.Facts.OwnerState["gc-toolkit__polecat-lx-live"] != "active" {
 		t.Errorf("session states carried: %v", res.Facts.OwnerState)
@@ -1298,17 +1296,17 @@ func TestGatherCarriesPrefixesAndDescription(t *testing.T) {
 	}
 }
 
-// TestConvoyOwnershipJoin: `gc convoy list` decides whether a convoy is a normal
-// row or the unowned-orphan exception, and an ABSENT answer must not be read as
-// "unowned" — that would flag every convoy in the city the first time the call
-// failed.
+// TestConvoyOwnershipJoin: a convoy's own "owned" label decides whether it is a
+// normal row or the unowned-orphan exception. It is the same label gascity keys
+// the `gc convoy list` owned flag on, read here from the convoy bead the gather
+// already holds — so ownership is always determinable and there is no absent
+// answer to guard against.
 func TestConvoyOwnershipJoin(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 
-	t.Run("unowned convoy flips kind", func(t *testing.T) {
-		gc := liveGC()
-		gc.convoys = []convoyRow{{ID: "tk-cv", Owned: false, Progress: &convoyProgress{Closed: 1, Total: 2}}}
-		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
+	t.Run("owned label stays a convoy", func(t *testing.T) {
+		// populatedStore's tk-cv carries the "owned" label.
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(liveGC()))
 		res, err := src.Gather(context.Background())
 		if err != nil {
 			t.Fatalf("Gather: %v", err)
@@ -1318,41 +1316,33 @@ func TestConvoyOwnershipJoin(t *testing.T) {
 			t.Fatal("tk-cv missing")
 		}
 		a := res.Anchors[i]
+		if a.Kind != "convoy" {
+			t.Errorf("an owned convoy is a normal row: kind=%q", a.Kind)
+		}
+		if a.Owned == nil || !*a.Owned {
+			t.Errorf("owned=true carried: %v", a.Owned)
+		}
+	})
+
+	t.Run("no owned label flips kind to the orphan exception", func(t *testing.T) {
+		st := populatedStore()
+		st.issues["convoy"] = append(st.issues["convoy"],
+			issue("tk-orphan", "unlabelled convoy", "convoy", 2, testNow, ""))
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st}, withGCClient(liveGC()))
+		res, err := src.Gather(context.Background())
+		if err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		i, ok := findAnchor(res, "tk-orphan")
+		if !ok {
+			t.Fatal("tk-orphan missing")
+		}
+		a := res.Anchors[i]
 		if a.Kind != "unowned" || a.Source != "unowned" {
 			t.Errorf("an unowned convoy is the orphan exception: kind=%q source=%q", a.Kind, a.Source)
 		}
 		if a.Owned == nil || *a.Owned {
 			t.Errorf("owned=false carried: %v", a.Owned)
-		}
-		if a.Progress == nil || a.Progress.Total != 2 || a.Progress.Closed != 1 {
-			t.Errorf("progress carried: %+v", a.Progress)
-		}
-	})
-
-	t.Run("owned convoy stays a convoy", func(t *testing.T) {
-		gc := liveGC()
-		gc.convoys = []convoyRow{{ID: "tk-cv", Owned: true}}
-		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
-		res, _ := src.Gather(context.Background())
-		i, _ := findAnchor(res, "tk-cv")
-		if res.Anchors[i].Kind != "convoy" {
-			t.Errorf("kind = %q, want convoy", res.Anchors[i].Kind)
-		}
-		if res.Anchors[i].Owned == nil || !*res.Anchors[i].Owned {
-			t.Errorf("owned=true carried: %v", res.Anchors[i].Owned)
-		}
-	})
-
-	t.Run("absent ownership is not an orphan", func(t *testing.T) {
-		gc := liveGC() // no convoy rows at all
-		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
-		res, _ := src.Gather(context.Background())
-		i, _ := findAnchor(res, "tk-cv")
-		if res.Anchors[i].Kind != "convoy" {
-			t.Errorf("an unlisted convoy keeps kind convoy, got %q", res.Anchors[i].Kind)
-		}
-		if res.Anchors[i].Owned != nil {
-			t.Errorf("owned stays null when unknown, got %v", res.Anchors[i].Owned)
 		}
 	})
 }
