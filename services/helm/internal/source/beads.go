@@ -60,10 +60,9 @@ type BeadsSource struct {
 	// openStore is injectable so tests can exercise Gather without a live Dolt.
 	openStore func(ctx context.Context, beadsDir string) (beadStore, error)
 
-	// gc reads the two facts no bead carries — session liveness and convoy
-	// ownership — through the `gc` CLI. Injectable for the same reason
-	// openStore is. See gccli.go for why this is a third sanctioned backend
-	// rather than a contract violation.
+	// gc reads the one fact no bead carries — session liveness — through the
+	// `gc` CLI. Injectable for the same reason openStore is. See gccli.go for
+	// why this is a third sanctioned backend rather than a contract violation.
 	gc gcClient
 
 	// now is the gather's clock. Both closed-row windows are measured from it,
@@ -1008,10 +1007,10 @@ func applyConvoyOwnership(a *board.Anchor, labels []string) {
 
 // admitConvoy mirrors the SupervisorSource filter: drop the transient MACHINE
 // convoys, which are the auto-generated `sling-*` wrappers and the per-sling
-// `input convoy for …` one-child wrappers. Partitioning the survivors into
-// owned vs. unowned stays deferred — this source could now read the parent edge
-// and decide, but changing WHICH convoys reach the board is a gather change,
-// and tk-x89rn ships the capability without spending it.
+// `input convoy for …` one-child wrappers. The non-machine survivors — owned
+// and unowned alike — all reach the board; applyConvoyOwnership marks each
+// one's ownership from its `owned` label and flips the unowned ones to the
+// orphan exception.
 func admitConvoy(title string) bool {
 	return !strings.HasPrefix(title, "sling-") && !strings.HasPrefix(title, "input convoy for")
 }
