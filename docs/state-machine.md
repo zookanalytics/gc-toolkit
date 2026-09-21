@@ -453,6 +453,43 @@ files it *depending on* its subject, so an edge back would be a cycle.
 `pr_comment_disposition` records which was chosen. Silence is not one of the
 options.
 
+## The status label (GitHub projection)
+
+Posture is recorded on the bead. Its projection onto GitHub's pull request list is
+a workflow-owned label from a mutually-exclusive `status:` group, so a person
+scanning the list sees who must act on each PR next without opening it. The group
+is extensible: one value is set at a time, and setting one removes any other
+`status:` value.
+
+| Label | Who acts next | When |
+|---|---|---|
+| `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
+| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened gate-green, reworked and handed back, or a non-blocking review left comments |
+| `status: needs-attention` | a human weighs in | a hold stands — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
+
+Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
+
+`needs-review` asks a human only for a review verdict on a settled head;
+`needs-attention` means the head cannot settle until a human acts — to unstick a
+block or to resolve what a hold stands for.
+
+The label reads the city's own state — the refinery-computed posture and merge
+state on the anchor, its holds, and its rework children — not GitHub's review
+posture directly and not a lane marker. The `working`->`needs-review` flip rests on
+the rework child, which is scoped to the reviewed commit and closes when the fix
+lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
+rework hands back, and a `check.<g>=green` that outlives a rewritten reviewed
+commit ([Green survives new commits](#gates), the bug tk-4zsj1p) cannot read the
+label settled.
+
+The label is workflow state and never says a PR may merge: machine readiness
+rides `pr.machine` and the draft flag, the two-signal split
+[specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md) works out.
+`assets/scripts/pr-status-label.sh` is the single writer; `pr-open.sh` sets it at
+open, `signoff.sh` flips it on each verdict, and `pr-facts.sh` reconciles it every
+pass so a missed event self-heals. Every write is pinned to the origin, and a
+label is not an approval.
+
 ## The machine axis
 
 Gates say whether one review passed. **`pr.machine`** says what the merge cadence
