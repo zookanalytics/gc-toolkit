@@ -512,7 +512,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, stalledGate bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalledGate bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -543,6 +543,15 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
+	// A parked conversation whose subject has a LIVE work molecule is being acted
+	// on, not disposed of: the takeaway records what the operator decided, and a
+	// re-dispatch has put that decision into flight. Band it as in-flight work
+	// rather than sinking it to the LOW floor the settled case takes — the parked
+	// twin of [ruledInFlight], for a subject carrying a takeaway without a human
+	// route. Childless like that arm; a decomposed parked subject is banded by
+	// its roll-up through the count branches.
+	case parkedInFlight && r.mTotal == 0:
+		sev0 = SevNormal
 	case a.Source == "parked" && r.mTotal == 0:
 		sev0 = SevLow
 	case r.mTotal == 0:
@@ -599,7 +608,7 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight bool,
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, parkedInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
@@ -661,6 +670,13 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
+	// The parked twin of "ruled — work in flight": the takeaway was recorded and
+	// the subject has since been re-dispatched, so the row is being acted on, not
+	// parked for disposal. Liveness outranks a recorded wait — the live molecule
+	// is what works it — and the roll-up phrases below, which a decomposed subject
+	// reports instead.
+	case parkedInFlight && r.mTotal == 0:
+		return "parked — work in flight"
 	case a.Source == "parked" && len(waitingOpen) > 0:
 		return fmt.Sprintf("parked · waiting on %d", len(waitingOpen))
 	// A NAMED wait outranks the roll-up below: the sitting stated it, and that
@@ -1502,6 +1518,11 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	dispDue := dispositionDue(a, waiting, waitingOpen)
 	isRuled := ruled(a, takeaway, waitingOpen)
 	isRuledInFlight := ruledInFlight(a, takeaway, waitingOpen)
+	// A parked subject — a takeaway with no human route — whose own work bead is
+	// covered by a live workflow is being acted on, not disposed of. Liveness is
+	// re-derived here through the same [Facts.wfLive] join every other in-flight
+	// signal uses, so a molecule that has since drained stops counting at once.
+	parkedInFlight := a.Source == "parked" && f.wfLive(a.ID)
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
@@ -1529,7 +1550,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		}
 	}
 
-	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, stalled)
+	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
 	t := Tile{
@@ -1600,7 +1621,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, closedDays, owedSince, now),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, parkedInFlight, closedDays, owedSince, now),
 		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed, stalledReason),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
