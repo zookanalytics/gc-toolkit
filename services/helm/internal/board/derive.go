@@ -328,10 +328,11 @@ func humanGated(a Anchor) bool {
 // the board and not the reverse; a marker added on one side has to be added on
 // the other, or the two disagree about which beads have a row.
 const (
-	mdRoutedTo  = "gc.routed_to"
-	mdTakeaway  = "gc.takeaway"
-	mdDemandFor = "gc.demand_for"
-	routedHuman = "human"
+	mdRoutedTo        = "gc.routed_to"
+	mdTakeaway        = "gc.takeaway"
+	mdTakeawaySettled = "gc.takeaway_settled"
+	mdDemandFor       = "gc.demand_for"
+	routedHuman       = "human"
 	// mdAnchorBead is the merge anchor a review or rework child names — the
 	// family root it hangs off, used by the grouping walk as a direct edge.
 	mdAnchorBead = "anchor_bead"
@@ -1532,6 +1533,20 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
+	// Tile.Takeaway is where a row's ruling rides the wire (board.go: "the ruling
+	// itself is in --json takeaway"). A demand's takeaway is its QUESTION, held
+	// there only until it is answered — every other human-gated row is taken out of
+	// the stand-down by [isDemand] for that reason. Once the demand closes, that
+	// question is settled: a closed demand whose ruling was never stamped back onto
+	// it (gc.takeaway_settled empty) must not keep publishing the question as its
+	// takeaway, or a reader takes a decision already made for one still open. A
+	// settled demand's takeaway IS the ruling, so it stays. The triple moves
+	// together — a suppressed takeaway carries no timestamp or author.
+	tileTakeaway, tileTakeawayAt, tileTakeawayBy := takeaway, a.TakeawayAt, a.TakeawayBy
+	if !a.ClosedAt.IsZero() && isDemand(a) && a.Metadata[mdTakeawaySettled] == "" {
+		tileTakeaway, tileTakeawayAt, tileTakeawayBy = "", "", ""
+	}
+
 	t := Tile{
 		ID:       a.ID,
 		Rig:      a.Rig,
@@ -1594,9 +1609,9 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		WaitingOnOpen:  waitingOpen,
 		DispositionDue: dispDue,
 
-		Takeaway:   nilIfEmpty(takeaway),
-		TakeawayAt: nilIfEmpty(a.TakeawayAt),
-		TakeawayBy: nilIfEmpty(a.TakeawayBy),
+		Takeaway:   nilIfEmpty(tileTakeaway),
+		TakeawayAt: nilIfEmpty(tileTakeawayAt),
+		TakeawayBy: nilIfEmpty(tileTakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,

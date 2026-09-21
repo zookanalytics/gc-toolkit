@@ -1565,6 +1565,7 @@ case "${2:-}" in
            else printf '[]\n'; fi ;;
     gate)  printf 'GC: %s\n' "$*" >>"$SOGC"; exit "${SO_GATE_RC:-0}" ;;
     close) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
+    update) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
     *) exit 2 ;;
 esac
 STUB
@@ -1610,6 +1611,9 @@ eq "$SO_RC" "0" "the discharge exits 0 on a clean ruling"
 have "the takeaway lands on the item with the outcome and --no-wait" \
      'helm[RIG] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
 have "a ruled sitting resolves the demand gate" 'bd gate resolve d-x --reason approved' "$SOGC"
+have "…and stamps the ruling onto the demand's board sentence through the takeaway verb, whose --no-wait marks it settled" \
+     'helm[RIG] takeaway d-x approved --by converse --no-wait' "$SOLOG"
+if grep -q 'gc.takeaway_settled' "$SOGC"; then bad "…and never hand-stamps the settled mark" "gc.takeaway_settled reached a direct bd update; the verb's --no-wait is its only writer"; else ok "…and never hand-stamps the settled mark, so the verb stays its only writer"; fi
 have "…and releases the held item back to the pool it named" \
      'lc transition item-x --to unanchored --route gc-toolkit/gc-toolkit.polecat' "$SOLOG"
 

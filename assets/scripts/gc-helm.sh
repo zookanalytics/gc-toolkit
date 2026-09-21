@@ -1628,6 +1628,23 @@ cmd_open() {
     fi
     # <<< open-subject-exists
 
+    # A DONE-band row is a finished item, not open work. Minting a fresh
+    # "operator pick" visit on a closed subject is how a resolved demand still
+    # showing its question gets re-engaged as a new ask. A superseded predecessor
+    # was already redirected to its live successor above, so a closed subject here
+    # is genuinely settled — refuse it rather than promote a glance into a visit.
+    # >>> open-subject-closed
+    subject_status=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then (first(.[] | objects | select((.id // "") == $b)) | .status // "")
+             else "" end' 2>/dev/null || true)
+    if [ "$subject_status" = "closed" ]; then
+        echo "$PROG: open: $bead is closed — a settled item on the DONE band, not open work. No visit filed. To act on it, re-open the bead or file fresh work; a closed row is not a pick." >&2
+        exit 4
+    fi
+    # <<< open-subject-closed
+
     # Already held? A visit records its subject twice — the
     # gc.continuation_group stamp and the tracks edge — and only the edge has
     # proved reliable (su-ab9je: the stamp landed empty), so match EITHER.
