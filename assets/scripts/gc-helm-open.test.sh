@@ -96,6 +96,11 @@ case "$1 ${2:-}" in
     else printf '[]\n'; fi ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
+    # FAKE_CREATE_ERROR models bd REJECTING the create (e.g. a title over the
+    # cap): the real bd answers a bare {"error":…} OBJECT on stdout, exit 1.
+    if [ -n "${FAKE_CREATE_ERROR:-}" ]; then
+      printf '{"error":"%s","schema_version":1}\n' "$FAKE_CREATE_ERROR"; exit 1
+    fi
     jq -n '{id:"tk-visit1"}' ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
@@ -328,6 +333,55 @@ set +e; sh "$SCRIPT" open tk-real1 --reason >/dev/null 2>&1; RC=$?; set -e
 eq "$RC" "2" "(BLURB) --reason with no value is a usage error"
 set +e; sh "$SCRIPT" open tk-real1 tk-real2 >/dev/null 2>&1; RC=$?; set -e
 eq "$RC" "2" "(BLURB) two bead-ids is a usage error"
+
+# --- (LONGREASON) a reason past the headline cap yields a bounded title --------
+# open caps the title TAIL at a board headline and keeps the FULL reason in the
+# body, so a reason longer than bd's title cap still files. The marker sits past
+# the cap: it must be ABSENT from the bounded title and PRESENT in the preserved
+# body.
+LONG_HEAD="$(printf 'A%.0s' $(seq 1 300))"
+LONG_REASON="${LONG_HEAD}ZZTAILZZ"
+: > "$FAKE_CALLS"
+export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+set +e
+sh "$SCRIPT" open tk-real1 --reason "$LONG_REASON" >/dev/null 2>"$TMP/err"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "0" "(LONGREASON) a reason past the cap still files the visit"
+# The stub flattens argv; the title is what sits between `--title ` and ` -d `.
+TITLE="${CALLS#*--title }"; TITLE="${TITLE%% -d *}"
+case "$TITLE" in
+  *ZZTAILZZ*) bad "(LONGREASON) the title still carries the full reason, unbounded (title: $TITLE)" ;;
+  *…*)        ok "(LONGREASON) the title is truncated to a bounded headline (ends with …)" ;;
+  *)          bad "(LONGREASON) the title was neither bounded nor ellipsized (title: $TITLE)" ;;
+esac
+case "$CALLS" in
+  *ZZTAILZZ*) ok "(LONGREASON) the full reason is preserved in the visit body" ;;
+  *)          bad "(LONGREASON) the full reason was lost from the body (calls: $CALLS)" ;;
+esac
+
+# --- (CREATEFAIL) a real create failure surfaces bd's error, not a jq crash ----
+# bd reports a failed create as an {"error":…} object, and the subject bead has
+# already resolved by this point. open surfaces bd's own message for such a
+# failure, rather than a jq indexing error or a misleading "does it exist?" that
+# blames a missing subject.
+: > "$FAKE_CALLS"
+export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+set +e
+FAKE_CREATE_ERROR='validation failed: title must be 500 characters or less (got 512)' \
+  sh "$SCRIPT" open tk-real1 --reason "a short reason" 2>"$TMP/err" >/dev/null; RC=$?
+set -e
+ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(CREATEFAIL) a create failure exits 4"
+grep -q 'title must be 500 characters or less' <<< "$ERR" \
+  && ok "(CREATEFAIL) bd's own error is surfaced to the operator" \
+  || bad "(CREATEFAIL) bd's error not surfaced (err: $ERR)"
+grep -q 'does it exist' <<< "$ERR" \
+  && bad "(CREATEFAIL) still prints the misleading '(does it exist?)' (err: $ERR)" \
+  || ok "(CREATEFAIL) no misleading '(does it exist?)'"
+grep -qi 'cannot index object' <<< "$ERR" \
+  && bad "(CREATEFAIL) a raw jq error leaked to the operator (err: $ERR)" \
+  || ok "(CREATEFAIL) no raw jq error leaked"
 
 # --- (RIGTIMEOUT) the rig-enumeration bound is generous, and tunable ----------
 # `gc rig list` measured 2.6-8.4s in a loaded city against a 10s bound, so open

@@ -170,6 +170,19 @@ normalize_headline() {
     # <<< takeaway-length-gate
 }
 
+# visit_headline <raw> — the board headline for a visit title, whitespace
+# collapsed and capped at TAKEAWAY_MAX codepoints. normalize_headline REJECTS
+# over its cap because a demand/takeaway headline IS the deliverable and only
+# the author knows which clause to keep; a visit carries its full reason in the
+# body, so here the over-cap tail is TRUNCATED with an ellipsis instead. That
+# keeps "visit: <id> — <tail>" under bd's title cap without dropping the reason.
+visit_headline() {
+    printf '%s' "$1" | jq -Rsr --argjson n "$TAKEAWAY_MAX" \
+        '((gsub("\\s+"; " ")) | sub("^ "; "") | sub(" $"; "")) as $h
+         | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end' \
+        2>/dev/null || printf '%s' "$1" | cut -c1-"$TAKEAWAY_MAX"
+}
+
 # Sibling tools: assets/scripts/ and tools/ are siblings under the pack root.
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
@@ -1670,7 +1683,9 @@ cmd_open() {
 
     # What this sitting is FOR, in the caller's words; resolved outside the
     # marked block so the block stays a verbatim copy of the canonical form.
-    visit_tail="${open_reason:-operator pick from the board}"
+    # Bounded to a board headline so a long --reason cannot overflow bd's title
+    # cap ("visit: <id> — <reason>"); the full reason is kept in visit_body below.
+    visit_tail=$(visit_headline "${open_reason:-operator pick from the board}")
     if [ -n "$open_body" ]; then
         visit_body="$open_body"
     elif [ -n "$open_reason" ]; then
@@ -1685,11 +1700,18 @@ cmd_open() {
     # with `gc-helm engage`. `human` is the board's exact gather predicate.
     # >>> gate-visit
     POOL="human"
-    VISIT=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
+    # bd create answers an ARRAY (or bare object) carrying the id on success and
+    # a bare {"error":…} OBJECT on failure; extract the id type-guarded and
+    # scrubbed so an error object never crashes jq. The subject already resolved
+    # above, so an empty id here is bd's failure — surface bd's own message.
+    VISIT_JSON=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
         -d "$visit_body" \
-        --json | jq -r '.id // .[0].id')
+        --json 2>/dev/null || true)
+    VISIT=$(printf '%s' "$VISIT_JSON" | scrub \
+        | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-        || { echo "$PROG: open: could not create a visit bead for '$bead' (does it exist?)" >&2; exit 4; }
+        || { create_err=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+             echo "$PROG: open: could not create a visit bead for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
     gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
         --set-metadata "gc.continuation_group=$bead" \
         --set-metadata "task_kind=visit"
