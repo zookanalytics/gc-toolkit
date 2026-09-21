@@ -257,9 +257,10 @@ hold_severity = "warn"
 
 [posture]
 # What the PR is doing, recorded on the anchor by pr-facts.sh. pr_posture is a
-# dated key, `<value>@<oid>@<since>`: its review_required value is a cause of an
-# owed row, so the instant the requirement was first read at this head is what
-# orders that row in the operator's queue. pr_merge_state keeps a plain
+# dated key, `<value>@<oid>@<since>`: a required posture — review_required, or a
+# standing changes_requested once the cadence has run dry — is a cause of an owed
+# row, so the instant the requirement was first read at this head is what orders
+# that row in the operator's queue. pr_merge_state keeps a plain
 # `<value>@<oid>` shape — nothing queues on it. merge.sh
 # reads these off the bead; nothing else re-derives them from GitHub.
 posture_key = "pr_posture"

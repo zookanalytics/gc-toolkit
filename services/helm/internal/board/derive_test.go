@@ -2252,35 +2252,60 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	}
 }
 
-// TestStandingVetoIsProgressingNotOwed. A non-city CHANGES_REQUESTED is not a
-// wedge: the city answers it by filing rework every round without bound, so
-// merge.sh records `progressing`, and the row is not the operator's until a fix
-// moves the head and the posture returns it as review_required. The standing
-// review travels on the posture axis; the machine axis says only that the
-// anchor is moving. An open PR still leads with its number and link.
-func TestStandingVetoIsProgressingNotOwed(t *testing.T) {
+// TestStandingVetoInSettledTailIsOwed. GitHub keeps a CHANGES_REQUESTED standing
+// across pushes and the city never dismisses it, so once the cadence has run dry
+// — no fix unit, review, or finding in flight — the veto is the operator's to
+// clear by re-reviewing. merge.sh records `settled` in that tail, the owed rule
+// reads the standing changes_requested off the posture axis, and the row names
+// the re-review, dated to the head the veto stands at. A veto with a fix unit
+// still in flight reads `progressing` and stays the city's move. An open PR
+// leads with its number and link either way.
+func TestStandingVetoInSettledTailIsOwed(t *testing.T) {
 	at := fixtureNow.Add(-72 * time.Hour)
 	b := BuildBoard([]Anchor{
 		mergeAnchor("tk-veto", map[string]string{
-			"pr.machine": dated(MachineProgressing, headLive, at),
+			"pr.machine": dated(MachineSettled, headLive, at),
 			"pr_number":  "513",
 			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
+			"pr_posture": dated(postureChangesRequested, headLive, at),
+		}),
+		// The same standing veto WITH a fix unit in flight: merge.sh's in-flight
+		// arm records `progressing` before the veto arm runs, so the row stays
+		// the city's move.
+		mergeAnchor("tk-veto-busy", map[string]string{
+			"pr.machine": dated(MachineProgressing, headLive, at),
+			"pr_number":  "514",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/514",
 			"pr_posture": dated(postureChangesRequested, headLive, at),
 		}),
 	}, fixtureNow, false, nil, Facts{})
 
 	veto := mustTile(t, b, "tk-veto")
-	if veto.PRMachine != MachineProgressing {
-		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineProgressing)
+	if veto.PRMachine != MachineSettled {
+		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineSettled)
 	}
-	if veto.Owed {
-		t.Error("a standing CHANGES_REQUESTED is the city's move to answer, not the operator's")
+	if !veto.Owed {
+		t.Error("a standing CHANGES_REQUESTED in the settled tail is the operator's to clear by re-reviewing")
 	}
-	if !strings.Contains(veto.Needs, "merge cadence") {
-		t.Errorf("needs reads as progressing, got %q", veto.Needs)
+	if !strings.Contains(veto.Needs, "re-review") {
+		t.Errorf("needs names the re-review the row is owed, got %q", veto.Needs)
 	}
 	if veto.PRNumber != 513 || veto.PRURL == "" {
 		t.Errorf("an open PR carries its number and link, got %d / %q", veto.PRNumber, veto.PRURL)
+	}
+	if !strings.Contains(veto.Frontier, "owed 3d") {
+		t.Errorf("the row carries the age the queue is sorted by, got %q", veto.Frontier)
+	}
+
+	busy := mustTile(t, b, "tk-veto-busy")
+	if busy.PRMachine != MachineProgressing {
+		t.Errorf("pr_machine = %q, want %q", busy.PRMachine, MachineProgressing)
+	}
+	if busy.Owed {
+		t.Error("a standing veto with a fix unit in flight is the city's move, not the operator's")
+	}
+	if !strings.Contains(busy.Needs, "merge cadence") {
+		t.Errorf("needs reads as progressing, got %q", busy.Needs)
 	}
 }
 
@@ -2479,8 +2504,8 @@ func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 	}{
 		{postureReviewRequired, ApprovalRequired, true,
 			"GitHub is holding the merge for a review nobody has given"},
-		{postureChangesRequested, ApprovalRequired, false,
-			"the requirement is unmet, but answering a rejecting review is the city's move"},
+		{postureChangesRequested, ApprovalRequired, true,
+			"GitHub keeps the veto standing across pushes; in the settled tail the operator clears it by re-reviewing"},
 		{postureApproved, ApprovalMet, false, "approved"},
 		{postureCommented, ApprovalNotRequired, false, "a comment-only review does not gate the merge"},
 		{postureNone, ApprovalNotRequired, false, "no protection rule and no review"},

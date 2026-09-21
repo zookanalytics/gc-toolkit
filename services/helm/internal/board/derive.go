@@ -746,6 +746,11 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// the decision/human branches need no guard of their own.
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
+	// The posture axis distinguishes the two settled-and-unapproved copies: a
+	// first review versus the re-review a standing changes_requested waits on.
+	// Only head-matched when prApproval reads ApprovalRequired, which is the one
+	// case prNeeds consults it, so the raw value is safe to read here.
+	prPosture, _, _, _ := splitDated(a.Metadata[mdPRPosture])
 
 	switch {
 	// A stalled pre-open codex gate names the gate and why it is stuck, ahead of
@@ -775,7 +780,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, ask)
+		return prNeeds(machine, approval, prPosture, ask)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -790,7 +795,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, ask)
+		return prNeeds(machine, approval, prPosture, ask)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -1032,10 +1037,13 @@ func askingDemand(blockers []Blocker) *Blocker {
 //
 // A row is owed by the operator when the machine axis is wedged, when the city
 // is asking and waiting on an answer, or when the cadence is done and GitHub is
-// holding the merge for a review nobody has given. A standing
-// `changes_requested` is excluded on purpose: the requirement is unmet, and
-// `pr_approval` says so, but ANSWERING a rejecting review is the city's move.
-// It returns to the operator as `review_required` once the fix moves the head.
+// holding the merge for a human review — one never given, or a standing
+// `changes_requested` the city has reworked as far as it can. GitHub keeps a
+// CHANGES_REQUESTED standing across pushes and the city never dismisses it, so
+// once no fix unit, review, or finding is in flight — the settled tail merge.sh
+// records `settled` for — the veto is the operator's to clear by re-reviewing.
+// A veto with a fix unit still in flight reads `progressing`, and this rule
+// leaves it alone.
 //
 // since is the EARLIEST instant among the causes the row currently holds. A row
 // wedged three days ago and asked about an hour ago has been owed for three
@@ -1075,11 +1083,11 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 		note(ask.CreatedAt)
 	}
 	if machine == MachineSettled && approval == ApprovalRequired {
-		if posture, _, at, ok := splitDated(a.Metadata[mdPRPosture]); ok &&
-			posture != postureChangesRequested {
+		if _, _, at, ok := splitDated(a.Metadata[mdPRPosture]); ok {
 			owed = true
-			// A new commit is a new thing to approve, so this one is
-			// head-pinned too.
+			// A new commit is a new thing to approve, and a standing veto is a
+			// re-review owed since the head it stands at, so both ride the
+			// head-pinned instant.
 			note(at)
 		}
 	}
@@ -1233,10 +1241,11 @@ func humanSince(t, now time.Time) string {
 
 // prNeeds is a merge anchor's one-glance ask, in the order an operator can act
 // on: a wedge names its shape and its release, a question names itself, an
-// unmet approval names the one thing that would land the row, and a row nothing
-// is owed on says who has it. `unknown` says the cadence has not recorded a
-// position, which is a fact about the city rather than an all-clear.
-func prNeeds(machine, approval string, ask *Blocker) string {
+// unmet approval names the one thing that would land the row — a first review,
+// or the re-review a standing changes_requested is waiting on — and a row
+// nothing is owed on says who has it. `unknown` says the cadence has not
+// recorded a position, which is a fact about the city rather than an all-clear.
+func prNeeds(machine, approval, posture string, ask *Blocker) string {
 	switch {
 	case machine == MachineWedgedException:
 		return "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not"
@@ -1246,6 +1255,9 @@ func prNeeds(machine, approval string, ask *Blocker) string {
 		}
 		return "asking — waiting on an answer"
 	case machine == MachineSettled && approval == ApprovalRequired:
+		if posture == postureChangesRequested {
+			return "changes requested — reviewer re-review needed"
+		}
 		return "green, waiting on your review"
 	case machine == MachineProgressing:
 		return "in the merge cadence"

@@ -828,12 +828,12 @@ export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 
-echo "# machine axis: a standing veto is progressing — the city reworks without bound"
-# Gates green at the live head, a non-city CHANGES_REQUESTED standing. Answering
-# it is the city's move: signoff files a rework child every round and bounds
-# nothing, so the anchor is moving whatever the count of past rework children.
-# The standing review is read off the posture axis; the machine axis says only
-# that an automated actor will act.
+echo "# machine axis: a standing veto in the settled tail is settled — the operator re-reviews"
+# Gates green at the live head, a non-city CHANGES_REQUESTED standing, and every
+# rework child it filed already closed. GitHub keeps the veto standing across
+# pushes and the city never dismisses it, so with nothing in flight the anchor is
+# the operator's to clear by re-reviewing. The machine axis records `settled`,
+# whose owed rule reads the standing changes_requested off the posture axis.
 store "[$(anchor V1 80), $(rev V1),
         {\"id\":\"rw-v1a\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-a\"}},
         {\"id\":\"rw-v1b\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-b\"}},
@@ -843,11 +843,24 @@ printf '%s' "$(prview 80 OPEN CLEAN)" > "$GH_DIR/pr_view_80.json"
 printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_80.json"
 out=$("$SUT" 2>&1)
 has "$out" "standing CHANGES_REQUESTED" "the veto still holds"
-eq "$(pinned V1)" "progressing@sha-80" "a standing veto records progressing, whatever the past rework-child count"
+has "$out" "run dry" "the settled-tail hold names why the row is the operator's"
+eq "$(pinned V1)" "settled@sha-80" "a standing veto with nothing in flight records settled, whatever the past rework-child count"
 case "$(machine V1)" in
   *@*@20[0-9][0-9]-*Z) ok "…dated at the turn it began" ;;
   *) bad "no @<since> component: '$(machine V1)'" ;;
 esac
+
+echo "# machine axis: a standing veto WITH a fix unit in flight stays progressing"
+# The same veto, but an OPEN pool-routed rework child is still moving the anchor.
+# The in-flight arm records `progressing` before the veto arm runs, so the row is
+# the city's move until the fix lands, and only then does the settled tail begin.
+store "[$(anchor V2 88), $(rev V2),
+        {\"id\":\"rw-v2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\"}}]"
+printf 'rw-v2|blocks|V2\n' > "$STUB_DEPS"
+printf '%s' "$(prview 88 OPEN CLEAN)" > "$GH_DIR/pr_view_88.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_88.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned V2)" "progressing@sha-88" "a veto with an open fix unit in flight stays progressing"
 
 echo "# a lane short of green is progressing; the cap's park is the wedge"
 # The shared predicate (also gate-ensure.sh's): merge_hold is the literal

@@ -553,13 +553,16 @@ while IFS= read -r row; do
   veto=$(printf '%s' "$rstate" | jq -r '.veto // ""')
   if [ -n "$veto" ]; then
     # A human's standing NO holds every candidate, whatever the check_set says.
-    # Answering it is the city's move, not a person's: signoff files a rework
-    # child every round and bounds nothing, so an automated actor will act until
-    # the reviewer clears the review or a fix moves the head. The standing
-    # CHANGES_REQUESTED is read off the posture axis; the machine axis says only
-    # whether the anchor is moving, and here it is — progressing.
-    record_machine "$id" "progressing" "$head_oid" "$aroute"
-    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED; merge held (anchor $id)"
+    # The in-flight arm above already held every anchor a finding, fix unit,
+    # review, or blocker is still moving, so reaching here means the cadence has
+    # run dry under a veto GitHub keeps standing across pushes and the city never
+    # dismisses. That settled tail is the operator's to clear by re-reviewing:
+    # record `settled`, whose owed rule reads the posture axis's standing
+    # changes_requested and puts the row on their queue. A veto with a fix unit
+    # still in flight never reaches here — the in-flight arm holds it at
+    # `progressing`.
+    record_machine "$id" "settled" "$head_oid" "$aroute"
+    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED and the cadence has run dry; merge held for re-review (anchor $id)"
     held=$((held + 1)); continue
   fi
   needs_approval=""

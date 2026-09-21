@@ -514,10 +514,13 @@ surface exists to show.
 
 **Whose move.** A row is owed by the operator when the machine axis is wedged,
 when an open `blocks` edge to a demand bead means the city is asking, or when the
-cadence is `settled` and GitHub wants a review nobody has given. A standing
-`changes_requested` renders `pr_approval=required` and is *not* owed: the
-requirement is unmet, but answering a rejecting review is the city's move, and it
-returns as `review_required` once the fix moves the head.
+cadence is `settled` and GitHub is holding the merge for a human review — one
+never given, or a standing `changes_requested` the city has reworked as far as it
+can. GitHub keeps the veto standing across pushes and the city never dismisses
+it, so once no fix unit, review, or finding is in flight the merge pass records
+`settled` and the row is the operator's to clear by re-reviewing (`pr_approval`
+reads `required`, and `needs` names the re-review). A veto with a fix unit still
+in flight reads `progressing` and stays the city's move.
 
 **Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
 for the `codex` gate is owed once it has held past three days
