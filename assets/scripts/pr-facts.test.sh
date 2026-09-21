@@ -473,7 +473,7 @@ printf '%s' "$(prview 97 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_97.json"
 out=$(run)
 has "$out" "rework CW1 already covers branch 'polecat/x97' at this head, no new child" "the anchor's own rework child is excluded from the guard, so the dedup runs"
 
-echo "# …but that own rework child, ITSELF held by a live decision demand, DOES veto: the demand gates the branch both share (tk-kq8rgb)"
+echo "# …but that own rework child, ITSELF held by a live decision demand, DOES veto: the demand gates the branch both share"
 # A base-supersession or reconcile decision is filed on the in-flight rework
 # (gc.demand_for=<child>), not the anchor. The child is on the anchor's own
 # branch, so anchor_foreign_blocker excludes it as the arm's own mechanism and
@@ -491,7 +491,7 @@ has "$out" "an open demand holds it for a person's decision; no rework dispatche
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no new rework child is minted"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 
-echo "# …control: with that child's demand CLOSED the hold lifts, and the own child dedups as the mechanism it is — so the LIVE demand, not the child, was the veto (tk-kq8rgb)"
+echo "# …control: with that child's demand CLOSED the hold lifts, and the own child dedups as the mechanism it is — so the LIVE demand, not the child, was the veto"
 store "[$(anchor FDK2 111),$(child KID2 polecat/x111 ',"task_kind":"rework","anchor_bead":"FDK2"'),$(demand KID2 closed)]"
 gc bd dep KID2 --blocks FDK2 >/dev/null 2>&1
 printf '%s' "$(prview 111 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_111.json"
