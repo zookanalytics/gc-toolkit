@@ -4,8 +4,9 @@
 # a twin) and refreshing an OPEN PR's body from the anchor's current pr_summary
 # before the flip (the marked region re-spliced, operator text and pr-stack's
 # section kept, a failed edit holding the anchor, a pre-markers body having its
-# region established over the legacy prefix, an unrecognizable or malformed shape
-# holding rather than flipping stale);
+# region established over the legacy prefix, a body with no managed region,
+# whether hand-written or a malformed marker shape, adopted as it stands rather
+# than rewritten);
 # refusing fork/foreign/uncertifiable rows; the closed-unmerged headstone (fresh
 # PR + supersede note; same-head close is a human decision left alone); holds
 # gating the create path; the all-lanes-green gate over every gate the anchor
