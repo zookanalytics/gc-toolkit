@@ -315,6 +315,35 @@ anchor_foreign_blocker() { # <anchor-id> <own-branch> <own-title>; prints foreig
 }
 # <<< anchor-foreign-blocker-guard
 
+# >>> anchor-decision-guard
+# A dispatch arm stands down when a person owes a decision on this anchor's
+# reconciliation. takeaway_is_holding answers that for a demand filed on the
+# anchor, but a base-supersession or reconcile decision is filed on the in-flight
+# rework it concerns instead (gc.demand_for=<child>), and anchor_foreign_blocker
+# excludes those children as the arm's own mechanism — so a demand on one reaches
+# no arm without this. The anchor and its live rework children share one branch,
+# so a demand a converse sitting owns on either holds the merge: bringing the
+# branch current under it performs one horn of the pending question by fait
+# accompli, the same reason a demand on the anchor holds it. Reads the demand
+# ledger for the anchor and for each live rework child (task_kind=rework,
+# anchor_bead=<anchor>) through the shared discriminator, which excludes the cap's
+# own demand and fails closed; an unreadable child list holds too, the safe side
+# for a branch rewrite. 0 = a person owes a decision here.
+anchor_decision_held() { # <anchor-id>
+  local kids kid
+  takeaway_is_holding "${1:-}" && return 0
+  kids=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "anchor_bead=${1:-}" --limit=0 --json 2>/dev/null) || return 0
+  kids=$(printf '%s' "$kids" | scrub)
+  printf '%s' "$kids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  for kid in $(printf '%s' "$kids" | jq -r '.[] | select(((.metadata.task_kind // "") | tostring) == "rework") | .id' 2>/dev/null); do
+    [ -n "$kid" ] || continue
+    takeaway_is_holding "$kid" && return 0
+  done
+  return 1
+}
+# <<< anchor-decision-guard
+
 # >>> pr-posture-vocabulary
 # Mirrors lifecycle/lifecycle.toml [posture]; pr-facts.test.sh fails on drift.
 # Listed in the precedence the derivation applies, strongest human signal first.
@@ -1042,11 +1071,14 @@ GATES
     # routinely one horn of the question being asked. A child dispatched under
     # one performs that horn as routine branch hygiene, which answers the
     # decision by fait accompli and leaves the person ruling on work already
-    # done. The anchor's own gc.routed_to is not read here: the human route sits
-    # on the demand gate, not on what it gates, and a freeze on the anchor's
-    # route would hold the merge with nothing defined to lift it. Resolving the
-    # demand gate lifts this one, which is what the demand's own text asks for.
-    if takeaway_is_holding "$id"; then
+    # done. The demand may sit on the anchor or on the live rework child that is
+    # reconciling its branch; anchor_decision_held reads both, because a decision
+    # on the child gates the one branch they share. The anchor's own gc.routed_to
+    # is not read here: the human route sits on the demand gate, not on what it
+    # gates, and a freeze on the anchor's route would hold the merge with nothing
+    # defined to lift it. Resolving the demand gate lifts this one, which is what
+    # the demand's own text asks for.
+    if anchor_decision_held "$id"; then
       echo "$PROG: $id — PR#$num conflicts but an open demand holds it for a person's decision; no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
@@ -1284,8 +1316,10 @@ GATES
     fix_branch="${head_ref:-$branch}"
     routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     # Read once: the routing choice below turns on whether a person or a sitting
-    # is holding this anchor, and each answer costs a ledger read.
-    holding=""; takeaway_is_holding "$id" && holding=1
+    # is holding this anchor, and each answer costs a ledger read. The demand may
+    # sit on the anchor or on the live rework child reconciling its branch;
+    # anchor_decision_held reads both.
+    holding=""; anchor_decision_held "$id" && holding=1
 
     # A human already holding this anchor gets the comments; filing work under a
     # live human decision fights it, and a child told to answer comments may have
@@ -1807,10 +1841,12 @@ GATES
       is_held "$hold"           && rc_why="merge_hold is set"
       [ "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')" = "human" ] \
         && rc_why="the anchor is already routed to a human"
-      takeaway_is_holding "$id" && rc_why="a sitting holds it for an operator ruling"
+      anchor_decision_held "$id" && rc_why="a sitting holds it for an operator ruling"
       [ -n "$armed" ]           && rc_why="the anchor is armed to re-dispatch when ready"
       # A held or human-steered anchor is theirs; file nothing under it, exactly
-      # as the conflict and feedback arms stand down on the same gates.
+      # as the conflict and feedback arms stand down on the same gates. The
+      # decision may be filed on the anchor or on the live rework child
+      # reconciling its branch; anchor_decision_held reads both.
       if [ -z "$rc_why" ]; then
         required_contexts_for "$base"
         if [ "$REQ_STATE" = "known" ] && [ -n "$REQ_CONTEXTS" ]; then
