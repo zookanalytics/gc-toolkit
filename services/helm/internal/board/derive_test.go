@@ -262,6 +262,66 @@ func TestParkedWithChildren(t *testing.T) {
 	}
 }
 
+// TestParkedWithLiveMoleculeIsActive covers the case tk-ygeufl found: a parked
+// subject carries gc.takeaway — so it is gathered as the parked kind — AND has
+// been re-dispatched, so a live work molecule is executing it. That molecule is
+// not a tile: `gc sling` leaves the subject at open/unassigned and puts the
+// in-flight state on the workflow, visible only through Facts.Inflight keyed by
+// the subject's OWN id. The band must read that live execution and NOT sink the
+// row to the parked LOW floor, where an actively-worked bead would read as a
+// finished row to dispose of.
+func TestParkedWithLiveMoleculeIsActive(t *testing.T) {
+	// One anchor shape, wired to a workflow three ways, so the signal that flips
+	// the band is proven to be LIVE execution and nothing else.
+	parked := func(id string) Anchor {
+		return Anchor{ID: id, Title: "re-dispatched after the ruling", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway: "confirmed — proceed; record kept on this bead"}
+	}
+	f := Facts{
+		// tk-live: a molecule whose session is still up. tk-drained: the same
+		// wiring, but the session has gone — wfLive must stop counting it at once.
+		Inflight: map[string][]string{
+			"tk-live":    {"gc-toolkit__polecat-lx-live"},
+			"tk-drained": {"gc-toolkit__polecat-lx-gone"},
+		},
+		OwnerState: map[string]string{"gc-toolkit__polecat-lx-live": "active"},
+	}
+	b := BuildBoard([]Anchor{parked("tk-live"), parked("tk-drained"), parked("tk-none")}, fixtureNow, false, nil, f)
+
+	live := mustTile(t, b, "tk-live")
+	if live.Severity != SevNormal {
+		t.Errorf("a parked subject with a live molecule is in-flight work, not the LOW floor: got %s", live.Severity)
+	}
+	if live.Section != SectionActive {
+		t.Errorf("…so it bands active, not cleanup: got %s", live.Section)
+	}
+	if live.Frontier != "parked — work in flight" {
+		t.Errorf("frontier: %q", live.Frontier)
+	}
+	// The takeaway still answers NEEDS, exactly as it does for ruledInFlight: the
+	// ruling is the best sentence the row has, and it is on the wire regardless.
+	if live.Needs != "confirmed — proceed; record kept on this bead" {
+		t.Errorf("the takeaway stays the NEEDS answer: %q", live.Needs)
+	}
+
+	// The discriminator: identical wiring, dead session. A molecule that drained
+	// stops counting, so this row falls back to the parked floor.
+	drained := mustTile(t, b, "tk-drained")
+	if drained.Severity != SevLow || drained.Section != SectionCleanup {
+		t.Errorf("a parked subject whose molecule drained returns to the floor: got %s / %s", drained.Severity, drained.Section)
+	}
+
+	// And with no workflow at all, the floor is still right.
+	none := mustTile(t, b, "tk-none")
+	if none.Severity != SevLow || none.Section != SectionCleanup {
+		t.Errorf("a genuinely parked conversation is untouched: got %s / %s", none.Severity, none.Section)
+	}
+	if none.Frontier != "conversation parked — takeaway recorded" {
+		t.Errorf("…and still reports the parked frontier: %q", none.Frontier)
+	}
+}
+
 // TestParkedNeverOutranksAttention pins the LOW band's job: a parked
 // conversation at maximum priority and age must still sort under ordinary
 // in-flight work, or it is competing for exactly the attention the bead says it
