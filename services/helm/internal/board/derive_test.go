@@ -1150,6 +1150,7 @@ func TestRuledTwinDoesNotReElevate(t *testing.T) {
 // the demand stops being owed the moment it closes, which is how it is answered.
 func TestOpenDemandStaysOwed(t *testing.T) {
 	const headline = "which of the two shapes should converse file?"
+	const ruling = "file the sibling shape — it keeps the visit claimable"
 	demandMD := map[string]string{
 		"gc.routed_to":   "human",
 		"gc.takeaway":    headline,
@@ -1173,12 +1174,23 @@ func TestOpenDemandStaysOwed(t *testing.T) {
 			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": "routed — nothing further needed here"},
 			Takeaway: "routed — nothing further needed here"},
 		// Control: the same demand once answered. Closing it is what makes the
-		// gated work ready, and what takes the row off the queue.
+		// gated work ready, and what takes the row off the queue. Its ruling was
+		// never stamped back (gc.takeaway_settled empty), so its takeaway is still
+		// the QUESTION and must not ride the DONE band as if unanswered.
 		{ID: "tk-discharged", Title: "an answered demand", Kind: "decision", Source: "decision",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
+			ClosedAt:   daysAgo(1),
+			Metadata:   map[string]string{"gc.routed_to": "human", "gc.takeaway": headline, "gc.demand_for": "tk-gated"},
+			Takeaway:   headline,
+			TakeawayAt: "2026-06-30T10:00:00Z", TakeawayBy: "converse"},
+		// Control: a closed demand whose ruling WAS stamped back over the question
+		// and marked settled. Its takeaway is the answer now, so the DONE band
+		// shows the ruling rather than suppressing it.
+		{ID: "tk-settled", Title: "a settled demand", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
 			ClosedAt: daysAgo(1),
-			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": headline, "gc.demand_for": "tk-gated"},
-			Takeaway: headline},
+			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": ruling, "gc.demand_for": "tk-gated", "gc.takeaway_settled": "1"},
+			Takeaway: ruling},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 
@@ -1218,6 +1230,24 @@ func TestOpenDemandStaysOwed(t *testing.T) {
 	}
 	if discharged.Owed || discharged.Severity != SevDone {
 		t.Errorf("a closed demand owes nothing: owed=%v %s", discharged.Owed, discharged.Severity)
+	}
+	// The QUESTION must not ride the wire once the demand is closed: --json
+	// takeaway is where a row publishes its ruling, and a stale question there
+	// reads as a decision still owed. The triple is suppressed together.
+	if discharged.Takeaway != nil {
+		t.Errorf("a closed unsettled demand still carries its question on the wire: %q", *discharged.Takeaway)
+	}
+	if discharged.TakeawayAt != nil || discharged.TakeawayBy != nil {
+		t.Errorf("a suppressed takeaway must carry no timestamp or author: at=%v by=%v",
+			discharged.TakeawayAt, discharged.TakeawayBy)
+	}
+
+	settled, ok := tileByID(b, "tk-settled")
+	if !ok {
+		t.Fatal("tk-settled is missing from the board")
+	}
+	if settled.Takeaway == nil || *settled.Takeaway != ruling {
+		t.Errorf("a settled closed demand shows its ruling on the wire, got %v", settled.Takeaway)
 	}
 }
 

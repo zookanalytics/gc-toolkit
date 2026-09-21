@@ -76,6 +76,9 @@ case "$1 ${2:-}" in
       dberror)   printf '{"error":"dial tcp 127.0.0.1:3307: connect: connection refused","schema_version":1}\n'; exit 1 ;;
       # A real bead whose notes carry raw control chars (invalid --json).
       ctrlchr)   printf '[{"id":"%s","title":"ctl\002chars","notes":"a\001b"}]\n' "$3" ;;
+      # A settled item on the DONE band: it exists, it just closed. No successor,
+      # so the resolver passes it through and the closed-subject gate must catch it.
+      closed)    jq -n --arg i "$3" '[{id:$i, title:"a settled demand", status:"closed"}]' ;;
     esac ;;
   "bd list")
     # The already-held lookup. $FAKE_VISIT set => one open visit on the subject.
@@ -261,6 +264,22 @@ run_open ctrlchr tk-real1
 eq "$RC" "0" "(CTRLCHR) a real bead with control chars in its payload still resolves"
 grep -q 'bd create' <<< "$CALLS" \
   && ok "(CTRLCHR) the visit is filed normally" || bad "(CTRLCHR) visit filed (err: $ERR)"
+
+# --- (CLOSED) a settled DONE-band item is not open work -----------------------
+# The subject EXISTS but has closed, so the existence gate passes and the pick
+# would otherwise mint a fresh "operator pick" visit on it — the loop by which a
+# resolved demand still showing its question gets re-engaged as a new ask. A
+# closed subject here is genuinely settled (a superseded predecessor was already
+# redirected to its live successor), so the pick fails closed and files nothing.
+run_open closed tk-clsd1
+eq "$RC" "4" "(CLOSED) a closed subject exits 4 (no fresh visit on a settled DONE row)"
+grep -q 'is closed' <<< "$ERR" \
+  && ok "(CLOSED) the message names the subject as closed" || bad "(CLOSED) message (err: $ERR)"
+if grep -q 'bd create' <<< "$CALLS"; then
+  bad "(CLOSED) nothing is filed on a closed subject" "found a bd create (calls: $CALLS)"
+else
+  ok "(CLOSED) nothing is filed on a closed subject"
+fi
 
 # --- (ORDER static) the gate precedes the gate-visit block --------------------
 # Placement is the invariant, not just presence: a check that ran after the

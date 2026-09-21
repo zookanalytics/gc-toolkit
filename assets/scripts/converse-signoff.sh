@@ -118,6 +118,18 @@ if [ -n "$DEMAND" ] && [ "$RULED" = yes ]; then
   # ("is not a gate issue"), so it is closed on the same terms instead.
   gc bd gate resolve "$DEMAND" --reason "$RULING" \
     || gc bd close "$DEMAND" --reason "$RULING"
+  # A demand's board sentence (gc.takeaway) is the QUESTION it was filed with,
+  # and the ruling is the answer. Left only in the gate's close reason, which no
+  # board reads, the closed demand lingers on the DONE band still asking and a
+  # glance re-engages a settled decision. The takeaway verb overwrites it with the
+  # ruling; --no-wait is what stamps gc.takeaway_settled, the settled mark only
+  # that verb writes, so every board surface reads the answer as a discharged
+  # wait. Run AFTER the close, so the demand never sits open-but-settled — the
+  # shape doctor/check-wait-is-an-edge reads as a wait already discharged while it
+  # still blocks. The verb's stamp is a plain metadata write, so it lands on the
+  # closed demand; if it does not, the renderer still suppresses the stale question.
+  "$HELM" takeaway "$DEMAND" "$RULING" --by converse --no-wait \
+    || echo "COULD NOT STAMP THE RULING on $DEMAND — the board may still show its question; run: $HELM takeaway $DEMAND \"$RULING\" --by converse --no-wait"
 elif [ -n "$DEMAND" ]; then
   # STILL OWED — cut short, or the question outlived the sitting. The
   # demand stays open, re-stated, so the wait stays a graph state.
