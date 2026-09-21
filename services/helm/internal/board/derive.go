@@ -1532,12 +1532,6 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
-	// progress_mismatch: the convoy's own closed/total claim disagrees with the
-	// membership actually rolled up. Only meaningful where the source supplied
-	// a progress object.
-	mismatch := a.Progress != nil &&
-		(a.Progress.Total != r.mTotal || a.Progress.Closed != r.nClosed)
-
 	t := Tile{
 		ID:       a.ID,
 		Rig:      a.Rig,
@@ -1587,8 +1581,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
 			a.Source != "human" && a.Source != "parked" && a.Source != "merge" &&
 			!isReviewReworkKind(a.Source),
-		Complete:         r.mTotal > 0 && r.open == 0,
-		ProgressMismatch: mismatch,
+		Complete: r.mTotal > 0 && r.open == 0,
 
 		StaleDays:      stale,
 		Priority:       a.Priority,

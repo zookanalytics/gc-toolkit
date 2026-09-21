@@ -808,31 +808,6 @@ func TestUnownedConvoyIsHigh(t *testing.T) {
 	}
 }
 
-// TestProgressMismatch: the convoy's own closed/total claim disagreeing with the
-// membership actually rolled up is a real signal, and absent progress is not one.
-func TestProgressMismatch(t *testing.T) {
-	kids := []Child{{ID: "m1", Status: "closed"}, {ID: "m2", Status: "open"}}
-	mk := func(id string, p *Progress) Anchor {
-		return Anchor{ID: id, Kind: "convoy", Source: "convoy", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
-			Progress: p, Children: kids}
-	}
-	b := BuildBoard([]Anchor{
-		mk("tk-agree", &Progress{Closed: 1, Total: 2}),
-		mk("tk-differ", &Progress{Closed: 0, Total: 5}),
-		mk("tk-none", nil),
-	}, fixtureNow, false, nil, Facts{})
-
-	if tl, _ := tileByID(b, "tk-agree"); tl.ProgressMismatch {
-		t.Error("matching progress is not a mismatch")
-	}
-	if tl, _ := tileByID(b, "tk-differ"); !tl.ProgressMismatch {
-		t.Error("a disagreeing progress object is a mismatch")
-	}
-	if tl, _ := tileByID(b, "tk-none"); tl.ProgressMismatch {
-		t.Error("an absent progress object makes no claim to disagree with")
-	}
-}
-
 // equalIDs compares two id lists for exact contents and order.
 func equalIDs(got, want []string) bool {
 	if len(got) != len(want) {

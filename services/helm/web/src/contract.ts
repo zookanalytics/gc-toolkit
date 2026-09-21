@@ -96,8 +96,6 @@ export interface Tile {
   stranded: boolean;
   empty: boolean;
   complete: boolean;
-  /** The convoy's own closed/total claim disagrees with the rolled-up membership. */
-  progress_mismatch: boolean;
   /**
    * Whole days since the anchor was last updated. 0 both when the anchor was
    * touched today and when the source could not read `updated_at` at all —

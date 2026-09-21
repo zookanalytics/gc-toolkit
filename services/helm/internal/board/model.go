@@ -16,7 +16,7 @@
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
-// sentence, the stranded/empty/complete/progress_mismatch booleans, the `held`
+// sentence, the stranded/empty/complete booleans, the `held`
 // visit fact, and the in-flight/dead-owner join that distinguishes a slung
 // bead being worked from one nobody has touched.
 //
@@ -118,11 +118,6 @@ type Anchor struct {
 	// is what keeps the wire field null rather than a misleading false.
 	Owned *bool `json:"owned,omitempty"`
 
-	// Progress is the convoy's OWN closed/total claim, as `gc convoy list`
-	// reports it. It is compared against the rolled-up child counts to derive
-	// progress_mismatch; nothing renders it directly.
-	Progress *Progress `json:"progress,omitempty"`
-
 	// The takeaway triple: the LLM-authored headline a converse sitting leaves
 	// on a bead, plus its provenance. Read from gc.takeaway / gc.takeaway_at /
 	// gc.takeaway_by. An anchor with a takeaway spends it as its NEEDS
@@ -207,13 +202,6 @@ type Blocker struct {
 	CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
-// Progress is a convoy's self-reported roll-up, mirroring the `progress` object
-// on `gc convoy list --json`.
-type Progress struct {
-	Closed int `json:"closed"`
-	Total  int `json:"total"`
-}
-
 // Tile is one rendered row of the board — the additive contract mirrored by the
 // frontend and emitted verbatim by `helm-svc board --json`.
 //
@@ -265,10 +253,9 @@ type Tile struct {
 
 	Owned *bool `json:"owned"`
 
-	Stranded         bool `json:"stranded"`
-	Empty            bool `json:"empty"`
-	Complete         bool `json:"complete"`
-	ProgressMismatch bool `json:"progress_mismatch"`
+	Stranded bool `json:"stranded"`
+	Empty    bool `json:"empty"`
+	Complete bool `json:"complete"`
 
 	// StaleDays is whole days since the anchor was last updated, and UpdatedAt
 	// is the timestamp it came from. Both are 0/zero when the source cannot read

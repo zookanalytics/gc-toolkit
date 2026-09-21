@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 50 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 49 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -62,7 +62,7 @@ and the order is now simply the wire's:
 id rig kind title severity owed weight held
 n_closed m_total open in_progress assigned
 in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
-stranded empty complete progress_mismatch
+stranded empty complete
 stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
@@ -659,11 +659,11 @@ and `/beads?status=open` paged to the end — one scan the `human` and `parked`
 kinds are filtered out of client-side, and whose parent-child edges are inverted
 into those anchors' child roll-ups so they cost no request of their own.
 
-**The `gc` CLI (`internal/source/gccli.go`) — for two facts no bead carries.**
+**The `gc` CLI (`internal/source/gccli.go`) — for the one fact no bead carries.**
 `gc session list --state all --json` for session liveness (the gate that tells
-work in flight from an abandoned husk), and `gc convoy list` for convoy
-ownership. These are the same reads `gc-helm.sh` makes, so the two boards agree
-by construction rather than by two derivations. The work bead a root's input
+work in flight from an abandoned husk). This is the same read `gc-helm.sh`
+makes, so the two boards agree on liveness by construction rather than by two
+derivations. The work bead a root's input
 convoy tracks — the other half of the in-flight join — is read in-process from
 that convoy's `tracks` edge in the rig store (`internal/source/facts.go`,
 `convoyMembers`), so it costs no `gc convoy status` per root. It honours the
@@ -1410,20 +1410,20 @@ same-origin reachability confirmed and detach-not-kill verified — see
   the actionable one, because a silent demand means whoever routed or parked
   the row never finished the handoff; a generic "operator action" reads like a
   valid ask and leaves the operator nothing to act on.
-- **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans, and `held`.
+- **`stranded`/`empty`/`complete`** booleans, and `held`.
 - **The in-flight / dead-owner join.** A child counts as moving only when its
   owning session is demonstrably live, or a live graph.v2 workflow stands over
   it. This is the false-stranded defect `tk-fkeft` fixed in `gc-helm.sh`, fixed
   here too: a slung bead never leaves `status=open`, so a board reading only
   child status called a polecat mid-implementation "stranded — assign or visit".
-- **owned-convoy partition** — `gc convoy list` supplies `owned` and `progress`,
-  and an unowned non-machine convoy is banded HIGH as the orphan exception.
+- **owned-convoy partition** — a convoy's `owned` label supplies ownership, and
+  an unowned non-machine convoy is banded HIGH as the orphan exception.
 - **The HQ bead store.** `gc rig list` reports the city root itself as a rig
   (`hq: true`); the gather scanned only `rigs/*/.beads` and silently dropped it,
   hiding the city-scope `gc.routed_to=human` beads.
 
-Session liveness and convoy ownership come from the `gc` CLI — see
-*Data-access contract*, which that adds a third sanctioned backend to.
+Session liveness comes from the `gc` CLI — see *Data-access contract*, which
+that adds a third sanctioned backend to.
 
 **Still deferred** (and *why*):
 

@@ -30,7 +30,6 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     stranded: false,
     empty: false,
     complete: false,
-    progress_mismatch: false,
     stale_days: 0,
     priority: null,
     cross_rig_refs: [],

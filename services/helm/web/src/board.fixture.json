@@ -27,7 +27,6 @@
       "stranded": false,
       "empty": false,
       "complete": false,
-      "progress_mismatch": false,
       "stale_days": 4,
       "priority": 1,
       "cross_rig_refs": [
@@ -85,7 +84,6 @@
       "stranded": false,
       "empty": false,
       "complete": true,
-      "progress_mismatch": true,
       "stale_days": 0,
       "priority": 3,
       "cross_rig_refs": [],
@@ -134,7 +132,6 @@
       "stranded": false,
       "empty": false,
       "complete": false,
-      "progress_mismatch": false,
       "stale_days": 3,
       "priority": 1,
       "cross_rig_refs": [],
@@ -184,7 +181,6 @@
       "stranded": false,
       "empty": false,
       "complete": true,
-      "progress_mismatch": false,
       "stale_days": 1,
       "priority": 3,
       "cross_rig_refs": [],
@@ -235,7 +231,7 @@
       "session": "gascity__converse-2",
       "opened_at": "2026-08-11T09:12:00Z",
       "closed_at": "2026-08-11T09:48:00Z",
-      "takeaway": "the roll-up was right; the convoy's own progress claim was stale",
+      "takeaway": "every tracked child has landed; the convoy is complete",
       "subject_title": ""
     }
   ],

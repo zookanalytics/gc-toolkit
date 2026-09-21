@@ -99,7 +99,6 @@ func emittedKeys(t *testing.T) []string {
 		UpdatedAt:   time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
 		Description: "blocks sl-abc12",
 		Owned:       &owned,
-		Progress:    &board.Progress{Closed: 1, Total: 2},
 		Takeaway:    "a headline", TakeawayAt: "2026-08-11T15:00:00Z", TakeawayBy: "host",
 		WaitingOn: []string{"tk-w1"}, WaitingOnClosed: []string{"tk-w1"},
 		Children: []board.Child{
