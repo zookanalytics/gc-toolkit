@@ -316,11 +316,10 @@ set +e; sh "$SCRIPT" open tk-real1 tk-real2 >/dev/null 2>&1; RC=$?; set -e
 eq "$RC" "2" "(BLURB) two bead-ids is a usage error"
 
 # --- (LONGREASON) a reason past the headline cap yields a bounded title --------
-# THE BUG (tk-y72p51): --reason went unbounded into `visit: <id> — <reason>`, so
-# a long reason overflowed bd's title cap and the create errored. The fix caps
-# the title TAIL at a board headline while keeping the FULL reason in the body,
-# so a long reason files instead of failing. The marker sits past the cap: it
-# must be ABSENT from the title (bounded) and PRESENT in the body (preserved).
+# open caps the title TAIL at a board headline and keeps the FULL reason in the
+# body, so a reason longer than bd's title cap still files. The marker sits past
+# the cap: it must be ABSENT from the bounded title and PRESENT in the preserved
+# body.
 LONG_HEAD="$(printf 'A%.0s' $(seq 1 300))"
 LONG_REASON="${LONG_HEAD}ZZTAILZZ"
 : > "$FAKE_CALLS"
@@ -343,10 +342,10 @@ case "$CALLS" in
 esac
 
 # --- (CREATEFAIL) a real create failure surfaces bd's error, not a jq crash ----
-# THE MASKING BUG (tk-y72p51): `jq -r '.id // .[0].id'` on bd's {"error":…}
-# OBJECT crashed jq ("Cannot index object with number (0)"), leaked that raw
-# error, and the guard then blamed a missing bead ("does it exist?") — but the
-# subject already resolved. A genuine create failure must print bd's OWN message.
+# bd reports a failed create as an {"error":…} object, and the subject bead has
+# already resolved by this point. open surfaces bd's own message for such a
+# failure, rather than a jq indexing error or a misleading "does it exist?" that
+# blames a missing subject.
 : > "$FAKE_CALLS"
 export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
 set +e
