@@ -550,7 +550,7 @@ review's result set.
   flight for the lane — a `blocks`-dep bead on the anchor carrying a non-empty
   `source_review_bead` (the review bead the rework answers) — and reads a
   legacy `exception@<oid>` marker as a park — wedged, no dispatch — until
-  `migrate-lane-states.sh` rewrites it to `merge_hold=signoff_cap`; its stray-
+  `migrate-lane-states.sh` rewrites it to `merge_hold=true`; its stray-
   marker sweep leaves that shape alone rather than clearing it, for the same
   reason.
 

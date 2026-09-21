@@ -615,7 +615,7 @@ STRAY
     # The marker is read for two legacy purposes only — never to classify the
     # lane. First, a legacy exception@ park: signoff.sh on main still refuses to
     # stamp over it and migrate-lane-states.sh has not yet rewritten it to
-    # merge_hold=signoff_cap, so a review poured against the parked anchor would
+    # merge_hold=true, so a review poured against the parked anchor would
     # be wasted reach — it reads as wedged and held. Second, the wedge
     # escalation's diagnostic line (judge_pour_liveness reads $marker). Both
     # retire with the round cap; the lane STATE is DERIVED below.

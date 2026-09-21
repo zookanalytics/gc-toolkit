@@ -8,9 +8,10 @@
 #   green@<oid>     -> green
 #   fixable@<oid>   -> fixing
 #   exception@<oid> -> the marker is cleared and the anchor is parked under
-#                      merge_hold=signoff_cap (+ signoff_cap=<gate>), which is
-#                      where the convergence cap's park lives now, plus one
-#                      visit carrying the park's reason — closing a park
+#                      merge_hold=true, a plain operator hold the cadence
+#                      honours, plus one visit carrying the park's reason. A
+#                      legacy gate exception has no lane-state equivalent, so
+#                      only an operator can rule its fate; closing a park
 #                      silently removes a row from the board.
 # Only check.<g> keys named in the anchor's own check_set are touched — a
 # marker outside it governs nothing and nothing (not even this migration)
@@ -117,7 +118,6 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
   migrated=0; parked=0; undeclared=0; attention=0
   while IFS=$'\037' read -r id key was to why decl; do
     [ -n "$id" ] || continue
-    gate="${key#check.}"
 
     if [ "$decl" != "1" ]; then
       # check_set does not name this gate: no reader dispatches or merges
@@ -145,7 +145,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
       continue
     fi
 
-    # --- a park: the marker goes, merge_hold=signoff_cap and a visit carry it -
+    # --- a park: the marker goes, merge_hold=true and a visit carry it --------
     # The visit is filed FIRST, before the marker is touched: escalate.sh
     # dedups on --subject/--key, so a retried call after a partial failure
     # files nothing twice, and a park write that then fails (or is never
@@ -159,7 +159,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         echo "$label $id: would need an operator to file the visit by hand (no rig to select the store the visit lands in); would NOT clear $key or park automatically" >&2
         attention=$((attention + 1)); continue
       fi
-      echo "$label $id: would file visit [$VISIT_KEY], then clear $key=\"$was\" and set merge_hold=signoff_cap signoff_cap=$gate"
+      echo "$label $id: would file visit [$VISIT_KEY], then clear $key=\"$was\" and set merge_hold=true"
       parked=$((parked + 1)); continue
     fi
     if [ ! -x "$ESCALATOR" ]; then
@@ -183,33 +183,32 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # converse routed-pool it used to name is retired.
     if ! GC_RIG="$rig_name" "$ESCALATOR" --subject "$id" --key "$VISIT_KEY" \
          --message \
-"The review cap's park on $id was carried across the lane-state migration and needs a person.
+"A legacy gate-exception marker on $id was carried across the lane-state migration and needs a person.
 
 $PARK_WHY
 
-The park used to be check.<gate>=exception@<head>, which a new commit cleared.
-It is merge_hold=signoff_cap now, which no commit clears: a lane state is a
-state of the lane. Retire it with a ruling, which lifts the hold and
-re-baselines the round floor in one write:
-  assets/scripts/signoff.sh reset $id --reason '<ruling>'
-Or reject the branch and let the anchor close the way any rejected work does." >/dev/null; then
+check.<gate>=exception@<head> was an operator-granted gate exception. That
+grammar is retired and has no lane-state equivalent, so the anchor is held
+under merge_hold=true, a plain operator hold no commit clears. Rule the
+anchor's fate: continue it, redesign it, or abandon it, reading the review
+beads under the anchor for the findings. Clearing merge_hold lifts the hold, or
+reject the branch and let the anchor close the way any rejected work does." >/dev/null; then
       attention=$((attention + 1))
       echo "$label $id: visit [$VISIT_KEY] did not file; NOT parked, legacy marker left in place for the next run" >&2
       continue
     fi
     run_bounded gc bd update "$id" --db "$RIG_DB" \
-      --unset-metadata "$key" --set-metadata merge_hold=signoff_cap --set-metadata "signoff_cap=$gate" \
-      --append-notes "$PROG: $key=\"$was\" retired. The convergence cap's park is merge_hold=signoff_cap now, and this anchor keeps it: $PARK_WHY" >/dev/null 2>&1
+      --unset-metadata "$key" --set-metadata merge_hold=true \
+      --append-notes "$PROG: $key=\"$was\" retired. A legacy gate exception has no lane-state equivalent, so this anchor is held under merge_hold=true for an operator ruling: $PARK_WHY" >/dev/null 2>&1
     got=$(meta_of "$id" "$key")
     hold=$(meta_of "$id" merge_hold)
-    cap=$(meta_of "$id" signoff_cap)
-    if [ -n "$got" ] || [ "$hold" != "signoff_cap" ] || [ -z "$cap" ]; then
+    if [ -n "$got" ] || [ "$hold" != "true" ]; then
       attention=$((attention + 1))
-      echo "$label $id: visit [$VISIT_KEY] is filed but the park did not read back ($key='${got:-<cleared>}', merge_hold='${hold:-<unset>}', signoff_cap='${cap:-<empty>}'); legacy marker left in place — the next run retries the write, and the visit will not duplicate" >&2
+      echo "$label $id: visit [$VISIT_KEY] is filed but the park did not read back ($key='${got:-<cleared>}', merge_hold='${hold:-<unset>}'); legacy marker left in place — the next run retries the write, and the visit will not duplicate" >&2
       continue
     fi
     parked=$((parked + 1))
-    echo "$label $id: $key=\"$was\" -> merge_hold=signoff_cap signoff_cap=$gate + visit [$VISIT_KEY]"
+    echo "$label $id: $key=\"$was\" -> merge_hold=true + visit [$VISIT_KEY]"
   done <<ROWS
 $rows
 ROWS

@@ -2,9 +2,10 @@
 # Hermetic test for assets/scripts/migrate-lane-states.sh.
 # Covers: dry-run reports and writes nothing; green@/fixable@ rewrite to bare
 # lane states (including a multi-gate check_set); a park clears the legacy
-# marker and writes merge_hold=signoff_cap + signoff_cap=<gate> (never plain
-# merge_hold=true), with escalate.sh invoked with GC_RIG pinned to the rig
-# being iterated (never an inherited GC_RIG) and a rig-qualified --pool; a
+# marker and writes plain merge_hold=true (never the retired signoff_cap, and
+# its visit never advertises the retired signoff.sh reset verb), with
+# escalate.sh invoked with GC_RIG pinned to the rig being iterated (never an
+# inherited GC_RIG); a
 # park write that does not land leaves the legacy marker standing for a
 # retry, with the visit already filed; a second --apply run is a true no-op
 # once everything has landed; a listing that is unparseable (non-array, or a
@@ -95,16 +96,16 @@ has "$out" "DRY-RUN" "dry-run announces itself"
 has "$out" 'would rewrite check.codex="green@1111111111111111111111111111111111111111" -> green' "G1 dry-run line"
 has "$out" 'would rewrite check.lint="green@2222222222222222222222222222222222222222" -> green' "G2 (multi-gate check_set) dry-run line"
 has "$out" 'would rewrite check.codex="fixable@3333333333333333333333333333333333333333" -> fixing' "F1 dry-run line"
-has "$out" 'would file visit [gate-park-migrated], then clear check.codex="exception@4444444444444444444444444444444444444444"' "P1 dry-run park line"
+has "$out" 'would file visit [gate-park-migrated], then clear check.codex="exception@4444444444444444444444444444444444444444" and set merge_hold=true' "P1 dry-run park line"
 has "$out" 'check.other="exception@5555555555555555555555555555555555555555" names a gate outside check_set' "U1 reported as an undeclared marker"
 cmp -s "$STUB_STORE" "$TMP/store.before"; eq "$?" 0 "dry-run left the store byte-identical"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "dry-run issued zero bd updates"
 eq "$(wc -l < "$STUB_ESCALATE_LOG" | tr -d ' ')" "0" "dry-run filed no visits"
 
 echo
-echo "# --apply: lane-state rewrites, and a park writes merge_hold=signoff_cap"
-echo "#   + signoff_cap=<gate>, with the visit filed under the ITERATED rig's"
-echo "#   GC_RIG, never one inherited from the caller's shell"
+echo "# --apply: lane-state rewrites, and a park writes plain merge_hold=true"
+echo "#   (never the retired signoff_cap), with the visit filed under the"
+echo "#   ITERATED rig's GC_RIG, never one inherited from the caller's shell"
 : > "$STUB_GC_LOG"
 export GC_RIG="some-other-rig"   # what a gc-helm shell or agent session exports
 out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
@@ -113,8 +114,8 @@ eq "$(meta G1 check.codex)" "green" "G1 rewritten to green"
 eq "$(meta G2 check.lint)" "green" "G2 (multi-gate check_set) rewritten to green"
 eq "$(meta F1 check.codex)" "fixing" "F1 rewritten to fixing"
 eq "$(meta P1 check.codex)" "<absent>" "P1 legacy marker cleared"
-eq "$(meta P1 merge_hold)" "signoff_cap" "P1 parked under merge_hold=signoff_cap, never plain true"
-eq "$(meta P1 signoff_cap)" "codex" "P1 signoff_cap names the gate that parked it"
+eq "$(meta P1 merge_hold)" "true" "P1 parked under plain merge_hold=true"
+eq "$(meta P1 signoff_cap)" "<absent>" "P1 carries no signoff_cap — the retired cap park is not written"
 eq "$(meta U1 check.other)" "exception@5555555555555555555555555555555555555555" "U1's undeclared marker is untouched"
 esc="$(cat "$STUB_ESCALATE_LOG")"
 has "$esc" "GC_RIG=gc-toolkit" "escalate.sh ran with GC_RIG pinned to the rig this pass is walking"
@@ -122,6 +123,8 @@ hasnt "$esc" "GC_RIG=some-other-rig" "…never the GC_RIG inherited from the cal
 has "$esc" "--subject P1" "the visit names the anchor"
 has "$esc" "--key gate-park-migrated" "the visit uses the migration's dedup key"
 hasnt "$esc" "--pool" "the visit parks on the board (escalate's default human route; the retired converse pool is not named)"
+hasnt "$esc" "signoff.sh reset" "the visit never advertises the retired signoff.sh reset verb"
+hasnt "$esc" "signoff_cap" "the visit never names the retired signoff_cap park"
 unset GC_RIG
 
 echo
@@ -156,8 +159,8 @@ export STUB_UPDATE_FAIL=""
 out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 0 "the retry exits 0"
 eq "$(meta P2 check.codex)" "<absent>" "P2's legacy marker is cleared on retry"
-eq "$(meta P2 merge_hold)" "signoff_cap" "P2 is parked on retry"
-eq "$(meta P2 signoff_cap)" "codex" "P2 signoff_cap on retry"
+eq "$(meta P2 merge_hold)" "true" "P2 is parked under merge_hold=true on retry"
+eq "$(meta P2 signoff_cap)" "<absent>" "P2 carries no signoff_cap on retry"
 eq "$(grep -c -- '--subject P2' "$STUB_ESCALATE_LOG" || true)" "2" "escalate.sh was asked again on retry (its own --key dedup keeps this from duplicating on the board — exercised in escalate.test.sh, not here)"
 
 echo
