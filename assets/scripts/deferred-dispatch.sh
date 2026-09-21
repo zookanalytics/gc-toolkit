@@ -55,12 +55,29 @@ K_SLUNG="gc.dispatch_when_ready_slung"
 SLUNG_TRYING="slinging@"   # value prefix: sling attempt in flight, not proven
 SLUNG_DONE="slung@"        # value prefix: sling returned success, arm may retire
 
+# `gc sling` mints an input convoy on every call, so a sling that never
+# finalizes must not be re-attempted forever — that leaks one convoy per pass.
+# This counter is the retry's memory: it lives on the bead, counts sling
+# attempts, and once they reach the cap reconcile stops re-slinging and hands the
+# bead to a person rather than minting convoy after convoy. It is cleared by
+# disarm, so a proven dispatch resets the budget and clearing it by hand re-arms.
+# Modeled on record-failure-cap.sh, the same pattern for merge.sh's record retry.
+K_FAILS="gc.dispatch_when_ready_fail_count"
+MAX_SLING_FAILURES="${GC_MAX_DISPATCH_SLING_FAILURES:-3}"
+case "$MAX_SLING_FAILURES" in ''|*[!0-9]*) MAX_SLING_FAILURES=3 ;; esac
+
 # The store, pinned: `gc bd` resolves its ledger from the invoking rig and
 # ignores BEADS_DIR, so an unpinned read in the rig-scoped order env answers
 # about whatever rig gc resolves rather than the one the pass is for.
 # `--db` overrides it.
 BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
 DRY_RUN=0
+
+# The retry cap hands a stuck dispatch to a person through escalate.sh (one open
+# visit per bead, deduped on the key). Resolve it beside this script; the env
+# override lets the hermetic test point it at a stub.
+SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
 
 TMPFILES=()
 cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
@@ -100,8 +117,12 @@ Verbs:
   list       Show every armed bead in this store and whether it is waiting,
              dispatchable now, or closed with a dispatch still owed.
   reconcile  One pass: sling every armed bead that is now ready, retire the arm
-             on every armed bead that closed. Driven by
-             orders/deferred-dispatch.toml (cooldown, scope="rig").
+             on every armed bead that closed or that another path already
+             delivered (a merge_result stamp), and — because each sling mints an
+             input convoy — stop re-slinging and escalate a bead whose dispatch
+             has failed to finalize MAX_SLING_FAILURES times rather than leak a
+             convoy per pass. Driven by orders/deferred-dispatch.toml (cooldown,
+             scope="rig").
 
 --sling-arg is repeatable and is passed through to `gc sling` verbatim after the
 target and bead, e.g. --sling-arg --on --sling-arg mol-pr-from-issue.
@@ -222,6 +243,7 @@ disarm_bead() { # id reason -> rc
         --unset-metadata "$K_AT" \
         --unset-metadata "$K_REASON" \
         --unset-metadata "$K_SLUNG" \
+        --unset-metadata "$K_FAILS" \
         --append-notes "$PROG: dispatch record cleared at $(now_utc)${reason:+ — $reason}" >/dev/null 2>&1
 }
 
@@ -278,27 +300,31 @@ cmd_list() {
         return 0
     fi
 
-    local n=0 id status ready json target reason slung state
+    local n=0 id status ready json target reason slung state mr fails
     while IFS=$'\t' read -r id status ready; do
         [ -n "${id:-}" ] || continue
         n=$((n + 1))
         json="$(show_bead "$id")" || json=""
-        target=""; reason=""; slung=""
+        target=""; reason=""; slung=""; mr=""; fails=0
         if [ -n "$json" ]; then
             target="$(meta_of "$json" "$K_TARGET")"
             reason="$(meta_of "$json" "$K_REASON")"
             slung="$(meta_of "$json" "$K_SLUNG")"
+            mr="$(meta_of "$json" merge_result)"
+            fails="$(meta_of "$json" "$K_FAILS")"; case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         fi
         # Not-ready splits in two, and conflating them is what hides a dead
         # arm: an OPEN bead is waiting on a blocker that can clear, while any
         # other live status is excluded by `--ready` on the status itself, so
         # no blocker closing will ever make it dispatchable.
         if [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
+        elif [ -n "$mr" ]; then state="DELIVERED — merge_result=$mr (arm retires next pass, no sling)"
         elif [ -n "$slung" ]; then
             case "$slung" in
                 "$SLUNG_TRYING"*) state="dispatch in flight (attempt not yet confirmed)" ;;
                 *)                state="dispatched (arm pending retirement)" ;;
             esac
+        elif [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then state="CAPPED — $fails sling failures, escalated; disarm or clear $K_FAILS"
         elif [ "$ready" = "1" ]; then state="DISPATCHABLE NOW"
         elif [ "$status" != "open" ]; then state="STRANDED — status=$status is never --ready"
         else state="waiting on a blocker"; fi
@@ -344,10 +370,10 @@ cmd_reconcile() {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
 
-    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 failed=0
+    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 capped=0 failed=0
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
-    local id status ready json target args_json assignee slung rc
+    local id status ready json target args_json assignee slung rc merge_result fails
     while IFS=$'\t' read -r id status ready; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
@@ -415,6 +441,25 @@ cmd_reconcile() {
                 ;;
         esac
 
+        # Already delivered: the bead carries a refinery delivery stamp (an open
+        # PR, the pre-open gate, a merge), so the work this arm would pour has
+        # already been produced by another path since the arm was recorded.
+        # Re-slinging pours a redundant molecule and mints an input convoy with
+        # it every pass — the common cause of a sling that never finalizes on an
+        # already-delivered bead. Retire the arm the way a proven slung@ marker
+        # does; there is no dispatch to lose, only one to stop repeating.
+        merge_result="$(meta_of "$json" merge_result)"
+        if [ -n "$merge_result" ]; then
+            if [ "$DRY_RUN" = 1 ]; then
+                echo "$PROG: DRY-RUN would retire arm on already-delivered $id (merge_result=$merge_result)"
+            elif disarm_bead "$id" "work already delivered (merge_result=$merge_result) by another path since the arm was recorded; arm retired without slinging a redundant molecule"; then
+                echo "$PROG: retired arm on already-delivered $id (merge_result=$merge_result)"
+            else
+                echo "$PROG: WARN could not retire arm on already-delivered $id" >&2; failed=$((failed + 1)); continue
+            fi
+            retired=$((retired + 1)); continue
+        fi
+
         # Not ready. An open bead is waiting on a blocker and the next pass
         # re-asks; any other live status is excluded by `--ready` on the status
         # itself, so waiting for it is waiting for something no blocker closing
@@ -446,14 +491,40 @@ cmd_reconcile() {
             held=$((held + 1)); continue
         fi
 
+        # The retry has a budget. Each sling attempt mints an input convoy, so a
+        # dispatch that never finalizes must stop re-slinging before it leaks one
+        # convoy per pass. The counter (bumped in the stamp write below) is the
+        # memory a bare rollback erases. At the cap, escalate once (escalate.sh
+        # dedups on the key) and leave the arm — never retire an unproven
+        # dispatch — so a person decides rather than reconcile looping forever.
+        fails="$(meta_of "$json" "$K_FAILS")"
+        case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
+        if [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then
+            if [ "$DRY_RUN" = 1 ]; then
+                echo "$PROG: DRY-RUN would escalate capped $id ($fails failed attempts, cap $MAX_SLING_FAILURES) instead of re-slinging"
+            else
+                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; escalating and leaving the arm for a person" >&2
+                if [ -x "$ESCALATE" ]; then
+                    "$ESCALATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
+                      --message "deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry." >/dev/null 2>&1 || true
+                else
+                    echo "$PROG: WARN escalate tool '$ESCALATE' not executable — capped $id has no visit; disarm or clear its fail count by hand" >&2
+                fi
+            fi
+            capped=$((capped + 1)); continue
+        fi
+
         # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying
         # between the two leaves an unconfirmed marker, which the next pass
         # re-slings rather than retires — so a death here costs a retry, never a
         # silently lost dispatch. A sling that fails rolls the marker back so the
         # arm retries next pass. Recovery stays keyed on this one owned marker, not
-        # on whichever stamp a given lane happened to leave.
+        # on whichever stamp a given lane happened to leave. The same write bumps
+        # the attempt counter the cap reads: an attempt is counted the moment it
+        # is about to be made, so a failure or a death both leave the count raised
+        # and disarm (on the eventual proven dispatch) clears it.
         if [ "$DRY_RUN" != 1 ]; then
-            bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_TRYING$(now_utc)" >/dev/null 2>&1 || {
+            bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_TRYING$(now_utc)" --set-metadata "$K_FAILS=$((fails + 1))" >/dev/null 2>&1 || {
                 echo "$PROG: WARN could not stamp $K_SLUNG on $id — leaving armed, not slinging" >&2
                 failed=$((failed + 1)); continue; }
         fi
@@ -490,7 +561,7 @@ cmd_reconcile() {
         echo "$PROG: reconcile: enumerated $expected armed bead(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1
     fi
-    echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $failed failed (of $expected armed)"
+    echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $capped capped, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
 }
 
