@@ -25,6 +25,12 @@
 #   * every OTHER arm that must NOT sling: still blocked, assignee held, sling
 #     failed;
 #   * the closed-bead retire arm;
+#   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
+#     that never finalizes must not be re-slung forever: an arm whose work
+#     another path already delivered (a merge_result stamp) RETIRES without
+#     slinging, and a sling that keeps failing is COUNTED, CAPPED, and escalated
+#     once (keeping the arm, never a silent retire) instead of leaking one convoy
+#     per pass; a proven dispatch clears the count so the budget resets;
 #   * the FALSE-EMPTY-QUEUE guard — an unreadable listing exits non-zero
 #     instead of printing a summary byte-identical to a healthy empty queue.
 #     That fail-open is the exact class this script must not have: it is a
@@ -178,18 +184,40 @@ if [ "${1:-}" = "sling" ]; then
 fi
 echo "gc stub: unsupported '${1:-}'" >&2; exit 2
 STUB
-chmod +x "$BIN/bd" "$BIN/gc"
+# escalate.sh stub: records each call (subject + key) so the retry-cap test can
+# prove reconcile hands a stuck dispatch to a person exactly once, and answers
+# like the real tool. Resolved by the SUT through GC_ESCALATE_TOOL.
+cat > "$BIN/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+set -u
+subject=""; key=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --subject) shift; subject="${1:-}" ;;
+    --key) shift; key="${1:-}" ;;
+    --message) shift ;;
+    *) : ;;
+  esac
+  shift || true
+done
+printf '%s\t%s\n' "$subject" "$key" >> "${ESC_CALLS:?}"
+echo "escalate: filed visit tk-visit1 on $subject [$key]"
+ESC
+chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh"
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
 export STUB_SLING_LOG="$TMP/sling.log"
+export ESC_CALLS="$TMP/escalate.log"
+export GC_ESCALATE_TOOL="$BIN/escalate.sh"
 export BEADS_ACTOR="test-actor"
 unset GC_AGENT GC_RIG GC_RIG_ROOT 2>/dev/null || true
 
-store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; }
+store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$ESC_CALLS"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
+escalations() { wc -l < "$ESC_CALLS" | tr -d ' '; }
 
 # --- ARM ---------------------------------------------------------------------
 echo "# arm"
@@ -392,7 +420,50 @@ out="$(STUB_SLING_RC=7 "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a failed sling makes the pass exit non-zero"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a failed sling LEAVES the record armed for the next pass"
 eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "a failed sling rolls the slung marker back so the arm retries, not retires"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "1" "a failed sling records one attempt against the retry cap"
 has "$out" "sling of b-1 -> rig/pool failed" "the failure names the bead and target"
+
+# --- the convoy-leak fix: already-delivered retire, and a capped retry ---------
+# Each gc sling mints an input convoy, so an arm that never finalizes must not be
+# re-slung forever. Two guards stop it: an arm whose work another path already
+# delivered (a merge_result stamp) retires without slinging, and a sling that
+# keeps failing is capped and escalated rather than leaking a convoy per pass.
+
+echo "# reconcile retires an arm whose work another path already delivered"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","merge_result":"pull_request"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "retiring an already-delivered arm is a clean pass"
+eq "$(slings)" "0" "an already-delivered bead is NOT slung — no redundant convoy"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the already-delivered arm is retired, not left to re-sling every pass"
+has "$(notes b-1)" "work already delivered (merge_result=pull_request)" "the retire names the delivery it deferred to"
+has "$out" "already-delivered b-1" "the retire is reported, not silent"
+has "$out" "1 retired" "summary counts the delivered retire"
+
+echo "# repeated non-finalizing slings are capped and escalated, not leaked one convoy per pass"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+STUB_SLING_RC=7 "$SUT" reconcile >/dev/null 2>&1
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "1" "failing pass 1 counts one attempt"
+STUB_SLING_RC=7 "$SUT" reconcile >/dev/null 2>&1
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "2" "failing pass 2 counts a second attempt"
+STUB_SLING_RC=7 "$SUT" reconcile >/dev/null 2>&1
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "3" "failing pass 3 reaches the cap"
+eq "$(escalations)" "0" "no escalation while still under the cap"
+before=$(slings)
+: > "$ESC_CALLS"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "$before" "a capped bead is NOT re-slung — the convoy-per-pass leak stops"
+eq "$(escalations)" "1" "a capped bead is handed to a person exactly once"
+eq "$(head -1 "$ESC_CALLS" | cut -f2)" "deferred-dispatch-sling-failed.b-1" "the escalation is keyed per bead, so repeated passes dedup to one visit"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a capped bead keeps its arm for the person, never a silent retire"
+has "$out" "CAPPED b-1" "the cap is reported"
+
+echo "# a proven dispatch clears the accumulated fail count, resetting the budget"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":"2"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "a bead one short of the cap is still slung"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "a proven dispatch clears the fail count so a later arm starts fresh"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "and the arm is retired"
+has "$out" "1 dispatched" "summary counts the dispatch"
 
 echo "# reconcile refuses a malformed arg list"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"not-json"},"notes":"","_ready":true}]'
@@ -435,12 +506,16 @@ store '[
  {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_reason":"needs b-0"},"notes":"","_ready":false},
  {"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/other"},"notes":"","_ready":true},
  {"id":"b-3","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false},
+ {"id":"b-6","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"},"notes":"","_ready":true},
+ {"id":"b-7","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_fail_count":"3"},"notes":"","_ready":true},
  {"id":"b-4","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
 out="$("$SUT" list 2>&1)"; rc=$?
 eq "$rc" 0 "list exits 0"
 has "$out" "b-1 -> rig/pool [waiting on a blocker] — needs b-0" "list shows a waiting arm with its reason"
 has "$out" "b-2 -> rig/other [DISPATCHABLE NOW]" "list shows a dispatchable arm"
 has "$out" "b-3 -> rig/pool [CLOSED" "list shows a closed arm"
+has "$out" "b-6 -> rig/pool [DELIVERED — merge_result=pull_request" "list flags an already-delivered arm (will retire, not sling)"
+has "$out" "b-7 -> rig/pool [CAPPED — 3 sling failures" "list flags a capped arm as needing a person"
 hasnt "$out" "b-4" "list shows only armed beads"
 
 # A held bead and a gated bead are both "not ready", and conflating them is
