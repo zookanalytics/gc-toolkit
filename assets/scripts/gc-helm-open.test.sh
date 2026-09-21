@@ -884,7 +884,7 @@ grep -qE 'sling 615( |$)' <<< "$SLUNG" \
 export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-succ"}}]'
 run_engage tk-pred
 eq "$RC" "0" "(RESOLVE-ENGAGE-SUPERSEDE) engage resolves a settled id and binds a sitting"
-grep -q 'visit tk-visitE on tk-succ' <<< "$OUT" \
+grep -q 'visit tk-visitE for tk-succ' <<< "$OUT" \
   && ok "(RESOLVE-ENGAGE-SUPERSEDE) the sitting holds a visit on the live successor" \
   || bad "(RESOLVE-ENGAGE-SUPERSEDE) sitting is on the successor (out: $OUT)"
 grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
@@ -898,7 +898,7 @@ grep -q 'bd update tk-visitE.*--assignee gc-toolkit/converse-opus.tk-visitE' <<<
 export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-prbead"}}]'
 run_engage 615
 eq "$RC" "0" "(RESOLVE-ENGAGE-PR) engage resolves a PR number and binds a sitting"
-grep -q 'visit tk-visitE on tk-prbead' <<< "$OUT" \
+grep -q 'visit tk-visitE for tk-prbead' <<< "$OUT" \
   && ok "(RESOLVE-ENGAGE-PR) the sitting holds a visit on the bead recording the PR" \
   || bad "(RESOLVE-ENGAGE-PR) sitting is on the PR anchor (out: $OUT)"
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \

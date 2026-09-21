@@ -100,16 +100,26 @@ case "$1 ${2:-}" in
         '[{id:$i, status:"open", assignee:"", metadata:{task_kind:$k}}]'
     fi ;;
   "bd list")
-    # The one open visit tracking tk-subj, when $HAVE_VISIT is set.
-    if [ "${HAVE_VISIT:-}" = "2" ]; then
-      jq -n '[{id:"tk-vis2", status:"open", assignee:"", created_at:"2026-09-02T00:00:00Z", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}},
-              {id:"tk-vis", status:"open", assignee:"", created_at:"2026-09-01T00:00:00Z", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
-    elif [ "${HAVE_VISIT:-}" = "held" ]; then
-      jq -n '[{id:"tk-vis2", status:"in_progress", assignee:"gc-toolkit__converse-3", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}},
-              {id:"tk-vis", status:"open", assignee:"", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
-    elif [ -n "${HAVE_VISIT:-}" ]; then
-      jq -n '[{id:"tk-vis", status:"open", assignee:"", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
-    else printf '[]\n'; fi ;;
+    case "$*" in
+      *--title-contains*)
+        # The subject title search (engage_prompt_subject). $SEARCH_HIT injects a
+        # matching NON-visit bead so a search resolves; unset = no match.
+        if [ -n "${SEARCH_HIT:-}" ]; then
+          jq -n '[{id:"tk-subj", status:"open", assignee:"", title:"a searchable subject", metadata:{task_kind:"task"}}]'
+        else printf '[]\n'; fi ;;
+      *)
+        # The open visit(s) tracking tk-subj, when $HAVE_VISIT is set. Titles are
+        # carried so the interactive visit menu has something to show.
+        if [ "${HAVE_VISIT:-}" = "2" ]; then
+          jq -n '[{id:"tk-vis2", status:"open", assignee:"", created_at:"2026-09-02T00:00:00Z", title:"visit: tk-subj — second concern", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}},
+                  {id:"tk-vis", status:"open", assignee:"", created_at:"2026-09-01T00:00:00Z", title:"visit: tk-subj — first concern", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
+        elif [ "${HAVE_VISIT:-}" = "held" ]; then
+          jq -n '[{id:"tk-vis2", status:"in_progress", assignee:"gc-toolkit__converse-3", title:"visit: tk-subj — held", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}},
+                  {id:"tk-vis", status:"open", assignee:"", title:"visit: tk-subj — parked", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
+        elif [ -n "${HAVE_VISIT:-}" ]; then
+          jq -n '[{id:"tk-vis", status:"open", assignee:"", title:"visit: tk-subj — the concern", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
+        else printf '[]\n'; fi ;;
+    esac ;;
   "session new")
     printf 'session new %s\n' "$*" >> "$CALLS"
     # Record the rig context engage supplies: `gc session new` resolves a bare
@@ -181,11 +191,35 @@ export CALLS="$TMP/calls" ASSIGNEE="$TMP/assignee" VIS_STATUS="$TMP/vstatus"
 unset GC_HELM_FIXTURE || true
 export TMPDIR="$TMP"
 
-# run_engage <bead> [extra-args...] -> RC/OUT, with per-case env preset by caller
+# A fixture agents dir, so the converse-<model> list engage globs is hermetic —
+# independent of the repo's live agents/. A bare `converse` is present to prove
+# it is EXCLUDED from the model list.
+mkdir -p "$TMP/agents/converse-opus" "$TMP/agents/converse-fable" \
+         "$TMP/agents/converse-codex" "$TMP/agents/converse"
+export GC_HELM_AGENTS_DIR="$TMP/agents"
+
+# run_engage <bead> [extra-args...] -> RC/OUT, with per-case env preset by caller.
+# stdin is /dev/null so the run is non-interactive regardless of the terminal the
+# suite is launched from ([ -t 0 ] is false); the interactive path is driven by
+# run_engage_tty below.
 run_engage() {
     : > "$CALLS"; : > "$ASSIGNEE"
     set +e
-    OUT="$(sh "$SCRIPT" engage "$@" 2>"$TMP/err")"; RC=$?
+    OUT="$(sh "$SCRIPT" engage "$@" </dev/null 2>"$TMP/err")"; RC=$?
+    set -e
+    OUT="$OUT$(cat "$TMP/err")"
+    CALLED="$(cat "$CALLS")"
+}
+
+# run_engage_tty <printf-format-of-answers> [args...] -> RC/OUT. Drives the
+# interactive prompts: GC_HELM_ASSUME_TTY forces the interactive path when stdin
+# is a pipe (a hermetic test has no real tty), and the answers feed the reads in
+# order. The answer string is a printf %b format, so lines are '\n'-separated.
+run_engage_tty() {
+    _ans="$1"; shift
+    : > "$CALLS"; : > "$ASSIGNEE"
+    set +e
+    OUT="$(printf '%b' "$_ans" | GC_HELM_ASSUME_TTY=1 sh "$SCRIPT" engage "$@" 2>"$TMP/err")"; RC=$?
     set -e
     OUT="$OUT$(cat "$TMP/err")"
     CALLED="$(cat "$CALLS")"
@@ -262,6 +296,13 @@ has "$CALLED" "bd create" "(REASON-NEW) …a NEW visit is filed, not the existin
 has "$CALLED" "visit: tk-subj — a distinct concern" "(REASON-NEW) …its title tail carries the reason"
 has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and its body (the claim-time brief) too"
 hasnt "$OUT" "already open" "(REASON-NEW) …bypassing the one-visit-per-subject dedup on purpose"
+# The internal file-a-visit path must not leak cmd_open's terminal success
+# chatter: engage emits the human summary on stdout and one [debug] line on
+# stderr, and cmd_open's "…filed / Engage it when ready" advice is stale once
+# engage binds the sitting. run_engage folds stderr into OUT, so this catches a
+# leak on either stream.
+hasnt "$OUT" "no session spawned" "(REASON-NEW) …cmd_open's success chatter is suppressed, not redirected to stderr"
+hasnt "$OUT" "Engage it when ready" "(REASON-NEW) …including its now-stale engage-later advice"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(REASON-NEW) …then spawns a sitting for the new visit"
 hasnt "$CALLED" "session nudge" "(REASON-NEW) …and the opus sitting is not kicked; it reads the reason from the body"
 hasnt "$OUT" "bound the pre-existing" "(REASON-NEW) …and no pre-existing-bind hint: --reason filed a fresh visit, it did not bind an old one"
@@ -600,6 +641,127 @@ hasnt "$CALLED" "session new" "(GONE-UNREADABLE) …and spawns nothing"
 has "$OUT" "pending engagement" "(GONE-UNREADABLE) …keeping the pending-engagement refusal"
 unset SESSION_LIST_BROKEN
 export VIS_OWNER=""
+
+# ── Interactive TTY flow + starter/model/debug ───────────────────────
+echo
+echo "# the model set is the configured converse-* variants; bare 'converse' is excluded"
+# --model validates against the globbed variants (opus/fable/codex from the
+# fixture agents dir); the bare 'converse' pool template is not an engage variant.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --model converse --no-attach
+eq "$RC" 2 "(IA-MODEL-SET) --model converse (the bare pool template) is not a variant, exit 2"
+hasnt "$CALLED" "session new" "(IA-MODEL-SET) …and nothing spawned"
+has "$OUT" "must be one of: opus" "(IA-MODEL-SET) …the message lists the configured variants"
+
+echo "# every success carries a ✓ summary on stdout and an always-on [debug] line"
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(IA-DEBUG) engaging exits 0"
+has "$OUT" "[debug] visit=tk-vis" "(IA-DEBUG) the provenance rides an always-on [debug] line"
+has "$OUT" "sitting=gc-77" "(IA-DEBUG) …carrying the sitting id"
+has "$OUT" "work_dir=/w" "(IA-DEBUG) …and the sitting work_dir"
+has "$OUT" "✓ converse-opus" "(IA-DEBUG) …and the human summary names the sitting template"
+
+echo "# --no-input keeps the non-interactive one-shot behavior (engages the existing visit)"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --no-input --no-attach
+eq "$RC" 0 "(IA-NOINPUT) --no-input on a subject-with-visit exits 0"
+hasnt "$CALLED" "bd create" "(IA-NOINPUT) …engaging the existing visit, filing nothing"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-NOINPUT) …with no prompts"
+unset HAVE_VISIT
+
+echo "# on a TTY a subject with a parked visit is offered engage-existing vs new"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+# [1] engage the existing visit · Enter at the model prompt (Opus)
+run_engage_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-VISIT-EXISTING) picking the existing visit exits 0"
+has "$OUT" "Subject has open visit" "(IA-VISIT-EXISTING) …after listing the open visit(s)"
+has "$OUT" "[d] discuss broadly" "(IA-VISIT-EXISTING) …in one prompt that also offers the new-visit seed letters"
+hasnt "$CALLED" "bd create" "(IA-VISIT-EXISTING) …files nothing"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISIT-EXISTING) …and engages it"
+unset HAVE_VISIT
+
+echo "# two parked visits become a numbered choice, replacing the error-on-two refusal"
+export BEAD_KIND=task HAVE_VISIT=2 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+# parked-first, oldest first: [1]=tk-vis (09-01) · [2]=tk-vis2 (09-02); pick [1]
+run_engage_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-VISIT-MULTI) two parked visits, picking one, exits 0 (no error-on-two)"
+hasnt "$OUT" "parked visits" "(IA-VISIT-MULTI) …the multi-visit refusal is replaced by the prompt"
+has "$OUT" "tk-vis2" "(IA-VISIT-MULTI) …both parked visits are listed"
+has "$CALLED" "session new converse-opus --alias tk-vis " "(IA-VISIT-MULTI) …spawning for the picked visit"
+unset HAVE_VISIT
+
+echo "# a seed letter at the one prompt files a NEW visit carrying that seed, even with a visit present"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+# [d] new visit seeded discuss-broadly (one prompt, no separate starter) · Enter model (Opus)
+run_engage_tty 'd\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-NEW-TEMPLATE) new visit + template exits 0"
+has "$CALLED" "bd create" "(IA-NEW-TEMPLATE) …a new visit is filed"
+hasnt "$OUT" "already open" "(IA-NEW-TEMPLATE) …deliberately, past the one-visit dedup"
+has "$CALLED" "talk through tk-subj broadly" "(IA-NEW-TEMPLATE) …its body is the seed, subject filled in"
+has "$CALLED" "visit: tk-subj — discuss broadly" "(IA-NEW-TEMPLATE) …titled by the seed label"
+has "$CALLED" "session new converse-opus" "(IA-NEW-TEMPLATE) …then a sitting is spawned"
+unset HAVE_VISIT
+
+echo "# free text at the one prompt opens a NEW visit carrying it verbatim as the opener"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+# free text (not a number or seed letter) · Enter model
+run_engage_tty 'lets revisit the scope\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-NEW-FREETEXT) new visit + free text exits 0"
+has "$CALLED" "bd create" "(IA-NEW-FREETEXT) …a new visit is filed"
+has "$CALLED" "lets revisit the scope" "(IA-NEW-FREETEXT) …with the typed message as its body"
+unset HAVE_VISIT
+
+echo "# the model prompt is a numbered choice; picking codex spawns converse-codex + kick"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+# model list = opus, codex, fable (opus first, then glob order); [2] = codex
+run_engage_tty '2\n' tk-vis --no-attach
+eq "$RC" 0 "(IA-MODEL-PICK) picking a model exits 0"
+has "$CALLED" "session new converse-codex --alias tk-vis" "(IA-MODEL-PICK) …spawning the picked variant"
+has "$CALLED" "session nudge gc-77" "(IA-MODEL-PICK) …and codex, the kicked provider, gets its opening turn"
+
+echo "# Enter at the model prompt keeps Opus (the work-tier default)"
+run_engage_tty '\n' tk-vis --no-attach
+eq "$RC" 0 "(IA-MODEL-DEFAULT) Enter at the model prompt exits 0"
+has "$CALLED" "session new converse-opus" "(IA-MODEL-DEFAULT) …keeping Opus"
+
+echo "# a subject given by title search resolves and engages"
+export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER="" SEARCH_HIT=1
+printf 'open' > "$VIS_STATUS"
+# search text · [1] pick the match · starter Enter (none) · model Enter (Opus)
+run_engage_tty 'findme\n1\n\n\n' --no-attach
+eq "$RC" 0 "(IA-SUBJECT-SEARCH) a title-searched subject resolves and engages, exit 0"
+has "$CALLED" "session new converse-opus" "(IA-SUBJECT-SEARCH) …spawning for the resolved subject's visit"
+unset SEARCH_HIT
+
+echo "# --template pre-fills the starter and skips its prompt (here under --no-input)"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --template unstick-a-stall --no-input --no-attach
+eq "$RC" 0 "(IA-TEMPLATE-FLAG) --template files a new visit with the seed, exit 0"
+has "$CALLED" "bd create" "(IA-TEMPLATE-FLAG) …a new visit is filed"
+has "$CALLED" "looks stalled" "(IA-TEMPLATE-FLAG) …carrying the seed body"
+hasnt "$OUT" "already open" "(IA-TEMPLATE-FLAG) …past the dedup"
+unset HAVE_VISIT
+
+echo "# an unknown --template is refused before anything spawns"
+export BEAD_KIND=task VIS_OWNER=""
+run_engage tk-subj --template bogus --no-input --no-attach
+eq "$RC" 2 "(IA-TEMPLATE-BAD) an unknown --template exits 2"
+has "$OUT" "unknown --template" "(IA-TEMPLATE-BAD) …naming the fault"
+hasnt "$CALLED" "session new" "(IA-TEMPLATE-BAD) …and nothing spawned"
+
+echo "# --reason and --template both set the opener — they conflict"
+run_engage tk-subj --reason x --template discuss-broadly --no-input --no-attach
+eq "$RC" 2 "(IA-REASON-TEMPLATE) --reason and --template together exit 2"
+has "$OUT" "both set the opening message" "(IA-REASON-TEMPLATE) …saying why"
+hasnt "$CALLED" "bd create" "(IA-REASON-TEMPLATE) …and nothing filed"
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"
