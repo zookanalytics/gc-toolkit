@@ -132,9 +132,19 @@ eq "$GOT" "$FIX/rigs/gc-toolkit/assets/scripts/gc-deacon-ledger.sh" \
 grep -q 'show --since' "$PROMPT" \
   && ok "the deacon reads the ledger at startup, which is what survives a recycle" \
   || bad "the deacon prompt never reads the ledger — a restarted deacon is back to the transcript"
+# The startup boot line must not fire every cycle: a ledger that logs each
+# recycle is the transcript again, the same signal-only rule next-iteration
+# follows. It records only when the reconcile changed state — a stale wisp
+# burned, or a fresh one poured because none was recoverable — so the append is
+# guarded, never a bare line that runs on every restart.
 grep -q 'append boot' "$PROMPT" \
-  && ok "and records the restart itself" \
-  || bad "a restart leaves no ledger entry, so a recycle loop is invisible in the record"
+  && ok "the prompt can record a restart that recovered state" \
+  || bad "the prompt never appends a boot entry, so a recovery-on-restart leaves no record"
+if grep -qE '^"\$LEDGER" append boot' "$PROMPT"; then
+  bad "the boot append is a bare top-level line, so it runs on every restart — that is one ledger entry per recycle, the noise a signal-only ledger excludes"
+else
+  ok "the boot append is guarded, so a routine recycle records nothing"
+fi
 PBLOCK="$TMP/prompt-resolver.sh"
 awk '/^LEDGER=""$/{f=1} f{print} /^done$/{if (f) exit}' "$PROMPT" > "$PBLOCK"
 if [ -s "$PBLOCK" ]; then
