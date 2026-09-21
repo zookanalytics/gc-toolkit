@@ -473,6 +473,32 @@ printf '%s' "$(prview 97 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_97.json"
 out=$(run)
 has "$out" "rework CW1 already covers branch 'polecat/x97' at this head, no new child" "the anchor's own rework child is excluded from the guard, so the dedup runs"
 
+echo "# …but that own rework child, ITSELF held by a live decision demand, DOES veto: the demand gates the branch both share"
+# A base-supersession or reconcile decision is filed on the in-flight rework
+# (gc.demand_for=<child>), not the anchor. The child is on the anchor's own
+# branch, so anchor_foreign_blocker excludes it as the arm's own mechanism and
+# takeaway_is_holding on the anchor reads clear — both blind. anchor_decision_held
+# reads the demand ledger for the child too, because a decision on it holds the
+# one branch the anchor and child share.
+store "[$(anchor FDK1 110),$(child KID1 polecat/x110 ',"task_kind":"rework","anchor_bead":"FDK1"'),$(demand KID1)]"
+gc bd dep KID1 --blocks FDK1 >/dev/null 2>&1
+printf '%s' "$(prview 110 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_110.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+eq "$(meta FDK1 'gc.routed_to')" "" "the anchor itself is not human-routed"
+eq "$(jq -r '.[] | select(.id=="dm-KID1") | .metadata["gc.demand_for"] // "<none>"' "$STUB_STORE")" "KID1" "the demand names the rework child, not the anchor"
+has "$out" "an open demand holds it for a person's decision; no rework dispatched" "a decision demand on the rework child vetoes the dispatch"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no new rework child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …control: with that child's demand CLOSED the hold lifts, and the own child dedups as the mechanism it is — so the LIVE demand, not the child, was the veto"
+store "[$(anchor FDK2 111),$(child KID2 polecat/x111 ',"task_kind":"rework","anchor_bead":"FDK2"'),$(demand KID2 closed)]"
+gc bd dep KID2 --blocks FDK2 >/dev/null 2>&1
+printf '%s' "$(prview 111 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_111.json"
+out=$(run)
+has "$out" "rework KID2 already covers branch 'polecat/x111' at this head, no new child" "a closed demand holds nothing; the own child dedups"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no new rework child is minted"
+
 echo "# …and an unreadable blocker list holds the dispatch, the safe side for a rewrite (tk-nak6pb)"
 store "[$(anchor FBK3 98)]"
 printf '%s' "$(prview 98 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_98.json"
