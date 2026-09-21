@@ -39,7 +39,6 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
 done
 "$LEDGER" show --since 48h
-"$LEDGER" append boot "deacon started ($GC_SESSION_NAME)" -
 ```
 
 An open escalation named there is already asked; do not re-file it. A cleanup
@@ -78,8 +77,25 @@ for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra"
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='gc-toolkit.' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
+  POURED=1
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
+# A routine recycle adopts the one live wisp and records nothing: the ledger is
+# a record of actions, and a clean restart is not one. Record a boot line only
+# when startup changed state a later reader needs — a stale wisp burned, or a
+# fresh one poured because none was recoverable — so a tight recycle cadence
+# shows up as the faults it caused, not as one entry per cycle.
+BURNED=$(printf '%s\n' "$WISP_IDS" | sed '1d' | grep -c . || true)
+BOOT=""
+[ "${BURNED:-0}" -gt 0 ] && BOOT="burned $BURNED stale patrol wisp(s)"
+[ -n "${POURED:-}" ] && BOOT="${BOOT:+$BOOT; }poured a fresh wisp (none recoverable)"
+if [ -n "$BOOT" ]; then
+  LEDGER=""
+  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+  done
+  "$LEDGER" append boot "$BOOT ($GC_SESSION_NAME)" -
+fi
 ```
 
 Identity is `$GC_AGENT`, never `$GC_ALIAS`. Then follow the formula. Never
