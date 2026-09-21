@@ -5,7 +5,7 @@ the refinery handoff. Run by every polecat in the city; the agent prompt
 carries the doctrine, this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
-push branch, ONE atomic handoff update to the refinery -> close own step
+push branch, hand the bead to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
 bead and names the disposition for whoever owns the close.
@@ -586,7 +586,7 @@ rejection — don't redo everything.
 change, because the feedback was addressed on the branch already or the
 dispatch was spurious. Hand it back anyway through the normal path: run
 self-review, then submit-and-exit. The branch is unchanged, so its `git push
-origin HEAD` is a safe no-op ("Everything up-to-date"), and the atomic handoff
+origin HEAD` is a safe no-op ("Everything up-to-date"), and the handoff
 is what routes the bead to the refinery and clears your
 `gc.session_id`/`gc.session_name`. The refinery closes it as a rework hand-back
 landed-on-branch. Never improvise the hand-back with a bare `gc bd update
@@ -1047,7 +1047,15 @@ if [ "$AUTO_PUSH" = "false" ]; then
     fi
     exit 1
   fi
-  gc bd update "$WORK_BEAD_ID" --status=open --assignee="" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  # Three writes, not one: a gc bd update that clears the assignee while this
+  # session still holds the bead in_progress is refused by bd's claim guard,
+  # which rolls back the batched metadata and notes with it. Metadata and notes
+  # bypass the guard and clear the route first, --status=open is accepted from
+  # the holder, and the assignee write lands once the bead is open — the same
+  # order the store-only arm releases a bead in.
+  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  gc bd update "$WORK_BEAD_ID" --status=open
+  gc bd update "$WORK_BEAD_ID" --assignee=""
   # >>> submit-halt-chain-close
   SC=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -1098,11 +1106,11 @@ the fix you just made describes something no reviewer is looking at.
 
 **4b. Resolve the bead the summary belongs on.** `pr-open.sh` publishes
 `pr_summary` off the anchor row it enumerates: the open bead that carries a
-`merge_result` for this branch. On fresh work that is the bead you claimed
-and one write serves both. On a rework or rebase child the anchor is a
-DIFFERENT bead, and a summary stamped on the child is never read — the PR
-body falls back to the dispatch text, which was written before the diff
-existed. An anchor in a gating state rests unheld (`lifecycle/lifecycle.toml`
+`merge_result` for this branch. On fresh work that is the bead you claimed, so
+the handoff's own metadata write carries the summary. On a rework or rebase
+child the anchor is a DIFFERENT bead, and a summary stamped on the child is
+never read — the PR body falls back to the dispatch text, which was written
+before the diff existed. An anchor in a gating state rests unheld (`lifecycle/lifecycle.toml`
 `detached_states`), so stamping it races no one:
 
 ```bash
@@ -1128,12 +1136,35 @@ The query asks the branch, not the state name: every state that carries a
 unreadable probe resolves to empty and the step behaves as it did before this
 block existed — degraded to the dispatch-text fallback, never stranded.
 
-**5. ONE atomic handoff.** A single `gc bd update` carries the whole
-transition — target, PR summary, notes, refinery assignee, cleared route,
-cleared session pins — so no partial handoff can strand the bead between
-writes. `--append-notes`, never `--notes` (which REPLACES and erases the
-dispatch note). The empty `gc.routed_to` is deliberate: the direct assignment
-IS the handoff, and named-session work must not read as pool demand.
+**5. The refinery handoff (three writes).** The transition carries target, PR
+summary, notes, refinery assignee, cleared route, and cleared session pins.
+It takes three `gc bd update` calls, not one. A single update that reassigns
+the bead off this session while it still holds it `in_progress` is refused by
+bd's claim guard (`AssigneeNotStolen`, which fires only on an `in_progress`
+bead), and the refusal rolls back the target, the notes, and everything else
+batched into that call. So the writes are ordered:
+
+1. metadata and notes, which bypass the guard, clearing the route while the
+   status is still `in_progress`;
+2. `--status=open`, accepted from the holder because it carries no assignee
+   change;
+3. the plain `--assignee`, accepted once the bead is `open` and no longer
+   `in_progress`.
+
+The intermediate state after the second write is open, still assigned here,
+and unrouted, which a pool's offer predicate cannot see, so no window offers
+the bead to anyone. Clearing the route in the first write, before the status
+flips, is what keeps it out. This is the order the store-only arm above
+releases a bead in.
+
+`--append-notes`, never `--notes` (which REPLACES and erases the dispatch
+note). The empty `gc.routed_to` is deliberate: the direct assignment IS the
+handoff, and named-session work must not read as pool demand.
+
+A refused `gc bd update` exits non-zero and rolls its own call back, so the
+three writes are chained. If any one fails the bead is not handed off, and the
+step holds and escalates rather than closing its chain and draining past a
+strand the refinery never sees.
 
 The handoff clears the polecat's `gc.session_id`/`gc.session_name`: once it
 lands the refinery holds the bead and this session does not. The witness
@@ -1146,7 +1177,7 @@ The summary is the one field addressed to a bead other than the claimed one.
 When 4b named an anchor, it is stamped there in its own write, before the
 handoff: it is metadata on a bead this session does not hold, and a failure to
 land it costs a good PR body, not the handoff. Everything the refinery reads
-still arrives in the single atomic write below.
+still arrives in the three writes below.
 
 ```bash
 # >>> submit-target-consume
@@ -1177,15 +1208,29 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
 fi
 PR_SUMMARY=""
 if [ -s "${PR_SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$PR_SUMMARY_FILE"); fi
-HANDOFF=(--status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
+HANDOFF_META=(--set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
 if [ -n "$PR_SUMMARY" ]; then
     if [ -n "${GATING_ANCHOR:-}" ]; then
         gc bd update "$GATING_ANCHOR" --set-metadata pr_summary="$PR_SUMMARY" || echo "pr_summary did not reach anchor $GATING_ANCHOR; its PR body falls back to the dispatch text"
     else
-        HANDOFF+=(--set-metadata pr_summary="$PR_SUMMARY")
+        HANDOFF_META+=(--set-metadata pr_summary="$PR_SUMMARY")
     fi
 fi
-gc bd update "$WORK_BEAD_ID" "${HANDOFF[@]}" --append-notes "Implemented: <brief summary>"
+HANDOFF_OK=0
+if gc bd update "$WORK_BEAD_ID" "${HANDOFF_META[@]}" --append-notes "Implemented: <brief summary>" && gc bd update "$WORK_BEAD_ID" --status=open && gc bd update "$WORK_BEAD_ID" --assignee="$REFINERY_TARGET"; then HANDOFF_OK=1; fi
+if [ "$HANDOFF_OK" != "1" ]; then
+    echo "HANDOFF REFUSED: a gc bd update in the handoff exited non-zero and rolled itself back, so $WORK_BEAD_ID is not open, assigned to $REFINERY_TARGET, and unrouted. The branch is pushed; the step chain is NOT closed."
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery. Held at submit-and-exit; nothing was closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "refinery handoff refused: a gc bd update exited non-zero and rolled back; the branch is pushed but the bead is not handed off"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
+    exit 1
+fi
 # <<< submit-target-consume
 # The summary file crosses steps, so step 4b cannot trap it and the block
 # above must not consume it — it is extracted and replayed against one
@@ -1256,6 +1301,6 @@ gc runtime drain-ack
 exit
 ```
 
-**Exit criteria:** branch pushed and verified, one atomic handoff written,
-refinery signaled, step chain closed forward, local branch released, drain
-acknowledged. Done means gone."""
+**Exit criteria:** branch pushed and verified, the refinery handoff written in
+three guard-safe writes, refinery signaled, step chain closed forward, local
+branch released, drain acknowledged. Done means gone."""

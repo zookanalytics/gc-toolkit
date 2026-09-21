@@ -5,7 +5,7 @@ the refinery handoff. Run by every polecat in the city; the agent prompt
 carries the doctrine, this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
-push branch, ONE atomic handoff update to the refinery -> close own step
+push branch, hand the bead to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
 bead and names the disposition for whoever owns the close.
