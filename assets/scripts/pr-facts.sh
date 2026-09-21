@@ -467,7 +467,12 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
 # finding.sh normalizes it out of the key, so a rebase that renumbers the file
 # does not re-raise the finding. An empty body is no objection and is dropped, so
 # a bodyless CHANGES_REQUESTED contributes only through its inline comments.
-feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message}
+feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message,comment_id}
+  # comment_id is the GitHub databaseId of the row that raised the objection.
+  # For an INLINE review comment it is also the databaseId the reviewThread
+  # carries, so the write-back can find the thread and post a declined finding's
+  # owed reply into it; a review-body or Conversation comment has no thread, so
+  # its id matches none and the write-back answers those on the PR itself.
   jq -nc --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
          --argjson icmts "$5" --argjson imark "$6" --arg self "$SELF_LOGIN" '
     def body: ((.body // "") | tostring);
@@ -477,18 +482,20 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $rmark)
-              | { login: ((.user.login // "?") | tostring), locus: "PR review", message: body } ])
+              | { login: ((.user.login // "?") | tostring), locus: "PR review", message: body,
+                  comment_id: ((.id // 0) | tostring) } ])
   + ([ $cmts[] | select(((.user.login // "") | tostring) != $self)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $cmark)
               | { login: ((.user.login // "?") | tostring),
                   locus: (((.path // "PR conversation") | tostring)
                           + (if ((.line // .original_line) != null) then ":" + ((.line // .original_line) | tostring) else "" end)),
-                  message: body } ])
+                  message: body, comment_id: ((.id // 0) | tostring) } ])
   + ([ $icmts[] | select(((.user.login // "") | tostring) != $self)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $imark)
-              | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body } ])' 2>/dev/null
+              | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
+                  comment_id: ((.id // 0) | tostring) } ])' 2>/dev/null
 }
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
@@ -1689,9 +1696,15 @@ $CBODY"
       flogin=$(printf '%s' "$frec" | jq -r '.login // "?"')
       flocus=$(printf '%s' "$frec" | jq -r '.locus // empty')
       fmsg=$(printf '%s' "$frec" | jq -r '.message // empty')
+      fcid=$(printf '%s' "$frec" | jq -r '(.comment_id // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
       if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" 2>/dev/null) && [ -n "$fid" ]; then
         FINDING_IDS="${FINDING_IDS:+$FINDING_IDS,}$fid"
+        # Record which GitHub row raised it, so the write-back can post a declined
+        # finding's owed reply into that thread. Best-effort: a missing id only
+        # drops the decline reply back to a PR-level answer, never the merge hold,
+        # so it does not gate the batch the way the finding filing above does.
+        case "$fcid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.comment_id="$fcid" >/dev/null 2>&1 || true ;; esac
       else
         ffail=1; break
       fi
@@ -2409,6 +2422,85 @@ $WB_MARKER"
   done <<WB_PLAN
 $wplan
 WB_PLAN
+
+  # --- a declined human objection owes its raiser an answer on the PR ----------
+  # The peer model lets the validator decline a human finding on its merits, but
+  # never in silence: declining it stamps the answer (finding.reply) and the row
+  # it answers (finding.comment_id) on the finding. This posts that answer into
+  # the raiser's thread and resolves it, so the decline is visible and no open
+  # thread holds the merge. The operator re-raises by re-reviewing — the content
+  # key re-adopts the closed finding as a fresh one and pr-facts re-opens the
+  # human validation pass — so resolving here forecloses no re-raise. Idempotent:
+  # finding.reply_posted marks a finding answered, and a thread already carrying
+  # our marker is never doubled. Only a pass that read the threads cleanly acts,
+  # the same $wplan_ok gate the plan above turns on.
+  if [ "$wplan_ok" = 1 ] && wdf=$(bd_list --metadata-field anchor_bead="$wid" --status=closed); then
+    wdrows=$(printf '%s' "$wdf" | jq -rc '.[]?
+        | select(((.metadata.task_kind // "") | tostring) == "finding")
+        | select(((.metadata["finding.lane"] // "") | tostring) == "human")
+        | select(((.metadata["finding.disposition"] // "") | tostring) == "declined")
+        | select(((.metadata["finding.reply"] // "") | tostring) != "")
+        | select(((.metadata["finding.reply_posted"] // "") | tostring) == "")
+        | { id: .id, cid: ((.metadata["finding.comment_id"] // "") | tostring),
+            reply: ((.metadata["finding.reply"]) | tostring) } | @base64' 2>/dev/null)
+    while IFS= read -r wdrow; do
+      [ -n "$wdrow" ] || continue
+      wdj=$(printf '%s' "$wdrow" | base64 -d 2>/dev/null) || continue
+      wdfid=$(printf '%s' "$wdj" | jq -r '.id // empty')
+      [ -n "$wdfid" ] || continue
+      wdcid=$(printf '%s' "$wdj" | jq -r '.cid // empty')
+      wdbody="$(printf '%s' "$wdj" | jq -r '.reply')
+$WB_MARKER"
+      # The thread whose originating comment is the one this finding answers. An
+      # inline comment's databaseId is the reviewThread's; a review-body or
+      # Conversation objection matches none, and is answered on the PR itself.
+      wdtid=$(printf '%s' "$wview" | jq -r --arg c "$wdcid" '
+        [ .threads[] | select((.comments.nodes // []) | any(((.databaseId // 0) | tostring) == $c)) | .id ] | .[0] // empty' 2>/dev/null)
+      if [ -z "$wdtid" ]; then
+        if gh pr comment "$wnum" --repo "$ORIGIN_REPO_Q" --body "$wdbody" >/dev/null 2>&1; then
+          gc bd update "$wdfid" --set-metadata finding.reply_posted=1 >/dev/null 2>&1 || true
+          replied=$((replied + 1))
+        else
+          echo "$PROG: $wid — PR#$wnum could not post the declined-finding reply for $wdfid; retry next pass" >&2
+        fi
+        continue
+      fi
+      # Already answered on this thread? Our own marker there means a prior pass
+      # replied but did not get to mark or resolve; pick up where it stopped.
+      wdreplied=0
+      if printf '%s' "$wview" | jq -e --arg t "$wdtid" --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" '
+           [ .threads[] | select(.id == $t) | (.comments.nodes // [])[]
+             | select((.author.login // "") == $self) | select((.body // "") | contains($m)) ] | length > 0' >/dev/null 2>&1; then
+        wdreplied=1
+      fi
+      if [ "$wdreplied" = 0 ]; then
+        if gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
+             -f t="$wdtid" -f b="$wdbody" >/dev/null; then
+          replied=$((replied + 1)); wdreplied=1
+        else
+          echo "$PROG: $wid — PR#$wnum could not reply the decline for $wdfid on thread $wdtid; retry next pass" >&2
+          continue
+        fi
+      fi
+      # Resolve behind the reply so the answered thread no longer holds the merge.
+      # A thread this identity cannot resolve, or one already resolved, needs no
+      # write; either way the finding is answered and is marked so.
+      wdres_ok=1
+      wdcanres=$(printf '%s' "$wview" | jq -r --arg t "$wdtid" '[ .threads[] | select(.id == $t) | (.viewerCanResolve // false) ] | .[0] // false')
+      wdisres=$(printf '%s' "$wview" | jq -r --arg t "$wdtid" '[ .threads[] | select(.id == $t) | (.isResolved // false) ] | .[0] // false')
+      if [ "$wdisres" != "true" ] && [ "$wdcanres" = "true" ]; then
+        if gh_graphql 'mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -f t="$wdtid" >/dev/null; then
+          resolved=$((resolved + 1))
+        else
+          wdres_ok=0
+          echo "$PROG: $wid — PR#$wnum replied the decline for $wdfid but could not resolve thread $wdtid; retry next pass" >&2
+        fi
+      fi
+      [ "$wdres_ok" = 1 ] && { gc bd update "$wdfid" --set-metadata finding.reply_posted=1 >/dev/null 2>&1 || true; }
+    done <<WB_DECLINES
+$wdrows
+WB_DECLINES
+  fi
 
   # The plan is this pass's own read of GitHub, so a plan that could not be built
   # retires nothing.

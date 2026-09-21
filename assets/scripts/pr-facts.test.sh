@@ -1248,7 +1248,7 @@ has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 FID1=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1") | .id ] | .[0] // "<none>"' "$STUB_STORE")
 hasnt "$FID1" "<none>" "the comment becomes a task_kind=finding bead on the anchor"
 eq "$(meta "$FID1" 'finding.lane')" "human" "…on the human lane the validator's finding query selects (finding.lane == check_name)"
-eq "$(meta "$FID1" 'finding.source')" "human:human1" "…sourced to the login that raised it, so a decline is escalated to them, not overruled"
+eq "$(meta "$FID1" 'finding.source')" "human:human1" "…sourced to the login that raised it, whose thread a decline's owed reply is posted back into"
 eq "$(meta "$FID1" 'finding.disposition')" "unvalidated" "…unruled until the validator rules it"
 grep -qxF "new-2|blocks|$FID1" "$STUB_DEPS" && ok "…and the rework child (the fix unit) blocks it, so closing the fix closes the finding" || bad "rework child does not block the finding (wire-fix-unit missing)"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1")] | length' "$STUB_STORE")" "1" "…one comment, one finding — no twin"
@@ -1881,8 +1881,61 @@ printf '%s' "$(prview 45 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_45.json"
 threads 45 "$(one_thread 45)"
 out=$(run)
 eq "$(reacted 45 NC-45)" "true" "the visit still acknowledges the comment"
-eq "$(treply 45 T-45)" "" "the city never replies for a human"
+eq "$(treply 45 T-45)" "" "a visit is a person's to answer, so the city never replies into their thread"
 eq "$(tresolved 45 T-45)" "false" "…and never resolves their thread"
+
+# ---- the peer model: a declined human objection is answered, never silenced ----
+# The validator may overrule a human on the merits (finding declined), but it
+# owes them the reason on their PR: it stamps the answer (finding.reply) and the
+# row it answers (finding.comment_id), and the write-back posts that answer into
+# the thread and resolves it. A closed declined human finding carrying both.
+dfind() { # id anchor comment_id [reply]
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"declined: not an objection","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"declined","finding.source":"human:johnzook","finding.comment_id":"%s"%s}}' \
+    "$1" "$2" "$3" "${4:+,\"finding.reply\":\"$4\"}"
+}
+
+echo "# a declined human objection is answered on its thread and the thread resolved"
+store "[$(anchor WD1 47 "$(wb_meta visit:VD1)"), $(dfind DF1 WD1 100 'The diff already asserts X in helper; no change needed.')]"
+printf '%s' "$(prview 47 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_47.json"
+threads 47 "$(one_thread 47)"
+out=$(run)
+has "$(treply 47 T-47)" "no change needed" "the validator's decline reason is posted into the raiser's thread"
+has "$(treply 47 T-47)" "<!-- gc-writeback -->" "…carrying the write-back marker"
+eq "$(tresolved 47 T-47)" "true" "…and the answered thread is resolved, so it no longer holds the merge"
+eq "$(meta DF1 finding.reply_posted)" "1" "…and the finding is marked answered"
+echo "# …and a second pass answers the same thread nothing"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "addPullRequestReviewThreadReply" "the answered decline is never replied to twice"
+
+echo "# the no-objection carve-out declines silently — no owed reply, no thread write"
+# A comment that raises no objection (a question the diff answers, praise) is
+# declined like a machine finding, with no --reply, so finding.reply is unset and
+# the write-back owes nothing: the thread is neither replied to nor resolved.
+store "[$(anchor WD3 48 "$(wb_meta visit:VD3)"), $(dfind DF3 WD3 100)]"
+printf '%s' "$(prview 48 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_48.json"
+threads 48 "$(one_thread 48)"
+out=$(run)
+eq "$(treply 48 T-48)" "" "a no-objection decline owes no reply, so none is posted"
+eq "$(tresolved 48 T-48)" "false" "…and the thread is left untouched"
+eq "$(meta DF3 finding.reply_posted)" "<absent>" "…and the finding is not marked answered"
+
+echo "# a re-raise re-blocks: a re-review after a decline re-opens the human validation pass"
+# Declining closes the finding, so a still-standing objection re-adopts as a
+# FRESH finding on re-review (find_open_by_key reads open findings only), and
+# pr-facts re-opens the human validation pass whose blocks edge re-holds the
+# anchor. The prior decline forecloses nothing.
+store "[$(anchor WR 49 ',"pr_comment_watermark":"100"'), $(dfind DFR WR 100 'declined last round')]"
+printf '%s' "$(prview 49 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_49.json"
+echo '[]' > "$GH_DIR/reviews_49.json"
+printf '[{"id":200,"user":{"login":"johnzook"},"body":"i still think this is wrong"}]' > "$GH_DIR/comments_49.json"
+out=$(run)
+VPR=$(vpass_id WR)
+hasnt "$VPR" "<none>" "the re-review re-opens a human validation pass on the anchor"
+grep -qxF "$VPR|blocks|WR" "$STUB_DEPS" && ok "…whose blocks edge re-holds the anchor" || bad "re-opened validation pass does not block the anchor"
+FRESHR=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "WR") | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FRESHR" "<none>" "…and a fresh OPEN finding is filed, the closed decline not re-adopted in its place"
+eq "$(bstatus DFR)" "closed" "…while the prior declined finding stays closed"
 
 echo "# a later batch answers its own comments and never the ones before them"
 # The watermark is cumulative and the disposition is overwritten per batch, so
