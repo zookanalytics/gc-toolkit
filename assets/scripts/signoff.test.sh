@@ -646,6 +646,25 @@ has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reas
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
 
+echo "# request-changes files a child at any round count — GC_MAX_REVIEW_ROUNDS is inert, no park written"
+# The round cap is retired: no counter, no floor, no signoff_cap park. Even with
+# rework children from prior rounds already on the anchor and GC_MAX_REVIEW_ROUNDS
+# exported below that count, request-changes files one more child and parks
+# nothing — the env var names a mechanism this verdict no longer has.
+reset "$ANCHOR_PR" ',{"id":"old-1","status":"closed","assignee":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc","source_review_bead":"rv-0a"},"notes":""},{"id":"old-2","status":"closed","assignee":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc","source_review_bead":"rv-0b"},"notes":""}'
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$(GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0 at a round count past any legacy cap"
+eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "one more rework child is filed, uncapped"
+eq "$(meta fix-1 source_review_bead)" "rv-1" "the new child names this review, not a prior round's"
+eq "$(meta tk-anc signoff_cap)" "<absent>" "no signoff_cap park is written"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "no round floor is written"
+eq "$(meta tk-anc merge_hold)" "<absent>" "no merge_hold park is written"
+eq "$(meta tk-anc gc.takeaway)" "<absent>" "no cap takeaway is written"
+eq "$(meta tk-anc blocked_reason)" "<absent>" "no blocked_reason is written"
+eq "$(meta tk-anc gc.routed_to)" "<absent>" "no human park route is written on the anchor"
+eq "$(status rv-1)" "closed" "the review bead closes on the dispatch"
+
 echo "# request-changes refuses a bare-route fallback when the pour will not read back (double-dispatch guard)"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"

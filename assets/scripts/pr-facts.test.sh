@@ -503,12 +503,31 @@ STUB_DEP_GARBAGE=""
 has "$out" "the anchor is held by an unreadable blocker (a merge is held on it); no rework dispatched" "an unreadable edge list fails closed"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 
-echo "# …and so does an operator's own merge_hold — the cap never wrote it, so it is not the park's carve-out"
+echo "# …and so does an operator's own merge_hold=true — a plain hold vetoes the dispatch"
 store "[$(anchor F5d 90 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 90 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_90.json"
 out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "an operator's own hold still vetoes the dispatch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+
+echo "# …and a held + CONFLICTING anchor DEFERS fresh operator comments — the cap-park carve-out is gone (F5e successor)"
+# The merge_hold skip above continues past the whole loop body, so the feedback
+# arm never runs: a fresh operator comment on a held+conflicting PR is left
+# unwatermarked and unrouted until the hold lifts. The retired cap park
+# (merge_hold=signoff_cap) had a carve-out that still routed it to the person
+# holding the anchor; every truthy merge_hold now defers it, and the five
+# migrated parks are exactly merge_hold=true.
+store "[$(anchor F5e 91 ',"merge_hold":"true"')]"
+printf '%s' "$(prview 91 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_91.json"
+echo '[]' > "$GH_DIR/reviews_91.json"
+printf '[{"id":9101,"user":{"login":"human1"},"body":"please rebase and address this"}]' > "$GH_DIR/comments_91.json"
+out=$(run)
+has "$out" "a hold is set (operator gate); no rework dispatched" "the held+conflicting anchor dispatches no rework"
+eq "$(meta F5e pr_comment_disposition)" "<absent>" "…the fresh operator comment gets no disposition"
+eq "$(meta F5e pr_comment_watermark)" "<absent>" "…the comment stays unwatermarked, deferred until the hold lifts"
+eq "$(vpass_id F5e)" "<none>" "…and no validation pass is opened for it"
+eq "$(meta F5e merge_hold)" "true" "…the operator's hold is left standing"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child of any kind is minted"
 
 echo "# …and so does an armed re-dispatch: the anchor is parked, waiting to re-offer when ready (tk-79ffoh)"
 # gc.dispatch_when_ready is deferred-dispatch's arm marker. While it is set the
