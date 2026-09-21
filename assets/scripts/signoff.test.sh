@@ -167,9 +167,8 @@ case "${1:-}" in
         echo "dep added" ;;
     esac ;;
   list)
-    # Enough of `bd list` for the live-demand read: --status and repeated
-    # --metadata-field, ANDed. STUB_LIST_FAIL models a ledger that will not
-    # answer, which the discriminator must read as "held".
+    # A `bd list` shim: --status and repeated --metadata-field, ANDed, over the
+    # seeded store. STUB_LIST_FAIL models a ledger that will not answer.
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "bd: list unavailable (stub)" >&2; exit 1; }
     shift
     statuses=""; fields=()
@@ -414,6 +413,21 @@ reset "$ANCHOR_PR"; pin "$OID_PIN"
 "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "$OID_OVR1" >/dev/null 2>&1
 eq "$(meta rv-1 reviewed_oid)" "$OID_OVR1" "the override replaces the pin with the commit actually judged"
 backed "…and the lane resolves against it"
+
+# --- a legacy exception@<oid> park predates the migration -----------------------
+# migrate-lane-states.sh rewrites an exception@<oid> marker to merge_hold=true
+# plus a board visit over a store still carrying one; until it runs, that marker
+# is not lane vocabulary this verdict may read. Stamping green over it would
+# silently release a park a human is relying on, so approve refuses before it
+# posts or stamps anything.
+echo "# an approve over a legacy exception@<oid> marker refuses, not migrates"
+reset "$ANCHOR_PR"; seed_marker "exception@$OID_OLD"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 2 "the legacy park refuses the verdict"
+has "$out" "migrate-lane-states.sh" "…and names the migration that clears it"
+eq "$(meta tk-anc check.codex)" "exception@$OID_OLD" "the legacy marker is left exactly as it stood"
+eq "$(status rv-1)" "in_progress" "the review bead is left open, not recorded as approving"
+eq "$(cat "$STUB_GH_BODY")" "" "no artifact is posted over an unmigrated park"
 
 echo "# request-changes records it too, though it leaves no marker"
 reset "$ANCHOR_PR"; seed_marker "green"

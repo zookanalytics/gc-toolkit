@@ -89,7 +89,6 @@ U
 
 warn() { echo "signoff: $*" >&2; }
 
-ANCHOR=""
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -421,6 +420,22 @@ dismiss_superseded() {
 }
 
 if [ "$VERDICT" = "approve" ]; then
+  # A legacy `exception@<oid>` marker is an operator-granted gate exception that
+  # predates this cadence's park shape. migrate-lane-states.sh is what rewrites
+  # it — to merge_hold=true plus a board visit — over a store still carrying one,
+  # and until that runs the marker is not lane vocabulary this verdict may read
+  # or overwrite: stamping green over it would silently release a park a human is
+  # relying on, on an anchor no reader here has re-classified. Refuse instead of
+  # guessing, before anything is posted or stamped — nothing is written, the
+  # review is left open, and the migration is named. This refusal retires with
+  # the marker grammar itself, once the legacy-surface endgame lands.
+  CURRENT_MARKER=$(row_meta "$(bd_json show "$ANCHOR")" "check.$CHECK_NAME")
+  case "$CURRENT_MARKER" in
+    exception@*)
+      warn "check.$CHECK_NAME on $ANCHOR is '$CURRENT_MARKER', a legacy gate exception awaiting migrate-lane-states.sh; refusing to stamp green over it. Nothing written — run migrate-lane-states.sh to rewrite this marker to merge_hold=true plus a board visit, then re-submit this verdict. Review bead $REVIEW_BEAD left open."
+      exit 2
+      ;;
+  esac
   post_artifact
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
