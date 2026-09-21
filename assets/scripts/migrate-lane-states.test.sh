@@ -2,8 +2,9 @@
 # Hermetic test for assets/scripts/migrate-lane-states.sh.
 # Covers: dry-run reports and writes nothing; green@/fixable@ rewrite to bare
 # lane states (including a multi-gate check_set); a park clears the legacy
-# marker and writes plain merge_hold=true (never the retired signoff_cap, and
-# its visit never advertises the retired signoff.sh reset verb), with
+# marker and any blocked_reason and writes plain merge_hold=true (never the
+# retired signoff_cap, and its visit never advertises the retired signoff.sh
+# reset verb), with
 # escalate.sh invoked with GC_RIG pinned to the rig being iterated (never an
 # inherited GC_RIG); a
 # park write that does not land leaves the legacy marker standing for a
@@ -96,7 +97,7 @@ has "$out" "DRY-RUN" "dry-run announces itself"
 has "$out" 'would rewrite check.codex="green@1111111111111111111111111111111111111111" -> green' "G1 dry-run line"
 has "$out" 'would rewrite check.lint="green@2222222222222222222222222222222222222222" -> green' "G2 (multi-gate check_set) dry-run line"
 has "$out" 'would rewrite check.codex="fixable@3333333333333333333333333333333333333333" -> fixing' "F1 dry-run line"
-has "$out" 'would file visit [gate-park-migrated], then clear check.codex="exception@4444444444444444444444444444444444444444" and set merge_hold=true' "P1 dry-run park line"
+has "$out" 'would file visit [gate-park-migrated], then clear check.codex="exception@4444444444444444444444444444444444444444" and any blocked_reason, and set merge_hold=true' "P1 dry-run park line"
 has "$out" 'check.other="exception@5555555555555555555555555555555555555555" names a gate outside check_set' "U1 reported as an undeclared marker"
 cmp -s "$STUB_STORE" "$TMP/store.before"; eq "$?" 0 "dry-run left the store byte-identical"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "dry-run issued zero bd updates"
@@ -115,6 +116,7 @@ eq "$(meta G2 check.lint)" "green" "G2 (multi-gate check_set) rewritten to green
 eq "$(meta F1 check.codex)" "fixing" "F1 rewritten to fixing"
 eq "$(meta P1 check.codex)" "<absent>" "P1 legacy marker cleared"
 eq "$(meta P1 merge_hold)" "true" "P1 parked under plain merge_hold=true"
+eq "$(meta P1 blocked_reason)" "<absent>" "P1's legacy blocked_reason is cleared — the visit carries the question, no marker-only hold remains"
 eq "$(meta P1 signoff_cap)" "<absent>" "P1 carries no signoff_cap — the retired cap park is not written"
 eq "$(meta U1 check.other)" "exception@5555555555555555555555555555555555555555" "U1's undeclared marker is untouched"
 esc="$(cat "$STUB_ESCALATE_LOG")"
@@ -160,6 +162,7 @@ out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 0 "the retry exits 0"
 eq "$(meta P2 check.codex)" "<absent>" "P2's legacy marker is cleared on retry"
 eq "$(meta P2 merge_hold)" "true" "P2 is parked under merge_hold=true on retry"
+eq "$(meta P2 blocked_reason)" "<absent>" "P2's legacy blocked_reason is cleared on retry"
 eq "$(meta P2 signoff_cap)" "<absent>" "P2 carries no signoff_cap on retry"
 eq "$(grep -c -- '--subject P2' "$STUB_ESCALATE_LOG" || true)" "2" "escalate.sh was asked again on retry (its own --key dedup keeps this from duplicating on the board — exercised in escalate.test.sh, not here)"
 

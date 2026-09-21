@@ -7,12 +7,12 @@
 # dispatches a review against it every pass. This rewrites the standing markers.
 #   green@<oid>     -> green
 #   fixable@<oid>   -> fixing
-#   exception@<oid> -> the marker is cleared and the anchor is parked under
-#                      merge_hold=true, a plain operator hold the cadence
-#                      honours, plus one visit carrying the park's reason. A
-#                      legacy gate exception has no lane-state equivalent, so
-#                      only an operator can rule its fate; closing a park
-#                      silently removes a row from the board.
+#   exception@<oid> -> the marker and any legacy blocked_reason are cleared and
+#                      the anchor is parked under merge_hold=true, a plain
+#                      operator hold the cadence honours, plus one visit carrying
+#                      the park's reason. A legacy gate exception has no
+#                      lane-state equivalent, so only an operator can rule its
+#                      fate; closing a park silently removes a row from the board.
 # Only check.<g> keys named in the anchor's own check_set are touched — a
 # marker outside it governs nothing and nothing (not even this migration)
 # rewrites it; it is reported and left for gate-ensure's stray-marker sweep.
@@ -145,13 +145,16 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
       continue
     fi
 
-    # --- a park: the marker goes, merge_hold=true and a visit carry it --------
+    # --- a park: markers go, merge_hold=true and a visit carry it ------------
     # The visit is filed FIRST, before the marker is touched: escalate.sh
     # dedups on --subject/--key, so a retried call after a partial failure
     # files nothing twice, and a park write that then fails (or is never
     # reached) leaves the legacy marker standing for the next run to pick
     # this row up again from here — never a hold with nothing on the board,
     # and never a re-run that duplicates the visit once the park has landed.
+    # The park also clears any legacy blocked_reason: the visit now carries the
+    # question, and a blocked_reason with no blocks edge beside it is a
+    # marker-only hold doctor/check-wait-is-an-edge flags on every migrated park.
     PARK_WHY="$why"
     [ -n "$PARK_WHY" ] || PARK_WHY="the review cap parked this anchor ($key was \"$was\")"
     if [ "$APPLY" -eq 0 ]; then
@@ -159,7 +162,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         echo "$label $id: would need an operator to file the visit by hand (no rig to select the store the visit lands in); would NOT clear $key or park automatically" >&2
         attention=$((attention + 1)); continue
       fi
-      echo "$label $id: would file visit [$VISIT_KEY], then clear $key=\"$was\" and set merge_hold=true"
+      echo "$label $id: would file visit [$VISIT_KEY], then clear $key=\"$was\" and any blocked_reason, and set merge_hold=true"
       parked=$((parked + 1)); continue
     fi
     if [ ! -x "$ESCALATOR" ]; then
@@ -198,13 +201,14 @@ reject the branch and let the anchor close the way any rejected work does." >/de
       continue
     fi
     run_bounded gc bd update "$id" --db "$RIG_DB" \
-      --unset-metadata "$key" --set-metadata merge_hold=true \
+      --unset-metadata "$key" --unset-metadata blocked_reason --set-metadata merge_hold=true \
       --append-notes "$PROG: $key=\"$was\" retired. A legacy gate exception has no lane-state equivalent, so this anchor is held under merge_hold=true for an operator ruling: $PARK_WHY" >/dev/null 2>&1
     got=$(meta_of "$id" "$key")
     hold=$(meta_of "$id" merge_hold)
-    if [ -n "$got" ] || [ "$hold" != "true" ]; then
+    bl=$(meta_of "$id" blocked_reason)
+    if [ -n "$got" ] || [ "$hold" != "true" ] || [ -n "$bl" ]; then
       attention=$((attention + 1))
-      echo "$label $id: visit [$VISIT_KEY] is filed but the park did not read back ($key='${got:-<cleared>}', merge_hold='${hold:-<unset>}'); legacy marker left in place — the next run retries the write, and the visit will not duplicate" >&2
+      echo "$label $id: visit [$VISIT_KEY] is filed but the park did not read back ($key='${got:-<cleared>}', merge_hold='${hold:-<unset>}', blocked_reason='${bl:-<cleared>}'); legacy marker left in place — the next run retries the write, and the visit will not duplicate" >&2
       continue
     fi
     parked=$((parked + 1))
