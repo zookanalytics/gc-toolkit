@@ -1,6 +1,6 @@
 ---
 name: converse-prep
-description: Converse's steps 3–4 — title the session by its subject, then rebuild the subject's state, run the filer's re-check hook, and read the subject PR's file-level comments. Converse loads this from its step-to-skill routing table once a claimed visit's premise holds; it is not for other agents.
+description: Converse's session titling and subject prime.
 ---
 
 # Steps 3–4 — Title and prime

@@ -1190,7 +1190,7 @@ have "the prompt has a branch for a sitting already underway" 'action=hold' "$PR
 have "…and the claimer-less fallback renders the same verdict" \
      'existing_assignment' "$PROMPT"
 have "…and step 8 sends a hold back to step 1 instead of draining on it" \
-     "is step 1's case, not this one" "$SK_CONTINUE"
+     "step 1's arms decide every action" "$SK_CONTINUE"
 # cut-short is a real outcome with one legitimate door; left unqualified it
 # reads as the generic way out of any stuck sitting.
 have "…and cut-short is confined to the low-context exit" \

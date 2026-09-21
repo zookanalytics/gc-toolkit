@@ -1,6 +1,6 @@
 ---
 name: converse-settle
-description: Converse's steps 6–7 — record the sitting's outcome on the subject, sign off as the thread's last word, then stamp gc.outcome and close ONLY the visit. A visit closed without its verified gc.outcome stamp is invisible to everything that reads outcomes, so the stamp-then-close is safety-critical. Converse loads this from its step-to-skill routing table when the operator has replied to a held sitting; it is not for other agents.
+description: Converse's record, sign-off, and visit close (safety-critical).
 ---
 
 # Steps 6–7 — Record, sign off, and close the visit

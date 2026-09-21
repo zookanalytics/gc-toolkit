@@ -1,6 +1,6 @@
 ---
 name: converse-recheck-premise
-description: Converse's step 2 — re-check a claimed visit's premise against live state before prepping, and take the moot/benign close-out exit that ends a visit with nothing posted. Converse loads this from its step-to-skill routing table when a fresh claim returns action=work; it is not for other agents.
+description: Converse's premise re-check and moot/benign visit close-out.
 ---
 
 # Step 2 — Re-check the premise

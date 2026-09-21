@@ -1,6 +1,6 @@
 ---
 name: converse-hold
-description: Converse's step 5 — the demand gate. File the human gate (a hold IS a demand) with converse-hold.sh, stamp it BEFORE waiting, then post the framing as a hand-back and offer the close-out. A hold that files no demand parks a bead nothing re-asks, so this step is safety-critical. Converse loads it from its step-to-skill routing table once a sitting is primed; it is not for other agents.
+description: Converse's demand-gate hold (safety-critical).
 ---
 
 # Step 5 — Hold
