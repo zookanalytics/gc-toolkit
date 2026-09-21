@@ -3,28 +3,14 @@
 # PR label. It projects the city's own workflow state — who must act on a PR
 # next — onto GitHub's pull request list, where that state is otherwise invisible
 # until you open the PR. One filterable value per open PR says whether the city
-# is working it, a human should review it, or a human must unstick it.
+# holds the ball, a human should review the head, or a human must weigh in before
+# the PR can settle. It is workflow state, never an approval, and never asserts a
+# PR may merge: machine-readiness rides pr.machine and the draft flag.
 #
-# The label is one value from a mutually-exclusive `status:` group. Setting one
-# value removes any other `status:` value, so a future phase is a value addition,
-# not a redesign. The three values answer one question — who must act next:
-#   working         the city holds the ball: a rework child stands on the reviewed
-#                   commit, or an approved PR is merging. No human input needed.
-#   needs-review    settled at the current head: a human review or re-review of
-#                   this commit is the next action.
-#   needs-attention the city stopped without settling: a signoff-cap park, a
-#                   hold/park marker, or an approved PR wedged with no live work.
-#                   The ask is "unstick us", not "review the diff".
-# Precedence when inputs overlap: needs-attention > working > needs-review.
-#
-# The signal is the city's own state, read from the refinery-computed facts on
-# the anchor (pr_posture, pr_merge_state, the merge/rebase holds) and its rework
-# children — never GitHub's review posture directly and never a lane's green. The
-# working->needs-review flip rests on the rework child, which is filed against the
-# reviewed commit and closes when the fix lands, so it tracks the reviewed commit
-# rather than a marker that outlives a rewrite of it (tk-4zsj1p). The label is
-# workflow state, never an approval, and never asserts a PR may merge:
-# machine-readiness/CI rides pr.machine and the draft flag.
+# The label is one value from a mutually-exclusive `status:` group: setting one
+# value removes any other, so a later phase adds a value rather than redesigning.
+# derive_value below is the single place the values, what each projects from, and
+# their precedence are defined.
 #
 # Every GitHub write is pinned to a repository the caller resolved (--repo), the
 # same origin-pinning pr-open.sh and pr-facts.sh already apply; gh-origin-guard.sh
@@ -145,13 +131,19 @@ is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 # Print the status value the anchor projects to, answering one question: who must
 # act next. Precedence needs-attention > working > needs-review.
 #
-#   needs-attention  the city stopped without settling — a signoff-cap park, any
-#                    merge/rebase hold on the anchor, or an approved PR wedged
-#                    (merge state BLOCKED) with no rework in flight.
+#   needs-attention  a human must weigh in before the city can settle this — to
+#                    unstick a mechanical stop (a signoff-cap park, any merge/rebase
+#                    hold on the anchor, or an approved PR wedged at merge state
+#                    BLOCKED with no rework in flight) or to resolve what a hold
+#                    stands for: an operator freeze, or a topic held for discussion
+#                    before the PR can settle. Unlike needs-review, the head cannot
+#                    settle until the human acts, so it is not a request to review
+#                    the diff.
 #   working          the city holds the ball — an open rework child stands on the
 #                    reviewed commit, or an approved PR is merging.
-#   needs-review     settled at the head, a human (re)review is next: posture
-#                    review_required/commented/none, no hold, no open rework.
+#   needs-review     the head is settled and the only thing left is a human's
+#                    review verdict: posture review_required/commented/none, no
+#                    hold, no open rework.
 #
 # Reads only refinery-computed state off the anchor — the pr-facts.sh posture
 # (pr_posture, stored dated as value@oid@instant) and merge state (pr_merge_state,

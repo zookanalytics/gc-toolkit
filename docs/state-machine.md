@@ -465,9 +465,13 @@ is extensible: one value is set at a time, and setting one removes any other
 |---|---|---|
 | `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
 | `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened gate-green, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | a human unsticks the city | the signoff cap parked it (`merge_hold=signoff_cap`), a merge/rebase hold stands, or an approved PR is wedged with no rework in flight |
+| `status: needs-attention` | a human weighs in | a hold stands — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
 
 Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
+
+`needs-review` asks a human only for a review verdict on a settled head;
+`needs-attention` means the head cannot settle until a human acts — to unstick a
+block or to resolve what a hold stands for.
 
 The label reads the city's own state — the refinery-computed posture and merge
 state on the anchor, its holds, and its rework children — not GitHub's review
