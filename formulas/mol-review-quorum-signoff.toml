@@ -97,8 +97,8 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 
 **2. Review the diff, read-only.** Apply the review method defined in
 `formulas/mol-review.toml`'s `review` step — its whole "What to check" list
-(intent, correctness, contract, testing, readiness, comments, the published
-PR page) and the work-quality standards it resolves from the pack's
+(intent, correctness, contract, testing, readiness, comments, the PR
+summary and page) and the work-quality standards it resolves from the pack's
 `template-fragments/work-quality-*`. Read the WHOLE diff
 (`git diff origin/<base>...<reviewed_oid>`), in chunks for a large one. You do
 NOT run the test suite — the synthesis step runs it once for the quorum; a
@@ -162,8 +162,8 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 
 **2. Review the diff, read-only.** Apply the review method defined in
 `formulas/mol-review.toml`'s `review` step — its whole "What to check" list
-(intent, correctness, contract, testing, readiness, comments, the published
-PR page) and the work-quality standards it resolves from the pack's
+(intent, correctness, contract, testing, readiness, comments, the PR
+summary and page) and the work-quality standards it resolves from the pack's
 `template-fragments/work-quality-*`. Read the WHOLE diff
 (`git diff origin/<base>...<reviewed_oid>`), in chunks for a large one. You do
 NOT run the test suite — the synthesis step runs it once for the quorum; a
