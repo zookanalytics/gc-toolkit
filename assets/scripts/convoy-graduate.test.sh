@@ -3,8 +3,9 @@
 # Covers: the happy path (assignee/branch/target/merge_strategy/graduation);
 # the non-vacuous-completion guard (no recorded merge onto the branch = no
 # graduation); operator holds on the convoy bead and on a separate bead naming
-# the branch; a live branch owner; idempotency via metadata.branch; fail-closed
-# skips on unreadable probes; and the GC_AGENT-unset skip.
+# the branch; a live branch owner; idempotency via metadata.branch; a ## Summary
+# seeded from the landed members with an existing summary left intact;
+# fail-closed skips on unreadable probes; and the GC_AGENT-unset skip.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,6 +100,28 @@ echo "# GC_AGENT unset skips"
 out=$(env -u GC_AGENT "$SUT" 2>&1); rc=$?
 eq "$rc" 0 "no identity exits 0"
 has "$out" "GC_AGENT unset; skip" "…and says why"
+
+echo "# graduation seeds the ## Summary from the landed members"
+convoys "{\"convoys\":[$(cv cv-s integration/syn 2 2)]}"
+store "[$(cbead cv-s),
+  {\"id\":\"m-1\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"Add the widget\",\"notes\":\"\",\"metadata\":{\"merged_target\":\"integration/syn\",\"merge_result\":\"merged\",\"pr_summary\":\"Adds a widget to the toolbar.\"}},
+  {\"id\":\"m-2\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"Wire the widget\",\"notes\":\"\",\"metadata\":{\"merged_target\":\"integration/syn\",\"merge_result\":\"merged\",\"pr_summary\":\"Wires the widget to the store.\"}}]"
+out=$("$SUT" --target main 2>&1); rc=$?
+eq "$rc" 0 "seeded graduation exits 0"
+has "$out" "graduating cv-s" "the convoy graduates"
+ps="$(meta cv-s pr_summary)"
+has "$ps" "landing the work of these beads" "a seed summary is composed from the members"
+has "$ps" "m-1" "…names the first landed member"
+has "$ps" "m-2" "…and every other landed member"
+has "$ps" "Adds a widget to the toolbar." "…and carries each member's own reviewed pr_summary"
+
+echo "# an already-authored summary is preserved (read-modify-write)"
+convoys "{\"convoys\":[$(cv cv-k integration/keep 1 1)]}"
+store "[$(cbead cv-k '"pr_summary":"Operator-written summary."'),
+  {\"id\":\"m-3\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"Some work\",\"notes\":\"\",\"metadata\":{\"merged_target\":\"integration/keep\",\"merge_result\":\"merged\",\"pr_summary\":\"member summary\"}}]"
+out=$("$SUT" --target main 2>&1)
+has "$out" "graduating cv-k" "the convoy graduates"
+eq "$(meta cv-k pr_summary)" "Operator-written summary." "an existing summary is not overwritten by the seed"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
