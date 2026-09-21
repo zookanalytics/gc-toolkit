@@ -114,7 +114,20 @@ the cadence — the arms run whether or not any refinery session is awake.
    The body's `## Summary` is the polecat's `pr_summary`, written at handoff
    by the only actor that has read the diff; the anchor's description is
    dispatch text, demoted to a collapsed section and standing in as the
-   summary only when the handoff carried none.
+   summary only when the handoff carried none. The region writes that heading
+   itself, so a `pr_summary` opening with one of its own is de-duplicated. The
+   composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
+   re-splices it from the anchor's current `pr_summary` — a rework's restamp
+   reaches the published merge surface — while text an operator or `pr-stack.sh`
+   added outside the markers stays. A body a create wrote before these markers
+   is the same stale-body case: the region is established over its legacy
+   `## Summary`…`## Refinery handoff` prefix, keeping what follows, so the
+   restamp still lands. A body carrying no such managed region — hand-written,
+   or a malformed marker shape — has nothing stale to republish and is adopted
+   as it stands; a MERGED PR is a landed record, flipped untouched. A refresh
+   this arm cannot verify — an unreadable or unparseable body, a missing head,
+   or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
+   rather than flip a managed body that may be stale.
 3. **pr-facts.sh --posture-only** — the posture record, and nothing else.
    `merge.sh` answers "is a human waiting on this?" off the bead and never asks
    GitHub, so the value it reads has to be written in the same pass. This arm
