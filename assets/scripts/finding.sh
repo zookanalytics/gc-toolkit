@@ -93,7 +93,10 @@ normalize() {
 
 # finding.key = <lane>:<12 hex of sha256(normalized locus + US + message)>. The
 # lane prefix keeps two reviewers' findings at one locus distinct; the hash is
-# the dedup handle re-raising an objection collides on.
+# the dedup handle re-raising an objection collides on. GitHub's own review and
+# comment ids would not serve: a re-review re-raises a still-standing objection
+# under a fresh id, so an id key twins it every pass where the content key
+# re-adopts.
 compute_key() {
   local lane="$1" locus="$2" msg="$3" nloc nmsg h
   nloc=$(normalize "$locus")
