@@ -148,3 +148,31 @@ if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" 
   "$LC" transition "$ITEM" --to unanchored --route "$ROUTE" \
     || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
 fi
+
+# Update the visit's PR reminder, if the subject has a PR, to say the sitting
+# closed. The takeaway is the Summary; Actions Taken is what the sitting did —
+# the work it routed, the ruling it reached, or what is still owed. update-only
+# (a visit that never engaged left no comment), best-effort, and it must not
+# fail a sign-off that has already written its durable trace.
+routed=""
+i=0
+while [ "$i" -lt "${#WAIT[@]}" ]; do
+  [ "${WAIT[$i]}" = "--waiting-on" ] && { i=$((i + 1)); routed="${routed:+$routed, }${WAIT[$i]}"; }
+  i=$((i + 1))
+done
+SIGNOFF_ACTIONS=""
+[ -n "$routed" ] && SIGNOFF_ACTIONS="routed work to $routed"
+if [ "$RULED" = yes ]; then
+  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }ruling: $RULING (released to $ROUTE)"
+elif [ -n "$STILL_OWED" ]; then
+  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }still owed: $STILL_OWED"
+fi
+PVC=""
+for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$cand/assets/scripts/pr-visit-comment.sh" ] && { PVC="$cand/assets/scripts/pr-visit-comment.sh"; break; }
+done
+if [ -n "$PVC" ]; then
+  pvc_args=(close --visit "$VISIT" --subject "$ITEM" --summary "$OUTCOME")
+  [ -n "$SIGNOFF_ACTIONS" ] && pvc_args+=(--actions "$SIGNOFF_ACTIONS")
+  "$PVC" "${pvc_args[@]}" || true
+fi
