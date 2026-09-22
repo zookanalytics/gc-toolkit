@@ -776,3 +776,95 @@ it('renders the severity the service assigned, not one it re-derives', async () 
   await waitFor(() => expect(packSection()).toBeTruthy());
   expect(within(packSection()).getByText('ELEVATED')).toBeTruthy();
 });
+
+// --- the rig filter -----------------------------------------------------------
+
+// A cross-rig board with rows in two rigs and a third rig that did not answer,
+// so the filter has something to choose between and the partial-gather signal
+// is live to check the filter against.
+const MULTI_RIG: Board = {
+  generated_at: '2026-09-01T12:00:00Z',
+  total: 2,
+  partial: true,
+  partial_errors: ['rig shutupandlisten: context canceled'],
+  tiles: [
+    tile({ id: 'tk-gct', kind: 'epic', title: 'the gc-toolkit family', severity: 'NORMAL', section: 'active', rig: 'gc-toolkit' }),
+    tile({ id: 'tk-gcy', kind: 'epic', title: 'the gascity family', severity: 'NORMAL', section: 'active', rig: 'gascity' }),
+  ],
+  sittings: [
+    {
+      id: 'tk-vs-gct', rig: 'gc-toolkit', subject: 'tk-gct', title: 'visit: tk-gct',
+      status: 'closed', outcome: 'diagnosed', session: 'gc-toolkit__converse-1',
+      opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
+      takeaway: '', subject_title: 'the gc-toolkit topic',
+    },
+    {
+      id: 'tk-vs-gcy', rig: 'gascity', subject: 'tk-gcy', title: 'visit: tk-gcy',
+      status: 'closed', outcome: 'diagnosed', session: 'gascity__converse-1',
+      opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
+      takeaway: '', subject_title: 'the gascity topic',
+    },
+  ],
+};
+
+const rigCombo = (): HTMLSelectElement =>
+  screen.getByRole('combobox', { name: 'filter by rig' }) as HTMLSelectElement;
+const sittingsRegion = (): HTMLElement => screen.getByRole('region', { name: 'converse sittings' });
+
+it('offers a rig filter listing each rig, defaulting to all rigs', async () => {
+  serveBoard(MULTI_RIG);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('the gascity family')).toBeTruthy());
+
+  const combo = rigCombo();
+  expect(combo.value).toBe('');
+  const options = within(combo)
+    .getAllByRole('option')
+    .map((o) => o.textContent);
+  expect(options).toEqual(['all rigs', 'gascity', 'gc-toolkit']);
+});
+
+it('narrows the families and the header count to the selected rig', async () => {
+  serveBoard(MULTI_RIG);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('the gascity family')).toBeTruthy());
+  expect(screen.getByText(/2 anchors · generated/)).toBeTruthy();
+
+  fireEvent.change(rigCombo(), { target: { value: 'gascity' } });
+
+  expect(region('tk-gcy')).toBeTruthy();
+  expect(queryRegion('tk-gct')).toBeNull();
+  expect(screen.getByText(/1 anchors · generated/)).toBeTruthy();
+});
+
+it('narrows the sittings record to the selected rig', async () => {
+  serveBoard(MULTI_RIG);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('the gascity family')).toBeTruthy());
+  expect(within(sittingsRegion()).getByText('tk-vs-gct')).toBeTruthy();
+
+  fireEvent.change(rigCombo(), { target: { value: 'gascity' } });
+
+  expect(within(sittingsRegion()).getByText('tk-vs-gcy')).toBeTruthy();
+  expect(within(sittingsRegion()).queryByText('tk-vs-gct')).toBeNull();
+});
+
+// The cross-rig completeness signal is a fact about the whole city, so selecting
+// one rig must not switch it off — a filtered view that hid it would read as an
+// all-clear the gather never earned.
+it('keeps the partial-gather warning when a rig is selected', async () => {
+  serveBoard(MULTI_RIG);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('the gascity family')).toBeTruthy());
+  expect(screen.getByText(/Partial board/)).toBeTruthy();
+
+  fireEvent.change(rigCombo(), { target: { value: 'gascity' } });
+
+  expect(screen.getByText(/Partial board/)).toBeTruthy();
+});
+
+it('omits the rig filter when the board holds a single rig', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(screen.queryByRole('combobox', { name: 'filter by rig' })).toBeNull();
+});

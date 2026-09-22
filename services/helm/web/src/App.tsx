@@ -413,6 +413,8 @@ export function App() {
   // The tile being drilled into, or null. A tile's id IS a bead id, which is
   // all the drill plane needs to open it.
   const [drillTarget, setDrillTarget] = useState<string | null>(null);
+  // The rig the operator narrowed the view to, or '' for all rigs.
+  const [rigFilter, setRigFilter] = useState<string>('');
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
@@ -445,6 +447,29 @@ export function App() {
   }, [refresh]);
 
   const tiles = board?.tiles ?? [];
+  const sittings = board?.sittings ?? [];
+
+  // The rig filter is a client-side view over rows the board already carries:
+  // every tile and sitting names its rig, so the options are those names and
+  // selecting one narrows what renders. It does not re-gather and does not touch
+  // the cross-rig completeness signal — `board.partial` is a fact about the
+  // whole city and stays whole below, so a one-rig view never reads as an
+  // all-clear the city has not earned.
+  const rigOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const t of tiles) if (t.rig) names.add(t.rig);
+    for (const s of sittings) if (s.rig) names.add(s.rig);
+    return [...names].sort();
+  }, [tiles, sittings]);
+  // A selection the current board no longer offers falls back to all rigs, so a
+  // rig ageing off the board cannot strand the view on an empty filter.
+  const effectiveRig = rigFilter && rigOptions.includes(rigFilter) ? rigFilter : '';
+  const visibleTiles = useMemo(
+    () => (effectiveRig ? tiles.filter((t) => t.rig === effectiveRig) : tiles),
+    [tiles, effectiveRig],
+  );
+  const visibleSittings = effectiveRig ? sittings.filter((s) => s.rig === effectiveRig) : sittings;
+
   // Sitting ages are measured from the board's OWN generated_at, so a tab left
   // open does not age every row past what the gather actually saw. A board
   // without a readable stamp falls back to the wall clock.
@@ -453,21 +478,21 @@ export function App() {
     return Number.isNaN(t) ? Date.now() : t;
   }, [board]);
 
-  // Group the ranked list into dependency families by reading tile.group_root —
+  // Group the visible rows into dependency families by reading tile.group_root —
   // the split the derive layer already made. The wire order (owed rows first,
   // oldest first) is preserved, so the oldest-owed family leads; within a family
   // the members read in SECTION_ORDER.
-  const families = useMemo(() => groupByFamily(tiles), [tiles]);
+  const families = useMemo(() => groupByFamily(visibleTiles), [visibleTiles]);
 
-  const owed = tiles.filter((t) => t.owed);
-  const coverage = prCoverage(tiles);
+  const owed = visibleTiles.filter((t) => t.owed);
+  const coverage = prCoverage(visibleTiles);
   // Live rows are everything but the DONE band — what "needs attention" counts.
-  const liveCount = tiles.filter((t) => t.section !== 'done').length;
-  const doneCount = tiles.length - liveCount;
+  const liveCount = visibleTiles.filter((t) => t.section !== 'done').length;
+  const doneCount = visibleTiles.length - liveCount;
   // The rows that are live and NOT already in the owed cover-sheet's count.
   // "No other anchors need attention" is a claim about these, not about a board
   // whose only live rows are the ones the queue just named.
-  const otherLive = tiles.filter((t) => !t.owed && t.section !== 'done');
+  const otherLive = visibleTiles.filter((t) => !t.owed && t.section !== 'done');
 
   return (
     <main>
@@ -485,6 +510,26 @@ export function App() {
         <button type="button" onClick={refresh} disabled={loading}>
           {loading ? 'refreshing…' : 'refresh'}
         </button>
+        {/* Offered only when there is more than one rig to choose between; a
+            single-rig city has nothing to filter. This narrows the view, not
+            the gather — the partial-board signal below is unchanged by it. */}
+        {rigOptions.length > 1 && (
+          <p className="rig-filter">
+            <label htmlFor="rig-filter">filter by rig</label>{' '}
+            <select
+              id="rig-filter"
+              value={effectiveRig}
+              onChange={(event) => setRigFilter(event.currentTarget.value)}
+            >
+              <option value="">all rigs</option>
+              {rigOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </p>
+        )}
         <CitySignals />
       </header>
 
@@ -548,7 +593,7 @@ export function App() {
         />
       ))}
 
-      <Sittings sittings={board?.sittings ?? []} now={renderedAt} onOpen={setDrillTarget} />
+      <Sittings sittings={visibleSittings} now={renderedAt} onOpen={setDrillTarget} />
 
       {/* One terminal, not one per anchor — and that is now a LAYOUT decision,
           not a wiring limit. The city still runs a single ttyd, but its attach
