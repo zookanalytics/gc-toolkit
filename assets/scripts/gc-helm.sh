@@ -2435,6 +2435,23 @@ cmd_engage() {
     fi
     bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
 
+    # Ground the operator in the bead they picked, before the visit prompt: a
+    # typed id, PR number, or URL carries nothing of the bead on its own, and a
+    # title search drops all but the title once a match is chosen. bead_row is
+    # the record the existence gate above already fetched, so the line costs no
+    # query. Interactive only — a --no-input caller named the subject on argv and
+    # its stdout is a script's to parse.
+    if [ "$engage_interactive" = 1 ]; then
+        subject_summary=$(printf '%s' "$bead_row" | jq -r '
+            (.title // "") as $t
+            | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
+            | "  " + (.id // "?")
+              + " (" + (.issue_type // "?") + " · " + (.status // "?")
+              + " · p" + ((.priority // 0) | tostring) + ")"
+              + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
+        [ -n "$subject_summary" ] && printf '%s\n' "$subject_summary"
+    fi
+
     # --template pre-fills the starter with a named seed now that the subject is
     # known; the seed body becomes the new visit's claim-time brief.
     if [ -n "$engage_template" ]; then

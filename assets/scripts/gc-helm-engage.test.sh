@@ -96,8 +96,8 @@ case "$1 ${2:-}" in
       jq -n --arg i "$id" --arg s "$st" --arg a "$who" \
         '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
     else
-      jq -n --arg i "$id" --arg k "${BEAD_KIND:-task}" \
-        '[{id:$i, status:"open", assignee:"", metadata:{task_kind:$k}}]'
+      jq -n --arg i "$id" --arg k "${BEAD_KIND:-task}" --arg t "${SUBJ_TITLE:-the subject under engagement}" \
+        '[{id:$i, title:$t, status:"open", issue_type:"task", priority:2, assignee:"", metadata:{task_kind:$k}}]'
     fi ;;
   "bd list")
     case "$*" in
@@ -681,6 +681,40 @@ has "$OUT" "Subject has open visit" "(IA-VISIT-EXISTING) …after listing the op
 has "$OUT" "[d] discuss broadly" "(IA-VISIT-EXISTING) …in one prompt that also offers the new-visit seed letters"
 hasnt "$CALLED" "bd create" "(IA-VISIT-EXISTING) …files nothing"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISIT-EXISTING) …and engages it"
+unset HAVE_VISIT
+
+echo "# a subject engage grounds the operator with a one-line summary before the visit prompt"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SUMMARY) engaging a subject exits 0"
+has "$OUT" "the subject under engagement" "(IA-SUMMARY) the summary carries the picked bead's title"
+has "$OUT" "task · open · p2" "(IA-SUMMARY) …with its type, status, and priority"
+# The summary precedes the visit prompt, so the operator reads what they picked
+# while deciding which visit to open or select.
+case "$OUT" in
+  *"the subject under engagement"*"Subject has open visit"*) ok "(IA-SUMMARY) …ahead of the visit prompt" ;;
+  *) bad "(IA-SUMMARY) the summary should precede the visit prompt" ;;
+esac
+unset HAVE_VISIT
+
+echo "# an over-long title is truncated so the summary stays one short line"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER="" \
+  SUBJ_TITLE="AAAA BBBB CCCC DDDD EEEE FFFF GGGG HHHH IIII JJJJ KKKK LLLL MMMM NNNN OOOO PPPP QQQQ RRRR SSSS TTTT ZEND"
+printf 'open' > "$VIS_STATUS"
+run_engage_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SUMMARY-TRUNC) engaging a long-titled subject exits 0"
+has "$OUT" "AAAA" "(IA-SUMMARY-TRUNC) the title head is kept"
+has "$OUT" "…" "(IA-SUMMARY-TRUNC) …with an ellipsis where it was cut"
+hasnt "$OUT" "ZEND" "(IA-SUMMARY-TRUNC) …and the tail past the cut is dropped"
+unset HAVE_VISIT SUBJ_TITLE
+
+echo "# --no-input suppresses the grounding summary — its stdout is a script's to parse"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --no-input --no-attach
+eq "$RC" 0 "(IA-SUMMARY-NOINPUT) --no-input on a subject exits 0"
+hasnt "$OUT" "the subject under engagement" "(IA-SUMMARY-NOINPUT) …and no grounding summary is printed"
 unset HAVE_VISIT
 
 echo "# two parked visits become a numbered choice, replacing the error-on-two refusal"
