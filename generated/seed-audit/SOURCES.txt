@@ -74,7 +74,7 @@ formulas/mol-review.toml
 formulas/mol-validate-close.toml
 73580bb5fee932a95cd766bc2e51bde6d3c2ea7354a213c77090f560d695a947
 formulas/mol-validate.toml
-485ca659b1f88a080161876263758cb2748752b4ae834fb69443971ecdce5ab5
+695971b491ebb64cd444d7a0204380b5b208ee1e5fec86e423118b78bdaf24bc
 formulas/mol-visit.toml
 6736d5b27b5b6445610bcc5db9ffb094bcd985b40092ed7e7ec6e7a70c43ac01
 formulas/mol-witness-patrol.toml
@@ -126,7 +126,7 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 300fe1760da04a64116818cd6b90207e879cf1c8206df10f0a7fa6ed5190735a
 template-fragments/polecat-doctrine.template.md
-8f1f8dd6abab2490080eeb24bd14ee29f766086b3ace03cd34dfbb3e3edbda8c
+49e515c610db7be6cbe47aedc469619347707e071945f05d5c89368509b9ccfe
 template-fragments/scratch-reclaim.template.md
 f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
