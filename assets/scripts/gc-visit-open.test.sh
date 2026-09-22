@@ -391,12 +391,12 @@ unset FAKE_AGENT_LIST_EMPTY
 # before; nonempty-invalid is the reachable degraded-data-plane one.
 for _bad in unparseable preface truncated wrongshape; do
     case "$_bad" in
-        unparseable) FAKE_AGENT_LIST_INVALID='not json at all' ;;
-        preface)     FAKE_AGENT_LIST_INVALID="$(printf 'gc: reading rig store\n{"agents":[]}')" ;;
-        truncated)   FAKE_AGENT_LIST_INVALID='{"agents":[' ;;
-        wrongshape)  FAKE_AGENT_LIST_INVALID='{"unexpected":true}' ;;
+        unparseable) _bad_roster='not json at all' ;;
+        preface)     _bad_roster="$(printf 'gc: reading rig store\n{"agents":[]}')" ;;
+        truncated)   _bad_roster='{"agents":[' ;;
+        wrongshape)  _bad_roster='{"unexpected":true}' ;;
     esac
-    export FAKE_AGENT_LIST_INVALID
+    export FAKE_AGENT_LIST_INVALID="$_bad_roster"
     run no "a topic when the roster is nonempty-invalid ($_bad)" --rig gascity
     eq "$RC" "0" "(DEADZONE) a nonempty invalid roster ($_bad) files rather than refusing"
     has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed ($_bad)"
