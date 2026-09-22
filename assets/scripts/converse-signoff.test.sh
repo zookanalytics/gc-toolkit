@@ -167,14 +167,14 @@ else
     fi
     # The visit's PR reminder is marked closed only AFTER the visit's own close
     # lands, so a death or a failed close between the two never leaves the PR
-    # saying "closed" over an open visit still holding the merge (tk-ipybkq). It
-    # reads the summary/actions converse-signoff.sh stashed, needing no re-derive.
+    # saying "closed" over an open visit still holding the merge. It reads the
+    # summary/actions converse-signoff.sh stashed, needing no re-derive.
     s7_prcomment=$(printf '%s\n' "$STEP7" | grep -nF 'pr-visit-comment.sh" close' | head -1 | cut -d: -f1)
     if [ -n "$s7_close" ] && [ -n "$s7_prcomment" ] && [ "$s7_close" -lt "$s7_prcomment" ]; then
         ok "the PR reminder is marked closed after the visit's own close"
     else
         bad "the PR reminder is marked closed after the visit's own close" \
-            "close@${s7_close:-none} pr-comment@${s7_prcomment:-none} — a reminder closed before the visit closes lies on the PR (tk-ipybkq)"
+            "close@${s7_close:-none} pr-comment@${s7_prcomment:-none} — a reminder closed before the visit closes lies on the PR"
     fi
 fi
 # The heading and the procedure disagreed for as long as the bug existed, and
