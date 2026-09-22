@@ -5,9 +5,9 @@ description: The measurable-goal contract, judge architecture, verdict taxonomy,
 
 # Goal Primitive
 
-A goal is a measurable condition about the world, carried by a bead at epic
-altitude, that generates work until the condition is measured met by something
-other than the worker that did the work.
+A goal is a measurable condition about the world, carried by a bead, that
+generates work until the condition is measured met by something other than the
+worker that did the work.
 
 Today the city converges on artifact approval: review loops iterate a diff
 until reviewers approve it. The goal primitive moves the convergence target
@@ -49,10 +49,21 @@ epic bead or a dedicated goal bead; the primitive is the contract and the loop,
 not a new bead type. Whether goals enrich the existing epic type or get their
 own type is an implementation choice and does not change this design.
 
-Altitude is epic. A goal spans multiple molecules over time. One goal, cutting
-p99 latency below a threshold, can spawn an implementation molecule, then a
-profiling molecule, then a tuning molecule across days, each iteration a fresh
-unit of work, all judged against the same oracle.
+A goal typically spans multiple units of work and is sized by the condition it
+states; the carrier may be any bead. An epic may carry or distill goals; a
+goal need not belong to an epic. One goal, cutting p99 latency below a
+threshold, can spawn an implementation molecule, then a profiling molecule,
+then a tuning molecule across days, each iteration a fresh unit of work, all
+judged against the same oracle.
+
+This spec is the middle layer. Above it, a vision layer: epics carry visions,
+and a PM-shaped refinement loop distills crisp goal contracts from them
+(separate design, tk-h2s7hj.1). Below it, goal-keeper v1 (tk-tutb46) executes
+and judges. Oracle hardness is a dial: deterministic oracles run autonomously
+within budget, rubric oracles carry a human lane, and operator weight scales
+with oracle softness. Document-shaped goals (a PRD meeting a graded checklist
+bar) are legal citizens of this same primitive through the rubric lane the
+judge architecture already defines.
 
 How it differs from what exists:
 
@@ -296,9 +307,9 @@ design. The full surveys are in tk-nt5uda's notes.
   the work, pinned to an immutable commit, and every iteration is measured
   against that pinned copy, so no worker can move the definition of done.
 
-No surveyed construct is a standing goal at epic altitude, stated as a
-measurable condition about the world, that generates work until reality
-measures it met. That is what this primitive is.
+No surveyed construct is a standing goal, stated as a measurable condition
+about the world, that generates work until reality measures it met. That is
+what this primitive is.
 
 ## 8. Handed to implementation and to the engine
 
