@@ -83,14 +83,14 @@ look at the finished change is authorizing its merge; the label reads the same
 either way. An approval given at the first checkpoint must not merge the work,
 and the operator has to be able to tell which of the two reviews they are giving.
 
-The merge preconditions already keep the two apart. An approval alone never
-merges. The city must also have reached its terminal step, so the anchor sits at
-a settled, mergeable posture with gates green and no hold. A mid-journey
-checkpoint is not there: work is still in flight, the anchor is not settled, and
-the PR is typically a draft, which `assets/scripts/merge.sh` skips. An approving
-verdict at that checkpoint cannot ship the work, and so is safe as "this
-milestone is good, keep going." An approval authorizes a merge only once the unit
-is presented as complete.
+The merge preconditions are only a last defense here, not the rule. An approval
+alone never merges: the city must also have reached its terminal step, so the
+anchor sits at a settled, mergeable posture with gates green and no hold, and a
+mid-journey PR is typically a draft, which `assets/scripts/merge.sh` skips. That
+backstop stops a stray checkpoint approval from shipping work, but it gives one
+no meaning, and the workflow must not lean on it: a GitHub **Approve** is never
+asked for, nor read, as a mid-journey milestone acknowledgement. What an
+approval means is fixed by the rule below, not left to a safety net.
 
 The rule this proposes keeps a GitHub **Approve** meaning one thing — authorize
 the merge — and takes mid-journey design feedback as review comments the city
