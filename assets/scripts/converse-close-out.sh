@@ -29,3 +29,19 @@ gc bd update "$SUBJECT" --append-notes "visit $VISIT closed $OUTCOME: $DETAIL"
 gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME"
 gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
 gc bd close "$VISIT"
+_close_rc=$?
+
+# If this visit ever engaged, it left an "open" reminder on the subject's PR;
+# once the close above lands, update it to say the visit closed. update-only, so
+# a visit that never engaged (the common moot case) touches nothing. This is a
+# different surface from the thread the header says stays silent, and it is
+# best-effort — a failure here must not disturb a close that landed, and it must
+# not mask the close's own exit code.
+if [ "$_close_rc" -eq 0 ]; then
+  PVC=""
+  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$cand/assets/scripts/pr-visit-comment.sh" ] && { PVC="$cand/assets/scripts/pr-visit-comment.sh"; break; }
+  done
+  [ -n "$PVC" ] && "$PVC" close --visit "$VISIT" --subject "$SUBJECT" --outcome "$OUTCOME" --summary "$DETAIL" || true
+fi
+exit "$_close_rc"

@@ -1471,8 +1471,16 @@ cat > "$TMP/visits.json" <<'JSON'
 JSON
 export FAKE_STEPS_JSON="$TMP/visits.json"
 
-: > "$TMP/updates"; : > "$TMP/closes"
-DOUT="$(sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
+# A recorder standing in for pr-visit-comment.sh, to prove dismiss updates the
+# subject's PR reminder when it closes a sitting's visit.
+cat > "$TMP/rec-pvc" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$REC_PVC_LOG"
+REC
+chmod +x "$TMP/rec-pvc"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/pvc.log"
+DOUT="$(GC_VISIT_COMMENT_TOOL="$TMP/rec-pvc" REC_PVC_LOG="$TMP/pvc.log" sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
 DERR="$(cat "$TMP/derr")"
 
 # (DISMISS-SITTING) the held visit is closed, and over its holder's claim: bd
@@ -1515,6 +1523,17 @@ if [ -z "$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)" ]; then
     ok "(DISMISS-NOSUBJECT) the subject is never written — the band carries no per-row state"
 else
     bad "(DISMISS-NOSUBJECT) dismiss wrote the subject (got: $(grep -E '^bd update A-PARKED' "$TMP/updates"))"
+fi
+
+# (DISMISS-PRCOMMENT) the closed sitting's visit gets its PR reminder updated to
+# closed. The subject A-PARKED is passed, the closed visit v-HELD is named, and
+# the outcome is dismissed. update-only in the tool itself means a subject with
+# no PR is a silent no-op; here the recorder proves the wiring fires with the
+# right arguments.
+if grep -qF -- 'close --visit v-HELD --subject A-PARKED --outcome dismissed' "$TMP/pvc.log"; then
+    ok "(DISMISS-PRCOMMENT) the dismissed visit's PR reminder is updated to closed"
+else
+    bad "(DISMISS-PRCOMMENT) the PR reminder was not updated on dismiss (got: $(cat "$TMP/pvc.log"))"
 fi
 
 # (DISMISS-SCOPE) another subject's visit is not collateral.
