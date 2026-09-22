@@ -208,6 +208,19 @@ if [ "$REASON" = "existing_assignment" ]; then
     if [ -n "$OUTCOME" ]; then
         if finish_close "$BEAD" "$OUTCOME"; then
             echo "$PROG: $BEAD carried gc.outcome=$OUTCOME with no close; closed it here" >&2
+            # The stranded close also updates the visit's PR reminder, the way a
+            # normal close does — the original session posted the "open" reminder
+            # and died before the close, so nothing else marks it closed.
+            # pr-visit-comment.sh reads the summary and actions converse-signoff.sh
+            # stashed before the death and refuses unless the visit is closed; its
+            # stdout is discarded so it cannot disturb the action=finish line the
+            # caller parses. GROUP is the subject: its gc.continuation_group stamp,
+            # else the tracks edge recovered above.
+            PVC=""
+            for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+                [ -x "$cand/assets/scripts/pr-visit-comment.sh" ] && { PVC="$cand/assets/scripts/pr-visit-comment.sh"; break; }
+            done
+            [ -n "$PVC" ] && [ -n "$GROUP" ] && "$PVC" close --visit "$BEAD" --subject "$GROUP" >/dev/null 2>&1 || true
         else
             # Still a finish: sending the caller back to waiting on a
             # sitting that is over is the defect itself, and the caller's own

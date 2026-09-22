@@ -26,13 +26,26 @@ REPO="$TMPD/repo"; mkdir -p "$REPO"
 git -C "$REPO" init -q
 git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 
-# gc stub: `gc bd show <subject> --json` composes a subject row from env
-# ($PR_NUMBER / $PR_URL), so each scenario dials the subject's PR binding.
+# gc stub: `gc bd show <id> --json`. A tk-vis* id is the visit — its status (does
+# close refuse while the visit is open?) and the close-payload stash
+# converse-signoff.sh writes (does close derive summary/actions/outcome?) come
+# from $VISIT_STATUS / $VIS_OUTCOME / $VIS_SUMMARY / $VIS_ACTIONS. Any other id is
+# the subject, whose PR binding ($PR_NUMBER / $PR_URL) is what a comment lands on.
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ] || exit 0
-jq -nc --arg n "${PR_NUMBER:-}" --arg u "${PR_URL:-}" \
-  '[{id:"tk-sub", metadata:( ({} + (if $n=="" then {} else {pr_number:$n} end)) + (if $u=="" then {} else {pr_url:$u} end) )}]'
+id="${3:-}"
+case "$id" in
+  tk-vis*)
+    jq -nc --arg i "$id" --arg s "${VISIT_STATUS:-closed}" --arg o "${VIS_OUTCOME:-}" --arg sum "${VIS_SUMMARY:-}" --arg act "${VIS_ACTIONS:-}" \
+      '[{id:$i, status:$s, metadata:(
+          {} + (if $o=="" then {} else {"gc.outcome":$o} end)
+             + (if $sum=="" then {} else {"gc.pr_visit_summary":$sum} end)
+             + (if $act=="" then {} else {"gc.pr_visit_actions":$act} end) )}]' ;;
+  *)
+    jq -nc --arg n "${PR_NUMBER:-}" --arg u "${PR_URL:-}" \
+      '[{id:"tk-sub", metadata:( ({} + (if $n=="" then {} else {pr_number:$n} end)) + (if $u=="" then {} else {pr_url:$u} end) )}]' ;;
+esac
 STUB
 chmod +x "$BIN/gc"
 
@@ -156,6 +169,31 @@ ok "closing tk-vis1 closes exactly one comment" "[ \"$CLOSED_N\" -eq 1 ]"
 has "Visit tk-vis1 — closed" "$(jq -r '.[] | select(.body|contains("— closed")) | .body' "$STATE")" "the closed comment is tk-vis1's own"
 TEN_OPEN="$(jq '[.[] | select((.body|contains("Visit tk-vis10 — open")))] | length' "$STATE")"
 ok "tk-vis10 stays open — its marker did not match the tk-vis1 close" "[ \"$TEN_OPEN\" -eq 1 ]"
+
+echo "# close with no payload args derives the outcome, summary and actions from the visit's stamps"
+printf '[]' >"$STATE"
+run d0 41 "https://github.com/acme/widgets/pull/41" -- engage --visit tk-visD --subject tk-sub --reason "let us talk"
+export VISIT_STATUS=closed VIS_OUTCOME=settled VIS_SUMMARY="agreed to ship it" VIS_ACTIONS="routed tk-w1"
+rc=$(run d1 41 "https://github.com/acme/widgets/pull/41" -- close --visit tk-visD --subject tk-sub)
+unset VISIT_STATUS VIS_OUTCOME VIS_SUMMARY VIS_ACTIONS
+ok "payload-less close exits 0" "[ '$rc' = 0 ]"
+BODYD="$(jq -r '.[] | select(.body|contains("tk-visD")) | .body' "$STATE")"
+has "Visit tk-visD — closed (settled)" "$BODYD" "the outcome word comes from the visit's gc.outcome"
+has "Summary: agreed to ship it" "$BODYD" "the summary comes from gc.pr_visit_summary"
+has "Actions Taken: routed tk-w1" "$BODYD" "the actions come from gc.pr_visit_actions"
+
+echo "# close refuses to mark the reminder closed while the visit is still open"
+printf '[]' >"$STATE"
+run o0 41 "https://github.com/acme/widgets/pull/41" -- engage --visit tk-visO --subject tk-sub --reason "mid conversation"
+export VISIT_STATUS=open
+rc=$(run o1 41 "https://github.com/acme/widgets/pull/41" -- close --visit tk-visO --subject tk-sub --outcome settled --summary "done")
+unset VISIT_STATUS
+ok "open-visit close exits 0 (fail-safe)" "[ '$rc' = 0 ]"
+GHO="$(cat "$TMPD/gh.o1.log")"
+hasnt "PATCH" "$GHO" "no edit is made while the visit is open"
+BODYO="$(jq -r '.[] | select(.body|contains("tk-visO")) | .body' "$STATE")"
+has "Visit tk-visO — open" "$BODYO" "the reminder stays in its open shape"
+hasnt "closed" "$BODYO" "nothing says the visit closed ahead of its close"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "PASS: all pr-visit-comment assertions passed"; else echo "FAIL: pr-visit-comment had failures"; fi

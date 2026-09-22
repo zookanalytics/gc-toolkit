@@ -149,11 +149,16 @@ if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" 
     || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
 fi
 
-# Update the visit's PR reminder, if the subject has a PR, to say the sitting
-# closed. The takeaway is the Summary; Actions Taken is what the sitting did —
-# the work it routed, the ruling it reached, or what is still owed. update-only
-# (a visit that never engaged left no comment), best-effort, and it must not
-# fail a sign-off that has already written its durable trace.
+# Stash what the visit's PR-reminder close will say, for the writer that runs
+# AFTER the visit is actually closed: converse-settle's close step on a normal
+# sign-off, or converse-claim.sh's stranded-finish recovery. This script is the
+# PRE-close durable trace, so posting "closed" here would run before the close
+# lands — a death, a failed outcome stamp, or a failed close between here and
+# there would leave the PR saying the visit closed while it is still open and
+# holding the merge. The takeaway is the Summary; Actions Taken is what the
+# sitting did: the work it routed, the ruling it reached, or what is still owed.
+# The stamp lands even though this session still holds the visit, because a
+# metadata write bypasses the claim guard.
 routed=""
 i=0
 while [ "$i" -lt "${#WAIT[@]}" ]; do
@@ -167,12 +172,7 @@ if [ "$RULED" = yes ]; then
 elif [ -n "$STILL_OWED" ]; then
   SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }still owed: $STILL_OWED"
 fi
-PVC=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/pr-visit-comment.sh" ] && { PVC="$cand/assets/scripts/pr-visit-comment.sh"; break; }
-done
-if [ -n "$PVC" ]; then
-  pvc_args=(close --visit "$VISIT" --subject "$ITEM" --summary "$OUTCOME")
-  [ -n "$SIGNOFF_ACTIONS" ] && pvc_args+=(--actions "$SIGNOFF_ACTIONS")
-  "$PVC" "${pvc_args[@]}" || true
-fi
+gc bd update "$VISIT" \
+  --set-metadata "gc.pr_visit_summary=$OUTCOME" \
+  --set-metadata "gc.pr_visit_actions=$SIGNOFF_ACTIONS" \
+  || echo "COULD NOT STASH the PR-reminder close text on $VISIT; its PR comment may stay 'open' after the visit closes"

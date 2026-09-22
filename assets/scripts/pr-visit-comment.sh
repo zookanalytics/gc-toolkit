@@ -20,7 +20,11 @@
 #   close:  edit the marked comment into its "closed" shape. UPDATE-ONLY — a
 #           visit that never engaged has no comment, and close leaves the PR
 #           alone. The reason is preserved from the comment engage wrote, so
-#           close takes no --reason.
+#           close takes no --reason. --outcome/--summary/--actions default to the
+#           visit's gc.outcome, gc.pr_visit_summary and gc.pr_visit_actions when
+#           omitted, so a post-close caller need only name the visit and subject.
+#           close refuses while the visit is still open, so it never says
+#           "closed" ahead of the close.
 set -u
 
 PROG=pr-visit-comment
@@ -102,6 +106,28 @@ if [ -n "$PR_URL" ]; then
     echo "$PROG: $SUBJECT PR#$PR lives in '$got', not '$ORIGIN_REPO_Q'; not ours — nothing posted" >&2
     exit 0
   fi
+fi
+
+# For a close, the summary, the actions, and the outcome word can be left to
+# durable state: converse-signoff.sh stamps gc.pr_visit_summary and
+# gc.pr_visit_actions on the visit before the close, and the visit's gc.outcome
+# is the closing word. Reading them here lets the post-close writers
+# (converse-settle's close step and converse-claim.sh's stranded-finish
+# recovery) close the reminder without re-deriving the sitting. The same read
+# refuses to mark the reminder closed while the visit is still open — a known
+# non-closed status leaves the comment alone — because saying "closed" ahead of
+# the close is the defect this waits on the close to avoid. An unreadable status
+# is not proof of anything, so it proceeds: this is a best-effort reminder.
+if [ "$MODE" = close ]; then
+  VISIT_JSON=$(gc bd show "$VISIT" --json 2>/dev/null | scrub)
+  VSTATUS=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].status // ""' 2>/dev/null || true)
+  case "$VSTATUS" in
+    ""|closed) : ;;
+    *) echo "$PROG: visit $VISIT reads '$VSTATUS', not closed; leaving its PR reminder open" >&2; exit 0 ;;
+  esac
+  [ -n "$OUTCOME" ] || OUTCOME=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].metadata["gc.outcome"] // ""' 2>/dev/null || true)
+  [ -n "$SUMMARY" ] || SUMMARY=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].metadata["gc.pr_visit_summary"] // ""' 2>/dev/null || true)
+  [ -n "$ACTIONS" ] || ACTIONS=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].metadata["gc.pr_visit_actions"] // ""' 2>/dev/null || true)
 fi
 
 MARKER="<!-- gc:visit:$VISIT -->"

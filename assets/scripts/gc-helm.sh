@@ -2840,10 +2840,23 @@ cmd_engage() {
     # splits ${x:+...}, which would break a multi-word reason.)
     if [ -x "$VISIT_COMMENT_TOOL" ]; then
         # The PR lives on the SUBJECT, not the visit. Engaging a subject id
-        # leaves $bead the subject; engaging a visit id leaves it the visit. The
-        # visit's continuation group is its subject either way, and it falls back
-        # to $bead (which IS the subject in the subject-id case).
-        _pr_subject=$(printf '%s' "$visit_row" | jq -r '.metadata["gc.continuation_group"] // ""' 2>/dev/null || true)
+        # leaves $bead the subject; engaging a visit id leaves it the visit,
+        # which names its subject by its gc.continuation_group stamp, else the
+        # tracks edge that stamp is filed alongside. The stamp lands empty on a
+        # minority of visits, and reading only it there falls back to the visit
+        # id and posts the reminder on the wrong bead (or none); cmd_open,
+        # current_sitting_subject, and converse-fold.sh all recover from the edge
+        # for the same reason. visit_row is a `gc bd show` row
+        # (.dependency_type/.id); the read tolerates the `gc bd list` edge shape
+        # (.type/.depends_on_id) too. $bead is the last resort, and IS the
+        # subject in the subject-id case.
+        _pr_subject=$(printf '%s' "$visit_row" | jq -r '
+            (.metadata["gc.continuation_group"] // "") as $g
+            | if $g != "" then $g
+              else ([ (.dependencies // [])[] | objects
+                      | select(((.dependency_type // .type // "") | tostring) == "tracks")
+                      | ((.id // .depends_on_id // "") | tostring) ] | map(select(. != "")) | first // "")
+              end' 2>/dev/null || true)
         [ -n "$_pr_subject" ] || _pr_subject="$bead"
         if [ -n "$engage_reason" ]; then
             "$VISIT_COMMENT_TOOL" engage --visit "$VISIT" --subject "$_pr_subject" --reason "$engage_reason" || true
