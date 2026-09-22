@@ -2438,14 +2438,17 @@ cmd_engage() {
     # The subject a visit id is about — for the grounding line and the success
     # summary below. A visit records its subject in the gc.continuation_group
     # stamp, which can land empty, so fall back to the tracks edge; the record
-    # the existence gate already fetched carries both. Empty for a non-visit.
+    # the existence gate already fetched carries both. bead_row is a `gc bd show`
+    # row, which renders a dependency as a bead row keyed .dependency_type with
+    # the target in .id — not the .type/.depends_on_id shape `gc bd list` emits.
+    # Empty for a non-visit.
     visit_subject=""
     if [ "$bead_kind" = "visit" ]; then
         visit_subject=$(printf '%s' "$bead_row" | jq -r '
             (.metadata["gc.continuation_group"] // "") as $g
             | if $g != "" then $g
-              else ([ .dependencies[]? | select((.type // "") == "tracks")
-                      | (.depends_on_id // "") ] | map(select(. != "")) | first // "")
+              else ([ .dependencies[]? | select((.dependency_type // "") == "tracks")
+                      | (.id // "") ] | map(select(. != "")) | first // "")
               end' 2>/dev/null || true)
     fi
 

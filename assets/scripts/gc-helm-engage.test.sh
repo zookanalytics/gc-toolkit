@@ -97,8 +97,14 @@ case "$1 ${2:-}" in
     if [ "$id" = "tk-vis" ]; then
       st="$(cat "$VIS_STATUS" 2>/dev/null || echo open)"
       who="$(cat "$ASSIGNEE" 2>/dev/null)"; [ -n "$who" ] || who="$VIS_OWNER"
+      # The subject rides on the gc.continuation_group stamp by default. A case may
+      # blank $VIS_CGROUP and set $VIS_TRACKS to exercise the tracks-edge fallback:
+      # `gc bd show` renders that edge as a dependency bead row keyed
+      # .dependency_type/.id, which is the shape the fallback must read.
       jq -n --arg i "$id" --arg s "$st" --arg a "$who" \
-        '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
+            --arg cg "${VIS_CGROUP-tk-subj}" --arg tr "${VIS_TRACKS-}" \
+        '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:{task_kind:"visit","gc.continuation_group":$cg}}
+          + (if $tr != "" then {dependencies:[{id:$tr, dependency_type:"tracks", title:"the subject under engagement", status:"open", issue_type:"task", priority:2}]} else {} end)]'
     else
       jq -n --arg i "$id" --arg k "${BEAD_KIND:-task}" --arg t "${SUBJ_TITLE:-the subject under engagement}" \
         '[{id:$i, title:$t, status:"open", issue_type:"task", priority:2, assignee:"", metadata:{task_kind:$k}}]'
@@ -784,6 +790,21 @@ hasnt "$OUT" "starts a new visit" "(IA-VISITID-SUBJECT) …and the join-or-new p
 hasnt "$OUT" "Subject has open visit" "(IA-VISITID-SUBJECT) …no visit list is offered"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISITID-SUBJECT) …then it engages the named visit"
 has "$OUT" "for tk-subj" "(IA-VISITID-SUBJECT) …and the success line reads 'for <subject>', not the visit id repeated"
+
+echo "# a visit id with an EMPTY continuation-group stamp still grounds via its tracks edge"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT="" VIS_CGROUP="" VIS_TRACKS="tk-subj"
+printf 'open' > "$VIS_STATUS"
+# The stamp landed empty, so the subject is only reachable through the tracks
+# edge, which `gc bd show` renders keyed .dependency_type/.id. Reading the
+# .type/.depends_on_id shape `gc bd list` uses would drop it and print
+# "this visit names no subject" — this case guards that exact regression.
+run_engage_tty '\n' tk-vis --no-attach
+eq "$RC" 0 "(IA-VISITID-TRACKS) engaging an empty-stamp visit id exits 0"
+has "$OUT" "Subject: tk-subj" "(IA-VISITID-TRACKS) the subject resolves from the tracks edge when the continuation-group stamp is empty"
+hasnt "$OUT" "names no subject" "(IA-VISITID-TRACKS) …so the subject-less degrade line is not printed"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISITID-TRACKS) …then it engages the named visit"
+has "$OUT" "for tk-subj" "(IA-VISITID-TRACKS) …and the success line names the subject, not the visit id"
+unset VIS_CGROUP VIS_TRACKS
 
 echo "# a subject given by title search resolves and engages"
 export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER="" SEARCH_HIT=1
