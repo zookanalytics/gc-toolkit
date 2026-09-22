@@ -69,10 +69,21 @@ command -v gh >/dev/null 2>&1 || exit 0
 command -v gc >/dev/null 2>&1 || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
-# The repository every gh call is pinned to — from the origin remote, never
-# from gh's movable current repo. Same derivation pr-open.sh proves.
+# The repository every gh call is pinned to — resolved from the SUBJECT's rig
+# origin, never gh's movable current repo, and never the caller's cwd: engage
+# and dismiss are launched from the board, outside any rig checkout, where a cwd
+# origin lookup resolves nothing and the reminder would silently never post. gc
+# rig list maps the subject's id prefix to its repo path; cwd is the fallback for
+# a caller that already runs inside the subject's rig (the converse close paths).
 ORIGIN_HOST=""; ORIGIN_REPO=""; ORIGIN_REPO_Q=""
-u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
+REPO_DIR=$(gc rig list --json 2>/dev/null | scrub \
+  | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .path' 2>/dev/null | head -n1)
+if [ -n "$REPO_DIR" ] && [ -d "$REPO_DIR" ]; then
+  u=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null | tr -d '[:space:]')
+else
+  u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
+fi
+# The url -> owner/repo derivation pr-open.sh uses.
 case "$u" in
   git@github.com:*|https://github.com/*|ssh://git@github.com/*)
     ORIGIN_HOST="github.com"
@@ -80,7 +91,7 @@ case "$u" in
       -e 's#^git@github.com:##' -e 's#^https://github.com/##' -e 's#\.git$##' -e 's#/*$##') ;;
 esac
 case "$ORIGIN_REPO" in */*/*|/*|*/) ORIGIN_REPO="" ;; */*) : ;; *) ORIGIN_REPO="" ;; esac
-[ -n "$ORIGIN_REPO" ] || { echo "$PROG: cannot resolve this checkout's origin repository; nothing posted" >&2; exit 0; }
+[ -n "$ORIGIN_REPO" ] || { echo "$PROG: cannot resolve the subject's rig origin repository; nothing posted" >&2; exit 0; }
 ORIGIN_REPO_Q="$ORIGIN_HOST/$ORIGIN_REPO"
 
 url_repo_q() {
