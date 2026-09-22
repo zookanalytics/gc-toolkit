@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lifecycle.sh — THE writer of anchor lifecycle transitions (lifecycle/lifecycle.toml).
 #   lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]...
-#     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>]
+#     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>|human]
 #     [--takeaway <text>] [--close] [--append-notes <t>] [--json]
 #   lifecycle.sh state <bead-id>
 #   lifecycle.sh reopen <bead-id>
@@ -252,6 +252,17 @@ cmd_transition() {
       echo "$PROG: --to $TO requires a route — '$TO' is a human state (human_states: $LIFECYCLE_HUMAN_STATES) and an empty gc.routed_to leaves the bead waiting on nobody" >&2
       exit 1
     fi
+  fi
+  # gc.routed_to is matched as an exact string by every pool claim, so a route
+  # that is neither <rig>/<agent> nor the "$LIFECYCLE_PARK_ROUTE" sentinel
+  # reaches no pool: the bead stays ready and is offered to nobody. Every
+  # --route caller shares this writer, so the shape is enforced here once. An
+  # empty --route clears the route and is handled above, so it is exempt.
+  if [ "$ROUTE_SET" = 1 ] && [ -n "$ROUTE" ]; then
+    case "$ROUTE" in
+      "$LIFECYCLE_PARK_ROUTE"|*/*) : ;;
+      *) echo "$PROG: --route '$ROUTE' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare name routes to nobody and the bead sits forever. Use <rig>/<agent> or '$LIFECYCLE_PARK_ROUTE'." >&2; exit 1 ;;
+    esac
   fi
   local kv
   for kv in ${SETS[@]+"${SETS[@]}"} ${DATED[@]+"${DATED[@]}"}; do
@@ -594,7 +605,7 @@ case "${1:-}" in
   state)      shift; cmd_state "$@" ;;
   reopen)     shift; cmd_reopen "$@" ;;
   *)
-    echo "usage: lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]" >&2
+    echo "usage: lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>|human] [--takeaway <text>] [--close] [--append-notes <text>] [--json]" >&2
     echo "       lifecycle.sh state <bead-id>" >&2
     echo "       lifecycle.sh reopen <bead-id>   # repair a bead closed on a non-closed merge_result" >&2
     exit 1 ;;

@@ -30,7 +30,7 @@ import (
 // they invoked.
 const prog = "lifecycle"
 
-const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
+const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>|human] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
        gctk lifecycle state <bead-id>
        gctk lifecycle reopen <bead-id>   # repair a bead closed on a non-closed merge_result
        gctk lifecycle --dump-machine     # the declared machine, for the lifecycle.toml drift test
@@ -325,6 +325,16 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 				prog, o.to, o.to, strings.Join(lifecycle.HumanStates, " "))
 			return 1
 		}
+	}
+	// gc.routed_to is matched as an exact string by every pool claim, so a route
+	// that is neither <rig>/<agent> nor the ParkRoute sentinel reaches no pool:
+	// the bead stays ready and is offered to nobody. Every --route caller shares
+	// this writer, so the shape is enforced here once. An empty --route clears
+	// the route and is handled above, so it is exempt.
+	if o.routeSet && o.route != "" && o.route != lifecycle.ParkRoute && !strings.Contains(o.route, "/") {
+		fmt.Fprintf(stderr, "%s: --route '%s' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare name routes to nobody and the bead sits forever. Use <rig>/<agent> or '%s'.\n",
+			prog, o.route, lifecycle.ParkRoute)
+		return 1
 	}
 	for _, s := range append(append([]string{}, o.sets...), o.dated...) {
 		switch k, _ := kv(s); k {

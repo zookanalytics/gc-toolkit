@@ -51,7 +51,7 @@ VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
   --visit "$VISIT" --subject "$SUBJECT" \
   --outcome "<outcome> — <what this sitting settled or needs next, ≤140 chars>" \
   --ruled no --still-owed "<what is still owed, ≤140 chars>"
-  # --ruled yes --ruling "<the ruling, one line>" --route <pool|human>
+  # --ruled yes --ruling "<the ruling, one line>" --route <rig>/<agent>|human
   # --no-wait   |   --waiting-on <bead> [--waiting-on <bead> ...]
 ```
 **Set `--ruled` from what this sitting actually settled.** The gate
