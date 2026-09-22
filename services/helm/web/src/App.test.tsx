@@ -777,7 +777,7 @@ it('renders the severity the service assigned, not one it re-derives', async () 
   expect(within(packSection()).getByText('ELEVATED')).toBeTruthy();
 });
 
-// --- the rig filter (tk-y14k48) -----------------------------------------------
+// --- the rig filter -----------------------------------------------------------
 
 // A cross-rig board with rows in two rigs and a third rig that did not answer,
 // so the filter has something to choose between and the partial-gather signal
