@@ -273,6 +273,16 @@ hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its 
 # case, so it gets no "bound the pre-existing …" hint or --reason alternative.
 hasnt "$OUT" "bound the pre-existing" "(VISIT) an explicit visit id is not reported as a subject-bound pre-existing visit"
 
+echo "# an explicit visit whose group stamp is empty resolves the PR subject from its tracks edge"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT="" VIS_CGROUP="" VIS_TRACKS="tk-subj"
+printf 'open' > "$VIS_STATUS"
+: > "$TMP/pvc.log"
+run_engage tk-vis --no-attach
+unset VIS_CGROUP VIS_TRACKS
+eq "$RC" 0 "(VISIT-PRCOMMENT-TRACKS) engaging a visit with an empty group stamp exits 0"
+has "$(cat "$TMP/pvc.log")" "engage --visit tk-vis --subject tk-subj" \
+    "(VISIT-PRCOMMENT-TRACKS) the reminder lands on the tracked subject recovered from the edge, not the visit id"
+
 echo "# --model selects the tier; codex is the one provider that keeps the kick"
 run_engage tk-vis --model codex --no-attach
 has "$CALLED" "session new converse-codex --alias tk-vis" "(MODELFLAG) --model codex spawns converse-codex"

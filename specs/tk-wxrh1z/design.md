@@ -47,22 +47,30 @@ and the "closed" update is the signal that the hold has lifted.
 
 ## The events it hooks
 
-The engage is one chokepoint; the close is three writers, because a visit
-closes three ways and the normal one never runs a helm verb.
+The engage is one chokepoint; the close is four writers. Every "closed" update
+runs only after the visit's own close has landed — a reminder that said
+"closed" while the visit was still open would lie on a PR whose merge that
+visit still holds.
 
 | Event | Writer | Where |
 |---|---|---|
 | engage | `gc-helm.sh cmd_engage` | after the sitting binds the visit |
-| close (normal sign-off) | `converse-signoff.sh` | after the takeaway is written, before the agent closes the visit |
+| close (normal sign-off) | `skills/converse-settle` close step | after `gc bd close "$VISIT"` |
+| close (stranded finish) | `converse-claim.sh` | after the recovery close of a stamped-but-unclosed visit |
 | close (operator dismiss) | `gc-helm.sh cmd_dismiss` | after each visit closes |
 | close (moot / benign) | `converse-close-out.sh` | after the visit closes |
 
 The normal close is done by the converse agent itself
-(`agents/converse/prompt.template.md`: run `converse-signoff.sh`, stamp
-`gc.outcome`, `gc bd close`), not by a helm verb. `converse-signoff.sh` is the
-reliable point on that path: it always runs immediately before the close and
-holds the visit id, the subject, and the outcome. Hooking it needs no change
-to the converse prompt.
+(`skills/converse-settle/SKILL.md`: run `converse-signoff.sh`, post the
+sign-off, stamp `gc.outcome`, `gc bd close`), not by a helm verb. The "closed"
+comment is posted by that close step, after the `gc bd close` succeeds.
+`converse-signoff.sh` runs earlier on the same path — it is the pre-close
+durable trace — so it does not post; it stashes the close text
+(`gc.pr_visit_summary`, `gc.pr_visit_actions`) on the visit for the close step
+to read. A sitting that stamps `gc.outcome` and then dies before the close is
+finished by `converse-claim.sh`'s recovery arm, which posts the "closed"
+comment from that same stash, so a recovered close leaves the PR in the shape a
+clean close would.
 
 The Go helm service owns no visit logic — `POST /helm/open` is a thin exec
 wrapper around `gc-helm.sh open` (`services/helm/internal/visit/opener.go`),
@@ -82,13 +90,23 @@ modes:
   — update-only: find the marked comment and edit it to its "closed" shape. If
   no marked comment exists, do nothing.
 
+`close` refuses while the visit is still open: it reads the visit's status and,
+on a known non-closed value, leaves the comment alone, so the PR never says
+"closed" ahead of the close. An unreadable status is not proof of anything, so
+it proceeds — this is a best-effort reminder, not a gate. The same read fills
+any of `--outcome`, `--summary`, `--actions` left off from the visit's own
+stamps (`gc.outcome`, `gc.pr_visit_summary`, `gc.pr_visit_actions`), so a
+post-close writer that holds no sitting context — the settle close step, or the
+stranded-finish recovery — closes the reminder by naming only the visit and
+subject.
+
 `close` is update-only, never create, for two reasons. A visit that closed
 moot or benign usually never engaged (its premise died between filing and
 claiming), so there is no comment and nothing to say on the PR. A visit that
 did engage and then benign-closed has an "open" comment that must not be left
 saying "open" forever. Update-only satisfies both: it closes the comment when
-one exists and is silent when none does. That is why all three close writers
-call the same `close` mode, including `converse-close-out.sh`, whose own thread
+one exists and is silent when none does. That is why every close writer calls
+the same `close` mode, including `converse-close-out.sh`, whose own thread
 output stays silent by design — the PR comment is a different surface from the
 conversation thread.
 
@@ -122,12 +140,15 @@ cannot be posted must never break an engage or a close.
 
 ## Summary and Actions Taken
 
-The close writers pass what they hold. `converse-signoff.sh` passes its
-`--outcome` — the sitting's takeaway, the agent-generated one-line conclusion
-already bounded to 140 characters — as the Summary, and composes Actions Taken
-from what it did: the ruling and release on `--ruled yes`, the beads it routed
-work into on `--waiting-on`, or what is still owed. `cmd_dismiss` passes the
-dismissal reason. `converse-close-out.sh` passes its reading.
+Each close writer supplies what it holds. `converse-signoff.sh` composes the
+normal close's Summary and Actions Taken and stashes them on the visit: the
+Summary is its `--outcome` (the sitting's takeaway, the agent-generated one-line
+conclusion already bounded to 140 characters), and Actions Taken is what it did
+— the ruling and release on `--ruled yes`, the beads it routed work into on
+`--waiting-on`, or what is still owed. The settle close step and the
+stranded-finish recovery post that stash after the visit closes. `cmd_dismiss`
+passes the dismissal reason and `converse-close-out.sh` its reading, each with
+its own close in hand.
 
 The takeaway is the Summary the shell has in hand. The richer sign-off prose
 the agent posts to the conversation thread is its stdout, not a value a script
@@ -137,10 +158,19 @@ requirement of the reminder.
 
 ## Files
 
-- `assets/scripts/pr-visit-comment.sh` — new; the comment primitive.
+- `assets/scripts/pr-visit-comment.sh` — new; the comment primitive. `close`
+  refuses while the visit is open and fills its fields from the visit's stamps.
 - `assets/scripts/pr-visit-comment.test.sh` — new; hermetic coverage of engage,
-  close, upsert, update-only, no-PR, and not-ours.
-- `assets/scripts/gc-helm.sh` — `cmd_engage` posts on engage; `cmd_dismiss`
-  updates on dismiss.
-- `assets/scripts/converse-signoff.sh` — updates on the normal close.
+  close, upsert, update-only, no-PR, not-ours, stash-derive, and open-refusal.
+- `assets/scripts/pr-visit-comment-wiring.test.sh` — new; proves the close
+  writers reach the tool or stash the right text.
+- `assets/scripts/gc-helm.sh` — `cmd_engage` posts on engage, resolving the
+  subject from the `gc.continuation_group` stamp, else the visit's tracks edge;
+  `cmd_dismiss` updates on dismiss.
+- `assets/scripts/converse-signoff.sh` — stashes the normal close's summary and
+  actions on the visit for the post-close writer.
+- `skills/converse-settle/SKILL.md` — posts the "closed" comment after the
+  visit's own close.
+- `assets/scripts/converse-claim.sh` — posts the "closed" comment on the
+  stranded-finish recovery close.
 - `assets/scripts/converse-close-out.sh` — updates on moot / benign close.

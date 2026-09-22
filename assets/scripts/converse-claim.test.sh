@@ -158,6 +158,25 @@ run OUTCOME=settled SHOW_STATUS=closed
 has  "an existing_assignment visit carrying gc.outcome FINISHes" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
 is   "…exit 4" "$RC" "4"
 
+echo "── the stranded finish also closes the visit's PR reminder ──"
+# A recorder at a candidate root stands in for pr-visit-comment.sh. The finish
+# arm redirects the tool's stdout so it cannot disturb the action=finish line, so
+# the recorder logs to a file, not stdout.
+PVCRIG="$TMPD/pvcrig"; mkdir -p "$PVCRIG/assets/scripts"
+cat >"$PVCRIG/assets/scripts/pr-visit-comment.sh" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${REC_PVC_LOG:?}"
+REC
+chmod +x "$PVCRIG/assets/scripts/pr-visit-comment.sh"
+REC_PVC_LOG="$TMPD/finish.pvc"; : >"$REC_PVC_LOG"
+run OUTCOME=settled SHOW_STATUS=closed GC_RIG_ROOT="$PVCRIG" REC_PVC_LOG="$REC_PVC_LOG"
+has  "the finish verdict is unchanged" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
+if grep -qF -- 'close --visit v-x --subject g' "$REC_PVC_LOG"; then
+    ok "the finish closes the visit's PR reminder, on the subject GROUP names"
+else
+    bad "the finish closes the visit's PR reminder, on the subject GROUP names" "recorder log: $(cat "$REC_PVC_LOG")"
+fi
+
 echo "── --sh: the same verdict as eval-able shell assignments ──"
 # The converse prompt runs `eval "$(converse-claim.sh --sh "$SUBJECT")"`, so the
 # stdout must be assignments only (nothing to execute), the verdict must still
