@@ -23,7 +23,7 @@
 #   converse-signoff.sh --visit <id> --outcome "<takeaway, ≤140 chars>" \
 #     [--subject <id>] [--ruled yes|no] \
 #     [--no-wait | --waiting-on <bead> ...] \
-#     [--ruling "<one line>"] [--still-owed "<≤140 chars>"] [--route <pool|human>]
+#     [--ruling "<one line>"] [--still-owed "<≤140 chars>"] [--route <rig>/<agent>|human]
 #   --outcome is required. --ruled defaults to `no`. --ruled yes requires
 #   --ruling and --route; --ruled no requires --still-owed.
 set -u

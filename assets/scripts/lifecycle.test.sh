@@ -505,6 +505,28 @@ has "$out" "requires a route" "the refusal names the missing route"
 eq "$(meta tk-9heqfh merge_result)" "<absent>" "no state was recorded"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and no write was attempted"
 
+# --- a route names a pool by its qualified address, or the park sentinel ---------
+# gc.routed_to is matched as an exact string by every pool claim, so a bare
+# token like "pool" reaches no pool: the bead stays ready and is offered to
+# nobody. This one writer, shared by every --route caller, refuses it before the
+# write rather than stranding the bead ready-but-unclaimable.
+echo "# a route is rig-qualified or the park sentinel"
+store '[{"id":"r-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition r-1 --to unanchored --route pool 2>&1)"; rc=$?
+eq "$rc" 1 "a bare --route that names no pool exits 1"
+has "$out" "not rig-qualified" "the refusal says the route is unqualified"
+has "$out" "exact string" "…and why a bare name reaches nobody"
+eq "$(meta r-1 merge_result)" "pull_request" "the refused transition wrote nothing"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
+
+# A rig-qualified target is exactly what a pool claims, so it passes and is
+# stamped verbatim.
+store '[{"id":"r-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition r-2 --to unanchored --route gc-toolkit/gc-toolkit.polecat 2>&1)"; rc=$?
+eq "$rc" 0 "a <rig>/<agent> route is accepted"
+eq "$(meta r-2 'gc.routed_to')" "gc-toolkit/gc-toolkit.polecat" "…and stamped verbatim"
+
 # --- a park must NAME what it waits for ------------------------------------------
 # The helm board spends gc.takeaway as a row's NEEDS sentence and, on a row
 # routed to a person with none, reports that nobody recorded a question. So
