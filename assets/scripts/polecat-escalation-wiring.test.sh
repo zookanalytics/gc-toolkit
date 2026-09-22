@@ -8,7 +8,7 @@
 #
 # A hold+drain is not a blocker to mail, though: it de-routes the whole molecule,
 # so it must leave a tracked record first. This also pins that the decline-and-hold
-# path files an escalate.sh visit before molecule-hold.sh runs — never bare mail
+# path files an escalate.sh visit before molecule-hold.sh runs, never bare mail
 # behind a hold, the silent strand that leaves a de-routed molecule no query returns.
 #
 # The sender half is useless without the receiver half, so this pins both: the
@@ -51,7 +51,7 @@ grep -q -- '--subject' "$DOCTRINE" && grep -q -- '--key' "$DOCTRINE" \
 # A decline that ends in a hold+drain files the visit FIRST and gates the hold on
 # it: an escalate.sh call precedes molecule-hold.sh, so a de-routed molecule always
 # leaves a tracked record a query returns and a hold never lands behind bare mail
-# (the silent strand this pins out — mail reaches an agent peer, not the record).
+# (the silent strand this pins out, since mail reaches an agent peer, not the record).
 if awk '/escalate\.sh.*--key/{e=NR} /molecule-hold\.sh.*--step/{if(e&&NR-e<=6)f=1} END{exit !f}' "$DOCTRINE"; then
   ok "hold+drain is gated on a filed escalate.sh visit (escalate precedes molecule-hold)"
 else

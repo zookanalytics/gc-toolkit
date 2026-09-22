@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Hermetic test for mol-validate's load-dispatch refusal arms.
 #
-# A malformed validation dispatch — an input convoy without exactly one tracked
-# member, or a member carrying no anchor_bead — cannot be ruled and never will be
-# on a retry. Before these arms existed load-dispatch answered both with a bare
+# A malformed validation dispatch cannot be ruled and never will be on a retry.
+# Two shapes are malformed: an input convoy without exactly one tracked member,
+# and a member carrying no anchor_bead. Before these arms existed load-dispatch answered both with a bare
 # `exit 1`, which leaves the step `open` and routed so the pool re-offers the same
 # unrulable pass every cycle, and the "escalation" the worker doctrine reached for
-# was bare witness mail — a record no query returns.
+# was bare witness mail, a record no query returns.
 #
 # Each arm now files a tracked visit through escalate.sh and holds the molecule
-# only if that visit landed, then drains: the same escalate→hold→drain contract
+# only if that visit landed, then drains, the same contract
 # mol-polecat-work's load-context arm holds. This EXECUTES the real snippet
 # extracted verbatim from the formula against a fake `gc` and stub scripts, so the
 # test cannot drift from the shipped instruction. No live city, Dolt, or network.
@@ -32,8 +32,8 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 
 # --- Extract a REAL arm from the formula. ------------------------------------
 # The flag-flip pulls the lines between the markers (exclusive). If a marker is
-# removed or renamed — the exact thing a wholesale reconciliation against base
-# does — extraction yields nothing and the checks below fail loudly.
+# removed or renamed, which is exactly what a wholesale reconciliation against
+# base does, extraction yields nothing and the checks below fail loudly.
 extract() {
   awk -v m="$1" '
     $0 ~ ("# >>> " m "$") {f=1; next}
@@ -74,7 +74,7 @@ HOLD
 chmod +x "$TMP/pack/assets/scripts/escalate.sh" "$TMP/pack/assets/scripts/molecule-hold.sh"
 export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 
-# run <arm.sh> <VALIDATION_PASS> <ANCHOR> -> "<rc>|<ordered verb log>"
+# run <arm.sh> <VALIDATION_PASS> <ANCHOR> returns "<rc>|<ordered verb log>"
 #   FAKE_*_RC control each stub's exit; FAKE_ESC/HOLD capture argv.
 run() {
   : > "$TMP/log"; : > "$TMP/esc"; : > "$TMP/hold"
@@ -113,14 +113,14 @@ check_arm() {
   # proceeds.
   eq "$(run "$A" "$nvp" "$nanc")" "0|" "$marker: well-formed dispatch is a no-op"
 
-  # No release path recorded (escalate exits non-zero): NEVER hold or drain — the
+  # No release path recorded (escalate exits non-zero): NEVER hold or drain, so the
   # step stays claimable and the next worker retries the escalation.
   eq "$(FAKE_ESC_RC=1 run "$A" "$fvp" "$fanc")" "1|ESCALATE;" \
-     "$marker: escalate fails -> no hold, no drain"
-  # Release recorded but the hold did not land: do NOT drain — the molecule can
+     "$marker: escalate fails, so no hold and no drain"
+  # Release recorded but the hold did not land: do NOT drain, since the molecule can
   # still be re-offered.
   eq "$(FAKE_HOLD_RC=1 run "$A" "$fvp" "$fanc")" "1|ESCALATE;HOLD;" \
-     "$marker: hold fails after escalate -> no drain"
+     "$marker: hold fails after escalate, so no drain"
 }
 
 # malformed convoy: fires on an empty VALIDATION_PASS; subject is the convoy.

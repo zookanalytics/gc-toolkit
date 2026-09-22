@@ -118,15 +118,15 @@ echo "validating lane $LANE on anchor $ANCHOR at ${REVIEWED_OID:-<unpinned>}"
 An absent `check_name` resolves to `codex`, the same default lane-state.sh and
 gate-ensure.sh use, so a pass dispatched without one rules the codex lane.
 
-A malformed dispatch — no single tracked convoy member, or a member carrying no
-`anchor_bead` — cannot be ruled and never will be on a retry, so each refusal
+A malformed dispatch cannot be ruled and never will be on a retry. Its convoy has
+no single tracked member, or that member carries no `anchor_bead`. So each refusal
 above files a visit through `escalate.sh` and holds this step `blocked`
 (not-closed, not-claimable) only if that visit landed, then drains. A bare
 `exit 1` would leave the step `open` and routed, and the pool would re-offer the
 same unrulable pass to a fresh validator every cycle. The store-read guards
 further down are the opposite case: an unreadable or non-array finding ledger is
 transient, so those DO fail closed to a plain `exit 1` and a later claim retries
-once the store recovers — do not convert them to a hold.
+once the store recovers. Do not convert them to a hold.
 
 **3. Read the batch.** The findings to rule are the LIVE `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition

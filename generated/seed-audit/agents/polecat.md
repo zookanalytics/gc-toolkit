@@ -246,10 +246,10 @@ including the `auto_push=false` halt arm.
 
 When blocked, act — do not wait, and do not guess. Where the signal goes
 depends on who can answer it. Anything that ends in a hold and a drain needs a
-tracked, routed record filed first — the visit `escalate.sh` opens, a bead a
-query returns — because the hold de-routes the whole molecule, and a hold with
-no such record behind it is a silent strand no reader is ever handed. Mail is
-not that record.
+tracked, routed record filed first. That record is the visit `escalate.sh`
+opens, or a bead a query returns. The hold de-routes the whole molecule, so a
+hold with no such record behind it is a silent strand no reader is ever
+handed. Mail is not that record.
 
 The witness is your first responder for a question another agent can answer
 without you holding the bead: requirements unclear after checking the docs,
@@ -267,11 +267,11 @@ The witness triages its inbox every patrol cycle. It unblocks what it can and
 promotes what needs a person into a visit, so mailing it is not a slower route
 to a human. It is the route that spends a human only when one is required.
 
-Escalate directly when no agent can answer — missing credentials, external
-access, a decision that is the operator's to make — and, whatever the reason,
-before any hold and drain. `escalate.sh` files (or refreshes) exactly one open
-visit per situation key, and its exit 0 is the release path a human hears about
-and can claim:
+Escalate directly when no agent can answer: missing credentials, external
+access, or a decision that is the operator's to make. Escalate this way before
+any hold and drain, whatever the reason for the hold. `escalate.sh` files (or
+refreshes) exactly one open visit per situation key, and its exit 0 is the
+release path a human hears about and can claim:
 
 ```bash
 SCRIPTS=""
@@ -285,20 +285,20 @@ done
 For a plain blocker that visit is the whole escalation: continue if possible,
 otherwise leave the bead resumable (branch + notes recorded) and drain.
 
-**Draining without closing your step means holding the molecule first — and the
+**Draining without closing your step means holding the molecule first, and the
 hold needs a filed visit before it.** This covers every reason you decline work
 you must not close: a duplicate dispatch, a premise you found falsified, work
 another branch already delivered. A step left `open` is claimable, so the pool
 hands it to a fresh polecat within minutes, that polecat re-derives your refusal
 and leaves it open again, and the cycle burns one pool slot per iteration until
-a human notices. So the hold sets the step `blocked` — not-closed and
-not-claimable — and clears the route on the step, on the molecule root, and on
+a human notices. So the hold sets the step `blocked`, which is not-closed and
+not-claimable, and clears the route on the step, on the molecule root, and on
 the root's other steps. Clearing the route without the `blocked` status does not
 stop the loop: the stranded-worker repair sweeps open steps assigned to a
 drained session and re-stamps a route on any it finds unrouted.
 
-But a de-routed molecule with nothing tracking it is worse than the loop — a
-silent strand no query returns and no human is asked to clear. So the record
+But a de-routed molecule with nothing tracking it is worse than the loop. It is
+a silent strand no query returns and no human is asked to clear. So the record
 comes first: `escalate.sh` files the visit that is the release path, and only on
 its success do you hold, and only on the hold's success do you drain:
 
@@ -314,8 +314,8 @@ gc runtime drain-ack
 where it is. Drain only if both landed. `escalate.sh` exits non-zero when it can
 neither file nor find the visit; `molecule-hold.sh` exits non-zero when it
 cannot prove which bead is yours, when duplicate step beads make that ambiguous,
-when the blocking write is refused, or when a route it had to clear — on the
-molecule root or on a sibling step — survived. A drain after either failed
+when the blocking write is refused, or when a route it had to clear survived,
+whether on the molecule root or on a sibling step. A drain after either failed
 leaves something in the molecule claimable.
 
 If the ruling that comes back is stand-down — the premise was falsified, or a
