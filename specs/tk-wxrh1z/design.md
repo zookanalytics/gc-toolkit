@@ -40,10 +40,10 @@ each.
 An open visit on a PR-bearing bead already holds the PR's merge:
 `merge.sh`'s in-flight-holder filter reads the subject's `pr_number`, finds
 the open visit tracking it, and holds the merge until the visit closes
-(`assets/scripts/merge.sh`, the `PR#... held by ...; merge held` arm). Before
-this change, that hold is invisible on the PR — the merge is paused with
-nothing on the PR to say why. The "Visit … open" comment is that explanation,
-and the "closed" update is the signal that the hold has lifted.
+(`assets/scripts/merge.sh`, the `PR#... held by ...; merge held` arm). The
+"Visit … open" comment records that pause on the PR itself: it names the open
+visit holding the merge and the reason it opened. The "closed" update marks the
+hold lifted.
 
 ## The events it hooks
 
