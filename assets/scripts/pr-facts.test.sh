@@ -69,7 +69,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -416,7 +416,7 @@ eq "$(meta F4 merge_result)" "pull_request" "the anchor keeps gating (no state f
 echo "# …dedup: second pass files nothing"
 out=$(run)
 has "$out" "already covers branch" "an existing child suppresses a twin"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "still exactly one child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child"
 
 echo "# …a closed child at the SAME head still dedups; holds veto the dispatch"
 store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
@@ -433,7 +433,7 @@ printf '%s' "$(prview 16 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_16.json"
 out=$(run)
 eq "$(meta F5b 'gc.routed_to')" "" "the anchor itself is not human-routed"
 has "$out" "an open demand holds it for a person's decision; no rework dispatched" "the demand vetoes the dispatch"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 eq "$(meta F5b merge_result)" "pull_request" "…while the anchor keeps gating, so the merge still waits"
 
@@ -508,7 +508,7 @@ store "[$(anchor F5d 90 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 90 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_90.json"
 out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "an operator's own hold still vetoes the dispatch"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 
 echo "# …and a held + CONFLICTING anchor DEFERS fresh operator comments — the cap-park carve-out is gone (F5e successor)"
 # The merge_hold skip above continues past the whole loop body, so the feedback
@@ -562,7 +562,7 @@ out=$(STUB_DROP_KEYS="new-2:branch,target,rejection_reason,merge_strategy,existi
 eq "$(meta new-2 branch)" "<absent>" "first pass left an unstamped orphan (stamp dropped)"
 out=$(run)
 has "$out" "adopting unstamped rework orphan new-2" "the next pass adopts the orphan by its deterministic title"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
 eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
 
@@ -611,7 +611,7 @@ echo "# …and the NEXT pass re-routes it, past the branch dedup that would bury
 out=$(run)
 has "$out" "re-routing stranded rework new-2" "the stranded child is adopted, not suppressed as a dup"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and the route lands on the retry"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…with no twin minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
 has "$out" "filed rebase-mode rework new-2 routed to $FIX" "…and only now is the dispatch reported"
 
 echo "# …once routed, the child dedups normally again"
@@ -716,7 +716,7 @@ out=$(run)
 has "$out" "rework live-rw already covers branch" "the live sibling still vetoes, strand or no strand"
 has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable strand is named, not silently left"
 eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
@@ -913,7 +913,7 @@ has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "the fix pool is woken"
 echo "# …a comment below the watermark is answered; the batch never re-fires"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "no twin child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "no twin child"
 eq "$(meta_pinned P1 pr_posture)" "review_required@sha-40" "the answered comment falls back to the standing posture"
 hasnt "$out" "routed to rework" "…and nothing re-routes"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…nor re-wakes the pool"
@@ -924,8 +924,8 @@ printf '[{"id":5001,"user":{"login":"human1"},"body":"a"},{"id":5009,"user":{"lo
 out=$(run)
 eq "$(meta_pinned P1 pr_posture)" "commented@sha-40" "a comment above the mark is outstanding by construction"
 eq "$(meta P1 pr_comment_watermark)" "5009" "the watermark advanced past it"
-eq "$(meta P1 pr_comment_disposition)" "rework:new-4" "the new batch got its own child (the first batch's pass took new-3)"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
+eq "$(meta P1 pr_comment_disposition)" "rework:new-5" "the new batch got its own child (the first batch took new-2, its pass new-3, its finding new-4)"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
 
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"
@@ -966,7 +966,7 @@ has "$out" "watermark did NOT record" "the lost watermark is caught by the read-
 eq "$(meta W1 pr_comment_watermark)" "<absent>" "…the mark really did not move"
 out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
 eq "$(meta W1 pr_comment_watermark)" "9001" "…and the mark lands on the retry"
 
 echo "# …an unstamped comment-rework orphan is ADOPTED, never twinned"
@@ -979,7 +979,7 @@ has "$out" "did not record anchor_bead=W2; left unrouted" "an unstamped child is
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…and cannot be claimed"
 out=$(run)
 has "$out" "adopting unstamped comment-rework orphan new-2" "the next pass adopts it by its deterministic title"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "STILL exactly one child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL exactly one child"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…now routed"
 
 echo "# …but a CLOSED orphan is never adopted: it holds nothing and still moves the mark"
@@ -992,7 +992,7 @@ has "$out" "did not record anchor_bead=W3; left unrouted" "the dropped stamp lea
 ctmp=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX"); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
 out=$(run)
 hasnt "$out" "adopting unstamped comment-rework orphan" "a closed orphan is passed over"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "2" "a live child is minted in its place"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "2" "a live child is minted in its place"
 eq "$(meta new-3 'gc.routed_to')" "$FIX" "…and that one is routed"
 eq "$(meta W3 pr_comment_disposition)" "rework:new-3" "the disposition names the live child"
 grep -qxF "new-3|blocks|W3" "$STUB_DEPS" && ok "…and it is what holds the merge" || bad "blocks edge missing"
@@ -1013,7 +1013,7 @@ eq "$(meta W4 pr_comment_disposition)" "<absent>" "…with nothing recorded as i
 out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass re-checks the route it left behind"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…repairs it in place"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…without minting a twin"
 eq "$(meta W4 pr_comment_watermark)" "9300" "…and only then does the mark move"
 
 echo "# …a child whose prepare_mode stamp drops is never routed, nor watermarked past"
@@ -1036,7 +1036,7 @@ out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
 eq "$(meta new-2 prepare_mode)" "merge" "…re-stamps the mode it classified"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only then routes it"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…without minting a twin"
 eq "$(meta W6 pr_comment_watermark)" "9600" "…and only then does the mark move"
 
 echo "# …a CLOSED child is dispositioned, so an unrouted one still converges"
@@ -1070,7 +1070,7 @@ out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child by anchor_bead"
 eq "$(meta new-2 task_kind)" "rework" "…re-stamps the role marker on the recheck"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only then routes it"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…without minting a twin rework child (the batch's own validation pass is a separate bead)"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…without minting a twin rework child (the batch's own validation pass is a separate bead)"
 eq "$(meta W7 pr_comment_watermark)" "9700" "…and only then does the mark move"
 
 echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
@@ -1089,7 +1089,7 @@ eq "$rc" 0 "a posture-only pass exits 0"
 eq "$(meta_pinned PO1 pr_posture)" "commented@sha-60" "the posture is recorded"
 eq "$(meta PO1 pr_merge_state)" "BLOCKED@sha-60" "…and the merge state beside it"
 has "$out" "posture-only" "the summary names the mode"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "NOTHING was dispatched"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "NOTHING was dispatched"
 eq "$(meta PO1 pr_comment_watermark)" "<absent>" "…and no watermark moved: routing is the full pass's"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake" "…no pool was woken"
 
@@ -1106,7 +1106,7 @@ echo '[]' > "$GH_DIR/comments_61.json"
 out=$(run_posture)
 eq "$(meta_pinned PO2 pr_posture)" "none@sha-61" "the posture is still recorded"
 hasnt "$out" "filed rebase-mode rework" "…but no rework child is filed"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…none at all"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…none at all"
 
 echo "# …and MERGED/CLOSED reconciliation is left to the full pass"
 store "[$(anchor PO3 62)]"
@@ -1263,6 +1263,32 @@ eq "$(meta V1 signoff_rounds_reset)" "<absent>" "the batch writes no signoff_rou
 eq "$(meta V1 'check.codex')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
 eq "$(meta V1 pr_comment_disposition)" "rework:new-2" "the comments still route to work (the pass is opened after, as new-3)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+# …and the comment becomes a finding the validator rules, the shape a machine
+# review's finding has (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
+FID1=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID1" "<none>" "the comment becomes a task_kind=finding bead on the anchor"
+eq "$(meta "$FID1" 'finding.lane')" "human" "…on the human lane the validator's finding query selects (finding.lane == check_name)"
+eq "$(meta "$FID1" 'finding.source')" "human:human1" "…sourced to the login that raised it, whose thread a decline's owed reply is posted back into"
+eq "$(meta "$FID1" 'finding.disposition')" "unvalidated" "…unruled until the validator rules it"
+grep -qxF "new-2|blocks|$FID1" "$STUB_DEPS" && ok "…and the rework child (the fix unit) blocks it, so closing the fix closes the finding" || bad "rework child does not block the finding (wire-fix-unit missing)"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1")] | length' "$STUB_STORE")" "1" "…one comment, one finding — no twin"
+
+echo "# a wire-fix-unit that fails holds the batch unwatermarked, so the next pass re-attempts the edge"
+# The fix-unit -> finding wire is a required write, not the anchor edge's
+# best-effort companion: a finding later ruled must-fix blocks the anchor, and
+# only this edge lets closing the child release it. A failed wire holds the
+# batch — the finding is filed (upsert re-adopts it next pass) and the mark does
+# not advance past the comment it answers, so the wire is retried before it does.
+store "[$(anchor Vw 87)]"
+printf '%s' "$(prview 87 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_87.json"
+echo '[]' > "$GH_DIR/reviews_87.json"
+printf '[{"id":8870,"user":{"login":"human1"},"body":"still not what I asked for"}]' > "$GH_DIR/comments_87.json"
+out=$(STUB_DEP_FAIL="new-2" run)
+has "$out" "could not wire rework child new-2" "the failed wire is reported, not swallowed"
+has "$out" "NOT watermarking" "…and the batch is held to retry"
+eq "$(meta Vw pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the wire holds, so it retries"
+FIDW=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "Vw") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FIDW" "<none>" "…while the finding is already filed, so the next pass re-adopts it rather than twinning"
 
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic codex,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
@@ -1499,6 +1525,9 @@ out=$(run)
 eq "$(meta_pinned P3 pr_posture)" "commented@sha-42" "a review body with no inline comment still counts"
 eq "$(meta P3 pr_review_watermark)" "7001" "the review id space carries it"
 eq "$(meta P3 pr_comment_watermark)" "0" "…and the comment id space stays at zero"
+FID3=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "P3") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID3" "<none>" "a review body with no inline comment becomes a finding too, not only inline comments"
+eq "$(meta "$FID3" 'finding.source')" "human:human1" "…sourced to the review's author"
 
 echo "# …an EMPTY-bodied COMMENTED review is not a posture no id can answer"
 store "[$(anchor P4 43)]"
@@ -1553,12 +1582,16 @@ has "$(desc new-2)" "WHY IS THIS HERE?" "the child carries the comment verbatim"
 has "$(desc new-2)" "docs/file-structure.md:12" "…and where it was left"
 hasnt "$(desc new-2)" "## Review bodies" "an empty review body renders no section"
 grep -qxF "new-2|blocks|P6" "$STUB_DEPS" && ok "…and the child holds the merge" || bad "blocks edge missing"
+FID6=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "P6") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID6" "<none>" "an operator's CHANGES_REQUESTED produces a finding — the tk-zina89 gap closed"
+eq "$(meta "$FID6" 'finding.source')" "human:human1" "…sourced to the operator who raised it, so it reaches the validator like any finding"
+grep -qxF "new-2|blocks|$FID6" "$STUB_DEPS" && ok "…and a must-fix ruling holds the merge through the fix unit that blocks it" || bad "fix unit does not block the CHANGES_REQUESTED finding"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 
 echo "# …the same standing review is not filed twice"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "no twin child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "no twin child"
 hasnt "$out" "routed to rework" "…nothing re-routes"
 eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "…and the veto stands on its own, answered or not"
 
@@ -1865,8 +1898,61 @@ printf '%s' "$(prview 45 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_45.json"
 threads 45 "$(one_thread 45)"
 out=$(run)
 eq "$(reacted 45 NC-45)" "true" "the visit still acknowledges the comment"
-eq "$(treply 45 T-45)" "" "the city never replies for a human"
+eq "$(treply 45 T-45)" "" "a visit is a person's to answer, so the city never replies into their thread"
 eq "$(tresolved 45 T-45)" "false" "…and never resolves their thread"
+
+# ---- the peer model: a declined human objection is answered, never silenced ----
+# The validator may overrule a human on the merits (finding declined), but it
+# owes them the reason on their PR: it stamps the answer (finding.reply) and the
+# row it answers (finding.comment_id), and the write-back posts that answer into
+# the thread and resolves it. A closed declined human finding carrying both.
+dfind() { # id anchor comment_id [reply]
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"declined: not an objection","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"declined","finding.source":"human:johnzook","finding.comment_id":"%s"%s}}' \
+    "$1" "$2" "$3" "${4:+,\"finding.reply\":\"$4\"}"
+}
+
+echo "# a declined human objection is answered on its thread and the thread resolved"
+store "[$(anchor WD1 47 "$(wb_meta visit:VD1)"), $(dfind DF1 WD1 100 'The diff already asserts X in helper; no change needed.')]"
+printf '%s' "$(prview 47 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_47.json"
+threads 47 "$(one_thread 47)"
+out=$(run)
+has "$(treply 47 T-47)" "no change needed" "the validator's decline reason is posted into the raiser's thread"
+has "$(treply 47 T-47)" "<!-- gc-writeback -->" "…carrying the write-back marker"
+eq "$(tresolved 47 T-47)" "true" "…and the answered thread is resolved, so it no longer holds the merge"
+eq "$(meta DF1 finding.reply_posted)" "1" "…and the finding is marked answered"
+echo "# …and a second pass answers the same thread nothing"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "addPullRequestReviewThreadReply" "the answered decline is never replied to twice"
+
+echo "# the no-objection carve-out declines silently — no owed reply, no thread write"
+# A comment that raises no objection (a question the diff answers, praise) is
+# declined like a machine finding, with no --reply, so finding.reply is unset and
+# the write-back owes nothing: the thread is neither replied to nor resolved.
+store "[$(anchor WD3 48 "$(wb_meta visit:VD3)"), $(dfind DF3 WD3 100)]"
+printf '%s' "$(prview 48 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_48.json"
+threads 48 "$(one_thread 48)"
+out=$(run)
+eq "$(treply 48 T-48)" "" "a no-objection decline owes no reply, so none is posted"
+eq "$(tresolved 48 T-48)" "false" "…and the thread is left untouched"
+eq "$(meta DF3 finding.reply_posted)" "<absent>" "…and the finding is not marked answered"
+
+echo "# a re-raise re-blocks: a re-review after a decline re-opens the human validation pass"
+# Declining closes the finding, so a still-standing objection re-adopts as a
+# FRESH finding on re-review (find_open_by_key reads open findings only), and
+# pr-facts re-opens the human validation pass whose blocks edge re-holds the
+# anchor. The prior decline forecloses nothing.
+store "[$(anchor WR 49 ',"pr_comment_watermark":"100"'), $(dfind DFR WR 100 'declined last round')]"
+printf '%s' "$(prview 49 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_49.json"
+echo '[]' > "$GH_DIR/reviews_49.json"
+printf '[{"id":200,"user":{"login":"johnzook"},"body":"i still think this is wrong"}]' > "$GH_DIR/comments_49.json"
+out=$(run)
+VPR=$(vpass_id WR)
+hasnt "$VPR" "<none>" "the re-review re-opens a human validation pass on the anchor"
+grep -qxF "$VPR|blocks|WR" "$STUB_DEPS" && ok "…whose blocks edge re-holds the anchor" || bad "re-opened validation pass does not block the anchor"
+FRESHR=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "WR") | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FRESHR" "<none>" "…and a fresh OPEN finding is filed, the closed decline not re-adopted in its place"
+eq "$(bstatus DFR)" "closed" "…while the prior declined finding stays closed"
 
 echo "# a later batch answers its own comments and never the ones before them"
 # The watermark is cumulative and the disposition is overwritten per batch, so
@@ -2237,7 +2323,7 @@ echo "# …idempotent: the same conversation batch mints no twin and moves no ma
 out=$(run)
 # The batch also opens a validation pass, a second new- bead, so count only the
 # rework child — the twin this guards against — not every new- bead.
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "still exactly one child (the validation pass is a separate bead)"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child (the validation pass is a separate bead)"
 eq "$(meta IC1 pr_issue_comment_watermark)" "770001" "…and the mark holds"
 
 echo "# …a newer conversation comment above the mark re-fires"

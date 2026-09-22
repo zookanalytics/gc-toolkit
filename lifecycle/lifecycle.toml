@@ -608,6 +608,20 @@ keys = [
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
   "finding.source",
+  # The GitHub comment databaseId that raised a human finding, stamped by
+  # pr-facts.sh at file time. For an inline review comment it is also the id the
+  # reviewThread carries, so the write-back can find the thread and post a
+  # declined finding's owed reply into it.
+  "finding.comment_id",
+  # The answer a declined HUMAN objection owes its raiser, set by the validator
+  # on `finding.sh set-disposition declined --reply`. pr-facts.sh's write-back
+  # posts it to finding.comment_id's thread; a machine or no-objection decline
+  # owes none and sets it not. The peer model: the validator may overrule a
+  # human on the merits, never in silence.
+  "finding.reply",
+  # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
+  # pass does not answer the same thread twice.
+  "finding.reply_posted",
 ]
 
 [metadata.pr_posture]

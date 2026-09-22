@@ -14,6 +14,13 @@
 #   finding.key          lane name + normalized locus + message; the dedup handle
 #   finding.disposition  unvalidated | must-fix | deferred | declined
 #   finding.source       machine:<lane> | human:<login>
+#   finding.comment_id   the GitHub comment databaseId that raised it (stamped by
+#                        pr-facts.sh for a human finding); the thread the write-back
+#                        posts an owed decline reply into
+#   finding.reply        the answer a declined HUMAN objection owes its raiser,
+#                        set on `set-disposition declined --reply`; pr-facts.sh's
+#                        write-back posts it to finding.comment_id's thread. A
+#                        machine or no-objection decline owes none and sets it not.
 #
 # The interlock a finding places on its anchor is a graph edge, and the
 # disposition picks the type (component-model I1: no wait lives only in a
@@ -40,7 +47,7 @@
 # Verbs:
 #   finding.sh key           --lane L --locus LOC --message MSG
 #   finding.sh upsert        --anchor A --lane L --locus LOC --message MSG [--source S]
-#   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R]
+#   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT]
 #   finding.sh wire-fix-unit --fix-unit FU --anchor A --findings F1,F2,...
 #   finding.sh open-must-fix --anchor A [--lane L]
 #   finding.sh close-unvalidated --anchor A --lane L [--reason R]
@@ -68,7 +75,7 @@ usage() {
 usage:
   finding.sh key --lane <lane> --locus <locus> --message <msg>
   finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>]
-  finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined [--reason <r>]
+  finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined [--reason <r>] [--reply <text>]
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
   finding.sh close-unvalidated --anchor <id> --lane <lane> [--reason <r>]
@@ -93,7 +100,10 @@ normalize() {
 
 # finding.key = <lane>:<12 hex of sha256(normalized locus + US + message)>. The
 # lane prefix keeps two reviewers' findings at one locus distinct; the hash is
-# the dedup handle re-raising an objection collides on.
+# the dedup handle re-raising an objection collides on. GitHub's own review and
+# comment ids would not serve: a re-review re-raises a still-standing objection
+# under a fresh id, so an id key twins it every pass where the content key
+# re-adopts.
 compute_key() {
   local lane="$1" locus="$2" msg="$3" nloc nmsg h
   nloc=$(normalize "$locus")
@@ -180,12 +190,13 @@ cmd_upsert() {
 }
 
 cmd_set_disposition() {
-  local finding="" anchor="" disp="" reason=""
+  local finding="" anchor="" disp="" reason="" reply=""
   while [ $# -gt 0 ]; do case "$1" in
     --finding) finding="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --disposition) disp="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --reply) reply="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$finding" ] && [ -n "$anchor" ] && [ -n "$disp" ] \
@@ -241,6 +252,18 @@ cmd_set_disposition() {
       if edge_exists "$finding" "$anchor"; then
         gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
           || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
+      fi
+      # A declined HUMAN objection owes its raiser an answer on the PR: the
+      # operator read the diff and objected, so overruling them in silence is the
+      # gap the peer model closes. Stamp the owed reply BEFORE the close, and fail
+      # closed if it does not stick — a finding closed without the reply the
+      # caller asked for is a silent decline the write-back can no longer post,
+      # and a closed finding is off the validator's unvalidated set so nothing
+      # re-attempts it. A machine or no-objection decline passes no --reply and
+      # owes nothing.
+      if [ -n "$reply" ]; then
+        gc bd update "$finding" --set-metadata finding.reply="$reply" >/dev/null 2>&1 \
+          || { warn "could not stamp finding.reply on $finding; NOT closing (a silent decline)"; exit 2; }
       fi
       local note="declined"
       [ -n "$reason" ] && note="declined: $reason"
