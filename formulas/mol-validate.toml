@@ -73,7 +73,21 @@ gc prime
 gc bd prime
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$VALIDATION_PASS" ] || { echo "mol-validate needs an input convoy with exactly one tracked member" >&2; exit 1; }
+# >>> validate-malformed-convoy-refuse
+if [ -z "$VALIDATION_PASS" ]; then
+  echo "mol-validate needs an input convoy with exactly one tracked member" >&2
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key validate-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-validate cannot derive its validation-pass bead; the pour is malformed and must be redone. Held at load-dispatch; nothing was ruled or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
+# <<< validate-malformed-convoy-refuse
 gc bd show "$VALIDATION_PASS"
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ```
@@ -84,11 +98,35 @@ lane's batch on one anchor at the head the batch was produced at:
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
-[ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
+# >>> validate-no-anchor-refuse
+if [ -z "$ANCHOR" ]; then
+  echo "validation pass carries no anchor_bead; nothing to rule" >&2
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  if ! "$SCRIPTS/escalate.sh" --subject "$VALIDATION_PASS" --key validate-no-anchor --message "Validation pass $VALIDATION_PASS carries no anchor_bead, so there is nothing to rule; the dispatch is malformed and must be redone. Held at load-dispatch; nothing was ruled or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass carries no anchor_bead; the dispatch is malformed and must be redone"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
+# <<< validate-no-anchor-refuse
 echo "validating lane $LANE on anchor $ANCHOR at ${REVIEWED_OID:-<unpinned>}"
 ```
 An absent `check_name` resolves to `codex`, the same default lane-state.sh and
 gate-ensure.sh use, so a pass dispatched without one rules the codex lane.
+
+A malformed dispatch cannot be ruled and never will be on a retry. Its convoy has
+no single tracked member, or that member carries no `anchor_bead`. So each refusal
+above files a visit through `escalate.sh` and holds this step `blocked`
+(not-closed, not-claimable) only if that visit landed, then drains. A bare
+`exit 1` would leave the step `open` and routed, and the pool would re-offer the
+same unrulable pass to a fresh validator every cycle. The store-read guards
+further down are the opposite case: an unreadable or non-array finding ledger is
+transient, so those DO fail closed to a plain `exit 1` and a later claim retries
+once the store recovers. Do not convert them to a hold.
 
 **3. Read the batch.** The findings to rule are the LIVE `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition
