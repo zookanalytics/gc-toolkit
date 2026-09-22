@@ -25,6 +25,10 @@
 #             visit, filing nothing
 #   (VISITID-REASON) --reason on an explicit visit id is refused (exit 2): a fresh
 #             visit needs a subject, and the reason is never dropped silently
+#   (VISITID-SUBJECT) an interactive engage of a visit id grounds the operator in
+#             the SUBJECT the visit tracks and the reason it was filed (not the
+#             visit's own row), skips the join-or-new prompt, and names the
+#             subject in the success line
 #   (MODELFLAG) --model codex spawns converse-codex
 #   (BUSY)    a visit already in_progress under an owner is not re-spawned (exit 4)
 #   (CLOSED)  a closed explicit visit is refused before spawning (exit 4)
@@ -764,6 +768,22 @@ echo "# Enter at the model prompt keeps Opus (the work-tier default)"
 run_engage_tty '\n' tk-vis --no-attach
 eq "$RC" 0 "(IA-MODEL-DEFAULT) Enter at the model prompt exits 0"
 has "$CALLED" "session new converse-opus" "(IA-MODEL-DEFAULT) …keeping Opus"
+
+echo "# a visit id is grounded by its SUBJECT and reason, not the visit's own row"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+# the join-or-new prompt is skipped for a visit id; the only read is the model
+# choice (Enter = Opus), so this exercises the visit-id grounding straight through.
+run_engage_tty '\n' tk-vis --no-attach
+eq "$RC" 0 "(IA-VISITID-SUBJECT) engaging a visit id exits 0"
+has "$OUT" "Subject: tk-subj" "(IA-VISITID-SUBJECT) grounding names the subject the visit tracks"
+has "$OUT" "the subject under engagement" "(IA-VISITID-SUBJECT) …with the subject's OWN title, resolved from the visit"
+has "$OUT" "compare notes on the WIP proposals" "(IA-VISITID-SUBJECT) …and the visit reason (the title tail after the em dash)"
+# the subject/join-or-new prompt belongs to a subject id; a visit id skips it
+hasnt "$OUT" "starts a new visit" "(IA-VISITID-SUBJECT) …and the join-or-new prompt is skipped"
+hasnt "$OUT" "Subject has open visit" "(IA-VISITID-SUBJECT) …no visit list is offered"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISITID-SUBJECT) …then it engages the named visit"
+has "$OUT" "for tk-subj" "(IA-VISITID-SUBJECT) …and the success line reads 'for <subject>', not the visit id repeated"
 
 echo "# a subject given by title search resolves and engages"
 export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER="" SEARCH_HIT=1

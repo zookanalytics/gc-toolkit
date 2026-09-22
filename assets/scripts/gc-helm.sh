@@ -2435,21 +2435,62 @@ cmd_engage() {
     fi
     bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
 
-    # Ground the operator in the bead they picked, before the visit prompt: a
-    # typed id, PR number, or URL carries nothing of the bead on its own, and a
-    # title search drops all but the title once a match is chosen. bead_row is
-    # the record the existence gate above already fetched, so the line costs no
-    # query. Interactive only — a --no-input caller named the subject on argv and
-    # its stdout is a script's to parse.
+    # The subject a visit id is about — for the grounding line and the success
+    # summary below. A visit records its subject in the gc.continuation_group
+    # stamp, which can land empty, so fall back to the tracks edge; the record
+    # the existence gate already fetched carries both. Empty for a non-visit.
+    visit_subject=""
+    if [ "$bead_kind" = "visit" ]; then
+        visit_subject=$(printf '%s' "$bead_row" | jq -r '
+            (.metadata["gc.continuation_group"] // "") as $g
+            | if $g != "" then $g
+              else ([ .dependencies[]? | select((.type // "") == "tracks")
+                      | (.depends_on_id // "") ] | map(select(. != "")) | first // "")
+              end' 2>/dev/null || true)
+    fi
+
+    # Ground the operator in the bead they picked, before the visit or model
+    # prompt: a typed id, PR number, or URL carries nothing of the bead on its
+    # own, and a title search drops all but the title once a match is chosen.
+    # Interactive only — a --no-input caller named the subject on argv and its
+    # stdout is a script's to parse.
     if [ "$engage_interactive" = 1 ]; then
-        subject_summary=$(printf '%s' "$bead_row" | jq -r '
-            (.title // "") as $t
-            | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
-            | "  " + (.id // "?")
-              + " (" + (.issue_type // "?") + " · " + (.status // "?")
-              + " · p" + ((.priority // 0) | tostring) + ")"
-              + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
-        [ -n "$subject_summary" ] && printf '%s\n' "$subject_summary"
+        if [ "$bead_kind" = "visit" ]; then
+            # A visit id names the visit, not the work it is about, and the
+            # join-or-new prompt is skipped for it — so this is the operator's one
+            # look before the model choice. Show the subject the visit tracks, and
+            # the reason it was filed (the visit title's tail after "— ").
+            if [ -n "$visit_subject" ]; then
+                subj_row=$(gc bd show "$visit_subject" --json 2>/dev/null | scrub \
+                    | jq -r --arg b "$visit_subject" \
+                        'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first) else empty end' 2>/dev/null || true)
+                subj_summary=$(printf '%s' "$subj_row" | jq -r '
+                    (.title // "") as $t
+                    | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
+                    | " (" + (.issue_type // "?") + " · " + (.status // "?")
+                      + " · p" + ((.priority // 0) | tostring) + ")"
+                      + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
+                # A subject that does not resolve (cross-store, or a torn row)
+                # still grounds by id rather than dropping the line.
+                printf '  Subject: %s%s\n' "$visit_subject" "$subj_summary"
+            else
+                printf '  Subject: (this visit names no subject — no continuation-group stamp and no tracks edge)\n'
+            fi
+            visit_reason=$(printf '%s' "$bead_row" | jq -r '
+                (.title // "")
+                | (split(" — ") | if length > 1 then (.[1:] | join(" — ")) else .[0] end)
+                | if length > 96 then .[0:95] + "…" else . end' 2>/dev/null || true)
+            [ -n "$visit_reason" ] && printf '  Visit:   "%s"\n' "$visit_reason"
+        else
+            subject_summary=$(printf '%s' "$bead_row" | jq -r '
+                (.title // "") as $t
+                | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
+                | "  " + (.id // "?")
+                  + " (" + (.issue_type // "?") + " · " + (.status // "?")
+                  + " · p" + ((.priority // 0) | tostring) + ")"
+                  + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
+            [ -n "$subject_summary" ] && printf '%s\n' "$subject_summary"
+        fi
     fi
 
     # --template pre-fills the starter with a named seed now that the subject is
@@ -2783,7 +2824,10 @@ cmd_engage() {
     # see it would bind a different visit.
     _eng_which=existing; [ "$visit_new" = 1 ] && _eng_which=new
     _eng_routed=$(printf '%s' "$visit_row" | jq -r '.metadata["gc.routed_to"] // ""' 2>/dev/null || true)
-    printf '✓ %s on %s visit %s for %s\n' "$template" "$_eng_which" "$VISIT" "$bead"
+    # On the visit-id path $bead IS the visit, so name the subject it tracks
+    # rather than repeat the visit id back as its own "for".
+    _eng_for="$bead"; [ "$bead_kind" = "visit" ] && [ -n "$visit_subject" ] && _eng_for="$visit_subject"
+    printf '✓ %s on %s visit %s for %s\n' "$template" "$_eng_which" "$VISIT" "$_eng_for"
     printf '  attach: gc session attach %s\n' "$sid"
     # `engage <subject>` with no --reason binds a visit that already existed, which
     # may be narrower or already-purposed than the fresh discussion the operator
