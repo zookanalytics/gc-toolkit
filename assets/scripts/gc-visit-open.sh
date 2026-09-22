@@ -198,6 +198,12 @@ require_reaction_agent() {
         _rra_roster=$(gc agent list --json 2>/dev/null || true)
     fi
     [ -n "$_rra_roster" ] || return 0
+    # A positive dead-zone finding requires a well-formed roster — a JSON object
+    # carrying an .agents array. Malformed, truncated, preface-prefixed, or
+    # wrong-shaped output is a degraded data plane, not a dead zone, so fail open
+    # (per the header) rather than strand a legitimate intake on a roster gc could
+    # not answer. Empty .agents stays a genuine finding; only unreadable is spared.
+    printf '%s' "$_rra_roster" | jq -e 'type == "object" and (.agents | type == "array")' >/dev/null 2>&1 || return 0
     # Serviceable when a proactive pool OR a converse (base name or a model
     # variant) is registered for the rig, in any cap or suspension state.
     if printf '%s' "$_rra_roster" | jq -e --arg r "$1" '

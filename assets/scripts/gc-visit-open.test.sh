@@ -109,8 +109,10 @@ case "$1 ${2:-}" in
     # A reaction roster: proactive + converse for each rig named in
     # $FAKE_REACTION_RIGS (default: both stub rigs served). A rig ABSENT from
     # this list has no reaction agent — the dead zone require_reaction_agent
-    # refuses. FAKE_AGENT_LIST_EMPTY models an unreadable roster (fail open).
+    # refuses. FAKE_AGENT_LIST_EMPTY models an empty (unreadable) roster and
+    # FAKE_AGENT_LIST_INVALID a nonempty-but-unparseable one — both fail open.
     [ -n "${FAKE_AGENT_LIST_EMPTY:-}" ] && exit 0
+    [ -n "${FAKE_AGENT_LIST_INVALID:-}" ] && { printf '%s\n' "$FAKE_AGENT_LIST_INVALID"; exit 0; }
     jq -n --arg rigs "${FAKE_REACTION_RIGS-gc-toolkit gascity}" \
       '{agents: [ ($rigs | split(" ")[] | select(length>0)) as $r
                   | {qualified_name:($r+"/gc-toolkit.proactive"), suspended:false, pool:{max:2}},
@@ -381,6 +383,25 @@ run no "a topic when the roster is unreadable" --rig gascity
 eq "$RC" "0" "(DEADZONE) an unreadable roster files rather than refusing"
 has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed"
 unset FAKE_AGENT_LIST_EMPTY
+
+# The same fail-open must cover a NONEMPTY roster gc cannot parse: malformed
+# JSON, a stray preface line before the JSON, a truncated payload, or valid JSON
+# of the wrong shape all leave the dead-zone finding unprovable, so the intake
+# files rather than refusing. Empty output was the only unreadable case covered
+# before; nonempty-invalid is the reachable degraded-data-plane one.
+for _bad in unparseable preface truncated wrongshape; do
+    case "$_bad" in
+        unparseable) FAKE_AGENT_LIST_INVALID='not json at all' ;;
+        preface)     FAKE_AGENT_LIST_INVALID="$(printf 'gc: reading rig store\n{"agents":[]}')" ;;
+        truncated)   FAKE_AGENT_LIST_INVALID='{"agents":[' ;;
+        wrongshape)  FAKE_AGENT_LIST_INVALID='{"unexpected":true}' ;;
+    esac
+    export FAKE_AGENT_LIST_INVALID
+    run no "a topic when the roster is nonempty-invalid ($_bad)" --rig gascity
+    eq "$RC" "0" "(DEADZONE) a nonempty invalid roster ($_bad) files rather than refusing"
+    has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed ($_bad)"
+    unset FAKE_AGENT_LIST_INVALID
+done
 
 # --- (SUBJECT) an existing bead is its own subject ----------------------------
 run no tk-abc12

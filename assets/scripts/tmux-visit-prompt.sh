@@ -6,9 +6,11 @@
 # response is re-parsed as a tmux command, tk-7z8c6); the submitted text goes
 # through a per-press DRAFT FILE to gc-visit-open.sh, which mints the subject
 # and queues the conversation. A second popup then picks the target rig —
-# defaulted to the pane's own rig, offering every rig and marking any that is
-# paused — and passes it as --rig. A suspended rig keeps its beads store, so a
-# report filed there is recorded and triaged on resume. The draft is removed at
+# defaulted to the pane's own rig, offering the non-hq rigs and tagging any that
+# is suspended or not running — and passes it as --rig. A suspended rig keeps its
+# beads store, so a report filed there is recorded and triaged on resume; the hq
+# store is withheld because it runs no reaction pool, though its bead ids stay
+# valid subjects. The draft is removed at
 # exactly two moments —
 # the intake CONFIRMS an id, or the file is provably empty — and every other
 # path keeps it and names its path (tk-w4dp4: this key's whole purpose is
@@ -210,12 +212,13 @@ if [ -z "$(printf '%s' "$TOPIC" | tr -d '[:space:]')" ]; then
     exit 0
 fi
 
-# 4b. Pick the target rig — default the board-context rig, override to any rig
-# (prefix+a → confirm). Every rig is offered; a suspended or not-running one is
-# tagged, not withheld: gc rig suspend keeps its beads store, so a report filed
-# there is recorded and triaged on resume, and the intake allows it. A broken or
-# empty `gc rig list` skips the chooser and lets the intake apply its own
-# default; an Esc keeps the draft, like the message popup.
+# 4b. Pick the target rig — default the board-context rig, override to any
+# non-hq rig (prefix+a → confirm). The hq/city-workspace store is dropped from
+# the offer (see below); a suspended or not-running rig is tagged, not withheld:
+# gc rig suspend keeps its beads store, so a report filed there is recorded and
+# triaged on resume, and the intake allows it. A broken or empty `gc rig list`
+# skips the chooser and lets the intake apply its own default; an Esc keeps the
+# draft, like the message popup.
 # Withheld entirely for a bead id: gc-visit-open.sh treats an id-shaped argument
 # whose prefix names a rig as an existing bead — the bead's own rig is
 # authoritative and the intake refuses --rig for it — so offering a rig here
