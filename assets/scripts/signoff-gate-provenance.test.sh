@@ -143,7 +143,7 @@ GIT
 chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_GC_LOG="$TMP/gc.log" STUB_GH_LOG="$TMP/gh.log"
-unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
+unset GC_RIG 2>/dev/null || true
 
 HEAD_OID=$(printf 'head' | sha1sum | cut -d' ' -f1)
 export STUB_LSREMOTE="$HEAD_OID" STUB_PR_HEAD="$HEAD_OID"

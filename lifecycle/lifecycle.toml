@@ -36,8 +36,8 @@ human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"
 detached_states = ["pre_open_gate", "pull_request"]
 # The one route value that is not a queue. No pool claims it, so it parks the
 # bead for a person (docs/gascity-human-engagement.md). A detached state may
-# rest on it, which is where signoff.sh routes a round-capped anchor, and a
-# transition that finds it leaves it alone. Every other route is a pool offer.
+# rest on it, and a transition that finds it leaves it alone. Every other route
+# is a pool offer.
 # A park must NAME what it waits for: writing this route without a gc.takeaway
 # is refused, because the helm board spends the takeaway as the row's NEEDS
 # sentence and reports a park without one as no question recorded.
@@ -223,12 +223,12 @@ settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 # "dispatch_count at the ceiling" as the writer itself recorded it.
 marker_prefixes = ["dispatch_backstop."]
 # No check.<g> value is a hold. A lane state says what one reviewer owes, and
-# every one of them is a state some actor moves the anchor on from. The park
-# that used to live under `exception@` is merge_hold, and the cap writes
-# blocked_reason and gc.takeaway with it, both declared above — so the wait is
-# still asserted, by the keys that carry its sentence. Leaving the two gate
-# scalars out is what disables that arm; the check reads an omitted field as a
-# marker the declaration dropped.
+# every one of them is a state some actor moves the anchor on from. merge_hold
+# is not a marker_key either: an operator's freeze is theirs to lift, and a
+# hold that must show as an edge asserts it through blocked_reason or
+# gc.takeaway beside it, both declared above, which carry the wait's sentence.
+# Leaving the two gate scalars out is what disables that arm; the check reads
+# an omitted field as a marker the declaration dropped.
 # The route that parks a bead for a person is park_route in [machine]. A bead
 # resting on it waits on somebody, and that wait has the same shape as any
 # other.
@@ -257,9 +257,10 @@ hold_severity = "warn"
 
 [posture]
 # What the PR is doing, recorded on the anchor by pr-facts.sh. pr_posture is a
-# dated key, `<value>@<oid>@<since>`: its review_required value is a cause of an
-# owed row, so the instant the requirement was first read at this head is what
-# orders that row in the operator's queue. pr_merge_state keeps a plain
+# dated key, `<value>@<oid>@<since>`: a required posture — review_required, or a
+# standing changes_requested once the cadence has run dry — is a cause of an owed
+# row, so the instant the requirement was first read at this head is what orders
+# that row in the operator's queue. pr_merge_state keeps a plain
 # `<value>@<oid>` shape — nothing queues on it. merge.sh
 # reads these off the bead; nothing else re-derives them from GitHub.
 posture_key = "pr_posture"
@@ -294,9 +295,9 @@ disposition_key = "pr_comment_disposition"
 # pass and prints it to a log; this key is where the answer is kept, so a reader
 # never re-implements two scripts' predicates to learn it.
 machine_key = "pr.machine"
-# The wedge shape is part of the value: both shapes mean no automated actor can
-# move the anchor, and they are released by different things, so a reader that
-# has to act on one must not have to re-derive which it is.
+# The wedge names itself in the value: it means no automated actor can move the
+# anchor, and the value says what releases it, so a reader acts without
+# re-deriving the shape.
 #   progressing       some automated actor will act — a pool-routed blocker is
 #                     open, or a declared lane is short of green
 #   settled           every declared gate reads green; the cadence
@@ -305,9 +306,7 @@ machine_key = "pr.machine"
 #   wedged-exception  merge_hold stands with signoff_cap beside it: the cap
 #                     parked the anchor and routed it to a person, and no
 #                     automated actor will lift it
-#   wedged-veto       a non-city CHANGES_REQUESTED stands with the signoff round
-#                     cap spent, so nothing will file further rework
-machines = ["progressing", "settled", "wedged-exception", "wedged-veto"]
+machines = ["progressing", "settled", "wedged-exception"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
 writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
@@ -350,10 +349,8 @@ since_format = "RFC 3339 UTC"
 # (escalate.sh, gc-helm.sh, mol-visit.toml, mol-first-reaction.toml,
 # mol-feedback-distiller.toml); a rework child or a doctor finding routed to its
 # fix pool (pr-facts.sh, pre-open-rebase.sh, doctor-finding-gate.sh); a review
-# bead's pool route restored after an abandoned round (mol-review.toml); and an
-# anchor parked to `human` by signoff.sh's round cap, beside
-# merge_hold=signoff_cap and a verified gc.takeaway, leaving merge_result
-# unchanged. A route value is a rig-qualified pool identity (<rig>/<agent>) or
+# bead's pool route restored after an abandoned round (mol-review.toml). A route
+# value is a rig-qualified pool identity (<rig>/<agent>) or
 # the park sentinel `human` ([machine] park_route); the pool
 # offer is exact byte equality (gascity hookClaimMatchesRoute), so a bare,
 # unqualified or padded value matches no pool and doctor/check-routed-work-
@@ -464,10 +461,9 @@ keys = [
 #   when an integration branch graduates; read by pr-facts.sh, absent leaves the
 #   branch-name classification standing. Never cleared.
 # blocked_reason — the human-readable reason an anchor sits in a human state
-#   (existing_pr unusable, a PR closed or retargeted out of band, a round cap).
-#   Written by pr-facts.sh, signoff.sh and molecule-hold.sh; it is also a [holds]
-#   marker, so a live bead carrying it owes a blocks edge. Cleared with `--unset`
-#   only when the round cap that wrote it is retired. Freeform.
+#   (existing_pr unusable, a PR closed or retargeted out of band). Written by
+#   pr-facts.sh and molecule-hold.sh; it is also a [holds] marker, so a live
+#   bead carrying it owes a blocks edge. Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
@@ -554,11 +550,11 @@ keys = [
 #   gc.execution_routed_to) to repair a wedged lane. Never cleared. A pool name.
 # source_review_bead / source_review — which feedback a rework child answers, in
 #   two id spaces that cannot share a key. signoff.sh stamps source_review_bead =
-#   the review BEAD it filed the child from, and both its round cap and
-#   gate-ensure's already-answered probe count a child by that key. pr-facts.sh
+#   the review BEAD it filed the child from, and gate-ensure's already-answered
+#   probe counts a child by that key. pr-facts.sh
 #   stamps source_review = the comma-joined GitHub review ids whose bodies its
-#   child carries verbatim, a comment batch rather than a signoff round, so it
-#   counts against no cap. Neither is cleared.
+#   child carries verbatim, a comment batch rather than a signoff round.
+#   Neither is cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a
@@ -574,18 +570,14 @@ keys = [
 # wedge_seen_root — the workflow root gate-ensure.sh last saw spend its dispatch
 #   ceiling, stamped on the review bead so a wedge gets one quiet pass before it
 #   escalates; a differing or absent value is the first sighting. A root bead id.
-# signoff_cap / signoff_rounds_reset / signoff_round_floor — the review-round
-#   cap. signoff_cap = <gate> names the gate whose rounds ran out, so the cap's
-#   own merge_hold park can be told from one a person made; signoff.sh and
-#   pr-facts.sh clear all three with `--unset` when the cap is retired.
-#   pr-facts.sh records each batch of operator feedback in signoff_rounds_reset =
-#   <review id>.<comment id>; signoff.sh answers it with signoff_round_floor =
-#   <rework children then>@<batch>, the rounds that no longer count. An absent
-#   floor counts from 0 (docs/state-machine.md).
+# signoff_cap / signoff_rounds_reset / signoff_round_floor — RETIRED. The
+#   review-round cap is gone: convergence is judged by the validator, not
+#   counted (specs/tk-ztapg/review-cycle-architecture.md), so nothing writes
+#   these now. Registered so that residue on a pre-retirement bead reads as
+#   known, not as a stray.
 # dispatch_count / dispatch_backstop.<g> — RETIRED. gate-ensure.sh removed the
-#   review dispatch ceiling, so nothing writes these now; the cap-reset sweep in
-#   signoff.sh and pr-facts.sh still `--unset`s any residue a pre-retirement
-#   store carries. Registered so that residue reads as known, not as a stray.
+#   review dispatch ceiling, so nothing writes these now. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
 
 [metadata.review_findings]
 # A finding is a review objection with an identity of its own, so it outlives
@@ -658,12 +650,11 @@ keys = [
 [metadata.holds]
 keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # merge_hold, rebase_hold and tracking_only are boolean-ish: empty, `false`, `0`
-# or `null` is not held, anything else is. merge_hold is the merge freeze —
-# signoff.sh writes the literal
-# `signoff_cap` (paired with the signoff_cap key) for a round-cap park, and an
-# operator or converse writes a plain truthy value; it is a [holds] marker, so a
-# live bead carrying it owes a blocks edge, and only the cap's own park is
-# cleared (with `--unset`). rebase_hold and tracking_only are OPERATOR freezes
+# or `null` is not held, anything else is. merge_hold is the merge freeze an
+# operator or converse writes as a plain truthy value; merge.sh, gate-ensure.sh
+# and pr-open.sh honour it. It is not itself a [holds] marker_key, so a bare
+# merge_hold owes no blocks edge; a hold that must show as an edge asserts it
+# through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads: a rebase_hold on any bead naming a branch stops
 # pre-open-rebase.sh, pr-open.sh, pr-facts.sh and convoy-graduate.sh from
 # rebasing or dispatching it, and tracking_only opts a PR out of merge.sh's
@@ -750,8 +741,7 @@ keys = [
   # reads to tell a sitting still waiting on a person from one that ended:
   # gc.takeaway beside it is the headline, replaced at sign-off and cleared by
   # nothing a sitting does, so only the demand's own liveness answers that
-  # question. The one takeaway that is retired is the round cap's own, which
-  # describes a park rather than a sitting and goes when the park does.
+  # question.
   # gc.takeaway_settled is the headline's own disposition, "1" where its writer
   # said nothing is waiting and empty where it did not: [holds] settled_keys
   # reads it, and it is rewritten with every headline rather than surviving one.

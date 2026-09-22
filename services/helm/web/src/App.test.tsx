@@ -569,19 +569,19 @@ function servePRUnder(rootId: string, pr: Tile) {
 // one the review cap parked, where the only release is a ruling nobody gave.
 it('names the wedge and links the pull request', async () => {
   servePRUnder('tk-root', prTile({
-    id: 'tk-veto',
-    title: 'a pull request a human rejected',
-    pr_machine: 'wedged-veto',
+    id: 'tk-exc',
+    title: 'a pull request the review cap parked',
+    pr_machine: 'wedged-exception',
     pr_number: 513,
     pr_url: 'https://github.com/zook/gc-toolkit/pull/513',
-    needs: 'wedged: a standing CHANGES_REQUESTED with the rework rounds spent',
+    needs: 'wedged: the review cap parked this anchor — a ruling releases it, a new commit does not',
   }));
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/a pull request a human rejected/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/a pull request the review cap parked/)).toBeTruthy());
 
-  const row = memberRow('tk-root', /a pull request a human rejected/);
+  const row = memberRow('tk-root', /a pull request the review cap parked/);
   expect(row).not.toBeNull();
-  expect(within(row as HTMLElement).getByText(/wedged: a standing CHANGES_REQUESTED/)).toBeTruthy();
+  expect(within(row as HTMLElement).getByText(/wedged: the review cap parked/)).toBeTruthy();
 
   const link = within(row as HTMLElement).getByRole('link', { name: 'PR #513' });
   expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/pull/513');

@@ -15,8 +15,7 @@ pr_url / pr_number post-open, and the dispatch-pinned reviewed_oid.
 The mol-review hard contract is preserved intact: ONE verdict per claim — the
 synthesis makes the single signoff.sh call and the lanes never call it; the
 verdict is posted as a COMMENT, never a GitHub approval (signoff.sh owns
-that); and the signoff round cap is untouched, because signoff.sh owns it and
-nothing here counts rounds. The lanes add reviewer breadth on a second
+that). The lanes add reviewer breadth on a second
 provider; the merge gate, the finding beads, and the rework child are the same
 machinery mol-review hands to.
 

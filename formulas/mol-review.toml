@@ -395,8 +395,7 @@ required fix.
 **1. One call, through the one writer.** `signoff.sh` owns every mechanic
 past your judgment: posting the artifact, stamping `check.<gate>` with
 read-back, filing the finding set from `findings.json` beside one slung rework
-child on request-changes, enforcing the round cap, and refusing a pin the
-branch no longer carries:
+child on request-changes, and refusing a pin the branch no longer carries:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')

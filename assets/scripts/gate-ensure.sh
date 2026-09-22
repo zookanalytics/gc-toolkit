@@ -171,11 +171,11 @@ inflight_review() { # <anchor-id> <gate>
 
 # An open rework child already filed under <anchor>? Echoes its id. A rework
 # child is a blocks-dep bead whose metadata carries a non-empty
-# source_review_bead — exactly what signoff.sh's count_rework_children walks —
-# and request-changes clears check.<g> and files exactly one such child, so a
-# lane back to unreviewed with one of these still open is owed the rework
-# landing, not a fresh review. Non-zero rc = the ledger could not answer; the
-# caller holds the dispatch, the same as an unreadable in-flight-review lookup.
+# source_review_bead, which request-changes stamps on the one child it files as
+# it clears check.<g>, so a lane back to unreviewed with one of these still
+# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
+# could not answer; the caller holds the dispatch, the same as an unreadable
+# in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
@@ -613,12 +613,13 @@ STRAY
       none|off|approval) continue ;;  # approval is evidenced by GitHub review state
     esac
     # The marker is read for two legacy purposes only — never to classify the
-    # lane. First, a legacy exception@ park: signoff.sh on main still refuses to
-    # stamp over it and migrate-lane-states.sh has not yet rewritten it to
-    # merge_hold=signoff_cap, so a review poured against the parked anchor would
-    # be wasted reach — it reads as wedged and held. Second, the wedge
-    # escalation's diagnostic line (judge_pour_liveness reads $marker). Both
-    # retire with the round cap; the lane STATE is DERIVED below.
+    # lane. First, a legacy exception@ park: signoff.sh refuses to stamp green
+    # over it and migrate-lane-states.sh rewrites it to merge_hold=true, so until
+    # that migration runs a review poured against the parked anchor is wasted
+    # reach — it reads as wedged and held. Second, the wedge escalation's
+    # diagnostic line (judge_pour_liveness reads $marker). Both retire with the
+    # marker grammar itself, once the legacy-surface endgame lands; the lane
+    # STATE is DERIVED below.
     marker=$(meta_of "$row" "check.$g")
     case "$marker" in
       exception@*)

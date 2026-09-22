@@ -2263,13 +2263,13 @@ func TestClosedMergeAnchorIsNotACoverageGap(t *testing.T) {
 	}
 }
 
-// TestWedgedAnchorIsOwedAndNamed covers both wedge shapes.
+// TestWedgedAnchorIsOwedAndNamed covers the exception wedge.
 //
-// The exception wedge is the state six of the seven wedged anchors were in, and
-// five of those six had no pull request open, which is why the row is keyed on
-// the anchor and carries the branch instead. The veto wedge is the seventh.
-// Neither was visible as anything but "routed to a person", which reads the
-// same for an anchor awaiting a ruling and for one nothing will ever move.
+// It is the state six of the seven wedged anchors were in, and five of those
+// six had no pull request open, which is why the row is keyed on the anchor and
+// carries the branch instead. It was visible as nothing but "routed to a
+// person", which reads the same for an anchor awaiting a ruling and for one
+// nothing will ever move.
 func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	wedgedAt := fixtureNow.Add(-72 * time.Hour)
 	anchors := []Anchor{
@@ -2280,12 +2280,6 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 			"merge_hold":     "true",
 			"signoff_cap":    "codex",
 			"blocked_reason": "signoff did not converge after 3 rework rounds (cap 3)",
-		}),
-		mergeAnchor("tk-veto", map[string]string{
-			"pr.machine": dated(MachineWedgedVeto, headLive, wedgedAt),
-			"pr_number":  "513",
-			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
-			"pr_posture": dated(postureChangesRequested, headLive, wedgedAt),
 		}),
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
@@ -2316,24 +2310,62 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	if !strings.Contains(exc.Frontier, "owed 3d") {
 		t.Errorf("the row carries the age the queue is sorted by, got %q", exc.Frontier)
 	}
+}
+
+// TestStandingVetoInSettledTailIsOwed. GitHub keeps a CHANGES_REQUESTED standing
+// across pushes and the city never dismisses it, so once the cadence has run dry
+// — no fix unit, review, or finding in flight — the veto is the operator's to
+// clear by re-reviewing. merge.sh records `settled` in that tail, the owed rule
+// reads the standing changes_requested off the posture axis, and the row names
+// the re-review, dated to the head the veto stands at. A veto with a fix unit
+// still in flight reads `progressing` and stays the city's move. An open PR
+// leads with its number and link either way.
+func TestStandingVetoInSettledTailIsOwed(t *testing.T) {
+	at := fixtureNow.Add(-72 * time.Hour)
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-veto", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, at),
+			"pr_number":  "513",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
+			"pr_posture": dated(postureChangesRequested, headLive, at),
+		}),
+		// The same standing veto WITH a fix unit in flight: merge.sh's in-flight
+		// arm records `progressing` before the veto arm runs, so the row stays
+		// the city's move.
+		mergeAnchor("tk-veto-busy", map[string]string{
+			"pr.machine": dated(MachineProgressing, headLive, at),
+			"pr_number":  "514",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/514",
+			"pr_posture": dated(postureChangesRequested, headLive, at),
+		}),
+	}, fixtureNow, false, nil, Facts{})
 
 	veto := mustTile(t, b, "tk-veto")
-	if veto.PRMachine != MachineWedgedVeto {
-		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineWedgedVeto)
+	if veto.PRMachine != MachineSettled {
+		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineSettled)
 	}
 	if !veto.Owed {
-		t.Error("a veto past the rework cap is owed: signoff will file nothing further")
+		t.Error("a standing CHANGES_REQUESTED in the settled tail is the operator's to clear by re-reviewing")
 	}
-	if !strings.Contains(veto.Needs, "CHANGES_REQUESTED") {
-		t.Errorf("needs must name the veto, got %q", veto.Needs)
+	if !strings.Contains(veto.Needs, "re-review") {
+		t.Errorf("needs names the re-review the row is owed, got %q", veto.Needs)
 	}
 	if veto.PRNumber != 513 || veto.PRURL == "" {
 		t.Errorf("an open PR carries its number and link, got %d / %q", veto.PRNumber, veto.PRURL)
 	}
-	// The branch does not stop being true once the PR opens: the number is what
-	// a surface leads with, not the only thing it may hold.
-	if veto.PRBranch != "polecat/tk-veto" {
-		t.Errorf("pr_branch = %q, want the branch an open PR is still cut from", veto.PRBranch)
+	if !strings.Contains(veto.Frontier, "owed 3d") {
+		t.Errorf("the row carries the age the queue is sorted by, got %q", veto.Frontier)
+	}
+
+	busy := mustTile(t, b, "tk-veto-busy")
+	if busy.PRMachine != MachineProgressing {
+		t.Errorf("pr_machine = %q, want %q", busy.PRMachine, MachineProgressing)
+	}
+	if busy.Owed {
+		t.Error("a standing veto with a fix unit in flight is the city's move, not the operator's")
+	}
+	if !strings.Contains(busy.Needs, "merge cadence") {
+		t.Errorf("needs reads as progressing, got %q", busy.Needs)
 	}
 }
 
@@ -2532,8 +2564,8 @@ func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 	}{
 		{postureReviewRequired, ApprovalRequired, true,
 			"GitHub is holding the merge for a review nobody has given"},
-		{postureChangesRequested, ApprovalRequired, false,
-			"the requirement is unmet, but answering a rejecting review is the city's move"},
+		{postureChangesRequested, ApprovalRequired, true,
+			"GitHub keeps the veto standing across pushes; in the settled tail the operator clears it by re-reviewing"},
 		{postureApproved, ApprovalMet, false, "approved"},
 		{postureCommented, ApprovalNotRequired, false, "a comment-only review does not gate the merge"},
 		{postureNone, ApprovalNotRequired, false, "no protection rule and no review"},
@@ -2725,7 +2757,7 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 	old := fixtureNow.Add(-96 * time.Hour)
 	recent := fixtureNow.Add(-2 * time.Hour)
 	b := BuildBoard([]Anchor{
-		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedVeto, headLive, recent)}),
+		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedException, headLive, recent)}),
 		{ID: "tk-big", Title: "a container that outranks everything", Kind: "epic", Source: "epic",
 			Rig: "gc-toolkit", Prefix: "tk", Children: func() []Child {
 				out := make([]Child, 40)

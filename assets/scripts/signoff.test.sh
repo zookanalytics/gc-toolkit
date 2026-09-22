@@ -1,21 +1,13 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/signoff.sh — the single gate-verdict writer.
-# Stubbed gc/gh/git; no live city, Dolt, network, or PRs. Ports the load-bearing
-# assertions of the retired signoff-round-cap and first-round-review-body
-# suites: the cap parks the anchor under merge_hold EXACTLY ONCE; the posted
-# artifact carries the anchor link; --approve is NEVER used. A verdict records
-# a lane state and binds to no commit, so the reviewed oid reaches the artifact
-# and the review bead and nothing else, and a head that moved under the review
-# refuses nothing.
-# It also pins what a round IS — an attempted rework child, never a review
-# dispatch — and what it is counted from: the floor pr-facts.sh's record of
-# operator feedback sets, written once per batch and never re-derived. The
-# `reset` verb is the other way that floor moves, for the anchor whose cap
-# fired before it had a PR to be commented on, and for the one whose batch was
-# recorded while the park stood. Both retirements read the same discriminator:
-# a live demand holds the anchor, a takeaway from a sitting that ended does not.
-# Both also take the cap's OWN takeaway with the park, and leave a sitting's,
-# which gc.takeaway_by tells apart.
+# Stubbed gc/gh/git; no live city, Dolt, network, or PRs. The posted artifact
+# carries the anchor link; --approve is NEVER used. A verdict records a lane
+# state and binds to no commit, so the reviewed oid reaches the artifact and the
+# review bead and nothing else, and a head that moved under the review refuses
+# nothing. request-changes always files exactly one rework child — convergence
+# is judged by the validator, not counted here — and is idempotent on
+# source_review_bead, so a re-pool adopts the child it already filed rather than
+# minting a twin.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -175,9 +167,8 @@ case "${1:-}" in
         echo "dep added" ;;
     esac ;;
   list)
-    # Enough of `bd list` for the live-demand read: --status and repeated
-    # --metadata-field, ANDed. STUB_LIST_FAIL models a ledger that will not
-    # answer, which the discriminator must read as "held".
+    # A `bd list` shim: --status and repeated --metadata-field, ANDed, over the
+    # seeded store. STUB_LIST_FAIL models a ledger that will not answer.
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "bd: list unavailable (stub)" >&2; exit 1; }
     shift
     statuses=""; fields=()
@@ -253,17 +244,6 @@ fi
 [ "${1:-}" = "merge-base" ] && exit "${STUB_MERGEBASE_RC:-0}"
 exit 0
 STUB
-cat > "$BIN/gc-helm" <<'STUB'
-#!/usr/bin/env bash
-# Stub for gc-helm.sh: records the cap's demand call and models its failure. The
-# real verb's own suite (gc-helm.test.sh) proves it files the demand and wires
-# the edge; here we need only that signoff's cap reaches for it with the right
-# shape, and that the cap survives a demand that does not land.
-set -u
-printf '%s\n' "$*" >> "${STUB_HELM_LOG:?}"
-[ -n "${STUB_HELM_FAIL:-}" ] && exit 4
-exit 0
-STUB
 cat > "$BIN/finding" <<'STUB'
 #!/usr/bin/env bash
 # Stub for finding.sh: records signoff's calls and mints a stable id per
@@ -285,11 +265,8 @@ case "$verb" in
 esac
 exit 0
 STUB
-chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/gc-helm" "$BIN/finding"
+chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/finding"
 export PATH="$BIN:$PATH"
-# The cap files its park as a demand through gc-helm.sh; point signoff at the
-# stub so the real verb never runs here.
-export GC_HELM_TOOL="$BIN/gc-helm" STUB_HELM_LOG="$TMP/helm.log"
 # request-changes files findings and approve closes them through finding.sh;
 # point signoff at the stub so the real primitive never runs here.
 export GC_FINDING_TOOL="$BIN/finding" STUB_FINDING_LOG="$TMP/finding.log"
@@ -312,7 +289,7 @@ OID_PRELIVE=$(oid prelive); OID_LIVEPIN=$(oid livepin)
 OID_SHORT=$(printf '%s' "$OID_DEAD" | cut -c1-9)
 export STUB_LSREMOTE="$OID_HEAD" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
 : > "$STUB_GH_ALL"
-unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
+unset GC_RIG 2>/dev/null || true
 
 ANCHOR_PR='{"id":"tk-anc","status":"open","assignee":"","metadata":{"branch":"polecat/tk-1","target":"main","merged_target":"main","pr_number":"42","pr_url":"https://github.com/o/r/pull/42"},"notes":""}'
 ANCHOR_PRE='{"id":"tk-anc","status":"open","assignee":"","metadata":{"branch":"polecat/tk-1","target":"main"},"notes":""}'
@@ -322,7 +299,7 @@ reset() { # $1 = anchor json, extra beads appended via $2
   printf '[%s,%s%s]' "$1" "$REVIEW" "${2:-}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"; : > "$STUB_GH_BODY"
   : > "$STUB_CREATED"; : > "$STUB_UPD_FAIL"; : > "$STUB_UNSET_NOOP"; printf '0' > "$STUB_SEQ"
-  : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"; : > "$STUB_DROP_NOTES"; : > "$STUB_HELM_LOG"
+  : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"; : > "$STUB_DROP_NOTES"
   : > "$STUB_FINDING_LOG"
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
@@ -337,8 +314,8 @@ anchor_meta() { # <k=v>... — stamp the anchor before the run
   done
 }
 # A rework child of tk-anc as store JSON, and the blocks edge that hangs it on
-# the anchor. The round cap counts these children, and the idempotency guard
-# reads the same walk to find an open child that already answers a review.
+# the anchor. The idempotency guard reads this walk to find an open child that
+# already answers a review.
 kid() { printf ',{"id":"c%s","status":"%s","assignee":"","metadata":{%s},"notes":""}' "$1" "$2" "$3"; }
 seed_cap_deps() { for c in "$@"; do printf 'tk-anc|%s|blocks\n' "$c" >> "$STUB_DEPS"; done; }
 
@@ -436,6 +413,21 @@ reset "$ANCHOR_PR"; pin "$OID_PIN"
 "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "$OID_OVR1" >/dev/null 2>&1
 eq "$(meta rv-1 reviewed_oid)" "$OID_OVR1" "the override replaces the pin with the commit actually judged"
 backed "…and the lane resolves against it"
+
+# --- a legacy exception@<oid> park predates the migration -----------------------
+# migrate-lane-states.sh rewrites an exception@<oid> marker to merge_hold=true
+# plus a board visit over a store still carrying one; until it runs, that marker
+# is not lane vocabulary this verdict may read. Stamping green over it would
+# silently release a park a human is relying on, so approve refuses before it
+# posts or stamps anything.
+echo "# an approve over a legacy exception@<oid> marker refuses, not migrates"
+reset "$ANCHOR_PR"; seed_marker "exception@$OID_OLD"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 2 "the legacy park refuses the verdict"
+has "$out" "migrate-lane-states.sh" "…and names the migration that clears it"
+eq "$(meta tk-anc check.codex)" "exception@$OID_OLD" "the legacy marker is left exactly as it stood"
+eq "$(status rv-1)" "in_progress" "the review bead is left open, not recorded as approving"
+eq "$(cat "$STUB_GH_BODY")" "" "no artifact is posted over an unmigrated park"
 
 echo "# request-changes records it too, though it leaves no marker"
 reset "$ANCHOR_PR"; seed_marker "green"
@@ -568,20 +560,6 @@ out=$("$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "not-an-oid" 2>
 eq "$rc" 1 "a value that is no commit at all refuses"
 eq "$(meta tk-anc check.codex)" "<absent>" "…and nothing was stamped"
 
-# --- a legacy exception@<oid> park predates the migration -----------------------
-# migrate-lane-states.sh rewrites exception@<oid> to merge_hold+signoff_cap
-# after this cadence lands; until it runs, that marker is not lane vocabulary
-# this verdict may read. Stamping green over it would silently release a park
-# a human is relying on.
-echo "# an approve over a legacy exception@<oid> marker refuses, not migrates"
-reset "$ANCHOR_PR"; seed_marker "exception@$OID_OLD"
-out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
-eq "$rc" 2 "the legacy park refuses the verdict"
-has "$out" "migrate-lane-states.sh" "…and names the migration that clears it"
-eq "$(meta tk-anc check.codex)" "exception@$OID_OLD" "the legacy marker is left exactly as it stood"
-eq "$(status rv-1)" "in_progress" "the review bead is left open, not recorded as approving"
-eq "$(cat "$STUB_GH_BODY")" "" "no artifact is posted over an unmigrated park"
-
 # --- a retired dispatch records no verdict ---------------------------------------
 close_rv() { jq -c 'map(if .id == "rv-1" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
 
@@ -639,8 +617,8 @@ has "$out" "did not read back" "…naming the close that did not stick"
 eq "$(status rv-1)" "closed" "the status write landed even though the verdict field did not…"
 eq "$(meta rv-1 signoff_verdict)" "<absent>" "…so this half-close is caught rather than trusted"
 
-# --- request-changes, under the cap ---------------------------------------------
-echo "# request-changes under cap"
+# --- request-changes files ONE rework child ------------------------------------
+echo "# request-changes files one rework child"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
@@ -664,9 +642,28 @@ has "$(cat "$STUB_GC_LOG")" "session wake rig/gc-toolkit.polecat" "the pool is w
 has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "child blocks the anchor"
 has "$(gc bd ready --json)" '"id":"fix-1"' "the rework child stays open and unblocked"
 hasnt "$(gc bd ready --json)" '"id":"tk-anc"' "the anchor waits on the child, not the reverse"
-has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reason carries the round context"
+has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reason carries the summary"
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
+
+echo "# request-changes files a child at any round count — GC_MAX_REVIEW_ROUNDS is inert, no park written"
+# The round cap is retired: no counter, no floor, no signoff_cap park. Even with
+# rework children from prior rounds already on the anchor and GC_MAX_REVIEW_ROUNDS
+# exported below that count, request-changes files one more child and parks
+# nothing — the env var names a mechanism this verdict no longer has.
+reset "$ANCHOR_PR" ',{"id":"old-1","status":"closed","assignee":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc","source_review_bead":"rv-0a"},"notes":""},{"id":"old-2","status":"closed","assignee":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc","source_review_bead":"rv-0b"},"notes":""}'
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$(GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0 at a round count past any legacy cap"
+eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "one more rework child is filed, uncapped"
+eq "$(meta fix-1 source_review_bead)" "rv-1" "the new child names this review, not a prior round's"
+eq "$(meta tk-anc signoff_cap)" "<absent>" "no signoff_cap park is written"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "no round floor is written"
+eq "$(meta tk-anc merge_hold)" "<absent>" "no merge_hold park is written"
+eq "$(meta tk-anc gc.takeaway)" "<absent>" "no cap takeaway is written"
+eq "$(meta tk-anc blocked_reason)" "<absent>" "no blocked_reason is written"
+eq "$(meta tk-anc gc.routed_to)" "<absent>" "no human park route is written on the anchor"
+eq "$(status rv-1)" "closed" "the review bead closes on the dispatch"
 
 echo "# request-changes refuses a bare-route fallback when the pour will not read back (double-dispatch guard)"
 reset "$ANCHOR_PR"
@@ -760,586 +757,15 @@ hasnt "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat c9" "the in-flight c
 has "$out" "already dispatched" "…the notice says the child was already dispatched"
 eq "$(status rv-1)" "closed" "the review is closed"
 
-echo "# the orphan's recorded round survives adoption — it is not advanced to the next"
-reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main","rejection_reason":"signoff requested changes (round 1): first pass"')"
+echo "# the orphan's recorded reason survives adoption — it is not overwritten"
+reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main","rejection_reason":"signoff requested changes: first pass"')"
 seed_cap_deps c9
 jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "adopt-and-dispatch exits 0"
 eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the orphan is adopted and dispatched"
-eq "$(meta c9 rejection_reason)" "signoff requested changes (round 1): first pass" "its recorded round is preserved, not overwritten"
+eq "$(meta c9 rejection_reason)" "signoff requested changes: first pass" "its recorded reason is preserved, not overwritten"
 eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no second child is filed"
-
-# --- the round cap ---------------------------------------------------------------
-echo "# round cap trips at 3 (default)"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the cap path exits 0"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "the cap parks the anchor under merge_hold=signoff_cap"
-eq "$(meta tk-anc signoff_cap)" "codex" "…stamped with the gate whose rounds ran out"
-eq "$(grep -c -- 'merge_hold=signoff_cap' "$STUB_GC_LOG")" "1" "the park is written EXACTLY once"
-hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata check.codex" "the cap never ALSO unsets the marker"
-eq "$(meta tk-anc gc.routed_to)" "human" "the anchor is routed to a human"
-eq "$(meta tk-anc signoff_cap)" "codex" "…and signoff_cap names the gate the park belongs to"
-has "$(meta tk-anc blocked_reason)" "did not converge" "blocked_reason says why it is held"
-# The board spends gc.takeaway as the row's NEEDS sentence; a park that writes
-# only blocked_reason reaches the operator saying no question was recorded. The
-# two are not the same string: blocked_reason is the row's detail and names the
-# case and the verb that retires it, which passes the board's cell, so the
-# takeaway carries the headline both cases share.
-eq "$(meta tk-anc gc.takeaway)" \
-  "signoff did not converge after 3 rework rounds (cap 3); findings are in the review beads under this anchor" \
-  "the park's takeaway is the headline the board can render"
-has "$(meta tk-anc blocked_reason)" \
-  "signoff did not converge after 3 rework rounds (cap 3)" \
-  "…and blocked_reason opens on the same sentence before adding the detail"
-eq "$(meta tk-anc gc.takeaway_by)" "signoff" "the takeaway names its writer"
-has "$(meta tk-anc gc.takeaway_at)" "T" "…and stamps when the wait started"
-eq "$(printf '%s' "$(meta tk-anc gc.takeaway)" | jq -Rsr 'length <= 140')" "true" \
-  "the takeaway fits the 140-codepoint board cap"
-eq "$(grep -c -- '--set-metadata gc.routed_to=human' "$STUB_GC_LOG")" "1" \
-  "route and takeaway ride in ONE update"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no rework child is filed past the cap"
-eq "$(status rv-1)" "closed" "the review bead still closes (verdict recorded)"
-eq "$(meta rv-1 signoff_verdict)" "request-changes" "…carrying signoff_verdict=request-changes, same as any other request-changes close"
-
-# The cap counts convergence rounds — prior reviews that each spent a rework —
-# so this review's own open child is the round in progress, not a prior one.
-# When a crashed attempt of the last-allowed round already filed that child, the
-# retry must adopt and dispatch it, not read it as one round too many and park
-# the anchor on the very rework it was about to send out. Two prior rounds plus
-# this review's own orphan makes three children, but only two rounds have been
-# spent: the cap must not trip.
-echo "# a retry of the last-allowed round adopts its own child, it does not park on it"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main"')"
-seed_cap_deps c1 c2 c9
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the cap-boundary retry exits 0"
-eq "$(meta tk-anc merge_hold)" "<absent>" "the anchor is NOT parked — its own in-flight round does not count against the cap"
-eq "$(meta tk-anc signoff_cap)" "<absent>" "…and no cap gate is stamped"
-has "$out" "adopting existing open rework child c9" "the retry adopts its own child by name"
-eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "…and dispatches the adopted child"
-has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat c9 --on mol-polecat-work" "…slinging that same child, not a new one"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no second child is filed at the boundary"
-eq "$(status rv-1)" "closed" "the review closes once the adopted child is dispatched"
-
-# The park is a wait on a person, and I1 wants a wait recorded as a `blocks`
-# edge, not a marker alone. The cap files a demand the anchor blocks on, stamped
-# as its own so the reset arm can tell it from a converse sitting's.
-echo "# the cap files its park as a demand the anchor blocks on"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the cap path still exits 0 when it files a demand"
-has "$(cat "$STUB_HELM_LOG")" "demand tk-anc" "the cap calls gc-helm.sh demand on the anchor"
-has "$(cat "$STUB_HELM_LOG")" "--by signoff" "…stamped as the cap's own (by signoff)"
-if hasin "$(cat "$STUB_HELM_LOG")" "--assignee"; then
-  bad "…as a ruling a person owes: the cap must file unassigned, but passed --assignee"
-else
-  ok "…as a ruling a person owes: filed unassigned (no --assignee)"
-fi
-has "$(cat "$STUB_HELM_LOG")" "did not converge" "…carrying the cap headline as the demand text"
-
-echo "# a demand that cannot be filed refuses the park: the edge is stamped first"
-# gate-ensure suppresses redispatch under merge_hold, so nothing re-fires the
-# cap to refile a demand it left unfiled — a park stamped without one holds
-# forever. The park must not be recorded at all until the edge lands.
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-out=$(STUB_HELM_FAIL=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "a demand that does not land refuses the park"
-eq "$(meta tk-anc merge_hold)" "<absent>" "…the anchor is NOT parked without the demand behind it"
-has "$out" "could not file the demand" "…and the failure names the unfiled demand"
-eq "$(status rv-1)" "in_progress" "…the review bead stays open for a retry"
-
-echo "# a converse sitting's demand already gates the anchor: the cap files no second"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-jq -c '. + [{"id":"dm-h","status":"open","assignee":"","metadata":{"gc.demand_for":"tk-anc","gc.takeaway_by":"host","gc.routed_to":"human"},"notes":""}]' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the cap path exits 0 with a sitting's demand already present"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the cap still parks the anchor"
-eq "$(cat "$STUB_HELM_LOG")" "" "…but files no demand of its own over the sitting's"
-
-# takeaway_is_holding fails CLOSED to "held", which for a RELEASE is right; the
-# cap writer asks the opposite — may I stamp a park? — and reads demand_gate_state
-# directly so a ledger that will not answer is not mistaken for a demand already
-# present. Read as "held" the old boolean skipped filing AND parked anyway,
-# leaving the marker-only hold this arm exists to prevent.
-echo "# an unreadable demand ledger refuses the cap park (no marker without a proven edge)"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-out=$(STUB_LIST_FAIL=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "an unreadable demand ledger refuses the park"
-eq "$(meta tk-anc merge_hold)" "<absent>" "…the anchor is NOT parked when the ledger cannot say if one already holds"
-eq "$(cat "$STUB_HELM_LOG")" "" "…and no demand is filed on a read that did not happen"
-eq "$(status rv-1)" "in_progress" "…the review bead stays open for a retry"
-has "$out" "could not read the demand ledger" "…and the refusal names the unreadable ledger, not a failed file"
-
-# pr-facts.sh's retire arm reads gc.takeaway_by to tell the cap's own board
-# sentence from a sitting's decision on the anchor. A takeaway that lands
-# without its provenance reads as the sitting's, so the operator feedback meant
-# to lift the park leaves the exception and the human route standing. The park
-# is proven only when the whole triple reads back.
-echo "# a cap park whose provenance stamp did not land is a read-back failure"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_by" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "a dropped gc.takeaway_by exits 2"
-has "$out" "did not read back" "the refusal reports the half-landed park"
-has "$out" "gc.takeaway_by" "…and names the field that went missing"
-eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
-
-echo "# …and so is a cap park with no gc.takeaway_at"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_at" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "a dropped gc.takeaway_at exits 2"
-has "$out" "gc.takeaway_at" "the refusal names the missing timestamp"
-eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
-
-# A timestamp that is merely present is not the one this verdict wrote. An
-# anchor parked before carries gc.takeaway_at already, so a cap update that
-# lands the headline and its provenance and drops only the timestamp satisfies
-# a non-empty check, and helm dates this wait to the earlier park and attributes
-# it to whatever sitting spans the old value.
-echo "# …and so is a cap park left holding a STALE gc.takeaway_at"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-anchor_meta gc.takeaway_at=1999-01-01T00:00:00Z
-out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_at" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "a cap park left on a stale gc.takeaway_at exits 2"
-has "$out" "gc.takeaway_at" "the refusal names the timestamp field"
-eq "$(meta tk-anc gc.takeaway_at)" "1999-01-01T00:00:00Z" "…and the stale value is what read back"
-eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
-
-# The cap park is a person owing an answer, and the anchor it lands on may
-# carry the settled disposition of the sitting that ended before it. A clear
-# that does not land leaves that "1" answering for this headline, and
-# doctor/check-wait-is-an-edge — the reader that exists to find parks nothing
-# re-asks — reads the cap as a wait already discharged. Only the CLEARED value
-# proves the park.
-echo "# …and so is a cap park that inherited a SETTLED disposition it did not clear"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-anchor_meta gc.takeaway_settled=1
-out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_settled" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "a cap park left on a stale gc.takeaway_settled exits 2"
-has "$out" "gc.takeaway_settled" "the refusal names the disposition field"
-eq "$(meta tk-anc gc.takeaway_settled)" "1" "…and the stale value is what read back"
-eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
-
-echo "# …while a cap park that clears it over a stale value parks normally"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-anchor_meta gc.takeaway_settled=1
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the cap path exits 0 with the disposition cleared"
-eq "$(meta tk-anc gc.takeaway_settled)" "" "the park's own disposition replaces the sitting's before it"
-eq "$(meta tk-anc gc.routed_to)" "human" "…and the park itself still lands"
-
-echo "# …and so is a cap park with no takeaway at all"
-reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
-seed_cap_deps c1 c2 c3
-out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "a dropped gc.takeaway exits 2"
-has "$out" "did not read back" "the refusal reports the half-landed park"
-eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
-
-echo "# only rework children count as rounds"
-reset "$ANCHOR_PR" "$(kid 1 open '"source_review_bead":"r1"')$(kid 2 open '')$(kid 3 open '"branch":"x"')"
-seed_cap_deps c1 c2 c3
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "non-rework children do not inflate the count (child filed)"
-
-echo "# cap is tunable via GC_MAX_REVIEW_ROUNDS"
-reset "$ANCHOR_PR" "$(kid 1 open '"source_review_bead":"r1"')"
-seed_cap_deps c1
-GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
-
-echo "# dispatch_count is not a round count: reviews of one commit never cap"
-reset "$ANCHOR_PR"
-jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "a dispatch_count past the cap with no rework children exits 0"
-eq "$(meta tk-anc check.codex)" "<absent>" "…does not trip the cap"
-eq "$(meta tk-anc gc.routed_to)" "<absent>" "…does not route the anchor to a human"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and the first rework round is filed"
-has "$(meta fix-1 rejection_reason)" "round 1" "…numbered by attempts, not by dispatches"
-
-echo "# an unreadable dep list never caps"
-reset "$ANCHOR_PR"
-STUB_DEP_GARBAGE=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "garbage dep list reads as 0 rounds (child filed, no cap)"
-
-# --- operator feedback resets the count ------------------------------------------
-# The cap measures the city failing to converge against its own reviewer. A
-# review the branch has never been answered against is not one of those rounds,
-# so pr-facts.sh records the batch that carried it and the rounds spent before
-# it become a floor this script subtracts.
-spent() { # <n> [anchor-json] — n closed rework children, edged to the anchor
-  local i extra=""
-  for i in $(seq 1 "$1"); do extra="$extra$(kid "$i" closed "\"source_review_bead\":\"r$i\"")"; done
-  reset "${2:-$ANCHOR_PR}" "$extra"
-  for i in $(seq 1 "$1"); do printf 'tk-anc|c%s|blocks\n' "$i" >> "$STUB_DEPS"; done
-}
-
-echo "# a recorded floor is subtracted: the rounds before the feedback do not cap"
-spent 3
-anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3@0.5001
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "three spent rounds under a recorded floor exit 0"
-eq "$(meta tk-anc check.codex)" "<absent>" "…the gate is cleared for a rework, not capped"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and a rework child is filed"
-has "$(meta fix-1 rejection_reason)" "round 1" "…numbered from the feedback, not from the branch"
-
-echo "# a batch with no floor yet re-baselines, and records what the counter was"
-spent 3
-anchor_meta signoff_rounds_reset=0.5001
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the cap does not fire at the batch that reset it"
-eq "$(meta tk-anc signoff_round_floor)" "3@0.5001" "the floor is written, pinned to the batch it answers"
-has "$(notes tk-anc)" "reset to 0 of 3 by operator feedback batch 0.5001" "the reset names its cause"
-has "$(notes tk-anc)" "The 3 rework round(s) filed before" "…and what the counter was"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and the released round is spent on a rework child"
-
-echo "# …and the floor stands next verdict: re-deriving it would swallow every new round"
-spent 4
-anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3@0.5001
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc signoff_round_floor)" "3@0.5001" "the floor is unchanged at the same batch"
-has "$(meta fix-1 rejection_reason)" "round 2" "…so the round after the reset counts as the second"
-
-echo "# …and the cap trips again once the feedback's own rounds are spent"
-spent 6
-anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3@0.5001
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "a reset buys one more budget, not an exemption"
-has "$(meta tk-anc blocked_reason)" "after 3 rework rounds" "…and the reason counts from the reset"
-
-echo "# a floor that names no batch is ignored rather than trusted"
-spent 3
-anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc signoff_round_floor)" "3@0.5001" "the malformed floor is replaced by one bound to the batch"
-eq "$(meta tk-anc check.codex)" "<absent>" "…and it did not cap on a value it could not read"
-
-echo "# a floor whose write does not land refuses the verdict rather than mis-count"
-spent 3
-anchor_meta signoff_rounds_reset=0.5001
-printf 'tk-anc\n' > "$STUB_UPD_FAIL"
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 2 "an unrecorded floor exits 2"
-has "$out" "signoff_round_floor did not read back" "…naming the write that did not stick"
-eq "$(status rv-1)" "in_progress" "…and the review bead stays open, the gate still owed"
-
-# --- a cap that fires before the PR exists ---------------------------------------
-# A spent cap is released by signoff.sh reset either way: operator feedback opens
-# a validation pass and leaves the park standing, and an anchor capped pre-open
-# has no conversation that could carry feedback at all, so the park it writes has
-# to say which case it is.
-echo "# a cap fired pre-open reports as pre-open and names the verb that retires it"
-spent 3 "$ANCHOR_PRE"
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the pre-open cap path exits 0"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…and parks the anchor"
-has "$(meta tk-anc blocked_reason)" "spent pre-open" "blocked_reason says the rounds were pre-open"
-has "$(meta tk-anc blocked_reason)" "signoff.sh reset tk-anc" "…and names the verb that retires it"
-# The pre-open detail is the longest the cap composes. The board still gets a
-# sentence, and still gets one that fits.
-eq "$(printf '%s' "$(meta tk-anc gc.takeaway)" | jq -Rsr 'length <= 140')" "true" \
-  "a pre-open cap's takeaway fits the board cap the detail exceeds"
-has "$(meta tk-anc gc.takeaway)" "did not converge" "…and still says what is owed"
-has "$out" "pre-open (no PR)" "the report tells a pre-open cap from a PR one"
-
-echo "# …and a cap on an open PR names the verb too: feedback there opens a validation pass, not a release"
-spent 3
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-has "$(meta tk-anc blocked_reason)" "signoff.sh reset tk-anc" "a post-open cap names the verb that retires it"
-has "$(meta tk-anc blocked_reason)" "opens a validation pass" "…because operator feedback on the PR opens a validation pass, not a release"
-
-# --- reset: the cap retirement a PR cannot deliver -------------------------------
-# Clearing the exception by hand leaves the rounds standing, so the next pass
-# recomputes the same count and re-caps. The verb writes the floor itself.
-capped_pre() { # <n spent> [extra k=v]... — a pre-open anchor parked by its own cap
-  local n="$1"; shift
-  spent "$n" "$ANCHOR_PRE"
-  anchor_meta merge_hold=signoff_cap "signoff_cap=codex" \
-    "gc.routed_to=human" "blocked_reason=signoff did not converge after $n rework rounds (cap 3)" "$@"
-}
-
-echo "# reset retires a pre-open cap: floor, exception, park, route and tally in one write"
-capped_pre 3 dispatch_count=5 dispatch_backstop.codex=1
-out=$("$SUT" reset tk-anc --reason "operator ruling: the findings were answered" --batch ruling-1 2>&1); rc=$?
-eq "$rc" 0 "reset exits 0"
-eq "$(meta tk-anc signoff_round_floor)" "3@ruling-1" "the floor advances to the rounds already spent"
-eq "$(meta tk-anc signoff_rounds_reset)" "ruling-1" "…pinned to the same batch, so the next verdict does not move it again"
-eq "$(meta tk-anc check.codex)" "<absent>" "the exception is retired"
-eq "$(meta tk-anc signoff_cap)" "<absent>" "…with the stamp that claimed it"
-eq "$(meta tk-anc blocked_reason)" "<absent>" "…and the reason that named it"
-eq "$(meta tk-anc gc.routed_to)" "" "the human route is cleared"
-eq "$(meta tk-anc dispatch_count)" "<absent>" "the dispatch tally goes with the park"
-eq "$(meta tk-anc dispatch_backstop.codex)" "<absent>" "…and its backstop stamp"
-has "$(notes tk-anc)" "operator ruling: the findings were answered" "the ruling is recorded on the anchor"
-has "$out" "reset to 0 of 3" "…and reported"
-
-echo "# …and the next verdict does not re-cap — the deadlock this verb exists to break"
-out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "the verdict after a reset exits 0"
-eq "$(meta tk-anc check.codex)" "<absent>" "…stamps no exception"
-eq "$(meta tk-anc signoff_cap)" "<absent>" "…re-writes no park"
-eq "$(meta tk-anc gc.routed_to)" "" "…and does not route the anchor back to a human"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…the released round is spent on a rework child"
-has "$(meta fix-1 rejection_reason)" "round 1" "…numbered from the ruling"
-
-echo "# …and the sentence the cap wrote for the board goes with that park"
-# The cap is the only writer that stamps a takeaway describing a park rather
-# than a sitting, so it is the only one this verb may clear. gc.takeaway_by is
-# what says which it is holding.
-capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" \
-  "gc.takeaway_at=2026-01-01T00:00:00Z" "gc.takeaway_by=signoff"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-ta 2>&1); rc=$?
-eq "$rc" 0 "the reset exits 0"
-eq "$(meta tk-anc gc.takeaway)" "<absent>" "the headline the board rendered for the park is retired with it"
-eq "$(meta tk-anc gc.takeaway_at)" "<absent>" "…with the instant that dated the wait"
-eq "$(meta tk-anc gc.takeaway_by)" "<absent>" "…and the provenance that told it from a sitting's"
-has "$out" "the cap's takeaway" "…and the report names it among what was retired"
-
-echo "# …and a takeaway unset that is silently lost is not a retirement"
-# Same shape as the tally: a park released while the board still renders its
-# question sends the operator to an anchor that is back in the cadence.
-capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" \
-  "gc.takeaway_at=2026-01-01T00:00:00Z" "gc.takeaway_by=signoff"
-printf 'tk-anc gc.takeaway\n' > "$STUB_UNSET_NOOP"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-ta2 2>&1); rc=$?
-eq "$rc" 2 "a lost gc.takeaway unset exits 2"
-has "$out" "did not read back on tk-anc (gc.takeaway)" "…naming the key the board still renders"
-eq "$(meta tk-anc gc.takeaway)" "signoff did not converge after 3 rework rounds (cap 3)" "…which the anchor still carries"
-
-echo "# reset writes to the anchor and to nothing else"
-capped_pre 3
-"$SUT" reset tk-anc --reason "operator ruling" >/dev/null 2>&1
-eq "$(grep -c 'bd update' "$STUB_GC_LOG")" "1" "exactly one write"
-hasnt "$(grep 'bd update' "$STUB_GC_LOG")" "rv-1" "…never to a review bead"
-eq "$(status rv-1)" "in_progress" "…which is left open for the dispatch it still owes"
-eq "$(cat "$STUB_GH_LOG")" "" "…and nothing is posted to GitHub"
-
-echo "# an omitted --batch mints one, so the floor is always pinned to a batch"
-capped_pre 2
-"$SUT" reset tk-anc --reason "operator ruling" >/dev/null 2>&1
-case "$(meta tk-anc signoff_round_floor)" in
-  2@reset-*) ok "the floor names the rounds spent and a minted batch" ;;
-  *)         bad "the floor names the rounds spent and a minted batch (got '$(meta tk-anc signoff_round_floor)')" ;;
-esac
-eq "$(meta tk-anc signoff_rounds_reset)" "$(meta tk-anc signoff_round_floor | cut -d@ -f2-)" "…and signoff_rounds_reset carries that batch"
-
-echo "# the verb is PR-blind: a post-open cap retires the same way"
-spent 3
-anchor_meta merge_hold=signoff_cap "signoff_cap=codex" "gc.routed_to=human"
-"$SUT" reset tk-anc --reason "operator ruling" --batch ruling-pr >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "reset on an anchor with a PR exits 0"
-eq "$(meta tk-anc check.codex)" "<absent>" "…and retires that park too"
-
-# --- what a hold is: the demand bead, never the takeaway headline ---------------
-# A sitting stamps gc.takeaway when it begins and replaces it with the outcome
-# at sign-off, so the field outlives every sitting that touches an anchor. Read
-# as a hold it shuts this verb permanently, and this verb is the only way back
-# for an anchor whose feedback reset already fired.
-demand() { # <status> — a demand bead gating tk-anc, in the store
-  jq -c --arg st "$1" '. + [{"id":"dm-1","status":$st,"assignee":"",
-    "metadata":{"gc.demand_for":"tk-anc","gc.routed_to":"human"},"notes":""}]' \
-    "$STUB_STORE" > "$STUB_STORE.n"
-  mv "$STUB_STORE.n" "$STUB_STORE"
-}
-
-echo "# a live demand outranks the ruling"
-capped_pre 3 "gc.takeaway=holding — needs a ruling"
-demand open
-out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "an anchor a person still owes an answer on refuses the reset"
-eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and nothing is written, not even the floor"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park stands"
-has "$out" "live demand" "…and the refusal names the hold"
-
-echo "# …but a takeaway recording a sitting that ENDED does not"
-capped_pre 3 "gc.takeaway=approved as-is on GitHub; merge still held by the gate"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-3 2>&1); rc=$?
-eq "$rc" 0 "a takeaway no demand backs is a record, not a hold"
-eq "$(meta tk-anc signoff_round_floor)" "3@ruling-3" "…the floor advances"
-eq "$(meta tk-anc check.codex)" "<absent>" "…and the park is retired"
-eq "$(meta tk-anc 'gc.takeaway')" "approved as-is on GitHub; merge still held by the gate" "…while the sitting's record is left alone"
-
-echo "# …and a demand the ruling already closed is such a sitting"
-capped_pre 3 "gc.takeaway=holding — needs a ruling"
-demand closed
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-4 2>&1); rc=$?
-eq "$rc" 0 "a closed demand holds nothing"
-eq "$(meta tk-anc check.codex)" "<absent>" "…so the park is retired"
-
-# The cap now files its OWN demand (by=signoff) to record its park as an edge.
-# That demand must not outrank the reset — it IS the park — and it retires with
-# it, or it holds the anchor out of `bd ready` under a park the reset just lifted.
-own_demand() { # a demand the cap filed for tk-anc, gc.takeaway_by=signoff
-  jq -c '. + [{"id":"dm-cap","status":"open","assignee":"",
-    "metadata":{"gc.demand_for":"tk-anc","gc.takeaway_by":"signoff","gc.routed_to":"human"},"notes":""}]' \
-    "$STUB_STORE" > "$STUB_STORE.n"
-  mv "$STUB_STORE.n" "$STUB_STORE"
-}
-echo "# the cap's OWN demand does not outrank its reset — it retires with the park"
-capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" "gc.takeaway_by=signoff"
-own_demand
-out=$("$SUT" reset tk-anc --reason "operator ruling: converged" --batch ruling-own 2>&1); rc=$?
-eq "$rc" 0 "reset proceeds past the cap's own demand (by signoff)"
-eq "$(meta tk-anc merge_hold)" "<absent>" "…the park is retired"
-eq "$(status dm-cap)" "closed" "…and the cap's own demand closes with it"
-has "$(notes dm-cap)" "cap reset by ruling" "…recording why it closed"
-
-# The park and its demand retire together. Closing the demand FIRST means a
-# close the store refuses leaves the park standing and the floor unwritten, so
-# the anchor is never released over a demand merge.sh still reads as a blocker,
-# and a re-run retries.
-echo "# a cap reset whose demand will not close is not reported as retired"
-capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" "gc.takeaway_by=signoff"
-own_demand
-printf 'dm-cap\n' > "$STUB_UPD_FAIL"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-stuck 2>&1); rc=$?
-eq "$rc" 2 "a demand that will not close refuses the reset"
-eq "$(status dm-cap)" "open" "…the demand stays open"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park stands rather than lift over a demand that still holds"
-eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and the floor is not written, so a re-run retries"
-has "$out" "release the anchor in name only" "…and the refusal explains why nothing was written"
-
-echo "# a converse sitting's demand outranks the reset even beside the cap's own"
-capped_pre 3 "gc.takeaway=holding — needs a ruling" "gc.takeaway_by=signoff"
-own_demand
-demand open   # dm-1, a sitting's (no by=signoff)
-out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "a sitting's demand still refuses the reset"
-eq "$(status dm-cap)" "open" "…and nothing closes, not even the cap's own demand"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park stands"
-
-echo "# a ledger that will not answer reads as held"
-capped_pre 3
-out=$(STUB_LIST_FAIL=1 "$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "an unreadable demand ledger refuses the reset"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park stands rather than be released on a guess"
-
-echo "# a hold no signoff_cap claims is a person's: the counter resets, the park stays"
-spent 3 "$ANCHOR_PRE"
-anchor_meta merge_hold=true "gc.routed_to=human"
-"$SUT" reset tk-anc --reason "operator ruling" --batch ruling-2 >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "the reset still exits 0"
-eq "$(meta tk-anc signoff_round_floor)" "3@ruling-2" "the rounds are the cap's wherever the park came from"
-eq "$(meta tk-anc merge_hold)" "true" "…but an unclaimed hold is not this verb's to lift"
-eq "$(meta tk-anc gc.routed_to)" "human" "…and the route a person is waiting on stands"
-has "$(notes tk-anc)" "No park was retired" "…and the anchor records that it kept the park"
-
-echo "# …and a signoff_cap standing beside no hold retires nothing"
-spent 3 "$ANCHOR_PRE"
-anchor_meta "signoff_cap=codex" "gc.routed_to=human"
-"$SUT" reset tk-anc --reason "operator ruling" --batch ruling-3 >/dev/null 2>&1
-eq "$(meta tk-anc signoff_cap)" "codex" "a cap stamp whose hold is already lifted is left alone"
-eq "$(meta tk-anc gc.routed_to)" "human" "…and so is the route beside it"
-has "$(notes tk-anc)" "No park was retired" "…and the anchor records that nothing was retired"
-
-# The regression this pairing exists to prevent: an operator lifts merge_hold
-# by hand (signoff_cap stays behind, per the case above), then later sets
-# merge_hold=true for an unrelated freeze while the orphaned signoff_cap is
-# still standing. The old predicate (signoff_cap non-empty && merge_hold
-# held-by-any-truthy-value) would read that freeze as this cap's own park and
-# silently lift it on the next reset. The exact-pairing predicate must not.
-echo "# an operator's merge_hold=true beside an orphaned signoff_cap is not this cap's pairing"
-spent 3 "$ANCHOR_PRE"
-anchor_meta merge_hold=true "signoff_cap=codex" "gc.routed_to=human"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-freeze 2>&1); rc=$?
-eq "$rc" 0 "the reset still exits 0"
-eq "$(meta tk-anc signoff_round_floor)" "3@ruling-freeze" "the rounds are the cap's wherever the orphaned stamp came from"
-eq "$(meta tk-anc merge_hold)" "true" "…but merge_hold=true is a person's freeze, not the cap's signoff_cap pairing"
-eq "$(meta tk-anc signoff_cap)" "codex" "…so the orphaned signoff_cap is left standing too"
-eq "$(meta tk-anc gc.routed_to)" "human" "…and the human route stands"
-has "$(notes tk-anc)" "a person's hold stays" "…and the note says a person's hold stays"
-
-echo "# a reset that does not read back is never reported as retired"
-capped_pre 3
-printf 'tk-anc\n' > "$STUB_UPD_FAIL"
-out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 2 "a denied write exits 2"
-has "$out" "did not read back" "…naming the failure"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…and the park still stands"
-
-# The tally is the half of the park gate-ensure.sh reads. A reset whose floor,
-# marker and route all land while one tally unset is lost releases an anchor
-# nobody may dispatch, and says it retired the tally.
-echo "# a tally unset that is silently lost is not a retirement"
-capped_pre 3 dispatch_count=5 dispatch_backstop.codex=1
-printf 'tk-anc dispatch_count\n' > "$STUB_UNSET_NOOP"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-tally 2>&1); rc=$?
-eq "$rc" 2 "a lost dispatch_count unset exits 2"
-has "$out" "did not read back on tk-anc (dispatch_count)" "…naming the key that still stands"
-eq "$(meta tk-anc dispatch_count)" "5" "…which the anchor still carries"
-hasnt "$out" "reset to 0 of" "…and the retirement is never reported"
-
-echo "# …and a lost backstop unset is caught on the same terms"
-capped_pre 3 dispatch_count=5 dispatch_backstop.codex=1
-printf 'tk-anc dispatch_backstop.codex\n' > "$STUB_UNSET_NOOP"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-tally2 2>&1); rc=$?
-eq "$rc" 2 "a lost backstop unset exits 2"
-has "$out" "did not read back on tk-anc (dispatch_backstop.codex)" "…naming the backstop stamp"
-eq "$(meta tk-anc dispatch_count)" "<absent>" "…while the tally key that did land is gone"
-
-# The floor is written from the ledger count, so reset reads it strictly: 0 from
-# a walk that glitched writes signoff_round_floor=0@<batch>, and the next
-# verdict counts the real children from 0 and re-caps immediately.
-echo "# a rework ledger reset cannot read refuses before it writes anything"
-capped_pre 3 dispatch_count=5
-out=$(STUB_DEP_GARBAGE=1 "$SUT" reset tk-anc --reason "operator ruling" --batch ruling-garbage 2>&1); rc=$?
-eq "$rc" 1 "an unparseable dep listing refuses the reset"
-has "$out" "rework ledger" "…naming what it could not read"
-eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes no floor"
-eq "$(meta tk-anc signoff_rounds_reset)" "<absent>" "…nor the batch it would pin it to"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park stands"
-eq "$(meta tk-anc gc.routed_to)" "human" "…the human route stands"
-eq "$(meta tk-anc dispatch_count)" "5" "…and the tally stands"
-
-echo "# …and a ledger naming no round is no cap to retire"
-reset "$ANCHOR_PRE"
-anchor_meta merge_hold=true "signoff_cap=codex" "gc.routed_to=human"
-out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "an anchor with no rework child refuses"
-has "$out" "no rework child" "…saying so"
-eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes nothing"
-eq "$(meta tk-anc merge_hold)" "true" "…retiring no park it cannot account for"
-
-# The strict read belongs to reset alone. The cap path reads the same ledger
-# leniently, and the floor it re-baselines under a broken walk is a count rather
-# than the blank a strict reader would leave.
-echo "# the cap path still reads that same ledger leniently"
-spent 3
-anchor_meta signoff_rounds_reset=0.5001
-STUB_DEP_GARBAGE=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc signoff_round_floor)" "0@0.5001" "a broken walk floors at 0 rounds, never at nothing"
-eq "$(meta tk-anc check.codex)" "<absent>" "…and parks nothing"
-
-echo "# reset refuses what it cannot record or cannot read"
-capped_pre 3
-out=$("$SUT" reset tk-anc 2>&1); rc=$?
-eq "$rc" 1 "no --reason refuses"
-eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes nothing"
-has "$out" "needs --reason" "…saying what is missing"
-out=$("$SUT" reset tk-nope --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "an anchor that does not resolve refuses"
-has "$out" "does not resolve" "…saying so"
-out=$("$SUT" reset --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "reset with no anchor refuses"
-has "$out" "anchor bead id" "…rather than reading the next flag as one"
-out=$("$SUT" reset tk-anc --reason "operator ruling" --verdict approve 2>&1); rc=$?
-eq "$rc" 1 "reset carrying verdict flags refuses — it answers no review bead"
-eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes nothing"
-out=$("$SUT" --review-bead rv-1 --verdict approve --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "a verdict carrying --reason refuses"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…and lifts no hold"
 
 # --- supersede-dismiss -----------------------------------------------------------
 echo "# supersede: dismiss own stale CHANGES_REQUESTED only"
@@ -1391,7 +817,7 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "request-changes without findings exits 0"
 hasnt "$(cat "$STUB_FINDING_LOG")" "upsert" "no findings are filed when no --findings-file is passed"
 FIX2=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
-has "$(meta "$FIX2" rejection_reason)" "signoff requested changes (round 1):" "rejection_reason keeps its one-line prose summary"
+has "$(meta "$FIX2" rejection_reason)" "signoff requested changes:" "rejection_reason keeps its one-line prose summary"
 hasnt "$(meta "$FIX2" rejection_reason)" "finding(s) this bead blocks" "…and names no findings when none were filed"
 
 # --- a malformed findings file never costs the rework dispatch ------------------
