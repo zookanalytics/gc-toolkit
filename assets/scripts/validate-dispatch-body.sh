@@ -7,8 +7,10 @@
 # Usage: validate-dispatch-body.sh [--note <text>]  (--note appends dispatch-
 # specific context, e.g. "this batch is a human feedback set" from pr-facts.sh).
 # Exit 0 always: a dispatch is never blocked on prose.
-# Callers: gate-ensure.sh, pr-facts.sh (the two surfaces that open a validation
-# pass — the machine review batch and the human feedback batch).
+# Callers: signoff.sh and pr-facts.sh — the two surfaces that OPEN a validation
+# pass, on a machine request-changes batch and a human feedback batch. (gate-
+# ensure.sh dispatches the validator onto an open pass; it opens none, so it
+# builds no note.)
 set -uo pipefail
 
 usage() {
