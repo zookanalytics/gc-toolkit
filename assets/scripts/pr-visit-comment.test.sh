@@ -26,13 +26,22 @@ REPO="$TMPD/repo"; mkdir -p "$REPO"
 git -C "$REPO" init -q
 git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 
-# gc stub: `gc bd show <id> --json`. A tk-vis* id is the visit — its status (does
-# close refuse while the visit is open?) and the close-payload stash
-# converse-signoff.sh writes (does close derive summary/actions/outcome?) come
-# from $VISIT_STATUS / $VIS_OUTCOME / $VIS_SUMMARY / $VIS_ACTIONS. Any other id is
-# the subject, whose PR binding ($PR_NUMBER / $PR_URL) is what a comment lands on.
+# gc stub: `gc bd show <id> --json` and `gc rig list --json`. A tk-vis* id is the
+# visit — its status (does close refuse while the visit is open?) and the
+# close-payload stash converse-signoff.sh writes (does close derive
+# summary/actions/outcome?) come from $VISIT_STATUS / $VIS_OUTCOME / $VIS_SUMMARY
+# / $VIS_ACTIONS. Any other id is the subject, whose PR binding ($PR_NUMBER /
+# $PR_URL) is what a comment lands on. `rig list` answers a single fixture rig
+# only when $RIG_PATH is planted (mapping $RIG_PREFIX to that path); empty
+# otherwise, so the subject-rig lookup finds nothing and the helper falls back to
+# the cwd origin — the path the git-repo-cwd cases below exercise.
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
+if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
+  [ -n "${RIG_PATH:-}" ] || { printf '{"rigs":[]}\n'; exit 0; }
+  jq -nc --arg p "${RIG_PREFIX:-tk}" --arg path "$RIG_PATH" '{rigs:[{name:"fixture",prefix:$p,path:$path}]}'
+  exit 0
+fi
 [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ] || exit 0
 id="${3:-}"
 case "$id" in
@@ -194,6 +203,35 @@ hasnt "PATCH" "$GHO" "no edit is made while the visit is open"
 BODYO="$(jq -r '.[] | select(.body|contains("tk-visO")) | .body' "$STATE")"
 has "Visit tk-visO — open" "$BODYO" "the reminder stays in its open shape"
 hasnt "closed" "$BODYO" "nothing says the visit closed ahead of its close"
+
+echo "# engage from a NON-git cwd resolves origin off the subject's rig (board-launched engage/dismiss)"
+# The board runs engage/dismiss from the city root, outside any rig checkout.
+# Prove the real helper — not a recorder stub — still posts there, resolving the
+# origin from the subject's rig ($RIG_PATH) rather than the git-less cwd.
+printf '[]' >"$STATE"
+NONGIT="$TMPD/nongit"; mkdir -p "$NONGIT"   # deliberately not a git repo
+GHLOG="$TMPD/gh.rig.log"; : >"$GHLOG"; : >"$GHLOG.argv"
+( cd "$NONGIT" && PATH="$BIN:$PATH" STATE="$STATE" GHLOG="$GHLOG" \
+    PR_NUMBER=55 PR_URL="https://github.com/acme/widgets/pull/55" RIG_PATH="$REPO" RIG_PREFIX=tk \
+    bash "$SUT" engage --visit tk-visR --subject tk-sub --reason "from the board" ) >"$TMPD/out.rig" 2>"$TMPD/err.rig"
+rc=$?
+ok "non-git-cwd engage exits 0" "[ '$rc' = 0 ]"
+GHR="$(cat "$GHLOG")"
+has "pr comment 55" "$GHR" "the reminder posts even though cwd is not a git repo"
+has "--repo github.com/acme/widgets" "$GHR" "the post is pinned to the subject's rig origin"
+BODYR="$(jq -r '.[] | select(.body|contains("tk-visR")) | .body' "$STATE")"
+has "Visit tk-visR — open" "$BODYR" "the comment lands in its open shape"
+
+echo "# non-git cwd with no rig match self-silences — no crash, nothing posted"
+printf '[]' >"$STATE"
+GHLOG="$TMPD/gh.norig.log"; : >"$GHLOG"; : >"$GHLOG.argv"
+( cd "$NONGIT" && PATH="$BIN:$PATH" STATE="$STATE" GHLOG="$GHLOG" \
+    PR_NUMBER=55 PR_URL="https://github.com/acme/widgets/pull/55" \
+    bash "$SUT" engage --visit tk-visN --subject tk-sub --reason "no rig, no git" ) >"$TMPD/out.norig" 2>"$TMPD/err.norig"
+rc=$?
+ok "no-rig non-git engage exits 0 (fail-safe)" "[ '$rc' = 0 ]"
+ok "nothing posted when neither rig nor cwd resolves an origin" "[ ! -s '$TMPD/gh.norig.log' ]"
+has "cannot resolve the subject's rig origin" "$(cat "$TMPD/err.norig")" "it says why it could not post"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "PASS: all pr-visit-comment assertions passed"; else echo "FAIL: pr-visit-comment had failures"; fi

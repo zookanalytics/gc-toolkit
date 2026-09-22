@@ -124,14 +124,19 @@ with the same `jq` the conversation reader uses
 to the integer after `/pull/` in `pr_url`. A subject with neither is a bead
 with no PR, and the script exits 0 having done nothing.
 
-Every `gh` call is pinned to the origin the checkout resolves, the way
-`pr-open.sh` proves: `ORIGIN_HOST` / `ORIGIN_REPO` / `ORIGIN_REPO_Q` from
-`git remote get-url origin`, and `gh pr comment --repo "$ORIGIN_REPO_Q"`. Where
-the subject carries a `pr_url`, its repository is checked against
-`ORIGIN_REPO_Q` before anything is posted, and a PR that resolves elsewhere is
-refused. `gh api` is not one of the five verbs the `gh-origin-guard.sh`
-PreToolUse hook covers and it runs inside a script in any case, so the pin is
-the guard here, exactly as it is for the other in-script `gh` writes.
+Every `gh` call is pinned to `ORIGIN_REPO_Q` (`gh pr comment --repo
+"$ORIGIN_REPO_Q"`), resolved from the SUBJECT's rig origin rather than the
+caller's cwd: `engage` and `dismiss` run from the board, outside any rig
+checkout, so cwd names no origin. `gc rig list` maps the subject's id prefix to
+its repo path, and `ORIGIN_HOST` / `ORIGIN_REPO` / `ORIGIN_REPO_Q` come from
+`git -C <that path> remote get-url origin`, with the url->owner/repo derivation
+`pr-open.sh` proves; a caller already inside the subject's rig — the converse
+close paths — falls back to the cwd origin. Where the subject carries a
+`pr_url`, its repository is checked against `ORIGIN_REPO_Q` before anything is
+posted, and a PR that resolves elsewhere is refused. `gh api` is not one of the
+five verbs the `gh-origin-guard.sh` PreToolUse hook covers and it runs inside a
+script in any case, so the pin is the guard here, exactly as it is for the other
+in-script `gh` writes.
 
 The script fails safe. A missing `gh` (`command -v gh || exit 0`), an
 unresolved origin, a subject with no PR, or a `gh` call that errors all leave
