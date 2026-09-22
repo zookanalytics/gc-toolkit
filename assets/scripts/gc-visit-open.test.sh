@@ -26,6 +26,11 @@
 #               cwd: this is fired from wherever the operator is sitting, and
 #               a silently varying destination is the worst failure mode an
 #               intake path can have. An unknown --rig files nothing.
+#   (DEADZONE)  a topic filed into a store with no reaction agent — no
+#               proactive pool and no registered converse — parks on the board
+#               with nobody to engage it. The intake refuses such a target
+#               before minting anything, keying on registration so a merely
+#               suspended rig (agents paused, see LIVENESS) still files.
 #   (SUBJECT)   an existing bead is its own subject — no second bead is
 #               minted — and a contradictory --rig/--type is refused rather
 #               than ignored.
@@ -100,6 +105,16 @@ case "$1 ${2:-}" in
               ({name:"gascity",    path:$g, prefix:"gc"}
                + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
                + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
+  "agent list")
+    # A reaction roster: proactive + converse for each rig named in
+    # $FAKE_REACTION_RIGS (default: both stub rigs served). A rig ABSENT from
+    # this list has no reaction agent — the dead zone require_reaction_agent
+    # refuses. FAKE_AGENT_LIST_EMPTY models an unreadable roster (fail open).
+    [ -n "${FAKE_AGENT_LIST_EMPTY:-}" ] && exit 0
+    jq -n --arg rigs "${FAKE_REACTION_RIGS-gc-toolkit gascity}" \
+      '{agents: [ ($rigs | split(" ")[] | select(length>0)) as $r
+                  | {qualified_name:($r+"/gc-toolkit.proactive"), suspended:false, pool:{max:2}},
+                    {qualified_name:($r+"/gc-toolkit.converse"),  suspended:false, pool:{max:2}} ]}' ;;
   "bd show")
     # Answers the origin read-back. $FAKE_ORIGIN is the value already on the
     # bead, so the "never overrule an existing origin" case is a real read of a
@@ -330,6 +345,42 @@ run no "a report when liveness is unknown" --rig gascity
 eq "$RC" "0" "(LIVENESS) an unknown (null) liveness files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and files into the chosen rig"
 hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
+
+# --- (DEADZONE) a target with no reaction agent is refused, not filed ---------
+# The reported bug: a topic filed into a store with no proactive pool AND no
+# registered converse parks on the board and no session ever engages it. The
+# intake now refuses such a target before minting anything. Registration is the
+# bar, not liveness — a suspended rig (agents registered, paused) still files,
+# per the (LIVENESS) block above.
+export FAKE_REACTION_RIGS="gc-toolkit"      # gascity now has no reaction agent
+run no "a topic for an agentless rig" --rig gascity
+eq "$RC" "3" "(DEADZONE) a rig with no reaction agent is refused (exit 3)"
+eq "$CALLS" "" "(DEADZONE) and nothing is created or filed"
+has "$ERR" "no reaction agent" "(DEADZONE) the message names the problem"
+has "$ERR" "Nothing filed" "(DEADZONE) and states that nothing was filed"
+has "$ERR" "gc-toolkit" "(DEADZONE) and points at a rig that has one"
+
+# The same store reached through an existing bead id (its own rig authoritative)
+# is refused the same way, before any visit is filed or origin stamped on it.
+run no gc-deadzn1
+eq "$RC" "3" "(DEADZONE) an existing bead in an agentless rig is refused"
+hasnt "$CALLS" "helm open" "(DEADZONE) and no visit is filed on it"
+hasnt "$CALLS" "bd update" "(DEADZONE) and its origin is not stamped"
+unset FAKE_REACTION_RIGS
+
+# Control: the SAME rig, now with a reaction agent registered, files exactly as
+# before — the refusal keys on the missing agent, not on the rig name.
+run no "a topic for a served rig" --rig gascity
+eq "$RC" "0" "(DEADZONE control) a rig WITH a reaction agent files as today"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE control) and the visit is filed"
+
+# An unreadable roster refuses nothing: a dead zone is a positive finding only,
+# so a roster gc cannot answer must not strand the operator at a refusal.
+export FAKE_AGENT_LIST_EMPTY=1
+run no "a topic when the roster is unreadable" --rig gascity
+eq "$RC" "0" "(DEADZONE) an unreadable roster files rather than refusing"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed"
+unset FAKE_AGENT_LIST_EMPTY
 
 # --- (SUBJECT) an existing bead is its own subject ----------------------------
 run no tk-abc12

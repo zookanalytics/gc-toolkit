@@ -270,17 +270,29 @@ destination that varies silently with the shell's directory is the worst
 failure mode an intake path can have.
 
 **The `prefix+a` keybinding picks the rig rather than defaulting it.** After the
-message popup, `tmux-visit-prompt.sh` shows a chooser of every rig — a suspended
-or not-running one is tagged, not withheld, since `gc rig suspend` keeps the
-beads store accessible and a report filed there is recorded and triaged on
-resume — defaulted to the rig of the pane the key was pressed in (its `GC_RIG`,
-else the `<rig>__<agent>` session-name prefix; absent on a pane that names no
-rig, where the operator just picks). Enter confirms that default or the operator
-picks another, and the choice rides through as `--rig`. This is board context,
-not cwd: the pane belongs to one rig explicitly, and the operator sees and
-confirms the target in the chooser rather than having it vary under them. A
-broken or empty `gc rig list` skips the chooser and leaves the intake on the CLI
-default.
+message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
+hq/city-workspace store — that store runs no reaction pool, so a topic filed
+there would park on the board with nobody to engage it, and it is dropped from
+the picker rather than offered. A suspended or not-running rig is still tagged,
+not withheld, since `gc rig suspend` keeps the beads store accessible and a
+report filed there is recorded and triaged on resume. The picker is defaulted to
+the rig of the pane the key was pressed in (its `GC_RIG`, else the
+`<rig>__<agent>` session-name prefix; absent on a pane that names no rig, where
+the operator just picks). Enter confirms that default or the operator picks
+another, and the choice rides through as `--rig`. This is board context, not
+cwd: the pane belongs to one rig explicitly, and the operator sees and confirms
+the target in the chooser rather than having it vary under them. A broken or
+empty `gc rig list` skips the chooser and leaves the intake on the CLI default.
+
+**A target with no reaction agent is refused, not filed.** `gc-visit-open.sh`
+reads the roster before it files: a rig with neither a proactive pool nor a
+registered converse cannot engage an operator topic, so the intake refuses such
+a target and files nothing rather than stranding the topic on the board. This
+backstops the chooser exclusion and also catches a `--rig` target, a
+non-interactive caller, or a bead id whose own rig is pool-less. Registration is
+the bar, not liveness: a suspended rig keeps its registered agents and still
+files (triaged on resume). An unreadable roster refuses nothing, so a degraded
+data plane never blocks an intake.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
 `mol-first-reaction` at the new subject. That formula triages the subject and

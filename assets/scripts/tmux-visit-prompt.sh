@@ -246,8 +246,13 @@ case "$TOPIC" in
             TOPIC_IS_BEADREF=1
         fi ;;
 esac
+# The hq store is the city-level workspace, not a topic target: it runs no
+# reaction pool, so a prefix+a topic filed there parks on the board with no
+# session to engage it. Drop it from the chooser so it cannot be picked. Its
+# prefix still marks its ids as bead refs above — an existing hq-store bead is a
+# valid subject — and the intake backstops any other pool-less rig.
 RIG_LIST=$(printf '%s' "$RIG_LIST_JSON" \
-    | jq -r '.rigs[]? | .name' 2>/dev/null || true)
+    | jq -r '.rigs[]? | select((.hq // false) | not) | .name' 2>/dev/null || true)
 if [ -z "$TOPIC_IS_BEADREF" ] && [ -n "$RIG_LIST" ]; then
     # The context rig leads the list so gum highlights it and Enter confirms it,
     # then the rest follow. When it is the only rig the tail is empty and grep
