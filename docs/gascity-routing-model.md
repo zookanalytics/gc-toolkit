@@ -20,7 +20,9 @@ mean.
 defines the routing contract; it is not a command tutorial, and it is
 not an incident procedure — recovering a dispatch that was already
 poured is
-[gascity-dispatch-containment.md](gascity-dispatch-containment.md).
+[gascity-dispatch-containment.md](gascity-dispatch-containment.md). The
+command-level convention for handing work to a pool — stamp the route,
+don't sling a formula — is [dispatching-work.md](dispatching-work.md).
 
 ## Provenance
 
