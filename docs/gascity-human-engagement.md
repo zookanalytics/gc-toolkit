@@ -574,7 +574,12 @@ is never registered with the idle tracker (`buildIdleTracker`,
 `cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity at
 all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached. A held
 converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
-the operator's `gc-helm dismiss <subject>`. Closing the visit ends the sitting's
+the operator's `gc-helm dismiss <subject>`. The sign-off is terminal — it stamps
+the outcome and closes the visit — so converse takes it only when nothing
+important is still pending; a turn that hands the operator important information
+(a live decision, a routing answer, anything they may want to respond to) posts
+the hand-back and leaves the visit open, ending that sitting on a later turn.
+Closing the visit ends the sitting's
 work; it does not close the session, so the pack's `converse-reap` order
 (`assets/scripts/converse-reap.sh`) closes the settled session once its visit
 reads closed or gone — the reap those two endings assume. It reaps only an
@@ -790,8 +795,10 @@ took, is a question about this session's scrollback that no script can read, so
 the claimer states the fact and the prompt makes the choice.
 
 *The one shape that verdict gets wrong, and the fourth that covers it:* a
-sitting does not end in a single write. The prompt posts the sign-off, then
-stamps `gc.outcome` on the visit, reads it back, and closes last of all. A
+sitting does not end in a single write. When converse does sign off — the
+sitting settled with nothing important left to hand the operator — the prompt
+posts the sign-off, then stamps `gc.outcome` on the visit, reads it back, and
+closes last of all. A
 session that dies between the stamp and the close leaves a visit that is
 `in_progress`, assigned, and carrying a final outcome. It is complete in
 every way except the one that ends it, and the claim result says only

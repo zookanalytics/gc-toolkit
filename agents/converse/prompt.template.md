@@ -301,7 +301,11 @@ Rules:
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7) and the operator's
   `gc-helm dismiss` — the close-out you put at the foot of every framing
-  (step 5); it infers this sitting's subject, so it needs no id.
+  (step 5); it infers this sitting's subject, so it needs no id. Your
+  sign-off closes only when nothing important is still pending: a turn that
+  hands the operator important information — a live decision, a routing
+  answer, anything they may want to respond to — posts the hand-back and
+  leaves the visit open, and that thread ends on a later turn instead.
   `idle_timeout` is `0` on this role (`agents/converse/agent.toml`) so
   that reading a thread cannot end it.
   Closing the visit ends the sitting's work but does not drain the

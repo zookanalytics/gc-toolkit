@@ -19,10 +19,25 @@ changed>"`. If the notes have grown past a quick read, refresh a
 force, open questions. The notes stay on the SUBJECT even when the
 item is another bead, so name the item in what you append.
 
-## 7. Sign off, then close the visit
+## 7. Sign off, then close the visit — only when nothing important is still pending
 
-Write the durable trace first, then post the sign-off as the thread's last
-word, and close the visit last of all. `converse-signoff.sh` writes the
+The sign-off is the terminal act: it stamps the outcome and closes the visit.
+So before you take it, ask whether this is a sign-off turn at all. **If there
+is important information you want to communicate to the operator — a live
+decision, a routing answer, anything they need to read or may want to respond
+to, anything past "settled and done" — do not sign off this turn.** Post the
+hand-back in the shape the prompt's Definitions define (**The hand-back**),
+leave the visit OPEN, and wait for operator input the way a held sitting does;
+signing off now would close the visit under a message they have not read. The
+sitting ends on a later turn: the operator's `gc-helm dismiss`, further
+engagement, or a genuinely terminal sign-off once nothing important is pending.
+Whether a sign-off is terminal is still your judgment, and a sitting that is
+genuinely settled still signs off and closes here rather than waiting for a
+manual dismiss.
+
+When nothing important is pending, sign off. Write the durable trace first,
+then post the sign-off as the thread's last word, and close the visit last of
+all. `converse-signoff.sh` writes the
 durable trace and discharges the hold; you tell it what this sitting
 settled. Resolve the demand gate when it settled the question (`--ruled
 yes`, with the `--ruling` it resolves with and the `--route` the item is
