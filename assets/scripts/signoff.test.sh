@@ -626,7 +626,7 @@ eq "$rc" 0 "request-changes exits 0"
 eq "$(meta tk-anc check.codex)" "<absent>" "the green marker is cleared"
 has "$(cat "$STUB_GH_LOG")" "--comment" "the changes artifact is a comment"
 hasnt "$(cat "$STUB_GH_LOG")" "--request-changes" "never a blocking GitHub review"
-eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "exactly one rework child, PR-titled"
+eq "$(grep '^Rework' "$STUB_CREATED")" "Rework PR#42: address signoff findings" "exactly one rework child, PR-titled"
 eq "$(meta fix-1 task_kind)" "rework" "child carries the rework role marker"
 eq "$(meta fix-1 anchor_bead)" "tk-anc" "child names the anchor it belongs to"
 eq "$(meta fix-1 branch)" "polecat/tk-1" "child resumes the anchor's branch"
@@ -655,7 +655,7 @@ reset "$ANCHOR_PR" ',{"id":"old-1","status":"closed","assignee":"","metadata":{"
 jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 out=$(GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "request-changes exits 0 at a round count past any legacy cap"
-eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "one more rework child is filed, uncapped"
+eq "$(grep '^Rework' "$STUB_CREATED")" "Rework PR#42: address signoff findings" "one more rework child is filed, uncapped"
 eq "$(meta fix-1 source_review_bead)" "rv-1" "the new child names this review, not a prior round's"
 eq "$(meta tk-anc signoff_cap)" "<absent>" "no signoff_cap park is written"
 eq "$(meta tk-anc signoff_round_floor)" "<absent>" "no round floor is written"
@@ -681,7 +681,7 @@ echo "# pre-open request-changes"
 reset "$ANCHOR_PRE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "pre-open request-changes exits 0"
-eq "$(cat "$STUB_CREATED")" "Rework branch polecat/tk-1: address pre-open signoff findings" "pre-open child is branch-titled"
+eq "$(grep '^Rework' "$STUB_CREATED")" "Rework branch polecat/tk-1: address pre-open signoff findings" "pre-open child is branch-titled"
 eq "$(meta fix-1 existing_pr)" "<absent>" "pre-open child carries no PR fields"
 
 echo "# incomplete child work order is exit 2, review stays open"
@@ -728,7 +728,7 @@ eq "$(meta fix-1 gc.execution_routed_to)" "<absent>" "the orphan was never dispa
 : > "$STUB_CREATED"; : > "$STUB_GC_LOG"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "the retry exits 0"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "the retry files NO second child"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "0" "the retry files NO second rework child"
 has "$out" "adopting existing open rework child fix-1" "…it adopts the orphan by name"
 eq "$(meta fix-1 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the adopted orphan is dispatched on the retry"
 has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat fix-1 --on mol-polecat-work" "…the retry slings the SAME child"
@@ -741,7 +741,7 @@ seed_cap_deps c9
 jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "request-changes for a new review exits 0"
-eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "a fresh child is filed for this review"
+eq "$(grep '^Rework' "$STUB_CREATED")" "Rework PR#42: address signoff findings" "a fresh child is filed for this review"
 eq "$(meta fix-1 source_review_bead)" "rv-1" "…naming THIS review, not the older one"
 eq "$(meta c9 gc.execution_routed_to)" "<absent>" "the other review's child is left untouched"
 eq "$(meta c9 task_kind)" "<absent>" "…and its work order is not rewritten"
@@ -752,10 +752,11 @@ seed_cap_deps c9
 jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "exits 0 — only the review close was still owed"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no second child is filed"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "0" "no second rework child is filed"
 hasnt "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat c9" "the in-flight child is not re-slung"
 has "$out" "already dispatched" "…the notice says the child was already dispatched"
 eq "$(status rv-1)" "closed" "the review is closed"
+eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | length' "$STUB_STORE")" "1" "the lane's validation pass is opened even on the already-dispatched exit"
 
 echo "# the orphan's recorded reason survives adoption — it is not overwritten"
 reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main","rejection_reason":"signoff requested changes: first pass"')"
@@ -765,7 +766,80 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "adopt-and-dispatch exits 0"
 eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the orphan is adopted and dispatched"
 eq "$(meta c9 rejection_reason)" "signoff requested changes: first pass" "its recorded reason is preserved, not overwritten"
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no second child is filed"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "0" "no second rework child is filed"
+
+# --- request-changes opens the machine lane's validation pass -------------------
+# The gap the retired round cap left: a codex request-changes batch filed
+# findings and a fix unit but opened no pass, so gate-ensure had nothing to
+# dispatch mol-validate onto and the machine lane's convergence was judged by
+# nobody. request-changes now ensures one task_kind=validation bead per (anchor,
+# lane) — the shape pr-facts.sh opens for a human batch — that gate-ensure's
+# open_validation_passes dispatches the validator onto and its quiescence reads
+# to hold a fresh review off the anchor while the pass is open.
+echo "# request-changes opens the machine lane's validation pass on the anchor"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | length' "$STUB_STORE")" "1" "exactly one validation pass is opened"
+VP=$(jq -r 'first(.[] | select((.metadata.task_kind // "") == "validation") | .id) // ""' "$STUB_STORE")
+eq "$(meta "$VP" check_name)" "codex" "the pass names the machine lane the validator rules by"
+eq "$(meta "$VP" anchor_bead)" "tk-anc" "the pass is anchored to the review's anchor"
+eq "$(meta "$VP" reviewed_oid)" "$OID_HEAD" "the pass pins the head the batch was reviewed at"
+has "$(cat "$STUB_CREATED")" "Validate PR#42 codex review @ $OID_HEAD" "the pass is PR-titled for the lane and head"
+has "$(cat "$STUB_DEPS")" "tk-anc|$VP|blocks" "the pass blocks the anchor — the merge is held until the validator closes it"
+
+echo "# request-changes reuses an open pass for the lane — no twin, one edge, head preserved"
+reset "$ANCHOR_PR" ',{"id":"vp-open","status":"open","assignee":"","metadata":{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"codex","reviewed_oid":"'"$OID_OLD"'"},"notes":""}'
+printf 'tk-anc|vp-open|blocks\n' >> "$STUB_DEPS"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+has "$out" "reusing open validation pass vp-open" "the open pass is reused by name"
+hasnt "$(cat "$STUB_CREATED")" "Validate" "no second validation pass is minted"
+eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | length' "$STUB_STORE")" "1" "still exactly one validation pass on the anchor"
+eq "$(grep -c 'tk-anc|vp-open|blocks' "$STUB_DEPS")" "1" "exactly one validation-pass edge holds the anchor — no duplicate accrued"
+eq "$(meta vp-open reviewed_oid)" "$OID_OLD" "the reused pass keeps the head it opened at — a validator mid-rule is not moved"
+
+echo "# request-changes adopts a same-title unstamped orphan instead of minting a twin"
+# A prior attempt that created the bead but never stamped its shape leaves an
+# orphan the lane probe cannot see; it is adopted by exact title and stamped
+# into shape rather than twinned into a second anchor blocker.
+reset "$ANCHOR_PR" ',{"id":"vp-orphan","status":"open","assignee":"","title":"Validate PR#42 codex review @ '"$OID_HEAD"'","metadata":{},"notes":""}'
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+has "$out" "adopting unstamped validation-pass orphan vp-orphan" "the unstamped orphan is adopted by title"
+hasnt "$(cat "$STUB_CREATED")" "Validate" "no twin pass is minted"
+eq "$(meta vp-orphan task_kind)" "validation" "the adopted orphan is stamped into shape"
+eq "$(meta vp-orphan check_name)" "codex" "…with the lane"
+eq "$(meta vp-orphan anchor_bead)" "tk-anc" "…and the anchor"
+has "$(cat "$STUB_DEPS")" "tk-anc|vp-orphan|blocks" "…and it is hung on the anchor"
+
+echo "# a different lane's open pass is not reused — one pass per lane"
+reset "$ANCHOR_PR" ',{"id":"vp-arch","status":"open","assignee":"","metadata":{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"arch","reviewed_oid":"'"$OID_HEAD"'"},"notes":""}'
+printf 'tk-anc|vp-arch|blocks\n' >> "$STUB_DEPS"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+has "$(cat "$STUB_CREATED")" "Validate PR#42 codex review" "a codex pass is opened beside the arch pass"
+eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | length' "$STUB_STORE")" "2" "the codex pass and the arch pass coexist — a pass is per lane"
+
+echo "# a validation pass whose shape does not read back is exit 2, review left open"
+reset "$ANCHOR_PR"
+# The pass is the second bead created (after the rework child fix-1); dropping
+# its task_kind models a shaping write that half-landed and the validator path
+# could never see, so the verdict must not close past it.
+out=$(STUB_DROP_KEYS="fix-2:task_kind" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a pass missing its task_kind exits 2"
+has "$out" "did not record the batch shape" "…naming the shape that did not stick"
+eq "$(status rv-1)" "in_progress" "the review is left open for a retry"
+
+echo "# pre-open request-changes opens a branch-titled validation pass"
+reset "$ANCHOR_PRE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "pre-open request-changes exits 0"
+VP=$(jq -r 'first(.[] | select((.metadata.task_kind // "") == "validation") | .id) // ""' "$STUB_STORE")
+eq "$(meta "$VP" check_name)" "codex" "the pre-open pass names the lane"
+eq "$(meta "$VP" anchor_bead)" "tk-anc" "the pre-open pass is anchored"
+has "$(cat "$STUB_CREATED")" "Validate branch polecat/tk-1 codex review @ $OID_HEAD" "the pre-open pass is branch-titled"
+has "$(cat "$STUB_DEPS")" "tk-anc|$VP|blocks" "the pre-open pass blocks the anchor"
 
 # --- supersede-dismiss -----------------------------------------------------------
 echo "# supersede: dismiss own stale CHANGES_REQUESTED only"

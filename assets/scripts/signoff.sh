@@ -58,6 +58,10 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 # stands on it), the cap park sets needs-attention, and an approve reconciles to
 # the current state. Post-open only.
 PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
+# The dispatch note carried by the validation pass a request-changes verdict
+# opens, so the validator polecat that claims it names the method. Same builder
+# pr-facts.sh uses for the human feedback batch's pass. Overridable for the test.
+VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
 
 usage() {
   cat >&2 <<'U'
@@ -118,6 +122,16 @@ bd_json()   { gc bd "$@" --json 2>/dev/null | scrub; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
+# Guarded array read: --limit=0 so a client-side filter sees every row, and a
+# non-array (or an errored ledger) returns non-zero so a caller reads "could not
+# tell", never "none". A metadata-field query defaults to open-only, so the live
+# set is named explicitly.
+bd_list()   { local raw rc; raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
+  raw=$(printf '%s' "$raw" | scrub)
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$raw"; }
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # Read the reviewer's structured findings — a JSON array of {locus, message} —
 # and file each as a finding bead through the finding primitive, deduped by
@@ -385,6 +399,116 @@ close_review() {
   fi
 }
 
+# Ensure this lane's validation pass on the anchor — the machine-review-batch
+# opener. The reviewer raised findings; the validator rules them and, once the
+# must-fix set closes, judges whether another full review is warranted (decision
+# 3 of specs/tk-ztapg/review-cycle-architecture.md, "The validator" — the
+# judgement that replaced the round counter). A task_kind=validation bead on the
+# anchor is what gate-ensure.sh's open_validation_passes dispatches mol-validate
+# onto, and what its quiescence clause (c) reads to hold a fresh whole-diff
+# review off the anchor while the pass is open. pr-facts.sh opens this same shape
+# for a human feedback batch; this is the machine-review-batch opener the same
+# section names. It runs alongside the fix unit rather than before it: the full
+# target-3 shape rules must-fix before any work goes out, but a pass opened
+# beside the dispatched fix unit still closes the convergence gap the retired
+# round cap left, which is this verdict's part.
+#
+# One live pass per (anchor, lane): check_name is the lane mol-validate selects
+# findings by and backs or supersedes, so a re-pool of this verdict or a later
+# round on the same still-open lane reuses the pass rather than hanging a second
+# blocks edge that double-holds the anchor. Called at each request-changes exit
+# after the fix child is settled, so a pass-open that will not complete leaves
+# the review open to retry rather than closing it past a gap. Fail closed: a
+# shape or edge that does not read back exits non-zero.
+ensure_validation_pass() {
+  local rows vpass vtitle vctx vbody vmeta vfix vblk orphans
+  if ! rows=$(bd_list --metadata-field anchor_bead="$ANCHOR" \
+       --metadata-field task_kind=validation --metadata-field check_name="$CHECK_NAME" \
+       --status="$LIVE_STATUSES"); then
+    warn "validation-pass probe for lane $CHECK_NAME on $ANCHOR is unreadable; review left open for a retry"
+    exit 2
+  fi
+  vpass=$(printf '%s' "$rows" | jq -r '[ .[] | .id ] | .[0] // empty' 2>/dev/null)
+  if [ -n "$POST_OPEN" ]; then
+    vtitle="Validate PR#$PR_NUMBER $CHECK_NAME review @ $REVIEWED_OID"
+    vctx="a $CHECK_NAME review batch on PR#$PR_NUMBER at $REVIEWED_OID"
+  else
+    vtitle="Validate branch $BRANCH $CHECK_NAME review @ $REVIEWED_OID"
+    vctx="a $CHECK_NAME review batch on branch $BRANCH at $REVIEWED_OID"
+  fi
+  if [ -n "$vpass" ]; then
+    echo "signoff: reusing open validation pass $vpass for lane $CHECK_NAME on $ANCHOR"
+  else
+    # A prior attempt that created the bead but failed to stamp its shape left an
+    # orphan the lane probe above cannot see (task_kind/check_name unset). Adopt
+    # it by exact title — the title names this lane and head — rather than mint a
+    # twin that would double-block the anchor. Live only; a closed orphan is
+    # already dispositioned. Best-effort: an unreadable probe falls through to mint.
+    if orphans=$(bd_list --title-contains "$vtitle" --status="$LIVE_STATUSES"); then
+      vpass=$(printf '%s' "$orphans" | jq -r --arg t "$vtitle" --arg l "$CHECK_NAME" '
+        [ .[] | select(((.title // "") | tostring) == $t)
+              | select(((.metadata.check_name // "") | tostring) as $c | $c == "" or $c == $l)
+              | .id ] | .[0] // empty' 2>/dev/null)
+    fi
+    if [ -n "$vpass" ]; then
+      echo "signoff: adopting unstamped validation-pass orphan $vpass for lane $CHECK_NAME on $ANCHOR"
+    else
+      vbody=""
+      [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules $vctx. The findings to rule are the open task_kind=finding beads on anchor $ANCHOR carrying finding.lane=$CHECK_NAME." 2>/dev/null) || vbody=""
+      if [ -n "$vbody" ]; then
+        vpass=$(printf '%s' "$vbody" | gc bd create "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+      else
+        warn "validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass"
+        vpass=$(gc bd create "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+      fi
+    fi
+    if [ -z "$vpass" ]; then
+      warn "could not open a validation pass for lane $CHECK_NAME on $ANCHOR; review left open for a retry"
+      exit 2
+    fi
+  fi
+  # Stamp the shape the validator path reads and read it back: task_kind=validation
+  # is what open_validation_passes selects, check_name is the lane, anchor_bead
+  # scopes the findings, reviewed_oid pins the head. reviewed_oid is only ADDED
+  # when absent, never overwritten, so a pass reused across rounds keeps the head
+  # it opened at rather than a validator mid-rule being moved under it.
+  vmeta=$(bd_json show "$vpass")
+  is_rows "$vmeta" || { warn "validation pass $vpass did not resolve after open; review left open for a retry"; exit 2; }
+  vfix=()
+  [ "$(row_meta "$vmeta" task_kind)" != "validation" ]   && vfix+=(--set-metadata task_kind=validation)
+  [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ]    && vfix+=(--set-metadata "anchor_bead=$ANCHOR")
+  [ "$(row_meta "$vmeta" check_name)" != "$CHECK_NAME" ] && vfix+=(--set-metadata "check_name=$CHECK_NAME")
+  [ -z "$(row_meta "$vmeta" reviewed_oid)" ]             && vfix+=(--set-metadata "reviewed_oid=$REVIEWED_OID")
+  if [ "${#vfix[@]}" -gt 0 ]; then
+    gc bd update "$vpass" "${vfix[@]}" >/dev/null 2>&1 || true
+    vmeta=$(bd_json show "$vpass")
+  fi
+  if [ "$(row_meta "$vmeta" task_kind)" != "validation" ] || [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] \
+     || [ "$(row_meta "$vmeta" check_name)" != "$CHECK_NAME" ] || [ -z "$(row_meta "$vmeta" reviewed_oid)" ]; then
+    warn "validation pass $vpass did not record the batch shape (want task_kind=validation anchor_bead=$ANCHOR check_name=$CHECK_NAME reviewed_oid set; got task_kind='$(row_meta "$vmeta" task_kind)' anchor_bead='$(row_meta "$vmeta" anchor_bead)' check_name='$(row_meta "$vmeta" check_name)' reviewed_oid='$(row_meta "$vmeta" reviewed_oid)'); review left open for a retry"
+    exit 2
+  fi
+  # The pass must HOLD the anchor, not merely sit beside it: merge.sh reads every
+  # live blocks blocker into its in-flight hold and bd refuses to close a blocked
+  # anchor, so absent the edge the pass holds nothing and gate-ensure would
+  # dispatch a validator that releases a merge nothing was holding. Idempotent — a
+  # reused pass keeps its one edge — and fail-closed like the shape stamp above.
+  if ! vblk=$(bd_json dep list "$ANCHOR" --direction=down -t blocks) \
+     || ! printf '%s' "$vblk" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    warn "validation-pass blocker probe on $ANCHOR is unreadable; review left open for a retry"
+    exit 2
+  fi
+  if ! printf '%s' "$vblk" | jq -e --arg v "$vpass" 'any(.[]?; (.id // "") == $v)' >/dev/null 2>&1; then
+    if ! gc bd dep "$vpass" --blocks "$ANCHOR" >/dev/null 2>&1 \
+       || ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
+            | jq -e --arg v "$vpass" 'any(.[]?; (.id // "") == $v)' >/dev/null 2>&1; then
+      warn "validation pass $vpass did not record a blocks edge on $ANCHOR; review left open for a retry"
+      exit 2
+    fi
+  fi
+  echo "signoff: validation pass $vpass open for lane $CHECK_NAME on $ANCHOR — mol-validate judges convergence"
+}
+
 # A pass at a new head retracts the city's OWN superseded CHANGES_REQUESTED,
 # else the PR stays BLOCKED on a dead commit while the bead reads green.
 # Guards, all fail-closed: our handle only (a human's block is a real veto);
@@ -535,6 +659,7 @@ if [ -n "$FIX_BEAD" ]; then
   ADOPT_ROUTE=$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")
   if [ -n "$ADOPT_ROUTE" ]; then
     echo "signoff: rework child $FIX_BEAD (source_review_bead=$REVIEW_BEAD) was already dispatched to $ADOPT_ROUTE; closing the review it left open, filing no second child"
+    ensure_validation_pass
     close_review
     # The in-flight rework child means the city holds the ball; keep it working.
     [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
@@ -647,6 +772,7 @@ else
   warn "rework child $FIX_BEAD: mol-polecat-work pour did not stamp gc.execution_routed_to=$FIX_POOL; not falling back to a bare route (double-dispatch hazard) — review left open for a retry."
   exit 2
 fi
+ensure_validation_pass
 close_review
 # A rework child now stands on the anchor; the city holds the ball until it lands.
 [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
