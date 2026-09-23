@@ -47,6 +47,12 @@ import (
 // exactly as it does for every `bd` invocation.
 type BeadsSource struct {
 	cityPath string
+	// cityPinned records that a caller supplied cityPath (WithCityPath), so the
+	// constructor must not run discovery over it. Discovery now shells out to gc,
+	// so re-resolving a path the caller already knows would be a needless
+	// subprocess — and, given an explicit empty path, would overwrite the "no
+	// city" the caller meant with whatever gc finds. Tests rely on both.
+	cityPinned bool
 
 	// mu guards stores. Handles are opened lazily and kept for the process
 	// lifetime: a long-lived sidecar re-gathers on every cache miss, and
@@ -95,8 +101,12 @@ type beadStore interface {
 // BeadsOption configures a BeadsSource.
 type BeadsOption func(*BeadsSource)
 
-// WithCityPath overrides the discovered city root (used by tests).
-func WithCityPath(p string) BeadsOption { return func(s *BeadsSource) { s.cityPath = p } }
+// WithCityPath supplies the city root instead of discovering it — the entrypoint
+// passes the once-resolved path here, and tests pass a fixture. It pins the
+// value, so the constructor runs no discovery over it (an empty string included).
+func WithCityPath(p string) BeadsOption {
+	return func(s *BeadsSource) { s.cityPath = p; s.cityPinned = true }
+}
 
 // withStoreOpener overrides how a rig store is opened (used by tests).
 func withStoreOpener(f func(ctx context.Context, beadsDir string) (beadStore, error)) BeadsOption {
@@ -113,17 +123,22 @@ func withClock(now func() time.Time) BeadsOption {
 	return func(s *BeadsSource) { s.now = now }
 }
 
-// NewBeadsSource builds a source over the city's per-rig bead stores. The city
-// root comes from GC_HELM_CITY_PATH, else GC_CITY_PATH, else GC_CITY.
+// NewBeadsSource builds a source over the city's per-rig bead stores. With no
+// WithCityPath override it discovers the city root itself (see DiscoverCityPath).
 func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
 	s := &BeadsSource{
-		cityPath:  DiscoverCityPath(),
 		stores:    map[string]beadStore{},
 		openStore: openLibraryStore,
 		now:       time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	// Discover only when no caller pinned the path. Discovery shells out to gc,
+	// so re-resolving a WithCityPath value would be a needless subprocess — the
+	// entrypoint resolves the city once for the whole process and passes it in.
+	if !s.cityPinned {
+		s.cityPath = DiscoverCityPath()
 	}
 	if s.gc == nil {
 		s.gc = newGCExec(s.cityPath)
@@ -185,17 +200,33 @@ func (l *libraryStore) GetDependencyRecordsForIssues(ctx context.Context, issueI
 	return l.dependencies.GetDependencyRecordsForIssues(ctx, issueIDs)
 }
 
-// DiscoverCityPath returns the city root this process should read, from the
-// first of GC_HELM_CITY_PATH, GC_CITY_PATH, GC_CITY that is set. Exported
-// because the entrypoint needs the same answer to locate the visit tool's
-// working directory (cmd/helm-svc wires internal/visit with it) — one
-// resolution, so the board and the write route cannot disagree about which
-// city they are acting on.
+// DiscoverCityPath returns the city root this process should read. An explicit
+// GC_HELM_CITY_PATH, GC_CITY_PATH or GC_CITY wins, in that order; with none of
+// them set it asks gc — `gc config show` — for the city it would act on and takes
+// that. A plain shell that injects none of those vars still reads a city, the
+// same one gc resolves, rather than a discovery reimplemented here: gc-toolkit
+// runs on Gas City, so gc is the authority on which city to read. A gc that
+// cannot answer — absent, or resolving no city — yields "", the same fail-closed
+// "no city" the callers already handle.
+//
+// Exported because the entrypoint needs the same answer to locate the visit
+// tool's working directory (cmd/helm-svc wires internal/visit with it) — one
+// resolution, so the board and the write route cannot disagree about which city
+// they are acting on. Discovery is a subprocess now, so the entrypoint resolves
+// it once at startup and threads it in, rather than calling this per board build.
 func DiscoverCityPath() string {
 	for _, k := range []string{"GC_HELM_CITY_PATH", "GC_CITY_PATH", "GC_CITY"} {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 			return v
 		}
+	}
+	// The plain-shell case: no city env set. Ask gc which city it resolves. The
+	// discovery client carries no cityPath, so gc resolves from this process's
+	// own context (see gcExec.CityPath); run bounds the call with its own timeout.
+	// Best-effort — any failure resolves to "" and the caller reports "no city
+	// path" exactly as it did before.
+	if p, err := newGCExec("").CityPath(context.Background()); err == nil {
+		return p
 	}
 	return ""
 }

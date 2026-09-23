@@ -156,7 +156,10 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 		return boardExitUsage
 	}
 
-	src := source.NewBeadsSource()
+	// Resolve the city once: discovery shells out to gc, and the store read and
+	// the pack-health read below must name the same city.
+	cityPath := source.DiscoverCityPath()
+	src := source.NewBeadsSource(source.WithCityPath(cityPath))
 	if err := src.Check(); err != nil {
 		// Fail loudly. The alternative — falling back to the supervisor HTTP
 		// API — would make `prefix+b` depend on a live sidecar, which is the
@@ -181,7 +184,7 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 
 	now := time.Now().UTC()
 	b := board.BuildBoard(res.Anchors, now, res.Partial, res.PartialErrors, res.Facts)
-	b.PackHealth = source.GatherPackHealth(source.DiscoverCityPath(), now)
+	b.PackHealth = source.GatherPackHealth(cityPath, now)
 
 	limit := opts.limit
 	if limit < 0 {
