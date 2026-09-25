@@ -37,15 +37,20 @@ VISIT_IDENTITY_JQ='
   def visit_subject:
     (visit_tracked_subjects | .[0] // "") as $t
     | if $t != "" then $t else visit_group_subject end;
-  # Every subject id this visit resolves to (edge targets plus the stamp), for
-  # callers that build a set of covered subjects across many visits.
+  # Every subject id this visit covers, for callers that build a set across many
+  # visits: the tracks targets, or the stamp alone when there is no edge. The
+  # stamp never adds to a non-empty edge set, so a stale stamp beside a live edge
+  # cannot widen coverage to a second subject.
   def visit_identity_subjects:
-    (visit_tracked_subjects + [visit_group_subject]) | map(select(. != "")) | unique;
-  # Which identity covers $subject: "tracks", "continuation_group", or "".
+    visit_tracked_subjects as $t
+    | (if ($t | length) > 0 then $t else [visit_group_subject] end)
+    | map(select(. != "")) | unique;
+  # Which identity covers $subject: "tracks", "continuation_group", or "". The
+  # stamp is the fallback visit_subject uses — consulted only for an empty edge set.
   def visit_identity_match($subject):
     if $subject == "" then ""
     elif (visit_tracked_subjects | any(. == $subject)) then "tracks"
-    elif visit_group_subject == $subject then "continuation_group"
+    elif (visit_tracked_subjects | length) == 0 and (visit_group_subject == $subject) then "continuation_group"
     else "" end;
   # Does this visit cover $subject by its direct identity edge or stamp?
   def visit_covers($subject): visit_identity_match($subject) != "";
