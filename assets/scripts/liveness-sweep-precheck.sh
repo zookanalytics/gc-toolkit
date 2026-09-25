@@ -28,6 +28,13 @@
 # NOT set -e: every failure is handled and routed to the run-the-pass side.
 set -uo pipefail
 
+# The one definition of what subject a visit covers, shared with liveness-sweep.sh
+# and gc-helm.sh. Exposes $VISIT_IDENTITY_JQ. This precheck reads only the
+# identity (no stall_root), mirroring liveness-sweep.sh's convgroups arm.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
+
 INTERVAL="${LIVENESS_SWEEP_INTERVAL:-21600}"     # the 6h cadence lives HERE only
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -242,13 +249,11 @@ if [ "$READS_OK" -eq 1 ]; then
                               | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | .[0].id // ""' "$LIVE" 2>/dev/null)
         BASELINE=$(cat "$BASELINE_FILE" 2>/dev/null || true)
         N_BASELINE=$(printf '%s' "$BASELINE" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')
-        # A visit names its subject twice (gc.continuation_group stamp + tracks
-        # edge) and only the edge has proved reliable (su-ab9je): read BOTH.
-        # select(. != "") keeps an empty stamp from matching an empty subject.
-        LIVE_VISIT=$(jq -r --arg s "$SUBJECT" '[.[] | select((.metadata.task_kind // "") == "visit")
-                                                    | ((.metadata["gc.continuation_group"] // ""),
-                                                       (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
-                                                    | select(. != "")]
+        # A visit names its subject by its shared identity (tracks edge,
+        # gc.continuation_group fallback — the stamp alone has landed empty,
+        # su-ab9je). visit_identity_subjects is visit-identity.sh.
+        LIVE_VISIT=$(jq -r --arg s "$SUBJECT" "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
+                                                    | visit_identity_subjects[]]
                                                | (index($s) // "") | tostring' "$LIVE" 2>/dev/null)
     fi
 fi
@@ -263,12 +268,10 @@ fi
 SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
-    SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" '
+    SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" "$VISIT_IDENTITY_JQ"'
       ([ ($live[0] // [])[]
          | select((.metadata.task_kind // "") == "visit")
-         | ((.metadata["gc.continuation_group"] // ""),
-            (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
-         | select(. != "") ]) as $convgroups
+         | visit_identity_subjects[] ]) as $convgroups
       | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
       | ([ ($alive[0] // [])[]
            | .dependencies[]?

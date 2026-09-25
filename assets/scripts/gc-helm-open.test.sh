@@ -179,6 +179,40 @@ grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
   && ok "(HELDEDGE) no second visit filed" \
   || bad "(HELDEDGE) filed a duplicate visit (calls: $CALLS)"
 
+# --- (OPEN-JSON) --json and stderr NAME which identity matched (no silent no-op)-
+# The shared predicate (visit-identity.sh) reports HOW it matched: a stamp match
+# is "continuation_group", an edge-only match is "tracks", and a bare miss files
+# fresh and reports filed:true. stdout is pure JSON; the fold line is on stderr.
+run_open_json() { # <show-mode> <subject> [visit] [edge]
+    : > "$FAKE_CALLS"
+    export FAKE_SHOW_MODE="$1" FAKE_SUBJECT="$2" FAKE_VISIT="${3:-}" FAKE_VISIT_EDGE="${4:-}"
+    set +e
+    JOUT="$(sh "$SCRIPT" open "$2" --json 2>"$TMP/jerr")"; JRC=$?
+    set -e
+    JERR="$(cat "$TMP/jerr")"; JCALLS="$(cat "$FAKE_CALLS")"
+}
+run_open_json found tk-real1 tk-visit0
+eq "$JRC" "0" "(OPEN-JSON) a held subject exits 0 under --json"
+printf '%s' "$JOUT" | jq -e '.visit == "tk-visit0" and .identity == "continuation_group" and .filed == false and .subject == "tk-real1"' >/dev/null 2>&1 \
+  && ok "(OPEN-JSON) --json names the existing visit and its continuation_group identity, filed:false" \
+  || bad "(OPEN-JSON) --json object wrong for a stamp match (got: ${JOUT:-<nothing>})"
+grep -q 'folded into tk-visit0 (continuation_group)' <<< "$JERR" \
+  && ok "(OPEN-JSON) stderr names the fold and its identity" \
+  || bad "(OPEN-JSON) stderr must name the match (err: $JERR)"
+[ -z "$JCALLS" ] \
+  && ok "(OPEN-JSON) a fold files nothing" || bad "(OPEN-JSON) filed on a fold (calls: $JCALLS)"
+run_open_json found tk-real1 tk-visit0 edge
+printf '%s' "$JOUT" | jq -e '.identity == "tracks" and .filed == false' >/dev/null 2>&1 \
+  && ok "(OPEN-JSON) an edge-only match is named 'tracks'" \
+  || bad "(OPEN-JSON) edge match identity wrong (got: ${JOUT:-<nothing>})"
+run_open_json found tk-real1
+printf '%s' "$JOUT" | jq -e '.filed == true and .identity == "filed" and .visit == "tk-visit1"' >/dev/null 2>&1 \
+  && ok "(OPEN-JSON) a bare miss files fresh and reports filed:true" \
+  || bad "(OPEN-JSON) fresh-file --json wrong (got: ${JOUT:-<nothing>})"
+printf '%s' "$JOUT" | jq -e 'type == "object"' >/dev/null 2>&1 \
+  && ok "(OPEN-JSON) fresh-file stdout is a single JSON object, not human text" \
+  || bad "(OPEN-JSON) fresh-file stdout not clean JSON (got: $JOUT)"
+
 # --- (ALLOWDUP) --allow-duplicate bypasses the one-visit-per-subject dedup ------
 # engage --reason files a fresh visit for a distinct concern even when the
 # subject already has one; it routes through open with --allow-duplicate, which

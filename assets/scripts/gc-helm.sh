@@ -39,12 +39,12 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
   gc-helm engage [<subject>] [--subject <id>] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
-  gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted)
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
 The board is `helm-svc board` (services/helm). This script carries only the
@@ -186,6 +186,13 @@ visit_headline() {
 # Sibling tools: assets/scripts/ and tools/ are siblings under the pack root.
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+# The one definition of what subject a visit covers — the tracks-edge identity
+# (gc.continuation_group stamp as fallback) that open, dismiss and engage below
+# all match on, shared with converse-fold.sh and the sweeps. Exposes
+# $VISIT_IDENTITY_JQ.
+# shellcheck source=visit-identity.sh
+. "${GC_VISIT_IDENTITY_LIB:-$SCRIPT_DIR/visit-identity.sh}" \
+    || { echo "$PROG: cannot source visit-identity.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
@@ -1577,7 +1584,7 @@ cmd_resolve() {
 # converse session reads at claim time — callers with their own origin
 # (gc-visit-open.sh) pass both rather than misreporting the board wording.
 cmd_open() {
-    bead=""; open_reason=""; open_body=""; open_allow_dup=""
+    bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) open_reason="${1#--reason=}"; shift ;;
@@ -1587,6 +1594,7 @@ cmd_open() {
             --body)     shift; [ $# -gt 0 ] || { echo "$PROG: open: --body requires a value" >&2; exit 2; }
                         open_body="$1"; shift ;;
             --allow-duplicate) open_allow_dup=1; shift ;;
+            --json)     open_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: open: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: open takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
@@ -1658,25 +1666,30 @@ cmd_open() {
     fi
     # <<< open-subject-closed
 
-    # Already held? A visit records its subject twice — the
-    # gc.continuation_group stamp and the tracks edge — and only the edge has
-    # proved reliable (su-ab9je: the stamp landed empty), so match EITHER.
-    # The $s != "" arm keeps an empty stamp from matching an empty subject.
+    # Already held? A visit records its subject as a tracks edge to it, with the
+    # gc.continuation_group stamp as the recovery fallback (su-ab9je: the stamp
+    # can land empty). visit-identity.sh is the one matcher, shared with dismiss,
+    # converse-fold and the sweeps; it also names WHICH identity matched, so a
+    # fold is reported (--json and stderr), never a silent no-op.
     # --allow-duplicate skips the dedup: engage --reason files a fresh visit for
     # a distinct concern on purpose, even when the subject already has one.
     if [ -z "$open_allow_dup" ]; then
-        existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
-            | jq -r --arg s "$bead" \
-                '[ .[]? | select((.metadata.task_kind // "") == "visit")
-                   | select($s != ""
-                            and (((.metadata["gc.continuation_group"] // "") == $s)
-                                 or ([ .dependencies[]?
-                                       | select((.type // "") == "tracks")
-                                       | select((.depends_on_id // "") == $s) ] | length > 0)))
-                   | .id ] | first // empty' 2>/dev/null || true)
+        existing_row=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub \
+            | jq -c --arg s "$bead" "$VISIT_IDENTITY_JQ"'
+                [ .[]? | select((.metadata.task_kind // "") == "visit")
+                   | select(visit_covers($s))
+                   | {id, identity: visit_identity_match($s)} ] | first // empty' 2>/dev/null || true)
+        existing=$(printf '%s' "$existing_row" | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
         if [ -n "$existing" ]; then
-            echo "$PROG: visit $existing is already open for $bead — parked on the helm board until an operator engages it."
-            echo "       Engage it when ready: $PROG engage $existing"
+            existing_identity=$(printf '%s' "$existing_row" | jq -r '.identity // empty' 2>/dev/null || true)
+            echo "$PROG: open: folded into $existing ($existing_identity) — no visit filed." >&2
+            if [ -n "$open_json" ]; then
+                jq -nc --arg s "$bead" --arg v "$existing" --arg id "$existing_identity" \
+                    '{subject: $s, visit: $v, identity: $id, filed: false}'
+            else
+                echo "$PROG: visit $existing is already open for $bead — parked on the helm board until an operator engages it."
+                echo "       Engage it when ready: $PROG engage $existing"
+            fi
             return 0
         fi
     fi
@@ -1737,8 +1750,13 @@ cmd_open() {
     # <<< gate-visit
     bust_cache
 
-    echo "$PROG: visit $VISIT filed on $bead — parked on the helm board (gc.routed_to=$POOL); no session spawned."
-    echo "       Engage it when ready: $PROG engage $VISIT"
+    if [ -n "$open_json" ]; then
+        jq -nc --arg s "$bead" --arg v "$VISIT" \
+            '{subject: $s, visit: $v, identity: "filed", filed: true}'
+    else
+        echo "$PROG: visit $VISIT filed on $bead — parked on the helm board (gc.routed_to=$POOL); no session spawned."
+        echo "       Engage it when ready: $PROG engage $VISIT"
+    fi
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
@@ -1856,17 +1874,12 @@ current_sitting_subject() {
     # One jq pass: the held visits, each reduced to its subject, deduplicated.
     # A jq failure here is a listing this verb cannot read (an element that is
     # not an object, metadata that is not a map), not an empty sitting.
-    _subjects=$(printf '%s' "$_vjson" | jq -r --arg ids "$_me" '
+    _subjects=$(printf '%s' "$_vjson" | jq -r --arg ids "$_me" "$VISIT_IDENTITY_JQ"'
         ($ids | split("\n") | map(select(. != ""))) as $me
         | [ .[] | objects | . as $v
             | select((($v.metadata // {}) | objects | .task_kind // "") == "visit")
             | select(($me | index($v.assignee // "")) != null)
-            | (($v.metadata["gc.continuation_group"] // "") as $g
-               | if $g != "" then $g
-                 else ([ ($v.dependencies // [])[] | objects
-                         | select((.type // "") == "tracks")
-                         | (.depends_on_id // "") ] | map(select(. != "")) | first // "")
-                 end) ]
+            | visit_subject ]
         | map(select(. != "")) | unique | .[]' 2>/dev/null) || {
         echo "$PROG: could not read this session's visits — 'gc bd list' answered nothing this verb could parse. Name the subject: $PROG dismiss <bead-id>." >&2
         return 4
@@ -1895,17 +1908,21 @@ current_sitting_subject() {
 # a sitting the board cannot report, and once closed no re-run reaches it. A
 # visit the verb could not account for aborts the run. Idempotent.
 cmd_dismiss() {
-    bead=""; dismiss_reason=""
+    bead=""; dismiss_reason=""; dismiss_json=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) dismiss_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --reason requires a value" >&2; exit 2; }
                         dismiss_reason="$1"; shift ;;
+            --json)     dismiss_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: dismiss: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: dismiss takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
         esac
     done
+    # In --json mode the one machine object is the only thing on stdout, so the
+    # human progress lines print to stderr instead; otherwise they print as before.
+    _dmsg() { if [ -n "$dismiss_json" ]; then echo "$@" >&2; else echo "$@"; fi; }
     if [ -z "$bead" ]; then
         current_sitting_subject || exit $?
         bead="$SITTING_SUBJECT"
@@ -1940,20 +1957,14 @@ cmd_dismiss() {
              then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.metadata.task_kind // "")
              else empty end' 2>/dev/null || true)
     if [ "$subject_kind" = "visit" ]; then
+        # subject_clean is a `gc bd show` payload (dependency_type/id edge shape);
+        # visit_subject reads both shapes, so the tracks fallback recovers the
+        # subject here even when the gc.continuation_group stamp landed empty.
         visit_of=$(printf '%s' "$subject_clean" \
-            | jq -r --arg b "$bead" \
-                'if type == "array"
-                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
-                      | (.metadata["gc.continuation_group"] // "") | select(. != "")
-                 else empty end' 2>/dev/null || true)
-        if [ -z "$visit_of" ]; then
-            visit_of=$(printf '%s' "$subject_clean" \
-                | jq -r --arg b "$bead" \
-                    'if type == "array"
-                     then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
-                          | [ .dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "") ] | map(select(. != "")) | first // empty
-                     else empty end' 2>/dev/null || true)
-        fi
+            | jq -r --arg b "$bead" "$VISIT_IDENTITY_JQ"'
+                if type == "array"
+                then (([ .[] | select(type == "object" and (.id // "") == $b) ] | first) // {} | visit_subject)
+                else "" end' 2>/dev/null || true)
         if [ -z "$visit_of" ]; then
             echo "$PROG: dismiss: $bead is a visit that names no subject (no gc.continuation_group stamp and no tracks edge) — nothing to dismiss it under. Nothing was written." >&2
             exit 4
@@ -1993,6 +2004,7 @@ cmd_dismiss() {
     # store — only possible with an explicit id from another rig — re-reads.
     sitting_failed=0
     visits=""
+    visits_matched="[]"
     listed=0
     if [ -n "$SITTING_LISTING" ] && { [ -z "$db" ] || [ "$db" = "$SITTING_LISTING_DIR" ]; }; then
         visits_json="$SITTING_LISTING"; listed=1
@@ -2001,19 +2013,16 @@ cmd_dismiss() {
     fi
     if [ "$listed" -eq 1 ]; then
         if printf '%s' "$visits_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            visits=$(printf '%s' "$visits_json" \
-                | jq -r --arg s "$bead" \
-                    '[ .[] | select((.metadata.task_kind // "") == "visit")
-                       | select($s != ""
-                                and (((.metadata["gc.continuation_group"] // "") == $s)
-                                     or ([ .dependencies[]?
-                                           | select((.type // "") == "tracks")
-                                           | select((.depends_on_id // "") == $s) ] | length > 0)))
-                       | .id ] | .[]' 2>/dev/null) || {
+            visits_matched=$(printf '%s' "$visits_json" \
+                | jq -c --arg s "$bead" "$VISIT_IDENTITY_JQ"'
+                    [ .[] | select((.metadata.task_kind // "") == "visit")
+                       | select(visit_covers($s))
+                       | {id, identity: visit_identity_match($s)} ]' 2>/dev/null) || {
                 sitting_failed=1
-                visits=""
+                visits_matched="[]"
                 echo "$PROG: dismiss: could not read the visits on $bead — 'gc bd list' answered nothing this verb could parse" >&2
             }
+            visits=$(printf '%s' "$visits_matched" | jq -r '.[].id' 2>/dev/null || true)
         else
             sitting_failed=1
             echo "$PROG: dismiss: could not read the visits on $bead — 'gc bd list' exited 0 without a JSON array of beads" >&2
@@ -2034,6 +2043,10 @@ cmd_dismiss() {
     for _v in $visits; do
         [ -n "$_v" ] || continue
         _why="dismissed by the operator${dismiss_reason:+: $dismiss_reason}"
+        # Name which identity tied this visit to the subject — the same shared
+        # matcher open reports, so a dismiss is never a silent match either.
+        _v_identity=$(printf '%s' "$visits_matched" | jq -r --arg v "$_v" 'map(select(.id == $v)) | .[0].identity // ""' 2>/dev/null || true)
+        echo "$PROG: dismiss: visit $_v covers $bead by ${_v_identity:-unknown} identity" >&2
         # gc.outcome is what every reader of a finished sitting looks at:
         # services/helm/internal/source/facts.go projects it onto the board's
         # Sitting.Outcome, so a visit closed without one is a sitting the board
@@ -2070,10 +2083,10 @@ cmd_dismiss() {
         fi
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
             closed_n=$((closed_n + 1))
-            echo "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
+            _dmsg "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
         elif gc bd close "$_v" --reason "$_why" --force >/dev/null 2>&1; then
             closed_n=$((closed_n + 1))
-            echo "$PROG: dismiss: closed visit $_v over its holder's claim — the sitting on $bead ends"
+            _dmsg "$PROG: dismiss: closed visit $_v over its holder's claim — the sitting on $bead ends"
         else
             sitting_failed=1
             echo "$PROG: dismiss: could not close visit $_v; its sitting keeps the pane. Close it by hand: gc bd close $_v --force" >&2
@@ -2086,12 +2099,19 @@ cmd_dismiss() {
         # Any visit that DID close changed the board's Held marker, so the
         # cache goes.
         bust_cache
+        [ -n "$dismiss_json" ] && jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
+            '{subject: $s, matched: $m, closed: $c, ok: false}'
         echo "$PROG: dismiss: $bead was NOT dismissed — a sitting is unaccounted for. Each unfinished visit above says what it needs, and a re-run resumes from there." >&2
         exit 4
     fi
 
     bust_cache
-    [ "$closed_n" -eq 0 ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
+    if [ -n "$dismiss_json" ]; then
+        jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
+            '{subject: $s, matched: $m, closed: $c, ok: true}'
+    else
+        [ "$closed_n" -eq 0 ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
+    fi
     return 0
 }
 
@@ -2148,10 +2168,8 @@ engage_valid_model() {
 # (open+unassigned) first, then held, oldest first within each.
 engage_find_visits() {
     gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub \
-        | jq -r --arg s "$1" \
-            '[ .[]? | select((.metadata.task_kind // "")=="visit")
-               | select($s != "" and (((.metadata["gc.continuation_group"] // "")==$s)
-                    or ([ .dependencies[]? | select((.type // "")=="tracks") | select((.depends_on_id // "")==$s) ] | length > 0))) ]
+        | jq -r --arg s "$1" "$VISIT_IDENTITY_JQ"'
+            [ .[]? | select((.metadata.task_kind // "")=="visit") | select(visit_covers($s)) ]
              | sort_by(((.assignee // "") != ""), ((.status // "") != "open"), (.created_at // ""))
              | .[] | [.id, (.status // ""), (.assignee // ""), (.title // "")] | @tsv' 2>/dev/null || true
 }
@@ -2436,20 +2454,13 @@ cmd_engage() {
     bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
 
     # The subject a visit id is about — for the grounding line and the success
-    # summary below. A visit records its subject in the gc.continuation_group
-    # stamp, which can land empty, so fall back to the tracks edge; the record
-    # the existence gate already fetched carries both. bead_row is a `gc bd show`
-    # row, which renders a dependency as a bead row keyed .dependency_type with
-    # the target in .id — not the .type/.depends_on_id shape `gc bd list` emits.
-    # Empty for a non-visit.
+    # summary below. visit_subject (visit-identity.sh) reads the tracks edge with
+    # the gc.continuation_group stamp as fallback, in either the `gc bd show`
+    # shape bead_row carries or the `gc bd list` shape, so the same matcher serves
+    # here as in open/dismiss. Empty for a non-visit.
     visit_subject=""
     if [ "$bead_kind" = "visit" ]; then
-        visit_subject=$(printf '%s' "$bead_row" | jq -r '
-            (.metadata["gc.continuation_group"] // "") as $g
-            | if $g != "" then $g
-              else ([ .dependencies[]? | select((.dependency_type // "") == "tracks")
-                      | (.id // "") ] | map(select(. != "")) | first // "")
-              end' 2>/dev/null || true)
+        visit_subject=$(printf '%s' "$bead_row" | jq -r "$VISIT_IDENTITY_JQ"'visit_subject' 2>/dev/null || true)
     fi
 
     # Ground the operator in the bead they picked, before the visit or model

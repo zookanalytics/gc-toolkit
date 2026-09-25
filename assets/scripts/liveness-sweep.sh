@@ -27,6 +27,12 @@ set -uo pipefail
 
 PROG="liveness-sweep"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The one definition of what subject a visit covers, shared with gc-helm.sh,
+# converse-fold.sh and gate-visit-sweep.sh. Exposes $VISIT_IDENTITY_JQ. The
+# stall_root reads below are a SEPARATE liveness question (workflow-root
+# membership), kept per the tk-fhlqce ruling, not part of this identity.
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -273,7 +279,7 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # >>> classify
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
-      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" '
+      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" "$VISIT_IDENTITY_JQ"'
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
@@ -315,13 +321,17 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
         | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
     | ($gates | length) > 0
       and all($gates[]; ($m["check." + .] // "") == "green");
-  # Live-visit subjects: union of the gc.continuation_group stamp and the
-  # tracks edge — the stamp alone has landed empty on a live visit (su-ab9je).
+  # Live-visit subjects: every subject a live visit covers by its shared identity
+  # (tracks edge, gc.continuation_group fallback — the stamp alone has landed
+  # empty on a live visit, su-ab9je). visit_identity_subjects is visit-identity.sh.
   ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
-     | ((.metadata["gc.continuation_group"] // ""),
-        (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
-     | select(. != "") ]) as $convgroups
+     | visit_identity_subjects[] ]) as $convgroups
+  # stall_root visits: a SEPARATE liveness question from coverage — a stalled
+  # sitting parked on a workflow ROOT keeps the ready steps under that root off
+  # the unnamed agenda (consumed at the gc.root_bead_id arm below). Nothing
+  # writes stall_root today, so this set is inert; it is kept per the tk-fhlqce
+  # ruling until an edge is proven to cover the same stalled-workflow visits.
   | ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata.stall_root // empty) | select(. != "") ]) as $rootvisits
@@ -527,10 +537,8 @@ sweep_visit() {
     # backlog to one conversation. Do NOT advance the baseline here — these
     # new candidates were never put in front of anyone.
     local live_visit
-    live_visit=$(jq -r --arg s "$SWEEP_SUBJECT" '[.[] | select((.metadata.task_kind // "") == "visit")
-        | ((.metadata["gc.continuation_group"] // ""),
-           (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
-        | select(. != "")] | (index($s) // "") | tostring' "$LIVE")
+    live_visit=$(jq -r --arg s "$SWEEP_SUBJECT" "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
+        | visit_identity_subjects[]] | (index($s) // "") | tostring' "$LIVE")
     if [ -n "$live_visit" ]; then
         echo "$PROG: batch visit already live on $SWEEP_SUBJECT; $CARRIED_COUNT carried, $NEW_COUNT new await it (baseline not advanced)"
         return 0
@@ -635,10 +643,8 @@ recurrence() {
                        then (.metadata["triage.last_seen"] // "") else null end)}] | .[]' "$LIVE")
     [ -n "$subjects" ] || return 0
     local convgroups
-    convgroups=$(jq -c '[.[] | select((.metadata.task_kind // "") == "visit")
-        | ((.metadata["gc.continuation_group"] // ""),
-           (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
-        | select(. != "")]' "$LIVE")
+    convgroups=$(jq -c "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
+        | visit_identity_subjects[]]' "$LIVE")
     printf '%s\n' "$subjects" > "$TMP/subjects"
     while IFS= read -r row; do
         local sid scope was now n delta
