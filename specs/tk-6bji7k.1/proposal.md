@@ -1,6 +1,6 @@
 ---
 name: WIP viewing and review — the WIP/ready state model
-description: Proposal for tk-6bji7k.1. How a bead-driven workflow views and reviews work in progress before it is a finished, approval-gated change. One status dimension — the workflow-owned status label — carries who must act next; the draft flag is a CI-cost lever rather than a second signal; a pull request opens at the checkpoint where a person is needed and there is something tangible to review; and a checkpoint's pull request lands on the owning convoy's integration branch rather than on main, so its approval mints a phase and main moves only at graduation. Rules out building review into Helm and switching off GitHub.
+description: Proposal for tk-6bji7k.1. How a bead-driven workflow lets a person view and review work in progress on GitHub. Two things carry the model: one workflow-owned status label says who must act next, and the pull request's base says where an approved change lands. An approval means the same thing everywhere — merge what is presented into this pull request's base — so the only variable is the base: `main`, a convoy's integration branch, or a direct commit with no pull request. The operator must be able to read that base. A pull request opens at the checkpoint where a person is needed and there is something tangible to review. Rules out building review into Helm and switching off GitHub.
 ---
 
 # WIP viewing and review
@@ -29,10 +29,12 @@ The design has to fit the shape a design or coding change actually takes:
 The arc lands on `main` as one change, but its reviewed phases do not each land
 there. A phase that needs a checkpoint lands on the owning convoy's integration
 branch, and `main` moves only when the whole unit graduates — the section "Where
-a checkpoint lands" gives the mechanism. At step 2 the person is asked to look
-and steer, not to approve a merge to `main`. Two things have to hold for that:
-the machine must not read an early look as a merge approval, and a person must
-not be asked to look before the work is ready for them.
+a checkpoint lands" gives the mechanism. At step 2 the person reviews the
+checkpoint; approving it merges that phase into the convoy's integration branch,
+not into `main`. Two things have to hold for that: the operator must be able to
+read which base a pull request targets, so a checkpoint into integration is never
+taken for a merge to `main`, and a person must not be asked to look before the
+work is ready for them.
 
 ## One status dimension: who must act next
 
@@ -56,9 +58,10 @@ the operator's question directly — is this mine to act on right now — and it
 answers it the same way whether the change is a spec at step 2 or a finished
 implementation at step 5. `working` means don't look; `needs-review` means look;
 `needs-attention` means look, where the ask is to unblock rather than to review.
-What the label does not carry is what a review verdict then authorizes, and that
-does differ between a spec at step 2 and a finished change at step 5. The
-subsection "A checkpoint approval is not a merge to main" below draws that line.
+What the label does not carry is where an approved change then lands. That is set
+by the pull request's base, not by which checkpoint the approval is given at — an
+approval means the same thing at a spec checkpoint and at the finished change.
+The subsection "An approval authorizes a merge into the base" below covers it.
 
 The label stays honest across a review round because it reads the city's own
 computed state — the posture and merge state the refinery stamps on the anchor,
@@ -75,49 +78,48 @@ second one. The internal machine axis `pr.machine` (`docs/state-machine.md`,
 "The machine axis") is the city's own bookkeeping that feeds the label; it is not
 separately projected onto GitHub, and the draft flag carries no state of its own.
 
-### A checkpoint approval is not a merge to main
+### An approval authorizes a merge into the base
 
-The label says who must look; it does not say what their verdict authorizes, and
-that differs between a checkpoint and the graduation. `needs-review` shows at
-both: on a child pull request presenting a spec for feedback, and on the
-graduation pull request presenting the finished unit for merge to `main`. The
-label reads the same; the verdicts do not.
+An approval means one thing wherever it is given: what is presented here is
+approved, so merge it into this pull request's base. A GitHub **Approve** on a
+checkpoint and one on the graduation carry the identical verdict. The only thing
+that differs is the base the approved change lands on, and that is a fact about
+the pull request, not a second meaning the person has to hold.
 
-What keeps them apart is the pull request's base, not a rule against approving
-mid-journey. A child pull request's base is `integration/<convoy-id>`, so
-approving it mints that phase into integration and moves nothing on `main`; the
-graduation pull request's base is `main`, so approving it authorizes the merge
-that ships the unit. A GitHub **Approve** keeps one meaning throughout —
-authorize the merge into this pull request's base — and the base is the thing the
-operator must be able to read, which is why an integration-targeted pull request
-is labelled and bannered as a checkpoint (the section "Where a checkpoint lands"
-below). The label is unchanged by any of this: it still says only who must look.
+A checkpoint's base is `integration/<convoy-id>`, so approving it merges that
+phase into integration and `main` does not move; the graduation's base is `main`,
+so approving it ships the unit. Same verdict, different base. That is what makes
+this model simpler than one where the same click has to mean different things at
+different points.
 
-The merge preconditions stay a last-line backstop, not the mechanism. A merge to
-`main` needs more than an approval — the city must have reached its terminal step
-with gates green and no hold, and `assets/scripts/merge.sh` skips a draft — so a
-stray approval on the wrong base cannot ship work by itself. The design does not
-lean on that: the base carries the meaning. And a merge-authorizing approval
-still has to survive the commits that follow it, which is the commit-scoping the
-section "Sign-off scoped to a commit, reset by materiality" leaves open.
+Because the base carries the whole distinction, the operator has to be able to
+read it. An integration-targeted pull request is marked as a checkpoint on the
+pull request list and states its base in a standing body banner — that it merges
+into `integration/<convoy-id>`, and that the broader review runs at graduation
+(the section "Where a checkpoint lands" below; tk-6bji7k.9). The status label is
+orthogonal to this and unchanged: it still says only who must act next.
 
-## The draft flag is a CI-cost lever, not a signal
+Both bases are gated the same way. A merge into either needs its declared lanes
+green, every open review comment addressed, and — where its `check_set` calls for
+one — an approval; nothing merges ungated (`assets/scripts/merge.sh`). The
+branch-protection rules a base carries can differ, so the gates themselves may
+differ, but integration is not the loose base to `main`'s strict one. The base
+names which line of work the approved change joins; it does not lower the bar.
 
-GitHub's draft boolean carries no WIP meaning here. The code reads it only to
-skip a draft PR in the merge arm and the posture read (`assets/scripts/merge.sh`,
-`assets/scripts/pr-facts.sh`), and the status-label projection sits above that
-skip on purpose, so it covers a draft PR as much as an open one
-(`assets/scripts/pr-facts.sh`, the label projection above the draft gate).
+## Draft is not part of this model
 
-What draft is good for is cost. GitHub Actions fire on a draft's pushes unless a
-workflow opts out, and `.github/workflows/tests.yml` triggers on every
-`pull_request` to `main` with no draft filter, so a PR opened early and still
-taking follow-up commits would run the full suite on each push. Gating the jobs
-on `github.event.pull_request.draft == false` and adding `ready_for_review` to
-the trigger types makes a draft cost no Actions minutes until it is marked ready.
-That is the entire role of draft in this design: a CI-cost optimization for a PR
-opened early and still churning, orthogonal to the status label that says who
-must act.
+GitHub's draft boolean carries no state in this design. The status label is the
+only WIP signal a person reads, and it covers a draft pull request exactly as it
+covers an open one (`assets/scripts/pr-facts.sh`, the label projection above the
+draft gate); the code otherwise reads draft only to skip a draft in the merge arm
+and the posture read (`assets/scripts/merge.sh`, `assets/scripts/pr-facts.sh`).
+
+One later use is worth naming but not pursued here. Because GitHub Actions fire on
+a draft's pushes unless a workflow opts out, gating CI jobs on `draft == false`
+could save Actions minutes on a pull request still taking follow-up commits. That
+is speculative and general — a candidate optimization, not doctrine this proposal
+rests on — and it is tk-6bji7k.5's, which would also verify draft-CI gating per
+rig before anything relied on it.
 
 ## When the pull request opens
 
@@ -155,11 +157,10 @@ integration and mints it, and `main` does not move. When the unit is ready, a
 graduation pull request carries the integration branch to `main` under the
 broader final review, and the phase-approval trail rides with it.
 
-This is what makes an early approval safe rather than something to forbid. A
-child pull request authorizes exactly one merge, into `integration/<convoy-id>`,
-so an operator steering a spec at a checkpoint mints that phase with no risk to
-`main`. The distinction the operator reads is the base, so an integration-targeted
-pull request has to be unmistakable. Two surfaces carry that, both set at pr-open
+A child pull request authorizes exactly one merge, into `integration/<convoy-id>`,
+so approving a spec at a checkpoint mints that phase and `main` does not move. The
+distinction the operator reads is the base, so an integration-targeted pull
+request has to be unmistakable. Two surfaces carry that, both set at pr-open
 time where the base branch is known: a workflow-owned label so the pull request
 list marks the PR as a checkpoint into integration, and a standing body banner
 stating that it merges into `integration/<convoy-id>`, that its approval mints a
@@ -214,50 +215,28 @@ person is never the first eyes on unchecked work today, and that is enforced now
 not a thing to build. A polecat runs its own `self-review` and pre-flight before
 the handoff, and the refinery holds the anchor at `pre_open_gate` until every
 lane its `check_set` declares is green before any PR opens
-(`assets/scripts/pr-open.sh`). The WIP model opens a PR earlier than the current
-flow does, before the work is ready to merge, so the requirement is that this
-early checkpoint route through that same pre-open gate rather than around it. The
+(`assets/scripts/pr-open.sh`). A checkpoint pull request is ready for its base
+when it opens — it is not a merge-ready change opened early — so the requirement
+is only that it route through that same pre-open gate rather than around it. The
 boundary is internal; the operator sees only that what is waiting on them has
-already cleared it. The work here is to hold the early checkpoint to the checks
-every current flow already runs, not to invent a new precondition.
+already cleared it. The work here is to hold the checkpoint to the checks every
+current flow already runs, not to invent a new precondition.
 
-**Sign-off scoped to a commit, reset by materiality.** This is the real open
-decision. Both review axes carry a verdict across the commits appended after it,
-and a routine push drops neither; they differ only in how each reacts to a
-rewrite that replaces the reviewed commit:
+**A standing approval and the live head.** A review loop where a person comments
+and the author pushes fixups in reply has to say when an approval given on an
+earlier commit no longer covers the head that follows it. This is a property of
+the generic review loop, not something the integration-branch model changes: an
+approval on a checkpoint and one on the graduation age against later commits the
+same way, so the rule here is the rule everywhere.
 
-- A **human** approval is recorded against the commit it was given on, and it
-  stands across the commits that follow. GitHub drops a standing approval only
-  when the repository turns on "dismiss stale approvals when new commits are
-  pushed." That setting is off here and stays off: it keys on the SHA, not on
-  whether the diff changed, so it would drop an approval on a content-neutral
-  rebase and make even a routine post-approval rebase far harder than it earns. A
-  changes-requested review is never auto-dismissed by a push either; the city
-  reworks that veto but never dismisses it (`services/helm/README.md`), and the
-  one dismissal the city does make is of its own superseded machine review, with
-  a human approval always left external (`assets/scripts/signoff.sh`,
-  `dismiss_superseded`). So a human verdict, once given, persists across new
-  commits on its own.
-- A **city gate** lane is commit-agnostic. `green` names no commit, a push does
-  not stale it (`docs/state-machine.md`, "Green survives new commits"), and the
-  `reviewed_oid` pin guards only against a rewrite that removes the reviewed
-  commit — an amend, rebase, or force-push answers `gone` and refuses a fresh
-  verdict, while commits appended on top keep the pin and the lane green
-  (`docs/state-machine.md`, "Gates"). The reason is cost: the cadence re-derives
-  every few minutes, and re-gating on every appended commit would never converge.
-
-A WIP review loop, where a reviewer comments and the author pushes fixups in
-reply, has to say when a standing approval no longer covers the live head.
-Because the approval persists on its own, the risk to guard is the opposite of an
-over-eager reset: a material rewrite shipping under a sign-off that was given for
-an earlier diff. Treating every new commit as stale guards against that but is
-too blunt, since it re-reviews a pure rebase and every trivial fixup. The rule to
-run is materiality: a human sign-off stands across commits that do not change the
-reviewed diff in substance, and a re-review is owed only when the change since
-sign-off is material. Judging that materiality is the piece to build. An agent
-evaluates the diff since the approved commit and decides whether it warrants
-another human pass, while machine lanes keep the commit-agnostic rule so the
-cadence still converges.
+Treating every new commit as stale is too blunt — it re-reviews a pure rebase and
+every trivial fixup — so the rule is materiality: a human sign-off stands across
+commits that do not change the reviewed diff in substance, and a re-review is
+owed only when the change since sign-off is material. Judging that materiality,
+with a fixup-then-squash discipline that keeps comments anchored within a round,
+is tk-6bji7k.6's to build. The related hand-back hygiene — clearing a stale
+`CHANGES_REQUESTED` once every thread is confidently addressed, so the label is
+not trapped by GitHub's sticky verdict — is tk-6bji7k.4's.
 
 **A visible process artifact and two-way links.** The artifact should tell a
 person one thing: whether the change is theirs to act on right now. The status
