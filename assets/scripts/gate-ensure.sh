@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # gate-ensure — arm 1 of the merge cadence; caller: refinery-reconcile.sh.
-# For every open pre_open_gate/pull_request anchor: canonicalize check_set
+# An anchor carrying gc.pr_close_disposition_kind is disposed — pr-dispose.sh stamped
+# it when the PR was withdrawn or superseded, and pr-facts.sh consummates the terminal
+# close — and is skipped whole: its lane is moot, so a review or validator dispatched
+# onto it burns a pool slot on a diff no one ships, and the validation pass hangs a
+# blocks edge on the very close it awaits.
+# For every other open pre_open_gate/pull_request anchor: canonicalize check_set
 # (empty -> stamp the declared default; a list or `none` is left alone), clear
 # any check.<g> that both fails the marker grammar and names a gate check_set
 # does not declare (nothing else reads it, so nothing else could ever rewrite
@@ -446,11 +451,25 @@ for MR in pre_open_gate pull_request; do
 done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0
+stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   [ -n "$id" ] || continue
+  # A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind when its PR
+  # was withdrawn or superseded — still enumerates here (open, merge_result set) until
+  # pr-facts.sh's terminal close lands, but its lane is moot: a review or validator
+  # dispatched onto it burns a pool slot on a diff no one will ship, and a validation
+  # pass mol-validate is poured onto hangs a blocks edge that holds the very close the
+  # disposal waits on. Skip the whole cadence for it — no canonicalization, no
+  # validator pour, no review dispatch, no verdict restamp; pr-facts.sh consummates the
+  # disposition, and signoff.sh declines a moot verdict on the same anchor for the same
+  # reason.
+  disposition=$(meta_of "$row" "gc.pr_close_disposition_kind")
+  if [ -n "$disposition" ]; then
+    echo "$PROG: $id carries a PR-close disposition (gc.pr_close_disposition_kind=$disposition); disposed, awaiting pr-facts terminal close — no review or validation dispatched"
+    disposed=$((disposed + 1)); continue
+  fi
   branch=$(meta_of "$row" branch)
   target=$(meta_of "$row" merged_target)
   [ -n "$target" ] || target=$(meta_of "$row" target)
@@ -899,7 +918,7 @@ done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh and still ungated; exiting rc=$UNSAFE_RC so the driver holds merge.sh this pass" >&2
   exit "$UNSAFE_RC"
