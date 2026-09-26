@@ -622,6 +622,12 @@ keys = [
   # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
   # pass does not answer the same thread twice.
   "finding.reply_posted",
+  # The databaseId of the GitHub review that raised a human finding, stamped by
+  # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's
+  # human findings by their originating review, so once every finding one review
+  # raised has closed the write-back dismisses THAT review and re-requests its
+  # author — per-review, independent of other reviews on the same PR.
+  "finding.review_id",
 ]
 
 [metadata.pr_posture]
