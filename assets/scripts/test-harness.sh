@@ -42,7 +42,7 @@ harness_init() {
   export STUB_ORIGIN_URL="https://github.com/zook/gc-toolkit"
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
-  export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS=""
+  export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
@@ -219,6 +219,18 @@ case "$verb" in
       esac
       shift || true
     done
+    # STUB_ENFORCE_BLOCKS: model bd's refusal to close an issue that still carries
+    # an open blocks-blocker. Off by default, so suites that close a blocked bead
+    # freely are unaffected; a suite means to exercise the refusal by exporting it.
+    # A --status=closed write is refused while any live bead blocks this id — the
+    # metadata and notes on the same call do not land either, exactly as bd rolls a
+    # refused close back whole.
+    if [ -n "${STUB_ENFORCE_BLOCKS:-}" ] && [ "$newstatus" = "closed" ]; then
+      for _b in $(awk -F'|' -v id="$id" '$2=="blocks" && $3==id {print $1}' "$D"); do
+        _bst=$(jq -r --arg b "$_b" '(.[] | select(.id == $b) | .status) // "open"' "$S")
+        [ "$_bst" = "closed" ] || { echo "gc: cannot close blocked issue $id (blocked by $_b)" >&2; exit 1; }
+      done
+    fi
     # STUB_DROP_KEYS="id:key1,key2 id2:key" — apply the update but silently drop
     # the named keys, modelling a write that reported success and half-landed.
     drops=""
@@ -274,6 +286,12 @@ case "$verb" in
   close)
     id="${1:-}"
     case " ${STUB_CLOSE_FAIL:-} " in *" $id "*) echo "gc: simulated close refusal" >&2; exit 1 ;; esac
+    if [ -n "${STUB_ENFORCE_BLOCKS:-}" ]; then
+      for _b in $(awk -F'|' -v id="$id" '$2=="blocks" && $3==id {print $1}' "$D"); do
+        _bst=$(jq -r --arg b "$_b" '(.[] | select(.id == $b) | .status) // "open"' "$S")
+        [ "$_bst" = "closed" ] || { echo "gc: cannot close blocked issue $id (blocked by $_b)" >&2; exit 1; }
+      done
+    fi
     tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
