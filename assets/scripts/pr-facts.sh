@@ -399,11 +399,15 @@ gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
 # on the /files page its inline comments live on, so an objection stated in the
 # body alone reaches a page-pointing work order as nothing at all.
 feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> <issue-comments-json> <issue-mark> — markdown on stdout
-  jq -nr --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
-         --argjson icmts "$5" --argjson imark "$6" \
+  # The JSON lists go in on stdin, never as --argjson: one that exceeds the OS
+  # per-argument limit (Linux MAX_ARG_STRLEN, 128 KiB) makes jq fail to exec, and
+  # a busy PR's comment list clears it. `input` reads them back in printed order.
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
+  jq -nr --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" \
          --arg self "$SELF_LOGIN" '
     def clip($n): if (length) > $n then (.[0:$n] + "\n\n_(truncated — the rest is on the PR)_") else . end;
     def body: ((.body // "") | tostring);
+    (input) as $revs | (input) as $cmts | (input) as $icmts |
     ([ $revs[] | select(((.user.login // "") | tostring) != $self)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
@@ -439,10 +443,11 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
   # carries, so the write-back can find the thread and post a declined finding's
   # owed reply into it; a review-body or Conversation comment has no thread, so
   # its id matches none and the write-back answers those on the PR itself.
-  jq -nc --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
-         --argjson icmts "$5" --argjson imark "$6" --arg self "$SELF_LOGIN" '
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
+  jq -nc --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" --arg self "$SELF_LOGIN" '
     def body: ((.body // "") | tostring);
     def has_body: ((body | gsub("[[:space:]]"; "")) != "");
+    (input) as $revs | (input) as $cmts | (input) as $icmts |
     ([ $revs[] | select(((.user.login // "") | tostring) != $self)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
@@ -472,7 +477,9 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
 # them. A comment naming no review, or naming one the review list does not
 # carry, is standalone and stays.
 live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
-  jq -nc --argjson revs "$1" --argjson cmts "$2" '
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; } | \
+  jq -nc '
+    (input) as $revs | (input) as $cmts |
     ([ $revs[]
        | select(((.state // "") | tostring) == "DISMISSED")
        | ((.id // 0) | tostring) ]) as $retired
@@ -485,7 +492,9 @@ live_comments() { # <reviews-json> <comments-json> — comments no dismissal ret
 # the body filter above keeps it out of the watermark: it is the review holding
 # the merge, and its inline comments are what the child has to answer.
 feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
-  jq -nr --argjson revs "$1" --argjson rmark "$2" --arg self "$SELF_LOGIN" '
+  printf '%s\n' "$1" | \
+  jq -nr --argjson rmark "$2" --arg self "$SELF_LOGIN" '
+    (input) as $revs |
     [ $revs[] | select(((.user.login // "") | tostring) != $self)
               | select(((.id // 0) | tonumber) > $rmark)
               | select((((.state // "") | tostring) == "CHANGES_REQUESTED")
