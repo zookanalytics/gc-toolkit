@@ -181,6 +181,44 @@ enumerate_rigs() {
     # <<< rig-enumeration-taxonomy
 }
 
+# require_reaction_agent <rig> — refuse (die, nothing filed) when <rig> has no
+# reaction agent registered, so an operator topic filed there would park on the
+# board with no session able to engage it. Two agent kinds engage a topic: the
+# proactive first-reaction pool, and converse (gc-helm engage spawns it on
+# demand). Registration, not liveness, is the bar: a suspended or zero-cap agent
+# still engages once its rig resumes or its cap lifts, and the topic path below
+# deliberately files-and-waits into a suspended rig rather than refusing it. A
+# rig with neither agent registered — the running, agent-less city workspace
+# this backstops — is the one with no resume. An unreadable roster refuses
+# nothing; a dead zone is a positive finding only.
+require_reaction_agent() {
+    if command -v timeout >/dev/null 2>&1; then
+        _rra_roster=$(timeout "${GC_VISIT_ROSTER_TIMEOUT:-15}" gc agent list --json 2>/dev/null || true)
+    else
+        _rra_roster=$(gc agent list --json 2>/dev/null || true)
+    fi
+    [ -n "$_rra_roster" ] || return 0
+    # A positive dead-zone finding requires a well-formed roster — a JSON object
+    # carrying an .agents array. Malformed, truncated, preface-prefixed, or
+    # wrong-shaped output is a degraded data plane, not a dead zone, so fail open
+    # (per the header) rather than strand a legitimate intake on a roster gc could
+    # not answer. Empty .agents stays a genuine finding; only unreadable is spared.
+    printf '%s' "$_rra_roster" | jq -e 'type == "object" and (.agents | type == "array")' >/dev/null 2>&1 || return 0
+    # Serviceable when a proactive pool OR a converse (base name or a model
+    # variant) is registered for the rig, in any cap or suspension state.
+    if printf '%s' "$_rra_roster" | jq -e --arg r "$1" '
+            [ .agents[]? | (.qualified_name // "")
+              | select(. == ($r + "/gc-toolkit.proactive")
+                       or startswith($r + "/gc-toolkit.converse")) ] | length > 0' >/dev/null 2>&1; then
+        return 0
+    fi
+    _rra_alt=$(printf '%s' "$_rra_roster" | jq -r '
+        [ .agents[]? | (.qualified_name // "")
+          | select(test("/gc-toolkit[.](proactive|converse)"))
+          | split("/")[0] ] | unique | join(", ")' 2>/dev/null || true)
+    die "rig '$1' has no reaction agent: neither a proactive pool nor a converse is registered there, so an operator topic filed into it would park on the board with no session able to engage it. Re-run against a rig that has one${_rra_alt:+ (e.g. $_rra_alt)}. Nothing filed." 3
+}
+
 # derive_subject_rig <bead-id> — set prefix_hit, RIG_NAME and SUBJ_DB (the
 # .beads path, empty when the prefix matches no rig) from a bead id's rig
 # prefix. RIGS must already be populated by enumerate_rigs.
@@ -251,6 +289,10 @@ else
     [ -n "$RIG_PATH" ] || die "unknown rig '$RIG' (try one of: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null))" 2
     [ -d "$RIG_PATH/.beads" ] || die "rig '$RIG' has no .beads ledger at $RIG_PATH/.beads" 3
 
+    # Refuse a dead-zone target before minting the subject bead, so nothing is
+    # filed where no agent could engage it.
+    require_reaction_agent "$RIG"
+
     # ── Filing into a paused rig is allowed; say the report will wait ────
     # A suspended rig has its agents skipped by the reconciler, and a rig with
     # no agents running has nothing to triage yet — but `gc rig suspend` leaves
@@ -303,6 +345,13 @@ board; this body is the record. Ask before assuming scope."
     RIG_NAME="$RIG"
     SUBJ_DB="$RIG_PATH/.beads"
     note "$PROG: subject $SUBJECT created in rig $RIG_NAME ($SUBJ_TYPE)"
+fi
+
+# The topic path guarded before it minted the subject; the existing-bead and
+# PR-reference paths resolve a subject in another rig, so guard here before a
+# visit is filed against a target that could never engage it.
+if [ -n "$looks_like_bead_id" ] || [ -n "$looks_like_pr_ref" ]; then
+    require_reaction_agent "$RIG_NAME"
 fi
 
 # ── Record the origin as a KEY, not only as prose ────────────────────
