@@ -442,6 +442,15 @@ type Sitting struct {
 	// close leaves an open visit reading "dismissed" until it is closed or the
 	// sitting signs off over it.
 	Outcome string `json:"outcome"`
+	// OutcomeReason is gc.outcome_reason, the one-line human-readable sentence
+	// naming WHY this visit closed — "moot: premise died, subject already
+	// closed", "folded into <holder>", or what a held sitting signed off on.
+	// Outcome is the word a reader groups by; OutcomeReason is the sentence a
+	// reader reads. It is stamped per VISIT beside Outcome, which is what lets a
+	// dedup close read on the board as a decision rather than a dropped need.
+	// Empty on a running sitting and on a closed one whose writer stamped only
+	// the word.
+	OutcomeReason string `json:"outcome_reason"`
 	// Session is the converse session that ran the sitting (gc.session_name),
 	// which is what an operator attaches to while it is still open.
 	Session string `json:"session"`
@@ -487,14 +496,19 @@ func (s Sitting) Topic() string {
 
 // Headline is what a sitting CONCLUDED, or failing that what it is ABOUT. The
 // takeaway is the conversation's own one-line conclusion and wins whenever one
-// was attributed. Without one the row shows the subject's title — the topic —
-// rather than the visit bead's own title, which on an old-path first reaction is
-// the generic pool-offer line "first reaction ready: accept or redirect" and
-// says nothing. The visit title is the last resort, for a subject the gather
-// could not read at all.
+// was attributed. A closed sitting that left no takeaway — a moot, benign or
+// folded dedup close — shows its outcome reason next, the sentence naming why it
+// closed, so the row reads as a decision rather than a blank. Without either the
+// row shows the subject's title — the topic — rather than the visit bead's own
+// title, which on an old-path first reaction is the generic pool-offer line
+// "first reaction ready: accept or redirect" and says nothing. The visit title
+// is the last resort, for a subject the gather could not read at all.
 func (s Sitting) Headline() string {
 	if s.Takeaway != "" {
 		return s.Takeaway
+	}
+	if s.OutcomeReason != "" {
+		return s.OutcomeReason
 	}
 	if s.SubjectTitle != "" {
 		return s.SubjectTitle

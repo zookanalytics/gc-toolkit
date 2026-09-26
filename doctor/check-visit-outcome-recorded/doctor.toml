@@ -1,0 +1,1 @@
+description = "A closed visit records the outcome it closed on (gc.outcome), so the board can report the finished sitting instead of reading a dedup close as a dropped need."
