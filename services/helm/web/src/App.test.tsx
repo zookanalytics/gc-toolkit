@@ -55,6 +55,8 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_conversation: '',
     pr_approval: '',
     section: 'active',
+    acceptable: false,
+    accept_formula: '',
     ...over,
   };
 }

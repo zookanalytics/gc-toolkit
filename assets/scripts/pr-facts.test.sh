@@ -107,6 +107,12 @@ export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # pre-recorded disposition through. The contract that matters here: on success
 # it stamps gc.superseded_by and CLOSES the origin; STUB_REHOME_RC models the
 # refusals it reports without closing (4 transient, 5/6 a human is needed).
+# It also models the real open-children hold: the close is NOT --force, so an
+# OPEN bead that still `blocks` the origin refuses it with exit 5 (bead-rehome.sh
+# :254-263). Without that, a stub that closed straight through a blocking rework
+# child would green-light the strand pr-facts's dispose-children-first order
+# exists to prevent — an anchor stranded open behind a rework child it cannot
+# close.
 cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
@@ -122,6 +128,16 @@ while [ $# -gt 0 ]; do
 done
 rc="${STUB_REHOME_RC:-0}"
 if [ "$rc" != "0" ]; then echo "bead-rehome (stub): refusing rc=$rc" >&2; exit "$rc"; fi
+# Real close: drop ONLY the origin->successor wait edge, then close WITHOUT
+# --force. Any OTHER open blocker (a rework child that blocks this anchor) refuses
+# the close, leaving the bead OPEN and pointed — exit 5, the shape pr-facts reads
+# as "a human is needed" and never as a clean dispose.
+gc bd dep remove "$origin" "$succ" >/dev/null 2>&1 || true
+if [ "$(gc bd dep list "$origin" --direction=down -t blocks --json 2>/dev/null \
+        | jq '[ .[] | select((.status // "open") != "closed") ] | length' 2>/dev/null || echo 0)" != "0" ]; then
+  echo "bead-rehome (stub): $origin has an OPEN blocker; non-force close refused (exit 5)" >&2
+  exit 5
+fi
 if [ -n "$store" ]; then
   gc bd update "$origin" --status=closed --set-metadata "gc.superseded_by=$succ" --set-metadata "gc.superseded_by_store=$store" >/dev/null 2>&1 || exit 5
 else
@@ -382,6 +398,34 @@ printf '%s' "$(prview 31 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_31.json"
 out=$(run)
 eq "$(bstatus K3)" "closed" "the child is dropped"
 has "$(cat "$STUB_REHOME_LOG")" "--origin K3 --successor ot-k --kind not-needed --successor-store rig:other" "the child drop carries the same successor store as the anchor"
+
+# A rework child holds a `blocks` edge on its anchor, so the anchor's own
+# non-force close is REFUSED while the child is open. The child must be dropped
+# FIRST, in this same pass — drop it after the anchor close and the anchor can
+# never close (its blocker is what fails the close), so it strands OPEN with its
+# pointer stamped and a human has to finish it by hand. The bead-rehome stub
+# models that open-blocker refusal, so this case fails against a dispose that
+# closes the anchor before its children.
+echo "# a blocking rework child is dropped BEFORE the anchor close, so the anchor is not stranded"
+: > "$STUB_DEPS"
+store "[$(anchor F2j 30 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-j"'), $(child RC polecat/x30 ',"task_kind":"rework","anchor_bead":"F2j"'), {\"id\":\"VJ\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"pr-abandoned.30\",\"gc.continuation_group\":\"F2j\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+gc bd dep RC --blocks F2j >/dev/null 2>&1   # the edge that refuses the anchor's close while RC is open
+printf '%s' "$(prview 30 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_30.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus RC)" "closed" "the blocking rework child is dropped"
+eq "$(bstatus F2j)" "closed" "…so the anchor's own close is no longer refused — disposed, not stranded"
+eq "$(meta F2j 'gc.superseded_by')" "tk-j" "the anchor carries its terminal pointer"
+eq "$(meta RC 'gc.superseded_by')" "tk-j" "…and the child is superseded by the anchor's successor"
+has "$(cat "$STUB_REHOME_LOG")" "--origin RC --successor tk-j --kind not-needed" "the child is dropped as not-needed -> the anchor's successor"
+rc_ln=$(grep -n -- "--origin RC " "$STUB_REHOME_LOG" | head -1 | cut -d: -f1)
+an_ln=$(grep -n -- "--origin F2j " "$STUB_REHOME_LOG" | head -1 | cut -d: -f1)
+{ [ -n "$rc_ln" ] && [ -n "$an_ln" ] && [ "$rc_ln" -lt "$an_ln" ]; } \
+  && ok "the child close precedes the anchor close (completeness by construction, not a next-pass retry)" \
+  || bad "the child must be disposed before the anchor close (rc_ln='$rc_ln' an_ln='$an_ln')"
+eq "$(bstatus VJ)" "closed" "the stale rework-or-close visit is retired in the same consummation"
+eq "$(meta VJ 'gc.outcome')" "moot" "…closed moot, the decision it asked for is made"
+eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated — the disposition consummated completely"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"

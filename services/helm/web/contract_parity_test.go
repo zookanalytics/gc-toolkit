@@ -635,6 +635,11 @@ func fixtureBoard() board.Board {
 				// while it is wedged on the operator.
 				Section:   board.SectionReview,
 				GroupRoot: "tk-01n5cc",
+				// The accept-able case: a recommendation rides this anchor (the
+				// design's worked instance — dispose the wedged PR), so the
+				// fixture carries both fields non-zero into the TypeScript check.
+				Acceptable:    true,
+				AcceptFormula: "mol-dispose-pr",
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into

@@ -1783,6 +1783,84 @@ func TestSittingPassesDegradeIndependently(t *testing.T) {
 	}
 }
 
+// TestGatherResolvesEdgeOnlyVisitSubject: a visit records its subject twice — the
+// gc.continuation_group stamp and a tracks edge — and gate-visit can leave the stamp
+// empty. The board reads the subject off the edge in that case, so an edge-only visit
+// holds its anchor and carries its subject's headline exactly as a stamped one does.
+func TestGatherResolvesEdgeOnlyVisitSubject(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"task": {
+				issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+				// task_kind=visit with NO gc.continuation_group: the subject is
+				// reachable only through the tracks edge below.
+				visitBead("tk-sit-edge", "visit: tk-rec — named through the tracks edge",
+					`{"task_kind":"visit","gc.claimed_at":"2026-08-01T11:00:00Z","gc.session_name":"gc-toolkit__converse-1"}`,
+					testNow),
+			},
+		},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-sit-edge": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
+		},
+	}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	got := sittingsByID(res)
+	s, ok := got["tk-sit-edge"]
+	if !ok {
+		t.Fatalf("the edge-only visit was dropped from the sitting record: %v", slices.Sorted(maps.Keys(got)))
+	}
+	if s.Subject != "tk-rec" {
+		t.Errorf("Subject = %q, want the tracks-edge target %q with the stamp empty", s.Subject, "tk-rec")
+	}
+	if !res.Facts.Visits["tk-rec"] {
+		t.Error("a running edge-only visit holds its subject, so the board must mark it visited")
+	}
+	// The subject's title rides the row, which only happens if the edge subject is
+	// resolved BEFORE attributeTakeaways reads it.
+	if want := "a recommendation subject"; s.SubjectTitle != want {
+		t.Errorf("SubjectTitle = %q, want the subject's title %q carried onto the row", s.SubjectTitle, want)
+	}
+}
+
+// TestEdgeSubjectResolutionReadsOnlyForStamplessVisits: the tracks-edge read fires
+// only for a visit whose stamp is empty. Two stores that differ only in whether the
+// visit carries a gc.continuation_group stamp make dependency reads that differ by
+// exactly one — the stamped board spends nothing resolving its subject.
+func TestEdgeSubjectResolutionReadsOnlyForStamplessVisits(t *testing.T) {
+	gather := func(st *fakeStore) *fakeStore {
+		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+		if _, err := src.Gather(context.Background()); err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		return st
+	}
+	stamped := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {
+		issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+		visitBead("tk-sit-stamped", "visit: tk-rec — stamped",
+			`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
+	}}})
+	edgeOnly := gather(&fakeStore{
+		issues: map[string][]*beads.Issue{"task": {
+			issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+			visitBead("tk-sit-edge", "visit: tk-rec — edge only",
+				`{"task_kind":"visit"}`, testNow),
+		}},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-sit-edge": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
+		},
+	})
+	if edgeOnly.depyN != stamped.depyN+1 {
+		t.Errorf("the tracks-edge read must fire only for a stamp-less visit: stamped=%d edge-only=%d (want edge-only = stamped+1)",
+			stamped.depyN, edgeOnly.depyN)
+	}
+}
+
 // ── The done pass ────────────────────────────────────────────────────────
 //
 // The anchor queries ask for open beads, so a closing anchor leaves the board

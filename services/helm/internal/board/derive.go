@@ -336,7 +336,51 @@ const (
 	// mdAnchorBead is the merge anchor a review or rework child names — the
 	// family root it hangs off, used by the grouping walk as a direct edge.
 	mdAnchorBead = "anchor_bead"
+	// mdRecommendedFormula is the execution mol a reaction names on a subject
+	// when its ruling has a determinable action. Its presence is what makes a
+	// visit a recommendation (Accept + Discuss) rather than a plain one
+	// (Discuss only); the board reads it to derive [Tile.Acceptable].
+	mdRecommendedFormula = "gc.recommended_formula"
 )
+
+// The visit bead's own status, as carried on [Sitting.Status]: a parked visit
+// is open, a converse-claimed one in_progress, an ended one closed.
+const (
+	sittingOpen       = "open"
+	sittingInProgress = "in_progress"
+	sittingClosed     = "closed"
+)
+
+// unengagedVisit reports whether subject has a visit no one has engaged: a
+// non-closed sitting standing OPEN on it that carries neither a claim
+// (in_progress), a bound session, nor a bound assignee. engage binds the visit
+// by assignee while it is still open and before the hook claim promotes it to
+// in_progress and stamps the session, so an open visit with an assignee is a
+// pending engagement, not an un-engaged one. It reads facts.Sittings rather
+// than Tile.Held because Held does not distinguish an open visit from a claimed
+// one — both are non-closed sittings. This is the passive half of the
+// Accept/Discuss invalidation rule: a live sitting suppresses Accept, and
+// leaving the sitting without a ruling (the visit reverts to open) restores it.
+func unengagedVisit(subject string, sittings []Sitting) bool {
+	parked := false
+	for _, s := range sittings {
+		if s.Subject != subject {
+			continue
+		}
+		// A claimed sitting, or a non-closed one a session or an assignee is
+		// bound to, is a live conversation the operator is holding: it
+		// suppresses Accept whatever else is on the subject. The assignee arm
+		// covers the pending-engagement window — engage binds the visit by
+		// assignee while it is still open, before the claim stamps the session.
+		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
+			return false
+		}
+		if s.Status == sittingOpen {
+			parked = true
+		}
+	}
+	return parked
+}
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
 // own right, and therefore carries its ask on a row of its own rather than as
@@ -1657,6 +1701,16 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		PRApproval:     approval,
 		PROwedSince:    owedSince,
 	}
+	// Accept-ability: a subject carrying a recommended execution formula whose
+	// visit is un-engaged offers Accept as well as Discuss — the formula
+	// dispatched at the subject and the visit dismissed in one procedural order.
+	// It is a property of the SUBJECT, so a visit wrapper (task_kind=visit) never
+	// carries it; the fold leaves it on the subject tile the wrapper folds onto.
+	if rf := a.Metadata[mdRecommendedFormula]; rf != "" && a.Metadata["task_kind"] != wrapperVisit && unengagedVisit(a.ID, f.Sittings) {
+		t.Acceptable = true
+		t.AcceptFormula = rf
+	}
+
 	// The band is a function of the finished tile, so the visit fold can re-run
 	// it after flipping a folded subject to owed. ClusterKey stays empty here;
 	// it needs the whole board to know a template recurs, so BuildBoard sets it.

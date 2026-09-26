@@ -59,7 +59,9 @@
       "pr_conversation": "",
       "pr_approval": "",
       "section": "stalled",
-      "group_root": "tk-eemvf"
+      "group_root": "tk-eemvf",
+      "acceptable": false,
+      "accept_formula": ""
     },
     {
       "id": "gt-1a2b3",
@@ -107,7 +109,9 @@
       "pr_approval": "",
       "section": "cleanup",
       "cluster_key": "all 2 closed — graduate",
-      "group_root": "gt-1a2b3"
+      "group_root": "gt-1a2b3",
+      "acceptable": false,
+      "accept_formula": ""
     },
     {
       "id": "tk-01n5cc",
@@ -156,7 +160,9 @@
       "pr_approval": "unknown",
       "pr_owed_since": "2026-08-08T11:02:00Z",
       "section": "review",
-      "group_root": "tk-01n5cc"
+      "group_root": "tk-01n5cc",
+      "acceptable": true,
+      "accept_formula": "mol-dispose-pr"
     },
     {
       "id": "tk-9tbbk",
@@ -205,7 +211,9 @@
       "pr_conversation": "",
       "pr_approval": "",
       "section": "done",
-      "group_root": "tk-9tbbk"
+      "group_root": "tk-9tbbk",
+      "acceptable": false,
+      "accept_formula": ""
     }
   ],
   "sittings": [
