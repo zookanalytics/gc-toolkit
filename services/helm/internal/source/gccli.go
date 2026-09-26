@@ -12,16 +12,22 @@ import (
 )
 
 // The `gc` CLI is the third sanctioned Gas City interface this package reads,
-// alongside the in-process beads library and the supervisor HTTP API. It exists
-// here because one board fact lives nowhere else:
+// alongside the in-process beads library and the supervisor HTTP API. Two facts
+// come from it:
 //
 //   - SESSION LIVENESS. Whether the session that claimed a child is still alive
 //     is what separates work in flight from an orphan, and no bead carries it.
 //     The supervisor API has no sessions endpoint and the beads library cannot
-//     see sessions at all; `gc session list` is the only reader.
+//     see sessions at all; `gc session list` is the only reader. This is the
+//     same read gc-helm.sh makes (`gcq session list`), so the two boards agree
+//     by construction rather than by two independent derivations.
 //
-// This is the same read gc-helm.sh makes (`gcq session list`), so the two
-// boards agree by construction rather than by two independent derivations.
+//   - CITY DISCOVERY. When no city env var is set, the city root comes from
+//     `gc config show` — the city gc itself resolves — rather than a discovery
+//     reimplemented here: gc-toolkit runs on Gas City, so gc is the authority on
+//     which city to read and helm-svc mirrors its answer. See DiscoverCityPath
+//     and CityPath.
+//
 // Convoy ownership and membership are read in-process from the rig store: a
 // convoy is `owned` when its bead carries the "owned" label — the test gascity
 // itself applies for the `gc convoy list` owned flag — and its members are the
@@ -161,4 +167,21 @@ func (g *gcExec) Sessions(ctx context.Context) (map[string]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// CityPath returns the city root gc resolves for this invocation, so discovery
+// reads the same city gc acts on instead of reimplementing city discovery.
+// `gc config show` reports gc's resolved configuration, city_path among it, so
+// this asks gc "which city would you act on here?" and takes that answer. The
+// discovery client carries no cityPath, so run pins neither --city nor
+// GC_CITY_PATH and leaves cmd.Dir at this process's cwd; gc resolves from where
+// helm-svc was started — the plain-shell case the env vars do not cover.
+func (g *gcExec) CityPath(ctx context.Context) (string, error) {
+	var payload struct {
+		CityPath string `json:"city_path"`
+	}
+	if err := g.run(ctx, &payload, "config", "show", "--json"); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(payload.CityPath), nil
 }

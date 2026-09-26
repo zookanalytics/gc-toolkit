@@ -27,6 +27,12 @@ type Server struct {
 	now func() time.Time
 	spa http.Handler
 
+	// cityPath is the city root pack health is read from, resolved once at
+	// startup and passed via WithCityPath. Empty when unset (tests, or a city
+	// gc could not resolve), which GatherPackHealth reads as "no pack health".
+	// Discovery is a subprocess (gc), so it is NOT re-run on every board build.
+	cityPath string
+
 	// opener files visits for POST /helm/open; nil disables the route (it
 	// then answers 503 rather than 404 — see handleOpen).
 	opener   Opener
@@ -67,6 +73,15 @@ func WithOpener(o Opener) Option {
 			s.opener = o
 		}
 	}
+}
+
+// WithCityPath supplies the city root the board reads pack health from. The
+// entrypoint resolves it once (discovery shells out to gc) and passes it here, so
+// build() reuses that answer instead of re-discovering on every cache refresh. An
+// empty path yields no pack-health section, which is the right answer for a city
+// gc could not resolve.
+func WithCityPath(p string) Option {
+	return func(s *Server) { s.cityPath = p }
 }
 
 // New builds a Server. ttl<=0 disables caching (every request recomputes).
@@ -202,8 +217,10 @@ func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 	b := board.BuildBoard(res.Anchors, now, res.Partial, res.PartialErrors, res.Facts)
 	// Read after the gather, not inside it: pack health is a handful of small
 	// local files and belongs to no Source backend, so making it part of the
-	// Source interface would oblige every backend to reimplement it.
-	b.PackHealth = source.GatherPackHealth(source.DiscoverCityPath(), now)
+	// Source interface would oblige every backend to reimplement it. The city
+	// root is the one resolved at startup (WithCityPath), never re-discovered
+	// here — discovery is a gc subprocess and this runs on every cache refresh.
+	b.PackHealth = source.GatherPackHealth(s.cityPath, now)
 	s.cached = &b
 	s.expiry = now.Add(s.ttl)
 	return &b, nil
