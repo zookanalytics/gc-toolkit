@@ -606,6 +606,18 @@ STRAY
   quiesce_hold=""
   quiesce_reason=""
   quiesce_unreadable=0
+
+  # Close any must-fix finding on this anchor whose fix unit has landed — every
+  # blocks-blocker closed. The fix unit's close leaves the finding it answered
+  # unblocked but open, and nothing else closes it, so the open finding holds
+  # the re-gate quiescence below forever: a landed fix wedged at pre_open_gate.
+  # This is the close review-cycle-architecture.md assigns here, run before the
+  # lane-state and quiescence reads so a landed fix no longer reads as owed and
+  # a lane an approve already backs reads green rather than provoking a dispatch.
+  # Best-effort: an unreadable store leaves the finding open, and quiescence
+  # below (which reads the same findings) fails the dispatch closed.
+  "$FINDING" close-answered --anchor "$id" >/dev/null 2>&1 || true
+
   gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue

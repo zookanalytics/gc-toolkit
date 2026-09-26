@@ -48,6 +48,18 @@ case "$sub" in
     f="$SHOW_DIR/$id.json"
     if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
     exit 0 ;;
+  "bd dep")
+    # `dep list <id> ...` → the finding's blockers, served from
+    # $SHOW_DIR/dep-<id>.json (default []). Only the landed-fix-wedge backstop
+    # reads this; the id is the token after "list" so a --db pin cannot shift it.
+    depid=""; seen_list=0
+    for a in "$@"; do
+      [ "$seen_list" = 1 ] && { depid="$a"; break; }
+      [ "$a" = list ] && seen_list=1
+    done
+    f="$SHOW_DIR/dep-$depid.json"
+    if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
+    exit 0 ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$GC_CALLS"
     printf '{"id":"tk-subj-new"}\n'; exit 0 ;;
@@ -554,6 +566,41 @@ else
         && bad "and never reached the warn arm" "$(cat "$TMP/err")" \
         || ok "and never reached the warn arm"
 fi
+
+echo "── landed-fix wedge: a must-fix finding whose fix unit CLOSED escalates its anchor ──"
+# The deadlock's silent shape: an anchor at pre_open_gate held by a must-fix
+# finding whose fix unit has landed (closed), which gate-ensure's close-answered
+# should have closed. The anchor is blocked by its own finding, so it never
+# reaches `bd ready` or the classify census — this backstop scans ALIVE.
+printf '[]\n' > "$TMP/ready.json"
+cat > "$TMP/live.json" <<'JSON'
+[
+  {"id":"w-anchor","status":"open","title":"wedged at pre_open_gate","metadata":{"merge_result":"pre_open_gate","branch":"polecat/w-anchor"}},
+  {"id":"w-find","status":"open","title":"must-fix finding","metadata":{"task_kind":"finding","finding.disposition":"must-fix","anchor_bead":"w-anchor"}}
+]
+JSON
+printf '[]\n' > "$TMP/widen.json"
+printf '%s\n' '[{"id":"w-fix","status":"closed","metadata":{"task_kind":"rework"}}]' > "$TMP/show/dep-w-find.json"
+run_sweep
+grep -q '^w-anchor landed-fix-wedge$' "$ESC_CALLS" \
+    && ok "a must-fix finding whose fix unit closed escalates its wedged anchor" \
+    || bad "landed-fix wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
+grep -q 'the fix is on the branch' "$ESC_BODIES" \
+    && ok "…and the visit body names the landed-fix wedge" || bad "wedge body" "$(cat "$ESC_BODIES")"
+
+echo "── …but a fix unit still IN FLIGHT is not a wedge — nothing escalated ──"
+printf '%s\n' '[{"id":"w-fix","status":"open","metadata":{"task_kind":"rework"}}]' > "$TMP/show/dep-w-find.json"
+run_sweep
+grep -q 'w-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "an in-flight fix unit's finding escalated" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "an in-flight fix unit's finding is left for its landing — nothing escalated"
+
+echo "── …and a must-fix finding NO fix unit blocks is a live objection, not a wedge ──"
+printf '[]\n' > "$TMP/show/dep-w-find.json"
+run_sweep
+grep -q 'w-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "an unanswered objection escalated as a wedge" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "a finding no fix unit blocks is not a wedge — nothing escalated"
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"
