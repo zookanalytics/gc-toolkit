@@ -927,6 +927,24 @@ eq "$(meta P1 pr_comment_watermark)" "5009" "the watermark advanced past it"
 eq "$(meta P1 pr_comment_disposition)" "rework:new-5" "the new batch got its own child (the first batch took new-2, its pass new-3, its finding new-4)"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
 
+echo "# a feedback batch past the OS per-argument limit still renders"
+# tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
+# per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as
+# --argjson could not exec — the batch never rendered, never watermarked, and
+# the merge held on a forever-retry commented posture. The lists ride stdin now,
+# so the fixture is built past the cap: the old --argjson form fails to exec here.
+store "[$(anchor BIG 70)]"
+printf '%s' "$(prview 70 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_70.json"
+echo '[]' > "$GH_DIR/reviews_70.json"
+jq -nc '[ range(7000;7010) | {id: ., user:{login:"human1"}, body:("y"*14000), path:"docs/big.md", line:(.-7000)} ]' > "$GH_DIR/comments_70.json"
+[ "$(wc -c < "$GH_DIR/comments_70.json")" -gt 131072 ] && ok "the fixture exceeds MAX_ARG_STRLEN, so the old --argjson form could not exec here" || bad "fixture too small to exercise the argv limit"
+out=$(run)
+hasnt "$out" "could not render the feedback findings" "the render survives a comment list past the argv limit"
+hasnt "$out" "could not filter retired reviews" "…and so does the dismissal filter that shares the argv"
+has "$out" "routed to rework:new-2" "the oversized batch routes like any other"
+eq "$(meta BIG pr_comment_watermark)" "7009" "the watermark advances to the last comment in the oversized batch"
+eq "$(meta BIG pr_comment_disposition)" "rework:new-2" "…and the disposition records on the anchor"
+
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"
 printf '%s' "$(prview 62 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
