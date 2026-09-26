@@ -70,6 +70,15 @@
 # awaiting its acknowledgement. A thread a human answered after the city's reply
 # is left open, and so is one holding a comment above the mark: no batch covers
 # that comment, so nothing has answered it yet.
+# The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
+# as GitHub's own blocking signal until someone clears it; once every finding a
+# particular human review raised has closed — a must-fix fixed and landed, or a
+# decline replied and resolved above — that review is answered in full, so the
+# sweep dismisses it (clearing the block) and re-requests its author, per-review
+# via finding.review_id so one reviewer clears independently of another. The
+# confidence is the validator's, carried by the finding's closure, never a commit
+# oid, so a later push does not reopen it. A dismissal is not an approval: the
+# merge still gates on an explicit one.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
 # Args: --fix-pool <pool>. Caller: refinery-reconcile.sh
@@ -433,12 +442,17 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
 # finding.sh normalizes it out of the key, so a rebase that renumbers the file
 # does not re-raise the finding. An empty body is no objection and is dropped, so
 # a bodyless CHANGES_REQUESTED contributes only through its inline comments.
-feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message,comment_id}
+feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message,comment_id,review_id}
   # comment_id is the GitHub databaseId of the row that raised the objection.
   # For an INLINE review comment it is also the databaseId the reviewThread
   # carries, so the write-back can find the thread and post a declined finding's
   # owed reply into it; a review-body or Conversation comment has no thread, so
   # its id matches none and the write-back answers those on the PR itself.
+  # review_id is the databaseId of the PR review the objection belongs to — its
+  # own id for a review body, the parent review's for an inline comment — so the
+  # write-back groups an anchor's human findings by review and dismisses one when
+  # all of its findings clear. A Conversation comment belongs to no review, so it
+  # carries none and holds no review's dismissal.
   jq -nc --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
          --argjson icmts "$5" --argjson imark "$6" --arg self "$SELF_LOGIN" '
     def body: ((.body // "") | tostring);
@@ -449,19 +463,20 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
               | select(has_body)
               | select(((.id // 0) | tonumber) > $rmark)
               | { login: ((.user.login // "?") | tostring), locus: "PR review", message: body,
-                  comment_id: ((.id // 0) | tostring) } ])
+                  comment_id: ((.id // 0) | tostring), review_id: ((.id // 0) | tostring) } ])
   + ([ $cmts[] | select(((.user.login // "") | tostring) != $self)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $cmark)
               | { login: ((.user.login // "?") | tostring),
                   locus: (((.path // "PR conversation") | tostring)
                           + (if ((.line // .original_line) != null) then ":" + ((.line // .original_line) | tostring) else "" end)),
-                  message: body, comment_id: ((.id // 0) | tostring) } ])
+                  message: body, comment_id: ((.id // 0) | tostring),
+                  review_id: ((.pull_request_review_id // "") | tostring) } ])
   + ([ $icmts[] | select(((.user.login // "") | tostring) != $self)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $imark)
               | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
-                  comment_id: ((.id // 0) | tostring) } ])' 2>/dev/null
+                  comment_id: ((.id // 0) | tostring), review_id: "" } ])' 2>/dev/null
 }
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
@@ -1662,14 +1677,19 @@ $CBODY"
       flocus=$(printf '%s' "$frec" | jq -r '.locus // empty')
       fmsg=$(printf '%s' "$frec" | jq -r '.message // empty')
       fcid=$(printf '%s' "$frec" | jq -r '(.comment_id // "") | tostring')
+      frid=$(printf '%s' "$frec" | jq -r '(.review_id // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
       if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" 2>/dev/null) && [ -n "$fid" ]; then
         FINDING_IDS="${FINDING_IDS:+$FINDING_IDS,}$fid"
-        # Record which GitHub row raised it, so the write-back can post a declined
-        # finding's owed reply into that thread. Best-effort: a missing id only
-        # drops the decline reply back to a PR-level answer, never the merge hold,
-        # so it does not gate the batch the way the finding filing above does.
+        # Record which GitHub row and review raised it. finding.comment_id lets the
+        # write-back post a declined finding's owed reply into that thread;
+        # finding.review_id groups the finding under its review, so the write-back
+        # dismisses that review once all of its findings clear. Best-effort: a
+        # missing comment id drops the decline reply back to a PR-level answer and a
+        # missing review id drops only this review's auto-dismissal, never the merge
+        # hold, so neither gates the batch the way the finding filing above does.
         case "$fcid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.comment_id="$fcid" >/dev/null 2>&1 || true ;; esac
+        case "$frid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.review_id="$frid" >/dev/null 2>&1 || true ;; esac
       else
         ffail=1; break
       fi
@@ -2467,6 +2487,95 @@ $WB_MARKER"
     done <<WB_DECLINES
 $wdrows
 WB_DECLINES
+  fi
+
+  # --- dismiss a human review and re-request its author once all of its findings
+  #     clear ------------------------------------------------------------------
+  # A human CHANGES_REQUESTED holds the merge and is GitHub's own blocking signal.
+  # It stands until someone clears it, and the person who reads the PR reads that
+  # signal, so a review answered in full but left standing tells them the opposite
+  # of the truth. Once every finding one review raised has closed — a must-fix
+  # fixed and landed, or a decline replied and resolved by the arms above — that
+  # review is answered, so dismiss it (clearing CHANGES_REQUESTED) and re-request
+  # its author, putting the reviewer back in their review-requested queue to judge
+  # the result. Per-review, keyed on finding.review_id: one reviewer clears
+  # independently of another on the same PR. The confidence is the validator's,
+  # carried by the finding's closure (the validator ruled it and the fix landed or
+  # the decline was answered), never a commit oid — a later push does not reopen
+  # this. Dismissal is not approval: the merge still gates on an explicit one. Only
+  # a pass that read the threads cleanly acts, the same $wplan_ok gate the reply
+  # and resolve arms above turn on.
+  if [ "$wplan_ok" = 1 ]; then
+    # Every finding on this anchor that names a review, open and closed, grouped by
+    # that review. A review is answered when every one of its findings is closed and
+    # every declined finding has had its owed reply posted and its thread resolved
+    # (finding.reply_posted=1). A declined finding closes when the validator stamps
+    # finding.reply, which is before the reply/resolve arm above delivers that answer,
+    # so closure alone does not mean answered. A deferred or still-unruled finding is
+    # open, so its review is not yet clear.
+    if wrf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
+      wrev_ready=$(printf '%s' "$wrf" | jq -rc '
+          [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+                | select(((.metadata["finding.review_id"] // "") | tostring) != "")
+                | { rid: ((.metadata["finding.review_id"]) | tostring),
+                    open: (((.status // "") | tostring) != "closed"),
+                    disp: ((.metadata["finding.disposition"] // "") | tostring),
+                    lane: ((.metadata["finding.lane"] // "") | tostring),
+                    reply: ((.metadata["finding.reply"] // "") | tostring),
+                    reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
+                    title: ((.title // "") | tostring) } ]
+          | group_by(.rid)
+          | [ .[] | { rid: .[0].rid,
+                      ready: (all(.[];
+                                  (.open == false)
+                                  and (( .lane == "human" and .disp == "declined"
+                                         and .reply != "" and .reply_posted != "1" ) | not))),
+                      lines: [ .[] | "- " + (.title | sub("^finding\\[[^]]*\\]: "; "")) + ": "
+                                 + (if .disp == "declined" then "resolved by an accepted decline"
+                                    elif .disp == "must-fix" then "addressed by a change"
+                                    else "resolved" end) ] } ]
+          | .[] | select(.ready) | @base64' 2>/dev/null)
+      while IFS= read -r wrr; do
+        [ -n "$wrr" ] || continue
+        wrrj=$(printf '%s' "$wrr" | base64 -d 2>/dev/null) || continue
+        wrid=$(printf '%s' "$wrrj" | jq -r '.rid // empty')
+        [ -n "$wrid" ] || continue
+        # The live review this id names. Only a human CHANGES_REQUESTED is this
+        # arm's to clear: our own superseded block is the reconcile arm's, above;
+        # an already-DISMISSED or otherwise non-blocking review needs nothing, and
+        # its DISMISSED state is the idempotency — a repeat pass finds nothing to do.
+        wrstate=$(printf '%s' "$wview" | jq -r --arg r "$wrid" \
+          '[ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0].state // empty' 2>/dev/null)
+        wrlogin=$(printf '%s' "$wview" | jq -r --arg r "$wrid" \
+          '[ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0].author.login // empty' 2>/dev/null)
+        [ "$wrstate" = "CHANGES_REQUESTED" ] || continue
+        [ -n "$wrlogin" ] && [ "$wrlogin" != "$SELF_LOGIN" ] || continue
+        wrlines=$(printf '%s' "$wrrj" | jq -r '.lines[]?' 2>/dev/null)
+        wrmsg="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed and a fresh review is requested.
+
+$wrlines
+
+Dismissal does not mark approval; the merge still gates on an explicit approving review."
+        # Re-request the author FIRST, so a re-queue that cannot land holds the
+        # dismissal with it: both are in scope, and a dismissal alone would drop
+        # the reviewer instead of re-queuing them. Re-requesting a past reviewer is
+        # allowed, so the retry after a failed dismiss repeats it harmlessly.
+        if ! gh_api_origin -X POST "repos/$ORIGIN_REPO/pulls/$wnum/requested_reviewers" \
+             -f "reviewers[]=$wrlogin" >/dev/null 2>&1; then
+          echo "$PROG: $wid — PR#$wnum could not re-request $wrlogin for review $wrid; NOT dismissing (retry next pass)" >&2
+          continue
+        fi
+        if gh_api_origin -X PUT "repos/$ORIGIN_REPO/pulls/$wnum/reviews/$wrid/dismissals" \
+             -f message="$wrmsg" >/dev/null 2>&1; then
+          dismissed_n=$((dismissed_n + 1))
+          echo "$PROG: $wid — PR#$wnum dismissed human review $wrid and re-requested $wrlogin (its findings all cleared)"
+        else
+          echo "$PROG: $wid — PR#$wnum re-requested $wrlogin but could not dismiss review $wrid; retry next pass" >&2
+        fi
+      done <<WB_REVIEW_CLEARS
+$wrev_ready
+WB_REVIEW_CLEARS
+    fi
   fi
 
   # The plan is this pass's own read of GitHub, so a plan that could not be built
