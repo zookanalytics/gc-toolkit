@@ -165,6 +165,17 @@ else
         bad "the outcome stamp lands after the sign-off and before the close" \
             "sign-off@${s7_signoff:-none} stamp@${s7_stamp:-none} close@${s7_close:-none} — a stamp ahead of the sign-off lets converse-claim.sh finish a visit whose sign-off never posted (tk-ayd4c0)"
     fi
+    # The visit's PR reminder is marked closed only AFTER the visit's own close
+    # lands, so a death or a failed close between the two never leaves the PR
+    # saying "closed" over an open visit still holding the merge. It reads the
+    # summary/actions converse-signoff.sh stashed, needing no re-derive.
+    s7_prcomment=$(printf '%s\n' "$STEP7" | grep -nF 'pr-visit-comment.sh" close' | head -1 | cut -d: -f1)
+    if [ -n "$s7_close" ] && [ -n "$s7_prcomment" ] && [ "$s7_close" -lt "$s7_prcomment" ]; then
+        ok "the PR reminder is marked closed after the visit's own close"
+    else
+        bad "the PR reminder is marked closed after the visit's own close" \
+            "close@${s7_close:-none} pr-comment@${s7_prcomment:-none} — a reminder closed before the visit closes lies on the PR"
+    fi
 fi
 # The heading and the procedure disagreed for as long as the bug existed, and
 # the heading was the correct half. Pin it: an edit that reverts the procedure
