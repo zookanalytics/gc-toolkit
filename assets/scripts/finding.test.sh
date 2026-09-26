@@ -96,6 +96,20 @@ eq "$(meta "$F4" 'finding.disposition')" "declined" "disposition recorded as dec
 eq "$(bstatus "$F4")" "closed" "declined finding is closed"
 has "$(notes "$F4")" "cosmetic, not worth a round" "the decline reason is recorded"
 hasnt " $(probe_blockers tk-anc) " " $F4 " "a declined finding holds nothing"
+eq "$(meta "$F4" 'finding.reply')" "<absent>" "a machine decline owes no reply, so finding.reply is unset"
+
+# ---------------------------------------------------------------------------
+# set-disposition declined --reply: a declined HUMAN objection owes an answer.
+# The reply text is stamped on the finding so pr-facts.sh's write-back can post
+# it to the raiser's thread; the finding still closes and holds nothing.
+# ---------------------------------------------------------------------------
+FH=$("$SUT" upsert --anchor tk-anc --lane human --source "human:johnzook" --locus "assets/scripts/foo.sh:helper()" --message "this should assert X")
+"$SUT" set-disposition --finding "$FH" --anchor tk-anc --disposition declined \
+  --reason "the diff already asserts X at foo.sh" --reply "The diff already asserts X in foo.sh's helper; no change needed."
+eq "$(meta "$FH" 'finding.disposition')" "declined" "the human objection is declined on its merits"
+eq "$(bstatus "$FH")" "closed" "…and closed like any decline, so a re-raise re-adopts fresh"
+has "$(meta "$FH" 'finding.reply')" "no change needed" "…and the owed reply is stamped for the write-back to post"
+hasnt " $(probe_blockers tk-anc) " " $FH " "…and it holds nothing once declined"
 
 # ---------------------------------------------------------------------------
 # wire-fix-unit: the fix unit's two blocks edges.

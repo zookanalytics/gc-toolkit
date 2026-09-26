@@ -15,6 +15,15 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esa
 
 harness_init() {
   PASS=0; FAIL=0
+  # These suites run from a tree inside a live city, whose session environment
+  # exports GC_* and BEADS_* — the rig, the city path, the actor, the bead under
+  # work. Scripts under test branch on those: a set GC_RIG adds `--rig <rig>` to
+  # a logged sling argv, so an inherited value would settle a hermetic assertion
+  # on the operator's shell rather than on the code. Clear both namespaces so the
+  # harness owns the environment; a suite that wants a rig exports it after
+  # harness_init returns. GCTK_* is left alone: GCTK_BIN is pinned just below,
+  # and a suite may build a port binary before harness_init (lifecycle.test.sh).
+  unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
   # Pin the merge cadence to its shell implementations. The scripts prefer a
@@ -321,6 +330,9 @@ case "$verb" in
       *)
         # gc bd dep <src> --blocks <dst>
         src="${1:-}"; shift || true
+        # STUB_DEP_FAIL="id id2" — refuse to attach an edge whose src is named,
+        # modelling a dep write that reports failure so a fail-closed caller retries.
+        case " ${STUB_DEP_FAIL:-} " in *" $src "*) echo "gc bd dep: simulated refusal for $src" >&2; exit 1 ;; esac
         [ "${1:-}" = "--blocks" ] && printf '%s|%s|%s\n' "$src" "blocks" "${2:-}" >> "$D" ;;
     esac
     ;;
@@ -342,10 +354,14 @@ case "$sub" in
     v="${1:-}"; shift || true
     case "$v" in
       view)
-        n="${1:-}"
+        n="${1:-}"; shift || true
         f="$G/pr_view_$n.json"
         [ -s "$f" ] || { echo "gh: no such pr" >&2; exit 1; }
-        cat "$f" ;;
+        # Honour -q/--jq like real gh, so a caller reading one field (e.g.
+        # `--json labels -q '.labels[].name'`) gets that field, not the whole row.
+        vq=""
+        while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; vq="${1:-}" ;; esac; shift || true; done
+        if [ -n "$vq" ]; then jq -r "$vq" "$f"; else cat "$f"; fi ;;
       list)
         br=""
         while [ $# -gt 0 ]; do
@@ -365,6 +381,7 @@ case "$sub" in
         f="$G/pr_view_$n.json"
         [ -s "$f" ] || { echo "gh: no such pr" >&2; exit 1; }
         [ "${STUB_PR_EDIT_RC:-0}" = "0" ] || exit "${STUB_PR_EDIT_RC:-0}"
+        LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
         while [ $# -gt 0 ]; do
           case "$1" in
             --body-file)
@@ -374,6 +391,32 @@ case "$sub" in
               jq --rawfile b "$1" '.body = $b' "$f" > "$t" && mv "$t" "$f" ;;
             --title) shift; t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
               jq --arg v "${1:-}" '.title = $v' "$f" > "$t" && mv "$t" "$f" ;;
+            # Labels mutate .labels so the next `pr view` reads them back — a
+            # second reconcile over an unchanged store is a no-op because the
+            # caller read its own write. --add-label refuses a label that does
+            # not exist in the repo (labels.json), exactly as real gh does, so a
+            # test proves the writer created the label first.
+            --add-label)
+              shift
+              IFS=',' read -r -a _adds <<< "${1:-}"
+              for _l in ${_adds[@]+"${_adds[@]}"}; do
+                _l="${_l#"${_l%%[![:space:]]*}"}"; _l="${_l%"${_l##*[![:space:]]}"}"
+                [ -n "$_l" ] || continue
+                if ! jq -e --arg n "$_l" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
+                  echo "gh: label '$_l' not found in repo" >&2; exit 1
+                fi
+                t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+                jq --arg n "$_l" '.labels = ((.labels // []) | if any(.[]?; .name == $n) then . else . + [{name: $n}] end)' "$f" > "$t" && mv "$t" "$f"
+              done ;;
+            --remove-label)
+              shift
+              IFS=',' read -r -a _rms <<< "${1:-}"
+              for _l in ${_rms[@]+"${_rms[@]}"}; do
+                _l="${_l#"${_l%%[![:space:]]*}"}"; _l="${_l%"${_l##*[![:space:]]}"}"
+                [ -n "$_l" ] || continue
+                t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+                jq --arg n "$_l" '.labels = ((.labels // []) | map(select(.name != $n)))' "$f" > "$t" && mv "$t" "$f"
+              done ;;
           esac
           shift || true
         done
@@ -564,6 +607,26 @@ case "$sub" in
       *) echo "gh api stub: unsupported '$path'" >&2; exit 2 ;;
     esac
     if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi ;;
+  label)
+    # The repo's label set, so `pr edit --add-label` can refuse one that was
+    # never created. `list` serves it (honouring -q); `create` appends if absent.
+    v="${1:-}"; shift || true
+    LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
+    case "$v" in
+      list)
+        lq=""
+        while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; lq="${1:-}" ;; esac; shift || true; done
+        if [ -n "$lq" ]; then jq -r "$lq" "$LBLS"; else cat "$LBLS"; fi ;;
+      create)
+        name="${1:-}"; shift || true
+        [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
+        if ! jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
+          t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
+          jq --arg n "$name" '. + [{name: $n}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+        fi
+        exit 0 ;;
+      *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;
+    esac ;;
   *) echo "gh stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 STUB

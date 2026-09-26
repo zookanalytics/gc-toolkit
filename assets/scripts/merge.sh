@@ -48,10 +48,6 @@ scrub() { tr -d '\000-\037'; }
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 
-# The signoff round cap, mirrored from signoff.sh: past it no further rework is
-# filed, which is what turns a standing veto from a hold into a wedge.
-MAX_REVIEW_ROUNDS="${GC_MAX_REVIEW_ROUNDS:-3}"
-case "$MAX_REVIEW_ROUNDS" in ''|*[!0-9]*) MAX_REVIEW_ROUNDS=3 ;; esac
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # The merged-record retry cap. Both record arms below retry every pass with no
 # memory of the last one, so a cause the retry cannot clear needs a writer that
@@ -557,40 +553,16 @@ while IFS= read -r row; do
   veto=$(printf '%s' "$rstate" | jq -r '.veto // ""')
   if [ -n "$veto" ]; then
     # A human's standing NO holds every candidate, whatever the check_set says.
-    # Whether anything will ANSWER it is the round count: signoff.sh files a
-    # rework child per round and stops at the cap, so a veto standing past the
-    # cap is one nothing will act on. signoff.sh owns that count, and reading it
-    # any other way records the wedge over work it would still send back: its
-    # cap measures rounds since the operator's last feedback, so the total is
-    # wrong by exactly the floor that feedback sets. Both halves come off reads
-    # this pass already has — the blockers, and the anchor row re-read above.
-    # The floor's stamp is signoff's alone; nothing here writes it.
-    total=$(printf '%s' "$blockers" | jq -r '
-      [ .[] | select(type == "object")
-        | select(((.metadata.source_review_bead // "") | tostring) != "") ] | length' 2>/dev/null)
-    case "$total" in ''|*[!0-9]*) total=0 ;; esac
-    floor_raw=$(printf '%s' "$fresh" | jq -r '(.meta.signoff_round_floor // "") | tostring')
-    case "$floor_raw" in
-      *@*) floor="${floor_raw%%@*}"; floor_batch="${floor_raw#*@}" ;;
-      *)   floor=""; floor_batch="" ;;
-    esac
-    case "$floor" in ''|*[!0-9]*) floor=0; floor_batch="" ;; esac
-    # Feedback signoff has not answered yet retires every round filed before it:
-    # the next verdict writes the floor at the total and files rework. Holding
-    # the older floor here would wedge the anchor for the whole window between
-    # the feedback and that verdict, which is as long as a review takes.
-    reset_batch=$(printf '%s' "$fresh" | jq -r '(.meta.signoff_rounds_reset // "") | tostring')
-    if [ -n "$reset_batch" ] && [ "$reset_batch" != "$floor_batch" ]; then
-      floor="$total"
-    fi
-    rounds=$((total - floor))
-    [ "$rounds" -ge 0 ] || rounds=0
-    if [ "$rounds" -ge "$MAX_REVIEW_ROUNDS" ]; then
-      record_machine "$id" "wedged-veto" "$head_oid" "$aroute"
-    else
-      record_machine "$id" "progressing" "$head_oid" "$aroute"
-    fi
-    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED; merge held (anchor $id, rework rounds $rounds/$MAX_REVIEW_ROUNDS)"
+    # The in-flight arm above already held every anchor a finding, fix unit,
+    # review, or blocker is still moving, so reaching here means the cadence has
+    # run dry under a veto GitHub keeps standing across pushes and the city never
+    # dismisses. That settled tail is the operator's to clear by re-reviewing:
+    # record `settled`, whose owed rule reads the posture axis's standing
+    # changes_requested and puts the row on their queue. A veto with a fix unit
+    # still in flight never reaches here — the in-flight arm holds it at
+    # `progressing`.
+    record_machine "$id" "settled" "$head_oid" "$aroute"
+    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED and the cadence has run dry; merge held for re-review (anchor $id)"
     held=$((held + 1)); continue
   fi
   needs_approval=""

@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 50 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 49 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -62,7 +62,7 @@ and the order is now simply the wire's:
 id rig kind title severity owed weight held
 n_closed m_total open in_progress assigned
 in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
-stranded empty complete progress_mismatch
+stranded empty complete
 stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
@@ -484,7 +484,7 @@ field would be lying on a normal day.
 
 | field | values | read from |
 |---|---|---|
-| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `wedged-veto`, `unknown` | `pr.machine` on the anchor |
+| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `unknown` (see below) | — |
 | `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
@@ -514,10 +514,13 @@ surface exists to show.
 
 **Whose move.** A row is owed by the operator when the machine axis is wedged,
 when an open `blocks` edge to a demand bead means the city is asking, or when the
-cadence is `settled` and GitHub wants a review nobody has given. A standing
-`changes_requested` renders `pr_approval=required` and is *not* owed: the
-requirement is unmet, but answering a rejecting review is the city's move, and it
-returns as `review_required` once the fix moves the head.
+cadence is `settled` and GitHub is holding the merge for a human review — one
+never given, or a standing `changes_requested` the city has reworked as far as it
+can. GitHub keeps the veto standing across pushes and the city never dismisses
+it, so once no fix unit, review, or finding is in flight the merge pass records
+`settled` and the row is the operator's to clear by re-reviewing (`pr_approval`
+reads `required`, and `needs` names the re-review). A veto with a fix unit still
+in flight reads `progressing` and stays the city's move.
 
 **Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
 for the `codex` gate is owed once it has held past three days
@@ -659,11 +662,11 @@ and `/beads?status=open` paged to the end — one scan the `human` and `parked`
 kinds are filtered out of client-side, and whose parent-child edges are inverted
 into those anchors' child roll-ups so they cost no request of their own.
 
-**The `gc` CLI (`internal/source/gccli.go`) — for two facts no bead carries.**
+**The `gc` CLI (`internal/source/gccli.go`) — for the one fact no bead carries.**
 `gc session list --state all --json` for session liveness (the gate that tells
-work in flight from an abandoned husk), and `gc convoy list` for convoy
-ownership. These are the same reads `gc-helm.sh` makes, so the two boards agree
-by construction rather than by two derivations. The work bead a root's input
+work in flight from an abandoned husk). This is the same read `gc-helm.sh`
+makes, so the two boards agree on liveness by construction rather than by two
+derivations. The work bead a root's input
 convoy tracks — the other half of the in-flight join — is read in-process from
 that convoy's `tracks` edge in the rig store (`internal/source/facts.go`,
 `convoyMembers`), so it costs no `gc convoy status` per root. It honours the
@@ -1410,20 +1413,20 @@ same-origin reachability confirmed and detach-not-kill verified — see
   the actionable one, because a silent demand means whoever routed or parked
   the row never finished the handoff; a generic "operator action" reads like a
   valid ask and leaves the operator nothing to act on.
-- **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans, and `held`.
+- **`stranded`/`empty`/`complete`** booleans, and `held`.
 - **The in-flight / dead-owner join.** A child counts as moving only when its
   owning session is demonstrably live, or a live graph.v2 workflow stands over
   it. This is the false-stranded defect `tk-fkeft` fixed in `gc-helm.sh`, fixed
   here too: a slung bead never leaves `status=open`, so a board reading only
   child status called a polecat mid-implementation "stranded — assign or visit".
-- **owned-convoy partition** — `gc convoy list` supplies `owned` and `progress`,
-  and an unowned non-machine convoy is banded HIGH as the orphan exception.
+- **owned-convoy partition** — a convoy's `owned` label supplies ownership, and
+  an unowned non-machine convoy is banded HIGH as the orphan exception.
 - **The HQ bead store.** `gc rig list` reports the city root itself as a rig
   (`hq: true`); the gather scanned only `rigs/*/.beads` and silently dropped it,
   hiding the city-scope `gc.routed_to=human` beads.
 
-Session liveness and convoy ownership come from the `gc` CLI — see
-*Data-access contract*, which that adds a third sanctioned backend to.
+Session liveness comes from the `gc` CLI — see *Data-access contract*, which
+that adds a third sanctioned backend to.
 
 **Still deferred** (and *why*):
 

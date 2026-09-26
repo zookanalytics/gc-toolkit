@@ -6,7 +6,7 @@
      sweep, an upstream fork — reports on that machine and does not elect it,
      and neither does a role whose escalation is emitted by a formula step
      rather than composed. Authoring durable output is the other fragment's
-     test; see work-quality.template.md. */ -}}
+     test; see work-quality-base.template.md. */ -}}
 ## What the operator cares about
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->

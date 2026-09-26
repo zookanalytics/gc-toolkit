@@ -63,7 +63,7 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 [ -x "$HOOK" ] || { echo "FATAL: hook script is not executable: $HOOK" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required" >&2; exit 1; }
 
-SANDBOX="$(mktemp -d)"
+SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gh-origin-guard-test.XXXXXX")"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 # --- fixtures ------------------------------------------------------------

@@ -283,19 +283,22 @@ broken or empty `gc rig list` skips the chooser and leaves the intake on the CLI
 default.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
-`mol-first-reaction` at the new subject, and *that formula files the visit*
-from its `advance-and-drain` step — so the operator arrives at a framed
-conversation with a first-reaction card already written, not a blank one. The
-script files nothing on that path; a second visit would split one conversation
+`mol-first-reaction` at the new subject. That formula triages the subject and
+takes one of its four dispositions; it files a visit from its `advance-and-drain`
+step only when the disposition is a ruling. So when the reaction judges the
+capture a genuine fork, an irreversible or destructive action, or a policy call,
+the operator arrives at a framed conversation with a first-reaction card already
+written; when it judges the action clear and reversible, it routes the capture,
+holds it, or hands it to a validating closer, and files no visit. The script
+files nothing on the reaction path; a second visit would split one conversation
 into two sittings of the same subject.
 
-That step has three dispositions, and only one of them files a visit — but a
-subject this intake creates always gets it. `gc.origin=operator`, stamped here,
-is what `first-reaction-dispose.sh` reads to refuse the routing and holding
-exits: the operator typed a topic because they want the conversation, so
-answering it with a dispatch would leave them with a topic that looks filed and
-is silently forgotten. Beads that reach the reaction any other way are triaged
-on their merits.
+`gc.origin=operator`, stamped here, is a fact the reaction weighs, not a gate.
+An operator capture is triaged on its merits like a bead that reached the
+reaction any other way — the origin does not force the visit exit. What the
+preferred path buys is that a capture the reaction does send back to the
+operator arrives framed, carrying the card the reaction wrote, rather than as a
+bare topic.
 
 The fallback path (`--no-react`, or automatically) files the visit
 immediately, through `gc-helm.sh open --reason/--body`. **Visit filing lives
@@ -339,7 +342,8 @@ already recorded). The prose line in the body says the same thing to a human
 and is not a predicate: it has already drifted across two script generations
 plus one an agent typed by hand, and a `--desc-contains` sweep for it matches
 beads that merely *quote* it — three of thirteen live hits, including the bead
-that specified this change. The key is what the return trip below selects on.
+that specified this change. The key, not the prose line, is what the reaction
+reads when it weighs a subject's origin.
 Subjects filed before it existed are carried across by
 `assets/scripts/backfill-operator-origin.sh`, which owns the anchored
 line-match, once, where a wrong match is visible and re-runnable.
@@ -570,7 +574,12 @@ is never registered with the idle tracker (`buildIdleTracker`,
 `cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity at
 all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached. A held
 converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
-the operator's `gc-helm dismiss <subject>`. Closing the visit ends the sitting's
+the operator's `gc-helm dismiss <subject>`. The sign-off is terminal — it stamps
+the outcome and closes the visit — so converse takes it only when nothing
+important is still pending; a turn that hands the operator important information
+(a live decision, a routing answer, anything they may want to respond to) posts
+the hand-back and leaves the visit open, ending that sitting on a later turn.
+Closing the visit ends the sitting's
 work; it does not close the session, so the pack's `converse-reap` order
 (`assets/scripts/converse-reap.sh`) closes the settled session once its visit
 reads closed or gone — the reap those two endings assume. It reaps only an
@@ -786,8 +795,10 @@ took, is a question about this session's scrollback that no script can read, so
 the claimer states the fact and the prompt makes the choice.
 
 *The one shape that verdict gets wrong, and the fourth that covers it:* a
-sitting does not end in a single write. The prompt posts the sign-off, then
-stamps `gc.outcome` on the visit, reads it back, and closes last of all. A
+sitting does not end in a single write. When converse does sign off — the
+sitting settled with nothing important left to hand the operator — the prompt
+posts the sign-off, then stamps `gc.outcome` on the visit, reads it back, and
+closes last of all. A
 session that dies between the stamp and the close leaves a visit that is
 `in_progress`, assigned, and carrying a final outcome. It is complete in
 every way except the one that ends it, and the claim result says only

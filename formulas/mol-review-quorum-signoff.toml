@@ -1,0 +1,311 @@
+description = """
+Two-lane review quorum that ends in a single signoff. Two read-only reviewer
+lanes read the same diff on DIFFERENT providers; a synthesis step combines
+their findings, writes findings.md + findings.json, and makes THE ONE
+signoff.sh verdict call. It is the gc-toolkit realization of the core
+mol-review-quorum scaffold (lane fan-out + per-lane provider + the
+review-quorum.lane.v1 durable schema), wired to this rig's signoff seam.
+
+Attached at dispatch to a review bead exactly as mol-review is
+(gc sling <pool> <review-bead> --on mol-review-quorum-signoff), and reads the
+same dispatch metadata: task_kind=review, check_name (the gate the verdict
+satisfies), anchor_bead, review_branch / review_base pre-open or
+pr_url / pr_number post-open, and the dispatch-pinned reviewed_oid.
+
+The mol-review hard contract is preserved intact: ONE verdict per claim — the
+synthesis makes the single signoff.sh call and the lanes never call it; the
+verdict is posted as a COMMENT, never a GitHub approval (signoff.sh owns
+that). The lanes add reviewer breadth on a second
+provider; the merge gate, the finding beads, and the rework child are the same
+machinery mol-review hands to.
+
+Lane routing is per-step: each lane carries gc.run_target / gc.provider, so
+the two lanes land on two provider pools and each runs on its pool's default
+model. The synthesis reads each lane's durable review-quorum.lane.v1 output
+from the lane step bead's
+gc.output_json. base_ref defaults to origin/main; the caller passes the
+review's base so the lanes diff against the branch's real landing target.
+
+Each step re-derives REVIEW_BEAD from the input convoy in its own shell and
+closes its own bead through assets/scripts/step-close.sh, which resolves by
+(gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var. The lanes run in
+separate pool sessions and each closes its own lane step; the synthesis is the
+terminal step and closes the chain forward.
+"""
+formula = "mol-review-quorum-signoff"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+[vars.base_ref]
+description = "Diff baseline the lanes review against; the caller passes origin/<review_base>"
+default = "origin/main"
+
+[vars.lane_one_id]
+description = "Durable ID for reviewer lane one"
+required = true
+
+[vars.lane_one_provider]
+description = "Provider identifier for reviewer lane one"
+required = true
+
+[vars.lane_one_target]
+description = "Gas City pool target for reviewer lane one"
+required = true
+
+[vars.lane_two_id]
+description = "Durable ID for reviewer lane two"
+required = true
+
+[vars.lane_two_provider]
+description = "Provider identifier for reviewer lane two"
+required = true
+
+[vars.lane_two_target]
+description = "Gas City pool target for reviewer lane two"
+required = true
+
+[vars.synthesis_target]
+description = "Gas City pool target for the synthesis-and-signoff step"
+required = true
+
+[[steps]]
+id = "review-lane-one"
+title = "Review lane one"
+description = """
+You are one lane of a two-lane review quorum, running as durable lane
+`{{lane_one_id}}` on provider `{{lane_one_provider}}` (your pool's default
+model). Read the diff and record findings; the synthesis step
+makes the verdict. Do NOT call signoff.sh, do NOT touch the anchor, do NOT
+file finding or rework beads, and do NOT modify any file, branch, comment, or
+bead other than writing your own durable output onto this step bead.
+
+**1. Derive the review bead and pin what you are reviewing.** The review bead
+is the single tracked member of the input convoy; read it exactly as
+`formulas/mol-review.toml`'s `load-dispatch` step does — discriminate pre-open
+(`review_branch`/`review_base`) from post-open (`pr_number`/`pr_url`, pin the
+repo from `pr_url`), and pin the commit from `reviewed_oid`. Use `{{base_ref}}`
+as the diff baseline when `review_base` is absent; never fall back to main.
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
+M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
+```
+
+**2. Review the diff, read-only.** Apply the review method defined in
+`formulas/mol-review.toml`'s `review` step — its whole "What to check" list
+(intent, correctness, contract, testing, readiness, comments, the PR
+summary and page) and the work-quality standards it resolves from the pack's
+`template-fragments/work-quality-*`. Read the WHOLE diff
+(`git diff origin/<base>...<reviewed_oid>`), in chunks for a large one. You do
+NOT run the test suite — the synthesis step runs it once for the quorum; a
+finding that depends on a test result is the synthesis's to confirm. Record a
+mutation baseline with `git status --porcelain=v1 -z` before and after and
+report any delta you introduced (there should be none).
+
+**3. Write your durable lane output** to this step bead's `gc.output_json` as
+a `review-quorum.lane.v1` object, then close the step. The keys:
+`lane_id`={{lane_one_id}}, `provider`={{lane_one_provider}},
+`model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
+`fail`, `blocked`), `summary`, `findings_count`, `findings` (each with
+`severity` P0/P1/P2, `title`, `body` stating what is wrong / why it matters /
+the fix, `file`, and `line` or range), `evidence` (what you read),
+`read_only_enforcement` (`baseline_command`, `after_command`, `passed`),
+`mutations_delta` (empty if none). Severities follow mol-review: P0 broken as
+merged, P1 a real defect that will bite, P2 worth fixing not worth blocking.
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+: "${SC:?step-close.sh not found in the pack}"
+# LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
+# you (a direct single-step claim, so the claimed id IS this lane step). Write
+# your review-quorum.lane.v1 object into gc.output_json — metadata is stored as
+# a string, so store it compact — then close by (root, step_ref) with the id as
+# the hint. step-close.sh closes only; it does not write gc.output_json.
+LANE_BEAD="<the bead_id from your gc hook --claim --json>"
+gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_one_id}}.json)"
+"$SC" --step mol-review-quorum-signoff.review-lane-one --bead "$LANE_BEAD" --outcome pass
+```
+
+**Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
+this step's gc.output_json, this step bead closed. No verdict, no signoff.
+"""
+metadata = { "gc.run_target" = "{{lane_one_target}}", "gc.provider" = "{{lane_one_provider}}", "gc.review_quorum_lane" = "{{lane_one_id}}", "gc.output_json_schema" = "review-quorum.lane.v1" }
+
+[[steps]]
+id = "review-lane-two"
+title = "Review lane two"
+description = """
+You are one lane of a two-lane review quorum, running as durable lane
+`{{lane_two_id}}` on provider `{{lane_two_provider}}` (your pool's default
+model). Read the diff and record findings; the synthesis step
+makes the verdict. Do NOT call signoff.sh, do NOT touch the anchor, do NOT
+file finding or rework beads, and do NOT modify any file, branch, comment, or
+bead other than writing your own durable output onto this step bead.
+
+**1. Derive the review bead and pin what you are reviewing.** The review bead
+is the single tracked member of the input convoy; read it exactly as
+`formulas/mol-review.toml`'s `load-dispatch` step does — discriminate pre-open
+(`review_branch`/`review_base`) from post-open (`pr_number`/`pr_url`, pin the
+repo from `pr_url`), and pin the commit from `reviewed_oid`. Use `{{base_ref}}`
+as the diff baseline when `review_base` is absent; never fall back to main.
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
+M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
+```
+
+**2. Review the diff, read-only.** Apply the review method defined in
+`formulas/mol-review.toml`'s `review` step — its whole "What to check" list
+(intent, correctness, contract, testing, readiness, comments, the PR
+summary and page) and the work-quality standards it resolves from the pack's
+`template-fragments/work-quality-*`. Read the WHOLE diff
+(`git diff origin/<base>...<reviewed_oid>`), in chunks for a large one. You do
+NOT run the test suite — the synthesis step runs it once for the quorum; a
+finding that depends on a test result is the synthesis's to confirm. Record a
+mutation baseline with `git status --porcelain=v1 -z` before and after and
+report any delta you introduced (there should be none).
+
+**3. Write your durable lane output** to this step bead's `gc.output_json` as
+a `review-quorum.lane.v1` object, then close the step. The keys:
+`lane_id`={{lane_two_id}}, `provider`={{lane_two_provider}},
+`model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
+`fail`, `blocked`), `summary`, `findings_count`, `findings` (each with
+`severity` P0/P1/P2, `title`, `body` stating what is wrong / why it matters /
+the fix, `file`, and `line` or range), `evidence` (what you read),
+`read_only_enforcement` (`baseline_command`, `after_command`, `passed`),
+`mutations_delta` (empty if none). Severities follow mol-review: P0 broken as
+merged, P1 a real defect that will bite, P2 worth fixing not worth blocking.
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+: "${SC:?step-close.sh not found in the pack}"
+# LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
+# you (a direct single-step claim, so the claimed id IS this lane step). Write
+# your review-quorum.lane.v1 object into gc.output_json — metadata is stored as
+# a string, so store it compact — then close by (root, step_ref) with the id as
+# the hint. step-close.sh closes only; it does not write gc.output_json.
+LANE_BEAD="<the bead_id from your gc hook --claim --json>"
+gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_two_id}}.json)"
+"$SC" --step mol-review-quorum-signoff.review-lane-two --bead "$LANE_BEAD" --outcome pass
+```
+
+**Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
+this step's gc.output_json, this step bead closed. No verdict, no signoff.
+"""
+metadata = { "gc.run_target" = "{{lane_two_target}}", "gc.provider" = "{{lane_two_provider}}", "gc.review_quorum_lane" = "{{lane_two_id}}", "gc.output_json_schema" = "review-quorum.lane.v1" }
+
+[[steps]]
+id = "synthesize-and-signoff"
+title = "Synthesize the two lanes and hand ONE verdict to signoff.sh"
+needs = ["review-lane-one", "review-lane-two"]
+description = """
+Combine the two lanes into one verdict and hand it to signoff.sh — once — then
+close the chain and drain. This is the ONE verdict per claim: signoff.sh owns
+the artifact, the check.<gate> marker, the finding beads from findings.json,
+the rework child, and the COMMENT-only posting. You add none of that; you
+decide the verdict and call signoff.sh exactly once.
+
+**1. Re-derive the review bead and its pins** (each step is its own shell),
+exactly as `formulas/mol-review.toml`'s `load-dispatch` does:
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
+M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
+REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
+# The workflow root is on THIS synthesis step bead (the bead this claim handed
+# you), not on the review bead. Scope the lane lookup by it: lane_ids are
+# constant across pours, so gc.review_quorum_lane alone would also match lanes
+# from every other quorum molecule.
+SYNTH_BEAD="<the bead_id from your gc hook --claim --json>"
+ROOT=$(gc bd show "$SYNTH_BEAD" --json | jq -r '.[0].metadata["gc.root_bead_id"] // empty')
+[ -n "$ROOT" ] || { echo "cannot resolve workflow root from the synthesis step bead $SYNTH_BEAD" >&2; exit 1; }
+```
+
+**2. Read both lanes' durable output.** Each lane wrote a
+`review-quorum.lane.v1` object to its step bead's `gc.output_json`. Find the
+two lane step beads by their `gc.review_quorum_lane` stamp (`{{lane_one_id}}`,
+`{{lane_two_id}}`), scoped to this workflow root in the query. `--status closed`
+is required (a metadata-field query defaults to open only), and `--limit=0`
+lifts the default 50-row cap: lane ids are constant across pours, so a capped
+lookup can fill its page with other molecules' lane beads and read this root's
+completed lane as missing.
+```bash
+for LANE in {{lane_one_id}} {{lane_two_id}}; do
+  gc bd list --metadata-field gc.review_quorum_lane="$LANE" --metadata-field gc.root_bead_id="$ROOT" --status closed --limit=0 --json \
+    | jq -r '.[0].metadata["gc.output_json"] // empty'
+done
+```
+A lane that is missing, unreadable, or closed `fail` is REDUCED COVERAGE, not
+a pass: say so in the verdict body and, when the missing lane leaves you unable
+to reach a confident verdict, treat the review as request-changes with a
+finding that names the coverage gap rather than approving on one lane.
+
+**3. Run the suite once at the pinned commit** in a throwaway detached
+worktree, exactly as `formulas/mol-review.toml`'s `review` step step 2 does
+(the trap owns teardown). The lanes did not run tests; this is the quorum's
+single verification. A failure that also fails on the base is pre-existing
+context, not this branch's defect.
+
+**4. Synthesize the verdict body.** UNION the lanes' findings — two providers
+catch more than one, which is the point — then dedupe findings that are the
+same defect at the same locus, keeping lane provenance. A finding either lane
+raises as blocking (P0/P1) that survives your own judgment is blocking for the
+quorum. `approve` iff no P0 and no P1 across both lanes and your test run;
+otherwise `request-changes`. Write the verdict body to `findings.md` in the
+mol-review verdict shape (VERDICT, reviewed branch/base/commit, scope checked,
+findings with location+impact+fix, filed, verification), self-contained
+because pre-open it is replayed verbatim as the opening PR comment. Note which
+lanes covered what, and any reduced coverage.
+
+**5. Emit `findings.json`** beside it — a JSON array, one `{locus, message}`
+per BLOCKING (P0/P1) finding, `[]` on approve — exactly as
+`formulas/mol-review.toml`'s `review` step 6b specifies (rebase-stable locus:
+a file and a symbol or section, never a line number or oid).
+
+**6. One call, through the one writer.** Resolve signoff.sh from the pack and
+call it once:
+```bash
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md --findings-file findings.json
+```
+Do not post the review yourself, do not touch `check.*`, do not file rework or
+finding beads, and never run `gh pr review --approve`.
+
+**7. Failure arms** are mol-review's `verdict-and-drain` arms verbatim: a
+`superseded`/`already closed` exit from signoff needs no re-pin (drop the
+verdict, close the chain, drain); any other failure appends your findings to
+the review bead (`--append-notes`, never `--notes`), then — after the chain is
+closed — restores the bead's route from `metadata.review_pool` so the pool can
+re-claim it, then drains.
+
+**8. Close this workflow's step chain forward, then drain.** Terminal step:
+close every step by its `(gc.root_bead_id, gc.step_ref)` pair through
+step-close.sh, in forward order; the lanes closed their own beads already, so
+those return "not this session's to close" and are left for the finalizer.
+Never close `workflow-finalize`.
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+: "${SC:?step-close.sh not found in the pack}"
+for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
+  "$SC" --step "mol-review-quorum-signoff.$STEP" --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
+done
+gc runtime drain-ack
+```
+
+**Exit criteria:** both lanes read (or reduced coverage recorded), suite run
+once at the pinned commit, findings.md + findings.json written, exactly one
+signoff.sh call succeeded (or findings appended and the route restored), step
+chain closed forward, drain acknowledged.
+"""
+metadata = { "gc.run_target" = "{{synthesis_target}}", "gc.review_quorum_role" = "synthesis" }

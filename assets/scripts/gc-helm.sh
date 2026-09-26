@@ -40,7 +40,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open
-  gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach
+  gc-helm engage [<subject>] [--subject <id>] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
@@ -61,14 +61,22 @@ tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
 (origin=manual, backstop-exempt), assigns the visit to the session's runtime
 name so the session's own claim adopts it with no pool routing, and attaches;
---model picks the tier (opus default), --no-attach spawns without attaching.
-A --reason given with a SUBJECT always files a new visit carrying that reason
-and engages it, even when the subject already has one parked. It passes
---allow-duplicate through to open, which bypasses the one-visit-per-subject
-dedup. With no --reason, an existing parked visit is engaged, and a fresh
-visit is filed only when the subject has none. A --reason given with an
-explicit visit id is refused, because a new visit needs a subject and the
-reason would otherwise be dropped.
+--model picks the converse variant (opus, the work tier, is the default),
+--no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
+subject it prompts for one (id or title search), lists the subject's open
+visits and offers engage-existing or a new visit, prompts a new visit's starter
+(a numbered seed, Enter for none, or free text sent verbatim), and prompts the
+model as a numbered choice over the configured variants. Any command-line value
+pre-fills and skips its prompt (--subject/positional, --reason/--template,
+--model); --no-input reverts to the flag-driven one-shot behavior. Starter seeds
+live in assets/scripts/gc-helm-engage-starters.sh. A --reason or --template with
+a SUBJECT files a new visit carrying that opener and engages it even when one is
+parked, passing --allow-duplicate through to open and --body the opener as the
+claim-time brief. With no starter, an existing parked visit is engaged and a
+fresh one is filed only when the subject has none. A --reason with an explicit
+visit id is refused, because a new visit needs a subject and the reason would
+otherwise be dropped. The summary and prompts print on stdout; a single [debug]
+line of visit/sitting/routing ids is always printed on stderr.
 dismiss ends the sitting. react slings a proactive first reaction via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one
@@ -163,10 +171,30 @@ normalize_headline() {
     # <<< takeaway-length-gate
 }
 
+# visit_headline <raw> — the board headline for a visit title, whitespace
+# collapsed and capped at TAKEAWAY_MAX codepoints. normalize_headline REJECTS
+# over its cap because a demand/takeaway headline IS the deliverable and only
+# the author knows which clause to keep; a visit carries its full reason in the
+# body, so here the over-cap tail is TRUNCATED with an ellipsis instead. That
+# keeps "visit: <id> — <tail>" under bd's title cap without dropping the reason.
+visit_headline() {
+    printf '%s' "$1" | jq -Rsr --argjson n "$TAKEAWAY_MAX" \
+        '((gsub("\\s+"; " ")) | sub("^ "; "") | sub(" $"; "")) as $h
+         | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end' \
+        2>/dev/null || printf '%s' "$1" | cut -c1-"$TAKEAWAY_MAX"
+}
+
 # Sibling tools: assets/scripts/ and tools/ are siblings under the pack root.
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# engage's starter seeds live in a sibling data table; its converse-<model>
+# variants are enumerated from the agent dirs, so the model menu cannot drift
+# from what `gc session new converse-<model>` resolves. Both are overridable so
+# a hermetic test can point them at a fixture.
+STARTERS_TOOL="${GC_HELM_STARTERS_TOOL:-$SCRIPT_DIR/gc-helm-engage-starters.sh}"
+ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
+TAB=$(printf '\t')
 
 # Bust the retired bash board's gather cache so a straggler reader never
 # serves a pre-write board for a whole TTL.
@@ -1614,6 +1642,23 @@ cmd_open() {
     fi
     # <<< open-subject-exists
 
+    # A DONE-band row is a finished item, not open work. Minting a fresh
+    # "operator pick" visit on a closed subject is how a resolved demand still
+    # showing its question gets re-engaged as a new ask. A superseded predecessor
+    # was already redirected to its live successor above, so a closed subject here
+    # is genuinely settled — refuse it rather than promote a glance into a visit.
+    # >>> open-subject-closed
+    subject_status=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then (first(.[] | objects | select((.id // "") == $b)) | .status // "")
+             else "" end' 2>/dev/null || true)
+    if [ "$subject_status" = "closed" ]; then
+        echo "$PROG: open: $bead is closed — a settled item on the DONE band, not open work. No visit filed. To act on it, re-open the bead or file fresh work; a closed row is not a pick." >&2
+        exit 4
+    fi
+    # <<< open-subject-closed
+
     # Already held? A visit records its subject twice — the
     # gc.continuation_group stamp and the tracks edge — and only the edge has
     # proved reliable (su-ab9je: the stamp landed empty), so match EITHER.
@@ -1639,7 +1684,9 @@ cmd_open() {
 
     # What this sitting is FOR, in the caller's words; resolved outside the
     # marked block so the block stays a verbatim copy of the canonical form.
-    visit_tail="${open_reason:-operator pick from the board}"
+    # Bounded to a board headline so a long --reason cannot overflow bd's title
+    # cap ("visit: <id> — <reason>"); the full reason is kept in visit_body below.
+    visit_tail=$(visit_headline "${open_reason:-operator pick from the board}")
     if [ -n "$open_body" ]; then
         visit_body="$open_body"
     elif [ -n "$open_reason" ]; then
@@ -1654,11 +1701,18 @@ cmd_open() {
     # with `gc-helm engage`. `human` is the board's exact gather predicate.
     # >>> gate-visit
     POOL="human"
-    VISIT=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
+    # bd create answers an ARRAY (or bare object) carrying the id on success and
+    # a bare {"error":…} OBJECT on failure; extract the id type-guarded and
+    # scrubbed so an error object never crashes jq. The subject already resolved
+    # above, so an empty id here is bd's failure — surface bd's own message.
+    VISIT_JSON=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
         -d "$visit_body" \
-        --json | jq -r '.id // .[0].id')
+        --json 2>/dev/null || true)
+    VISIT=$(printf '%s' "$VISIT_JSON" | scrub \
+        | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-        || { echo "$PROG: open: could not create a visit bead for '$bead' (does it exist?)" >&2; exit 4; }
+        || { create_err=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+             echo "$PROG: open: could not create a visit bead for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
     gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
         --set-metadata "gc.continuation_group=$bead" \
         --set-metadata "task_kind=visit"
@@ -2245,6 +2299,224 @@ cmd_accept() {
     cmd_dismiss "$bead" --reason "${accept_reason:-accepted: dispatched $formula}"
 }
 
+# ── engage: decision helpers (UI-reusable) ──────────────────────────
+# The four engage decisions — subject, visit, starter, model — resolved from
+# durable state, factored out of the prompt loop so a later helm UI can drive
+# the same logic. The prompt_* wrappers add the one terminal read; the
+# list/find/seed helpers touch no terminal. Prompts print to the foreground
+# (stdout) and read stdin; a closed input (EOF) returns non-zero, so a caller
+# cancels rather than loops.
+
+# engage_list_models — configured converse-<model> tokens, one per line, opus
+# (the work tier) first. Enumerated from the agent dirs the templates live in,
+# so the menu tracks what `gc session new converse-<model>` can resolve.
+engage_list_models() {
+    _elm_all=""
+    for _elm_d in "$ENGAGE_AGENTS_DIR"/converse-*; do
+        [ -d "$_elm_d" ] || continue
+        _elm_m=$(basename "$_elm_d"); _elm_m=${_elm_m#converse-}
+        [ -n "$_elm_m" ] || continue
+        _elm_all="$_elm_all $_elm_m"
+    done
+    # Two passes so opus leads; `if` (not `&&`) keeps a false test from making the
+    # final loop iteration — and so the function — return non-zero under set -e.
+    for _elm_m in $_elm_all; do
+        if [ "$_elm_m" = opus ]; then printf '%s\n' "$_elm_m"; fi
+    done
+    for _elm_m in $_elm_all; do
+        if [ "$_elm_m" != opus ]; then printf '%s\n' "$_elm_m"; fi
+    done
+}
+
+# engage_model_label <token> — the token with an initial capital, for the menu.
+engage_model_label() {
+    printf '%s%s' "$(printf '%s' "$1" | cut -c1 | tr '[:lower:]' '[:upper:]')" \
+                  "$(printf '%s' "$1" | cut -c2-)"
+}
+
+# engage_valid_model <token> — 0 iff the token names a configured variant.
+# Fails OPEN when the list cannot be enumerated (a broken pack), so engage never
+# rejects a model it merely could not confirm; the spawn is the real gate then.
+engage_valid_model() {
+    _evm_list=$(engage_list_models)
+    [ -n "$_evm_list" ] || return 0
+    _evm_ok=1
+    for _evm in $_evm_list; do
+        if [ "$_evm" = "$1" ]; then _evm_ok=0; fi
+    done
+    return "$_evm_ok"
+}
+
+# engage_find_visits <subject> — open visits tracking the subject, one
+# "<id>\t<status>\t<assignee>\t<title>" row per candidate, parked
+# (open+unassigned) first, then held, oldest first within each.
+engage_find_visits() {
+    gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub \
+        | jq -r --arg s "$1" \
+            '[ .[]? | select((.metadata.task_kind // "")=="visit")
+               | select($s != "" and (((.metadata["gc.continuation_group"] // "")==$s)
+                    or ([ .dependencies[]? | select((.type // "")=="tracks") | select((.depends_on_id // "")==$s) ] | length > 0))) ]
+             | sort_by(((.assignee // "") != ""), ((.status // "") != "open"), (.created_at // ""))
+             | .[] | [.id, (.status // ""), (.assignee // ""), (.title // "")] | @tsv' 2>/dev/null || true
+}
+
+# engage_starter_list — "<key>\t<label>" per starter seed, in menu order.
+engage_starter_list() { sh "$STARTERS_TOOL" list 2>/dev/null || true; }
+# engage_starter_seed <key> <subject> — the seed body with the subject filled in.
+engage_starter_seed() { sh "$STARTERS_TOOL" seed "$1" "$2" 2>/dev/null || true; }
+
+# engage_search_subjects <query> — open non-visit beads whose title contains the
+# query, one "<id>\t<title>" row each. The subject prompt's title search, split
+# out so a UI can populate its own picker from the same rows.
+engage_search_subjects() {
+    gc bd list --status=open,in_progress --title-contains "$1" --json --limit=0 2>/dev/null | scrub \
+        | jq -r '.[]? | select((.metadata.task_kind // "") != "visit") | [.id, (.title // "")] | @tsv' 2>/dev/null || true
+}
+
+# engage_prompt_subject — a typed id, PR number, or URL is taken as-is
+# (downstream verification fails closed on a bogus one); anything else is a
+# title search offering numbered matches. Sets ENGAGE_SUBJECT.
+engage_prompt_subject() {
+    while :; do
+        printf '  Subject? (id or search) › '
+        IFS= read -r _eps_in || return 1
+        _eps_in=${_eps_in# }; _eps_in=${_eps_in% }
+        [ -n "$_eps_in" ] || { printf '  enter a bead id, PR number/URL, or search text\n'; continue; }
+        case "$_eps_in" in
+            *-*|[0-9]*|http://*|https://*) ENGAGE_SUBJECT="$_eps_in"; return 0 ;;
+        esac
+        _eps_rows=$(engage_search_subjects "$_eps_in")
+        if [ -z "$_eps_rows" ]; then
+            printf '  no open bead matches "%s" — try an id or different text\n' "$_eps_in"
+            continue
+        fi
+        _eps_i=0; _eps_map=""
+        while IFS="$TAB" read -r _eps_id _eps_title; do
+            [ -n "$_eps_id" ] || continue
+            _eps_i=$((_eps_i + 1))
+            [ "$_eps_i" -gt 9 ] && { printf '    … more matches; narrow the search\n'; break; }
+            printf '    [%s] %s — %s\n' "$_eps_i" "$_eps_id" "$_eps_title"
+            _eps_map="$_eps_map$_eps_i $_eps_id
+"
+        done <<EOF
+$_eps_rows
+EOF
+        printf '  Which? [1-%s], or type to search again › ' "$_eps_i"
+        IFS= read -r _eps_pick || return 1
+        case "$_eps_pick" in
+            ""|*[!0-9]*) continue ;;
+        esac
+        _eps_sel=$(printf '%s' "$_eps_map" | awk -v n="$_eps_pick" '$1==n{print $2}')
+        [ -n "$_eps_sel" ] && { ENGAGE_SUBJECT="$_eps_sel"; return 0; }
+    done
+}
+
+# engage_prompt_visit_or_starter <subject> — ONE prompt covering both the
+# existing-visit choice and the new-visit starter. Open visits are listed
+# numbered; the starter seeds follow, each keyed by its letter. The single reply
+# resolves as: a number engages that visit; a seed letter opens a new visit on
+# that seed; any other text opens a new visit with that text as its opener;
+# Enter opens a blank new visit. Numbers and letters never collide, so both live
+# in one prompt. Held visits are shown for context but are not selectable. Sets
+# ENGAGE_VISIT_CHOICE to a visit id (engage it) or "new"; on "new" it also sets
+# ENGAGE_STARTER_BODY (the visit body; empty = blank) and ENGAGE_STARTER_TAIL
+# (a short title tail).
+engage_prompt_visit_or_starter() {
+    ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""
+    _epv_i=0; _epv_map=""
+    _epv_rows=$(engage_find_visits "$1")
+    if [ -n "$_epv_rows" ]; then
+        printf '  Subject has open visit(s):\n'
+        # Read whole lines and cut the columns: an empty middle field (an
+        # unassigned visit's assignee) collapses under a whitespace IFS in
+        # `read`, so split with cut, which keeps empty fields.
+        while IFS= read -r _epv_row; do
+            [ -n "$_epv_row" ] || continue
+            _epv_id=$(printf '%s' "$_epv_row" | cut -f1)
+            _epv_st=$(printf '%s' "$_epv_row" | cut -f2)
+            _epv_who=$(printf '%s' "$_epv_row" | cut -f3)
+            _epv_title=$(printf '%s' "$_epv_row" | cut -f4-)
+            [ -n "$_epv_id" ] || continue
+            if [ "$_epv_st" = open ] && [ -z "$_epv_who" ]; then
+                _epv_i=$((_epv_i + 1))
+                printf '    [%s] %s — "%s"\n' "$_epv_i" "$_epv_id" "$_epv_title"
+                _epv_map="$_epv_map$_epv_i $_epv_id
+"
+            else
+                printf '    ( ) %s — "%s"  ⚠ held by %s\n' "$_epv_id" "$_epv_title" "${_epv_who:-a sitting}"
+            fi
+        done <<EOF
+$_epv_rows
+EOF
+    fi
+    # The new-visit starters, keyed by letter; build the menu and a letter->key map.
+    _epv_smenu=""; _epv_smap=""
+    while IFS="$TAB" read -r _eps_key _eps_label _eps_letter; do
+        [ -n "$_eps_key" ] && [ -n "$_eps_letter" ] || continue
+        [ -n "$_epv_smenu" ] && _epv_smenu="$_epv_smenu · "
+        _epv_smenu="$_epv_smenu[$_eps_letter] $_eps_label"
+        _epv_smap="$_epv_smap$_eps_letter $_eps_key
+"
+    done <<EOF
+$(engage_starter_list)
+EOF
+    [ -n "$_epv_smenu" ] && printf '    new:  %s · or type your own opener\n' "$_epv_smenu"
+    if [ "$_epv_i" -gt 0 ]; then
+        printf '  [1-%s] engage a listed visit · a letter or text starts a new one · Enter = new, blank › ' "$_epv_i"
+    else
+        printf '  a letter or text starts a new visit · Enter = new, blank › '
+    fi
+    IFS= read -r _epv_reply || return 1
+    # Enter → a blank new visit (the default).
+    if [ -z "$_epv_reply" ]; then ENGAGE_VISIT_CHOICE="new"; return 0; fi
+    # A seed letter (case-insensitive) → a new visit on that seed.
+    _epv_lc=$(printf '%s' "$_epv_reply" | tr 'A-Z' 'a-z')
+    _epv_seed=$(printf '%s' "$_epv_smap" | awk -v l="$_epv_lc" '$1==l{print $2}')
+    if [ -n "$_epv_seed" ]; then
+        ENGAGE_VISIT_CHOICE="new"
+        ENGAGE_STARTER_BODY=$(engage_starter_seed "$_epv_seed" "$1")
+        ENGAGE_STARTER_TAIL=$(engage_starter_list | awk -F"$TAB" -v k="$_epv_seed" '$1==k{print $2}')
+        return 0
+    fi
+    # A number naming a listed visit → engage it.
+    case "$_epv_reply" in
+        *[!0-9]*) : ;;
+        *)
+            _epv_sel=$(printf '%s' "$_epv_map" | awk -v n="$_epv_reply" '$1==n{print $2}')
+            if [ -n "$_epv_sel" ]; then ENGAGE_VISIT_CHOICE="$_epv_sel"; return 0; fi ;;
+    esac
+    # Anything else → a new visit with the reply verbatim as its opener.
+    ENGAGE_VISIT_CHOICE="new"
+    ENGAGE_STARTER_BODY="$_epv_reply"
+    ENGAGE_STARTER_TAIL=$(printf '%s' "$_epv_reply" | cut -c1-60)
+    return 0
+}
+
+# engage_prompt_model — numbered selection over the configured variants; Enter
+# keeps opus (the work tier). Sets ENGAGE_MODEL.
+engage_prompt_model() {
+    _epm_i=0; _epm_map=""; _epm_menu=""
+    for _epm_m in $(engage_list_models); do
+        _epm_i=$((_epm_i + 1))
+        _epm_lbl=$(engage_model_label "$_epm_m")
+        [ "$_epm_m" = opus ] && _epm_lbl="$_epm_lbl (default)"
+        [ -n "$_epm_menu" ] && _epm_menu="$_epm_menu · "
+        _epm_menu="$_epm_menu[$_epm_i] $_epm_lbl"
+        _epm_map="$_epm_map$_epm_i $_epm_m
+"
+    done
+    if [ "$_epm_i" -eq 0 ]; then ENGAGE_MODEL=opus; return 0; fi
+    printf '  Model — %s   (Enter = Opus) › ' "$_epm_menu"
+    IFS= read -r _epm_reply || return 1
+    case "$_epm_reply" in
+        "") ENGAGE_MODEL=opus; return 0 ;;
+        *[!0-9]*) printf '  (not a listed number; keeping Opus)\n'; ENGAGE_MODEL=opus; return 0 ;;
+    esac
+    _epm_pick=$(printf '%s' "$_epm_map" | awk -v n="$_epm_reply" '$1==n{print $2}')
+    if [ -n "$_epm_pick" ]; then ENGAGE_MODEL="$_epm_pick"; else printf '  (no such choice; keeping Opus)\n'; ENGAGE_MODEL=opus; fi
+    return 0
+}
+
 # ── Verb: engage ─────────────────────────────────────────────────────
 # The operator's "I want to talk about this now" — the spawn-on-engagement
 # entry point. The converse routed-pool is retired: a filed visit PARKS on the
@@ -2266,26 +2538,58 @@ cmd_accept() {
 # before. Attached (the default), the operator lands in the sitting directly.
 cmd_engage() {
     bead=""; engage_model="opus"; engage_reason=""; engage_attach=1
+    engage_no_input=0; engage_model_set=0; engage_reason_set=0; engage_template=""
+    # Interactive decisions carried into the visit-resolution and output below.
+    engage_body=""; engage_file_new=0; engage_chosen_visit=""; visit_new=0
     while [ $# -gt 0 ]; do
         case "$1" in
-            --model=*)   engage_model="${1#--model=}"; shift ;;
+            --model=*)   engage_model="${1#--model=}"; engage_model_set=1; shift ;;
             --model)     shift; [ $# -gt 0 ] || { echo "$PROG: engage: --model requires a value" >&2; exit 2; }
-                         engage_model="$1"; shift ;;
-            --reason=*)  engage_reason="${1#--reason=}"; shift ;;
+                         engage_model="$1"; engage_model_set=1; shift ;;
+            --reason=*)  engage_reason="${1#--reason=}"; engage_reason_set=1; shift ;;
             --reason)    shift; [ $# -gt 0 ] || { echo "$PROG: engage: --reason requires a value" >&2; exit 2; }
-                         engage_reason="$1"; shift ;;
+                         engage_reason="$1"; engage_reason_set=1; shift ;;
+            --template=*) engage_template="${1#--template=}"; shift ;;
+            --template)  shift; [ $# -gt 0 ] || { echo "$PROG: engage: --template requires a value" >&2; exit 2; }
+                         engage_template="$1"; shift ;;
+            --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; shift ;;
+            --subject)   shift; [ $# -gt 0 ] || { echo "$PROG: engage: --subject requires a value" >&2; exit 2; }
+                         [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; shift ;;
+            --no-input)  engage_no_input=1; shift ;;
             --no-attach) engage_attach=0; shift ;;
             -h|--help)   usage; exit 0 ;;
             -*) echo "$PROG: engage: unknown flag '$1'" >&2; exit 2 ;;
-            *) [ -z "$bead" ] || { echo "$PROG: engage takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
+            *) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; shift ;;
         esac
     done
-    case "$bead" in "") echo "$PROG: engage needs <bead-id> (a parked visit, or a subject to converse about)" >&2; usage; exit 2 ;; esac
-    case "$engage_model" in
-        opus|fable|codex) ;;
-        *) echo "$PROG: engage: --model must be opus, fable, or codex (got '$engage_model')" >&2; exit 2 ;;
-    esac
-    template="converse-$engage_model"
+
+    # --reason and --template both pre-fill the starter — they conflict.
+    if [ -n "$engage_reason" ] && [ -n "$engage_template" ]; then
+        echo "$PROG: engage: --reason and --template both set the opening message — pass only one." >&2
+        exit 2
+    fi
+
+    # Interactive is the DEFAULT on a TTY; --no-input reverts to the flag-driven,
+    # one-shot behavior for scripts/CI. GC_HELM_ASSUME_TTY is a test seam that
+    # forces the interactive path when stdin is a pipe, as in a hermetic test.
+    engage_interactive=0
+    if [ "$engage_no_input" = 0 ] && { [ -t 0 ] || [ -n "${GC_HELM_ASSUME_TTY:-}" ]; }; then
+        engage_interactive=1
+    fi
+    # A pre-filled --reason/--template already commits to a new visit with that
+    # opener, so the interactive visit/starter prompts are skipped for it.
+    starter_prefilled=0
+    if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ]; then starter_prefilled=1; fi
+
+    # Subject: prompt when absent on a TTY; a flag or positional pre-fills it.
+    if [ -z "$bead" ]; then
+        if [ "$engage_interactive" = 1 ]; then
+            engage_prompt_subject || { echo "$PROG: engage: no subject given — nothing engaged" >&2; exit 2; }
+            bead="$ENGAGE_SUBJECT"
+        else
+            echo "$PROG: engage needs <bead-id> (a parked visit, or a subject to converse about)" >&2; usage; exit 2
+        fi
+    fi
 
     # Resolve a PR reference or a settled disposition to the live owning bead
     # (parity with open), before the rig is derived from the id prefix.
@@ -2298,7 +2602,7 @@ cmd_engage() {
     # with no rig there is nowhere to resolve "$template" and nothing to spawn.
     path=$(rig_path_for_bead "$bead")
     if [ -z "$path" ]; then
-        echo "$PROG: engage: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list', so there is no rig to resolve $template in. Nothing spawned." >&2
+        echo "$PROG: engage: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list', so there is no rig to resolve the converse template in. Nothing spawned." >&2
         exit 4
     fi
     [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
@@ -2335,24 +2639,121 @@ cmd_engage() {
     fi
     bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
 
+    # The subject a visit id is about — for the grounding line and the success
+    # summary below. A visit records its subject in the gc.continuation_group
+    # stamp, which can land empty, so fall back to the tracks edge; the record
+    # the existence gate already fetched carries both. bead_row is a `gc bd show`
+    # row, which renders a dependency as a bead row keyed .dependency_type with
+    # the target in .id — not the .type/.depends_on_id shape `gc bd list` emits.
+    # Empty for a non-visit.
+    visit_subject=""
+    if [ "$bead_kind" = "visit" ]; then
+        visit_subject=$(printf '%s' "$bead_row" | jq -r '
+            (.metadata["gc.continuation_group"] // "") as $g
+            | if $g != "" then $g
+              else ([ .dependencies[]? | select((.dependency_type // "") == "tracks")
+                      | (.id // "") ] | map(select(. != "")) | first // "")
+              end' 2>/dev/null || true)
+    fi
+
+    # Ground the operator in the bead they picked, before the visit or model
+    # prompt: a typed id, PR number, or URL carries nothing of the bead on its
+    # own, and a title search drops all but the title once a match is chosen.
+    # Interactive only — a --no-input caller named the subject on argv and its
+    # stdout is a script's to parse.
+    if [ "$engage_interactive" = 1 ]; then
+        if [ "$bead_kind" = "visit" ]; then
+            # A visit id names the visit, not the work it is about, and the
+            # join-or-new prompt is skipped for it — so this is the operator's one
+            # look before the model choice. Show the subject the visit tracks, and
+            # the reason it was filed (the visit title's tail after "— ").
+            if [ -n "$visit_subject" ]; then
+                subj_row=$(gc bd show "$visit_subject" --json 2>/dev/null | scrub \
+                    | jq -r --arg b "$visit_subject" \
+                        'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first) else empty end' 2>/dev/null || true)
+                subj_summary=$(printf '%s' "$subj_row" | jq -r '
+                    (.title // "") as $t
+                    | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
+                    | " (" + (.issue_type // "?") + " · " + (.status // "?")
+                      + " · p" + ((.priority // 0) | tostring) + ")"
+                      + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
+                # A subject that does not resolve (cross-store, or a torn row)
+                # still grounds by id rather than dropping the line.
+                printf '  Subject: %s%s\n' "$visit_subject" "$subj_summary"
+            else
+                printf '  Subject: (this visit names no subject — no continuation-group stamp and no tracks edge)\n'
+            fi
+            visit_reason=$(printf '%s' "$bead_row" | jq -r '
+                (.title // "")
+                | (split(" — ") | if length > 1 then (.[1:] | join(" — ")) else .[0] end)
+                | if length > 96 then .[0:95] + "…" else . end' 2>/dev/null || true)
+            [ -n "$visit_reason" ] && printf '  Visit:   "%s"\n' "$visit_reason"
+        else
+            subject_summary=$(printf '%s' "$bead_row" | jq -r '
+                (.title // "") as $t
+                | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
+                | "  " + (.id // "?")
+                  + " (" + (.issue_type // "?") + " · " + (.status // "?")
+                  + " · p" + ((.priority // 0) | tostring) + ")"
+                  + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
+            [ -n "$subject_summary" ] && printf '%s\n' "$subject_summary"
+        fi
+    fi
+
+    # --template pre-fills the starter with a named seed now that the subject is
+    # known; the seed body becomes the new visit's claim-time brief.
+    if [ -n "$engage_template" ]; then
+        engage_body=$(engage_starter_seed "$engage_template" "$bead")
+        [ -n "$engage_body" ] || { echo "$PROG: engage: unknown --template '$engage_template' (valid: $(engage_starter_list | cut -f1 | tr '\n' ' ' | sed 's/ *$//'))" >&2; exit 2; }
+        engage_reason=$(engage_starter_list | awk -F"$TAB" -v k="$engage_template" '$1==k{print $2}')
+        [ -n "$engage_reason" ] || engage_reason="$engage_template"
+        engage_file_new=1
+    fi
+
+    # Interactive decision for a SUBJECT, in one prompt: engage an existing visit,
+    # or open a new one (blank, on a seed, or with a typed opener). An explicit
+    # visit id names its own visit, and a pre-filled --reason/--template already
+    # chose a new one.
+    if [ "$engage_interactive" = 1 ] && [ "$bead_kind" != "visit" ] && [ "$starter_prefilled" = 0 ]; then
+        engage_prompt_visit_or_starter "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
+        if [ "$ENGAGE_VISIT_CHOICE" = "new" ]; then
+            engage_file_new=1
+            engage_reason="$ENGAGE_STARTER_TAIL"
+            engage_body="$ENGAGE_STARTER_BODY"
+        else
+            engage_chosen_visit="$ENGAGE_VISIT_CHOICE"
+        fi
+    fi
+
+    # Model: prompt when interactive and unset, else the opus default (or the
+    # flag). Validated against the configured variants before the template binds.
+    if [ "$engage_model_set" = 0 ] && [ "$engage_interactive" = 1 ]; then
+        engage_prompt_model || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
+        engage_model="$ENGAGE_MODEL"
+    fi
+    if ! engage_valid_model "$engage_model"; then
+        echo "$PROG: engage: --model must be one of: $(engage_list_models | tr '\n' ' ' | sed 's/ *$//') (got '$engage_model')" >&2
+        exit 2
+    fi
+    template="converse-$engage_model"
+
     # Resolve the sitting's visit. A visit picked off the board is itself the
-    # visit; a subject resolves to the open visits tracking it (the union
-    # open/dismiss match), and a subject with none gets one filed (open parks it
-    # to the board). A subject can carry several open visits — escalate.sh files
-    # one per (subject, key) — so the parked (open, unassigned) ones are
-    # preferred over one a sitting already holds, oldest first; more than one
-    # parked visit is an ambiguity the operator settles by naming the visit id.
-    # Emits "<id>\t<status>\t<assignee>" per candidate, parked first.
-    engage_find_visits() {
-        gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub \
-            | jq -r --arg s "$1" \
-                '[ .[]? | select((.metadata.task_kind // "")=="visit")
-                   | select($s != "" and (((.metadata["gc.continuation_group"] // "")==$s)
-                        or ([ .dependencies[]? | select((.type // "")=="tracks") | select((.depends_on_id // "")==$s) ] | length > 0))) ]
-                 | sort_by(((.assignee // "") != ""), ((.status // "") != "open"), (.created_at // ""))
-                 | .[] | [.id, (.status // ""), (.assignee // "")] | @tsv' 2>/dev/null || true
-    }
+    # visit; a subject resolves to the open visits tracking it (engage_find_visits
+    # at file scope), and a subject with none gets one filed (open parks it to the
+    # board). A subject can carry several open visits — escalate.sh files one per
+    # (subject, key) — so the parked (open, unassigned) ones are preferred over
+    # one a sitting already holds, oldest first; more than one parked visit is an
+    # ambiguity the operator settles interactively or by naming the visit id.
     visit_row=""
+    # bound_existing marks the path where `engage <subject>` binds a visit that
+    # already existed, as opposed to an explicit visit id or one freshly filed
+    # here. Only that path gets the extra output below: the bound visit's subject
+    # and the --reason alternative. It stays 0 everywhere else.
+    bound_existing=0
+    # A blocks-dep that has since closed is a satisfied gate, so the visit's
+    # premise may be moot. Read once from the pre-spawn dep list, surfaced only on
+    # the bound_existing output.
+    visit_closed_gates=""
     if [ "$bead_kind" = "visit" ]; then
         # --reason files a NEW visit, which only makes sense for a subject. An
         # explicit visit id names one exact visit, so a reason has nowhere to go
@@ -2365,27 +2766,45 @@ cmd_engage() {
         fi
         VISIT="$bead"
         visit_row="$bead_row"
+    elif [ -n "$engage_chosen_visit" ]; then
+        # The operator picked an existing parked visit at the interactive prompt.
+        VISIT="$engage_chosen_visit"
     else
         VISIT=""
+        # filed_fresh records that cmd_open below filed a NEW visit, so the bind
+        # block does not misreport a freshly filed visit as a pre-existing one.
+        filed_fresh=0
         candidates=$(engage_find_visits "$bead")
-        # --reason names a fresh, likely-distinct concern, so file a NEW visit
-        # for it and engage that — even when the subject already has one.
-        # cmd_open dedups one-visit-per-subject, so --allow-duplicate marks this
-        # second visit deliberate. With no --reason, an existing visit is engaged
-        # and only a subject with none has a visit filed.
-        if [ -n "$engage_reason" ] || [ -z "$candidates" ]; then
-            if [ -n "$engage_reason" ]; then
-                echo "$PROG: engage: --reason given — filing a new visit on $bead to carry it, then engaging that visit" >&2
-                set -- "$bead" --reason "$engage_reason" --allow-duplicate
+        # A --reason, a --template, or an interactive "new visit"
+        # (engage_file_new) files a fresh visit and engages it — even when the
+        # subject already has one; cmd_open's --allow-duplicate marks that
+        # deliberate, and --body carries the starter as the claim-time brief.
+        # With none of those, an existing visit is engaged and only a subject
+        # with none has a visit filed.
+        if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ] || [ -z "$candidates" ]; then
+            if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; then
+                echo "$PROG: engage: filing a new visit on $bead, then engaging it" >&2
+                set -- "$bead" --allow-duplicate
+                [ -n "$engage_reason" ] && set -- "$@" --reason "$engage_reason"
+                [ -n "$engage_body" ] && set -- "$@" --body "$engage_body"
             else
                 echo "$PROG: engage: no open visit on $bead — filing one to park on the board, then engaging it" >&2
                 set -- "$bead"
             fi
             # cmd_open runs in this shell and leaves the new id in VISIT.
-            cmd_open "$@" >&2 || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            # Drop its stdout: the "visit filed / engage it when ready" success
+            # lines are terminal advice for a standalone `open`, stale here
+            # because engage binds the sitting itself just below. Errors stay on
+            # stderr and still surface.
+            cmd_open "$@" >/dev/null || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            filed_fresh=1
+            [ -n "$VISIT" ] && visit_new=1
             [ -n "$VISIT" ] || candidates=$(engage_find_visits "$bead")
         fi
         if [ -z "$VISIT" ] && [ -n "$candidates" ]; then
+            # Reached without a freshly filed visit means the visit engaged here
+            # already existed on the subject — the bind-a-pre-existing-visit path.
+            [ "$filed_fresh" = 0 ] && bound_existing=1
             parked=$(printf '%s\n' "$candidates" | awk -F'\t' '$2=="open" && $3=="" {print $1}')
             parked_n=$(printf '%s\n' "$parked" | grep -c . || true)
             if [ "$parked_n" -gt 1 ]; then
@@ -2487,18 +2906,24 @@ cmd_engage() {
             echo "$PROG: engage: visit $VISIT is '${visit_status:-unknown}', not open${visit_owner:+ (last held by '$visit_owner')} — a spawned sitting adopts only ready (open, unblocked) assigned work, so it would hold nothing. Nothing spawned." >&2
             exit 4 ;;
     esac
-    if ! visit_blockers=$(gc bd dep list "$VISIT" --direction=down --json 2>/dev/null | scrub \
-        | jq -er 'if type == "array" then
-               [ .[] | select((.dependency_type // "") == "blocks")
-                     | select((.status // "") != "closed") | .id ] | join(" ")
-             else error("not an edge array") end' 2>/dev/null); then
+    if ! visit_deps_json=$(gc bd dep list "$VISIT" --direction=down --json 2>/dev/null | scrub \
+        | jq -ce 'if type == "array" then . else error("not an edge array") end' 2>/dev/null); then
         echo "$PROG: engage: could not read the blockers on visit $VISIT ('gc bd dep list' failed or did not answer with an edge array), so its claimable state is UNPROVEN — refusing to spawn a sitting that may hold nothing. Nothing spawned; retry once the store answers." >&2
         exit 4
     fi
+    visit_blockers=$(printf '%s' "$visit_deps_json" \
+        | jq -r '[ .[] | select((.dependency_type // "") == "blocks")
+                       | select((.status // "") != "closed") | .id ] | join(" ")' 2>/dev/null || true)
     if [ -n "$visit_blockers" ]; then
         echo "$PROG: engage: visit $VISIT is blocked by $visit_blockers — a blocked bead is not in 'bd ready', so a spawned sitting could not adopt it and would hold nothing. Nothing spawned; engage it once its blockers clear." >&2
         exit 4
     fi
+    # A blocks-dep that is now CLOSED is a satisfied gate: whatever this visit was
+    # waiting on has resolved, so its premise may be moot and a bound sitting may
+    # self-dismiss it. Derived from the same read the blocker guard used above.
+    visit_closed_gates=$(printf '%s' "$visit_deps_json" \
+        | jq -r '[ .[] | select((.dependency_type // "") == "blocks")
+                       | select((.status // "") == "closed") | .id ] | join(" ")' 2>/dev/null || true)
 
     # Spawn the manual sitting WITHOUT attaching, so the visit is assigned before
     # the session's claim loop runs. Capture the runtime identity from --json:
@@ -2528,6 +2953,7 @@ cmd_engage() {
         fi
         sid=$(printf '%s' "$spawn" | jq -r '.session_id // ""' 2>/dev/null || true)
         sname=$(printf '%s' "$spawn" | jq -r '.session_name // ""' 2>/dev/null || true)
+        swork_dir=$(printf '%s' "$spawn" | jq -r '.work_dir // ""' 2>/dev/null || true)
     }
 
     # Spawn under the bare visit id first — it is the alias other engages read
@@ -2600,7 +3026,29 @@ cmd_engage() {
     fi
     bust_cache
 
-    echo "$PROG: engage: sitting $sname ($template) holds visit $VISIT on $bead"
+    # Human summary on stdout; id-heavy provenance on a single always-on [debug]
+    # line on stderr — never gated behind a verbosity flag, since re-running to
+    # see it would bind a different visit.
+    _eng_which=existing; [ "$visit_new" = 1 ] && _eng_which=new
+    _eng_routed=$(printf '%s' "$visit_row" | jq -r '.metadata["gc.routed_to"] // ""' 2>/dev/null || true)
+    # On the visit-id path $bead IS the visit, so name the subject it tracks
+    # rather than repeat the visit id back as its own "for".
+    _eng_for="$bead"; [ "$bead_kind" = "visit" ] && [ -n "$visit_subject" ] && _eng_for="$visit_subject"
+    printf '✓ %s on %s visit %s for %s\n' "$template" "$_eng_which" "$VISIT" "$_eng_for"
+    printf '  attach: gc session attach %s\n' "$sid"
+    # `engage <subject>` with no --reason binds a visit that already existed, which
+    # may be narrower or already-purposed than the fresh discussion the operator
+    # meant to start. Name what was bound and offer --reason, so the operator can
+    # tell a bound existing thread from a new one rather than reading a bare id.
+    if [ "$bound_existing" = "1" ]; then
+        visit_title=$(printf '%s' "$visit_row" | jq -r '.title // ""' 2>/dev/null || true)
+        visit_label="visit $VISIT"
+        [ -n "$visit_title" ] && visit_label="\"$visit_title\""
+        echo "$PROG: engage: bound the pre-existing $visit_label on $bead, not a fresh discussion. To open a new visit instead, re-run: $PROG engage $bead --reason \"<topic>\""
+        [ -n "$visit_closed_gates" ] && echo "$PROG: engage: heads up: this visit's gate(s) $visit_closed_gates have since closed, so its premise may be satisfied and the sitting may find it moot and self-dismiss."
+    fi
+    printf '[debug] visit=%s sitting=%s (%s) routed_to=%s cont_group=%s work_dir=%s\n' \
+        "$VISIT" "$sid" "$sname" "${_eng_routed:-?}" "$bead" "${swork_dir:-?}" >&2
 
     # A freshly spawned sitting self-starts from the prompt its launch delivers.
     # `gc session new` puts the rendered converse prompt on argv (every converse
@@ -2630,16 +3078,16 @@ cmd_engage() {
         opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
         *)
             kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
-            [ -n "$engage_reason" ] && kick="$kick The operator's reason: $engage_reason"
+            _kick_opener="${engage_body:-$engage_reason}"
+            [ -n "$_kick_opener" ] && kick="$kick The operator's reason: $_kick_opener"
             gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
                 || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
             ;;
     esac
 
+    # The summary already printed the attach line; on the default path we attach.
     if [ "$engage_attach" = "1" ]; then
         gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
-    else
-        echo "$PROG: engage: spawned --no-attach; attach when ready: gc session attach $sid"
     fi
     return 0
 }

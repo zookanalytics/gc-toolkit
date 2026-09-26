@@ -110,6 +110,8 @@ nothing — log the verdict line and move on.
 
 {{ template "heartbeat-no-consent-ui" . }}
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}

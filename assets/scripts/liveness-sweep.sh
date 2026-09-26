@@ -485,7 +485,7 @@ SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subj
 if [ -z "$SWEEP_SUBJECT" ] && [ "$DRY_RUN" -eq 0 ]; then
     SWEEP_SUBJECT=$(bd_write create -t task --title "triage: unnamed waits (this rig)" \
         -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits NEW since the previous pass. Dispositions: route / gate / kill (gc bd close, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) / park (a real dep edge onto a scope bead) / demand (a sibling bead naming what a person owes, plus a blocks edge)." \
-        --json | scrub | jq -r '.id // .[0].id')
+        --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     [ -n "$SWEEP_SUBJECT" ] && [ "$SWEEP_SUBJECT" != "null" ] \
         || { echo "$PROG: could not create the standing subject — nothing filed" >&2; exit 1; }
     bd_write update "$SWEEP_SUBJECT" --set-metadata "task_kind=triage-subject" \

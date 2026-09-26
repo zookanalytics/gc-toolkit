@@ -458,7 +458,7 @@ func fixtureBoard() board.Board {
 				Session:  "gascity__converse-2",
 				OpenedAt: time.Date(2026, 8, 11, 9, 12, 0, 0, time.UTC),
 				ClosedAt: time.Date(2026, 8, 11, 9, 48, 0, 0, time.UTC),
-				Takeaway: "the roll-up was right; the convoy's own progress claim was stale",
+				Takeaway: "every tracked child has landed; the convoy is complete",
 			},
 		},
 		Tiles: []board.Tile{
@@ -487,11 +487,9 @@ func fixtureBoard() board.Board {
 
 				Owned: nil,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         false,
-				ProgressMismatch: false,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       false,
 				StaleDays:      4,
 				Priority:       &p1,
 				CrossRigRefs:   []string{"sl-9k2mq"},
@@ -543,11 +541,9 @@ func fixtureBoard() board.Board {
 				// the TypeScript `boolean | null` is exercised either way.
 				Owned: &no,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         true,
-				ProgressMismatch: true,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       true,
 				StaleDays:      0,
 				Priority:       &p3,
 				CrossRigRefs:   []string{},
@@ -604,11 +600,9 @@ func fixtureBoard() board.Board {
 
 				Owned: nil,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         false,
-				ProgressMismatch: false,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       false,
 				StaleDays:      3,
 				Priority:       &p1,
 				CrossRigRefs:   []string{},
@@ -675,11 +669,9 @@ func fixtureBoard() board.Board {
 
 				Owned: nil,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         true,
-				ProgressMismatch: false,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       true,
 				StaleDays:      1,
 				Priority:       &p3,
 				CrossRigRefs:   []string{},

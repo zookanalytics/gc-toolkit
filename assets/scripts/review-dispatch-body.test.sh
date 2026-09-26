@@ -59,6 +59,19 @@ ROOT="$(cd "$HERE/../.." && pwd)"
   && ok "(NAME) formulas/mol-review.toml exists where the note points" \
   || bad "(NAME) formulas/mol-review.toml missing — the note names a formula the pack does not ship"
 
+echo "# a non-mol-review formula (the two-lane quorum) gets a note that defers to its steps"
+bash "$SCRIPT" --formula mol-review-quorum-signoff > "$TMP/quorum.out" 2>/dev/null
+QOUT="$TMP/quorum.out"
+hasF "$QOUT" 'formulas/mol-review-quorum-signoff.toml' "(NAME) names the dispatched formula's file path"
+hasF "$QOUT" 'gc formula show mol-review-quorum-signoff' "(RECOVER) recovery command names the dispatched formula"
+hasF "$QOUT" 'which of its steps makes the single verdict' "(DEFER) defers the verdict path to the formula's steps"
+notF "$QOUT" 'single pass' "(DEFER) does not assert a single-agent pass for a fan-out formula"
+notF "$QOUT" 'no parallel review pass' "(DEFER) does not forbid the parallel pass the quorum performs"
+notF "$QOUT" 'signoff.sh --review-bead' "(DEFER) does not tell a lane to call signoff itself — the formula's synthesis step owns that"
+notF "$QOUT" '__FORMULA__' "(DEFER) the formula placeholder is substituted, not left raw"
+RCQ=0; bash "$SCRIPT" --formula mol-review-quorum-signoff >/dev/null 2>&1 || RCQ=$?
+eq "$RCQ" "0" "(RC) a non-default formula still exits 0"
+
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

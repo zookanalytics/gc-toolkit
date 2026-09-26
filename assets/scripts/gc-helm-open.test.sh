@@ -76,6 +76,9 @@ case "$1 ${2:-}" in
       dberror)   printf '{"error":"dial tcp 127.0.0.1:3307: connect: connection refused","schema_version":1}\n'; exit 1 ;;
       # A real bead whose notes carry raw control chars (invalid --json).
       ctrlchr)   printf '[{"id":"%s","title":"ctl\002chars","notes":"a\001b"}]\n' "$3" ;;
+      # A settled item on the DONE band: it exists, it just closed. No successor,
+      # so the resolver passes it through and the closed-subject gate must catch it.
+      closed)    jq -n --arg i "$3" '[{id:$i, title:"a settled demand", status:"closed"}]' ;;
     esac ;;
   "bd list")
     # The already-held lookup. $FAKE_VISIT set => one open visit on the subject.
@@ -93,6 +96,11 @@ case "$1 ${2:-}" in
     else printf '[]\n'; fi ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
+    # FAKE_CREATE_ERROR models bd REJECTING the create (e.g. a title over the
+    # cap): the real bd answers a bare {"error":…} OBJECT on stdout, exit 1.
+    if [ -n "${FAKE_CREATE_ERROR:-}" ]; then
+      printf '{"error":"%s","schema_version":1}\n' "$FAKE_CREATE_ERROR"; exit 1
+    fi
     jq -n '{id:"tk-visit1"}' ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
@@ -262,6 +270,22 @@ eq "$RC" "0" "(CTRLCHR) a real bead with control chars in its payload still reso
 grep -q 'bd create' <<< "$CALLS" \
   && ok "(CTRLCHR) the visit is filed normally" || bad "(CTRLCHR) visit filed (err: $ERR)"
 
+# --- (CLOSED) a settled DONE-band item is not open work -----------------------
+# The subject EXISTS but has closed, so the existence gate passes and the pick
+# would otherwise mint a fresh "operator pick" visit on it — the loop by which a
+# resolved demand still showing its question gets re-engaged as a new ask. A
+# closed subject here is genuinely settled (a superseded predecessor was already
+# redirected to its live successor), so the pick fails closed and files nothing.
+run_open closed tk-clsd1
+eq "$RC" "4" "(CLOSED) a closed subject exits 4 (no fresh visit on a settled DONE row)"
+grep -q 'is closed' <<< "$ERR" \
+  && ok "(CLOSED) the message names the subject as closed" || bad "(CLOSED) message (err: $ERR)"
+if grep -q 'bd create' <<< "$CALLS"; then
+  bad "(CLOSED) nothing is filed on a closed subject" "found a bd create (calls: $CALLS)"
+else
+  ok "(CLOSED) nothing is filed on a closed subject"
+fi
+
 # --- (ORDER static) the gate precedes the gate-visit block --------------------
 # Placement is the invariant, not just presence: a check that ran after the
 # create would leave the junk visit behind, which is the whole defect.
@@ -309,6 +333,55 @@ set +e; sh "$SCRIPT" open tk-real1 --reason >/dev/null 2>&1; RC=$?; set -e
 eq "$RC" "2" "(BLURB) --reason with no value is a usage error"
 set +e; sh "$SCRIPT" open tk-real1 tk-real2 >/dev/null 2>&1; RC=$?; set -e
 eq "$RC" "2" "(BLURB) two bead-ids is a usage error"
+
+# --- (LONGREASON) a reason past the headline cap yields a bounded title --------
+# open caps the title TAIL at a board headline and keeps the FULL reason in the
+# body, so a reason longer than bd's title cap still files. The marker sits past
+# the cap: it must be ABSENT from the bounded title and PRESENT in the preserved
+# body.
+LONG_HEAD="$(printf 'A%.0s' $(seq 1 300))"
+LONG_REASON="${LONG_HEAD}ZZTAILZZ"
+: > "$FAKE_CALLS"
+export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+set +e
+sh "$SCRIPT" open tk-real1 --reason "$LONG_REASON" >/dev/null 2>"$TMP/err"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "0" "(LONGREASON) a reason past the cap still files the visit"
+# The stub flattens argv; the title is what sits between `--title ` and ` -d `.
+TITLE="${CALLS#*--title }"; TITLE="${TITLE%% -d *}"
+case "$TITLE" in
+  *ZZTAILZZ*) bad "(LONGREASON) the title still carries the full reason, unbounded (title: $TITLE)" ;;
+  *…*)        ok "(LONGREASON) the title is truncated to a bounded headline (ends with …)" ;;
+  *)          bad "(LONGREASON) the title was neither bounded nor ellipsized (title: $TITLE)" ;;
+esac
+case "$CALLS" in
+  *ZZTAILZZ*) ok "(LONGREASON) the full reason is preserved in the visit body" ;;
+  *)          bad "(LONGREASON) the full reason was lost from the body (calls: $CALLS)" ;;
+esac
+
+# --- (CREATEFAIL) a real create failure surfaces bd's error, not a jq crash ----
+# bd reports a failed create as an {"error":…} object, and the subject bead has
+# already resolved by this point. open surfaces bd's own message for such a
+# failure, rather than a jq indexing error or a misleading "does it exist?" that
+# blames a missing subject.
+: > "$FAKE_CALLS"
+export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+set +e
+FAKE_CREATE_ERROR='validation failed: title must be 500 characters or less (got 512)' \
+  sh "$SCRIPT" open tk-real1 --reason "a short reason" 2>"$TMP/err" >/dev/null; RC=$?
+set -e
+ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(CREATEFAIL) a create failure exits 4"
+grep -q 'title must be 500 characters or less' <<< "$ERR" \
+  && ok "(CREATEFAIL) bd's own error is surfaced to the operator" \
+  || bad "(CREATEFAIL) bd's error not surfaced (err: $ERR)"
+grep -q 'does it exist' <<< "$ERR" \
+  && bad "(CREATEFAIL) still prints the misleading '(does it exist?)' (err: $ERR)" \
+  || ok "(CREATEFAIL) no misleading '(does it exist?)'"
+grep -qi 'cannot index object' <<< "$ERR" \
+  && bad "(CREATEFAIL) a raw jq error leaked to the operator (err: $ERR)" \
+  || ok "(CREATEFAIL) no raw jq error leaked"
 
 # --- (RIGTIMEOUT) the rig-enumeration bound is generous, and tunable ----------
 # `gc rig list` measured 2.6-8.4s in a loaded city against a 10s bound, so open
@@ -884,7 +957,7 @@ grep -qE 'sling 615( |$)' <<< "$SLUNG" \
 export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-succ"}}]'
 run_engage tk-pred
 eq "$RC" "0" "(RESOLVE-ENGAGE-SUPERSEDE) engage resolves a settled id and binds a sitting"
-grep -q 'visit tk-visitE on tk-succ' <<< "$OUT" \
+grep -q 'visit tk-visitE for tk-succ' <<< "$OUT" \
   && ok "(RESOLVE-ENGAGE-SUPERSEDE) the sitting holds a visit on the live successor" \
   || bad "(RESOLVE-ENGAGE-SUPERSEDE) sitting is on the successor (out: $OUT)"
 grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
@@ -898,7 +971,7 @@ grep -q 'bd update tk-visitE.*--assignee gc-toolkit/converse-opus.tk-visitE' <<<
 export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-prbead"}}]'
 run_engage 615
 eq "$RC" "0" "(RESOLVE-ENGAGE-PR) engage resolves a PR number and binds a sitting"
-grep -q 'visit tk-visitE on tk-prbead' <<< "$OUT" \
+grep -q 'visit tk-visitE for tk-prbead' <<< "$OUT" \
   && ok "(RESOLVE-ENGAGE-PR) the sitting holds a visit on the bead recording the PR" \
   || bad "(RESOLVE-ENGAGE-PR) sitting is on the PR anchor (out: $OUT)"
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \

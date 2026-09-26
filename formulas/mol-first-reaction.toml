@@ -14,10 +14,10 @@ reaction, and drains.
 2. **Write a CARD**, not prose: `Understanding · Found (freshness-stamped)
    · Proposal · Decision needed · Disposition` — the shape the board lands the
    human on, ending in the one line the terminal step acts on.
-3. **Dispose, don't close.** The reaction ends in ONE of three exits — route
-   the bead to a pool, hold it on an edge, or file a visit — chosen from the
-   card. The work bead stays OPEN either way; closing it would claim the work
-   is done.
+3. **Dispose, don't close.** The reaction ends in ONE of four exits — route
+   the bead to a pool, hold it on an edge, route it to a validating closer, or
+   file a visit — chosen from the card. The reaction never closes the bead
+   itself; where a bead should close, the closer pool confirms and closes it.
 4. **mr-only for code.** A reaction is notes-only by default; code it
    produces takes the gated `mr` path, never `direct`, never a push to main.
 
@@ -154,45 +154,52 @@ gc bd update "$WORK_BEAD_ID" --append-notes "$(cat <<'EOF'
  for a bead you are routing or holding, "none — <what happens next>">
 
 ## Disposition
-<actionable | blocked | ruling> — <one line: why this one>
+<actionable | blocked | close | ruling> — <one line: why this one>
 EOF
 )"
 ```
 
 **Disposition** is the line step 3 acts on, so decide it here, while the bead
-is in front of you. It is one of exactly three:
+is in front of you. Triage on the bead's merits, biased to move work forward, so
+a human card is the minority exit. It is one of exactly four:
 
 - **actionable** — the bead names work someone can pick up: a done condition
   you can state, and no unanswered question in front of it. The exit routes it
   to the pool that does that work.
 - **blocked** — the bead cannot move until something else does. Name that
   something. The exit records it as an edge.
-- **ruling** — the operator's judgment is the next move, in one of three shapes.
-  One is a question whose answer changes what gets built. One is a conclusion
-  that there is nothing to do: you verified the thing is already fixed with
-  nothing left to merge, or the bead should not exist — a recommend-close. The
-  third is a recommendation: a determinable action only converse/operator
-  authority may take (retire an in-flight PR, supersede its anchor;
-  authority-map rows 28-30), where you can name the execution mol. All three
-  file a visit (step 1c); a recommendation also stamps that mol so the operator
-  can Accept it, while the other two are Discuss-only.
+- **close** — you are confident there is nothing to do and nothing the operator
+  needs to see: you verified the thing is already fixed with nothing left to
+  merge, or the bead should not exist. The exit routes the bead to a validating
+  closer — a capable pool that re-checks the conclusion and closes the bead when
+  it agrees, or escalates to the operator when it does not. A first reaction
+  never closes a bead itself; it routes, and the closer closes.
+- **ruling** — the operator's judgment is the next move, in one of two shapes.
+  One no worker can stand in for: a genuine fork with several reasonable
+  directions, an irreversible or destructive action, or a policy call —
+  Discuss-only. The other is a recommendation: a determinable action only
+  converse/operator authority may take (retire an in-flight PR, supersede its
+  anchor; authority-map rows 28-30), where you name the execution mol so the
+  operator can Accept it from the visit. Both file a visit (step 1d).
 
-Prefer **actionable** when you can state the done condition. Take **ruling**
-when you cannot name the work without an answer first, or when the honest
-conclusion is that there is no work. A first reaction that verifies nothing is
-broken, or that the bead should not exist, does not route to a pool and does
-not write a `specs/<bead-id>` record: it recommends closing the bead, routed to
-the operator. Its card gives them what they need to disagree — why no work is
-needed, the counter-case for keeping the bead open, and that the decision to
-close is theirs — and its takeaway reads `recommend close: <why>`, so the board
-carries the recommendation at a glance. A high-confidence "nothing to do" files
-the same visit rather than closing the bead: a reaction never closes a work
-bead, and confirming the recommendation costs the operator one glance.
+Move the bead forward when you can: take **actionable** when you can state the
+done condition, **blocked** when a named bead has to land first, and **close**
+when the honest conclusion is that there is no work. Reserve **ruling** for the
+judgment only the operator can give.
+
+`gc.origin=operator` does not decide the exit. An operator capture whose action
+is clear and reversible routes or holds like any other bead; keep it a **ruling**
+only for the three cases the ruling exit names — a fork, an irreversible or
+destructive action (a prune, a force-push, a mass close), or a policy call. When
+one bead bundles an obvious mechanical part with a genuine fork, file the
+mechanical part as its own bead and route that, and let the fork be the ruling —
+never sweep the do-it-now part into the human wait.
 
 "The operator would probably want to see this" is still not a ruling. A ruling
-is a question whose answer changes what gets built, a recommend-close the
-operator only has to confirm, or a determinable converse/operator-authority
-action you recommend by naming its execution mol.
+is a fork, an irreversible action, or a policy call — never something a
+confident worker could carry forward on its own — or a determinable action
+reserved to converse/operator authority, which you recommend by naming its
+execution mol.
 
 When the ruling is a recommendation, its card is what the execution worker
 reads via `bd show` if the operator Accepts: broad direction, not a spec — the
@@ -246,25 +253,30 @@ title = "Perform the card's disposition, leave the bead open, and drain"
 needs = ["first-reaction"]
 description = """
 The reaction is on the bead. Now perform the **## Disposition** line your card
-ends with. There are three exits and you take exactly one. Do NOT close the
-work bead — every exit advances it; none of them finishes it.
+ends with. There are four exits and you take exactly one. Do NOT close the
+work bead — every exit advances it; none of them finishes it, the `close` exit
+included: it routes the bead to a validating closer rather than closing it here.
 
 | Disposition | The exit | What it leaves behind |
 |---|---|---|
 | actionable | release the bead TO a pool | a routed, unassigned, open bead a worker claims |
 | blocked | write the wait as a `blocks` edge | a bead held by a named bead, in the same store |
+| close | route the bead to a validating closer | a capable pool re-checks the no-work call and closes the bead, or escalates |
 | ruling | file the visit | a held conversation the operator lands in |
 
-One subject is not yours to classify: a bead carrying `gc.origin=operator` is
-a topic a human typed into `gc-visit-open` and is waiting to talk about, so the
-visit is the answer and the script refuses the other two exits on it.
+`gc.origin=operator` does not force an exit. An operator capture is triaged on
+its merits like any other bead (the rubric in `first-reaction`), so the script
+performs whichever of the four the card names.
 
-`assets/scripts/first-reaction-dispose.sh` performs all three. It records what
-you chose and why on the bead (`gc.first_reaction*`) before it acts, and folds
-the board takeaway and the release into one `gc-helm.sh takeaway … --release`
-write, which also stamps `gc.proactive_reaction=1` so the scan does not
-re-react. Each block below resolves it and re-derives the bead in its own
-shell, because that is the only thing a block can rely on.
+`assets/scripts/first-reaction-dispose.sh` performs all four. It records what
+you chose and why on the bead (`gc.first_reaction*`) before it acts. The
+actionable, blocked, and ruling exits fold the board takeaway and the release
+into one `gc-helm.sh takeaway … --release` write, which also stamps
+`gc.proactive_reaction=1` so the scan does not re-react; the close exit records
+the reaction and hands the bead to the closer pool, deferred behind this
+reaction's own workflow so the closer is the bead's sole dispatch surface. Each
+block below resolves it and re-derives the bead in its own shell, because that is
+the only thing a block can rely on.
 
 The **takeaway** in every exit below is your card's one-line headline, derived
 from **## Decision needed**, ≤140 chars on ONE line — the wrapper rejects a
@@ -325,21 +337,54 @@ by hand. Leaving a blocked work bead with no route and no arm is the debt
 doctor/check-blocked-work-armed flags. Omit `--then-route` only when the bead is
 not work a pool takes — a decision, a ruling, or a research note.
 
-**1c. NEEDS A RULING — the next move is the operator's judgment, so file the
-visit.** Three shapes reach here: a question whose answer changes what gets
-built; a recommend-close (you verified there is nothing to do, or the bead
-should not exist); and a recommendation — a determinable action only
+**1c. CLOSE — you are confident there is nothing to do, so route the bead to a
+validating closer.** Take this when you verified the thing is already fixed with
+nothing left to merge, or the bead should not exist. A first reaction never
+closes a bead; it hands the conclusion to a capable pool that re-checks it
+against live state and closes the bead when it agrees, or escalates to the
+operator when it does not. Your `--reason` is the closer's brief: why there is
+no work, and the counter-case for keeping the bead open, so the closer can
+disagree. The closer runs mol-validate-close on this rig's capable pool (pass
+`--route` for another pool). It is not poured now: this reaction is still a live
+workflow on the bead, and the closer must be the bead's sole workflow, so
+`--after-workflow` names this reaction's root and the closer is deferred — held
+behind that root and armed, then slung by the deferred-dispatch reconcile pass
+once the reaction closes.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
+DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
+done
+[ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
+# This reaction's own workflow root, so the closer is deferred until it closes
+# rather than poured as a second live workflow on the bead. The root is the
+# kind=workflow bead launched from this workflow's input convoy.
+REACTION_ROOT=$(gc bd list --status open,in_progress --metadata-field gc.input_convoy_id={{convoy_id}} --metadata-field gc.kind=workflow --json --limit 0 | tr -d '[:cntrl:]' | jq -r '.[0].id // empty')
+"$DISPOSE" "$WORK_BEAD_ID" --disposition close --by proactive --reason "<why there is no work, and the counter-case for keeping it open>" --takeaway "<the ≤140-char headline>" ${REACTION_ROOT:+--after-workflow "$REACTION_ROOT"}
+```
+
+A high-confidence "nothing to do" takes this exit, not a card: the closer
+confirms and closes, so the operator is not asked to glance at a bead the
+reaction already judged inert. Keep it for a conclusion you are confident in;
+when the conclusion itself is the operator's to make, that is a ruling (1d).
+
+**1d. NEEDS A RULING — the next move is the operator's judgment, so file the
+visit.** Reserve this for what no worker can carry forward: a genuine fork with
+several reasonable directions, an irreversible or destructive action, or a
+policy call. It is the minority case — if you can name the work take 1a, and if
+the honest conclusion is that there is nothing to do take 1c.
+
+A ruling can also carry a recommendation: a determinable action only
 converse/operator authority may take (retire an in-flight PR, supersede its
-anchor; authority-map rows 28-30) where you can name the execution mol. It
-should be the minority case: if you can route the work to a pool, take 1a
-instead. The visit is the same for all three, filed by the block below. A
-recommend-close differs only in the dispose call — a `--takeaway` that reads
-`recommend close: <why>` and a `--reason` that names the counter-case. A
-recommendation adds `--recommended-formula <mol>`, which stamps
-`gc.recommended_formula` on the subject so the operator can Accept it from the
-visit; its `--takeaway` carries the recommendation and its card (from
-`first-reaction`) is the execution guidance. Omit `--recommended-formula` for
-the other two — no stamp is a plain Discuss-only visit. The visit form is
+anchor; authority-map rows 28-30), where you name the execution mol with
+`--recommended-formula <mol>`. That stamps `gc.recommended_formula` on the
+subject so the operator can Accept it from the visit; its `--takeaway` carries
+the recommendation, and its card (from `first-reaction`) is the execution
+guidance, broad direction not a spec. Omit `--recommended-formula` for a plain
+Discuss-only ruling. The visit form is
 mol-visit's, spelled inline:
 
 ```bash
@@ -381,8 +426,8 @@ if [ "$GROUP_GOT" != "$WORK_BEAD_ID" ]; then
   fi
 fi
 # <<< gate-visit
-# A question, or a recommend-close (Discuss-only — no --recommended-formula):
-"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the question only the operator can answer, or for a recommend-close why there is no work and the counter-case>" --takeaway "<the ≤140-char headline; a recommend-close reads 'recommend close: <why>'>" --visit "$VISIT"
+# A fork, irreversible action, or policy call — Discuss-only (no --recommended-formula):
+"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the fork, irreversible action, or policy call only the operator can decide>" --takeaway "<the ≤140-char headline>" --visit "$VISIT"
 # A recommendation — a determinable converse/operator-authority action, naming
 # the execution mol so the operator can Accept it from the visit:
 "$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the action, and why it is converse/operator authority>" --takeaway "<the ≤140-char headline, e.g. 'recommend: <action>; execute via <mol>'>" --visit "$VISIT" --recommended-formula <execution-mol>

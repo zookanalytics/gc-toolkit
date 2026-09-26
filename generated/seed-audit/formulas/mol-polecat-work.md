@@ -5,7 +5,7 @@ the refinery handoff. Run by every polecat in the city; the agent prompt
 carries the doctrine, this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
-push branch, ONE atomic handoff update to the refinery -> close own step
+push branch, hand the bead to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
 bead and names the disposition for whoever owns the close.
@@ -50,11 +50,13 @@ alias, which resolves in every city. Cities that staff a work-health role
   {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
 
-Steps (7):
+Steps (9):
   ├── mol-polecat-work.load-context: Load context and verify assignment
   ├── mol-polecat-work.workspace-setup: Set up worktree and feature branch [needs: mol-polecat-work.load-context]
   ├── mol-polecat-work.preflight-tests: Verify pre-flights pass on base branch [needs: mol-polecat-work.workspace-setup]
   ├── mol-polecat-work.implement: Implement the solution [needs: mol-polecat-work.preflight-tests]
-  ├── mol-polecat-work.self-review: Self-review and run tests (affected-aware) [needs: mol-polecat-work.implement]
+  ├── mol-polecat-work.self-review.spec: Step spec for Self-review and verify green (affected-aware, bounded check loop) (spec)
+  ├── mol-polecat-work.self-review.iteration.1: Self-review and verify green (affected-aware, bounded check loop) [needs: mol-polecat-work.implement]
+  ├── mol-polecat-work.self-review: Self-review and verify green (affected-aware, bounded check loop) [needs: mol-polecat-work.implement, mol-polecat-work.self-review.iteration.1]
   ├── mol-polecat-work.submit-and-exit: Submit work to refinery and exit [needs: mol-polecat-work.self-review]
   └── mol-polecat-work.workflow-finalize: Finalize workflow [needs: mol-polecat-work.submit-and-exit]

@@ -26,9 +26,12 @@ Hard rules, in force for every step:
   and how, and one party's code read is not that. When the dispatch says not
   to re-raise something and you find it, report it and say in the verdict
   that you are contradicting the dispatch and why.
-- One agent, single pass. Read the diff yourself, run the tests yourself,
-  write the verdict yourself. No subagents, no persona reviewers, no
-  parallel review pass.
+- Single honest pass. Read the diff yourself, run the tests yourself, write
+  your findings yourself. No subagents doing the review, no persona
+  reviewers. The review may run as a two-provider quorum instead: two lanes
+  each do one honest pass, and one synthesizer combines their findings into
+  the single verdict (the mol-review-quorum-signoff formula). One verdict per
+  claim holds either way, because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: the review bead arrives as the input
 convoy (each step re-derives REVIEW_BEAD in its own shell), and each step

@@ -237,6 +237,18 @@ and `parent-child` upward, and `discovered-from` is neither ready-blocking nor
 read by either probe, so a deferred finding stays open across the merge holding
 nothing.
 
+A `declined` finding raised by a human owes one thing a machine's does not: the
+raiser hears why. The validator rules it on the merits like any finding — the
+operator is a highly informed peer, not an authority the pass may never overrule
+— but it records the answer on the finding (`finding.reply`, keyed to the
+`finding.comment_id` that raised it) and `pr-facts.sh`'s write-back posts that
+answer into the objection's PR thread and resolves it. The overrule is on the
+merits and never silent. The operator re-raises by re-reviewing: a declined
+finding closes, so the content key re-adopts the still-standing objection as a
+fresh finding, which re-opens the human validation pass and re-holds the anchor.
+A human objection is weighed and answered, never held as one only its raiser may
+withdraw.
+
 The earlier design's mistake was the shape, not the edge. It attached the
 finding to the anchor with `parent-child`, which states decomposition and
 cascades the anchor's blocked state down onto the finding. I1's shape law is

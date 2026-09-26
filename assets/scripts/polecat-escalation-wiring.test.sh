@@ -6,6 +6,11 @@
 # .test.sh) does not reach the polecat: a patrol tops the agent tier with no
 # peer to mail, a worker has one.
 #
+# A hold+drain is not a blocker to mail, though: it de-routes the whole molecule,
+# so it must leave a tracked record first. This also pins that the decline-and-hold
+# path files an escalate.sh visit before molecule-hold.sh runs, never bare mail
+# behind a hold, the silent strand that leaves a de-routed molecule no query returns.
+#
 # The sender half is useless without the receiver half, so this pins both: the
 # doctrine that tells the polecat to mail HELP, and the witness patrol step
 # that triages it.
@@ -42,6 +47,16 @@ grep -q 'escalate\.sh' "$DOCTRINE" \
 grep -q -- '--subject' "$DOCTRINE" && grep -q -- '--key' "$DOCTRINE" \
   && ok "escalate.sh call carries --subject and --key (the dedup identity)" \
   || bad "escalate.sh call must carry --subject and --key"
+
+# A decline that ends in a hold+drain files the visit FIRST and gates the hold on
+# it: an escalate.sh call precedes molecule-hold.sh, so a de-routed molecule always
+# leaves a tracked record a query returns and a hold never lands behind bare mail
+# (the silent strand this pins out, since mail reaches an agent peer, not the record).
+if awk '/escalate\.sh.*--key/{e=NR} /molecule-hold\.sh.*--step/{if(e&&NR-e<=6)f=1} END{exit !f}' "$DOCTRINE"; then
+  ok "hold+drain is gated on a filed escalate.sh visit (escalate precedes molecule-hold)"
+else
+  bad "hold+drain must run escalate.sh first and gate the hold on its exit 0; a hold behind bare mail strands silently"
+fi
 
 grep -q 'HELP' "$WITNESS" && grep -q 'escalate\.sh' "$WITNESS" \
   && ok "witness patrol still triages HELP mail and promotes it to a visit" \

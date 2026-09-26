@@ -262,6 +262,66 @@ func TestParkedWithChildren(t *testing.T) {
 	}
 }
 
+// TestParkedWithLiveMoleculeIsActive covers the case tk-ygeufl found: a parked
+// subject carries gc.takeaway — so it is gathered as the parked kind — AND has
+// been re-dispatched, so a live work molecule is executing it. That molecule is
+// not a tile: `gc sling` leaves the subject at open/unassigned and puts the
+// in-flight state on the workflow, visible only through Facts.Inflight keyed by
+// the subject's OWN id. The band must read that live execution and NOT sink the
+// row to the parked LOW floor, where an actively-worked bead would read as a
+// finished row to dispose of.
+func TestParkedWithLiveMoleculeIsActive(t *testing.T) {
+	// One anchor shape, wired to a workflow three ways, so the signal that flips
+	// the band is proven to be LIVE execution and nothing else.
+	parked := func(id string) Anchor {
+		return Anchor{ID: id, Title: "re-dispatched after the ruling", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway: "confirmed — proceed; record kept on this bead"}
+	}
+	f := Facts{
+		// tk-live: a molecule whose session is still up. tk-drained: the same
+		// wiring, but the session has gone — wfLive must stop counting it at once.
+		Inflight: map[string][]string{
+			"tk-live":    {"gc-toolkit__polecat-lx-live"},
+			"tk-drained": {"gc-toolkit__polecat-lx-gone"},
+		},
+		OwnerState: map[string]string{"gc-toolkit__polecat-lx-live": "active"},
+	}
+	b := BuildBoard([]Anchor{parked("tk-live"), parked("tk-drained"), parked("tk-none")}, fixtureNow, false, nil, f)
+
+	live := mustTile(t, b, "tk-live")
+	if live.Severity != SevNormal {
+		t.Errorf("a parked subject with a live molecule is in-flight work, not the LOW floor: got %s", live.Severity)
+	}
+	if live.Section != SectionActive {
+		t.Errorf("…so it bands active, not cleanup: got %s", live.Section)
+	}
+	if live.Frontier != "parked — work in flight" {
+		t.Errorf("frontier: %q", live.Frontier)
+	}
+	// The takeaway still answers NEEDS, exactly as it does for ruledInFlight: the
+	// ruling is the best sentence the row has, and it is on the wire regardless.
+	if live.Needs != "confirmed — proceed; record kept on this bead" {
+		t.Errorf("the takeaway stays the NEEDS answer: %q", live.Needs)
+	}
+
+	// The discriminator: identical wiring, dead session. A molecule that drained
+	// stops counting, so this row falls back to the parked floor.
+	drained := mustTile(t, b, "tk-drained")
+	if drained.Severity != SevLow || drained.Section != SectionCleanup {
+		t.Errorf("a parked subject whose molecule drained returns to the floor: got %s / %s", drained.Severity, drained.Section)
+	}
+
+	// And with no workflow at all, the floor is still right.
+	none := mustTile(t, b, "tk-none")
+	if none.Severity != SevLow || none.Section != SectionCleanup {
+		t.Errorf("a genuinely parked conversation is untouched: got %s / %s", none.Severity, none.Section)
+	}
+	if none.Frontier != "conversation parked — takeaway recorded" {
+		t.Errorf("…and still reports the parked frontier: %q", none.Frontier)
+	}
+}
+
 // TestParkedNeverOutranksAttention pins the LOW band's job: a parked
 // conversation at maximum priority and age must still sort under ordinary
 // in-flight work, or it is competing for exactly the attention the bead says it
@@ -808,31 +868,6 @@ func TestUnownedConvoyIsHigh(t *testing.T) {
 	}
 }
 
-// TestProgressMismatch: the convoy's own closed/total claim disagreeing with the
-// membership actually rolled up is a real signal, and absent progress is not one.
-func TestProgressMismatch(t *testing.T) {
-	kids := []Child{{ID: "m1", Status: "closed"}, {ID: "m2", Status: "open"}}
-	mk := func(id string, p *Progress) Anchor {
-		return Anchor{ID: id, Kind: "convoy", Source: "convoy", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
-			Progress: p, Children: kids}
-	}
-	b := BuildBoard([]Anchor{
-		mk("tk-agree", &Progress{Closed: 1, Total: 2}),
-		mk("tk-differ", &Progress{Closed: 0, Total: 5}),
-		mk("tk-none", nil),
-	}, fixtureNow, false, nil, Facts{})
-
-	if tl, _ := tileByID(b, "tk-agree"); tl.ProgressMismatch {
-		t.Error("matching progress is not a mismatch")
-	}
-	if tl, _ := tileByID(b, "tk-differ"); !tl.ProgressMismatch {
-		t.Error("a disagreeing progress object is a mismatch")
-	}
-	if tl, _ := tileByID(b, "tk-none"); tl.ProgressMismatch {
-		t.Error("an absent progress object makes no claim to disagree with")
-	}
-}
-
 // equalIDs compares two id lists for exact contents and order.
 func equalIDs(got, want []string) bool {
 	if len(got) != len(want) {
@@ -1175,6 +1210,7 @@ func TestRuledTwinDoesNotReElevate(t *testing.T) {
 // the demand stops being owed the moment it closes, which is how it is answered.
 func TestOpenDemandStaysOwed(t *testing.T) {
 	const headline = "which of the two shapes should converse file?"
+	const ruling = "file the sibling shape — it keeps the visit claimable"
 	demandMD := map[string]string{
 		"gc.routed_to":   "human",
 		"gc.takeaway":    headline,
@@ -1198,12 +1234,23 @@ func TestOpenDemandStaysOwed(t *testing.T) {
 			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": "routed — nothing further needed here"},
 			Takeaway: "routed — nothing further needed here"},
 		// Control: the same demand once answered. Closing it is what makes the
-		// gated work ready, and what takes the row off the queue.
+		// gated work ready, and what takes the row off the queue. Its ruling was
+		// never stamped back (gc.takeaway_settled empty), so its takeaway is still
+		// the QUESTION and must not ride the DONE band as if unanswered.
 		{ID: "tk-discharged", Title: "an answered demand", Kind: "decision", Source: "decision",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
+			ClosedAt:   daysAgo(1),
+			Metadata:   map[string]string{"gc.routed_to": "human", "gc.takeaway": headline, "gc.demand_for": "tk-gated"},
+			Takeaway:   headline,
+			TakeawayAt: "2026-06-30T10:00:00Z", TakeawayBy: "converse"},
+		// Control: a closed demand whose ruling WAS stamped back over the question
+		// and marked settled. Its takeaway is the answer now, so the DONE band
+		// shows the ruling rather than suppressing it.
+		{ID: "tk-settled", Title: "a settled demand", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
 			ClosedAt: daysAgo(1),
-			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": headline, "gc.demand_for": "tk-gated"},
-			Takeaway: headline},
+			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": ruling, "gc.demand_for": "tk-gated", "gc.takeaway_settled": "1"},
+			Takeaway: ruling},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 
@@ -1243,6 +1290,24 @@ func TestOpenDemandStaysOwed(t *testing.T) {
 	}
 	if discharged.Owed || discharged.Severity != SevDone {
 		t.Errorf("a closed demand owes nothing: owed=%v %s", discharged.Owed, discharged.Severity)
+	}
+	// The QUESTION must not ride the wire once the demand is closed: --json
+	// takeaway is where a row publishes its ruling, and a stale question there
+	// reads as a decision still owed. The triple is suppressed together.
+	if discharged.Takeaway != nil {
+		t.Errorf("a closed unsettled demand still carries its question on the wire: %q", *discharged.Takeaway)
+	}
+	if discharged.TakeawayAt != nil || discharged.TakeawayBy != nil {
+		t.Errorf("a suppressed takeaway must carry no timestamp or author: at=%v by=%v",
+			discharged.TakeawayAt, discharged.TakeawayBy)
+	}
+
+	settled, ok := tileByID(b, "tk-settled")
+	if !ok {
+		t.Fatal("tk-settled is missing from the board")
+	}
+	if settled.Takeaway == nil || *settled.Takeaway != ruling {
+		t.Errorf("a settled closed demand shows its ruling on the wire, got %v", settled.Takeaway)
 	}
 }
 
@@ -2198,13 +2263,13 @@ func TestClosedMergeAnchorIsNotACoverageGap(t *testing.T) {
 	}
 }
 
-// TestWedgedAnchorIsOwedAndNamed covers both wedge shapes.
+// TestWedgedAnchorIsOwedAndNamed covers the exception wedge.
 //
-// The exception wedge is the state six of the seven wedged anchors were in, and
-// five of those six had no pull request open, which is why the row is keyed on
-// the anchor and carries the branch instead. The veto wedge is the seventh.
-// Neither was visible as anything but "routed to a person", which reads the
-// same for an anchor awaiting a ruling and for one nothing will ever move.
+// It is the state six of the seven wedged anchors were in, and five of those
+// six had no pull request open, which is why the row is keyed on the anchor and
+// carries the branch instead. It was visible as nothing but "routed to a
+// person", which reads the same for an anchor awaiting a ruling and for one
+// nothing will ever move.
 func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	wedgedAt := fixtureNow.Add(-72 * time.Hour)
 	anchors := []Anchor{
@@ -2215,12 +2280,6 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 			"merge_hold":     "true",
 			"signoff_cap":    "codex",
 			"blocked_reason": "signoff did not converge after 3 rework rounds (cap 3)",
-		}),
-		mergeAnchor("tk-veto", map[string]string{
-			"pr.machine": dated(MachineWedgedVeto, headLive, wedgedAt),
-			"pr_number":  "513",
-			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
-			"pr_posture": dated(postureChangesRequested, headLive, wedgedAt),
 		}),
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
@@ -2251,24 +2310,62 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	if !strings.Contains(exc.Frontier, "owed 3d") {
 		t.Errorf("the row carries the age the queue is sorted by, got %q", exc.Frontier)
 	}
+}
+
+// TestStandingVetoInSettledTailIsOwed. GitHub keeps a CHANGES_REQUESTED standing
+// across pushes and the city never dismisses it, so once the cadence has run dry
+// — no fix unit, review, or finding in flight — the veto is the operator's to
+// clear by re-reviewing. merge.sh records `settled` in that tail, the owed rule
+// reads the standing changes_requested off the posture axis, and the row names
+// the re-review, dated to the head the veto stands at. A veto with a fix unit
+// still in flight reads `progressing` and stays the city's move. An open PR
+// leads with its number and link either way.
+func TestStandingVetoInSettledTailIsOwed(t *testing.T) {
+	at := fixtureNow.Add(-72 * time.Hour)
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-veto", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, at),
+			"pr_number":  "513",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
+			"pr_posture": dated(postureChangesRequested, headLive, at),
+		}),
+		// The same standing veto WITH a fix unit in flight: merge.sh's in-flight
+		// arm records `progressing` before the veto arm runs, so the row stays
+		// the city's move.
+		mergeAnchor("tk-veto-busy", map[string]string{
+			"pr.machine": dated(MachineProgressing, headLive, at),
+			"pr_number":  "514",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/514",
+			"pr_posture": dated(postureChangesRequested, headLive, at),
+		}),
+	}, fixtureNow, false, nil, Facts{})
 
 	veto := mustTile(t, b, "tk-veto")
-	if veto.PRMachine != MachineWedgedVeto {
-		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineWedgedVeto)
+	if veto.PRMachine != MachineSettled {
+		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineSettled)
 	}
 	if !veto.Owed {
-		t.Error("a veto past the rework cap is owed: signoff will file nothing further")
+		t.Error("a standing CHANGES_REQUESTED in the settled tail is the operator's to clear by re-reviewing")
 	}
-	if !strings.Contains(veto.Needs, "CHANGES_REQUESTED") {
-		t.Errorf("needs must name the veto, got %q", veto.Needs)
+	if !strings.Contains(veto.Needs, "re-review") {
+		t.Errorf("needs names the re-review the row is owed, got %q", veto.Needs)
 	}
 	if veto.PRNumber != 513 || veto.PRURL == "" {
 		t.Errorf("an open PR carries its number and link, got %d / %q", veto.PRNumber, veto.PRURL)
 	}
-	// The branch does not stop being true once the PR opens: the number is what
-	// a surface leads with, not the only thing it may hold.
-	if veto.PRBranch != "polecat/tk-veto" {
-		t.Errorf("pr_branch = %q, want the branch an open PR is still cut from", veto.PRBranch)
+	if !strings.Contains(veto.Frontier, "owed 3d") {
+		t.Errorf("the row carries the age the queue is sorted by, got %q", veto.Frontier)
+	}
+
+	busy := mustTile(t, b, "tk-veto-busy")
+	if busy.PRMachine != MachineProgressing {
+		t.Errorf("pr_machine = %q, want %q", busy.PRMachine, MachineProgressing)
+	}
+	if busy.Owed {
+		t.Error("a standing veto with a fix unit in flight is the city's move, not the operator's")
+	}
+	if !strings.Contains(busy.Needs, "merge cadence") {
+		t.Errorf("needs reads as progressing, got %q", busy.Needs)
 	}
 }
 
@@ -2467,8 +2564,8 @@ func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 	}{
 		{postureReviewRequired, ApprovalRequired, true,
 			"GitHub is holding the merge for a review nobody has given"},
-		{postureChangesRequested, ApprovalRequired, false,
-			"the requirement is unmet, but answering a rejecting review is the city's move"},
+		{postureChangesRequested, ApprovalRequired, true,
+			"GitHub keeps the veto standing across pushes; in the settled tail the operator clears it by re-reviewing"},
 		{postureApproved, ApprovalMet, false, "approved"},
 		{postureCommented, ApprovalNotRequired, false, "a comment-only review does not gate the merge"},
 		{postureNone, ApprovalNotRequired, false, "no protection rule and no review"},
@@ -2660,7 +2757,7 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 	old := fixtureNow.Add(-96 * time.Hour)
 	recent := fixtureNow.Add(-2 * time.Hour)
 	b := BuildBoard([]Anchor{
-		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedVeto, headLive, recent)}),
+		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedException, headLive, recent)}),
 		{ID: "tk-big", Title: "a container that outranks everything", Kind: "epic", Source: "epic",
 			Rig: "gc-toolkit", Prefix: "tk", Children: func() []Child {
 				out := make([]Child, 40)

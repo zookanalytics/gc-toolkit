@@ -24,8 +24,9 @@
 #   • THE mr-INVARIANT — `sling` bakes in --on mol-first-reaction --merge mr and
 #     HARD-REFUSES --merge direct (the security invariant).
 #   • THE FORMULA CONTRACT — mol-first-reaction writes the fixed card shape,
-#     ends in ONE of three dispositions (route it, hold it, ask), records which
-#     one and why, flags the bead onto the board, and NEVER closes the target.
+#     ends in ONE of four dispositions (route it, hold it, close it via a
+#     validating closer, or ask), records which one and why, flags the bead onto
+#     the board, and NEVER closes the target itself.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
 #     (max 2-3, the pool's only throttle), it defaults to mr, and one
 #     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
@@ -603,7 +604,7 @@ has "formula attributes the takeaway to proactive"      "--by proactive"        
 has "formula collapses stamp+release into one --release call" "--release"         "$F"
 has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
 
-echo "── the terminal step has THREE exits, not one hardcoded visit ──"
+echo "── the terminal step has FOUR exits, not one hardcoded visit ──"
 # The defect this replaces: every bead a reaction touched became a request for
 # the operator's attention, whatever the bead actually needed. The exits are
 # named in the formula and performed by one script, so the choice is a branch
@@ -613,26 +614,33 @@ DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
 has "exit: actionable — route the bead to a pool"  "--disposition actionable" "$F"
 has "exit: blocked — record the wait as an edge"   "--disposition blocked"    "$F"
+has "exit: close — route to a validating closer"   "--disposition close"      "$F"
 has "exit: ruling — file the visit"                "--disposition ruling"     "$F"
 has "the exits are performed by one script"        "first-reaction-dispose.sh" "$F"
 has "the blocked exit names an existing wait"      "--waiting-on"             "$F"
 has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
+has "the close exit defers behind the reaction's own root" "--after-workflow" "$F"
 has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
 has "every exit records WHY it was chosen"         "--reason"                 "$F"
-# The three exits must be distinguishable to the reader, not one exit with
-# three labels: the actionable exit routes to the pool that does the work.
+# The four exits must be distinguishable to the reader, not one exit with four
+# labels: the actionable exit routes to the pool that does the work, and the
+# close exit routes to the pool that validates and closes it.
 has "the actionable exit names the pool that works it" "polecat pool"         "$F"
+has "the close exit names the validating closer formula" "mol-validate-close" "$F"
 D="$(cat "$DISPOSE")"
 has "…and the route default lives in the script, once" "gc-toolkit.polecat"   "$D"
 has "the script records the choice on the bead"    "gc.first_reaction="       "$D"
 has "…and the reason beside it"                    "gc.first_reaction_reason=" "$D"
 has "…and what the choice named"                   "gc.first_reaction_target=" "$D"
 has "the blocked exit refuses a cross-store edge"  "another store"            "$D"
-# The operator-intake contract: a topic a human typed is a conversation, and
-# routing it silently answers a question nobody asked
-# (docs/gascity-human-engagement.md, gc-visit-open's react path).
-has "an operator-commissioned subject is always the visit" "gc.origin=operator" "$D"
-has "…and the formula says so before the script refuses"   "gc.origin=operator" "$F"
+has "the close exit hands the bead to the validating closer" "mol-validate-close" "$D"
+# Origin does not decide the exit: an operator capture is triaged on its merits
+# like any other bead, and the guardrail (a genuine fork, an irreversible or
+# destructive action, or a policy call goes to a human) lives in the reacting
+# agent's rubric, not an origin gate on the script
+# (docs/gascity-human-engagement.md, Lever 1).
+has "the script does not gate the exit on origin"           "Origin does not decide the exit" "$D"
+has "…and the formula's rubric says origin does not decide"  "does not decide the exit"        "$F"
 absent "no exit closes the work bead"              "bd close"                 "$D"
 # A disposition that did not land is not a disposition. The script fails
 # non-zero when the route never stamped or the wait never became an edge, and
@@ -682,15 +690,16 @@ has "prompt names the formula"                  "mol-first-reaction"     "$PM"
 has "prompt forbids closing the target"         "Close the target"       "$PM"
 has "prompt keeps code on the mr path"          "mr path only"           "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
-has "prompt stamps the board takeaway on every exit"    "--takeaway"              "$PM"
-has "prompt attributes the takeaway to proactive"      "--by proactive"          "$PM"
-has "prompt teaches the actionable exit"               "--disposition actionable" "$PM"
-has "prompt teaches the blocked exit"                  "--disposition blocked"    "$PM"
-has "prompt teaches the ruling exit"                   "--disposition ruling"     "$PM"
+# Doctrine, not mechanics: the prompt NAMES the four exits and defers the dispose
+# commands (--disposition/--takeaway/--by proactive/--release) to the formula,
+# which the formula-contract assertions above already lock. Asserting the command
+# strings against the prompt too is what made the two surfaces duplicate.
+has "prompt names the actionable exit"                 "**actionable**"           "$PM"
+has "prompt names the blocked exit"                    "**blocked**"              "$PM"
+has "prompt names the close exit"                      "**close**"                "$PM"
+has "prompt names the ruling exit"                     "**ruling**"               "$PM"
 has "prompt says a visit is the minority case"         "minority case"            "$PM"
-has "prompt carries the operator-commission rule"     "gc.origin=operator"       "$PM"
-has "prompt collapses stamp+release into one --release call" "--release"         "$PM"
-has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1" "$PM"
+has "prompt triages origin on its merits, not a gate"  "triaged on its merits"    "$PM"
 absent "prompt has no separate --status=open release update" "--status=open"     "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"

@@ -328,10 +328,11 @@ func humanGated(a Anchor) bool {
 // the board and not the reverse; a marker added on one side has to be added on
 // the other, or the two disagree about which beads have a row.
 const (
-	mdRoutedTo  = "gc.routed_to"
-	mdTakeaway  = "gc.takeaway"
-	mdDemandFor = "gc.demand_for"
-	routedHuman = "human"
+	mdRoutedTo        = "gc.routed_to"
+	mdTakeaway        = "gc.takeaway"
+	mdTakeawaySettled = "gc.takeaway_settled"
+	mdDemandFor       = "gc.demand_for"
+	routedHuman       = "human"
 	// mdAnchorBead is the merge anchor a review or rework child names — the
 	// family root it hangs off, used by the grouping walk as a direct edge.
 	mdAnchorBead = "anchor_bead"
@@ -556,7 +557,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, stalledGate bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalledGate bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -587,6 +588,15 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
+	// A parked conversation whose subject has a LIVE work molecule is being acted
+	// on, not disposed of: the takeaway records what the operator decided, and a
+	// re-dispatch has put that decision into flight. Band it as in-flight work
+	// rather than sinking it to the LOW floor the settled case takes — the parked
+	// twin of [ruledInFlight], for a subject carrying a takeaway without a human
+	// route. Childless like that arm; a decomposed parked subject is banded by
+	// its roll-up through the count branches.
+	case parkedInFlight && r.mTotal == 0:
+		sev0 = SevNormal
 	case a.Source == "parked" && r.mTotal == 0:
 		sev0 = SevLow
 	case r.mTotal == 0:
@@ -643,7 +653,7 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight bool,
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, parkedInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
@@ -705,6 +715,13 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
+	// The parked twin of "ruled — work in flight": the takeaway was recorded and
+	// the subject has since been re-dispatched, so the row is being acted on, not
+	// parked for disposal. Liveness outranks a recorded wait — the live molecule
+	// is what works it — and the roll-up phrases below, which a decomposed subject
+	// reports instead.
+	case parkedInFlight && r.mTotal == 0:
+		return "parked — work in flight"
 	case a.Source == "parked" && len(waitingOpen) > 0:
 		return fmt.Sprintf("parked · waiting on %d", len(waitingOpen))
 	// A NAMED wait outranks the roll-up below: the sitting stated it, and that
@@ -789,6 +806,11 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// the decision/human branches need no guard of their own.
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
+	// The posture axis distinguishes the two settled-and-unapproved copies: a
+	// first review versus the re-review a standing changes_requested waits on.
+	// Only head-matched when prApproval reads ApprovalRequired, which is the one
+	// case prNeeds consults it, so the raw value is safe to read here.
+	prPosture, _, _, _ := splitDated(a.Metadata[mdPRPosture])
 
 	switch {
 	// A stalled pre-open codex gate names the gate and why it is stuck, ahead of
@@ -818,7 +840,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, ask)
+		return prNeeds(machine, approval, prPosture, ask)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -833,7 +855,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, ask)
+		return prNeeds(machine, approval, prPosture, ask)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -879,7 +901,6 @@ const (
 	MachineProgressing     = "progressing"
 	MachineSettled         = "settled"
 	MachineWedgedException = "wedged-exception"
-	MachineWedgedVeto      = "wedged-veto"
 
 	// AxisUnknown is a RENDERED value on both axes, never a fallback to the
 	// quiet end. An unreadable axis and a clear one are not interchangeable,
@@ -940,7 +961,7 @@ func splitDated(v string) (value, oid string, since time.Time, ok bool) {
 }
 
 func isWedge(v string) bool {
-	return v == MachineWedgedException || v == MachineWedgedVeto
+	return v == MachineWedgedException
 }
 
 func knownMachine(v string) bool {
@@ -1076,10 +1097,13 @@ func askingDemand(blockers []Blocker) *Blocker {
 //
 // A row is owed by the operator when the machine axis is wedged, when the city
 // is asking and waiting on an answer, or when the cadence is done and GitHub is
-// holding the merge for a review nobody has given. A standing
-// `changes_requested` is excluded on purpose: the requirement is unmet, and
-// `pr_approval` says so, but ANSWERING a rejecting review is the city's move.
-// It returns to the operator as `review_required` once the fix moves the head.
+// holding the merge for a human review — one never given, or a standing
+// `changes_requested` the city has reworked as far as it can. GitHub keeps a
+// CHANGES_REQUESTED standing across pushes and the city never dismisses it, so
+// once no fix unit, review, or finding is in flight — the settled tail merge.sh
+// records `settled` for — the veto is the operator's to clear by re-reviewing.
+// A veto with a fix unit still in flight reads `progressing`, and this rule
+// leaves it alone.
 //
 // since is the EARLIEST instant among the causes the row currently holds. A row
 // wedged three days ago and asked about an hour ago has been owed for three
@@ -1119,11 +1143,11 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 		note(ask.CreatedAt)
 	}
 	if machine == MachineSettled && approval == ApprovalRequired {
-		if posture, _, at, ok := splitDated(a.Metadata[mdPRPosture]); ok &&
-			posture != postureChangesRequested {
+		if _, _, at, ok := splitDated(a.Metadata[mdPRPosture]); ok {
 			owed = true
-			// A new commit is a new thing to approve, so this one is
-			// head-pinned too.
+			// A new commit is a new thing to approve, and a standing veto is a
+			// re-review owed since the head it stands at, so both ride the
+			// head-pinned instant.
 			note(at)
 		}
 	}
@@ -1277,21 +1301,23 @@ func humanSince(t, now time.Time) string {
 
 // prNeeds is a merge anchor's one-glance ask, in the order an operator can act
 // on: a wedge names its shape and its release, a question names itself, an
-// unmet approval names the one thing that would land the row, and a row nothing
-// is owed on says who has it. `unknown` says the cadence has not recorded a
-// position, which is a fact about the city rather than an all-clear.
-func prNeeds(machine, approval string, ask *Blocker) string {
+// unmet approval names the one thing that would land the row — a first review,
+// or the re-review a standing changes_requested is waiting on — and a row
+// nothing is owed on says who has it. `unknown` says the cadence has not
+// recorded a position, which is a fact about the city rather than an all-clear.
+func prNeeds(machine, approval, posture string, ask *Blocker) string {
 	switch {
 	case machine == MachineWedgedException:
 		return "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not"
-	case machine == MachineWedgedVeto:
-		return "wedged: a standing CHANGES_REQUESTED with the rework rounds spent"
 	case ask != nil:
 		if t := collapseWS(ask.Title); t != "" {
 			return "asking: " + t
 		}
 		return "asking — waiting on an answer"
 	case machine == MachineSettled && approval == ApprovalRequired:
+		if posture == postureChangesRequested {
+			return "changes requested — reviewer re-review needed"
+		}
 		return "green, waiting on your review"
 	case machine == MachineProgressing:
 		return "in the merge cadence"
@@ -1546,6 +1572,11 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	dispDue := dispositionDue(a, waiting, waitingOpen)
 	isRuled := ruled(a, takeaway, waitingOpen)
 	isRuledInFlight := ruledInFlight(a, takeaway, waitingOpen)
+	// A parked subject — a takeaway with no human route — whose own work bead is
+	// covered by a live workflow is being acted on, not disposed of. Liveness is
+	// re-derived here through the same [Facts.wfLive] join every other in-flight
+	// signal uses, so a molecule that has since drained stops counting at once.
+	parkedInFlight := a.Source == "parked" && f.wfLive(a.ID)
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
@@ -1573,14 +1604,22 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		}
 	}
 
-	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, stalled)
+	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
-	// progress_mismatch: the convoy's own closed/total claim disagrees with the
-	// membership actually rolled up. Only meaningful where the source supplied
-	// a progress object.
-	mismatch := a.Progress != nil &&
-		(a.Progress.Total != r.mTotal || a.Progress.Closed != r.nClosed)
+	// Tile.Takeaway is where a row's ruling rides the wire (board.go: "the ruling
+	// itself is in --json takeaway"). A demand's takeaway is its QUESTION, held
+	// there only until it is answered — every other human-gated row is taken out of
+	// the stand-down by [isDemand] for that reason. Once the demand closes, that
+	// question is settled: a closed demand whose ruling was never stamped back onto
+	// it (gc.takeaway_settled empty) must not keep publishing the question as its
+	// takeaway, or a reader takes a decision already made for one still open. A
+	// settled demand's takeaway IS the ruling, so it stays. The triple moves
+	// together — a suppressed takeaway carries no timestamp or author.
+	tileTakeaway, tileTakeawayAt, tileTakeawayBy := takeaway, a.TakeawayAt, a.TakeawayBy
+	if !a.ClosedAt.IsZero() && isDemand(a) && a.Metadata[mdTakeawaySettled] == "" {
+		tileTakeaway, tileTakeawayAt, tileTakeawayBy = "", "", ""
+	}
 
 	t := Tile{
 		ID:       a.ID,
@@ -1631,8 +1670,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
 			a.Source != "human" && a.Source != "parked" && a.Source != "merge" &&
 			!isReviewReworkKind(a.Source),
-		Complete:         r.mTotal > 0 && r.open == 0,
-		ProgressMismatch: mismatch,
+		Complete: r.mTotal > 0 && r.open == 0,
 
 		StaleDays:      stale,
 		Priority:       a.Priority,
@@ -1645,13 +1683,13 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		WaitingOnOpen:  waitingOpen,
 		DispositionDue: dispDue,
 
-		Takeaway:   nilIfEmpty(takeaway),
-		TakeawayAt: nilIfEmpty(a.TakeawayAt),
-		TakeawayBy: nilIfEmpty(a.TakeawayBy),
+		Takeaway:   nilIfEmpty(tileTakeaway),
+		TakeawayAt: nilIfEmpty(tileTakeawayAt),
+		TakeawayBy: nilIfEmpty(tileTakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, closedDays, owedSince, now),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, parkedInFlight, closedDays, owedSince, now),
 		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed, stalledReason),
 		RankScore: rankScore(sev, w, stale, closedDays),
 

@@ -385,7 +385,7 @@ if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
     STANDING=$(gc bd create -t task \
       --title "triage: escalations raised from an ephemeral subject (this rig)" \
       -d "Standing subject for escalations whose caller named an ephemeral subject — a patrol wisp, which is burned and re-poured every cycle. One open visit per situation key hangs here; each visit names the wisp that raised it in escalation_raised_by, and a sitting's outcome and takeaway land on this bead." \
-      --json | jq -r '.id // .[0].id')
+      --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     if [ -n "$STANDING" ] && [ "$STANDING" != "null" ]; then
       gc bd update "$STANDING" --set-metadata "task_kind=triage-subject" \
         --set-metadata "triage.scope=$TRIAGE_SCOPE" >/dev/null
@@ -415,9 +415,11 @@ BODY="$MESSAGE"
 
 Raised from $RAISED_BY, which is ephemeral. The visit hangs on this standing subject so the sitting's outcome and takeaway have a bead that outlives the cycle."
 
-VISIT=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$BODY" --json | jq -r '.id // .[0].id')
+VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$BODY" --json 2>/dev/null || true)
+VISIT=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-  || { echo "escalate: bd create returned no id — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }
+  || { create_err=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+       echo "escalate: bd create returned no id${create_err:+: $create_err} — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
   --set-metadata "task_kind=visit" \

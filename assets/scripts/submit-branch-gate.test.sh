@@ -8,9 +8,12 @@
 #   2. TARGET RESOLVE — {{base_branch}} is "branch FROM", never "land INTO".
 #      A caller-set metadata.target wins; base_branch fills in only for
 #      fresh work; nothing resolvable fails closed (never a self-merge).
-#   3. ATOMIC HANDOFF — one gc bd update carries target + refinery assignee
-#      + cleared route + APPENDED notes; a partial handoff cannot ship.
-#   4. CHAIN CLOSE — six session-owned steps close forward via step-close.sh
+#   3. REFINERY HANDOFF — three gc bd update writes (metadata + APPENDED notes
+#      clearing the route, then --status=open, then the refinery --assignee)
+#      carry target + refinery assignee + cleared route, split so the claim
+#      guard cannot refuse reassigning a bead this session still holds; a
+#      partial handoff cannot ship.
+#   4. CHAIN CLOSE — five session-owned steps close forward via step-close.sh
 #      at ALL THREE terminal exits (handoff, the auto_push=false halt, and the
 #      store-only exit), and workflow-finalize is never touched.
 #   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
@@ -123,6 +126,12 @@ BP_DEFAULT="$(awk '
 # gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
 #         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
 #         assertions can prove WHAT was written and WHETHER the arm halted.
+#         `gc bd update` ENFORCES bd's claim guard: an assignee change on an
+#         in_progress bead is refused and rolled back (records nothing, exits 1),
+#         so a one-shot handoff fails exactly as it does against real bd and only
+#         the metadata -> status=open -> assignee split lands. Current state is
+#         reconstructed from this scenario's own log (reset per scenario), so a
+#         fresh bead is in_progress and held — what the polecat holds at handoff.
 #         `gc agent list --json` answers $FAKE_AGENTS; the value UNREADABLE
 #         makes the call fail, which reaches the guard as a different cause
 #         than an empty roster but must take the same arm.
@@ -148,7 +157,38 @@ cat > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
-  "bd update")         shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
+  "bd update")
+    # Model bd's claim guard (validation.AssigneeNotStolen): reassigning an
+    # in_progress bead held by someone the caller is not is refused, and the
+    # refusal rolls the WHOLE call back. The polecat's actor is its session NAME
+    # (BEADS_ACTOR) while the hook-claim holder is its session ID, so the two
+    # never match; we model that as always mismatched and refuse any assignee
+    # CHANGE while the bead is in_progress. Once --status=open lands, the bead is
+    # no longer in_progress and the assignee write is accepted. Current state is
+    # reconstructed from this scenario's own log, so a fresh bead is in_progress
+    # and held.
+    shift 2
+    id="$1"; argv="$*"
+    cur_status=in_progress; cur_assignee=lx-holder
+    if [ -s "${FAKE_LOG:-/dev/null}" ]; then
+      beadlines=$(grep -F "UPDATE|$id " "$FAKE_LOG" 2>/dev/null || true)
+      s=$(printf '%s\n' "$beadlines" | grep -oE -- '--status=[^ ]*' | tail -1 | sed 's/^--status=//')
+      [ -n "$s" ] && cur_status="$s"
+      if grep -qE -- '--assignee=' <<< "$beadlines"; then
+        cur_assignee=$(printf '%s\n' "$beadlines" | grep -oE -- '--assignee=[^ ]*' | tail -1 | sed 's/^--assignee=//')
+      fi
+    fi
+    has_assignee=0; new_assignee=""
+    case " $argv " in *' --assignee='*) has_assignee=1; new_assignee=$(printf '%s\n' "$argv" | grep -oE -- '--assignee=[^ ]*' | head -1 | sed 's/^--assignee=//') ;; esac
+    # $FAKE_FORCE_GUARD forces the refusal on any assignee change regardless of
+    # status, to exercise the handoff's fail-closed arm on a write that is
+    # refused even after the split (a shape the real guard should never take).
+    if [ "$has_assignee" = 1 ] && [ -n "$cur_assignee" ] && [ "$new_assignee" != "$cur_assignee" ] && { [ "$cur_status" = in_progress ] || [ -n "${FAKE_FORCE_GUARD:-}" ]; }; then
+      printf 'cannot reassign %s: held by "%s" (in_progress); coordinate with the holder — pass --force only if their claim is abandoned\n' "$id" "$cur_assignee" >&2
+      printf 'Error: 1 of 1 issues failed to update\n' >&2
+      exit 1
+    fi
+    printf 'UPDATE|%s\n' "$argv" >> "$FAKE_LOG"; exit 0 ;;
   "bd list")           printf '%s\n' "${FAKE_ANCHOR_ROWS-[]}"; exit 0 ;;
   "agent list")        [ "${FAKE_AGENTS-}" = "UNREADABLE" ] && exit 1
                        printf '{"agents":%s}\n' "${FAKE_AGENTS:-[]}"; exit 0 ;;
@@ -315,11 +355,12 @@ eq "$(run_resolve polecat/tk-work main '{"target":""}')" \
    "0|main" \
    "empty-string metadata.target falls back to base_branch"
 
-# --- 3. The atomic handoff. -----------------------------------------------------
-# ONE gc bd update carries the whole transition — resolved target, refinery
-# assignee, cleared route, cleared session pins, APPENDED notes — so a partial
-# handoff cannot strand the bead between writes, and --notes can never erase
-# the dispatch note.
+# --- 3. The refinery handoff (three writes). ----------------------------------
+# The handoff takes THREE gc bd update calls, not one: metadata + APPENDED notes
+# (which clears the route), then --status=open, then the refinery --assignee. A
+# single update that reassigns off the holder while in_progress is refused by
+# bd's claim guard, which rolls the whole call back, so the split is the only
+# shape that lands. --notes can never erase the dispatch note.
 # {{binding_prefix}} is substituted the way the materializer does; GC_RIG is
 # controlled per case.
 # ROSTER_OK is the shape `gc agent list --json` returns: every agent carries a
@@ -346,15 +387,27 @@ bash -n "$TMP/consume.sh" \
   || bad "extracted handoff failed bash -n"
 
 eq "$(run_consume main)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
-   "one atomic write: target + refinery assignee + cleared route + APPENDED notes"
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
+   "three writes: metadata+notes (route cleared), then status=open, then refinery assignee"
+
+# CONTROL: the one-shot base shipped — a single gc bd update that reassigns the
+# bead to the refinery while it is in_progress. bd's claim guard refuses it and
+# rolls the whole call back; the fake enforces exactly that, so the one-shot
+# records nothing and exits non-zero. This is what makes the split load-bearing:
+# were the handoff a single update, this suite would pass a shape real bd fails.
+: > "$TMP/log"
+printf '%s\n' 'gc bd update tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes "Implemented: x"' > "$TMP/oneshot.sh"
+ONESHOT_RC=0
+FAKE_LOG="$TMP/log" bash "$TMP/oneshot.sh" >/dev/null 2>&1 || ONESHOT_RC=$?
+eq "$ONESHOT_RC|$(tr '\n' ';' < "$TMP/log")" "1|" \
+   "control: the base one-shot handoff is REFUSED by the claim guard and records nothing"
 
 eq "$(run_consume integration/tk-c1)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=integration/tk-c1 --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=integration/tk-c1 --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "carries an integration-branch target through to the bead"
 
 eq "$(run_consume main myrig)" \
-   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=myrig/gc-toolkit.refinery;" \
    "rig sessions get the rig-qualified refinery address"
 
 # A partial re-run that skips step 1b must not write target="". An empty
@@ -364,6 +417,27 @@ eq "$(run_consume '')" \
    "1|ESCALATE;HOLD;DRAIN;" \
    "unset LANDING_TARGET: escalates, holds, then halts instead of writing an empty target"
 has_hold() { grep -q -- "$1" "$TMP/hold"; }
+
+# The handoff itself fails closed. gc bd update exits non-zero and rolls its call
+# back when a write is refused, so the three writes are chained; if one is
+# refused even after --status=open — a shape the guard should never take, forced
+# here with FAKE_FORCE_GUARD — the step must NOT close its chain and drain past
+# the strand. The first two writes land; the assignee write is refused, so
+# HANDOFF_OK stays 0 and the arm escalates, holds, then drains.
+printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/consume.sh"
+: > "$TMP/log"; : > "$TMP/hold"
+REFUSED_HANDOFF_RC=0
+LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_FORCE_GUARD=1 FAKE_LOG="$TMP/log" \
+  bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || REFUSED_HANDOFF_RC=$?
+eq "$REFUSED_HANDOFF_RC|$(tr '\n' ';' < "$TMP/log")" \
+   "1|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;ESCALATE;HOLD;DRAIN;" \
+   "a refused handoff write escalates, holds, then drains — never closes the chain"
+has_hold "refinery handoff refused" \
+  && ok "the handoff-refusal hold names why it held" \
+  || bad "handoff-refusal hold has no reason: $(cat "$TMP/hold")"
+has_hold "--step mol-polecat-work.submit-and-exit" \
+  && ok "the handoff-refusal holds its own step" \
+  || bad "handoff-refusal did not hold submit-and-exit: $(cat "$TMP/hold")"
 
 # --- 3b. Fail-closed arms HOLD before they drain. -----------------------------
 # `open` is half the pool's offer predicate, so an arm that drains leaving its
@@ -414,18 +488,18 @@ eq "$(run_consume main gc-toolkit typo.)" \
 # correct. A call that fails and a roster that is genuinely empty arrive by
 # different routes and must both write.
 eq "$(run_consume main myrig gc-toolkit. UNREADABLE)" \
-   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=myrig/gc-toolkit.refinery;" \
    "unreadable roster: hands off rather than stalling on what it cannot check"
 
 eq "$(run_consume main myrig gc-toolkit. '[]')" \
-   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=myrig/gc-toolkit.refinery;" \
    "empty roster: hands off rather than stalling on what it cannot check"
 
 # --- 3b. The PR summary the handoff carries. ----------------------------------
 # pr-open.sh publishes metadata.pr_summary as the PR's ## Summary and falls back
 # to the anchor's description, which is dispatch text. Only the polecat has read
-# the diff, so the summary rides the SAME atomic write as the rest of the
-# transition; a second write is a second thing a crash can lose.
+# the diff, so the summary rides the metadata write (the first of the three), not
+# a fourth call a crash could lose on its own.
 #
 # run_consume_file <summary-file-path> [strict]
 #   -> prints "<rc>|<log>" with PR_SUMMARY_FILE pointed at the given path. The
@@ -444,15 +518,15 @@ run_consume_file() {
 
 printf 'Compares heads instead of names.' > "$TMP/summary.txt"
 eq "$(run_consume_file "$TMP/summary.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
-   "a carried summary rides the one atomic write as pr_summary"
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
+   "a carried summary rides the metadata write as pr_summary"
 
 # A real summary is prose, not a line. The fake logs argv verbatim, so an
 # embedded newline shows up as a second logged line — which is the proof that
 # the value reaches gc unmangled rather than truncated at the first line.
 printf 'Line one.\nLine two.' > "$TMP/summary-multiline.txt"
 eq "$(run_consume_file "$TMP/summary-multiline.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Line one.;Line two. --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Line one.;Line two. --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "a multi-line summary reaches the write whole"
 
 # Both no-summary shapes fall back to the unsummarized handoff
@@ -462,11 +536,11 @@ eq "$(run_consume_file "$TMP/summary-multiline.txt")" \
 # write the key.
 : > "$TMP/summary-empty.txt"
 eq "$(run_consume_file "$TMP/summary-empty.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "an empty summary file writes no pr_summary key at all"
 
 eq "$(run_consume_file "$TMP/summary-absent.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "a PR_SUMMARY_FILE naming no file hands off unsummarized rather than halting"
 
 # The step's own blocks run before this one under one shell, and a polecat that
@@ -480,11 +554,11 @@ NOSUM_RC=0
 LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
   bash "$TMP/nosummary.sh" > "$TMP/out" 2>&1 || NOSUM_RC=$?
 eq "$NOSUM_RC|$(tr '\n' ';' < "$TMP/log")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "strict shell, PR_SUMMARY_FILE never set: hands off unsummarized, no set -u crash"
 
 eq "$(run_consume_file "$TMP/summary.txt" strict)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "strict shell: a carried summary still writes"
 
 # The polecat pastes this block into a live shell, and `bash "$TMP/consume.sh"`
@@ -517,11 +591,11 @@ ROSTER_BIG="$(jq -cn '[{qualified_name:"gc-toolkit/gc-toolkit.refinery"}]
   + [range(1200) | {qualified_name:("filler-rig-\(.)/gc-toolkit.polecat-padding-entry")}]')"
 
 eq "$(run_strict_consume main gc-toolkit "$ROSTER_BIG")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit/gc-toolkit.refinery;" \
    "strict shell: a matching address in an oversized roster still writes (the pipe form takes SIGPIPE here)"
 
 eq "$(run_strict_consume main gc-toolkit UNREADABLE)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit/gc-toolkit.refinery;" \
    "strict shell: a failed roster call still reaches the permissive arm rather than killing the step"
 
 eq "$(run_strict_consume main gc-toolkit '[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]')" \
@@ -626,8 +700,8 @@ run_consume_anchor() {
 # pr-open.sh enumerates — and the claimed bead's handoff carries no pr_summary,
 # because writing it there would assert a summary nothing reads.
 eq "$(run_consume_anchor "$TMP/summary.txt" tk-anchor)" \
-   "0|UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
-   "child: the summary is stamped on the anchor, and the handoff stays otherwise atomic"
+   "0|UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
+   "child: the summary is stamped on the anchor, and the handoff splits into three"
 
 # The anchor write comes FIRST. It is metadata on a bead this session does not
 # hold; sequencing it before the handoff keeps the write that releases the bead
@@ -638,21 +712,21 @@ eq "$(run_consume_anchor "$TMP/summary.txt" tk-anchor | tr ';' '\n' | sed -n '1p
 
 # Prose reaches the anchor whole, the same as it does the claimed bead.
 eq "$(run_consume_anchor "$TMP/summary-multiline.txt" tk-anchor)" \
-   "0|UPDATE|tk-anchor --set-metadata pr_summary=Line one.;Line two.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-anchor --set-metadata pr_summary=Line one.;Line two.;UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "a multi-line summary reaches the anchor whole"
 
 # No summary composed: nothing is written to the anchor at all. An empty
 # metadata value round-trips as set-but-empty, which would assert a summary the
 # polecat never wrote and suppress pr-open.sh's own description fallback.
 eq "$(run_consume_anchor "$TMP/summary-empty.txt" tk-anchor)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "no summary: the anchor is not touched"
 
-# An empty GATING_ANCHOR is the fresh-work case and must be byte-identical to
-# the pre-change behavior: one write, carrying the summary.
+# An empty GATING_ANCHOR is the fresh-work case: the summary rides the handoff's
+# own metadata write (the first of the three), with no separate anchor write.
 eq "$(run_consume_anchor "$TMP/summary.txt" '')" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
-   "fresh work: unchanged single atomic write carrying the summary"
+   "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
+   "fresh work: the summary rides the metadata write, then status=open, then assignee"
 
 # A hold that did not land must not drain. molecule-hold.sh exits non-zero when
 # it cannot resolve the step, when duplicate step beads make that ambiguous,
@@ -702,11 +776,11 @@ FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":
 eq "$BOTH_RC" "0" "composed run exits 0 on the rework shape"
 eq "$(sed -n 's/^landing target: //p' "$TMP/out")" "main" \
    "composed run resolves the landing target to main, not to the pushed branch"
-# The only write is the atomic handoff: metadata.branch already agreed, so
+# The only writes are the handoff's three: metadata.branch already agreed, so
 # nothing rewrites it, and target lands on main rather than the self-merge.
 eq "$(tr '\n' ';' < "$TMP/log")" \
-   "UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
-   "composed run writes only the atomic handoff, with target=main"
+   "UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
+   "composed run writes only the handoff's three writes, with target=main"
 
 # The same four snippets on the shape the whole change is for: a rework child
 # whose branch is anchored by another open bead, with a summary composed. End to
@@ -722,7 +796,7 @@ FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":
   GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" bash "$TMP/four.sh" > "$TMP/out" 2>&1 || FOUR_RC=$?
 eq "$FOUR_RC" "0" "composed rework run exits 0"
 eq "$(tr '\n' ';' < "$TMP/log")" \
-   "UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
+   "UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "composed rework run: summary to the anchor, handoff to the claimed bead"
 
 # --- 5. Step-chain close. -----------------------------------------------------
@@ -769,7 +843,12 @@ esac
 if [ -n "${FAKE_REFUSE:-}" ] && [ "$step" = "$FAKE_REFUSE" ]; then
   echo "step-close: FATAL — not this session's bead for $step" >&2; exit 2
 fi
-if [ -n "$blocker" ] && ! grep -qx "mol-polecat-work.$blocker" "$FAKE_CLOSED"; then
+# self-review is not in the polecat's chain-close list — the orchestrator closes
+# the ralph control on convergence — so a blocker of self-review counts as closed
+# when it is recorded in FAKE_ENGINE_CLOSED, which stands in for that engine close.
+if [ -n "$blocker" ] \
+  && ! grep -qx "mol-polecat-work.$blocker" "$FAKE_CLOSED" \
+  && ! grep -qx "mol-polecat-work.$blocker" "${FAKE_ENGINE_CLOSED:-/dev/null}"; then
   echo "  ${step}: updating issue: cannot close blocked issue: blocked by [$blocker]" >&2
   exit 2
 fi
@@ -781,6 +860,12 @@ printf '%s\n' "$step" >> "$FAKE_CLOSED"
 exit 0
 STEPCLOSE
 chmod +x "$TMP/pack/assets/scripts/step-close.sh"
+
+# The orchestrator closes the self-review ralph control on convergence, before
+# submit-and-exit's session runs its chain-close, so self-review is not in the
+# loop's list. This file stands in for that engine close: it satisfies the
+# submit-and-exit blocker the fake enforces, without the loop having closed it.
+printf 'mol-polecat-work.self-review\n' > "$TMP/engine-closed"
 
 printf '%s\n' "$CLOSE" > "$TMP/close.sh"
 bash -n "$TMP/close.sh" \
@@ -802,19 +887,23 @@ run_close() {
   local rc=0
   GC_PACK_DIR="${2-$TMP/pack}" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_REFUSE="${1-}" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
-    FAKE_LOG="$TMP/log" \
+    FAKE_LOG="$TMP/log" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$TMP/close-run.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')"
 }
 # steps the loop TRIED, regardless of outcome — proves it did not abort early.
 attempted() { sed 's/^mol-polecat-work\.//' "$TMP/attempted" | tr '\n' ',' | sed 's/,$//'; }
 
-ALL_SIX="load-context,workspace-setup,preflight-tests,implement,self-review,submit-and-exit"
+# The five steps this session owns and closes forward. self-review is absent by
+# design: it is the ralph control the orchestrator closes on convergence, and the
+# fake treats it as engine-closed (FAKE_ENGINE_CLOSED above), which is what lets
+# submit-and-exit — blocked by self-review — close at the end of the loop.
+LOOP_STEPS="load-context,workspace-setup,preflight-tests,implement,submit-and-exit"
 
 # THE ORDER. Forward is the only order bd permits: the chain can unwind only
 # from the unblocked end, and closing each step is what unblocks the next.
-eq "$(run_close)" "0|$ALL_SIX" \
-   "closes all six session-owned steps, forward order, load-context first"
+eq "$(run_close)" "0|$LOOP_STEPS" \
+   "closes the five session-owned steps, forward order, load-context first"
 
 # submit-and-exit closes LAST. It is workflow-finalize's only blocker, so
 # reaching it is what arms the control-dispatcher finalizer as the backstop.
@@ -834,19 +923,21 @@ esac
 eq "$(run_close >/dev/null; sed -n '/^UPDATE|/p' "$TMP/log" | tr '\n' ';')" "" \
    "writes nothing to any bead (the work bead stays the refinery's)"
 
-# A refusal must not abort the loop. Refusing the FIRST step is the worst case:
-# every later step is then blocked, so nothing closes at all — but all six must
-# still be attempted and the block must exit 0.
+# A refusal must not abort the loop. Refusing the FIRST step blocks its inline
+# successors (workspace-setup..implement), but submit-and-exit still closes — its
+# blocker is self-review, which the engine closed — so one step closes, all five
+# are still attempted, and the block still exits 0.
 REFUSED_FIRST="$(run_close mol-polecat-work.load-context)"
-eq "$REFUSED_FIRST|$(attempted)" "0||$ALL_SIX" \
-   "a refusal on the first step: nothing closes, but all six are still attempted"
+eq "$REFUSED_FIRST|$(attempted)" "0|submit-and-exit|$LOOP_STEPS" \
+   "a refused load-context blocks its inline successors, but submit-and-exit still closes; all five attempted"
 
-# A refusal mid-chain closes everything up to it and blocks the rest, and still
-# must not abort.
+# A refusal mid-chain closes the inline steps up to it. submit-and-exit is not an
+# inline successor of implement — its blocker is the engine's self-review — so it
+# still closes; only the refused implement is skipped. The loop must not abort.
 REFUSED_MID="$(run_close mol-polecat-work.implement)"
 eq "$REFUSED_MID|$(attempted)" \
-   "0|load-context,workspace-setup,preflight-tests|$ALL_SIX" \
-   "a refusal mid-chain: predecessors close, successors block, loop continues"
+   "0|load-context,workspace-setup,preflight-tests,submit-and-exit|$LOOP_STEPS" \
+   "a refused implement skips only itself; submit-and-exit closes via the engine's self-review; loop continues"
 
 # No step-close.sh on any candidate path must fail loudly rather than drain
 # with the chain silently open — that is the failure this whole section exists
@@ -860,14 +951,15 @@ eq "$(run_close '' "$TMP/nonexistent")" "1|" \
 # being "simplified" back.
 : > "$TMP/closed"; : > "$TMP/attempted"; : > "$TMP/log"
 printf 'set -e\n%s\n' "$CLOSE" \
-  | sed 's/^for STEP in .*; do$/for STEP in submit-and-exit self-review implement preflight-tests workspace-setup load-context; do/' \
+  | sed 's/^for STEP in .*; do$/for STEP in submit-and-exit implement preflight-tests workspace-setup load-context; do/' \
   > "$TMP/close-rev.sh"
 GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
   FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_LOG="$TMP/log" \
+  FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
   bash "$TMP/close-rev.sh" > "$TMP/out" 2>&1 || true
 eq "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')" \
-   "load-context" \
-   "control: dependent-first closes only load-context (bd refuses blocked issues)"
+   "submit-and-exit,load-context" \
+   "control: dependent-first closes only the two unblocked ends (submit-and-exit via the engine's self-review, load-context via no blocker); the middle stays blocked"
 
 # The done sequence lives ONLY in this formula now (the native polecat prompt
 # points at it instead of duplicating it), so there is no prompt-fragment copy
@@ -889,7 +981,7 @@ run_halt() {
   local rc=0
   FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
     GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
-    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$1" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
 }
@@ -902,23 +994,31 @@ bash -n "$TMP/halt.sh" \
   && ok "extracted auto_push=false arm is syntactically valid bash" \
   || bad "extracted halt arm failed bash -n"
 
-# THE REGRESSION. The six closes must happen, and they must happen after the
+# THE REGRESSION. The five closes must happen, and they must happen after the
 # bead is parked and before the session drains.
 HALT_RC="$(run_halt "$TMP/halt.sh")"
 eq "$HALT_RC" "0" "halt arm exits 0"
-eq "$(trace)" "UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
-   "halt arm parks the bead, closes six steps, THEN drains"
+eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "halt arm parks the bead in three writes, closes five steps, THEN drains"
 eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
-   "$ALL_SIX" \
-   "halt arm closes the same six steps, forward order"
+   "$LOOP_STEPS" \
+   "halt arm closes the same five steps, forward order"
 
-# The bead write is the halt's whole point and is unchanged by this: branch and
-# target recorded, assignee cleared, branch_ready + halt_reason set so the
-# caller can tell an opt-out halt from a failure, and --append-notes rather
-# than the --notes that erases the dispatch note (tk-6kf6r).
-eq "$(sed -n 's/^UPDATE|//p' "$TMP/log")" \
-   "tk-work --status=open --assignee= --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to= --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
-   "halt arm's bead write is intact (branch_ready, halt_reason, --append-notes)"
+# The bead write is the halt's whole point: branch and target recorded,
+# branch_ready + halt_reason set so the caller can tell an opt-out halt from a
+# failure, and --append-notes rather than the --notes that erases the dispatch
+# note (tk-6kf6r). It is three writes for the same reason the store-only arm is:
+# clearing the assignee while in_progress is refused by the claim guard, so the
+# metadata clears the route first, --status=open lands next, and --assignee last.
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
+   "tk-work --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to= --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
+   "halt arm first write: branch + target + branch_ready + halt_reason + cleared route, --append-notes"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --status=open" \
+   "halt arm second write: --status=open alone, while the bead is still assigned"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 3p)" "tk-work --assignee=" \
+   "halt arm third write: --assignee cleared, after the status is open"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" "0" \
+   "the assignee is NOT batched with the metadata (that call is refused whole)"
 
 # The arm must not reach the push. A fake `git` answers everything with exit 0,
 # so a stray `git push` would pass unnoticed; the drain-then-exit trace above is
@@ -950,7 +1050,7 @@ printf '%s\n' "$HALT" \
   | awk '/# >>> submit-halt-chain-close$/{f=1} /# <<< submit-halt-chain-close$/{f=0; next} !f' \
   > "$TMP/halt-nochain.sh"
 CTRL_RC="$(run_halt "$TMP/halt-nochain.sh")"
-eq "$CTRL_RC|$(trace)" "0|UPDATE,DRAIN" \
+eq "$CTRL_RC|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
    "control: comment-only halt arm drains with the chain open (the defect is real)"
 
 # --- 6b. The store-only exit. -------------------------------------------------
@@ -969,7 +1069,7 @@ run_store() {
   local script="$1"; shift
   local rc=0
   env "$@" FAKE_BRANCH=main GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
-    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$script" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
 }
@@ -991,15 +1091,15 @@ bash -n "$TMP/store.sh" \
 eq "$(run_store "$TMP/store.sh")|$(trace)" "0|" \
    "empty STORE_ONLY_RECORD: falls through, writes nothing, does not drain"
 
-# THE ARM. Three writes, then the six closes, then the drain — the order is the
+# THE ARM. Three writes, then the five closes, then the drain — the order is the
 # contract, not an accident: metadata bypasses the claim guard, --status=open is
 # accepted from the holder, and only then does the plain --assignee write land.
 eq "$(run_store "$TMP/store-armed.sh")" "0" "store-only arm exits 0"
-eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
-   "store-only arm releases in three writes, closes six steps, THEN drains"
+eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "store-only arm releases in three writes, closes five steps, THEN drains"
 eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
-   "$ALL_SIX" \
-   "store-only arm closes the same six steps, forward order"
+   "$LOOP_STEPS" \
+   "store-only arm closes the same five steps, forward order"
 
 # The writes themselves, and their ORDER, which is the whole reason there are
 # three. A gc bd update that moves the assignee while this session still holds
@@ -1063,7 +1163,7 @@ fi
 
 # CONTROL: the same arm with its chain-close removed still exits 0 and still
 # releases the bead, so only the trace above tells a complete arm from one that
-# leaves six step beads open to be re-offered as new work.
+# leaves five step beads open to be re-offered as new work.
 awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-close$/{f=0; next} !f' \
   "$TMP/store-armed.sh" > "$TMP/store-nochain.sh"
 eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
@@ -1080,7 +1180,7 @@ HANDOFF_END=$(grep -n '^# <<< submit-target-consume$' "$TOML" | cut -d: -f1)
 CLOSE_END=$(grep -n '^# <<< submit-chain-close$' "$TOML" | cut -d: -f1)
 RELEASE_START=$(grep -n '^# >>> submit-branch-release$' "$TOML" | cut -d: -f1)
 if [ -n "$HANDOFF_END" ] && [ -n "$RELEASE_START" ] && [ "$RELEASE_START" -gt "$HANDOFF_END" ]; then
-  ok "branch release is ordered AFTER the atomic handoff"
+  ok "branch release is ordered AFTER the handoff"
 else
   bad "branch release must follow the handoff (handoff ends ${HANDOFF_END:-?}, release starts ${RELEASE_START:-?})"
 fi

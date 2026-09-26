@@ -54,15 +54,40 @@ bd_list() {
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   printf '%s' "$raw"
 }
-convoy_meta() { # <id> -> {hold, rhold, branch}; non-zero = unreadable
+convoy_meta() { # <id> -> {hold, rhold, branch, psummary}; non-zero = unreadable
   local raw rc out
   raw=$(gc bd show "$1" ${GC_RIG:+--rig="$GC_RIG"} --json 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   raw=$(printf '%s' "$raw" | scrub)
   printf '%s' "$raw" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || return 1
   out=$(printf '%s' "$raw" | jq -c '.[0] | {hold: (.metadata.merge_hold // ""),
-    rhold: (.metadata.rebase_hold // ""), branch: (.metadata.branch // "")}' 2>/dev/null) || return 1
+    rhold: (.metadata.rebase_hold // ""), branch: (.metadata.branch // ""),
+    psummary: (.metadata.pr_summary // "")}' 2>/dev/null) || return 1
   printf '%s\n' "$out"
+}
+
+# Compose a seed pr_summary for a graduating convoy from the beads that merged
+# onto its integration branch, so the graduated PR describes the work that
+# landed rather than falling back to the convoy's dispatch text (pr-open.sh's
+# fallback when pr_summary is absent). Each landed bead carries its own
+# already-reviewed pr_summary, so their union is a diff-derived account; the
+# pre-open review then validates that union against the integrated diff. It
+# reads the landed set already in hand in one jq pass, so an unreadable value
+# yields no seed. Echoes the seed on stdout; empty output means "no seed".
+compose_member_summary() { # <convoy-id> <landed-json>
+  local cid="$1" landed_json="$2" out
+  out=$(printf '%s' "$landed_json" | jq -r --arg cid "$cid" '
+    [ .[] | select(((.metadata.merge_result // "") | tostring | ascii_downcase) == "merged") ] as $m
+    | if ($m | length) == 0 then ""
+      else "This PR graduates integration convoy `\($cid)`, landing the work of these beads:\n"
+           + ( $m | map(
+                 "\n- `\(.id)` — \((.title // "") | tostring | gsub("\n"; " "))"
+                 + ( ((.metadata.pr_summary // "") | tostring)
+                     | if . == "" then ""
+                       else "\n" + (rtrimstr("\n") | split("\n") | map("  " + .) | join("\n")) end )
+               ) | join("") )
+      end' 2>/dev/null) || return 0
+  printf '%s' "$out"
 }
 
 # Owned-ness + member completion live only in `gc convoy list` (city-wide;
@@ -138,12 +163,22 @@ while IFS="$(printf '\t')" read -r cid ctarget; do
     vacuous=$((vacuous + 1)); continue
   fi
 
-  if gc bd update "$cid" ${GC_RIG:+--rig="$GC_RIG"} \
-       --assignee="$GC_AGENT" \
-       --set-metadata branch="$ctarget" \
-       --set-metadata target="$TARGET_BRANCH" \
-       --set-metadata merge_strategy=mr \
-       --set-metadata graduation=true >/dev/null 2>&1; then
+  UPD=("$cid" ${GC_RIG:+--rig="$GC_RIG"}
+       --assignee="$GC_AGENT"
+       --set-metadata "branch=$ctarget"
+       --set-metadata "target=$TARGET_BRANCH"
+       --set-metadata "merge_strategy=mr"
+       --set-metadata "graduation=true")
+  # Seed the ## Summary from the members, so the graduated PR describes the work
+  # that landed rather than falling back to the convoy's dispatch text. An
+  # already-authored summary is preserved (read-modify-write); composing one is
+  # best-effort, and its absence just leaves pr-open's fallback for the review
+  # to flag.
+  if [ -z "$(printf '%s' "$cmeta" | jq -r '.psummary')" ]; then
+    SEED=$(compose_member_summary "$cid" "$landed_raw")
+    [ -n "$SEED" ] && UPD+=(--set-metadata "pr_summary=$SEED")
+  fi
+  if gc bd update "${UPD[@]}" >/dev/null 2>&1; then
     graduated=$((graduated + 1))
     echo "$PROG: graduating $cid — $ctarget -> $TARGET_BRANCH (mr; human-approved PR)"
   else

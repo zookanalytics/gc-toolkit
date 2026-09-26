@@ -223,6 +223,25 @@ out=$("$SUT" show --since 5m 2>/dev/null)
 hasnt "$out" "three hours back" "a shorter window stops the walk sooner"
 
 echo
+echo "# show folds a run of consecutive boot entries"
+reset
+"$SUT" current >/dev/null 2>&1
+plant led-1 500 "[boot] deacon started (a) -> -"
+plant led-1 440 "[boot] deacon started (b) -> -"
+plant led-1 380 "[boot] deacon started (c) -> -"
+plant led-1 320 "[cleanup] killed an orphan -> bead:tk-1"
+plant led-1 260 "[boot] deacon started (d) -> -"
+out=$("$SUT" show 2>/dev/null)
+has "$out" "deacon started (a)" "the first boot of a run is kept"
+has "$out" "(+2 more boots through" "a run of three boots folds to the first plus a count"
+hasnt "$out" "deacon started (b)" "the folded boots are dropped from the render"
+hasnt "$out" "deacon started (c)" "including the last of the run"
+has "$out" "killed an orphan" "a non-boot entry breaks the run and prints"
+has "$out" "deacon started (d)" "a lone boot after the break prints unchanged"
+hasnt "$out" "(+0 more" "a lone boot is never annotated as a run"
+eq "$(printf '%s\n' "$out" | grep -c 'deacon started')" "2" "only the run's first boot and the lone boot survive the fold"
+
+echo
 echo "# show refuses a duration it cannot read, and is quiet on an empty city"
 reset
 out=$("$SUT" show --since 3fortnights 2>&1); rc=$?

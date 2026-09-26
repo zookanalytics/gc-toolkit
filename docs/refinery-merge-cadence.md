@@ -47,19 +47,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    reads `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
    back). A lane that reads `green` ends the arm's interest however far the
-   branch has advanced since — nothing here compares a marker to a head. The
-   convergence cap's park also ends it with no dispatch: `signoff.sh` set
-   `merge_hold=signoff_cap` (the literal string, distinct from an operator's
-   own `merge_hold=true`) with `signoff_cap=<gate>` beside it,
-   `gc.routed_to=human`, a `blocked_reason` naming the cap, and
-   the shorter `gc.takeaway` headline the helm board renders, in one act. No
-   visit is filed for it, so the anchor is parked rather than queued. What
-   undoes that is new operator feedback, which arm 5 records: the cap counts
-   non-convergence, and a review the branch has never answered is not that
-   ([state-machine.md](state-machine.md#the-round-cap-counts-from-the-last-operator-feedback)).
-   An anchor capped before its PR was opened can receive neither, and says so
-   in its `blocked_reason`; `signoff.sh reset <anchor> --reason <why>` is its
-   release.
+   branch has advanced since — nothing here compares a marker to a head. An
+   operator's own `merge_hold` also ends the arm with no dispatch: gate-ensure
+   raises no review under a hold.
    A review whose only reach is the pour stamp is qualified before it counts
    as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict
@@ -113,7 +103,20 @@ the cadence — the arms run whether or not any refinery session is awake.
    The body's `## Summary` is the polecat's `pr_summary`, written at handoff
    by the only actor that has read the diff; the anchor's description is
    dispatch text, demoted to a collapsed section and standing in as the
-   summary only when the handoff carried none.
+   summary only when the handoff carried none. The region writes that heading
+   itself, so a `pr_summary` opening with one of its own is de-duplicated. The
+   composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
+   re-splices it from the anchor's current `pr_summary` — a rework's restamp
+   reaches the published merge surface — while text an operator or `pr-stack.sh`
+   added outside the markers stays. A body a create wrote before these markers
+   is the same stale-body case: the region is established over its legacy
+   `## Summary`…`## Refinery handoff` prefix, keeping what follows, so the
+   restamp still lands. A body carrying no such managed region — hand-written,
+   or a malformed marker shape — has nothing stale to republish and is adopted
+   as it stands; a MERGED PR is a landed record, flipped untouched. A refresh
+   this arm cannot verify — an unreadable or unparseable body, a missing head,
+   or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
+   rather than flip a managed body that may be stale.
 3. **pr-facts.sh --posture-only** — the posture record, and nothing else.
    `merge.sh` answers "is a human waiting on this?" off the bead and never asks
    GitHub, so the value it reads has to be written in the same pass. This arm
@@ -208,11 +211,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    rework child or a visit. The posture write is idempotent, so re-running it
    here after arm 3 costs nothing when nothing changed. Routing lives only in
    this arm: arm 3 records, this one decides what answers it. Each batch it
-   routes also resets `signoff.sh`'s round cap, once per batch, retiring the
-   cap's own park with it — but only while `merge_hold` still reads the
-   literal `signoff_cap` with a non-empty `signoff_cap=<gate>` beside it; an
-   operator's own `merge_hold=true` is never that pairing and is never lifted
-   by this reset, even past an orphan `signoff_cap`.
+   routes also opens one validation pass on the anchor — a
+   `task_kind=validation` bead, unrouted, blocking the anchor — from which
+   `gate-ensure.sh`'s quiescence holds a fresh whole-diff review while the
+   validator rules the batch.
+   The batch is watermarked only once that pass records the shape the validator
+   reads — `anchor_bead`, `check_name=human`, `reviewed_oid` — and its `blocks`
+   edge holds.
    A write-back sweep then answers the operator in the PR itself. On an anchor
    carrying `pr_comment_disposition`, every comment at or below the recorded
    watermark gets an EYES reaction, and once the bead that disposition names

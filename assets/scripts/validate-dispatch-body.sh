@@ -7,8 +7,10 @@
 # Usage: validate-dispatch-body.sh [--note <text>]  (--note appends dispatch-
 # specific context, e.g. "this batch is a human feedback set" from pr-facts.sh).
 # Exit 0 always: a dispatch is never blocked on prose.
-# Callers: gate-ensure.sh, pr-facts.sh (the two surfaces that open a validation
-# pass — the machine review batch and the human feedback batch).
+# Callers: signoff.sh and pr-facts.sh — the two surfaces that OPEN a validation
+# pass, on a machine request-changes batch and a human feedback batch. (gate-
+# ensure.sh dispatches the validator onto an open pass; it opens none, so it
+# builds no note.)
 set -uo pipefail
 
 usage() {
@@ -55,12 +57,21 @@ anchor), `check_name` (the lane whose batch this pass rules), and `reviewed_oid`
 
 **What the pass writes**: a `finding.disposition` on each finding via
 `finding.sh set-disposition` (must-fix, deferred, or declined — decisions 1 and
-2), and the lane's approve outcome via `review-outcome.sh` (back-lane when no
-further review is warranted, supersede-lane when one is — decision 3). It
-never stamps a `check.<lane>` marker, never closes or routes the anchor, and
-never runs `gh pr review --approve` — the city does not approve PRs. Closing the
-validation-pass bead is the terminal step; the dispositions and approve outcome
-above are what carry the lane's state.
+2; a human-sourced finding is ruled on its merits like a machine one — the
+operator is a highly informed peer, not an authority the pass may not overrule —
+but declining a human objection owes them an answer, passed as `--reply` and
+posted to their PR thread by pr-facts.sh's write-back, never a silent decline; a
+re-raise re-blocks because the closed finding re-adopts fresh on re-review),
+and one convergence outcome via `review-outcome.sh` whose shape follows
+`check_name` (decision 3). A reviewer's lane batch backs its lane (`back-lane`)
+on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
+review is warranted. A `human` batch is anchor-wide: unconverged, it supersedes
+every lane the anchor's `check_set` declares (`supersede-anchor`); converged, it
+writes no outcome, leaving the declared lanes' green and the open must-fix
+findings to hold the merge. It never stamps a `check.<lane>` marker, never closes
+or routes the anchor, and never runs `gh pr review --approve` — the city does not
+approve PRs. Closing the validation-pass bead is the terminal step; the
+dispositions and any convergence outcome above are what carry the lane state.
 H
 
 if [ -n "$NOTE" ]; then
