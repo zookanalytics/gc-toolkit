@@ -553,8 +553,15 @@ dismiss_superseded() {
 # recorded, so it backs no lane green (lane-state.sh), and not superseded, so
 # gate-ensure pours no fresh review at the live head — then exit. pr-facts.sh
 # consummates the disposition; gate-ensure.sh skips the same anchor for the same
-# reason.
-DISPOSED=$(row_meta "$(bd_json show "$ANCHOR")" "gc.pr_close_disposition_kind")
+# reason. Marker absence is trustworthy only when the re-read resolved: an
+# unreadable fresh row cannot be told from an undisposed anchor, so an
+# unresolvable probe leaves the review open rather than falling through.
+DISPOSED_ROW=$(bd_json show "$ANCHOR")
+if ! is_rows "$DISPOSED_ROW"; then
+  warn "disposition re-read of anchor $ANCHOR returned no row; a failed read cannot be told from an undisposed anchor, so refusing to stamp a marker or file rework on a possibly-disposed anchor. Review $REVIEW_BEAD left open for a retry."
+  exit 2
+fi
+DISPOSED=$(row_meta "$DISPOSED_ROW" "gc.pr_close_disposition_kind")
 if [ -n "$DISPOSED" ]; then
   gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=moot \
     --append-notes "signoff: $VERDICT verdict is MOOT — anchor $ANCHOR was disposed (gc.pr_close_disposition_kind=$DISPOSED) before this verdict was ruled. No marker stamped, no rework filed, no validation pass opened; pr-facts.sh consummates the disposition." \
