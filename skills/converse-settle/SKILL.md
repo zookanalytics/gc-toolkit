@@ -73,16 +73,19 @@ with its recommendation.>
 A converse is about its one subject; name another bead only where the
 conversation's substance genuinely leads there, and then as a plain
 sentence.
-Only then stamp the outcome and close the visit — the sitting's last
-actions, with nothing said after them. The stamp is the last write
-before the close on purpose. An open visit carrying `gc.outcome` is then
-a sitting whose sign-off already posted and whose only missing write is
-the close. That is the one shape `converse-claim.sh` finishes without
-posting anything.
+Only then close the visit through the shared guarded close — the sitting's
+last action, with nothing said after it. `visit-close.sh` stamps the outcome
+word and its one-line reason, reads both back, and only then closes; the
+stamp before the close is on purpose. An open visit carrying `gc.outcome` is
+a sitting whose sign-off already posted and whose only missing write is the
+close, which is the one shape `converse-claim.sh` finishes without posting
+anything. `--reason` is the sentence a board reader reads — why this sitting
+closed — beside the one-word `--outcome` they group by; a held sitting's is
+what it settled.
 ```bash
-gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
-gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
-gc bd close "$VISIT"
+"$CONV/visit-close.sh" --visit "$VISIT" \
+  --outcome "<one-word-outcome>" \
+  --reason "<one line: why this sitting closed>"
 ```
 **If this sitting ROUTED work, file that work as a SIBLING of the
 subject** (`--parent "$PARENT"`, read as at the top of the prompt)

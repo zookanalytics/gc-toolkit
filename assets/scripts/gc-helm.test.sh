@@ -184,13 +184,19 @@ case "$1 ${2:-}" in
     # like a visit that was never stamped. FAKE_OUTCOME_DROP is the write below
     # that exits 0 and yet does not land.
     outcome="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id" 2>/dev/null || true)"
+    # gc.outcome_reason reads back the same way, from FAKE_OUTCOME_DIR/<id>.reason.
+    # dismiss reads it back beside gc.outcome, so a reason that lands empty while
+    # the outcome lands is caught before the irreversible close. FAKE_OUTCOME_REASON_DROP
+    # is the write below that exits 0 and yet does not land — the reason lost on
+    # its own, which is the drop the read-back must refuse the close on.
+    outcome_reason="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reason" 2>/dev/null || true)"
     # A visit id (v-*) answers with its fixture row from FAKE_STEPS_JSON, so a
     # verb handed a VISIT (the board lists parked visits as rows of their own)
     # sees task_kind=visit and the subject it tracks, the way the store would.
     # gc.outcome still reads back from FAKE_OUTCOME_DIR, as for any bead.
     case "$id" in v-*)
-      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" \
-            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
+      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" --arg or "$outcome_reason" \
+            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc | .metadata["gc.outcome_reason"] = $or ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
          && [ "$vrow" != "[]" ]; then
         printf '%s\n' "$vrow"; exit 0
       fi ;;
@@ -207,8 +213,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -261,6 +267,16 @@ case "$1 ${2:-}" in
           case "${FAKE_OUTCOME_DROP:-}" in
             1) ;;
             *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
+          esac ;;
+        # gc.outcome_reason lands beside gc.outcome so the read-back sees the
+        # headline the board shows for a no-takeaway close. FAKE_OUTCOME_REASON_DROP=1
+        # loses every one though the call exits 0 — the reason dropped while the
+        # outcome lands, no repair write recovering it — so the read-back must
+        # refuse the close on the reason alone.
+        gc.outcome_reason=*)
+          case "${FAKE_OUTCOME_REASON_DROP:-}" in
+            1) ;;
+            *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome_reason=}" > "$FAKE_OUTCOME_DIR/$3.reason" ;;
           esac ;;
         # gc.execution_routed_to is CLEARED via --unset-metadata, so its token
         # arrives bare (no =value). A landed clear empties FAKE_EXEC, so the
@@ -1615,7 +1631,7 @@ eq "$(grep -c '^bd close v-NOSTAMP' "$TMP/closes" || true)" "0" \
 eq "$(grep -c '^bd update A-STAMPLESS' "$TMP/updates" || true)" "0" \
    "(DISMISS-UNSTAMPED) …and the subject is never written"
 eq "$NRC" "4" "(DISMISS-UNSTAMPED) …and the run fails, so a caller cannot read it as a dismiss"
-if grep -q 'could not stamp gc.outcome on visit v-NOSTAMP; it was NOT closed' <<< "$NOUT"; then
+if grep -q 'could not stamp the outcome on visit v-NOSTAMP; it was NOT closed' <<< "$NOUT"; then
     ok "(DISMISS-UNSTAMPED) …and it names the visit and says the close was withheld"
 else
     bad "(DISMISS-UNSTAMPED) the refused stamp reads as a warning beside a close that happened anyway (got: $NOUT)"
@@ -1643,7 +1659,7 @@ eq "$(grep -c '^bd update v-DROP --set-metadata gc.outcome=dismissed' "$TMP/upda
 eq "$(grep -c '^bd update A-DROP' "$TMP/updates" || true)" "0" \
    "(DISMISS-DROPPED) …and the subject is never written"
 eq "$DRPRC" "4" "(DISMISS-DROPPED) …and the run fails, so a caller cannot read it as a dismiss"
-if grep -q "gc.outcome on visit v-DROP read back as '<empty>', not 'dismissed'" <<< "$DRPOUT"; then
+if grep -q "visit v-DROP did not read back (gc.outcome='<empty>'" <<< "$DRPOUT"; then
     ok "(DISMISS-DROPPED) …and it names the read-back that came up empty"
 else
     bad "(DISMISS-DROPPED) the silent drop reads as a close that happened anyway (got: $DRPOUT)"
@@ -1652,6 +1668,38 @@ if grep -q 'was NOT dismissed' <<< "$DRPOUT"; then
     ok "(DISMISS-DROPPED) …and it says the subject was not dismissed"
 else
     bad "(DISMISS-DROPPED) the refusal is not stated as one (got: $DRPOUT)"
+fi
+
+# (DISMISS-REASON-DROPPED) the read-back covers the reason as well as the
+# outcome. gc.outcome_reason is the headline the board shows a no-takeaway close
+# by (board.Sitting.Headline in services/helm/internal/board/model.go), and an
+# empty one drops the row to the subject's bare title. So a store that lands
+# gc.outcome=dismissed but silently drops gc.outcome_reason — the exit-0 write
+# that does not persist — must still withhold the close, the same both-stamp
+# guard visit-close.sh applies. Read back on the outcome alone, the close would
+# proceed and the sitting would end illegibly. v-DROP is unassigned, so its close
+# would otherwise succeed; the dropped reason is the only thing withholding it,
+# which isolates the reason read-back from a close that would have failed anyway.
+# The outcome files are shared across dismiss cases, so clear them first: this
+# case needs the outcome to LAND while only the reason drops.
+: > "$TMP/updates"; : > "$TMP/closes"
+rm -f "$TMP/outcomes/v-DROP" "$TMP/outcomes/v-DROP.reason"
+RDRC=0
+RDOUT="$(FAKE_OUTCOME_REASON_DROP=1 sh "$SCRIPT" dismiss A-DROP 2>&1)" || RDRC=$?
+eq "$(grep -c '^bd close v-DROP' "$TMP/closes" || true)" "0" \
+   "(DISMISS-REASON-DROPPED) a reason that exits 0 but does not land leaves the visit unclosed"
+eq "$(grep -c '^bd update v-DROP --set-metadata gc.outcome=dismissed' "$TMP/updates" || true)" "2" \
+   "(DISMISS-REASON-DROPPED) …read back and written once more before it is given up on"
+eq "$RDRC" "4" "(DISMISS-REASON-DROPPED) …and the run fails, so a caller cannot read it as a dismiss"
+if grep -q "visit v-DROP did not read back (gc.outcome='dismissed', gc.outcome_reason='<empty>')" <<< "$RDOUT"; then
+    ok "(DISMISS-REASON-DROPPED) …and it names the reason as the stamp that came up empty while the outcome landed"
+else
+    bad "(DISMISS-REASON-DROPPED) the dropped reason reads as a close that happened anyway (got: $RDOUT)"
+fi
+if grep -q 'was NOT dismissed' <<< "$RDOUT"; then
+    ok "(DISMISS-REASON-DROPPED) …and it says the subject was not dismissed"
+else
+    bad "(DISMISS-REASON-DROPPED) the refusal is not stated as one (got: $RDOUT)"
 fi
 
 # (DISMISS-BLIND) a visit lookup that did not ANSWER is not a subject with no
