@@ -35,6 +35,15 @@
 # Caller: the converse prompt's claim loop.
 set -u
 
+# The one definition of what subject a visit covers (its tracks-edge identity,
+# gc.continuation_group stamp as fallback), shared with gc-helm.sh, converse-fold
+# .sh and the sweeps. Exposes $VISIT_IDENTITY_JQ. The recovery below stays scoped
+# to task_kind=visit — tracks is not a visit-only edge, so a non-visit must not
+# borrow a group from it.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || { echo "converse-claim: cannot source visit-identity.sh from $HERE" >&2; exit 3; }
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -122,12 +131,9 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 # writer-side loss (tk-ax6y4) is repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
     GROUP=$(printf '%s' "$BEAD_JSON" \
-        | jq -r 'if type == "array" then (.[0] // {}) else {} end
+        | jq -r "$VISIT_IDENTITY_JQ"'if type == "array" then (.[0] // {}) else {} end
                  | select(((.metadata // {}).task_kind // "") == "visit")
-                 | [ ((.dependencies // [])[]?
-                       | select((((.type // .dependency_type // "") | tostring)) == "tracks")
-                       | ((.depends_on_id // .id // "") | tostring)) ]
-                 | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf '')
+                 | visit_subject' 2>/dev/null || printf '')
     [ -n "$GROUP" ] && echo "$PROG: the claim reported no continuation group for $BEAD; recovered '$GROUP' from its tracks edge" >&2
 fi
 

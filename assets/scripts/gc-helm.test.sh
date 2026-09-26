@@ -1540,6 +1540,33 @@ else
     bad "(DISMISS-EDGE) an empty group stamp hid the visit (closes: $(cat "$TMP/closes"))"
 fi
 
+# (DISMISS-JSON) --json prints the machine object and NAMES which identity each
+# closed visit matched — the same shared predicate open reports. stdout is pure
+# JSON; the human progress lines move to stderr. A-PARKED matches its visit by
+# the gc.continuation_group stamp; A-EDGE matches by the tracks edge.
+: > "$TMP/updates"; : > "$TMP/closes"
+JOUT="$(sh "$SCRIPT" dismiss A-PARKED --json 2>"$TMP/jerr")"; JERR="$(cat "$TMP/jerr")"
+if printf '%s' "$JOUT" | jq -e '.subject == "A-PARKED" and .closed == 1 and .ok == true and .matched[0].identity == "continuation_group"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) --json names the matched identity (continuation_group) and the close count"
+else
+    bad "(DISMISS-JSON) --json object wrong (got: ${JOUT:-<nothing>})"
+fi
+grep -q 'by continuation_group identity' <<< "$JERR" \
+  && ok "(DISMISS-JSON) stderr also names which identity matched" \
+  || bad "(DISMISS-JSON) stderr must name the identity (err: $JERR)"
+if printf '%s' "$JOUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) stdout is a single JSON object, not human text"
+else
+    bad "(DISMISS-JSON) stdout was not clean JSON (got: $JOUT)"
+fi
+: > "$TMP/updates"; : > "$TMP/closes"
+EJOUT="$(sh "$SCRIPT" dismiss A-EDGE --json 2>/dev/null)"
+if printf '%s' "$EJOUT" | jq -e '.matched[0].identity == "tracks"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) an edge-only visit is named as a 'tracks' match"
+else
+    bad "(DISMISS-JSON) edge match identity wrong (got: ${EJOUT:-<nothing>})"
+fi
+
 # (DISMISS-IDEM) a subject with no open visit has no sitting to end and says so,
 # writing nothing.
 : > "$TMP/updates"; : > "$TMP/closes"

@@ -25,6 +25,14 @@
 #           EMPTY when the listing did not read (hold, do not fold)>
 set -u
 
+# The one definition of what subject a visit covers (its tracks-edge identity,
+# gc.continuation_group stamp as fallback), shared with gc-helm.sh and the
+# sweeps. Exposes $VISIT_IDENTITY_JQ. stall_root stays this script's TOPIC/item
+# discriminator below — it is not the identity.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || { echo "converse-fold: cannot source visit-identity.sh from $HERE" >&2; exit 3; }
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -56,11 +64,7 @@ ITEM=$(printf '%s' "$V" | jq -r '.[0].metadata.stall_root // ""')
 # it still carries the subject. Recover it from the edge before using it
 # as a filter — every predicate below keys on it.
 if [ -z "$SUBJECT" ]; then
-  SUBJECT=$(printf '%s' "$V" | jq -r '
-    [ ((.[0].dependencies // [])[]?
-        | select((((.type // .dependency_type // "") | tostring))=="tracks")
-        | ((.depends_on_id // .id // "") | tostring)) ]
-    | map(select(. != "")) | .[0] // ""')
+  SUBJECT=$(printf '%s' "$V" | jq -r "$VISIT_IDENTITY_JQ"'(.[0] // {}) | visit_subject')
 fi
 ITEM="${ITEM:-$SUBJECT}"
 # The item is a bead, because step 5 writes to it. The TOPIC is what
@@ -82,7 +86,7 @@ if [ -z "$SUBJECT" ]; then
 else
   HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
     | scrub \
-    | jq -r --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" '
+    | jq -r --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" "$VISIT_IDENTITY_JQ"'
         def topic($fallback):
           (.metadata.stall_root // "") as $r
           | (.metadata.escalation_key // "") as $k
@@ -91,14 +95,8 @@ else
             else $fallback end;
         [ .[]
           | select((.metadata.task_kind // "")=="visit")
-          | . as $c
-          # a sibling wears the same flaky stamp: read ITS group the same way
-          | (if (($c.metadata // {})["gc.continuation_group"] // "") != ""
-             then (($c.metadata // {})["gc.continuation_group"] // "")
-             else ([ ($c.dependencies // [])[]?
-                     | select((((.type // .dependency_type // "") | tostring))=="tracks")
-                     | ((.depends_on_id // .id // "") | tostring) ]
-                   | map(select(. != "")) | .[0] // "") end) as $cg
+          # a sibling wears the same flaky stamp: read ITS subject the shared way
+          | (visit_subject) as $cg
           | select($cg==$s)
           | select(topic($s)==$t)
           | select((.assignee // "")!="")
