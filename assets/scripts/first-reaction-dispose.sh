@@ -379,15 +379,26 @@ gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
 # above reports success without proving this one key moved, and a silent drop
 # is invisible until the operator meets the wrong affordance — a dropped set
 # files a recommendation visit that offers only Discuss, a dropped stale-clear
-# leaves a superseded Accept executable. So read it back, retry the lone
-# set/unset once, and refuse before the act if it is still wrong; the record
-# stands, so this command re-runs.
+# leaves a superseded Accept executable. So read it back from a valid payload,
+# retry the lone set/unset once, and refuse before the act if it is still wrong
+# — or if the subject cannot be read to prove the key moved; the record stands,
+# so this command re-runs.
 if [ -n "$RECO_TOUCHED" ]; then
+    # Tag the read so an unreadable subject is never mistaken for a proven
+    # clear: "v:<value>" is a valid array payload (<value> empty = key absent),
+    # "u:" is a non-array, error object, empty, or unparseable read whose state
+    # is unknown. gc bd show answers an error OBJECT (not an array) for a subject
+    # it cannot resolve, and a bare "" would collapse that onto "key absent" and
+    # let a dropped stale-clear (RECO_WANT empty) satisfy the guard. So the guard
+    # compares against "v:$RECO_WANT"; a "u:" matches neither the set nor the
+    # clear, and the read-back fails closed.
     reco_now() {
         gc_bd show "$BEAD" --json 2>/dev/null | scrub \
-            | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.recommended_formula"] // "") else "" end' 2>/dev/null || printf ''
+            | jq -r 'if (type == "array" and length > 0) then "v:" + (((.[0].metadata // {})["gc.recommended_formula"]) // "") else "u:" end' 2>/dev/null \
+            || printf 'u:'
     }
-    if [ "$(reco_now)" != "$RECO_WANT" ]; then
+    RECO_OK="v:$RECO_WANT"
+    if [ "$(reco_now)" != "$RECO_OK" ]; then
         if [ -n "$RECO_WANT" ]; then
             gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$RECO_WANT" >/dev/null 2>&1 || true
         else
@@ -395,11 +406,11 @@ if [ -n "$RECO_TOUCHED" ]; then
         fi
     fi
     RECO_GOT="$(reco_now)"
-    if [ "$RECO_GOT" != "$RECO_WANT" ]; then
+    if [ "$RECO_GOT" != "$RECO_OK" ]; then
         if [ -n "$RECO_WANT" ]; then
-            die "the recommendation did not land on $BEAD: gc.recommended_formula reads '${RECO_GOT:-<unset>}', not '$RECO_WANT'. The operator's Accept reads this key, so the act is withheld rather than leave the operator a recommendation visit that offers only Discuss. The record stands — clear the cause and re-run this command."
+            die "the recommendation did not land on $BEAD: gc.recommended_formula read back as '$RECO_GOT' (want 'v:$RECO_WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The operator's Accept reads this key, so the act is withheld rather than leave the operator a recommendation visit that offers only Discuss. The record stands — clear the cause and re-run this command."
         else
-            die "the stale recommendation did not clear on $BEAD: gc.recommended_formula still reads '$RECO_GOT'. A Discuss-only ruling must not leave a superseded Accept executable, so the act is withheld. The record stands — clear the cause and re-run this command."
+            die "the stale recommendation did not clear on $BEAD: gc.recommended_formula read back as '$RECO_GOT' (want 'v:' for a proven-absent key; a 'u:' means the subject could not be read, which is not proof it cleared). A Discuss-only ruling must not leave a superseded Accept executable, so the act is withheld. The record stands — clear the cause and re-run this command."
         fi
     fi
 fi

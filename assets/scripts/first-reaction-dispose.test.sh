@@ -65,6 +65,15 @@ case "$1 ${2:-}" in
     printf '{"rigs":[{"name":"gc-toolkit","path":"%s","prefix":"tk"}]}\n' "${FAKE_RIG_PATH:-/nonexistent-rig}" ;;
   "bd show")
     printf 'SHOW %s\n' "$*" >> "$FAKE_LOG"
+    # FAKE_SHOW_UNREADABLE_AFTER_UPDATE models a subject that becomes unreadable
+    # once the record write has landed: the initial subject read (before any
+    # UPDATE) sees the fixture, and every read-back after it returns the non-array
+    # error object gc bd show emits for a subject it cannot resolve. This is the
+    # read the guard must not mistake for a proven-absent key.
+    if [ -n "${FAKE_SHOW_UNREADABLE_AFTER_UPDATE:-}" ] && grep -q '^UPDATE ' "$FAKE_LOG" 2>/dev/null; then
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'
+      exit 0
+    fi
     # Overlay the current gc.recommended_formula state (set by bd update above)
     # onto the fixture, so a read-back sees what the last write actually did.
     _base="${FAKE_SHOW_JSON:-$DEFAULT_SHOW}"
@@ -465,6 +474,22 @@ eq "$RC" "4" "(RECOGUARD) a silently dropped stale-clear refuses the exit"
 hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so the superseded Accept is never left executable"
 has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the stale key that did not clear"
 unset FAKE_DROP_RECO FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests reuse the visit edge
+
+# A stale-clear whose read-back is UNREADABLE — every post-write `bd show`
+# answers the non-array error object gc bd show emits for an unresolvable
+# subject — must fail closed, not read the empty value as a proven clear. The
+# subject last read carried gc.recommended_formula=mol-old, so accepting the
+# unreadable read (want empty) would leave a superseded Accept executable. This
+# is distinct from the dropped-write case above: the write is not modelled as
+# dropped, the subject simply cannot be read back to prove it moved.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"ruling","gc.recommended_formula":"mol-old"}}]'
+export FAKE_SHOW_UNREADABLE_AFTER_UPDATE=1
+run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
+    --takeaway "needs a ruling: which default" --visit tk-visit1
+eq "$RC" "4" "(RECOGUARD) an unreadable stale-clear read-back refuses the exit"
+hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so a stale Accept cannot slip through an unreadable read"
+has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the key it could not prove cleared"
+unset FAKE_SHOW_UNREADABLE_AFTER_UPDATE FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON for later ruling tests
 
 # --recommended-formula belongs to the ruling exit only: the other three route,
 # hold, or close the bead, none gates a visit the operator Accepts.
