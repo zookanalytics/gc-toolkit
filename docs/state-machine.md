@@ -419,8 +419,8 @@ commit ([Green survives new commits](#gates), the bug tk-4zsj1p) cannot read the
 label settled.
 
 The label is workflow state and never says a PR may merge: machine readiness
-rides `pr.machine` and the draft flag, the two-signal split
-[specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md) works out.
+rides `pr.machine`, and the draft flag is a CI-cost lever rather than a second
+signal ([specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md)).
 `assets/scripts/pr-status-label.sh` is the single writer; `pr-open.sh` sets it at
 open, `signoff.sh` flips it on each verdict, and `pr-facts.sh` reconciles it every
 pass so a missed event self-heals. Every write is pinned to the origin, and a
