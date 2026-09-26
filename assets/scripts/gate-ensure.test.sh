@@ -614,6 +614,36 @@ oid r1c > "$GH_DIR/head_polecat_r1c"
 out=$(run)
 has "$out" "1 reviews dispatched" "a closed rework child no longer withholds the review"
 
+echo "# a landed fix unit's must-fix finding is closed, so quiescence clears and the wedged anchor re-gates"
+# The pre_open_gate deadlock: the fix unit closed having pushed its fix onto the
+# branch, but the must-fix finding it answered was left open, and clause (a)
+# holds the re-gate on that open finding forever. gate-ensure closes the finding
+# whose blockers have all closed, so quiescence clears and the re-gate dispatches.
+store "[$(anchor W1 pre_open_gate codex "" polecat/w1),
+        $(mustfix find-w1 W1),
+        $(rework_kid fix-w1 rev-w1 closed)]"
+printf 'find-w1|blocks|W1\n'      >> "$STUB_DEPS"  # the must-fix finding holds the anchor
+printf 'fix-w1|blocks|find-w1\n'  >> "$STUB_DEPS"  # its fix unit blocks it (close ordering)
+printf 'fix-w1|blocks|W1\n'       >> "$STUB_DEPS"  # the fix unit's second edge, onto the anchor
+oid w1 > "$GH_DIR/head_polecat_w1"
+: > "$STUB_GC_LOG"
+out=$(run)
+eq "$(bstatus find-w1)" "closed" "gate-ensure closes the must-fix finding once its fix unit has landed"
+hasnt "$out" "quiesced (open must-fix finding find-w1)" "…so the landed fix no longer holds the re-gate"
+has "$out" "1 reviews dispatched" "…and the wedged anchor re-gates"
+
+echo "# …but a must-fix finding whose fix unit is still IN FLIGHT is left open (not closed early)"
+store "[$(anchor W2 pre_open_gate codex "" polecat/w2),
+        $(mustfix find-w2 W2),
+        $(rework_kid fix-w2 rev-w2 open)]"
+printf 'find-w2|blocks|W2\n'     >> "$STUB_DEPS"
+printf 'fix-w2|blocks|find-w2\n' >> "$STUB_DEPS"
+printf 'fix-w2|blocks|W2\n'      >> "$STUB_DEPS"
+oid w2 > "$GH_DIR/head_polecat_w2"
+out=$(run)
+eq "$(bstatus find-w2)" "open" "an in-flight fix unit's finding is left open"
+has "$out" "0 reviews dispatched" "…and the fix unit still in flight quiesces the anchor"
+
 echo "# …and an unreadable quiescence probe holds the dispatch, fail-closed"
 store "[$(anchor R1u pull_request codex "" polecat/r1u)]"
 oid r1u > "$GH_DIR/head_polecat_r1u"

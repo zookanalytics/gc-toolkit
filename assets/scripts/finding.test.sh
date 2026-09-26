@@ -136,5 +136,29 @@ eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the approve
 eq "$(bstatus "$F2")" "closed" "close-unvalidated closes the unvalidated finding"
 eq "$(bstatus "$F1")" "open" "close-unvalidated leaves the must-fix finding for the validator/fix unit"
 
+# ---------------------------------------------------------------------------
+# close-answered: the must-fix finding closes once its fix unit LANDS (every
+# blocks-blocker closed), which is what releases the re-gate quiescence and
+# unwedges a pre_open_gate anchor. FU (wired above) blocks the must-fix F1.
+# ---------------------------------------------------------------------------
+eq "$(bstatus "$F1")" "open" "the must-fix finding is open with its fix unit still in flight"
+"$SUT" close-answered --anchor tk-anc
+eq "$(bstatus "$F1")" "open" "close-answered leaves a finding whose fix unit has NOT landed"
+# The fix unit lands: its rework bead closes having pushed the fix to the branch.
+gc bd update "$FU" --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-anc
+eq "$(bstatus "$F1")" "closed" "close-answered closes the must-fix finding once its fix unit landed"
+has "$(notes "$F1")" "fix unit landed" "the close records why the finding was resolved"
+# Quiescence clears: gate-ensure's open-must-fix now finds nothing on the
+# anchor, so the re-gate the open finding held is free to dispatch.
+if "$SUT" open-must-fix --anchor tk-anc >/dev/null; then bad "open-must-fix still holds the re-gate after the finding closed"; else ok "quiescence clears once the answered finding closes, so the anchor re-gates"; fi
+
+# A must-fix finding NO fix unit blocks is an objection nothing has answered
+# yet: close-answered must leave it open, or it drops the objection.
+F6=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/new.sh:go()" --message "guard the nil deref")
+"$SUT" set-disposition --finding "$F6" --anchor tk-anc --disposition must-fix
+"$SUT" close-answered --anchor tk-anc
+eq "$(bstatus "$F6")" "open" "close-answered leaves a must-fix finding no fix unit blocks (unanswered objection)"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

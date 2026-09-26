@@ -61,12 +61,16 @@ the cadence — the arms run whether or not any refinery session is awake.
    lane, a fix unit in flight, a validation pass in flight, or a full review
    already in flight on the lane — which is the QUIESCENCE predicate one
    authority computes so it cannot disagree with itself about whether a review
-   was already out. A review that read a mid-change diff would raise only the
-   no-op rework the declination texts are full of. There is no dispatch
+   was already out. The same authority also releases that hold: it closes a
+   `must-fix` finding once every fix unit answering it has closed, so a fix that
+   has landed on the branch stops holding the re-gate rather than wedging the
+   anchor at `pre_open_gate`. A review that read a mid-change diff would raise
+   only the no-op rework the declination texts are full of. There is no dispatch
    ceiling: quiescence forbids the redundant round a ceiling would have bounded,
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
-   filed with its edge reversed — stop the PR moving and are caught by
-   `liveness-sweep.sh`'s stale-gate pass, not a count on the gate.
+   filed with its edge reversed, a landed fix whose finding that release missed
+   — stop the PR moving and are caught by `liveness-sweep.sh`'s stale-gate pass,
+   not a count on the gate.
    **rc=3 is the designed interlock**: it holds `merge.sh` for this
    pass — an anchor whose gates are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
