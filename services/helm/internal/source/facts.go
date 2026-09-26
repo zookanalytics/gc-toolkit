@@ -103,6 +103,7 @@ func (s *BeadsSource) rigSittings(ctx context.Context, st beadStore, r rigRef, g
 		}
 	}
 
+	s.resolveEdgeSubjects(ctx, st, r, g, out)
 	s.attributeTakeaways(ctx, st, r, g, out, now)
 	return out
 }
@@ -118,6 +119,7 @@ func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 		Status:   string(iss.Status),
 		Outcome:  md["gc.outcome"],
 		Session:  md["gc.session_name"],
+		Assignee: iss.Assignee,
 		OpenedAt: iss.CreatedAt,
 	}
 	// A visit exists from the moment it is filed, but the CONVERSATION starts
@@ -131,6 +133,60 @@ func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 		st.ClosedAt = iss.ClosedAt.UTC()
 	}
 	return st
+}
+
+// resolveEdgeSubjects fills the Subject of any sitting whose gc.continuation_group
+// stamp is empty from the visit's tracks edge. A visit records its subject twice —
+// the stamp and a `tracks` edge to the subject — and gate-visit can leave the stamp
+// empty while the edge stands, so the projection reads the stamp first and the edge
+// when it is empty, the way gc-helm.sh accept and dismiss resolve the same subject.
+// An unresolved Subject would never match its recommendation subject in the board's
+// unengagedVisit test, so the row would render without the Accept affordance.
+//
+// One batched read over only the stamp-less visits: a board whose visits all carry
+// the stamp spends nothing here. A failed read narrows the join and is noted
+// partial, the same best-effort direction as every other join in this file.
+func (s *BeadsSource) resolveEdgeSubjects(ctx context.Context, st beadStore, r rigRef, g *gatherState, sittings []board.Sitting) {
+	var ids []string
+	for i := range sittings {
+		if sittings[i].Subject == "" {
+			ids = append(ids, sittings[i].ID)
+		}
+	}
+	if ids = uniqueStrings(ids); len(ids) == 0 {
+		return
+	}
+	recs, err := st.GetDependencyRecordsForIssues(ctx, ids)
+	if err != nil {
+		g.note(true, []string{"visit-subjects@" + r.name + ": " + err.Error()})
+		return
+	}
+	for i := range sittings {
+		if sittings[i].Subject != "" {
+			continue
+		}
+		if subj := trackedSubject(recs[sittings[i].ID]); subj != "" {
+			sittings[i].Subject = subj
+		}
+	}
+}
+
+// trackedSubject returns the one subject a visit's tracks edge names, or "" when the
+// edge is absent or names more than one. gate-visit files exactly one tracks edge
+// from a visit to its subject, so a second target is a malformed visit the board
+// declines to guess about — the fail-closed rule convoyMembers applies to a convoy's
+// members.
+func trackedSubject(ds []*beads.Dependency) string {
+	var subjects []string
+	for _, d := range ds {
+		if d != nil && string(d.Type) == "tracks" {
+			subjects = append(subjects, d.DependsOnID)
+		}
+	}
+	if subjects = uniqueStrings(subjects); len(subjects) == 1 {
+		return subjects[0]
+	}
+	return ""
 }
 
 // attributeTakeaways fills in the two things a row reads off its SUBJECT bead,

@@ -517,7 +517,20 @@ func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 	}
 	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(acceptCell(t), colNeedsMax)+"\n")
+}
+
+// acceptCell prefixes a row's needs with a compact affordance marker when the
+// row can be Accepted — a recommendation the operator can dispatch and dismiss
+// in one order, the extra move it offers over a discuss-only gate. The marker
+// only flags the affordance; the verb is in the legend and the formula in
+// --json (Tile.AcceptFormula), since the takeaway a recommendation row carries
+// already names it at a glance.
+func acceptCell(t board.Tile) string {
+	if t.Acceptable {
+		return "accept ▸ " + t.Needs
+	}
+	return t.Needs
 }
 
 // nmCell is the "N/M" progress cell. "—" means THIS ROW has no roll-up, not that
@@ -574,8 +587,8 @@ func familyBanner(root board.Tile) string {
 		glyph = "●"
 	}
 	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", glyph, root.ID, root.Kind, nmCell(root), root.Frontier)
-	if root.Needs != "" {
-		line += " · " + root.Needs
+	if n := acceptCell(root); n != "" {
+		line += " · " + n
 	}
 	return clip(line, colHeld+2+colNeedsMax)
 }
@@ -589,7 +602,7 @@ func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
 	}
 	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(t.Section, colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(acceptCell(t), colNeedsMax)+"\n")
 }
 
 // renderFamilyLegend is the overview's trailer: what a family is, and what the
@@ -602,6 +615,7 @@ func renderFamilyLegend(w io.Writer) {
 	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy\n")
+	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
 }
 
 // clusterMemberCap bounds how many members a folded cluster spells out before it
@@ -672,6 +686,7 @@ func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. A row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
+	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
 }
 
 // Sitting column widths. SUBJECT and OUTCOME are minimums sized to content by

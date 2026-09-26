@@ -422,6 +422,21 @@ type Tile struct {
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
+
+	// Acceptable marks a recommendation row: the subject carries a
+	// gc.recommended_formula AND its visit is un-engaged, so a person can Accept
+	// it — dispatch that formula at the subject and dismiss the visit in one
+	// procedural order, no sitting required. A live sitting suppresses it (the
+	// operator is deciding by hand) and leaving without a ruling restores it;
+	// [unengagedVisit] is that derivation. It rides beside Held, which cannot
+	// carry it: Held is true for any visit, engaged or not. Discuss (engage) is
+	// always available; Accept is the extra move a recommendation row offers.
+	Acceptable bool `json:"acceptable"`
+
+	// AcceptFormula is the gc.recommended_formula Accept would dispatch, named on
+	// the wire so a surface can say WHAT accepting does without re-reading the
+	// subject bead. Empty exactly when Acceptable is false.
+	AcceptFormula string `json:"accept_formula"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —
@@ -458,6 +473,14 @@ type Sitting struct {
 	// Session is the converse session that ran the sitting (gc.session_name),
 	// which is what an operator attaches to while it is still open.
 	Session string `json:"session"`
+
+	// Assignee is the visit bead's assignee. engage binds the visit by assignee
+	// while it is still open, before the hook claim promotes it to in_progress
+	// and stamps Session; an open visit with an assignee is therefore a pending
+	// engagement a sitting is about to hold, which [unengagedVisit] treats as
+	// engaged so it suppresses Accept in that window. It is a derivation input,
+	// not part of the record the web renders, so it carries no wire tag.
+	Assignee string `json:"-"`
 
 	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back
 	// to the bead's creation time for a visit that was never claimed. ClosedAt
