@@ -122,9 +122,9 @@ lacks "the rote Ended (<outcome>) sign-off tag is gone" 'Ended (<one-word-outcom
     "the sign-off is a plain-language wrap-up, not a fixed two-line tag"
 lacks "the rote Look at: <subject-id> pointer is gone" 'Look at: <subject-id>' "$SK_SETTLE" \
     "a converse names another bead only where the substance leads there, as prose"
-have "the outcome stamp is still verified before the close" \
-    "jq -e '.[0].metadata[\"gc.outcome\"] // empty'" "$SK_SETTLE"
-have "close step still closes only the visit" 'gc bd close "$VISIT"' "$SK_SETTLE"
+have "the close goes through the shared guarded close (visit-close.sh), which stamps the outcome and its reason, verifies both, then closes" \
+    'visit-close.sh' "$SK_SETTLE"
+have "the guarded close names only the visit" '--visit "$VISIT"' "$SK_SETTLE"
 
 # THE ORDER, not the presence (tk-747cl). Closing the visit removes the
 # session's last wake reason, and the no-wake-reason drain pinned further down
@@ -142,28 +142,23 @@ if [ -z "$STEP7" ]; then
 else
     ok "step 7 is still extractable"
     # A close that is missing entirely reports close@none and fails here too:
-    # deleting the close is not a way to satisfy an ordering check.
+    # deleting the close is not a way to satisfy an ordering check. The stamp,
+    # its readback, and the close are now one act inside visit-close.sh, so the
+    # line to order against the sign-off is that call: visit-close.sh stamps
+    # gc.outcome (the marker converse-claim.sh reads to finish a stranded visit)
+    # immediately before it closes, so the stamp lands after the sign-off
+    # whenever the CALL does. A call ahead of the sign-off reopens the original
+    # bug — a death between the stamp and the sign-off strands a visit that then
+    # finishes silently, dropping the sign-off it still owed (tk-ayd4c0) — and a
+    # sign-off written after the close lands in a pane the drain is already
+    # taking (tk-747cl).
     s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF '<subject-id> — <short human label>' | head -1 | cut -d: -f1)
-    s7_stamp=$(printf '%s\n' "$STEP7" | grep -nF 'gc.outcome=<one-word-outcome>' | head -1 | cut -d: -f1)
-    s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'gc bd close "$VISIT"' | head -1 | cut -d: -f1)
+    s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'visit-close.sh' | head -1 | cut -d: -f1)
     if [ -n "$s7_signoff" ] && [ -n "$s7_close" ] && [ "$s7_signoff" -lt "$s7_close" ]; then
-        ok "the sign-off is posted BEFORE the visit is closed"
+        ok "the sign-off is posted BEFORE the guarded close stamps and closes"
     else
-        bad "the sign-off is posted BEFORE the visit is closed" \
-            "sign-off@${s7_signoff:-none} close@${s7_close:-none} — a sign-off written after the close lands in a pane the drain is already taking (tk-747cl)"
-    fi
-    # The outcome stamp is the marker converse-claim.sh reads to finish a
-    # stranded visit without posting anything, so it must land AFTER the
-    # sign-off and immediately before the close. A stamp ahead of the sign-off
-    # reopens the original bug: a death between the stamp and the sign-off
-    # strands a visit that then finishes silently, dropping the sign-off it
-    # still owed (tk-ayd4c0).
-    if [ -n "$s7_signoff" ] && [ -n "$s7_stamp" ] && [ -n "$s7_close" ] \
-       && [ "$s7_signoff" -lt "$s7_stamp" ] && [ "$s7_stamp" -lt "$s7_close" ]; then
-        ok "the outcome stamp lands after the sign-off and before the close"
-    else
-        bad "the outcome stamp lands after the sign-off and before the close" \
-            "sign-off@${s7_signoff:-none} stamp@${s7_stamp:-none} close@${s7_close:-none} — a stamp ahead of the sign-off lets converse-claim.sh finish a visit whose sign-off never posted (tk-ayd4c0)"
+        bad "the sign-off is posted BEFORE the guarded close stamps and closes" \
+            "sign-off@${s7_signoff:-none} close@${s7_close:-none} — a stamp/close ahead of the sign-off drops the sign-off it owed (tk-ayd4c0/tk-747cl)"
     fi
 fi
 # The heading and the procedure disagreed for as long as the bug existed, and

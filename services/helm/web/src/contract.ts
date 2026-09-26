@@ -261,6 +261,15 @@ export interface Sitting {
    * sitting reading `dismissed` until it is closed or signed off over.
    */
   outcome: string;
+  /**
+   * The one-line human-readable sentence naming WHY the visit closed
+   * (`gc.outcome_reason`): "moot: premise died, subject already closed",
+   * "folded into <holder>", or what a held sitting signed off on. `outcome` is
+   * the word to group by; this is the sentence to read, so a dedup close reads
+   * as a decision rather than a dropped need. `''` when the writer stamped only
+   * the word.
+   */
+  outcome_reason: string;
   /** The converse session that ran it — what an operator attaches to. */
   session: string;
   /** RFC 3339. Omitted when the source could not read the stamp. */

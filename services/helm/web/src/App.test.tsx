@@ -91,6 +91,7 @@ const SITTINGS: Sitting[] = [
     title: 'visit: tk-epic — what the canvas owes the operator',
     status: 'in_progress',
     outcome: '',
+    outcome_reason: '',
     session: 'gc-toolkit__converse-1',
     opened_at: '2026-08-21T18:34:00Z',
     takeaway: '',
@@ -103,6 +104,7 @@ const SITTINGS: Sitting[] = [
     title: 'visit: tk-yps55 — the raw script path',
     status: 'closed',
     outcome: 'diagnosed',
+    outcome_reason: '',
     session: 'gc-toolkit__converse-2',
     opened_at: '2026-08-21T17:20:00Z',
     closed_at: '2026-08-21T17:54:00Z',
@@ -448,6 +450,42 @@ it('shows running sittings and recently closed ones with their outcome', async (
   expect(within(done).getByText('the raw-path launcher finding')).toBeTruthy();
 });
 
+it('shows a dedup close’s outcome reason as its headline when it left no takeaway', async () => {
+  const deduped: Board = {
+    ...BOARD,
+    sittings: [
+      {
+        id: 'tk-vst10',
+        rig: 'gc-toolkit',
+        subject: 'tk-epic',
+        title: 'visit: tk-epic — the pool-offer line that says nothing',
+        status: 'closed',
+        outcome: 'moot',
+        outcome_reason: 'moot: premise died, subject already closed',
+        session: 'gc-toolkit__converse-10',
+        opened_at: '2026-08-21T18:34:00Z',
+        closed_at: '2026-08-21T18:40:00Z',
+        takeaway: '',
+        subject_title: 'the attention-canvas epic topic',
+      },
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(deduped), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(region('converse sittings')).toBeTruthy());
+
+  const row = within(region('converse sittings')).getByText('tk-vst10').closest('tr') as HTMLElement;
+  expect(within(row).getByText('moot')).toBeTruthy();
+  // No takeaway: the headline is the outcome reason (why it closed), so the
+  // dedup close reads as a decision rather than falling back to the topic.
+  expect(within(row).getByText('moot: premise died, subject already closed')).toBeTruthy();
+  expect(within(row).queryByText(/the pool-offer line that says nothing/)).toBeNull();
+});
+
 it('shows the outcome on a running sitting a dismissal stamped but could not close', async () => {
   const stuck: Board = {
     ...BOARD,
@@ -459,6 +497,7 @@ it('shows the outcome on a running sitting a dismissal stamped but could not clo
         title: 'visit: tk-epic — the operator ended it from the board',
         status: 'in_progress',
         outcome: 'dismissed',
+        outcome_reason: '',
         session: 'gc-toolkit__converse-9',
         opened_at: '2026-08-21T18:34:00Z',
         takeaway: '',
@@ -794,13 +833,13 @@ const MULTI_RIG: Board = {
   sittings: [
     {
       id: 'tk-vs-gct', rig: 'gc-toolkit', subject: 'tk-gct', title: 'visit: tk-gct',
-      status: 'closed', outcome: 'diagnosed', session: 'gc-toolkit__converse-1',
+      status: 'closed', outcome: 'diagnosed', outcome_reason: '', session: 'gc-toolkit__converse-1',
       opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
       takeaway: '', subject_title: 'the gc-toolkit topic',
     },
     {
       id: 'tk-vs-gcy', rig: 'gascity', subject: 'tk-gcy', title: 'visit: tk-gcy',
-      status: 'closed', outcome: 'diagnosed', session: 'gascity__converse-1',
+      status: 'closed', outcome: 'diagnosed', outcome_reason: '', session: 'gascity__converse-1',
       opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
       takeaway: '', subject_title: 'the gascity topic',
     },

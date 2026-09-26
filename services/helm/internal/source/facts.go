@@ -111,14 +111,15 @@ func (s *BeadsSource) rigSittings(ctx context.Context, st beadStore, r rigRef, g
 func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 	md := decodeMetadata(iss.Metadata)
 	st := board.Sitting{
-		ID:       iss.ID,
-		Rig:      r.name,
-		Subject:  md["gc.continuation_group"],
-		Title:    iss.Title,
-		Status:   string(iss.Status),
-		Outcome:  md["gc.outcome"],
-		Session:  md["gc.session_name"],
-		OpenedAt: iss.CreatedAt,
+		ID:            iss.ID,
+		Rig:           r.name,
+		Subject:       md["gc.continuation_group"],
+		Title:         iss.Title,
+		Status:        string(iss.Status),
+		Outcome:       md["gc.outcome"],
+		OutcomeReason: md["gc.outcome_reason"],
+		Session:       md["gc.session_name"],
+		OpenedAt:      iss.CreatedAt,
 	}
 	// A visit exists from the moment it is filed, but the CONVERSATION starts
 	// when a converse session claims it, and a visit can wait in the pool for

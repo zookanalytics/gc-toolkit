@@ -392,10 +392,11 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                     "dismissed", the signal that the sitting is stuck open and
                     needs a manual close. */}
                 <td>{s.outcome || '—'}</td>
-                {/* The takeaway is what the sitting concluded; with none, the
-                    subject's title (the topic) rather than the visit bead's own
-                    generic title, which says nothing. */}
-                <td>{s.takeaway || s.subject_title || s.title}</td>
+                {/* The takeaway is what the sitting concluded; with none, a
+                    dedup close shows its outcome reason (why it closed), then
+                    the subject's title (the topic) rather than the visit bead's
+                    own generic title, which says nothing. */}
+                <td>{s.takeaway || s.outcome_reason || s.subject_title || s.title}</td>
               </tr>
             );
           })}

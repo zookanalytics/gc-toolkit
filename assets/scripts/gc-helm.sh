@@ -2053,14 +2053,14 @@ cmd_dismiss() {
         # close ladder. The close is irreversible to this verb, so a silently
         # dropped stamp would otherwise close the visit into the unreportable
         # state this precondition exists to prevent.
-        if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" >/dev/null 2>&1; then
+        if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1; then
             sitting_failed=1
             echo "$PROG: dismiss: could not stamp gc.outcome on visit $_v; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
         outcome_got=$(meta_now "$_v" gc.outcome)
         if [ "$outcome_got" != "dismissed" ]; then
-            gc bd update "$_v" --set-metadata "gc.outcome=dismissed" >/dev/null 2>&1 || true
+            gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1 || true
             outcome_got=$(meta_now "$_v" gc.outcome)
         fi
         if [ "$outcome_got" != "dismissed" ]; then
