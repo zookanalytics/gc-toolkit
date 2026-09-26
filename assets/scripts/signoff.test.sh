@@ -58,6 +58,19 @@ shift
 bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id)]' "$STORE"; }
 case "${1:-}" in
   show)
+    # A fresh re-read that fails after an earlier read of the same bead resolved:
+    # STUB_SHOW_DEAD_AFTER "<id> <n> garbage|norows" resolves the id for its first
+    # <n> shows, then returns dead output; STUB_SHOW_CNT counts the shows.
+    if [ -s "${STUB_SHOW_DEAD_AFTER:-/dev/null}" ]; then
+      read -r _did _lim _dmode < "$STUB_SHOW_DEAD_AFTER"
+      if [ "$2" = "$_did" ]; then
+        _c=$(cat "${STUB_SHOW_CNT:?}" 2>/dev/null); _c=$(( ${_c:-0} + 1 )); printf '%s' "$_c" > "$STUB_SHOW_CNT"
+        if [ "$_c" -gt "$_lim" ]; then
+          case "$_dmode" in garbage) printf 'not-json\n' ;; *) echo '{"error":"no issues found"}' ;; esac
+          exit 0
+        fi
+      fi
+    fi
     # A read that stops working only AFTER the delete: keyed on the unset so the
     # SUT's first read of the bead still resolves. Both modes answer the same ''
     # through row_meta that a genuinely cleared key does.
@@ -278,6 +291,10 @@ export STUB_DROP_NOTES="$TMP/dropnotes"
 # "<id> norows|garbage": gc bd show stops resolving that id once the id
 # has been unset, standing in for a read-back the store cannot answer.
 export STUB_SHOW_DEAD="$TMP/showdead"
+# "<id> <n> garbage|norows": gc bd show resolves that id for its first <n>
+# calls, then returns dead output — a fresh re-read that fails after an earlier
+# read of the same bead resolved. STUB_SHOW_CNT counts the shows of that id.
+export STUB_SHOW_DEAD_AFTER="$TMP/showdeadafter" STUB_SHOW_CNT="$TMP/showcnt"
 # Fixture oids are 40 lowercase hex — the grammar signoff.sh enforces before it
 # stamps a marker; sha1sum mints a labelled one.
 oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
@@ -300,6 +317,7 @@ reset() { # $1 = anchor json, extra beads appended via $2
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"; : > "$STUB_GH_BODY"
   : > "$STUB_CREATED"; : > "$STUB_UPD_FAIL"; : > "$STUB_UNSET_NOOP"; printf '0' > "$STUB_SEQ"
   : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"; : > "$STUB_DROP_NOTES"
+  : > "$STUB_SHOW_DEAD_AFTER"; : > "$STUB_SHOW_CNT"
   : > "$STUB_FINDING_LOG"
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
@@ -435,6 +453,55 @@ reset "$ANCHOR_PR"; seed_marker "green"
 eq "$rc" 0 "post-open request-changes exits 0"
 eq "$(meta tk-anc check.codex)" "<absent>" "…clearing the lane rather than stamping one"
 eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "…and recording which commit the round judged, so the lane it cleared is still accountable"
+
+echo "# a disposed anchor makes any verdict moot — no rework child, no validation pass, no marker"
+# pr-dispose.sh stamps gc.pr_close_disposition_kind when a PR is withdrawn/superseded.
+# A review dispatched before the disposal can rule after it, and that verdict is moot:
+# the PR will not ship. request-changes must file no rework child and open no
+# validation pass, and approve must stamp no green — either would spawn work on a dead
+# anchor, and the validation pass would hang a blocks edge on the close the disposal
+# awaits. The review closes gc.outcome=moot: not recorded (so it backs no lane green)
+# and not superseded (so gate-ensure pours no fresh review at the live head).
+reset "$ANCHOR_PR"; anchor_meta "gc.pr_close_disposition_kind=not-needed"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes on a disposed anchor exits 0"
+eq "$(cat "$STUB_CREATED")" "" "…minting no rework child and opening no validation pass"
+eq "$(status rv-1)" "closed" "…closing the review the reviewer drains behind"
+eq "$(meta rv-1 gc.outcome)" "moot" "…as moot"
+eq "$(meta rv-1 signoff_verdict)" "<absent>" "…with no signoff_verdict=approve to back a lane green"
+has "$out" "disposed" "…and naming the disposition as the reason"
+
+echo "# …and approve on a disposed anchor stamps no green either"
+reset "$ANCHOR_PR"; anchor_meta "gc.pr_close_disposition_kind=duplicate"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "approve on a disposed anchor exits 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…stamping no green marker on the dead anchor"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and posting no verdict comment to the withdrawn PR"
+eq "$(status rv-1)" "closed" "…closing the review as moot"
+eq "$(meta rv-1 gc.outcome)" "moot" "…so it backs no lane green"
+
+echo "# a disposition re-read that fails is fail-closed — no marker, no rework, review open"
+# The first anchor read resolves; the fresh disposition probe then fails. Absence
+# of the marker is not proof the anchor is live, so an unreadable re-read must not
+# fall through to stamp green or file a rework child on an anchor that may already
+# be disposed. The probe is fail-closed: exit 2, nothing written, review open.
+reset "$ANCHOR_PR"; anchor_meta "gc.pr_close_disposition_kind=superseded"
+printf 'tk-anc 1 garbage\n' > "$STUB_SHOW_DEAD_AFTER"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "an unreadable disposition re-read exits 2"
+eq "$(cat "$STUB_CREATED")" "" "…filing no rework child on the possibly-disposed anchor"
+eq "$(meta tk-anc check.codex)" "<absent>" "…writing no lane state"
+eq "$(status rv-1)" "in_progress" "…leaving the review open for a retry"
+has "$out" "disposition re-read" "…and naming the unreadable probe"
+
+echo "# …and approve is fail-closed on the same unreadable probe"
+reset "$ANCHOR_PR"; anchor_meta "gc.pr_close_disposition_kind=superseded"
+printf 'tk-anc 1 garbage\n' > "$STUB_SHOW_DEAD_AFTER"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 2 "an unreadable disposition re-read exits 2 on approve too"
+eq "$(meta tk-anc check.codex)" "<absent>" "…stamping no green on the possibly-disposed anchor"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and posting no verdict to the PR"
+eq "$(status rv-1)" "in_progress" "…leaving the review open for a retry"
 
 echo "# a record that will not stick stamps nothing"
 reset "$ANCHOR_PR"
