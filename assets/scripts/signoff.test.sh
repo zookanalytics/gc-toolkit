@@ -865,7 +865,7 @@ STUB_AUTOMERGE_JSON='{"autoMergeRequest":{"enabledAt":"x"}}' "$SUT" --review-bea
 hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "armed auto-merge blocks the dismissal"
 unset STUB_PR_HEAD STUB_REVIEWS
 
-# --- request-changes files the objections as findings and wires the fix unit ----
+# --- request-changes files the objections as findings beside the fix unit -------
 echo "# request-changes files findings beside the fix unit"
 reset "$ANCHOR_PR"
 FF="$TMP/findings.json"
@@ -880,7 +880,7 @@ eq "$rc" 0 "request-changes with --findings-file exits 0"
 has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane codex --locus assets/scripts/foo.sh:bar() --message unquoted expansion in the loop" "signoff files the first objection as a finding on the reviewed lane"
 has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane codex --locus docs/x.md --message stale reference to a retired script" "signoff files the second objection as a finding"
 FIX=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
-has "$(cat "$STUB_FINDING_LOG")" "wire-fix-unit --fix-unit $FIX --anchor tk-anc --findings fnd-" "signoff wires the fix unit to the findings it filed"
+hasnt "$(cat "$STUB_FINDING_LOG")" "wire-fix-unit" "signoff does NOT wire the fix unit to the unvalidated findings — the validator hangs that edge as it rules each one must-fix, so a later declined ruling can still close its finding"
 has "$(cat "$STUB_DEPS")" "tk-anc|$FIX|blocks" "the fix unit still blocks the anchor (the merge is held)"
 has "$(meta "$FIX" rejection_reason)" "address the 2 finding(s) this bead blocks" "rejection_reason points the worker at the findings, not the objection prose"
 

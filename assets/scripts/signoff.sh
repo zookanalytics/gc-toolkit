@@ -623,9 +623,9 @@ if [ -z "$FIX_TARGET" ]; then
   exit 2
 fi
 REASON_HEAD=$(head -n 1 "$BODY_FILE" | cut -c1-200)
-# The objections themselves are now the findings this child blocks; the
-# rejection_reason carries the one-line summary and points the resumed worker at
-# the beads, rather than being the whole record.
+# The objections are filed as findings beside this child; the rejection_reason
+# carries the one-line summary and points the resumed worker at the beads, rather
+# than being the whole record.
 if [ "$FINDING_COUNT" -gt 0 ]; then
   REJECTION_REASON="signoff requested changes: address the $FINDING_COUNT finding(s) this bead blocks. $REASON_HEAD"
 else
@@ -714,14 +714,13 @@ if ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
   gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
 fi
 
-# Point the fix unit at every finding it answers: the many-to-one relation and
-# the close ordering (bd refuses to close a blocked issue, so no finding closes
-# before its work does). The anchor edge above already holds the merge, so a
-# missing finding edge costs the finding's later auto-close, never the hold.
-if [ -n "$FINDING_IDS" ]; then
-  "$FINDING" wire-fix-unit --fix-unit "$FIX_BEAD" --anchor "$ANCHOR" --findings "$FINDING_IDS" >/dev/null 2>&1 \
-    || warn "could not wire fix unit $FIX_BEAD to all findings ($FINDING_IDS); the anchor edge still holds the merge"
-fi
+# The fix unit's edges onto the findings it answers are NOT hung here. Every
+# finding is still unvalidated at this point, and a fix unit that blocked one the
+# validator later declines would refuse that finding's close (bd will not close a
+# blocked issue) and stall the validator's triage. The close-ordering edge onto a
+# finding is hung as the validator rules that finding must-fix (finding.sh
+# set-disposition), so the fix unit blocks only the findings it must answer. The
+# anchor edge above is what holds the merge in the meantime.
 
 # Verify the work order — every field the resumed workflow reads — and the
 # blocks edge BEFORE the pour, so a claimed rework can never run against absent

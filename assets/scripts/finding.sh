@@ -41,8 +41,11 @@
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
 # onto every finding it answers (the many-to-one relation and the close
 # ordering), one onto the anchor (the routed live blocker merge.sh already
-# reads). Routing a finding would make each its own claim and break that
-# cardinality.
+# reads). The finding edge is hung as the validator rules that finding
+# must-fix, never at dispatch: a fix unit wired to a still-unvalidated finding
+# would block the very close a later declined ruling needs, and bd refuses to
+# close a blocked issue. Routing a finding would make each its own claim and
+# break that cardinality.
 #
 # Verbs:
 #   finding.sh key           --lane L --locus LOC --message MSG
@@ -52,10 +55,12 @@
 #   finding.sh open-must-fix --anchor A [--lane L]
 #   finding.sh close-unvalidated --anchor A --lane L [--reason R]
 #
-# Callers: signoff.sh (upsert + wire-fix-unit on request-changes,
-# close-unvalidated on approve), the validator (set-disposition), and
-# gate-ensure's quiescence (open-must-fix). Exit 0 on success; a read verb
-# exits 1 when its predicate is false, 2 when the store would not read.
+# Callers: signoff.sh (upsert on request-changes, close-unvalidated on
+# approve), the validator through set-disposition — which hangs the fix unit's
+# edge onto a finding only as it rules that finding must-fix, so the fix unit
+# blocks only the findings it must answer — and gate-ensure's quiescence
+# (open-must-fix). Exit 0 on success; a read verb exits 1 when its predicate is
+# false, 2 when the store would not read.
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -131,6 +136,43 @@ edge_exists() { # <blocker> blocks <blocked> ?  (reads the blocked's down-blocke
   local blocker="$1" blocked="$2"
   bd_json dep list "$blocked" --direction=down -t blocks \
     | jq -e --arg b "$blocker" 'type == "array" and any(.[]?; .id == $b)' >/dev/null 2>&1
+}
+
+# The open fix unit standing on <anchor>, or empty. A fix unit is a live
+# blocks-dep child of the anchor carrying a non-empty source_review_bead — the
+# bead request-changes (or the feedback arm) files and routes to answer the
+# anchor's findings. must-fix wiring reads it to hang the close-ordering edge
+# the fix unit's landing releases; a batch a human answers (a visit-routed feedback
+# batch) has no fix unit, so this is empty and the must-fix finding still holds the
+# merge through its own anchor edge. Non-zero rc = the ledger would not read.
+anchor_fix_unit() { # <anchor-id>
+  local raw
+  raw=$(bd_json dep list "$1" --direction=down -t blocks) || return 2
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  printf '%s' "$raw" | jq -r --arg ls "$LIVE_STATUSES" '
+    ($ls | split(",")) as $live
+    | [ .[]
+        | select(((.status // "open") | ascii_downcase) as $st | ($live | index($st)) != null)
+        | select(((.metadata.source_review_bead // "") | tostring) != "")
+        | .id ] | (.[0] // empty)' 2>/dev/null
+}
+
+# Remove every blocks edge INTO <finding> — the beads that block it. A finding
+# being declined or reclassified deferred holds nothing and answers no work, so
+# nothing may block it: a fix unit wired to it before the validator ruled (or an
+# edge left from an earlier must-fix ruling this pass overturns) would refuse the
+# close with "cannot close blocked issue" and stall the validator's triage.
+# Idempotent and best-effort per edge — the caller's own guard fails closed if the
+# subsequent close does not stick.
+strip_inbound_blocks() { # <finding>
+  local blockers b
+  blockers=$(bd_json dep list "$1" --direction=down -t blocks \
+    | jq -r 'if type == "array" then .[]?.id else empty end' 2>/dev/null)
+  for b in $blockers; do
+    [ -n "$b" ] || continue
+    gc bd dep remove "$1" "$b" >/dev/null 2>&1 \
+      || gc bd dep remove "$b" "$1" >/dev/null 2>&1 || true
+  done
 }
 
 cmd_key() {
@@ -217,6 +259,19 @@ cmd_set_disposition() {
       fi
       edge_exists "$finding" "$anchor" \
         || { warn "$finding does not block $anchor after must-fix wiring"; exit 2; }
+      # The fix unit answers only the findings ruled must-fix, so its close-ordering
+      # edge onto this finding is hung HERE, from the ruling — never at dispatch,
+      # when the finding was still unvalidated and a later declined ruling could not
+      # close it past that block. Wire it when a fix unit stands on the anchor (a
+      # visit-routed feedback batch has none). Best-effort: the finding's own anchor
+      # edge above is the hold, so a fix unit whose edge cannot be hung costs the
+      # close ordering, never the merge hold.
+      local fu
+      fu=$(anchor_fix_unit "$anchor") || fu=""
+      if [ -n "$fu" ] && ! edge_exists "$fu" "$finding"; then
+        cmd_wire_fix_unit --fix-unit "$fu" --anchor "$anchor" --findings "$finding" >/dev/null 2>&1 \
+          || warn "could not hang fix unit $fu --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"
+      fi
       ;;
     deferred)
       # Provenance only, holding nothing: discovered-from is neither
@@ -233,6 +288,11 @@ cmd_set_disposition() {
       fi
       ! edge_exists "$finding" "$anchor" \
         || { warn "$finding still blocks $anchor after deferred reclassification"; exit 2; }
+      # A deferred finding is fresh work picked up after the merge, answered by no
+      # fix unit now, so drop any fix-unit edge a prior must-fix ruling hung onto it
+      # — the deferral holds nothing and nothing may hold it. Retract before adding
+      # the provenance edge so the strip cannot touch discovered-from.
+      strip_inbound_blocks "$finding"
       gc bd dep add "$finding" "$anchor" --type discovered-from >/dev/null 2>&1 \
         || warn "could not wire $finding --discovered-from $anchor (deferred records provenance only)"
       # The deferral REASON is the whole justification for not fixing now, and
@@ -247,12 +307,17 @@ cmd_set_disposition() {
       ;;
     declined)
       # No objection to answer: close it with the reason. A declined finding
-      # holds nothing, so drop any blocks edge it carried before it blocks the
-      # anchor's own close.
+      # holds nothing and nothing holds it, so drop BOTH sides before the close:
+      # its own must-fix hold on the anchor (finding --blocks anchor), and every
+      # blocker wired INTO it. The inbound strip is what the close depends on — a
+      # fix unit wired onto this finding (from an earlier must-fix ruling, or a
+      # dispatch that cross-wired before the validator ran) would make bd refuse
+      # the close with "cannot close blocked issue" and stall the whole triage.
       if edge_exists "$finding" "$anchor"; then
         gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
           || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
       fi
+      strip_inbound_blocks "$finding"
       # A declined HUMAN objection owes its raiser an answer on the PR: the
       # operator read the diff and objected, so overruling them in silence is the
       # gap the peer model closes. Stamp the owed reply BEFORE the close, and fail

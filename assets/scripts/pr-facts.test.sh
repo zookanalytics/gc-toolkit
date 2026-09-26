@@ -1270,25 +1270,25 @@ hasnt "$FID1" "<none>" "the comment becomes a task_kind=finding bead on the anch
 eq "$(meta "$FID1" 'finding.lane')" "human" "…on the human lane the validator's finding query selects (finding.lane == check_name)"
 eq "$(meta "$FID1" 'finding.source')" "human:human1" "…sourced to the login that raised it, whose thread a decline's owed reply is posted back into"
 eq "$(meta "$FID1" 'finding.disposition')" "unvalidated" "…unruled until the validator rules it"
-grep -qxF "new-2|blocks|$FID1" "$STUB_DEPS" && ok "…and the rework child (the fix unit) blocks it, so closing the fix closes the finding" || bad "rework child does not block the finding (wire-fix-unit missing)"
+grep -qxF "new-2|blocks|$FID1" "$STUB_DEPS" && bad "the rework child must NOT block the unvalidated finding at dispatch — a fix unit that blocked one the validator later declines would refuse its close" || ok "the rework child does not block the unvalidated finding; the validator hangs that edge only as it rules the finding must-fix"
+grep -qxF "new-2|blocks|V1" "$STUB_DEPS" && ok "…the rework child still blocks the anchor, so the merge is held" || bad "rework child does not block the anchor (the merge hold is gone)"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "V1")] | length' "$STUB_STORE")" "1" "…one comment, one finding — no twin"
 
-echo "# a wire-fix-unit that fails holds the batch unwatermarked, so the next pass re-attempts the edge"
-# The fix-unit -> finding wire is a required write, not the anchor edge's
-# best-effort companion: a finding later ruled must-fix blocks the anchor, and
-# only this edge lets closing the child release it. A failed wire holds the
-# batch — the finding is filed (upsert re-adopts it next pass) and the mark does
-# not advance past the comment it answers, so the wire is retried before it does.
+echo "# the batch watermarks once findings are filed and the pass is opened — no fix-unit-to-finding wire gates it"
+# The fix-unit -> finding edges are no longer hung at dispatch, so a dep write
+# that would have failed them cannot hold the batch: the findings are filed, the
+# validation pass is opened, and the disposition is watermarked. The validator
+# hangs the close-ordering edge as it rules each finding must-fix.
 store "[$(anchor Vw 87)]"
 printf '%s' "$(prview 87 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_87.json"
 echo '[]' > "$GH_DIR/reviews_87.json"
 printf '[{"id":8870,"user":{"login":"human1"},"body":"still not what I asked for"}]' > "$GH_DIR/comments_87.json"
-out=$(STUB_DEP_FAIL="new-2" run)
-has "$out" "could not wire rework child new-2" "the failed wire is reported, not swallowed"
-has "$out" "NOT watermarking" "…and the batch is held to retry"
-eq "$(meta Vw pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the wire holds, so it retries"
+out=$(run)
+hasnt "$out" "wire rework child" "no fix-unit-to-finding wire is attempted at dispatch"
 FIDW=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "Vw") | .id ] | .[0] // "<none>"' "$STUB_STORE")
-hasnt "$FIDW" "<none>" "…while the finding is already filed, so the next pass re-adopts it rather than twinning"
+hasnt "$FIDW" "<none>" "the comment is filed as a finding"
+grep -qxF "new-2|blocks|$FIDW" "$STUB_DEPS" && bad "the rework child must not block the unvalidated finding" || ok "…which the rework child does not block at dispatch"
+eq "$(meta Vw pr_comment_disposition)" "rework:new-2" "…and the batch watermarks its rework disposition"
 
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic codex,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
@@ -1585,7 +1585,7 @@ grep -qxF "new-2|blocks|P6" "$STUB_DEPS" && ok "…and the child holds the merge
 FID6=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "P6") | .id ] | .[0] // "<none>"' "$STUB_STORE")
 hasnt "$FID6" "<none>" "an operator's CHANGES_REQUESTED produces a finding — the tk-zina89 gap closed"
 eq "$(meta "$FID6" 'finding.source')" "human:human1" "…sourced to the operator who raised it, so it reaches the validator like any finding"
-grep -qxF "new-2|blocks|$FID6" "$STUB_DEPS" && ok "…and a must-fix ruling holds the merge through the fix unit that blocks it" || bad "fix unit does not block the CHANGES_REQUESTED finding"
+grep -qxF "new-2|blocks|$FID6" "$STUB_DEPS" && bad "the child must not block the still-unvalidated CHANGES_REQUESTED finding at dispatch" || ok "…and the child does not block the unvalidated finding; a must-fix ruling is what hangs the fix unit's edge onto it (the merge is held by the child's anchor edge above)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 
 echo "# …the same standing review is not filed twice"

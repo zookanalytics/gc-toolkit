@@ -136,5 +136,42 @@ eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the approve
 eq "$(bstatus "$F2")" "closed" "close-unvalidated closes the unvalidated finding"
 eq "$(bstatus "$F1")" "open" "close-unvalidated leaves the must-fix finding for the validator/fix unit"
 
+# ---------------------------------------------------------------------------
+# set-disposition must-fix hangs the fix unit's close-ordering edge FROM the
+# ruling, so the fix unit blocks ONLY the findings the validator ruled must-fix
+# — never one still unvalidated, which a later declined ruling could not close
+# past that block.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-anc3","status":"open","assignee":"","title":"anchor3","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"fu3","status":"open","assignee":"","title":"Rework: address findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc3","source_review_bead":"rev3"}}]'
+# The fix unit stands on the anchor (holds the merge) before any finding is ruled.
+gc bd dep fu3 --blocks tk-anc3 >/dev/null
+FA=$("$SUT" upsert --anchor tk-anc3 --lane codex --locus "assets/scripts/a.sh:f()" --message "guard the write")
+FB=$("$SUT" upsert --anchor tk-anc3 --lane codex --locus "assets/scripts/b.sh:g()" --message "double-quote the expansion")
+hasnt "$(deps)" "fu3|blocks|$FA" "an unvalidated finding carries no inbound fix-unit block"
+"$SUT" set-disposition --finding "$FA" --anchor tk-anc3 --disposition must-fix
+has "$(deps)" "$FA|blocks|tk-anc3" "must-fix wires the finding --blocks anchor"
+has "$(deps)" "fu3|blocks|$FA" "…and hangs the fix unit's close-ordering edge onto the must-fix finding"
+hasnt "$(deps)" "fu3|blocks|$FB" "the fix unit blocks ONLY the ruled must-fix finding, not the unvalidated one"
+
+# ---------------------------------------------------------------------------
+# Regression: a finding a fix unit blocks is DECLINED and still closes. With the
+# block enforced the way bd enforces it, the earlier one-sided strip left the
+# inbound fix-unit edge and the close failed rc=2, stalling the whole triage.
+# ---------------------------------------------------------------------------
+export STUB_ENFORCE_BLOCKS=1
+FC=$("$SUT" upsert --anchor tk-anc3 --lane codex --locus "assets/scripts/c.sh:h()" --message "nit: rename for clarity")
+"$SUT" wire-fix-unit --fix-unit fu3 --anchor tk-anc3 --findings "$FC"
+has "$(deps)" "fu3|blocks|$FC" "the fix unit blocks the finding (the pre-decline state the incident hit)"
+if "$SUT" set-disposition --finding "$FC" --anchor tk-anc3 --disposition declined --reason "not a real objection"; then
+  ok "declining a fix-unit-blocked finding exits 0 (its inbound block was stripped before the close)"
+else
+  bad "declining a fix-unit-blocked finding failed (rc=2) — the inbound fix-unit block was not stripped"
+fi
+eq "$(bstatus "$FC")" "closed" "the declined finding closes despite the fix unit that blocked it"
+hasnt "$(deps)" "fu3|blocks|$FC" "…and the stale fix-unit edge onto the declined finding is gone"
+unset STUB_ENFORCE_BLOCKS
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
