@@ -369,6 +369,29 @@ out=$(STUB_DROP_KEYS="vp-4:gc.execution_routed_to" run_val)
 has "$out" "validation pass vp-4 pour did not read back" "the failed pour is reported, not swallowed"
 has "$out" "0 validation passes dispatched" "…and not counted as dispatched"
 
+echo "# a disposed anchor is skipped whole — no validator pour onto its open pass, no review"
+# pr-dispose.sh stamps gc.pr_close_disposition_kind when a PR is withdrawn/superseded;
+# the anchor still enumerates (open, merge_result set) until pr-facts.sh's terminal
+# close, but its lane is moot. The head file is present, so absent the skip the open
+# pass WOULD be poured — the assertions below prove the skip forecloses that.
+store "[$(anchor DP1 pull_request codex "" polecat/dp1 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-succ"'), $(validation vp-dp1 DP1)]"
+oid dp1 > "$GH_DIR/head_polecat_dp1"
+out=$(run_val)
+has "$out" "DP1 carries a PR-close disposition (gc.pr_close_disposition_kind=not-needed)" "the disposed anchor is named as skipped"
+has "$out" "1 disposed-skipped" "…counted as a disposed skip"
+eq "$(meta vp-dp1 'gc.execution_routed_to')" "<absent>" "…and mol-validate is NOT poured onto its open validation pass"
+has "$out" "0 validation passes dispatched" "…no validation dispatched"
+has "$out" "0 reviews dispatched" "…and no review dispatched"
+
+echo "# a disposed anchor short of green is still skipped — no fresh review pour"
+# No pass, no findings: a live anchor here would derive not-green and dispatch a fresh
+# review. The disposition marker forecloses that too.
+store "[$(anchor DP2 pull_request codex "" polecat/dp2 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-dup"')]"
+oid dp2 > "$GH_DIR/head_polecat_dp2"
+out=$(run_val)
+has "$out" "DP2 carries a PR-close disposition (gc.pr_close_disposition_kind=duplicate)" "the disposed anchor is named as skipped"
+has "$out" "0 reviews dispatched" "…and no fresh review is dispatched onto it"
+
 echo "# an unreadable live head neither settles a lane nor stops a dispatch"
 # gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit. The
 # derivation never consulted it, so the only thing the head decides now is the

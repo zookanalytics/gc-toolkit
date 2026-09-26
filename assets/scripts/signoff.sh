@@ -543,6 +543,31 @@ dismiss_superseded() {
   done
 }
 
+# A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind on it when
+# the PR was withdrawn or superseded — awaits only pr-facts.sh's terminal close. A
+# verdict that lands in that window (a review dispatched before the disposal, ruling
+# after it) is moot: the PR will not ship, so stamping green, filing a rework child,
+# or opening a validation pass would each spawn work on a dead anchor, and the pass
+# would hang a blocks edge that holds the very close the disposal is waiting on. Write
+# nothing to the anchor. Close the review the caller drains behind as moot — not
+# recorded, so it backs no lane green (lane-state.sh), and not superseded, so
+# gate-ensure pours no fresh review at the live head — then exit. pr-facts.sh
+# consummates the disposition; gate-ensure.sh skips the same anchor for the same
+# reason.
+DISPOSED=$(row_meta "$(bd_json show "$ANCHOR")" "gc.pr_close_disposition_kind")
+if [ -n "$DISPOSED" ]; then
+  gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=moot \
+    --append-notes "signoff: $VERDICT verdict is MOOT — anchor $ANCHOR was disposed (gc.pr_close_disposition_kind=$DISPOSED) before this verdict was ruled. No marker stamped, no rework filed, no validation pass opened; pr-facts.sh consummates the disposition." \
+    --status=closed >/dev/null 2>&1 || true
+  DISPOSED_ST=$(row_field "$(bd_json show "$REVIEW_BEAD")" status)
+  if [ "$DISPOSED_ST" != "closed" ]; then
+    warn "anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSED) but closing review $REVIEW_BEAD as moot did not read back (status='$DISPOSED_ST'); review left open for a retry"
+    exit 2
+  fi
+  echo "signoff: anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSED); $VERDICT verdict is moot — no marker stamped, no rework filed, no validation pass opened. Review $REVIEW_BEAD closed."
+  exit 0
+fi
+
 if [ "$VERDICT" = "approve" ]; then
   # A legacy `exception@<oid>` marker is an operator-granted gate exception that
   # predates this cadence's park shape. migrate-lane-states.sh is what rewrites

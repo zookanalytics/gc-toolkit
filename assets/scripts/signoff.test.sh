@@ -436,6 +436,32 @@ eq "$rc" 0 "post-open request-changes exits 0"
 eq "$(meta tk-anc check.codex)" "<absent>" "…clearing the lane rather than stamping one"
 eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "…and recording which commit the round judged, so the lane it cleared is still accountable"
 
+echo "# a disposed anchor makes any verdict moot — no rework child, no validation pass, no marker"
+# pr-dispose.sh stamps gc.pr_close_disposition_kind when a PR is withdrawn/superseded.
+# A review dispatched before the disposal can rule after it, and that verdict is moot:
+# the PR will not ship. request-changes must file no rework child and open no
+# validation pass, and approve must stamp no green — either would spawn work on a dead
+# anchor, and the validation pass would hang a blocks edge on the close the disposal
+# awaits. The review closes gc.outcome=moot: not recorded (so it backs no lane green)
+# and not superseded (so gate-ensure pours no fresh review at the live head).
+reset "$ANCHOR_PR"; anchor_meta "gc.pr_close_disposition_kind=not-needed"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes on a disposed anchor exits 0"
+eq "$(cat "$STUB_CREATED")" "" "…minting no rework child and opening no validation pass"
+eq "$(status rv-1)" "closed" "…closing the review the reviewer drains behind"
+eq "$(meta rv-1 gc.outcome)" "moot" "…as moot"
+eq "$(meta rv-1 signoff_verdict)" "<absent>" "…with no signoff_verdict=approve to back a lane green"
+has "$out" "disposed" "…and naming the disposition as the reason"
+
+echo "# …and approve on a disposed anchor stamps no green either"
+reset "$ANCHOR_PR"; anchor_meta "gc.pr_close_disposition_kind=duplicate"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "approve on a disposed anchor exits 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…stamping no green marker on the dead anchor"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and posting no verdict comment to the withdrawn PR"
+eq "$(status rv-1)" "closed" "…closing the review as moot"
+eq "$(meta rv-1 gc.outcome)" "moot" "…so it backs no lane green"
+
 echo "# a record that will not stick stamps nothing"
 reset "$ANCHOR_PR"
 printf 'rv-1\n' > "$STUB_UPD_FAIL"
