@@ -2034,38 +2034,43 @@ cmd_dismiss() {
     for _v in $visits; do
         [ -n "$_v" ] || continue
         _why="dismissed by the operator${dismiss_reason:+: $dismiss_reason}"
-        # gc.outcome is what every reader of a finished sitting looks at:
-        # services/helm/internal/source/facts.go projects it onto the board's
-        # Sitting.Outcome, so a visit closed without one is a sitting the board
-        # cannot report. It is a PRECONDITION of the close rather than a
-        # best-effort write beside it, because the lookup above reads only OPEN
-        # visits. Once the close lands, no re-run of this verb reaches that
-        # visit again, and the missing outcome is permanent. A visit that will
-        # not take the stamp therefore stays open and keeps its pane, which is
-        # the reading this verb already gives a visit that will not close. The
-        # stamp sits outside the force ladder below because a metadata update
-        # does not go through bd's close-authority guard, so it lands on a visit
-        # held by a session name this actor cannot close under. A zero exit is
-        # not proof it landed either: one --set-metadata pair can read back empty
-        # while the call still exits 0, the same store behaviour meta_now guards
-        # against on the takeaway path. So the stamp is read back and repaired
-        # once, and only a visit whose gc.outcome reads "dismissed" enters the
-        # close ladder. The close is irreversible to this verb, so a silently
-        # dropped stamp would otherwise close the visit into the unreportable
-        # state this precondition exists to prevent.
+        # Both stamps precede and gate the close — the same guard the shared
+        # visit-close.sh applies, which this verb reproduces rather than calls
+        # because it closes over the holder's claim and pins its own rig.
+        # gc.outcome is the word a reader groups a finished sitting by
+        # (services/helm/internal/source/facts.go projects it onto
+        # Sitting.Outcome); gc.outcome_reason is the one-line headline the board
+        # shows for a sitting that left no takeaway (board.Sitting.Headline in
+        # services/helm/internal/board/model.go), and an empty one drops the row
+        # back to the subject's bare title. So an outcome recorded without its
+        # reason still closes the sitting into an illegible row. They are a
+        # PRECONDITION, not best-effort writes beside the close: the lookup above
+        # reads only OPEN visits, so once the close lands no re-run of this verb
+        # reaches the visit and a dropped stamp is permanent. A visit that will
+        # not take both stays open and keeps its pane, the reading this verb
+        # already gives one that will not close. The stamp sits outside the force
+        # ladder below because a metadata update does not pass bd's close-authority
+        # guard, so it lands even on a visit held by a session this actor cannot
+        # close under. A zero exit is not proof it landed: one --set-metadata pair
+        # can read back empty while the call exits 0, the store behaviour meta_now
+        # guards against on the takeaway path. So both are read back and repaired
+        # once, and only a visit whose gc.outcome and gc.outcome_reason both read
+        # back enters the close ladder.
         if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1; then
             sitting_failed=1
-            echo "$PROG: dismiss: could not stamp gc.outcome on visit $_v; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
+            echo "$PROG: dismiss: could not stamp the outcome on visit $_v; it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
         outcome_got=$(meta_now "$_v" gc.outcome)
-        if [ "$outcome_got" != "dismissed" ]; then
+        reason_got=$(meta_now "$_v" gc.outcome_reason)
+        if [ "$outcome_got" != "dismissed" ] || [ "$reason_got" != "$_why" ]; then
             gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1 || true
             outcome_got=$(meta_now "$_v" gc.outcome)
+            reason_got=$(meta_now "$_v" gc.outcome_reason)
         fi
-        if [ "$outcome_got" != "dismissed" ]; then
+        if [ "$outcome_got" != "dismissed" ] || [ "$reason_got" != "$_why" ]; then
             sitting_failed=1
-            echo "$PROG: dismiss: gc.outcome on visit $_v read back as '${outcome_got:-<empty>}', not 'dismissed'; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
+            echo "$PROG: dismiss: the outcome stamps on visit $_v did not read back (gc.outcome='${outcome_got:-<empty>}', gc.outcome_reason='${reason_got:-<empty>}'); it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
