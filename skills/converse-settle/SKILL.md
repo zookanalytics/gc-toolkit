@@ -83,6 +83,11 @@ posting anything.
 gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
 gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
 gc bd close "$VISIT"
+# Once that close lands, mark the visit's PR reminder closed, if the subject has
+# a PR. Best-effort and update-only (a visit that never engaged left no comment);
+# it reads the summary and actions converse-signoff.sh stashed on the visit, and
+# refuses while the visit is not closed, so the reminder never leads the close.
+"$CONV/pr-visit-comment.sh" close --visit "$VISIT" --subject "$SUBJECT" || true
 ```
 **If this sitting ROUTED work, file that work as a SIBLING of the
 subject** (`--parent "$PARENT"`, read as at the top of the prompt)

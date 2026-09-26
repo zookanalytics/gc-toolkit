@@ -193,6 +193,10 @@ PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # a hermetic test can point them at a fixture.
 STARTERS_TOOL="${GC_HELM_STARTERS_TOOL:-$SCRIPT_DIR/gc-helm-engage-starters.sh}"
 ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
+# Leaves a reminder on the subject's PR that a visit engaged (and, on dismiss,
+# that it closed). Best-effort and self-silencing when the subject has no PR;
+# overridable so a hermetic test can point it at a fixture.
+VISIT_COMMENT_TOOL="${GC_VISIT_COMMENT_TOOL:-$SCRIPT_DIR/pr-visit-comment.sh}"
 TAB=$(printf '\t')
 
 # Bust the retired bash board's gather cache so a straggler reader never
@@ -2068,15 +2072,22 @@ cmd_dismiss() {
             echo "$PROG: dismiss: gc.outcome on visit $_v read back as '${outcome_got:-<empty>}', not 'dismissed'; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
+        _closed_this=0
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
-            closed_n=$((closed_n + 1))
+            closed_n=$((closed_n + 1)); _closed_this=1
             echo "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
         elif gc bd close "$_v" --reason "$_why" --force >/dev/null 2>&1; then
-            closed_n=$((closed_n + 1))
+            closed_n=$((closed_n + 1)); _closed_this=1
             echo "$PROG: dismiss: closed visit $_v over its holder's claim — the sitting on $bead ends"
         else
             sitting_failed=1
             echo "$PROG: dismiss: could not close visit $_v; its sitting keeps the pane. Close it by hand: gc bd close $_v --force" >&2
+        fi
+        # A closed sitting updates its PR reminder to say so, if the subject has
+        # a PR. update-only, so a visit that never engaged (left no comment)
+        # touches nothing; best effort, never failing the dismiss.
+        if [ "$_closed_this" = 1 ] && [ -x "$VISIT_COMMENT_TOOL" ]; then
+            "$VISIT_COMMENT_TOOL" close --visit "$_v" --subject "$bead" --outcome dismissed --summary "$_why" || true
         fi
     done
 
@@ -2821,6 +2832,38 @@ cmd_engage() {
         engage_abort "$sid" "visit $VISIT read back with no assignee after binding it to '$sname' — the bind did not persist. The sitting holds nothing and was closed; the visit is unchanged — re-run: $PROG engage $bead"
     fi
     bust_cache
+
+    # Leave a reminder on the subject's PR that this visit engaged, if it has a
+    # PR. Best effort: pr-visit-comment.sh self-silences when the subject has no
+    # PR or gh is absent, and its failure must not fail an engage that already
+    # bound its visit. (The reason is passed conditionally because /bin/sh word-
+    # splits ${x:+...}, which would break a multi-word reason.)
+    if [ -x "$VISIT_COMMENT_TOOL" ]; then
+        # The PR lives on the SUBJECT, not the visit. Engaging a subject id
+        # leaves $bead the subject; engaging a visit id leaves it the visit,
+        # which names its subject by its gc.continuation_group stamp, else the
+        # tracks edge that stamp is filed alongside. The stamp lands empty on a
+        # minority of visits, and reading only it there falls back to the visit
+        # id and posts the reminder on the wrong bead (or none); cmd_open,
+        # current_sitting_subject, and converse-fold.sh all recover from the edge
+        # for the same reason. visit_row is a `gc bd show` row
+        # (.dependency_type/.id); the read tolerates the `gc bd list` edge shape
+        # (.type/.depends_on_id) too. $bead is the last resort, and IS the
+        # subject in the subject-id case.
+        _pr_subject=$(printf '%s' "$visit_row" | jq -r '
+            (.metadata["gc.continuation_group"] // "") as $g
+            | if $g != "" then $g
+              else ([ (.dependencies // [])[] | objects
+                      | select(((.dependency_type // .type // "") | tostring) == "tracks")
+                      | ((.id // .depends_on_id // "") | tostring) ] | map(select(. != "")) | first // "")
+              end' 2>/dev/null || true)
+        [ -n "$_pr_subject" ] || _pr_subject="$bead"
+        if [ -n "$engage_reason" ]; then
+            "$VISIT_COMMENT_TOOL" engage --visit "$VISIT" --subject "$_pr_subject" --reason "$engage_reason" || true
+        else
+            "$VISIT_COMMENT_TOOL" engage --visit "$VISIT" --subject "$_pr_subject" || true
+        fi
+    fi
 
     # Human summary on stdout; id-heavy provenance on a single always-on [debug]
     # line on stderr — never gated behind a verbosity flag, since re-running to

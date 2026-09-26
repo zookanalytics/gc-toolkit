@@ -243,11 +243,23 @@ hasnt "$CALLED" "session new" "(MODEL) …and nothing was spawned"
 run_engage ""
 eq "$RC" 2 "(NOARG) a missing bead-id exits 2"
 
+# A recorder standing in for pr-visit-comment.sh, to prove engage posts the
+# "open" reminder for the subject the visit tracks (not the visit itself).
+cat > "$TMP/rec-pvc" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$REC_PVC_LOG"
+REC
+chmod +x "$TMP/rec-pvc"
+export GC_VISIT_COMMENT_TOOL="$TMP/rec-pvc" REC_PVC_LOG="$TMP/pvc.log"
+
 echo "# engaging an OPEN visit spawns a sitting and binds the visit to it"
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
+: > "$TMP/pvc.log"
 run_engage tk-vis --no-attach
 eq "$RC" 0 "(VISIT) engaging an open visit exits 0"
+has "$(cat "$TMP/pvc.log")" "engage --visit tk-vis --subject tk-subj" \
+    "(VISIT-PRCOMMENT) engage posts the open reminder on the subject the visit tracks, not the visit id"
 has "$CALLED" "session new converse-opus --alias tk-vis --no-attach --json" "(VISIT) spawns converse-opus --alias <visit> --no-attach"
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(BIND) the visit is assigned to the session's runtime name"
 has "$CALLED" "bd update tk-vis --if-assignee" "(BIND) …conditionally, on the open+unassigned state the guards read"
@@ -260,6 +272,16 @@ hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its 
 # An explicit visit id is engaged as-is; it is not the subject-binds-a-pre-existing
 # case, so it gets no "bound the pre-existing …" hint or --reason alternative.
 hasnt "$OUT" "bound the pre-existing" "(VISIT) an explicit visit id is not reported as a subject-bound pre-existing visit"
+
+echo "# an explicit visit whose group stamp is empty resolves the PR subject from its tracks edge"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT="" VIS_CGROUP="" VIS_TRACKS="tk-subj"
+printf 'open' > "$VIS_STATUS"
+: > "$TMP/pvc.log"
+run_engage tk-vis --no-attach
+unset VIS_CGROUP VIS_TRACKS
+eq "$RC" 0 "(VISIT-PRCOMMENT-TRACKS) engaging a visit with an empty group stamp exits 0"
+has "$(cat "$TMP/pvc.log")" "engage --visit tk-vis --subject tk-subj" \
+    "(VISIT-PRCOMMENT-TRACKS) the reminder lands on the tracked subject recovered from the edge, not the visit id"
 
 echo "# --model selects the tier; codex is the one provider that keeps the kick"
 run_engage tk-vis --model codex --no-attach

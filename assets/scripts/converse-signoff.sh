@@ -148,3 +148,31 @@ if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" 
   "$LC" transition "$ITEM" --to unanchored --route "$ROUTE" \
     || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
 fi
+
+# Stash what the visit's PR-reminder close will say, for the writer that runs
+# AFTER the visit is actually closed: converse-settle's close step on a normal
+# sign-off, or converse-claim.sh's stranded-finish recovery. This script is the
+# PRE-close durable trace, so posting "closed" here would run before the close
+# lands — a death, a failed outcome stamp, or a failed close between here and
+# there would leave the PR saying the visit closed while it is still open and
+# holding the merge. The takeaway is the Summary; Actions Taken is what the
+# sitting did: the work it routed, the ruling it reached, or what is still owed.
+# The stamp lands even though this session still holds the visit, because a
+# metadata write bypasses the claim guard.
+routed=""
+i=0
+while [ "$i" -lt "${#WAIT[@]}" ]; do
+  [ "${WAIT[$i]}" = "--waiting-on" ] && { i=$((i + 1)); routed="${routed:+$routed, }${WAIT[$i]}"; }
+  i=$((i + 1))
+done
+SIGNOFF_ACTIONS=""
+[ -n "$routed" ] && SIGNOFF_ACTIONS="routed work to $routed"
+if [ "$RULED" = yes ]; then
+  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }ruling: $RULING (released to $ROUTE)"
+elif [ -n "$STILL_OWED" ]; then
+  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }still owed: $STILL_OWED"
+fi
+gc bd update "$VISIT" \
+  --set-metadata "gc.pr_visit_summary=$OUTCOME" \
+  --set-metadata "gc.pr_visit_actions=$SIGNOFF_ACTIONS" \
+  || echo "COULD NOT STASH the PR-reminder close text on $VISIT; its PR comment may stay 'open' after the visit closes"
