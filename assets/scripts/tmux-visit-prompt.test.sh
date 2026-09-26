@@ -519,6 +519,29 @@ has "$ccalls" "argv=[--rig]" "CHOOSER: ...and still forwards the chosen rig"
 has "$ccalls" "argv=[ci-flaky-again]" "CHOOSER: ...and files the report"
 unset FAKE_RIGS_JSON FAKE_FORMAT
 
+# The hq store (the city-level workspace) is never offered as a topic target: it
+# runs no reaction pool, so a topic filed there would strand — and it is dropped
+# from the picker even though it is a live rig. Its prefix still marks its own
+# ids as bead refs, so an existing hq-store bead stays a valid subject.
+HQ_RIGS='[{"name":"loomington","prefix":"lx","hq":true,"suspended":false,"running":true},
+          {"name":"gc-toolkit","prefix":"tk","hq":false,"suspended":false,"running":true},
+          {"name":"signal-loom","prefix":"sl","hq":false,"suspended":false,"running":true}]'
+export FAKE_RIGS_JSON="$HQ_RIGS" FAKE_FORMAT="gc-toolkit__polecat-1"
+run_handler "$CFG_OK" "a topic that must not target the workspace"
+cgum=$(cat "$TMP/gum.log"); ccalls=$(cat "$TMP/calls.log")
+has "$cgum" "gum choose" "CHOOSERHQ: the picker is shown for a topic"
+hasnt "$cgum" "loomington" "CHOOSERHQ: the hq/city-workspace rig is withheld from the picker"
+has "$cgum" "gc-toolkit" "CHOOSERHQ: ...while non-hq rigs are still offered"
+has "$ccalls" "argv=[--rig]" "CHOOSERHQ: ...and a non-hq rig is forwarded"
+# An hq-store bead id is still a bead ref: the chooser is withheld (the bead's
+# own rig is authoritative) and the id reaches the intake, so excluding the hq
+# store from the picker never strands an existing hq-store subject.
+run_handler "$CFG_OK" "lx-abc12"
+cgum=$(cat "$TMP/gum.log"); ccalls=$(cat "$TMP/calls.log")
+hasnt "$cgum" "gum choose" "CHOOSERHQ: an hq-store bead id shows no picker"
+has "$ccalls" "argv=[lx-abc12]" "CHOOSERHQ: ...and the hq-store bead id still reaches the intake"
+unset FAKE_RIGS_JSON FAKE_FORMAT
+
 unset DRAFT_DIR_OVERRIDE
 
 # (TMPFILE) — a file per press, and no file left behind.
