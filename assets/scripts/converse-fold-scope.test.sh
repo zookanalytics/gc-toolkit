@@ -306,6 +306,20 @@ folds=0
 [ "$h2" = "v-two" ] || folds=$((folds + 1))
 is "…so exactly one of the two folds (never both, never neither)" "$folds" "1"
 
+# The HOLDER scan reads `gc bd list`, whose tracks edge is keyed .type +
+# .depends_on_id — not the .dependency_type + .id show shape the visit() helper
+# emits. The shared predicate (visit-identity.sh) reads BOTH, so a live-list
+# edge must fold the same way; this pins that at the shared boundary so a
+# show-only simplification cannot pass.
+list_edge_visit() { # <id> <subject> <assignee>
+    jq -nc --arg id "$1" --arg s "$2" --arg a "$3" \
+      '{id:$id, assignee:$a, metadata:{"task_kind":"visit","gc.continuation_group":""},
+        dependencies:[{type:"tracks", issue_id:$id, depends_on_id:$s}]}'
+}
+fixture "$(list_edge_visit v-two sub sess-2)" "$(list_edge_visit v-one sub sess-1)"
+is "a live-list-shape (.type/.depends_on_id) tracks edge folds via the shared predicate" \
+    "$(holder v-two '')" "v-one"
+
 # The mirror: the scan must not over-match once it resolves candidates. Two
 # empty stamps whose EDGES name different subjects are different sittings.
 fixture "$(visit v-two '' '' sess-2 other)" "$(visit v-one '' '' sess-1 sub)"
