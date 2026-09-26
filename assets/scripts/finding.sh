@@ -51,11 +51,13 @@
 #   finding.sh wire-fix-unit --fix-unit FU --anchor A --findings F1,F2,...
 #   finding.sh open-must-fix --anchor A [--lane L]
 #   finding.sh close-unvalidated --anchor A --lane L [--reason R]
+#   finding.sh close-answered --anchor A [--reason R]
 #
 # Callers: signoff.sh (upsert + wire-fix-unit on request-changes,
 # close-unvalidated on approve), the validator (set-disposition), and
-# gate-ensure's quiescence (open-must-fix). Exit 0 on success; a read verb
-# exits 1 when its predicate is false, 2 when the store would not read.
+# gate-ensure (open-must-fix computes quiescence; close-answered releases it
+# once a fix unit lands). Exit 0 on success; a read verb exits 1 when its
+# predicate is false, 2 when the store would not read.
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -79,6 +81,7 @@ usage:
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
   finding.sh close-unvalidated --anchor <id> --lane <lane> [--reason <r>]
+  finding.sh close-answered --anchor <id> [--reason <r>]
 USAGE
 }
 
@@ -354,6 +357,50 @@ cmd_close_unvalidated() {
   done
 }
 
+# A must-fix finding is closed once every fix unit answering it has landed. The
+# fix unit blocks the finding (wire-fix-unit), and bd refuses to close a blocked
+# issue, so the finding is closeable exactly when all its blockers have closed —
+# which is the fix unit's landing (merge-push closes the rework once its commit
+# is on the branch). Nothing else performs that close, so the finding otherwise
+# stays open and holds the re-gate through quiescence, wedging a landed fix at
+# pre_open_gate. gate-ensure runs this per anchor: the reader that computes
+# quiescence and holds the re-gate is the one that releases it, so the two
+# cannot disagree. A must-fix finding with no blocker is an objection no fix
+# unit answers yet, and one still blocked by a live fix unit is left for that
+# unit's landing — neither closes here.
+cmd_close_answered() {
+  local anchor="" reason=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    *) warn "unknown arg '$1'"; usage; exit 1 ;;
+  esac; done
+  [ -n "$anchor" ] || { warn "close-answered needs --anchor"; exit 1; }
+  local rows ids id note blk n_all n_live
+  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES" --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || { warn "could not read findings on $anchor"; return 2; }
+  ids=$(printf '%s' "$rows" | jq -r '
+    [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+          | select(((.metadata["finding.disposition"] // "") | tostring) == "must-fix") ]
+    | .[].id' 2>/dev/null)
+  [ -n "$ids" ] || return 0
+  note="resolved: fix unit landed — every blocker closed, so the objection's fix is on the branch"
+  [ -n "$reason" ] && note="$note ($reason)"
+  for id in $ids; do
+    # The finding's blocks-blockers are its fix units. Read them with status so a
+    # still-live one leaves the finding open rather than being attempted and
+    # warned every pass. A finding with no blocker at all has no fix unit yet.
+    blk=$(bd_json dep list "$id" --direction=down -t blocks)
+    printf '%s' "$blk" | jq -e 'type == "array"' >/dev/null 2>&1 \
+      || { warn "could not read blockers of finding $id; leaving it open"; continue; }
+    n_all=$(printf '%s' "$blk" | jq -r 'length' 2>/dev/null)
+    n_live=$(printf '%s' "$blk" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed") ] | length' 2>/dev/null)
+    [ "${n_all:-0}" -gt 0 ] && [ "${n_live:-1}" -eq 0 ] || continue
+    gc bd update "$id" --status=closed --append-notes "$note" >/dev/null 2>&1 \
+      || warn "could not close answered finding $id"
+  done
+}
+
 [ $# -ge 1 ] || { usage; exit 1; }
 VERB="$1"; shift
 case "$VERB" in
@@ -363,5 +410,6 @@ case "$VERB" in
   wire-fix-unit)     cmd_wire_fix_unit "$@" ;;
   open-must-fix)     cmd_open_must_fix "$@" ;;
   close-unvalidated) cmd_close_unvalidated "$@" ;;
+  close-answered)    cmd_close_answered "$@" ;;
   *) warn "unknown verb '$VERB'"; usage; exit 1 ;;
 esac

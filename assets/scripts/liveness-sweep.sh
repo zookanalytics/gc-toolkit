@@ -479,6 +479,58 @@ next pass past the floor raises it again while the PR is still stale."
 }
 stale_escalations
 
+# --- landed-fix wedge: a must-fix finding whose fix unit has closed -----------
+# gate-ensure closes a must-fix finding once its fix unit lands, which releases
+# the re-gate the open finding held. If that close is ever missed the finding
+# stays open, holds the re-gate through quiescence forever, and wedges the
+# anchor at pre_open_gate with the fix already on the branch — the silent
+# multi-day strand this backstop exists to make loud. The anchor is blocked by
+# its own finding, so it is absent from `bd ready` and from the classify census
+# above; this scans ALIVE. A wedge here means the auto-close is not running, so
+# escalate.sh's one-open-visit-per-subject dedup is the whole bound: re-raising
+# each pass until it clears is correct, not noise.
+WEDGE_BLK="$TMP/wedge-blk.json"
+wedged_fix_escalations() {
+    local rows row fid anchor amr n_all n_live body out filed=0
+    rows=$(jq -c '[ .[] | select((.metadata.task_kind // "") == "finding")
+                        | select((.metadata["finding.disposition"] // "") == "must-fix")
+                        | {fid: .id, anchor: ((.metadata.anchor_bead // "") | tostring)} ]
+                  | .[]' "$ALIVE" 2>/dev/null)
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        fid=$(printf '%s' "$row" | jq -r '.fid // ""')
+        anchor=$(printf '%s' "$row" | jq -r '.anchor // ""')
+        [ -n "$fid" ] && [ -n "$anchor" ] || continue
+        # The anchor is a live pre_open_gate anchor — read from ALIVE, since a
+        # finding-blocked anchor is open (here) but not in READY.
+        amr=$(jq -r --arg a "$anchor" 'first(.[] | select(.id == $a) | (.metadata.merge_result // "")) // ""' "$ALIVE" 2>/dev/null)
+        [ "$amr" = "pre_open_gate" ] || continue
+        # Its fix unit(s) — the finding's blocks-blockers — are ALL closed: the
+        # fix landed but the finding was not closed with it. A finding no fix
+        # unit blocks is a live objection awaiting one, not a wedge.
+        bd_read "$WEDGE_BLK" dep list "$fid" --direction=down -t blocks --json || continue
+        n_all=$(jq -r 'length' "$WEDGE_BLK" 2>/dev/null)
+        n_live=$(jq -r '[ .[] | select(((.status // "open") | ascii_downcase) != "closed") ] | length' "$WEDGE_BLK" 2>/dev/null)
+        [ "${n_all:-0}" -gt 0 ] && [ "${n_live:-1}" -eq 0 ] || continue
+        body="landed-fix wedge: anchor $anchor is held at pre_open_gate by must-fix finding $fid whose fix unit has already closed — the fix is on the branch.
+gate-ensure closes such a finding each pass so the re-gate proceeds; this one is still open, so that close is not running, and the anchor cannot re-gate or open its PR until $fid closes.
+Disposition: close $fid to release the re-gate (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            echo "$PROG: dry-run: would escalate $anchor [landed-fix-wedge] (finding $fid)"
+            filed=$((filed + 1)); continue
+        fi
+        if out=$("$ESCALATE" --subject "$anchor" --key landed-fix-wedge --message "$body"); then
+            printf '%s\n' "$out"; filed=$((filed + 1))
+        else
+            echo "$PROG: WARN: escalate.sh failed for $anchor [landed-fix-wedge] — next pass retries" >&2
+        fi
+    done <<EOF
+$rows
+EOF
+    echo "$PROG: landed-fix wedge: $filed escalated"
+}
+wedged_fix_escalations
+
 # --- the standing unnamed-waits subject (create on first run) -----------------
 SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subject")
   | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | (.[0].id // "")' "$LIVE")
