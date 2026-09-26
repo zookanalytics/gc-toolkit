@@ -577,6 +577,12 @@ case "$sub" in
       */pulls/*/reviews/*/dismissals)
         printf 'DISMISS %s\n' "$path" >> "${STUB_GH_LOG:?}"
         exit "${STUB_DISMISS_RC:-0}" ;;
+      */pulls/*/requested_reviewers)
+        # Re-request a reviewer. The reviewer login rides the -f arg the full-args
+        # log above already captured; this marks the endpoint hit for a test to
+        # assert, and STUB_REREQUEST_RC models a re-request the API refuses.
+        printf 'REREQUEST %s\n' "$path" >> "${STUB_GH_LOG:?}"
+        exit "${STUB_REREQUEST_RC:-0}" ;;
       */pulls/*/reviews*|*/pulls/*/comments*)
         n="${path##*/pulls/}"; n="${n%%/*}"
         # STUB_GH_LIST_RC: the history delivered as a real gh failure. An absent

@@ -2452,6 +2452,93 @@ has "$out" "required check(s) failing (test); filed" "a BLOCKED PR whose block i
 eq "$(meta new-2 anchor_bead)" "RC8" "…as a rework child of the blocked anchor"
 rm -f "$GH_DIR/rules_main.json"
 
+# ---- per-review dismissal + re-request once a human review's findings clear ----
+# The peer-model write-back above answers each finding; this closes the loop at
+# the review level. A human CHANGES_REQUESTED is GitHub's own block and stands
+# until cleared, so once every finding one review raised has closed — fixed and
+# landed, or declined and answered — pr-facts dismisses THAT review (clearing the
+# block) and re-requests its author, per-review via finding.review_id. The
+# confidence is the validator's, carried by the closed findings; a dismissal is
+# not an approval. wview.reviews is served from the .reviews of threads_<n>.json.
+rfind() { # id anchor review_id disposition [status]
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"finding[human]: %s","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"%s","finding.source":"human:johnzook","finding.review_id":"%s"}}' \
+    "$1" "${5:-closed}" "$1" "$2" "$4" "$3"
+}
+hreview() { # num review-databaseId state — a threads fixture carrying one human review
+  printf '{"reviews":[{"id":"R%s","databaseId":%s,"state":"%s","author":{"login":"johnzook"}}],"threads":[]}' "$2" "$2" "$3"
+}
+
+echo "# a human review is dismissed and its author re-requested once all its findings clear"
+store "[$(anchor HR1 140 "$(wb_meta rework:HRC1)"), $(child HRC1 closed), $(rfind HF1 HR1 555 must-fix), $(rfind HF2 HR1 555 declined)]"
+printf '%s' "$(prview 140 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_140.json"
+threads 140 "$(hreview 140 555 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/140/reviews/555/dismissals" "the human review is dismissed once all its findings clear"
+has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/140/requested_reviewers" "…and a fresh review is requested"
+has "$(cat "$STUB_GH_LOG")" "reviewers[]=johnzook" "…from the review's own author"
+has "$(cat "$STUB_GH_LOG")" "addressed by a change" "the dismiss message names the comment resolved by a change"
+has "$(cat "$STUB_GH_LOG")" "resolved by an accepted decline" "…and the one resolved by an accepted decline"
+has "$out" "dismissed human review 555 and re-requested johnzook" "the pass reports the per-review dismissal"
+
+echo "# …but not while one of that review's findings is still open"
+store "[$(anchor HR2 141 "$(wb_meta rework:HRC2)"), $(child HRC2 closed), $(rfind HF3 HR2 556 must-fix), $(rfind HF4 HR2 556 must-fix open)]"
+printf '%s' "$(prview 141 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_141.json"
+threads 141 "$(hreview 141 556 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an open finding (unfixed or deferred) keeps the review standing"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested"
+
+echo "# …a review already DISMISSED is left alone — its state is the idempotency"
+store "[$(anchor HR3 142 "$(wb_meta rework:HRC3)"), $(child HRC3 closed), $(rfind HF5 HR3 557 declined)]"
+printf '%s' "$(prview 142 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_142.json"
+threads 142 "$(hreview 142 557 DISMISSED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an already-dismissed review is not dismissed again"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…nor its author re-requested again"
+
+echo "# …a re-request the API refuses holds the dismissal — both are in scope"
+store "[$(anchor HR4 143 "$(wb_meta rework:HRC4)"), $(child HRC4 closed), $(rfind HF6 HR4 558 declined)]"
+printf '%s' "$(prview 143 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_143.json"
+threads 143 "$(hreview 143 558 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(STUB_REREQUEST_RC=1 run)
+has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/143/requested_reviewers" "the re-request is attempted"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and a re-request that fails holds the dismissal"
+
+# ---- a declined finding's owed reply gates its review's dismissal ---------------
+# A declined human finding closes when the validator stamps its answer
+# (finding.reply), which is before the reply/resolve arm has delivered that answer
+# and marked it finding.reply_posted=1. So closure alone must not make the review
+# dismissable: dismissing then would clear CHANGES_REQUESTED before the decline
+# reached the reviewer. This finding carries both its review id and its owed reply.
+rfindreply() { # id anchor review_id comment_id [reply_posted]
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","title":"finding[human]: %s","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"declined","finding.source":"human:johnzook","finding.review_id":"%s","finding.comment_id":"%s","finding.reply":"declined on the merits"%s}}' \
+    "$1" "$1" "$2" "$3" "$4" "${5:+,\"finding.reply_posted\":\"$5\"}"
+}
+
+echo "# a declined finding whose owed reply has not landed holds its review's dismissal"
+store "[$(anchor HR5 144 "$(wb_meta rework:HRC5)"), $(child HRC5 closed), $(rfindreply HF7 HR5 559 100)]"
+printf '%s' "$(prview 144 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_144.json"
+threads 144 "$(jq -cn --argjson r "$(hreview 144 559 CHANGES_REQUESTED)" --argjson t "$(one_thread 144)" '{reviews: $r.reviews, threads: $t.threads}')"
+: > "$STUB_GH_LOG"
+out=$(STUB_RESOLVE_RC=1 run)
+eq "$(meta HF7 finding.reply_posted)" "<absent>" "the resolve failed, so the decline reply is not yet marked delivered"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an undelivered decline reply holds the review's dismissal"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested"
+
+echo "# …and once that reply is delivered (finding.reply_posted=1) the review is dismissed"
+store "[$(anchor HR6 145 "$(wb_meta rework:HRC6)"), $(child HRC6 closed), $(rfindreply HF8 HR6 560 101 1)]"
+printf '%s' "$(prview 145 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_145.json"
+threads 145 "$(hreview 145 560 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/145/reviews/560/dismissals" "a delivered decline reply lets the review dismiss"
+has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/145/requested_reviewers" "…and its author is re-requested"
+has "$(cat "$STUB_GH_LOG")" "resolved by an accepted decline" "…the dismiss message names the accepted decline"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
