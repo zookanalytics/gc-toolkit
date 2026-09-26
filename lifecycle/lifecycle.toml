@@ -347,8 +347,8 @@ since_format = "RFC 3339 UTC"
 # whichever script or formula owns that bead's dispatch. The recurring shapes: an
 # escalation or visit routed to its handler pool or parked to `human`
 # (escalate.sh, gc-helm.sh, mol-visit.toml, mol-first-reaction.toml,
-# mol-feedback-distiller.toml); a rework child or a doctor finding routed to its
-# fix pool (pr-facts.sh, pre-open-rebase.sh, doctor-finding-gate.sh); a review
+# mol-feedback-distiller.toml); a rework child routed to its fix pool
+# (pr-facts.sh, pre-open-rebase.sh); a review
 # bead's pool route restored after an abandoned round (mol-review.toml). A route
 # value is a rig-qualified pool identity (<rig>/<agent>) or
 # the park sentinel `human` ([machine] park_route); the pool
@@ -829,18 +829,11 @@ keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",
   "finding.about", "finding.recurrence_of",
-  "doctor_check", "doctor_finding_predecessor",
 ]
 # finding.key here is the same prefix the review findings use
 # ([metadata.review_findings]); the two families share the name and are told
 # apart by task_kind, and only these patrol keys (scope, digest, the seen
 # timestamps, occurrences, about, recurrence_of) belong to this one.
-# doctor_check — the doctor check a finding names, the handle
-#   doctor-finding-gate.sh keys its convergent dedup on (a bead also "names" a
-#   check by a whole token in its title). A check name; not cleared.
-# doctor_finding_predecessor — the prior finding this one converges onto, so a
-#   check's repeated findings collapse to one line rather than accreting. Written
-#   by doctor-finding-gate.sh. A bead id; not cleared.
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session
