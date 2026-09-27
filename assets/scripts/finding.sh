@@ -141,23 +141,30 @@ edge_exists() { # <blocker> blocks <blocked> ?  (reads the blocked's down-blocke
     | jq -e --arg b "$blocker" 'type == "array" and any(.[]?; .id == $b)' >/dev/null 2>&1
 }
 
-# The open fix unit standing on <anchor>, or empty. A fix unit is a live
-# blocks-dep child of the anchor carrying a non-empty source_review_bead, which
-# request-changes stamps on the one child it files to answer the anchor's findings
-# (the same discriminator gate-ensure's open_rework_child reads). must-fix wiring
-# reads it to hang the close-ordering edge the fix unit's landing releases. A
-# feedback batch (pr-facts) files no such fix unit — its child carries no
-# source_review_bead — so this is empty and the must-fix finding still holds the
-# merge through its own anchor edge. Non-zero rc = the ledger would not read.
-anchor_fix_unit() { # <anchor-id>
+# The open fix unit answering <finding-lane>'s objections on <anchor>, or empty.
+# A fix unit is a live blocks-dep child of the anchor carrying task_kind=rework.
+# Two paths file one: signoff stamps source_review_bead on the child it files for
+# a machine review's findings; pr-facts files one child per human batch, carrying
+# the batch's review ids in source_review and no source_review_bead. A finding is
+# answered by the child of its own lane, so match on the lane — a human finding
+# takes the child with no source_review_bead, a machine finding the child that
+# carries one — and no lane's finding is wired to another lane's child. must-fix
+# wiring reads this to hang the close-ordering edge the fix unit's landing
+# releases. Non-zero rc = the ledger would not read.
+anchor_fix_unit() { # <anchor-id> <finding-lane>
   local raw
   raw=$(bd_json dep list "$1" --direction=down -t blocks) || return 2
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
-  printf '%s' "$raw" | jq -r --arg ls "$LIVE_STATUSES" '
+  printf '%s' "$raw" | jq -r --arg ls "$LIVE_STATUSES" --arg lane "${2:-}" '
     ($ls | split(",")) as $live
     | [ .[]
         | select(((.status // "open") | ascii_downcase) as $st | ($live | index($st)) != null)
-        | select(((.metadata.source_review_bead // "") | tostring) != "")
+        | select(((.metadata.task_kind // "") | tostring) == "rework")
+        | select(
+            if $lane == "human"
+            then ((.metadata.source_review_bead // "") | tostring) == ""
+            else ((.metadata.source_review_bead // "") | tostring) != ""
+            end)
         | .id ] | (.[0] // empty)' 2>/dev/null
 }
 
@@ -270,8 +277,9 @@ cmd_set_disposition() {
       # visit-routed feedback batch has none). Best-effort: the finding's own anchor
       # edge above is the hold, so a fix unit whose edge cannot be hung costs the
       # close ordering, never the merge hold.
-      local fu
-      fu=$(anchor_fix_unit "$anchor") || fu=""
+      local fu flane
+      flane=$(bd_json show "$finding" | jq -r '(.[0].metadata["finding.lane"] // "") | tostring' 2>/dev/null)
+      fu=$(anchor_fix_unit "$anchor" "$flane") || fu=""
       if [ -n "$fu" ] && ! edge_exists "$fu" "$finding"; then
         cmd_wire_fix_unit --fix-unit "$fu" --anchor "$anchor" --findings "$finding" >/dev/null 2>&1 \
           || warn "could not hang fix unit $fu --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"

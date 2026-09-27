@@ -197,5 +197,31 @@ eq "$(bstatus "$FC")" "closed" "the declined finding closes despite the fix unit
 hasnt "$(deps)" "fu3|blocks|$FC" "…and the stale fix-unit edge onto the declined finding is gone"
 unset STUB_ENFORCE_BLOCKS
 
+# ---------------------------------------------------------------------------
+# Human-lane fix unit: pr-facts files one rework child per human batch, carrying
+# the batch's review ids in source_review and NO source_review_bead. A human
+# must-fix finding must hang THAT child's close-ordering edge — not a machine
+# child that happens to stand on the same anchor — so the finding closes when the
+# human batch lands, and never before. Both children stand on the anchor here, so
+# the assertions prove the lane match discriminates rather than picking either.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-anch","status":"open","assignee":"","title":"anchorH","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"cfuh","status":"open","assignee":"","title":"Address review comments on PR#7","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anch","source_review":"111,222"}},
+        {"id":"mfuh","status":"open","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anch","source_review_bead":"revH"}}]'
+gc bd dep cfuh --blocks tk-anch >/dev/null
+gc bd dep mfuh --blocks tk-anch >/dev/null
+FHM=$("$SUT" upsert --anchor tk-anch --lane human --source "human:johnzook" --locus "assets/scripts/z.sh:go()" --message "handle the empty batch")
+"$SUT" set-disposition --finding "$FHM" --anchor tk-anch --disposition must-fix
+has "$(deps)" "$FHM|blocks|tk-anch" "a human must-fix finding blocks the anchor"
+has "$(deps)" "cfuh|blocks|$FHM" "must-fix hangs the human batch child's close-ordering edge onto the human finding"
+hasnt "$(deps)" "mfuh|blocks|$FHM" "…and never the machine child, whose source_review_bead marks a different lane"
+"$SUT" close-answered --anchor tk-anch
+eq "$(bstatus "$FHM")" "open" "close-answered leaves the human finding open while its batch child is in flight"
+gc bd update cfuh --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-anch
+eq "$(bstatus "$FHM")" "closed" "close-answered closes the human finding once its batch child lands"
+has "$(notes "$FHM")" "fix unit landed" "the close records why the human finding was resolved"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

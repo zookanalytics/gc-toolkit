@@ -29,11 +29,13 @@ The fix-unit must block **only** the findings the validator rules must-fix, and 
 declined or deferred finding must be free to close no matter what blocks it.
 
 - `finding.sh set-disposition must-fix` hangs the `fix-unit --blocks finding`
-  close-ordering edge from the ruling: it finds the anchor's open fix-unit
-  (`anchor_fix_unit`, a live down-blocks child carrying `source_review_bead`) and
-  wires it onto the finding as it rules that finding must-fix. So a finding the
-  validator has not yet ruled — one it may decline — never carries an inbound
-  fix-unit block.
+  close-ordering edge from the ruling: it finds the fix-unit answering the
+  finding's own lane (`anchor_fix_unit`, a live down-blocks `task_kind=rework`
+  child of the anchor — a machine review's child carries `source_review_bead`, a
+  human batch's child carries none) and wires it onto the finding as it rules that
+  finding must-fix. So a finding the validator has not yet ruled — one it may
+  decline — never carries an inbound fix-unit block, and a human finding is never
+  wired to a machine lane's child, nor the reverse.
 - `finding.sh set-disposition declined` and `deferred` strip **every** inbound
   blocks edge on the finding (`strip_inbound_blocks`) before the close /
   reclassification, so an edge left by an earlier must-fix ruling this pass
