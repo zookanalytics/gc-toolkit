@@ -2,11 +2,19 @@
 # orphan-dispose.sh — dispose of ONE bead that orphan recovery classified as
 # orphaned, by the kind of thing the bead is.
 #
-# Six kinds reach this script and only two are returned to the pool — and a
-# source bead only when its work has not already reached a downstream court:
+# Seven kinds reach this script and only three are returned to a pool — a
+# workflow-step, and a source or review bead, the latter two only when the work
+# has not already reached a downstream court:
 #
 #   visit          release the assignee and NOTHING else. A visit's metadata
 #                  (route, continuation group, task_kind) is its identity.
+#   review         a review bead is the source bead of its own mol-review
+#                  molecule and carries no worktree of its own, so it disposes by
+#                  the source contract below (delete-source is a no-op on an
+#                  input-convoy root, reopen-source returns it to its review
+#                  pool). It is recognised by task_kind before the source arm the
+#                  way a visit is, and the witness salvage scope gate skips its
+#                  worktree salvage and merge-verify for the same reason.
 #   workflow-root  skip. A graph.v2 root is not schedulable work: nothing
 #                  claims it, and it closes when its workflow-finalize step
 #                  closes. Setting it open+unassigned+routed is what makes a
@@ -130,12 +138,15 @@ ROOT_ID="$(mval gc.root_bead_id)"
 ROUTED="$(mval gc.routed_to)"
 MERGE_RESULT="$(mval merge_result)"
 
-# Classification order matters. A visit is the source bead of its own mol-visit
-# molecule, so it must be recognised before the source arm would claim it. Root
-# before step: gascity's own IsWorkflowRoot is gc.kind=workflow OR
-# gc.formula_contract=graph.v2, and a step carries neither.
+# Classification order matters. A visit and a review are each the source bead of
+# their own molecule (mol-visit, mol-review), so both must be recognised by
+# task_kind before the source arm would claim them. Root before step: gascity's
+# own IsWorkflowRoot is gc.kind=workflow OR gc.formula_contract=graph.v2, and a
+# step carries neither.
 if [ "$TASK_KIND" = "visit" ]; then
     CLASS="visit"
+elif [ "$TASK_KIND" = "review" ]; then
+    CLASS="review"
 elif [ "$KIND" = "workflow" ] || [ "$CONTRACT" = "graph.v2" ]; then
     CLASS="workflow-root"
 elif [ -n "$STEP_REF" ]; then
@@ -285,10 +296,11 @@ verify() {
     sname="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_name"] // ""')"
     [ "$st"  = "open" ] || note_failed "status(still=$st)"
     [ -z "$asg" ]       || note_failed "assignee(still=$asg)"
-    # The arms that clear session pins — workflow-step and source — must land it:
-    # a surviving pin is exactly what makes orphan recovery re-detect the bead.
+    # The arms that clear session pins — workflow-step, source and review — must
+    # land it: a surviving pin is exactly what makes orphan recovery re-detect the
+    # bead.
     case "$CLASS" in
-        workflow-step|source)
+        workflow-step|source|review)
             [ -n "$sid" ]   && note_failed "gc.session_id(still=$sid)"
             [ -n "$sname" ] && note_failed "gc.session_name(still=$sname)"
             ;;
@@ -394,7 +406,13 @@ case "$CLASS" in
         ACTION="skip"
         DETAIL="root_unreadable"
         ;;
-    source)
+    source|review)
+        # A review bead shares this arm: it is the source of its own mol-review
+        # molecule, carries no merge_result of its own and is routed to a review
+        # pool rather than a human gate, so neither skip below fires and it is
+        # always reopened to that pool. It reaches here as class=review only so
+        # the witness salvage scope gate can skip its worktree salvage and
+        # merge-verify; the disposal it needs is exactly the source contract.
         # A source work bead whose work already reached a downstream court is not
         # lost, so delete-source + reopen-source must not return it to the pool
         # (every cycle would re-detect and re-recover it, stamping a recovery the
