@@ -592,8 +592,8 @@ else
 fi
 ```
 
-Seven kinds reach it and only three are returned to a pool — a workflow step,
-and a source or review bead, the latter two only when the work has not already
+Each kind is disposed by what it is. Some kinds return a bead to a pool to be
+claimed again, and some of those return it only when the work has not already
 reached a downstream court. A **visit** gives up its assignee and nothing else,
 because its route, continuation group and task_kind are its identity. A
 **review** is the source bead of its own mol-review molecule and carries no
@@ -607,8 +607,8 @@ unassigned and routed is what makes a pool offer the root itself as work.
 Everything else is a **source bead** and goes to
 `gc workflow delete-source --apply` followed by `gc workflow reopen-source`.
 
-The other two kinds turn on the step's root, which the disposal reads before it
-releases anything. A step whose **root has CLOSED** has no molecule left to
+The remaining step dispositions turn on the step's root, which the disposal reads
+before it releases anything. A step whose **root has CLOSED** has no molecule left to
 resume — releasing it would hand a finished chain to a pool as fresh work — so
 it goes to `dead-molecule-dispose.sh`, which de-routes every member of the chain
 before it closes any of them. A step whose **root will not read** is left

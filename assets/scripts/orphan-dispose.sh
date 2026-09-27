@@ -2,9 +2,9 @@
 # orphan-dispose.sh — dispose of ONE bead that orphan recovery classified as
 # orphaned, by the kind of thing the bead is.
 #
-# Seven kinds reach this script and only three are returned to a pool — a
-# workflow-step, and a source or review bead, the latter two only when the work
-# has not already reached a downstream court:
+# Each kind is disposed by what it is; the rule for each is below. Some kinds
+# return a bead to a pool to be claimed again, and some of those return it only
+# when its work has not already reached a downstream court.
 #
 #   visit          release the assignee and NOTHING else. A visit's metadata
 #                  (route, continuation group, task_kind) is its identity.

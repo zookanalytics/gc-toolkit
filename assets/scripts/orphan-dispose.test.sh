@@ -10,7 +10,7 @@
 # exactly — and against a ROOT it offers the root itself to a pool as work.
 #
 # What is exercised here:
-#   * CLASSIFICATION on the five shapes that reach the disposal, including the
+#   * CLASSIFICATION of the shapes that reach the disposal, including the
 #     order dependencies: a visit and a review are each the source bead of their
 #     own molecule and must be recognised by task_kind before the source arm,
 #     and a root carries gc.kind/gc.formula_contract where a step carries
