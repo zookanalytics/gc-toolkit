@@ -139,24 +139,27 @@ is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 #                    before the PR can settle. Unlike needs-review, the head cannot
 #                    settle until the human acts, so it is not a request to review
 #                    the diff.
-#   working          the city holds the ball — an open rework child stands on the
-#                    reviewed commit, or an approved PR is merging.
+#   working          the city holds the ball — live work is anchored to this PR (a
+#                    rework or fix child, a validation pass, a review in flight), or
+#                    an approved PR is merging.
 #   needs-review     the head is settled and the only thing left is a human's
 #                    review verdict: posture review_required/commented/none, no
-#                    hold, no open rework.
+#                    hold, no live work anchored to this PR.
 #
-# Reads only refinery-computed state off the anchor — the pr-facts.sh posture
+# Reads refinery-computed state off the anchor — the pr-facts.sh posture
 # (pr_posture, stored dated as value@oid@instant) and merge state (pr_merge_state,
-# value@oid), the merge/rebase holds — and the rework children. It does NOT read
-# GitHub's review posture directly or check.<lane>=green: the working->needs-review
-# flip rests on the rework child, which is scoped to the reviewed commit, so
-# GitHub's sticky changes_requested never traps the label in `working` after a
-# rework hands back, and a green that outlives a rewritten commit (tk-4zsj1p)
-# cannot read the label ready. pr_posture is read only to split the approved case
-# (merging vs wedged) and to name the awaiting-review states. Exit 2 when a read
-# does not resolve, so a caller does not flip the label on a guess.
+# value@oid), the merge/rebase holds — together with the anchor's in-flight set:
+# any live bead carrying anchor_bead, the same membership test pr-facts.sh applies
+# in its own arms (a rework or fix child, a validation pass, a review all carry it).
+# It does NOT read GitHub's review posture directly or check.<lane>=green: the
+# working->needs-review flip rests on live work anchored to the PR, which closes as
+# that work hands back, so GitHub's sticky changes_requested never traps the label
+# in `working`, and a green that outlives a rewritten commit (tk-4zsj1p) cannot read
+# the label ready. pr_posture is read only to split the approved case (merging vs
+# wedged) and to name the awaiting-review states. Exit 2 when a read does not
+# resolve, so a caller does not flip the label on a guess.
 derive_value() { # <anchor-id>
-  local anchor="$1" arow hold cap rhold posture mstate kids nkids
+  local anchor="$1" arow hold cap rhold posture mstate inflight ninflight
   [ -n "$anchor" ] || { warn "derive needs --anchor"; return 1; }
   arow=$(gc bd show "$anchor" --json 2>/dev/null)
   if ! printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
@@ -171,26 +174,29 @@ derive_value() { # <anchor-id>
   posture=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_posture // "") | tostring | split("@")[0])' 2>/dev/null)
   mstate=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_merge_state // "") | tostring | split("@")[0])' 2>/dev/null)
 
-  # An open rework child stands on the anchor. metadata-field selection lists
-  # non-closed by default; the explicit --status keeps it robust if that default
-  # changes. Repeated --status flags drop earlier values, so it is one list.
-  kids=$(gc bd list --metadata-field task_kind=rework --metadata-field "anchor_bead=$anchor" \
-    --status open,in_progress,blocked --limit 0 --json 2>/dev/null)
-  if ! printf '%s' "$kids" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    warn "could not read rework children for $anchor; cannot derive a status"
+  # The anchor's in-flight set: any live bead carrying anchor_bead. This is the
+  # membership test pr-facts.sh applies in its own arms, over the same live statuses,
+  # so the label and the merge hold agree on who is acting. Counting the whole set,
+  # not just task_kind=rework, is what keeps a human changes-requested batch (a
+  # validation pass) or any other non-rework shape from reading as settled. Repeated
+  # --status flags drop earlier values, so it is one list.
+  inflight=$(gc bd list --metadata-field "anchor_bead=$anchor" \
+    --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null)
+  if ! printf '%s' "$inflight" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    warn "could not read the in-flight set for $anchor; cannot derive a status"
     return 2
   fi
-  nkids=$(printf '%s' "$kids" | jq 'length' 2>/dev/null); case "$nkids" in ''|*[!0-9]*) nkids=0 ;; esac
+  ninflight=$(printf '%s' "$inflight" | jq 'length' 2>/dev/null); case "$ninflight" in ''|*[!0-9]*) ninflight=0 ;; esac
 
   # needs-attention: the city stopped without settling; a human must unstick it.
   if is_cap_park "$hold" "$cap"; then printf 'needs-attention\n'; return 0; fi
   if is_set "$hold" || is_set "$rhold"; then printf 'needs-attention\n'; return 0; fi
-  if [ "$posture" = "approved" ] && [ "$mstate" = "BLOCKED" ] && [ "$nkids" -eq 0 ]; then
+  if [ "$posture" = "approved" ] && [ "$mstate" = "BLOCKED" ] && [ "$ninflight" -eq 0 ]; then
     printf 'needs-attention\n'; return 0
   fi
 
   # working: the city holds the ball; no human input needed.
-  if [ "$nkids" -gt 0 ]; then printf 'working\n'; return 0; fi
+  if [ "$ninflight" -gt 0 ]; then printf 'working\n'; return 0; fi
   if [ "$posture" = "approved" ]; then printf 'working\n'; return 0; fi
 
   # needs-review: settled at the head, a human review or re-review is next.
