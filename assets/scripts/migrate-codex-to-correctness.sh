@@ -141,7 +141,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     if [ "$cshit" = "true" ] && [ "$(meta_of "$id" check_set)" != "$newset" ]; then ok=0; fi
     if [ "$mkhit" = "true" ] && { [ "$(meta_of "$id" 'check.correctness')" != "$marker" ] || [ -n "$(meta_of "$id" 'check.codex')" ]; }; then ok=0; fi
     if [ "$ok" -eq 1 ]; then
-      echo "$label $id: migrated (check_set='$newset'${mkhit:+, marker moved})"
+      moved=""; [ "$mkhit" = "true" ] && moved=", marker moved"
+      echo "$label $id: migrated (check_set='$newset'$moved)"
     else
       attention=$((attention + 1)); echo "$label $id: writes did not read back cleanly; still legacy, retry" >&2
     fi
