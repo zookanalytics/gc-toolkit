@@ -159,6 +159,31 @@ case "${1:-}" in
     mv "$tmp" "$STORE"
     echo "updated $id"
     ;;
+  dep)
+    # Only `dep list <id> --json` is used (own_blocks_cleared). Real bd answers an
+    # ARRAY of {id, dependency_type, status} — a bead's own outgoing edges — and an
+    # ERROR OBJECT (not an array) for an unresolvable id, so the stub serves both
+    # shapes to exercise the SUT's fail-closed array check.
+    shift
+    [ "${1:-}" = "list" ] || { echo "bd stub: unsupported 'dep ${1:-}'" >&2; exit 2; }
+    shift; depid="${1:-}"
+    if [ -n "${STUB_DEP_LIST_FAIL:-}" ] && [ "$STUB_DEP_LIST_FAIL" = "$depid" ]; then
+      # A store that cannot answer the dep query: not an array. own_blocks_cleared
+      # must fail closed on this and leave the bead armed, never sling on a guess.
+      echo '{"error":"simulated dep-list failure","schema_version":1}'; exit 0
+    fi
+    if [ "$(jq -r --arg id "$depid" 'any(.[]; .id == $id)' "$STORE")" != "true" ]; then
+      echo '{"error":"resolving '"$depid"': no issue found","schema_version":1}'
+    else
+      # _deps models the bead's own edges. Absent it, a not-ready bead stands in
+      # for the common "waiting on its own open blocker" case and a ready one for
+      # "no blockers left", so the pre-existing fixtures stay honest with no _deps.
+      jq -c --arg id "$depid" '
+        [ .[] | select(.id == $id) ] | .[0] as $b
+        | ($b._deps //
+            (if ($b._ready // false) then [] else [{"id":"_synthetic_blocker","dependency_type":"blocks","status":"open"}] end))' "$STORE"
+    fi
+    ;;
   *) echo "bd stub: unsupported '${1:-}'" >&2; exit 2 ;;
 esac
 STUB
@@ -413,6 +438,47 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "a closed armed bead is NOT slung"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "a closed armed bead's record is retired"
 has "$out" "1 retired" "summary counts the retire"
+
+# --- RECONCILE: the parent-cascade fix (tk-so8clv) ---------------------------
+# An armed OPEN bead whose own `blocks` edges have all closed is dispatchable
+# even when `bd list --ready` excludes it: the is_blocked flag cascades DOWN
+# parent-child edges, so an epic child under a container held on a human gate
+# never enters --ready though its own work is ready. reconcile asks the bead's
+# OWN blockers, not bd's claimability, and slings.
+echo "# reconcile dispatches an arm held out of bd --ready only by an ancestor cascade"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child","status":"open"},{"id":"b-0","dependency_type":"blocks","status":"closed"}]}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "dispatching a cascade-held arm is a clean pass"
+eq "$(slings)" "1" "an arm whose own blocks edges are all closed is slung though bd --ready excludes it"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1" "the cascade-held arm reaches sling with its recorded target"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the record is cleared after the dispatch"
+has "$out" "unready only through a blocked/deferred ancestor" "reconcile names why it dispatched a not-ready bead"
+has "$out" "1 dispatched" "summary counts the dispatch, not a wait"
+
+# The narrowing guard: an OPEN own blocker still withholds. Only the bead's own
+# blocks edges gate the arm, so a parent-child edge closing must never be
+# mistaken for the thing the arm actually waits on.
+echo "# reconcile still withholds an arm whose OWN blocker is open"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child","status":"closed"},{"id":"b-0","dependency_type":"blocks","status":"open"}]}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an arm with an open OWN blocker is NOT slung even if its parent-child edge is closed"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the still-blocked arm keeps its record"
+has "$out" "1 waiting" "summary counts it as waiting"
+
+# Fail closed: a dep-list read that does not answer an array must leave an
+# otherwise-dispatchable arm armed, never slung on a guess.
+echo "# a cascade probe that cannot read the dep list fails closed"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks","status":"closed"}]}]'
+out="$(STUB_DEP_LIST_FAIL=b-1 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an unreadable dep list leaves the otherwise-dispatchable arm un-slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record when its own blockers cannot be read"
+has "$out" "1 waiting" "an unresolved cascade probe counts as waiting, not dispatched"
+
+# list surfaces the cascade-held state distinctly from a plain wait.
+echo "# list labels a cascade-held arm as dispatchable"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks","status":"closed"}]}]'
+out="$("$SUT" list 2>&1)"
+has "$out" "DISPATCHABLE NOW (own blockers clear" "list flags the cascade-held arm as dispatchable, not waiting"
 
 echo "# reconcile keeps the record when the sling fails"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
