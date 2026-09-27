@@ -2558,6 +2558,71 @@ has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/145/reviews/560
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/145/requested_reviewers" "…and its author is re-requested"
 has "$(cat "$STUB_GH_LOG")" "resolved by an accepted decline" "…the dismiss message names the accepted decline"
 
+# ---- --route-comments-only: route operator feedback early, before merge --------
+# The tk-8qtkvv divergence: --posture-only stamps commented/changes_requested on
+# the cheap pre-merge tick, but routing lived only in the full arm at the pass
+# TAIL (after merge). A pass the timeout killed in between left the feedback
+# stamped-as-seen yet unrouted for hours. This mode routes on the early tick too:
+# it does the SAME routing the full arm does, then stops — no write-back sweep,
+# no MERGED/CLOSED reconciliation, none of the non-feedback arms.
+# The `new-N` bead counter is high this late in the run, so the child id is read
+# back from the store rather than assumed.
+run_route() { "$SUT" --route-comments-only --fix-pool "$FIX" 2>&1; }
+
+echo "# --route-comments-only: an unanswered comment is routed to a fix-pool child"
+store "[$(anchor RC1 66)]"
+printf '%s' "$(prview 66 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_66.json"
+echo '[]' > "$GH_DIR/reviews_66.json"
+printf '[{"id":6601,"user":{"login":"human1"},"body":"please change this","path":"a.sh"}]' > "$GH_DIR/comments_66.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_route); rc=$?
+eq "$rc" 0 "a route-comments-only pass exits 0"
+has "$out" "route-comments-only" "the summary names the mode"
+eq "$(meta_pinned RC1 pr_posture)" "commented@sha-66" "posture is still recorded (the arm re-reads it to route)"
+rc1_child=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | .id ][0] // "<none>"' "$STUB_STORE")
+eq "$(meta RC1 pr_comment_disposition)" "rework:$rc1_child" "the comment is routed on the early tick, disposition recorded"
+eq "$(meta RC1 pr_comment_watermark)" "6601" "…and the watermark advanced to the routed comment"
+eq "$(meta "$rc1_child" anchor_bead)" "RC1" "the child names the anchor"
+eq "$(meta "$rc1_child" task_kind)" "rework" "…and carries its role marker"
+eq "$(meta "$rc1_child" 'gc.routed_to')" "$FIX" "…and is routed to the fix pool"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "the fix pool is woken"
+eq "$(vpass_id RC1)" "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | .id ][0] // "<none>"' "$STUB_STORE")" \
+  "the batch opens its validation pass here too, exactly as the full arm does"
+
+echo "# …a human hold routes the same batch to a visit, early (the full arm's choice)"
+store "[$(anchor RC2 67 ',"merge_hold":"true"')]"
+printf '%s' "$(prview 67 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_67.json"
+echo '[]' > "$GH_DIR/reviews_67.json"
+printf '[{"id":6701,"user":{"login":"human1"},"body":"hmm"}]' > "$GH_DIR/comments_67.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
+out=$(run_route)
+eq "$(meta RC2 pr_comment_disposition | sed 's/visit:.*/visit/')" "visit" "a held anchor's feedback goes to a visit, on the early tick"
+has "$(cat "$STUB_ESC_LOG")" "merge_hold is set" "…and the visit records why no work could be routed"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work routed under the hold"
+
+echo "# …route-comments-only does NOT run the write-back sweep (the full pass owns it)"
+store "[$(anchor RC3 68 "$(wb_meta rework:KX)"), $(child KX open)]"
+printf '%s' "$(prview 68 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_68.json"
+threads 68 "$(one_thread 68)"
+out=$(run_route)
+eq "$(reacted 68 NC-68)" "false" "no EYES reaction: the write-back sweep did not run in route mode"
+hasnt "$out" "comments acknowledged" "…and the route summary reports no write-back"
+# Control: the full pass on the SAME fixture reacts, so the false above is the
+# mode's doing, not a fixture that could never react.
+out=$(run)
+eq "$(reacted 68 NC-68)" "true" "the full pass reacts on the same fixture, proving it discriminates"
+
+echo "# …and MERGED/CLOSED reconciliation is left to the full pass, like --posture-only"
+store "[$(anchor RC4 69)]"
+printf '%s' "$(prview 69 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_69.json"
+out=$(run_route)
+hasnt "$out" "is MERGED" "a merged PR is not reconciled by the feedback arm"
+eq "$(bstatus RC4)" "open" "…the anchor is left exactly as it was"
+eq "$(meta RC4 merge_result)" "pull_request" "…with its state untouched"
+out=$(run)
+has "$out" "PR#69 is MERGED" "the full pass still records it"
+eq "$(bstatus RC4)" "closed" "…and closes the anchor"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
