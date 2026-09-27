@@ -249,6 +249,13 @@ STUB
 
 cat > "$BIN/git" <<'STUB'
 #!/usr/bin/env bash
+# resolve_index reads the check index at the reviewed commit with
+# `git [-C <root>] show <oid>:review-checks.toml`. When STUB_INDEX names a file,
+# serve it; otherwise fall through (exit 0, empty) so the SUT sees no index.
+_g=("$@"); [ "${_g[0]:-}" = "-C" ] && _g=("${_g[@]:2}")
+if [ "${_g[0]:-}" = "show" ] && [ -n "${STUB_INDEX:-}" ]; then
+  case "${_g[1]:-}" in *:review-checks.toml) cat "$STUB_INDEX"; exit 0 ;; esac
+fi
 if [ "${1:-}" = "ls-remote" ]; then
   [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
   exit 0
@@ -982,6 +989,61 @@ if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then
 else
   ok "no gh invocation across this whole suite ever passed --approve"
 fi
+
+# --- --add-gates: triage widens the check_set -------------------------------------
+TRI='{"id":"rv-tri","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"triage","anchor_bead":"tk-anc"},"notes":"triage body"}'
+
+echo "# --add-gates widens check_set and records a triage-add note"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "a triage approve carrying --add-gates exits 0"
+has "$(meta tk-anc check_set)" "demo" "the added check reaches check_set"
+has "$(notes tk-anc)" "triage-add: demo @" "the widening is recorded as a triage-add note"
+has "$out" "check_set now" "the verdict line names the widened check_set"
+
+echo "# --add-gates is monotonic: re-adding a declared check is a no-op"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates triage 2>&1); rc=$?
+eq "$rc" 0 "re-adding an already-declared check exits 0"
+eq "$(meta tk-anc check_set)" "correctness,triage" "check_set is unchanged when the check is already declared"
+hasnt "$(notes tk-anc)" "triage-add: triage @" "no triage-add note for a check already present"
+
+echo "# only a triage approve may widen"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 1 "a correctness review may not widen"
+has "$out" "only the 'triage' check may widen" "the refusal names the widen rule"
+eq "$(meta tk-anc check_set)" "<absent>" "nothing is written on that refusal"
+reset "$ANCHOR_PR" ",$TRI"
+out=$("$SUT" --review-bead rv-tri --verdict request-changes --add-gates demo 2>&1); rc=$?
+eq "$rc" 1 "a request-changes verdict may not carry --add-gates"
+has "$out" "only an approve verdict records" "the refusal names the verdict rule"
+
+echo "# the human-only opt-out is never widened"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=none"
+out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "triage on a none anchor still records its verdict"
+eq "$(meta tk-anc check_set)" "none" "the none opt-out stays human-only, not widened"
+
+echo "# --add-gates is validated against the check index at the reviewed commit"
+IDX="$TMP/index.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\n[checks.triage]\nmethod="m"\npurpose="p"\n[checks.demo]\nmethod="m"\npurpose="p"\n' > "$IDX"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "a check the index declares is added"
+has "$(meta tk-anc check_set)" "demo" "the declared check reaches check_set"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates nonesuch 2>&1); rc=$?
+eq "$rc" 1 "a check the index does not declare is refused"
+has "$out" "not on the index" "the refusal names the closed index"
+hasnt "$(meta tk-anc check_set)" "nonesuch" "the undeclared check never reaches check_set"
+
+echo "# the widening is read back: a write that does not land leaves the review OPEN"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_DROP_KEYS="tk-anc:check_set" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 2 "a check_set write that did not read back exits 2 (review left open)"
+has "$out" "did not read back" "the failure names the read-back"
+eq "$(meta tk-anc "check.triage")" "<absent>" "no green marker is stamped when the widening did not persist"
 
 echo
 echo "signoff.test.sh: $PASS passed, $FAIL failed"
