@@ -160,5 +160,68 @@ F6=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/new.sh:g
 "$SUT" close-answered --anchor tk-anc
 eq "$(bstatus "$F6")" "open" "close-answered leaves a must-fix finding no fix unit blocks (unanswered objection)"
 
+# ---------------------------------------------------------------------------
+# set-disposition must-fix hangs the fix unit's close-ordering edge FROM the
+# ruling, so the fix unit blocks ONLY the findings the validator ruled must-fix
+# — never one still unvalidated, which a later declined ruling could not close
+# past that block.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-anc3","status":"open","assignee":"","title":"anchor3","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"fu3","status":"open","assignee":"","title":"Rework: address findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc3","source_review_bead":"rev3"}}]'
+# The fix unit stands on the anchor (holds the merge) before any finding is ruled.
+gc bd dep fu3 --blocks tk-anc3 >/dev/null
+FA=$("$SUT" upsert --anchor tk-anc3 --lane codex --locus "assets/scripts/a.sh:f()" --message "guard the write")
+FB=$("$SUT" upsert --anchor tk-anc3 --lane codex --locus "assets/scripts/b.sh:g()" --message "double-quote the expansion")
+hasnt "$(deps)" "fu3|blocks|$FA" "an unvalidated finding carries no inbound fix-unit block"
+"$SUT" set-disposition --finding "$FA" --anchor tk-anc3 --disposition must-fix
+has "$(deps)" "$FA|blocks|tk-anc3" "must-fix wires the finding --blocks anchor"
+has "$(deps)" "fu3|blocks|$FA" "…and hangs the fix unit's close-ordering edge onto the must-fix finding"
+hasnt "$(deps)" "fu3|blocks|$FB" "the fix unit blocks ONLY the ruled must-fix finding, not the unvalidated one"
+
+# ---------------------------------------------------------------------------
+# Regression: a finding a fix unit blocks is DECLINED and still closes. With the
+# block enforced the way bd enforces it, the earlier one-sided strip left the
+# inbound fix-unit edge and the close failed rc=2, stalling the whole triage.
+# ---------------------------------------------------------------------------
+export STUB_ENFORCE_BLOCKS=1
+FC=$("$SUT" upsert --anchor tk-anc3 --lane codex --locus "assets/scripts/c.sh:h()" --message "nit: rename for clarity")
+"$SUT" wire-fix-unit --fix-unit fu3 --anchor tk-anc3 --findings "$FC"
+has "$(deps)" "fu3|blocks|$FC" "the fix unit blocks the finding (the pre-decline state the incident hit)"
+if "$SUT" set-disposition --finding "$FC" --anchor tk-anc3 --disposition declined --reason "not a real objection"; then
+  ok "declining a fix-unit-blocked finding exits 0 (its inbound block was stripped before the close)"
+else
+  bad "declining a fix-unit-blocked finding failed (rc=2) — the inbound fix-unit block was not stripped"
+fi
+eq "$(bstatus "$FC")" "closed" "the declined finding closes despite the fix unit that blocked it"
+hasnt "$(deps)" "fu3|blocks|$FC" "…and the stale fix-unit edge onto the declined finding is gone"
+unset STUB_ENFORCE_BLOCKS
+
+# ---------------------------------------------------------------------------
+# Human-lane fix unit: pr-facts files one rework child per human batch, carrying
+# the batch's review ids in source_review and NO source_review_bead. A human
+# must-fix finding must hang THAT child's close-ordering edge — not a machine
+# child that happens to stand on the same anchor — so the finding closes when the
+# human batch lands, and never before. Both children stand on the anchor here, so
+# the assertions prove the lane match discriminates rather than picking either.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-anch","status":"open","assignee":"","title":"anchorH","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"cfuh","status":"open","assignee":"","title":"Address review comments on PR#7","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anch","source_review":"111,222"}},
+        {"id":"mfuh","status":"open","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anch","source_review_bead":"revH"}}]'
+gc bd dep cfuh --blocks tk-anch >/dev/null
+gc bd dep mfuh --blocks tk-anch >/dev/null
+FHM=$("$SUT" upsert --anchor tk-anch --lane human --source "human:johnzook" --locus "assets/scripts/z.sh:go()" --message "handle the empty batch")
+"$SUT" set-disposition --finding "$FHM" --anchor tk-anch --disposition must-fix
+has "$(deps)" "$FHM|blocks|tk-anch" "a human must-fix finding blocks the anchor"
+has "$(deps)" "cfuh|blocks|$FHM" "must-fix hangs the human batch child's close-ordering edge onto the human finding"
+hasnt "$(deps)" "mfuh|blocks|$FHM" "…and never the machine child, whose source_review_bead marks a different lane"
+"$SUT" close-answered --anchor tk-anch
+eq "$(bstatus "$FHM")" "open" "close-answered leaves the human finding open while its batch child is in flight"
+gc bd update cfuh --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-anch
+eq "$(bstatus "$FHM")" "closed" "close-answered closes the human finding once its batch child lands"
+has "$(notes "$FHM")" "fix unit landed" "the close records why the human finding was resolved"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

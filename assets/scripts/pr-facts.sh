@@ -1660,7 +1660,6 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not render the feedback findings; NOT watermarking (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    FINDING_IDS=""
     ffail=""
     while IFS= read -r frec; do
       [ -n "$frec" ] || continue
@@ -1671,7 +1670,6 @@ $CBODY"
       frid=$(printf '%s' "$frec" | jq -r '(.review_id // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
       if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" 2>/dev/null) && [ -n "$fid" ]; then
-        FINDING_IDS="${FINDING_IDS:+$FINDING_IDS,}$fid"
         # Record which GitHub row and review raised it. finding.comment_id lets the
         # write-back post a declined finding's owed reply into that thread;
         # finding.review_id groups the finding under its review, so the write-back
@@ -1689,22 +1687,15 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not file every feedback finding; NOT watermarking (retry next pass; finding.sh re-adopts the ones already filed)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # A rework child carrying the batch is the fix unit for the findings it
-    # answers: it blocks each one, so closing it unblocks them the way a codex
-    # rework child does (specs/tk-ztapg/review-cycle-architecture.md, "The fix
-    # unit"). A visit-routed batch has no fix unit; a human answers it. The wire
-    # is a required write, fail-closed like the finding filing above: a finding
-    # the validator later rules must-fix blocks the anchor, and only the fix-unit
-    # edge lets closing the child release it, so a lost wire strands the anchor
-    # blocked with nothing to unblock it. A failed wire holds the batch
-    # unwatermarked — upsert re-adopts the filed findings and wire-fix-unit,
-    # idempotent, re-attempts only the missing edges next pass.
-    if [ "$choice" = rework ] && [ -n "${CFIX:-}" ] && [ -n "$FINDING_IDS" ]; then
-      if ! "$FINDING" wire-fix-unit --fix-unit "$CFIX" --anchor "$id" --findings "$FINDING_IDS" >/dev/null 2>&1; then
-        echo "$PROG: WARN $id — PR#$num could not wire rework child $CFIX to findings $FINDING_IDS; NOT watermarking (retry next pass)" >&2
-        skipped=$((skipped + 1)); continue
-      fi
-    fi
+    # The rework child's edges onto the findings it answers are NOT hung here.
+    # Every finding is still unvalidated, and a fix unit that blocked one the
+    # validator later declines would refuse that finding's close (bd will not close
+    # a blocked issue) and stall the validator's triage. The close-ordering edge
+    # onto a finding is hung as the validator rules it must-fix (finding.sh
+    # set-disposition), so the fix unit blocks only the findings it must answer; a
+    # visit-routed batch has no fix unit and a human answers it. The child's own
+    # blocks edge onto the anchor, wired at dispatch, is what holds the merge in the
+    # meantime (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
 
     # The batch boundary goes down WITH the disposition that names it. Derived
     # later, off the disposition, it can be lost: a pass that exits after this
