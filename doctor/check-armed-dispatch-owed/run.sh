@@ -44,6 +44,14 @@ OWED_WINDOW_SECONDS=900
 K_ARM="gc.dispatch_when_ready"
 K_SLUNG="gc.dispatch_when_ready_slung"
 K_ARMED_AT="gc.dispatch_when_ready_armed_at"
+K_FAILS="gc.dispatch_when_ready_fail_count"
+
+# The retry cap, read exactly as deferred-dispatch.sh reads it (same env
+# override, same non-numeric fallback): once an arm's sling failures reach it,
+# the reconcile pass files a visit through escalate.sh and stops re-slinging, so
+# a capped arm is already surfaced to a person — not a silent stall to re-report.
+MAX_SLING_FAILURES="${GC_MAX_DISPATCH_SLING_FAILURES:-3}"
+case "$MAX_SLING_FAILURES" in ''|*[!0-9]*) MAX_SLING_FAILURES=3 ;; esac
 
 findings=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -120,25 +128,31 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not list armed beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
     fi
-    rows=$(printf '%s' "$raw" | scrub | jq -r --arg slung "$K_SLUNG" --arg armed_at "$K_ARMED_AT" '
+    rows=$(printf '%s' "$raw" | scrub | jq -r --arg slung "$K_SLUNG" --arg armed_at "$K_ARMED_AT" --arg fails "$K_FAILS" '
         .[]? | . as $b | ($b.metadata // {}) as $m
         | [ ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")),
             (($b.status // "") | tostring),
             (($b.assignee // "") | tostring | (. != "") | tostring),
             (($m[$slung] // "") | tostring | (. != "") | tostring),
             (($m["merge_result"] // "") | tostring | (. != "") | tostring),
-            (($m[$armed_at] // "") | tostring) ]
+            (($m[$armed_at] // "") | tostring),
+            (($m[$fails] // "") | tostring) ]
         | @tsv' 2>/dev/null) || {
         warnings+=("$label: could not evaluate armed beads in $rig_path/.beads — this store was NOT checked")
         continue
     }
     [ -n "$rows" ] || continue
 
-    while IFS=$'\t' read -r id status has_assignee has_slung has_mr armed_at; do
+    while IFS=$'\t' read -r id status has_assignee has_slung has_mr armed_at fails; do
         [ -n "$id" ] || continue
+        case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         [ "$status" = "closed" ] && continue          # dispatch no longer owed
         [ "$has_mr" = "true" ] && continue            # delivered by another path; reconcile retires
         [ "$has_slung" = "true" ] && continue         # mid-dispatch or proven; reconcile handles it
+        # A capped arm has already been escalated by the reconcile pass, so it is
+        # surfaced, not silent. deferred-dispatch.sh's `list` classifies CAPPED
+        # ahead of both stranded and dispatchable; mirror that order here.
+        [ "$fails" -ge "$MAX_SLING_FAILURES" ] && continue
         if [ "$status" != "open" ]; then
             findings+=("$label bead $id: armed for dispatch at status=$status, which \`bd list --ready\` never answers — no blocker closing can dispatch it. Clear the hold or disarm: deferred-dispatch.sh disarm $id")
             continue

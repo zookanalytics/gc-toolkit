@@ -4,7 +4,9 @@
 # edges closed long ago but that never dispatched), the STRANDED finding (armed
 # at a non-open status), the narrowing exemptions (still waiting on its own open
 # blocker; dispatchable only recently, within the reconcile window; mid-dispatch
-# via a slung marker; delivered via merge_result; closed), the fail-closed probes
+# via a slung marker; delivered via merge_result; closed; capped at the
+# configured sling-failure cap, which reconcile has already escalated), the
+# fail-closed probes
 # (unreadable dep list, unreadable armed listing, unreadable rig list), the
 # suspended-rig skip, and the quiet path (no armed beads).
 set -uo pipefail
@@ -67,6 +69,10 @@ astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready
 aslung()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_slung":"slinging@2020-01-01T00:00:00Z"}}' "$1"; }
 amr()     { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"}}' "$1"; }
 aassigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
+# A capped arm: fail count defaults to the cap (3); $2 overrides it. Paired with
+# a long-closed own blocker it would read as owed-but-not-firing without the cap
+# exemption.
+acapped() { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_fail_count":"%s","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-3}" "${3:-2020-01-01T00:00:00Z}"; }
 
 # Dep-list fixtures (the bead's own outgoing edges).
 dep_fixture() { local n="$1" id="$2"; shift 2; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.dep.$id.json"; }
@@ -137,6 +143,33 @@ dep_fixture alpha a-7b "$(e_blk_closed b-0 "$OLD")"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an assigned (HELD) arm is not owed a dispatch, not flagged"
 hasnt "$OUT" "alpha bead a-7b" "a handed-off/held arm is not reported as owed"
+clear_stores
+
+# --- 7c. EXEMPT: a capped arm whose own blockers closed long ago — the reconcile
+#          pass already escalated it, so it is surfaced, not silent -----------
+armed_store alpha "$(acapped a-7c)"
+dep_fixture alpha a-7c "$(e_blk_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a capped arm (fail count at the cap) is exempt, not flagged as owed"
+hasnt "$OUT" "alpha bead a-7c" "a capped arm is not reported"
+clear_stores
+
+# --- 7d. DISCRIMINATE: below the cap is still owed (the test is >=, not just
+#          any nonzero fail count) --------------------------------------------
+armed_store alpha "$(acapped a-7d 2)"
+dep_fixture alpha a-7d "$(e_blk_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm below the cap (2 < 3) is still owed and flagged"
+has "$OUT" "alpha bead a-7d" "a sub-cap owed arm is still reported"
+clear_stores
+
+# --- 7e. the cap honors GC_MAX_DISPATCH_SLING_FAILURES, exactly as
+#          deferred-dispatch.sh reads the configured cap ----------------------
+armed_store alpha "$(acapped a-7e 2)"
+dep_fixture alpha a-7e "$(e_blk_closed b-0 "$OLD")"
+OUT=$(GC_MAX_DISPATCH_SLING_FAILURES=2 run_check); RC=$?
+eq "$RC" "0" "with the cap lowered to 2, a 2-failure arm is capped and exempt"
+hasnt "$OUT" "alpha bead a-7e" "the configured-cap override matches deferred-dispatch.sh"
 clear_stores
 
 # --- 8. FAIL CLOSED: an otherwise-dispatchable arm whose dep list is unreadable
