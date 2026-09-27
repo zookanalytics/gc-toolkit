@@ -1,7 +1,7 @@
 Formula: mol-review
 Description: Signoff review lifecycle — claim -> pin -> judge -> ONE signoff.sh verdict ->
 drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
-metadata.task_kind=review, check_name (the gate the verdict satisfies),
+metadata.task_kind=review, check_name (the check the verdict satisfies),
 anchor_bead (the gating anchor), and the review target — review_branch /
 review_base pre-open, or pr_url / pr_number once a PR exists — plus the
 dispatch-pinned reviewed_oid. The steps carry the whole method; the agent

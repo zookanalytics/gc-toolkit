@@ -17,7 +17,7 @@ single-writer discipline stated as counts, every invariant bound to its
 mechanical check, and which workflow each component belongs to.
 
 **Boundaries.** It does not draw the lifecycle — [state-machine.md](state-machine.md)
-owns the diagram, the transition table, and the gate vocabulary. It does not
+owns the diagram, the transition table, and the check vocabulary. It does not
 narrate the merge cadence ([refinery-merge-cadence.md](refinery-merge-cadence.md))
 or the human surface ([gascity-human-engagement.md](gascity-human-engagement.md)),
 and it does not compose the lifecycles —
@@ -40,10 +40,10 @@ in the discard list below it.
 |---|---|---|
 | **Bead** | one durable row: id, status, assignee, metadata, notes | state lives in agent context and dies with the session |
 | **Graph edge** | typed relation between two beads (`blocks`, `parent-child`, `tracks`, …) | a wait becomes a sentence, and nothing can re-evaluate a sentence |
-| **Anchor** | the single open bead that owns a PR and carries its gates | N claimants on one PR ⇒ the weakest check-set decides the merge |
+| **Anchor** | the single open bead that owns a PR and carries its checks | N claimants on one PR ⇒ the weakest check-set decides the merge |
 | **Convoy** | tracked set with one landing target | no unit larger than a bead can land, and integration branches cannot graduate |
 | **Formula + step bead** | a workflow materialised as beads | a crashed session resumes by reconstructing intent from prose |
-| **Check-set + gate marker** | declared merge preconditions, each bound to a commit | merges depend on whoever remembers to look |
+| **Check-set + check marker** | declared merge preconditions, each bound to a commit | merges depend on whoever remembers to look |
 | **Pool + route** | demand addressed to a role, not to a session | dispatch names a mortal process |
 | **Order** | controller-owned recurring pass, no LLM | cadence becomes an invisible daemon |
 | **Agent session** | one mortal executor with an identity | nothing can be claimed, and nothing can be recycled |
@@ -99,7 +99,7 @@ writes.
 
 ## 2. The lifecycle, as counts
 
-The machine itself — states, transitions, writers, gates — is drawn once, in
+The machine itself — states, transitions, writers, checks — is drawn once, in
 [state-machine.md](state-machine.md), from the declaration in
 `lifecycle/lifecycle.toml`. What this document holds it to:
 
@@ -112,9 +112,9 @@ The machine itself — states, transitions, writers, gates — is drawn once, in
   carrying every field of the transition → read back. A single `bd update` is
   atomic ([gascity-routing-model.md](gascity-routing-model.md)); the old
   healer passes existed because writers split transitions across calls.
-- **One gate-verdict writer** — `signoff.sh`. Clearing a marker is a separate
+- **One check-verdict writer** — `signoff.sh`. Clearing a marker is a separate
   power from writing one: a clear withdraws evidence where a verdict asserts
-  it, so no clearer can make a gate pass. Three components hold that power,
+  it, so no clearer can make a check pass. Three components hold that power,
   each under one condition stated in [authority-map.md](authority-map.md).
 - **One posture writer** — `pr-facts.sh`, which records what the PR is doing
   (`pr_posture`, `pr_merge_state`, the comment watermarks) so every consumer
@@ -146,7 +146,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
 | **I5** | No bead is closed while the work it represents is unlanded: closed anchor ⇒ `merged` + `merged_sha`, or an explicit terminal state. | `doctor/check-closed-implies-landed` |
 | **I6** | Every gating anchor declares a non-empty `check_set`, and every marker is a bare lane-state word. | `doctor/check-gate-integrity` |
-| **I7** | A gate verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: `signoff.sh` contains the only code that sets a `check.*` value. The two other components that touch the key ([authority-map.md](authority-map.md)) only clear it, which cannot forge a verdict. `doctor/check-gate-marker-provenance` (tk-iljtmq) carries the depth half in two arms. Green is derived from the outcome graph (`lane-state.sh`), so its **outcome arm** audits that graph markerlessly: every CLOSED `task_kind=review` bead that backs a lane on an open gating anchor — `signoff_verdict=approve` carrying a non-empty `reviewed_oid`, the local backing `lane-state.sh` derives green from — must record `gc.outcome=recorded` (a live backing) or `gc.outcome=superseded` (retired); an approve carrying any other outcome still derives the lane green (`lane-state.sh` excludes only `superseded`) while standing on a verdict no writer recorded, and is the finding. Because `gate-ensure.sh` still reads `check.<lane>` and skips dispatch on `green`, a **marker arm** is kept during the transition: a `check.<lane>=green` on such an anchor that resolves to no backing — no local approve or legacy-recorded bead, no APPROVED GitHub review on its `pr_number` — is the wedge (gate-ensure raises no review while `lane-state.sh` holds the merge), an error, or an undetermined warning when the GitHub path could not run. It reads no commit oid, and a legacy no-verdict `gc.outcome=recorded` bead and an operator's APPROVED GitHub review both pass both arms. The sanctioned writers (`signoff.sh` close, `review-outcome.sh back-lane`) record only `recorded` or `superseded`, so a clean store has no findings — it stays a forward regression detector. The marker arm is removed once the last marker consumer reads `lane-state.sh`. Moving the stamp out of `template-fragments/polecat-non-impl-done.template.md` into the pass that observes the review is tk-eh6xhf, and this check does not replace it. |
+| **I7** | A check verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: `signoff.sh` contains the only code that sets a `check.*` value. The two other components that touch the key ([authority-map.md](authority-map.md)) only clear it, which cannot forge a verdict. `doctor/check-gate-marker-provenance` (tk-iljtmq) carries the depth half in two arms. Green is derived from the outcome graph (`lane-state.sh`), so its **outcome arm** audits that graph markerlessly: every CLOSED `task_kind=review` bead that backs a lane on an open gating anchor — `signoff_verdict=approve` carrying a non-empty `reviewed_oid`, the local backing `lane-state.sh` derives green from — must record `gc.outcome=recorded` (a live backing) or `gc.outcome=superseded` (retired); an approve carrying any other outcome still derives the lane green (`lane-state.sh` excludes only `superseded`) while standing on a verdict no writer recorded, and is the finding. Because `gate-ensure.sh` still reads `check.<lane>` and skips dispatch on `green`, a **marker arm** is kept during the transition: a `check.<lane>=green` on such an anchor that resolves to no backing — no local approve or legacy-recorded bead, no APPROVED GitHub review on its `pr_number` — is the wedge (gate-ensure raises no review while `lane-state.sh` holds the merge), an error, or an undetermined warning when the GitHub path could not run. It reads no commit oid, and a legacy no-verdict `gc.outcome=recorded` bead and an operator's APPROVED GitHub review both pass both arms. The sanctioned writers (`signoff.sh` close, `review-outcome.sh back-lane`) record only `recorded` or `superseded`, so a clean store has no findings — it stays a forward regression detector. The marker arm is removed once the last marker consumer reads `lane-state.sh`. Moving the stamp out of `template-fragments/polecat-non-impl-done.template.md` into the pass that observes the review is tk-eh6xhf, and this check does not replace it. |
 | **I8** | Every step bead reaches a terminal state: no offerable step under a closed root, no frontier stalled past its bound. A step under a closed root is offerable when its own status is open and every blocking dependency has closed; one parked at `status=blocked`, or still waiting on a live blocker, is inert residue and reported as a note, because no pool can hand it out. | `doctor/check-step-terminal` |
 | **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
@@ -285,7 +285,7 @@ city executes, with nothing unplaced and no row carrying any other value.
 advances, not the one whose name it carries. `mol-refinery-patrol` is merge
 because what it produces is merge decisions. `gate-ensure.sh` is review even
 though it runs as arm 1 of the merge cadence, because what it produces is a
-raisable gate and a routed review bead. Patrol is the workflow whose product
+raisable check and a routed review bead. Patrol is the workflow whose product
 is a fleet that can still run the other five.
 
 **Shared primitive** means more than one workflow calls it for the same
@@ -302,11 +302,11 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
-| `assets/scripts/gate-ensure.sh` | review | Makes every declared gate raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
+| `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
-| `assets/scripts/signoff.sh` | review | The single writer of gate verdicts (I7). |
+| `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
 | `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, wires the disposition edge (`blocks` for must-fix, `discovered-from` for deferred), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
-| `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every gate reader agrees without a stored `check.<lane>` marker. |
+| `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every check reader agrees without a stored `check.<lane>` marker. |
 | `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker and never touches the anchor. |
 | `assets/scripts/validate-dispatch-body.sh` | review | Emits the dispatch note a validation-pass bead carries. |
 | `assets/scripts/review-outcome.sh` | review | The write side of a lane's approve outcome, the bead lane-state.sh reads: `back-lane` files the closed approve outcome that greens a lane, `supersede-lane` stamps it superseded to return the lane to `unreviewed`. |

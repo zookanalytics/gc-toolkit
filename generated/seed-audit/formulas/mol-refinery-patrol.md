@@ -9,7 +9,7 @@ run the rig's checks, decide (land / gate / reject), pour the next wisp,
 burn this one. Steps are not materialized; read each description as you
 reach it. On crash, re-derive position from git and bead state.
 
-Everything downstream of the gating handoff — gate arming and review
+Everything downstream of the gating handoff — check arming and review
 dispatch, PR opening, the merge itself, external PR facts, convoy
 graduation — is the refinery-reconcile ORDER's (60s, no session). This
 formula never runs those passes: docs/refinery-merge-cadence.md.
@@ -34,7 +34,7 @@ Variables:
   {{auto_ff_rig_main}}: After a direct merge, best-effort fast-forward the rig's canonical checkout when it is on the target branch with a clean tree. Never blocks the merge. (default=true)
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
   {{build_command}}: Build command. Empty = skip. (default=)
-  {{check_set}}: Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of gate names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the gate that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so gateless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. (default=correctness,triage)
+  {{check_set}}: Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. (default=correctness,triage)
   {{default_merge_strategy}}: Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. (default=mr)
   {{delete_merged_branches}}: Delete source branches after a direct merge. (default=true)
   {{lint_command}}: Lint command. Empty = skip. (default=)

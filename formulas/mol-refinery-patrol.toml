@@ -9,7 +9,7 @@ run the rig's checks, decide (land / gate / reject), pour the next wisp,
 burn this one. Steps are not materialized; read each description as you
 reach it. On crash, re-derive position from git and bead state.
 
-Everything downstream of the gating handoff — gate arming and review
+Everything downstream of the gating handoff — check arming and review
 dispatch, PR opening, the merge itself, external PR facts, convoy
 graduation — is the refinery-reconcile ORDER's (60s, no session). This
 formula never runs those passes: docs/refinery-merge-cadence.md.
@@ -84,7 +84,7 @@ description = "After a direct merge, best-effort fast-forward the rig's canonica
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of gate names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the gate that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so gateless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
 default = "correctness,triage"
 
 [[steps]]
@@ -572,7 +572,7 @@ its failure.
 **If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
 pushes the prepared branch and transitions the anchor into the gated
 pipeline; the cadence's gate-ensure dispatches the review, pr-open opens the
-PR, merge.sh lands it. Gate dispatch does NOT happen here.
+PR, merge.sh lands it. Check dispatch does NOT happen here.
 
 1. Push the prepared branch. Force ONLY when the push actually rewrites
 history — derived from ancestry, not the branch name:
@@ -668,7 +668,7 @@ bead already gates this branch, $WORK is a rework hand-back: move it to
 (a merge_result-carrying rework child joins the anchor enumeration as a
 gateless second anchor), and let gating continue on the existing anchor: its
 lane markers are states of the lane, not of the head, so the rework's push does
-not touch them — the cadence re-reads the existing anchor's gate and holds
+not touch them — the cadence re-reads the existing anchor's check and holds
 until it reads green.
 
 Branch is the join key and `merge_result` present is the whole predicate: any

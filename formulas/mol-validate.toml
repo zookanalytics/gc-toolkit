@@ -281,7 +281,7 @@ nothing about decision 3: carry on to `rule-convergence` and judge convergence
 there on the batch's own evidence, never on the emptiness of this read.
 
 A deferred finding needs a bead someone can pick up later; filing that follow-up
-work is the fix-unit dispatch the gate authority owns (tk-o1bzbm), not this pass.
+work is the fix-unit dispatch the check authority owns (tk-o1bzbm), not this pass.
 This pass rules the disposition; it does not create or route fix units.
 
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
@@ -332,7 +332,7 @@ This pass rules one of two shapes, and `$LANE` names which: a `check_set` lane
 (`correctness`) for a reviewer's batch, or `human` for an operator feedback batch. A
 human batch is anchor-wide — it is input the whole diff has never been answered
 against, so its ruling moves every lane the anchor's `check_set` declares, not
-the `human` pseudo-lane no gate reader derives green from
+the `human` pseudo-lane no check reader derives green from
 (specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane backwards").
 Record the ruling with the line matching this pass's shape and your judgement;
 the `$LANE` guard on each makes the wrong line a no-op.
@@ -353,14 +353,14 @@ comment its reviewer never read, so a converged human batch runs neither line.
 **If it has NOT converged — a fresh whole-diff review is warranted.**
 
 A reviewer's lane batch supersedes its own lane, returning it to `unreviewed` so
-the gate authority pours a fresh review at the live head. On a request-changes
+the check authority pours a fresh review at the live head. On a request-changes
 batch there is no approve backing yet; supersede-lane is then a no-op success and
 the lane already owes its review.
 ```bash
 [ "$LANE" != human ] && "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "<one line: what still needs a whole-diff look>"
 ```
 A human batch supersedes EVERY declared lane, since the whole diff owes a fresh
-look. Superseding only the `human` pseudo-lane would leave the real gates green
+look. Superseding only the `human` pseudo-lane would leave the real checks green
 and let the anchor merge without the review this ruling requires.
 ```bash
 [ "$LANE" = human ] && "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --reason "<one line: what the operator's input overturns>"

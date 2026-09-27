@@ -1,7 +1,7 @@
 description = """
 Signoff review lifecycle — claim -> pin -> judge -> ONE signoff.sh verdict ->
 drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
-metadata.task_kind=review, check_name (the gate the verdict satisfies),
+metadata.task_kind=review, check_name (the check the verdict satisfies),
 anchor_bead (the gating anchor), and the review target — review_branch /
 review_base pre-open, or pr_url / pr_number once a PR exists — plus the
 dispatch-pinned reviewed_oid. The steps carry the whole method; the agent
@@ -226,7 +226,7 @@ finding this diff carries, not the first one that appears.
   pin load-dispatch set, never a bare number against ambient gh context:
   `gh pr view "$PR" --repo "$PR_REPO_Q" --json title,body`. Pre-open there is
   no page, but `pr-open.sh` will publish the anchor's `metadata.pr_summary`
-  verbatim as `## Summary` once the gate goes green, falling back to the
+  verbatim as `## Summary` once the check goes green, falling back to the
   dispatch description and then a placeholder when it is absent
   (`assets/scripts/pr-open.sh`); read that pending summary and hold it to the
   same standard —
@@ -269,7 +269,7 @@ fi
 ```
 
 **4. Calibrate severity.** P0 — broken or unsafe as merged: data loss, a
-merge that bypasses a gate, a crash on the normal path. P1 — a real defect
+merge that bypasses a check, a crash on the normal path. P1 — a real defect
 that will bite: wrong behavior on a reachable input, a fail-open where
 fail-closed was intended. P2 — worth fixing, not worth blocking: a narrow
 hazard, a test gap, a clarity problem. Grade honestly: a P2 inflated to P1
