@@ -174,8 +174,11 @@ and is not rebound to a commit. Renaming the standing check from `codex` to
 `correctness` renames the lane and the marker key together, and the default
 lane name that an absent `check_name` resolves to changes with it, so the
 derivation, the writer, the dispatcher, and the validator agree on the name.
-Markers stamped `check.codex` on live anchors are migrated to `check.correctness`
-so no open anchor loses a green it earned.
+The one-shot `migrate-codex-to-correctness.sh` rewrites the legacy name on every
+live surface that carries it — the `check_set` token, the `check.codex` marker, a
+review bead's `check_name`, and a finding bead's `finding.lane` — so no open
+anchor loses a green it earned, and no open finding goes invisible to the
+correctness validator that selects the findings to rule by their lane.
 
 ## What is not carried
 
@@ -198,7 +201,7 @@ through the finding graph, not through a sixth lane state.
 
 ## Seams left open
 
-Three things are deliberately buildable-later without restructuring:
+Deliberately deferred, each tracked by a bead:
 
 - **The correctness tier** (deferred, tk-3voqke; design in `specs/tk-9tqphn/`).
   Check names stay a flat comma-list of clean names — no dotted
@@ -212,6 +215,15 @@ Three things are deliberately buildable-later without restructuring:
   The index accepts new rows and `review-dispatch-body.sh` accepts new
   `--check-name` arms without any change to the dispatch or the merge predicate,
   so each specialist lands as content within this model.
+- **The helm board's pre-open-stall deriver** (tk-263hr9).
+  `services/helm/internal/board/derive.go` recognizes the standing pre-open gate
+  by an exact `check_set == "codex"` match and the `check.codex` marker. Under the
+  renamed, comma-list `correctness,triage` baseline it matches neither, so the
+  board stops surfacing a stalled pre-open correctness gate until that deriver
+  moves to comma-list membership on `correctness`. Only the board's stall
+  indicator is affected; the merge machinery derives and holds each check
+  independently. It is a Go change in the actively-owned board component, kept out
+  of this shell/TOML foundation on purpose.
 
 ## The reference-docs convention
 

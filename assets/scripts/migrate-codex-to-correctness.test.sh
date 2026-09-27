@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/migrate-codex-to-correctness.sh.
 # Covers: dry-run (the default) reports every rewrite and writes nothing; --apply
-# rewrites the check_name=codex backing on open AND closed reviews, rewrites the
-# codex token inside a check_set (order and sibling checks kept), and moves a
-# check.codex marker to check.correctness (value copied verbatim, old key unset);
+# rewrites the check_name=codex backing on open AND closed reviews, rewrites
+# finding.lane=codex on findings (open AND closed, a non-codex lane left alone),
+# rewrites the codex token inside a check_set (order and sibling checks kept), and
+# moves a check.codex marker to check.correctness (value copied verbatim, old key unset);
 # a token that only CONTAINS "codex" (codexy) is left alone, proving the
 # comma-boundary match; a stray check.codex marker on an anchor whose check_set
 # never named codex is still moved; a second --apply is a true no-op; a write that
@@ -56,14 +57,21 @@ anchor() { # id check_set extra-metadata-json (starts with a comma, or empty)
   printf '{"id":"%s","status":"open","assignee":"","title":"t-%s","metadata":{"check_set":"%s"%s}}' \
     "$1" "$1" "$2" "${3:-}"
 }
+finding() { # id status lane
+  printf '{"id":"%s","status":"%s","assignee":"","title":"t-%s","metadata":{"task_kind":"finding","finding.lane":"%s","finding.source":"machine:%s"}}' \
+    "$1" "$2" "$1" "$3" "$3"
+}
 
 # Fixture: two codex reviews (one open, one closed — both backings migrate); one
-# review already named correctness (invisible to the codex query); an anchor whose
-# check_set IS codex plus a check.codex marker; a multi-check check_set proving the
-# comma-token rewrite keeps order and siblings; a stray marker on an already-clean
-# check_set; a "codexy" token proving the boundary; and a fully-clean anchor.
+# review already named correctness (invisible to the codex query); two codex
+# findings (open and closed, both migrate) and a human finding the codex query
+# never sees; an anchor whose check_set IS codex plus a check.codex marker; a
+# multi-check check_set proving the comma-token rewrite keeps order and siblings; a
+# stray marker on an already-clean check_set; a "codexy" token proving the
+# boundary; and a fully-clean anchor.
 fixture() {
   store "[$(review R1 open codex),$(review R2 closed codex),$(review R3 open correctness),\
+$(finding F1 open codex),$(finding F2 closed codex),$(finding F3 open human),\
 $(anchor A1 codex ',"check.codex":"green"'),\
 $(anchor A2 "lint,codex,arch" ''),\
 $(anchor A3 correctness ',"check.codex":"green"'),\
@@ -80,6 +88,9 @@ has "$out" "DRY-RUN" "dry-run announces itself"
 has "$out" "gc-toolkit R1: would set check_name codex -> correctness" "R1 (open review) reported"
 has "$out" "gc-toolkit R2: would set check_name codex -> correctness" "R2 (closed review) reported — closed backings migrate too"
 hasnt "$out" "R3:" "R3 (already correctness) is invisible to the codex query"
+has "$out" "gc-toolkit F1: would set finding.lane codex -> correctness" "F1 (open codex finding) reported"
+has "$out" "gc-toolkit F2: would set finding.lane codex -> correctness" "F2 (closed codex finding) reported — closed findings migrate too"
+hasnt "$out" "F3:" "F3 (human lane) is invisible to the codex query"
 has "$out" "gc-toolkit A1: would set check_set 'codex' -> 'correctness'" "A1 check_set rewrite reported"
 has "$out" "gc-toolkit A1: would move check.codex='green' -> check.correctness" "A1 marker move reported"
 has "$out" "gc-toolkit A2: would set check_set 'lint,codex,arch' -> 'lint,correctness,arch'" "A2 multi-check check_set keeps order and siblings"
@@ -99,6 +110,9 @@ eq "$rc" 0 "apply exits 0"
 eq "$(meta R1 check_name)" "correctness" "R1 open review rewritten"
 eq "$(meta R2 check_name)" "correctness" "R2 closed review rewritten — closed backings too"
 eq "$(meta R3 check_name)" "correctness" "R3 was already correctness, still correctness"
+eq "$(meta F1 'finding.lane')" "correctness" "F1 open codex finding rewritten"
+eq "$(meta F2 'finding.lane')" "correctness" "F2 closed codex finding rewritten — closed findings too"
+eq "$(meta F3 'finding.lane')" "human" "F3 human finding left alone"
 eq "$(meta A1 check_set)" "correctness" "A1 check_set token rewritten"
 eq "$(meta A1 'check.correctness')" "green" "A1 marker value copied verbatim to check.correctness"
 eq "$(meta A1 'check.codex')" "<absent>" "A1 old check.codex key unset"
@@ -156,6 +170,7 @@ export STUB_BD_LIST_GARBAGE='{"error":"boom"}'
 out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 1 "a non-array listing (rc 0) exits 1"
 has "$out" "review listing unreadable" "the loud NOT-migrated message fires for reviews"
+has "$out" "finding listing unreadable" "…and for findings"
 has "$out" "anchor listing unreadable" "…and for anchors"
 hasnt "$out" "nothing to migrate" "garbage is never read as an empty, fully-migrated store"
 export STUB_BD_LIST_GARBAGE=""

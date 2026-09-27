@@ -7,11 +7,14 @@
 # name reads as a lane whose method the pack no longer declares: gate-ensure
 # dispatches its review against review-dispatch-body's `*)` no-method fallback,
 # and its board vocabulary names a retired tool. This rewrites the old name in
-# place on three surfaces, keeping each anchor and its backing reviews consistent
-# so no lane loses the green it earned:
+# place on four surfaces, keeping each anchor and its backing reviews and
+# findings consistent so no lane loses the green it earned:
 #   check_set          the `codex` token -> `correctness` (the comma list is kept)
 #   check.codex marker -> check.correctness (value copied, the old key unset)
 #   review beads       check_name=codex -> correctness (open AND closed backings)
+#   finding beads      finding.lane=codex -> correctness (the validator selects
+#                      findings by lane, so a `codex` finding is invisible to the
+#                      correctness validator and holds its anchor unresolvable)
 #
 # Backing review beads are rewritten BEFORE the anchor's check_set, so an
 # interrupted run leaves an anchor still naming `codex` beside a `correctness`
@@ -104,7 +107,31 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     attention=$((attention + 1))
   fi
 
-  # 2) Anchors: the check_set token and the stray check.codex marker.
+  # 2) Finding beads next, before the anchor, for the same reason as the backing
+  #    reviews: a finding names its lane in finding.lane, and signoff's validation
+  #    pass selects the findings to rule by finding.lane=<check>. A finding left
+  #    naming `codex` is invisible to the correctness validator, yet still blocks
+  #    its anchor — merge held with nothing able to rule it, never a false green.
+  findings=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked,closed \
+    --metadata-field finding.lane=codex --json --limit 0 2>/dev/null | scrub)
+  if printf '%s' "$findings" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    for fid in $(printf '%s' "$findings" | jq -r '.[]?.id // empty' 2>/dev/null); do
+      if [ "$APPLY" -eq 0 ]; then
+        echo "$label $fid: would set finding.lane codex -> correctness"; continue
+      fi
+      run_bounded gc bd update "$fid" --db "$RIG_DB" --set-metadata finding.lane=correctness >/dev/null 2>&1
+      if [ "$(meta_of "$fid" finding.lane)" = "correctness" ]; then
+        echo "$label $fid: finding.lane codex -> correctness"
+      else
+        attention=$((attention + 1)); echo "$label $fid: finding.lane did not read back as correctness; still legacy, retry" >&2
+      fi
+    done
+  else
+    echo "$label: finding listing unreadable — its finding.lane beads were NOT migrated" >&2
+    attention=$((attention + 1))
+  fi
+
+  # 3) Anchors: the check_set token and the stray check.codex marker.
   raw=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked \
     --has-metadata-key check_set --json --limit 0 2>/dev/null | scrub)
   if ! printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
