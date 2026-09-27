@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/pre-open-rebase.sh — the conflict observer for
-# pre_open_gate anchors, the arm that files a rebase child for a branch GitHub
+# pre_open_gate anchors, the arm that files a merge-in child for a branch GitHub
 # cannot yet be asked about. Covers: a conflicting branch dispatching ONE child
-# stamped prepare_mode and routed, carrying no PR facts; a branch that still
-# merges dispatching nothing; the branch allowlist (polecat/* rebases, every
-# other shape merges, a graduation merges whatever its branch is named) and its
-# agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
+# stamped prepare_mode=merge and routed, carrying no PR facts; a branch that still
+# merges dispatching nothing; every branch shape brought current by merge (no
+# shape rebases or force-pushes, polecat/* and a graduation included) and this
+# site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
 # rebase_hold on a bead naming the branch, a live demand, no fix pool); dedup on
 # branch and head against a live child, a stranded child re-routed rather than
 # buried, and an unstamped orphan adopted by title; the read-backs that leave a

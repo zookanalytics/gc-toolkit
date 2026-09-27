@@ -8,7 +8,7 @@
 # absent before it reads anything else. The result is not a narrow enumeration
 # that could be widened: widening one routes zero children, because the facts
 # those arms dispatch on are PR facts. A pre-open anchor whose branch has gone
-# stale therefore gets no rebase child at all, while an otherwise identical
+# stale therefore gets no merge-in child at all, while an otherwise identical
 # pull_request anchor gets one.
 #
 # This arm asks git the question GitHub cannot yet be asked — does the recorded
@@ -169,7 +169,7 @@ while IFS= read -r row; do
   # Nothing is probed until both sides resolve. `git merge-tree` exits 1 for a
   # ref it cannot resolve ("not something we can merge") exactly as it does for a
   # conflict, so on the exit status alone a branch someone deleted is a permanent
-  # conflict, and this arm would file it a rebase child every pass for a branch
+  # conflict, and this arm would file it a merge-in child every pass for a branch
   # that is not there. Since the pass fetch is a glob, a branch that is gone
   # reaches here as a missing ref rather than as a failed fetch, and this is the
   # only thing standing between that and a bogus dispatch. It also supplies
@@ -185,12 +185,12 @@ while IFS= read -r row; do
     1) : ;;   # conflict — the arm below
     *) # unrelated histories (128), or a git with no `merge-tree --write-tree`
        # (2.38). Neither is a conflict, and reporting one would dispatch a
-       # rewrite against a question that was never answered.
+       # merge-in child against a question that was never answered.
        echo "$PROG: $id merge-tree could not compare '$branch' against '$target' (rc=$mt_rc); nothing observed" >&2
        skipped=$((skipped + 1)); continue ;;
   esac
 
-  # --- CONFLICT: file ONE rebase child per branch to the fix pool ----------------
+  # --- CONFLICT: file ONE merge-in child per branch to the fix pool --------------
   if is_held "$hold" || is_held "$rhold"; then
     echo "$PROG: $id — '$branch' conflicts with '$target' but a hold is set (operator gate); no rework dispatched"
     held=$((held + 1)); continue
