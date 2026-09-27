@@ -10,10 +10,11 @@
 # exactly — and against a ROOT it offers the root itself to a pool as work.
 #
 # What is exercised here:
-#   * CLASSIFICATION on the four shapes that reach the disposal, including the
-#     order dependencies: a visit is the source bead of its own molecule and
-#     must be read as a visit, and a root carries gc.kind/gc.formula_contract
-#     where a step carries gc.step_ref;
+#   * CLASSIFICATION of the shapes that reach the disposal, including the
+#     order dependencies: a visit and a review are each the source bead of their
+#     own molecule and must be recognised by task_kind before the source arm,
+#     and a root carries gc.kind/gc.formula_contract where a step carries
+#     gc.step_ref;
 #   * the ROOT arm writing NOTHING, and in particular never reaching the
 #     open+unassigned+routed shape a pool can claim;
 #   * the STEP arm releasing the dead session's pin while the chain survives:
@@ -105,6 +106,15 @@ store '[{"id":"tk-v2","status":"in_progress","assignee":"lx-dead","title":"visit
          "metadata":{"task_kind":"visit","gc.step_ref":"mol-visit.converse",
                      "gc.routed_to":"r","gc.session_id":"lx-dead"}}]'
 OUT=$("$SCRIPT" tk-v2 2>&1); has "$OUT" "class=visit" "task_kind=visit outranks a step_ref"
+
+# A review bead is the source bead of its own mol-review molecule, so like a visit
+# it is classified by task_kind before the source arm — and before the step/root
+# checks, so a review that also carried a step_ref still reads review.
+store '[{"id":"tk-rv","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+         "metadata":{"task_kind":"review","gc.step_ref":"mol-review.review","check_name":"codex",
+                     "anchor_bead":"tk-anc","review_branch":"polecat/tk-anc",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"lx-dead"}}]'
+OUT=$("$SCRIPT" tk-rv 2>&1); has "$OUT" "class=review" "task_kind=review outranks a step_ref"
 
 echo "--- preview is the default ---"
 fixture
@@ -345,6 +355,30 @@ has "$OUT" "result=disposed" "source disposal reports disposed"
 has "$OUT" "pins" "source arm reports the pin clear in landed"
 eq "$(meta tk-work gc.session_id)" "<absent>" "source arm clears the dead session id (reopen leaves it)"
 eq "$(meta tk-work gc.session_name)" "<absent>" "source arm clears the dead session name (reopen leaves it)"
+
+echo "--- review arm: a review orphan is reopened to its pool by the source contract ---"
+# A review bead is the source of its own mol-review molecule: no worktree, so the
+# witness scope gate skips its salvage/verify, but its disposal IS the source
+# contract — delete-source (a no-op on the input-convoy root) + reopen-source,
+# then the dead session's pins cleared and the route restored from the durable
+# execution stamp so another reviewer is offered it. It reports class=review only
+# so the scope gate and this classifier agree that it takes no salvage path.
+store '[{"id":"tk-rev","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+         "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
+                     "review_branch":"polecat/tk-anc","review_base":"main","gc.routed_to":"",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-5-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-rev --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "review disposal exits 0"
+has "$OUT" "class=review" "a review orphan is classed review, not source"
+has "$OUT" "action=delegate-source-workflow" "the review arm delegates to the source contract"
+has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-rev" "reopen-source invoked for the review"
+eq "$(bstatus tk-rev)" "open" "the review bead is returned to the pool"
+eq "$(meta tk-rev gc.routed_to)" "gc-toolkit/gc-toolkit.polecat-codex" "review route restored from the execution stamp"
+eq "$(meta tk-rev gc.session_id)" "<absent>" "the dead session id is cleared"
+eq "$(meta tk-rev gc.session_name)" "<absent>" "the dead session name is cleared"
+has "$OUT" "result=disposed" "review disposal reports disposed"
 
 echo "--- source arm: a claimed-then-orphaned source bead has its route restored ---"
 # The bug this arm exists to close: a source bead (a rework, say) is dispatched
