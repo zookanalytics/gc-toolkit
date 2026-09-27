@@ -12,15 +12,15 @@
 # pull_request anchor gets one.
 #
 # This arm asks git the question GitHub cannot yet be asked — does the recorded
-# branch still merge into its target — and on a conflict files ONE rebase child
+# branch still merge into its target — and on a conflict files ONE merge-in child
 # per branch to the fix pool, the same child pr-facts.sh's CONFLICTING arm files
 # for a PR anchor. ONE fetch per pass mirrors every branch into a private ref
 # namespace; per anchor, both sides must resolve there before
 # `git merge-tree --write-tree` is asked anything.
-# CLEAN records nothing; CONFLICT classifies the head branch (allowlist: only
-# polecat/* may be rewritten, and never a graduation) and files, adopts or
-# re-routes one child, stamped prepare_mode and counted as dispatched only once
-# that stamp AND the route read back.
+# CLEAN records nothing; CONFLICT files, adopts or re-routes one child that brings
+# the branch current by MERGE — no branch shape is rebased or force-pushed —
+# stamped prepare_mode=merge and counted as dispatched only once that stamp AND
+# the route read back.
 #
 # Same vetoes as pr-facts.sh: an operator merge_hold or rebase_hold on the
 # anchor, a rebase_hold on any bead naming the branch, and a live demand
@@ -156,9 +156,6 @@ while IFS= read -r row; do
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // empty')
   [ -n "$target" ] || target="$DEFAULT_BRANCH"
-  # A graduation is the integration-to-main case whatever its branch is named,
-  # so the classifier reads this as well as the branch.
-  grad=$(printf '%s' "$row" | jq -r '.metadata.graduation // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
   if [ -z "$id" ] || [ -z "$branch" ]; then skipped=$((skipped + 1)); continue; fi
@@ -207,32 +204,21 @@ while IFS= read -r row; do
     skipped=$((skipped + 1)); continue
   fi
 
-  # --- WHICH rewrite may be dispatched against this branch. ---------------------
+  # --- HOW the branch is brought current before the anchor opens its PR. --------
   # >>> pre-open-dispatch-mode
-  # The same allowlist as pr-facts.sh's `stale-base-dispatch-mode`, applied where
-  # the second actor is chosen. Only polecat/* is single-author and disposable
-  # enough to rewrite; every other shape, including one invented next year, must
-  # fail to MERGE, which a denylist could not do. Rebase REWRITES commits, which
-  # is free on a disposable per-bead branch and destructive on a branch other
-  # work already depends on. pre-open-rebase.test.sh fails if the two copies of
-  # the allowlist disagree. See specs/tk-rvspf/dispatch-site-branch-classification.md.
-  case "$branch" in
-    polecat/*) prepare_mode=rebase ;;
-    *)         prepare_mode=merge ;;
-  esac
-  # Load-bearing only for a graduation carried on a polecat-shaped branch.
-  if [ "$grad" = "true" ]; then prepare_mode=merge; fi
-  # prepare_mode is what stops the rewrite; mol-polecat-work's
-  # `rejected-branch-resume-mode` reads it. The title and instruction are for
-  # whoever works the bead by hand, and must not contradict it: a merge-mode
-  # child titled "Rebase ..." invites exactly what the mode prevents.
-  if [ "$prepare_mode" = "merge" ]; then
-    FIX_TITLE="Merge $target into shared branch $branch:"
-    fix_instruction="Resume in prepare_mode=merge: '$branch' is a SHARED branch, so bring it current by MERGING origin/$target IN (git merge --no-edit origin/$target), resolve conflicts, and push as a fast-forward. Do NOT rebase it and do NOT force-push it: rewriting it orphans the already-merged PRs it carries (tk-a0hva)."
-  else
-    FIX_TITLE="Rebase $branch onto $target:"
-    fix_instruction="Resume in prepare_mode=rebase: rebase '$branch' onto origin/$target, resolve conflicts, and force-push with --force-with-lease."
-  fi
+  # Every branch shape is brought current by MERGING origin/$target in, never by a
+  # rebase — per-bead polecat/* branches included. A rebase rewrites history and
+  # forces a --force-with-lease push, which resets GitHub's "changes since last
+  # review" and drifts the line-anchored review comments on the PR; a merge keeps
+  # both. Because no shape rewrites, none can force-push, and a branch shape invented
+  # next year cannot slip past an allowlist into a rewrite. main stays linear because
+  # merge.sh squashes at land, not because the branch was rebased. pr-facts.sh's
+  # `stale-base-dispatch-mode` and mol-refinery-patrol's `shared-branch-merge-mode`
+  # make the same choice; pre-open-rebase.test.sh fails if this site and pr-facts.sh
+  # diverge. See specs/tk-yu4sng/merge-in-for-all-branches.md.
+  prepare_mode=merge
+  FIX_TITLE="Merge $target into $branch:"
+  fix_instruction="Resume in prepare_mode=merge: bring '$branch' current by MERGING origin/$target IN (git merge --no-edit origin/$target), resolve conflicts, and push as a fast-forward. Do NOT rebase it and do NOT force-push it: a rewrite resets the PR's review view, and on a shared branch it also orphans the already-merged PRs the branch carries (tk-a0hva)."
   # <<< pre-open-dispatch-mode
 
   # Dedup on branch+head via the child's own metadata, in the shape pr-facts.sh
@@ -320,8 +306,8 @@ while IFS= read -r row; do
     # Orphan adoption BEFORE create: a child this arm created whose stamp then
     # failed carries the deterministic title but no branch metadata — invisible
     # to the branch dedup above, so re-creating would mint a twin every pass.
-    # The title is the classifier's, and stays deterministic for a given branch:
-    # the mode is a pure function of the branch name and the graduation marker.
+    # The title is a pure function of the branch name, so it stays deterministic
+    # for a given branch across passes.
     # An unreadable probe dispatches nothing (retry next pass).
     if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
       echo "$PROG: $id — '$branch' conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2

@@ -171,16 +171,17 @@ needs = ["find-work"]
 description = """
 **Config: target_branch = {{target_branch}}**
 
-Read the bead ONCE, classify the branch, and prepare it — one fail-closed
-block, because `gc bd` fails open (errors to stderr, empty stdout) and an
-unreadable classification must not read as "unset". Rebase REWRITES commits:
-free on a disposable per-bead branch, destructive on a branch other work
-depends on (an integration branch carries already-merged PRs). ALLOWLIST,
-not denylist: only `polecat/*` may be rewritten; every other shape — and any
-graduation bead — is brought current by MERGE. The mode is stamped on the
-bead BEFORE touching the worktree, because the hand-back path (a rejection
-repool) reads it in a different shell and would otherwise rebase a shared
-branch.
+Read the bead ONCE and prepare it by bringing its branch current with the
+target — one fail-closed block, because `gc bd` fails open (errors to stderr,
+empty stdout) and an unreadable bead must not read as "unset". Every branch
+shape — per-bead `polecat/*`, shared `integration/*`, a graduation bead — is
+brought current by MERGING origin/$TARGET in, never by a rebase: a rebase
+rewrites history and forces a --force-with-lease push, which resets GitHub's
+"changes since last review" and drifts the PR's line-anchored review comments.
+main stays linear because merge.sh squashes at land, not because the branch was
+rewritten. prepare_mode=merge is stamped on the bead BEFORE touching the
+worktree, because the hand-back path (a rejection repool) reads it in a
+different shell to bring the branch current the same way.
 
 ```bash
 TARGET_BRANCH_DEFAULT="{{target_branch}}"
@@ -193,18 +194,13 @@ if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/nul
 fi
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
-GRADUATION=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.graduation // empty')
 [ -n "$TARGET" ] || TARGET="$TARGET_BRANCH_DEFAULT"
 if [ -z "$BRANCH" ]; then
   echo "$WORK carries no metadata.branch — nothing to prepare; leaving it with the refinery"
   gc runtime drain-ack
   exit 1
 fi
-case "$BRANCH" in
-  polecat/*) PREPARE_MODE=rebase ;;
-  *)         PREPARE_MODE=merge ;;
-esac
-if [ "$GRADUATION" = "true" ]; then PREPARE_MODE=merge; fi
+PREPARE_MODE=merge
 if ! gc bd update $WORK --set-metadata prepare_mode="$PREPARE_MODE" >/dev/null 2>&1; then
   echo "could not record prepare_mode=$PREPARE_MODE on $WORK — NOT preparing the branch; leaving it with the refinery to retry"
   gc runtime drain-ack
@@ -232,12 +228,11 @@ if ! git -C "$RIG_ROOT" worktree add -f --detach "$PREP_WT" "origin/$BRANCH"; th
   exit 1
 fi
 PREPARE_FAILED=
-if [ "$PREPARE_MODE" = "rebase" ]; then
-  git -C "$PREP_WT" rebase "origin/$TARGET" || { git -C "$PREP_WT" rebase --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
-else
-  echo "$BRANCH is not a disposable per-bead branch (graduation=${GRADUATION:-false}) — merging origin/$TARGET IN, not rebasing"
-  git -C "$PREP_WT" merge --no-edit "origin/$TARGET" || { git -C "$PREP_WT" merge --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
-fi
+# Bring the branch current by MERGE, never rebase — see the prose above. Every
+# branch shape takes this force-push-free path; the push step ships a fast-forward
+# because the merge keeps origin/$BRANCH an ancestor of the prepared head.
+echo "bringing '$BRANCH' current with origin/$TARGET by MERGE (no rebase, no force-push)"
+git -C "$PREP_WT" merge --no-edit "origin/$TARGET" || { git -C "$PREP_WT" merge --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
 # <<< shared-branch-merge-mode
 ```
 

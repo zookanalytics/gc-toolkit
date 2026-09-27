@@ -31,8 +31,8 @@ separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
 submit-and-exit resolves it once, in step 4b, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
-attempt bounced with the branch intact — resume it per metadata.prepare_mode
-(merge = shared branch, never rebase/force-push), don't redo the work.
+attempt bounced with the branch intact — resume it by bringing the branch
+current with MERGE (never rebase or force-push), don't redo the work.
 
 
 Variables:

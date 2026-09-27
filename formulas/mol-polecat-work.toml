@@ -31,8 +31,8 @@ separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
 submit-and-exit resolves it once, in step 4b, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
-attempt bounced with the branch intact — resume it per metadata.prepare_mode
-(merge = shared branch, never rebase/force-push), don't redo the work.
+attempt bounced with the branch intact — resume it by bringing the branch
+current with MERGE (never rebase or force-push), don't redo the work.
 """
 formula = "mol-polecat-work"
 extends = ["mol-polecat-base"]
@@ -367,31 +367,29 @@ fi
 ```
 
 If resuming a REJECTED branch, bring it current the way the refinery
-classified it — `metadata.prepare_mode` is stamped by the refinery's prepare
-block: `rebase` for a disposable per-bead branch, `merge` for every other
-shape. A rebase rewrites commits, which is destructive on a branch other
-work already depends on (an integration branch carries already-merged PRs),
-so honor the mode:
+classified it — `metadata.prepare_mode` is stamped `merge` by the refinery's
+prepare block for every branch shape, and the resume brings the branch current
+the way it was prepared: MERGE origin in, never rebase. A rebase rewrites
+history and forces a --force-with-lease push, which resets the PR's "changes
+since last review" and drifts its line-anchored review comments, so no shape is
+rewritten:
 ```bash
 # >>> rejected-branch-resume-mode
 BEAD_JSON=$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null)
 REJECTION=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.rejection_reason // empty')
 if [ -n "$REJECTION" ]; then
-    PREPARE_MODE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.prepare_mode // empty')
-    if [ "$PREPARE_MODE" = "merge" ]; then
-        echo "prepare_mode=merge: SHARED branch — bring it current by MERGE; never rebase, amend, squash, or force-push it"
-        git merge --no-edit origin/{{base_branch}}
-        # Conflicts (likely the rejection reason): resolve, git add, git commit.
-    else
-        git rebase origin/{{base_branch}}
-        # Conflicts: resolve, then git rebase --continue.
-    fi
+    # Bring the branch current by MERGE — never rebase, amend, squash, or
+    # force-push it. prepare_mode is stamped merge; an absent stamp resolves to
+    # merge here too, so a dropped stamp never triggers a rewrite.
+    echo "resuming rejected branch by MERGE (git merge --no-edit origin/{{base_branch}}); never rebase or force-push"
+    git merge --no-edit origin/{{base_branch}}
+    # Conflicts (likely the rejection reason): resolve, git add, git commit.
     gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
 fi
 # <<< rejected-branch-resume-mode
 ```
-Leave `prepare_mode` on the bead — it is the refinery's classification,
-re-stamped on every prepare.
+Leave `prepare_mode` on the bead — the refinery re-stamps it (merge) on every
+prepare.
 
 **If no branch**: create `polecat/<bead-id>` from the FRESHLY-FETCHED remote
 tip (a stale local base causes spurious duplicate conflicts at the refinery)
@@ -1070,7 +1068,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
   exit 0
 fi
 # <<< submit-auto-push-halt
-git push origin HEAD || { echo "PUSH FAILED — bead stays with polecat. If prepare_mode=merge, a non-fast-forward rejection is NOT a force-push case (shared branch); redo the resume as a merge."; gc runtime drain-ack; exit 1; }
+git push origin HEAD || { echo "PUSH FAILED — bead stays with polecat. A non-fast-forward rejection means the branch moved under you; re-fetch, MERGE origin in, and retry — never force-push (branches are brought current by merge, never rebase)."; gc runtime drain-ack; exit 1; }
 # Verify the ref is actually on origin before trusting the push.
 REMOTE_REF=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 LOCAL_HEAD=$(git rev-parse HEAD)

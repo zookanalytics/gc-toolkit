@@ -86,9 +86,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    38, and this arm holds the pass lock while it runs — pruned, so a branch
    deleted on origin does not linger as a ref the probe would believe. Per
    anchor it then requires both sides to resolve there and probes
-   `git merge-tree --write-tree`; a conflict files the same rebase child arm 5
-   files for a PR anchor, classified by the same branch allowlist and stamped
-   `prepare_mode`. It runs before `pr-open.sh` because that arm ends its
+   `git merge-tree --write-tree`; a conflict files the same merge-in rework
+   child arm 5 files for a PR anchor, stamped `prepare_mode=merge` (every branch
+   shape is brought current by merge, never rebase). It runs before `pr-open.sh`
+   because that arm ends its
    domain: once an anchor carries a PR, `mergeable` answers the question and
    arm 5 owns the dispatch. Both arms probe children on `metadata.branch` and
    write the same `head <oid>` phrasing, so whichever sees a branch first
@@ -269,8 +270,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    have recorded no work — either `work_outcome=no-op`, or no work-product key
    at all (`branch`, `work_dir`, `pr_number`, `pr_url`, `merge_result`,
    `gc.work_commit`). "No work" cannot be read off an absent `branch`: on a
-   rebase or rework dispatch that field names the TWIN's branch, so most
-   verified no-op duplicates carry one. A bead somebody else owns — assigned,
+   rework dispatch that field names the TWIN's branch, so most verified no-op
+   duplicates carry one. A bead somebody else owns — assigned,
    `in_progress`, a review bead, a step bead, or already pointed at a different
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 4 merged or arm 5 recorded on this pass is
@@ -281,7 +282,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    that and none of them touch it, so a reviewer approves a scope the body does
    not describe. For each open anchor recording a `pr_number`, this arm reads
    the branch's bead ledger — `branch` (committed onto the branch: the anchor,
-   plus every rework and rebase hand-back), `fold_target` (folded onto it by a
+   plus every rework hand-back), `fold_target` (folded onto it by a
    polecat), and `merged_target` with `merge_result=merged` (landed its own PR
    into it) — and splices the list into a delimited section at the end of the
    body. The title is left alone: it names the anchor, and the body is where a
