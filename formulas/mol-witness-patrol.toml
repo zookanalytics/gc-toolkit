@@ -592,9 +592,14 @@ else
 fi
 ```
 
-Six kinds reach it and only two are returned to the pool. A **visit** gives up
-its assignee and nothing else, because its route, continuation group and
-task_kind are its identity. A **workflow step under a live root** gives up the
+Seven kinds reach it and only three are returned to a pool — a workflow step,
+and a source or review bead, the latter two only when the work has not already
+reached a downstream court. A **visit** gives up its assignee and nothing else,
+because its route, continuation group and task_kind are its identity. A
+**review** is the source bead of its own mol-review molecule and carries no
+worktree of its own, so it disposes by the source contract below — recognised by
+task_kind before the source arm the way a visit is, and reopened to its review
+pool. A **workflow step under a live root** gives up the
 dead session's pin and keeps the rest, so the molecule resumes at that same step
 under whoever claims it next. A **workflow root** is skipped: nothing claims a
 root, it closes when its workflow-finalize step closes, and setting it open,
@@ -632,7 +637,7 @@ whole filter exists to stop. Gate the record on the disposal's own verdict:
 ```bash
 # >>> recovery-stamp-gate
 # STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
-# (result=disposed: a released visit or step, or a delegated source). Every other
+# (result=disposed: a released visit or step, or a delegated source or review). Every other
 # verdict — skipped (a root, or a source already in a downstream court), partial,
 # failed, or an unread empty — returned nothing to the pool, so no recovery is
 # stamped and no crash-loop rate is read.
