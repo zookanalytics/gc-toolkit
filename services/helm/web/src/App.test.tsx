@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { App } from './App';
+import { App, resolveDrillTarget } from './App';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board arrives as one ranked list; every row carries its dependency FAMILY
@@ -400,6 +400,29 @@ it('drills into a family root like any other tile', async () => {
 
   fireEvent.click(within(region('tk-yps55')).getByRole('button', { name: 'tk-yps55' }));
   expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy();
+});
+
+it('resolveDrillTarget reads ?drill= and ignores everything else', () => {
+  expect(resolveDrillTarget('')).toBeNull();
+  expect(resolveDrillTarget('?other=1')).toBeNull();
+  expect(resolveDrillTarget('?drill=')).toBeNull();
+  expect(resolveDrillTarget('?drill=%20%20')).toBeNull();
+  expect(resolveDrillTarget('?drill=tk-abc12')).toBe('tk-abc12');
+  expect(resolveDrillTarget('?drill=tk-abc12.3')).toBe('tk-abc12.3');
+});
+
+// A `?drill=<bead>` deep link opens the board straight on that row's drill
+// panel — the target end of a link from a pull request back to a board move.
+it('opens the drill panel for a ?drill= deep link on load', async () => {
+  window.history.replaceState({}, '', '?drill=tk-yps55');
+  try {
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy(),
+    );
+  } finally {
+    window.history.replaceState({}, '', '/');
+  }
 });
 
 // A board renders exactly the families it holds — never an empty one for a band

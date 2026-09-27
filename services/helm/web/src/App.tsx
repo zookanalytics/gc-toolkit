@@ -59,6 +59,25 @@ async function fetchBoard(signal: AbortSignal): Promise<Board> {
   return (await res.json()) as Board;
 }
 
+/**
+ * Reads the bead to drill into on load, honouring a `?drill=` override. This is
+ * the target end of a link from outside the board — a pull request, a message —
+ * that resolves to a board ACTION rather than the board's front page: it opens
+ * the row's drill panel, where the board moves (start a conversation) live.
+ * Absent or blank opens nothing, the board's default.
+ *
+ * NOT validated here, for the reason resolveTerminalSession is not: the id
+ * travels to the drill fetch and the open route, both of which check it against
+ * the store server-side. A regex here would be a decorative copy that drifts
+ * from the check that matters, over a string the client controls anyway.
+ */
+export function resolveDrillTarget(search: string): string | null {
+  const raw = new URLSearchParams(search).get('drill');
+  if (raw === null) return null;
+  const trimmed = raw.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 // The date the row started asking. `gc.takeaway_at` is when a sitting recorded
 // what is owed; `updated_at` only bounds it from below, and a backend may read
 // neither. Display only — the ORDER is the service's, and re-deriving it here
@@ -431,7 +450,9 @@ export function App() {
   const [reloadToken, setReloadToken] = useState(0);
   // The tile being drilled into, or null. A tile's id IS a bead id, which is
   // all the drill plane needs to open it.
-  const [drillTarget, setDrillTarget] = useState<string | null>(null);
+  const [drillTarget, setDrillTarget] = useState<string | null>(() =>
+    resolveDrillTarget(window.location.search),
+  );
   // The rig the operator narrowed the view to, or '' for all rigs.
   const [rigFilter, setRigFilter] = useState<string>('');
 
