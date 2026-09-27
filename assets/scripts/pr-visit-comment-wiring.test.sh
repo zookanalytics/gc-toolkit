@@ -44,22 +44,40 @@ exit 0
 HELM
 chmod +x "$SR/assets/scripts/gc-helm.sh"
 
-# gc stub: the visit names its subject via stall_root; the subject reads back a
-# takeaway (so the sign-off's readback passes); every list is empty (no demand);
-# `bd update` (the sign-off's PR-reminder stash) is logged to $GC_UPDATE_LOG;
-# every other write succeeds.
+# gc stub. The visit names its subject via stall_root and the subject reads back
+# a takeaway, so the sign-off's readback passes. `bd update` is logged to
+# $GC_UPDATE_LOG for the sign-off's PR-reminder-stash assertions, and it also
+# persists the gc.outcome / gc.outcome_reason it is handed; `bd close` records the
+# status; `bd show` reflects both back. That store model is what lets the shared
+# close (visit-close.sh, which converse-close-out.sh funnels through) read its own
+# stamps back and close — the same model visit-close.test.sh and
+# converse-close-out.test.sh use. Every list is empty (no demand).
+STATE="$TMPD/gc-state"; export STATE
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = "bd" ] || exit 0
+O="${STATE:?}.o"; R="${STATE:?}.r"; ST="${STATE:?}.st"
 case "${2:-}" in
   show)
     id="${3:-}"
     case "$id" in
-      tk-vis) jq -nc '[{id:"tk-vis",metadata:{stall_root:"tk-subj"}}]' ;;
+      tk-vis) jq -nc \
+                --arg o "$(cat "$O" 2>/dev/null)" \
+                --arg r "$(cat "$R" 2>/dev/null)" \
+                --arg s "$(cat "$ST" 2>/dev/null)" \
+                '[{id:"tk-vis",status:(if $s=="" then "open" else $s end),metadata:{stall_root:"tk-subj","gc.outcome":$o,"gc.outcome_reason":$r}}]' ;;
       *)      jq -nc '[{id:"tk-subj",metadata:{"gc.takeaway":"we shipped it","gc.outcome":"moot"}}]' ;;
     esac ;;
   list)   printf '[]' ;;
-  update) printf '%s\n' "$*" >> "${GC_UPDATE_LOG:-/dev/null}" ;;
+  update)
+    printf '%s\n' "$*" >> "${GC_UPDATE_LOG:-/dev/null}"
+    for a in "$@"; do
+      case "$a" in
+        gc.outcome=*)        printf '%s' "${a#gc.outcome=}" >"$O" ;;
+        gc.outcome_reason=*) printf '%s' "${a#gc.outcome_reason=}" >"$R" ;;
+      esac
+    done ;;
+  close)  printf 'closed' >"$ST" ;;
   *) : ;;
 esac
 STUB
@@ -81,6 +99,7 @@ else bad "the sign-off does not post the reminder before the close" "PVC_LOG not
 
 echo "── converse-close-out.sh updates the reminder on a moot/benign close ──"
 PVC_LOG="$TMPD/closeout.pvc"; : >"$PVC_LOG"
+rm -f "$STATE.o" "$STATE.r" "$STATE.st"   # a fresh visit: no stamp yet, status open
 ( PATH="$BIN:$PATH" GC_RIG_ROOT="$SR" PVC_LOG="$PVC_LOG" \
   VISIT=tk-vis SUBJECT=tk-subj bash "$CLOSEOUT" moot "the premise died before anyone claimed it" ) >/dev/null 2>&1
 has "the reminder is closed for the visit, on its subject" \
