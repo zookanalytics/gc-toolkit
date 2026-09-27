@@ -1418,14 +1418,16 @@ func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
 
 // TestSittingTopicAndHeadlineFallback pins the two derivations a row reads off
 // its subject: the topic is the subject's title, and the headline prefers the
-// takeaway but falls back to that same title before it ever shows the visit
-// bead's own generic name. Both degrade to the id and the visit title only when
-// the gather could not read the subject at all.
+// takeaway, then a dedup close's own outcome reason, and only then the subject
+// title before it ever shows the visit bead's own generic name. Both degrade to
+// the id and the visit title only when the gather could not read the subject at
+// all.
 func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 	const (
 		subjTitle = "the raw script path the launcher took"
 		visit     = "visit: tk-anchor — first reaction ready: accept or redirect"
 		takeaway  = "routed the fix to the pool; nothing further here"
+		reason    = "moot: premise died, subject already closed"
 	)
 
 	// A concluded sitting: the takeaway is the headline, the subject title the topic.
@@ -1437,7 +1439,20 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 		t.Errorf("the topic is the subject title: got %q, want %q", got, subjTitle)
 	}
 
-	// No takeaway, subject read: the headline is the topic, NOT the visit title.
+	// A takeaway still wins when an outcome reason is also present.
+	both := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit, Takeaway: takeaway, OutcomeReason: reason}
+	if got := both.Headline(); got != takeaway {
+		t.Errorf("a takeaway wins over the outcome reason: got %q, want %q", got, takeaway)
+	}
+
+	// A dedup close: no takeaway, but an outcome reason — the headline is the
+	// reason, so the row reads as a decision instead of the bare topic.
+	dedup := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit, OutcomeReason: reason}
+	if got := dedup.Headline(); got != reason {
+		t.Errorf("no takeaway but an outcome reason: the headline is the reason: got %q, want %q", got, reason)
+	}
+
+	// No takeaway, no reason, subject read: the headline is the topic, NOT the visit title.
 	bare := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit}
 	if got := bare.Headline(); got != subjTitle {
 		t.Errorf("no takeaway falls back to the subject title, not the visit title: got %q, want %q", got, subjTitle)

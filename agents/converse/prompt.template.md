@@ -235,11 +235,16 @@ The loop, every visit:
    HOLDER=""
    eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER)=')"
    ```
-   **Fold only when `$HOLDER` is another visit's id** — then append
-   `folded into $HOLDER` to the subject's notes, stamp your visit
-   `gc.outcome=folded`, close it, and go to step 8. When `$HOLDER` is
-   `$VISIT` you are the holder: prep and continue. When it is EMPTY the
-   listing did not read, which proves nothing — hold.
+   **Fold only when `$HOLDER` is another visit's id** — then close your visit
+   through the shared guarded close, which appends the reading to the subject,
+   stamps `gc.outcome=folded` and its board-visible reason, and closes:
+   ```bash
+   "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
+     --outcome folded --reason "folded into $HOLDER"
+   ```
+   Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
+   continue. When it is EMPTY the listing did not read, which proves nothing —
+   hold.
 
 **Steps 2–8 — the working procedure lives in skills that load when you
 reach the step.** Step 1 is the entry point and stays inline; steps 2
