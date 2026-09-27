@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# pr-status-label.test.sh — hermetic tests for the workflow-owned `status:` PR
-# label: the derivation (anchor state -> working/needs-review/needs-attention),
-# the mutually-exclusive set, ensure, and reconcile. No live city, gh, or network.
+# pr-status-label.test.sh — hermetic tests for the workflow-owned PR labels: the
+# status: derivation (anchor state -> working/needs-review/needs-attention), its
+# mutually-exclusive set, ensure, and reconcile, and the sibling base: group
+# (mark-base) that marks an integration checkpoint. No live city, gh, or network.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-prlabel-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -201,6 +202,49 @@ resetlog
 "$SUT" reconcile --anchor tk-missing --pr 51 --repo "$REPO" --current-labels "status: needs-review"
 eq "$(pv_labels 51)" "status: needs-review" "reconcile leaves the label as-is when the anchor does not resolve"
 hasnt "$(ghlog)" "pr edit" "reconcile writes nothing when it cannot derive a status"
+
+# ---------------------------------------------------------------------------
+# mark-base: the sibling `base:` group, stamped from the target at pr-open.
+# Standing (never derived from anchor state), additive, and orthogonal to status:.
+# ---------------------------------------------------------------------------
+
+# an integration/ target earns base: integration, the label created first.
+rm -f "$STUB_GH_DIR/labels.json"
+pv 60 '[]'
+resetlog
+"$SUT" mark-base --pr 60 --target "integration/tk-conv" --repo "$REPO"
+eq "$(pv_labels 60)" "base: integration" "mark-base stamps base: integration on an integration/ target"
+has "$(ghlog)" "label create" "…creating the label first (the stub refuses an unknown label)"
+{ repo_has "base: integration" && ok "the base: integration label now exists in the repo"; } || bad "base: integration not created"
+
+# a main target is the default: no label created, no PR edit.
+rm -f "$STUB_GH_DIR/labels.json"
+pv 61 '[]'
+resetlog
+"$SUT" mark-base --pr 61 --target "main" --repo "$REPO"
+eq "$(pv_labels 61)" "" "mark-base is a no-op on a main target"
+hasnt "$(ghlog)" "pr edit" "…writing nothing"
+hasnt "$(ghlog)" "label create" "…and creating no label"
+
+# orthogonal: the base marker adds alongside a status value, removing neither.
+printf '[{"name":"status: needs-review"},{"name":"base: integration"}]\n' > "$STUB_GH_DIR/labels.json"
+pv 62 '[{"name":"status: needs-review"}]'
+resetlog
+"$SUT" mark-base --pr 62 --target "integration/tk-conv" --repo "$REPO"
+eq "$(pv_labels 62)" "base: integration,status: needs-review" "mark-base adds base: alongside status:, removing neither"
+
+# and the status writer, flipping its own value, leaves the sibling base: label alone.
+pv 62 '[{"name":"status: working"},{"name":"base: integration"}]'
+resetlog
+"$SUT" set --pr 62 --value needs-review --repo "$REPO" --current-labels "status: working,base: integration"
+eq "$(pv_labels 62)" "base: integration,status: needs-review" "set flips status: and never touches the sibling base: label"
+
+# idempotent: a second mark-base adds no duplicate.
+printf '[{"name":"base: integration"}]\n' > "$STUB_GH_DIR/labels.json"
+pv 63 '[{"name":"base: integration"}]'
+resetlog
+"$SUT" mark-base --pr 63 --target "integration/tk-conv" --repo "$REPO"
+eq "$(pv_labels 63)" "base: integration" "mark-base is idempotent — a present label is a no-op add"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

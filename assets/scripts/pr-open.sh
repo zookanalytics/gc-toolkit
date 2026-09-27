@@ -38,9 +38,10 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # disagree), and finding reads the anchor's open must-fix findings.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
-# The single writer of the workflow-owned `status:` PR label. A PR is born
-# gate-green with no review yet, so its initial state is needs-review; the
-# reconcile derives that (and self-heals an adopted PR mid-rework).
+# The single writer of the workflow-owned PR labels. A PR is born gate-green with
+# no review yet, so its initial status is needs-review; reconcile derives that (and
+# self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
+# on an integration-targeted checkpoint, the PR-list counterpart to the body banner.
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 
 command -v gh >/dev/null 2>&1 || exit 0
@@ -230,7 +231,8 @@ strip_summary_heading() { # <text>
   '
 }
 
-# The region's contents, no markers: the ## Summary a reviewer reads first, the
+# The region's contents, no markers: an integration-checkpoint banner when the
+# target is under integration/, then the ## Summary a reviewer reads first, the
 # dispatch text demoted below it when both exist, and the refinery handoff facts.
 # Shared by the create path and the adoption refresh so the two never diverge —
 # which is also what lets the refresh compare its render against the body and skip
@@ -238,6 +240,21 @@ strip_summary_heading() { # <text>
 compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head>
   local summary="$1" desc="$2" id="$3" branch="$4" target="$5" checkset="$6" head_oid="$7" sup_num="$8" sup_head="$9"
   local greened
+  # A standing banner leads the region when the base is an integration branch, so a
+  # reviewer reads it before the diff: approving mints this phase into
+  # integration/<convoy-id> and main does not move, the broader review running at
+  # graduation. Set here where the base is known; the base: label on the PR list is
+  # its counterpart (pr-status-label.sh mark-base). specs/tk-6bji7k.9/decision.md.
+  # Single-quoted printf keeps the markdown backticks literal, never a command sub.
+  case "$target" in
+    integration/*)
+      echo '> [!IMPORTANT]'
+      printf '> **This pull request merges into `%s`, not `main`.**\n' "$target"
+      echo '>'
+      printf '%s\n' '> Approving it mints this phase into the convoy integration branch, and `main` does not move. The broader review runs at graduation, when the integration branch is carried to `main`.'
+      echo
+      ;;
+  esac
   echo "## Summary"; echo
   if [ -n "$summary" ]; then strip_summary_heading "$summary"
   elif [ -n "$desc" ]; then printf '%s\n' "$desc"
@@ -470,6 +487,10 @@ while IFS= read -r row; do
         # rework state rather than assuming ready. Best-effort.
         "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$CERT_NUM" \
           --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
+        # Standing base marker: an integration-targeted checkpoint is labelled so the
+        # PR list never reads it as a merge to main. Best-effort; a no-op off integration/.
+        "$PR_STATUS_LABEL" mark-base --pr "$CERT_NUM" --target "$target" \
+          --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
         echo "$PROG: $id branch '$branch' already has PR#$CERT_NUM ($CERT_STATE); flipped to pull_request"
       else
         echo "$PROG: $id PR#$CERT_NUM adoption transition failed; anchor stays pre_open_gate (retry next pass)" >&2
@@ -622,6 +643,9 @@ GATES
     # Born gate-green: seed the initial status label (and its group). Best-effort
     # — a label failure never unwinds an opened PR; pr-facts.sh reconciles it.
     "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$CERT_NUM" \
+      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
+    # Standing base marker for an integration checkpoint (no-op off integration/).
+    "$PR_STATUS_LABEL" mark-base --pr "$CERT_NUM" --target "$target" \
       --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
     echo "$PROG: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (check_set '$checkset' green)${SUP_NUM:+, superseding closed PR#$SUP_NUM}; flipped to pull_request"
   else
