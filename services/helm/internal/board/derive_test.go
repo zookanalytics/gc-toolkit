@@ -2193,8 +2193,6 @@ func dated(value, oid string, at time.Time) string {
 	return value + "@" + oid + "@" + at.Format(time.RFC3339)
 }
 
-// mergeAnchor is an open merge anchor as the gather produces one: the `merge`
-// kind, whatever metadata the case is about, and its `blocks` blockers.
 // prPhase answers who acts next in the same values and precedence as
 // pr-status-label.sh's derive_value; these cases mirror that script's, since it
 // stamps nothing on the bead for the board to read instead.
@@ -2291,6 +2289,8 @@ func TestRepoBaseFromPRURL(t *testing.T) {
 	}
 }
 
+// mergeAnchor is an open merge anchor as the gather produces one: the `merge`
+// kind, whatever metadata the case is about, and its `blocks` blockers.
 func mergeAnchor(id string, md map[string]string, blockers ...Blocker) Anchor {
 	full := map[string]string{"merge_result": "pull_request", "branch": "polecat/" + id}
 	for k, v := range md {
