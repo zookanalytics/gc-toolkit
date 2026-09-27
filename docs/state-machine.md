@@ -448,6 +448,30 @@ groups are independent: the `status:` writer removes only `status:` values, and
 ([specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md), "Where a
 checkpoint lands"; [specs/tk-6bji7k.9/decision.md](../specs/tk-6bji7k.9/decision.md)).
 
+A `main`-targeted PR carries neither marker; an integration-targeted PR carries
+both. Those two markers are all that sets a checkpoint apart from a mainline PR:
+
+```text
+PR targeting main
+  PR list   status: needs-review
+  PR body   ## Summary
+            ...
+
+PR targeting integration/<convoy-id>
+  PR list   status: needs-review   base: integration
+  PR body   > [!IMPORTANT]
+            > This pull request merges into integration/<convoy-id>, not main.
+            >
+            > Approving it mints this phase into the convoy integration branch,
+            > and main does not move. The broader review runs at graduation,
+            > when the integration branch is carried to main.
+            ## Summary
+            ...
+```
+
+GitHub renders the body blockquote as an `[!IMPORTANT]` alert box above the
+summary, and lists `base: integration` beside `status:` in its own colour.
+
 ## The machine axis
 
 Gates say whether one review passed. **`pr.machine`** says what the merge cadence
