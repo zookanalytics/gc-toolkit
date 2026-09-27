@@ -109,6 +109,16 @@ function PRLink({ tile }: { tile: Tile }) {
 }
 
 /**
+ * The phase indicator: who must act on this merge anchor next, in the same three
+ * values the GitHub status: label carries. A colored chip so the answer reads at
+ * a glance; nothing rendered on a row with no phase.
+ */
+function PRPhaseChip({ tile }: { tile: Tile }) {
+  if (!tile.pr_phase) return null;
+  return <span className={`pr-phase pr-phase--${tile.pr_phase}`}>{tile.pr_phase}</span>;
+}
+
+/**
  * What the board could not read about the pull requests it holds.
  *
  * The coverage sentence's empty state is a contract: it states its coverage or
@@ -330,6 +340,7 @@ function FamilyBlock({
                 <td>{m.rig}</td>
                 <td>{m.kind}</td>
                 <td>
+                  <PRPhaseChip tile={m} />
                   <PRLink tile={m} />
                 </td>
                 <td>{m.title}</td>

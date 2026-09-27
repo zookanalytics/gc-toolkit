@@ -878,13 +878,17 @@ const (
 
 // The anchor metadata the axes are read from.
 const (
-	mdMergeResult = "merge_result"
-	mdCheckSet    = "check_set"
-	mdPRMachine   = "pr.machine"
-	mdPRPosture   = "pr_posture"
-	mdPRNumber    = "pr_number"
-	mdPRURL       = "pr_url"
-	mdBranch      = "branch"
+	mdMergeResult  = "merge_result"
+	mdCheckSet     = "check_set"
+	mdPRMachine    = "pr.machine"
+	mdPRPosture    = "pr_posture"
+	mdPRNumber     = "pr_number"
+	mdPRURL        = "pr_url"
+	mdBranch       = "branch"
+	mdMergeHold    = "merge_hold"
+	mdSignoffCap   = "signoff_cap"
+	mdRebaseHold   = "rebase_hold"
+	mdPRMergeState = "pr_merge_state"
 
 	// The posture vocabulary pr-facts.sh records, mirroring
 	// lifecycle/lifecycle.toml [posture].postures.
@@ -893,6 +897,10 @@ const (
 	postureApproved         = "approved"
 	postureReviewRequired   = "review_required"
 	postureNone             = "none"
+
+	// mergeStateBlocked is GitHub's mergeStateStatus when it withholds the merge;
+	// pr-facts.sh records it as pr_merge_state.
+	mergeStateBlocked = "BLOCKED"
 )
 
 // isMergeAnchor reports whether this row is a merge anchor at all. Only those
@@ -1715,6 +1723,11 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// wrapper neither sources a rig's repository nor waits for one.
 	linkPRBranches(folded)
 
+	// Stamp who must act next, the same taxonomy pr-status-label.sh projects to
+	// the GitHub status: label, reading the anchors' holds and posture and the
+	// open rework children they carry.
+	classifyPRPhases(folded, anchors)
+
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 
 	return Board{
@@ -1772,6 +1785,105 @@ func repoBaseFromPRURL(prURL string) string {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host + "/" + parts[0] + "/" + parts[1]
+}
+
+// The phase values — the mutually-exclusive status: taxonomy
+// pr-status-label.sh projects to a GitHub PR label. Precedence when inputs
+// overlap is needs-attention > working > needs-review.
+const (
+	PhaseWorking        = "working"
+	PhaseNeedsReview    = "needs-review"
+	PhaseNeedsAttention = "needs-attention"
+)
+
+// classifyPRPhases stamps each merge anchor's phase — who must act on it next.
+// It reads the holds and posture off the anchor and counts the open rework
+// children the board already gathers (a child names its anchor in
+// [mdAnchorBead]), so a non-merge row leaves the field empty. Counting is deduped
+// by child id, because one gather can list a bead twice.
+func classifyPRPhases(tiles []Tile, anchors []Anchor) {
+	anchorByID := make(map[string]Anchor, len(anchors))
+	reworkKids := make(map[string]int)
+	seenKid := make(map[string]bool)
+	for _, a := range anchors {
+		if _, ok := anchorByID[a.ID]; !ok {
+			anchorByID[a.ID] = a
+		}
+		if a.Source == kindRework && a.ClosedAt.IsZero() && !seenKid[a.ID] {
+			if parent := a.Metadata[mdAnchorBead]; parent != "" {
+				seenKid[a.ID] = true
+				reworkKids[parent]++
+			}
+		}
+	}
+	for i := range tiles {
+		a, ok := anchorByID[tiles[i].ID]
+		if !ok {
+			continue
+		}
+		tiles[i].PRPhase = prPhase(a, reworkKids[tiles[i].ID])
+	}
+}
+
+// prPhase answers who must act on a merge anchor next, in the three values and
+// precedence assets/scripts/pr-status-label.sh's derive_value uses: the status:
+// label on the GitHub PR list and this indicator read one taxonomy. It reads the
+// refinery-computed holds and posture off the anchor and the open-rework count
+// the board gathers, and never calls GitHub. Empty on a non-merge row.
+//
+// derive_value is the authority for the values and their precedence; it stamps
+// nothing back on the bead, so this reads the same inputs rather than its result,
+// and the two must change together.
+func prPhase(a Anchor, openReworkKids int) string {
+	if !isMergeAnchor(a) {
+		return ""
+	}
+	hold := a.Metadata[mdMergeHold]
+	signoffCap := a.Metadata[mdSignoffCap]
+	rebaseHold := a.Metadata[mdRebaseHold]
+	posture := beforeAt(a.Metadata[mdPRPosture])
+	mstate := beforeAt(a.Metadata[mdPRMergeState])
+
+	switch {
+	// needs-attention: the city stopped without settling; a human must unstick it.
+	case isCapPark(hold, signoffCap), isHoldSet(hold), isHoldSet(rebaseHold):
+		return PhaseNeedsAttention
+	case posture == postureApproved && mstate == mergeStateBlocked && openReworkKids == 0:
+		return PhaseNeedsAttention
+	// working: the city holds the ball; no human input needed.
+	case openReworkKids > 0, posture == postureApproved:
+		return PhaseWorking
+	// needs-review: settled at the head, a human review or re-review is next.
+	default:
+		return PhaseNeedsReview
+	}
+}
+
+// beforeAt returns the value before the first '@' — the <value>@<oid>[@<instant>]
+// shape lifecycle.sh writes, read the way derive_value does (split("@")[0]).
+func beforeAt(v string) string {
+	if i := strings.IndexByte(v, '@'); i >= 0 {
+		return v[:i]
+	}
+	return v
+}
+
+// isHoldSet is the truthiness rule pr-facts.sh, pr-open.sh and pr-status-label.sh
+// read a hold by, so a hold means the same thing in all of them.
+func isHoldSet(v string) bool {
+	switch v {
+	case "", "false", "False", "FALSE", "0", "null":
+		return false
+	default:
+		return true
+	}
+}
+
+// isCapPark is the round cap's park — merge_hold=signoff_cap paired with a
+// non-empty signoff_cap — distinct from an operator freeze (merge_hold=true),
+// which isHoldSet still catches as a hold.
+func isCapPark(hold, signoffCap string) bool {
+	return hold == "signoff_cap" && signoffCap != ""
 }
 
 // clusterThreshold is how many rows must share one section-and-needs before the

@@ -242,6 +242,12 @@ export interface Tile {
    * holds no pull request URL for keeps the bare branch text.
    */
   pr_branch_url: string;
+  /**
+   * Who must act on this merge anchor next — `'working'`, `'needs-review'`, or
+   * `'needs-attention'` — the same status: taxonomy the GitHub PR list carries,
+   * so the board and the label read one vocabulary. `''` on a non-merge row.
+   */
+  pr_phase: string;
 }
 
 /**

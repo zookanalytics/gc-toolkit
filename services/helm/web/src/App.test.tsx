@@ -52,6 +52,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_url: '',
     pr_branch: '',
     pr_branch_url: '',
+    pr_phase: '',
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
@@ -656,6 +657,21 @@ it('links a pre-open branch to GitHub when the repo is known', async () => {
   const row = memberRow('tk-root', /a pre-open branch with a known repo/);
   const link = within(row as HTMLElement).getByRole('link', { name: 'polecat/tk-link' });
   expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/tree/polecat/tk-link');
+});
+
+// The phase chip names who must act next in the same words the GitHub status:
+// label carries, so the board and the label do not read as two vocabularies.
+it('shows the PR phase beside the row', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-ph',
+    title: 'a row that needs a review',
+    pr_phase: 'needs-review',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a row that needs a review/)).toBeTruthy());
+
+  const row = memberRow('tk-root', /a row that needs a review/);
+  expect(within(row as HTMLElement).getByText('needs-review')).toBeTruthy();
 });
 
 // An anchor at a human state carries merge_result and can carry no branch and no
