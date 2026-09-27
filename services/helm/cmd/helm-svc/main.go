@@ -12,9 +12,10 @@
 // As the sidecar, it runs as a
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
 // a unix socket path in GC_SERVICE_SOCKET, dials that socket as a reverse proxy,
-// and reaches GET /helm (the board), GET /healthz (liveness), POST /helm/open
-// (file a visit on a bead — the one write route) and the embedded web app (the
-// mount root, plus its assets) over it. Requests arrive already path-stripped.
+// and reaches GET /helm (the board), GET /healthz (liveness), the write routes
+// POST /helm/{open,accept,engage,dismiss} (actuate a board recommendation) and
+// the embedded web app (the mount root, plus its assets) over it. Requests arrive
+// already path-stripped.
 //
 // The service reads all bead state through the internal/source.Source seam —
 // either the in-process beads library or the supervisor's loopback HTTP API,
@@ -108,7 +109,7 @@ func serve() {
 	ttl := cacheTTL()
 	src, closeSrc := selectSource()
 	defer closeSrc()
-	srv := server.New(src, ttl, server.WithSPA(spaHandler()), server.WithOpener(selectOpener()))
+	srv := server.New(src, ttl, server.WithSPA(spaHandler()), server.WithActuator(selectActuator()))
 
 	// The supervisor removes any stale socket before spawning us, so we own
 	// creation. net.Listen("unix") unlinks the socket on close.
@@ -158,23 +159,23 @@ func spaHandler() http.Handler {
 	return h
 }
 
-// selectOpener wires the board's one write route, POST /helm/open, or returns
-// nil to serve the board read-only.
+// selectActuator wires the board's write routes, POST /helm/{open,accept,engage,
+// dismiss}, or returns nil to serve the board read-only.
 //
-// A nil opener is NOT a failure to start. The board is the load-bearing
-// contract and the write route is additive, so an unresolvable visit tool is
-// logged loudly and the service keeps serving exactly as it did before the
-// route existed — the same degradation rule [spaHandler] follows for a broken
-// bundle. The route then answers 503 with the reason rather than 404, so an
-// operator who clicks the action learns why instead of thinking it vanished.
-func selectOpener() server.Opener {
-	o, err := visit.New(source.DiscoverCityPath())
+// A nil actuator is NOT a failure to start. The board is the load-bearing
+// contract and the write routes are additive, so an unresolvable gc-helm.sh is
+// logged loudly and the service keeps serving exactly as it did before the routes
+// existed — the same degradation rule [spaHandler] follows for a broken bundle.
+// The routes then answer 503 with the reason rather than 404, so an operator who
+// clicks an action learns why instead of thinking it vanished.
+func selectActuator() server.Actuator {
+	a, err := visit.New(source.DiscoverCityPath())
 	if err != nil {
-		log.Printf("visit filing unavailable, board is read-only: %v", err)
+		log.Printf("board actuation unavailable, board is read-only: %v", err)
 		return nil
 	}
-	log.Printf("visit tool: %s", o.Script())
-	return o
+	log.Printf("write tool: %s", a.Script())
+	return a
 }
 
 // selectSource picks the data-access backend and returns it with a cleanup

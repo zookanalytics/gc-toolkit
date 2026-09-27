@@ -259,6 +259,16 @@ describe('DrillPanel', () => {
     expect(await screen.findByText(/gc-toolkit__polecat-lx-8y6j/)).toBeTruthy();
   });
 
+  // Discuss (engage) and Dismiss are the drill panel's home for the two verbs the
+  // board row does not carry — the board row offers only Accept — so all three
+  // conversation actions are reachable per bead, in both session states.
+  it('offers Discuss and Dismiss alongside start-a-conversation', async () => {
+    renderPanel();
+    expect(await screen.findByRole('button', { name: /start a conversation/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /discuss/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^dismiss$/i })).toBeTruthy();
+  });
+
   // Partial data is first-class on this surface, and the failure mode it
   // prevents is specific: an unanswered session store rendering as the sentence
   // an operator reads to mean "nothing is happening here, look elsewhere".

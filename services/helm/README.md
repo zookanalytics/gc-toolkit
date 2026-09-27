@@ -49,8 +49,12 @@ GET /            -> the board JSON, or the embedded web app for a browser
                     (Accept: text/html) — see *Web UI*
 GET /assets/...  -> the web app's bundle
 
-POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
-                    — the ONE write route; see *Starting a conversation*
+POST /helm/open     -> { bead, outcome, visit?, message }   file a visit on a bead
+POST /helm/accept   -> { bead, verb, message }   dispatch the subject's recommended
+                       formula and dismiss its visit (Accept)
+POST /helm/engage   -> { bead, verb, message }   spawn a Discuss sitting on the visit
+POST /helm/dismiss  -> { bead, verb, message }   close the subject's open visit
+                    — the write routes; see *Actuating from the board*
 ```
 
 A `Tile` carries 49 fields, declared in `internal/board/model.go` and mirrored
@@ -1152,55 +1156,70 @@ nullable — narrow them (`board.tiles ?? []`) before iterating.
 Reasoning and rejected alternatives (codegen, a TS test runner, a `.ts`
 fixture): `specs/tk-eemvf.2/decisions.md`.
 
-## Starting a conversation (`POST <mount>/helm/open`, tk-yc00g)
+## Actuating from the board (`POST <mount>/helm/{open,accept,engage,dismiss}`)
 
-The board's **one write route**, and the drill panel's one write action: file a
-visit on a bead so a converse session picks it up. Everything else this service
-serves is a read.
+The board's write routes — the only writes this service serves; everything else
+is a read. Each shells out to the matching `gc-helm.sh` verb:
 
-The affordance already existed in tmux (`tmux-pick-helm.sh` → `gc-helm.sh open`),
-but the operator's main surface is the web board, so it needed to exist there.
+- **open** files a visit on a bead so it parks on the board (tk-yc00g).
+- **accept** dispatches the subject's `gc.recommended_formula` at the subject and
+  dismisses its visit — the low-friction actuation of a recommendation the
+  operator has already decided (Accept/Discuss flow, tk-hsm4d9).
+- **engage** spawns a Discuss sitting bound to the visit (`--no-input
+  --no-attach`).
+- **dismiss** closes the subject's open visit.
 
-**It owns no visit logic.** Visit filing lives once, in `gc-helm.sh open`'s
-marked `gate-visit` block, and this route *shells out to that verb* exactly as
-`assets/scripts/gc-visit-open.sh` does — so the subject-existence gate
-(tk-ujwvt), the one-open-visit-per-subject gate, rig resolution by id prefix and
-the board cache bust are inherited, not reimplemented.
-`assets/scripts/gate-visit.test.sh` guards that single copy; a Go
-reimplementation would be an unguarded second one.
+Where they surface: **Accept** renders on the board row itself, when the wire
+says the row is `acceptable` — mirroring the CLI board's `accept ▸` marker
+(`cmd/helm-svc/board.go`), which keeps Discuss and Dismiss as separate verbs off
+the marked row. **Discuss**, **Dismiss** and **open** are the drill panel's
+per-bead conversation actions. Each affordance already existed in tmux / the CLI
+(`gc-helm.sh <verb>`); the operator's main surface is the web board, so they
+needed to exist there too.
+
+**They own no verb logic.** Each verb lives once, in `gc-helm.sh`, and these
+routes *shell out to it* exactly as `assets/scripts/gc-visit-open.sh` does — so
+subject resolution, the one-open-visit-per-subject gate, rig resolution, the
+un-engaged re-check `accept` makes before it slings, and the board cache bust are
+inherited, not reimplemented. `assets/scripts/gate-visit.test.sh` and
+`gc-helm-accept.test.sh` guard those single copies; a Go reimplementation would
+be an unguarded second one.
 
 ```bash
-curl -X POST http://127.0.0.1:8372/v0/city/<city>/svc/helm/helm/open \
+curl -X POST http://127.0.0.1:8372/v0/city/<city>/svc/helm/helm/accept \
   -H 'Content-Type: application/json' -d '{"bead":"tk-abc12"}'
 ```
 
-**What it does not do: attach.** In tmux, `open` reattaches the caller. In a
-browser there is no pane to attach to until the embedded ttyd can be retargeted
-at the new session (tk-rbf9r, whose city-repo half tk-xlup8 is written but
-unapplied). So the button *files* the visit and says a conversation is opening;
-the panel copy is explicit that it did not attach you. That is a follow-on, not
-a reason to hold this.
+**What open and engage do not do: attach.** In tmux, `open` reattaches the
+caller and `engage` attaches the spawned sitting. In a browser there is no pane
+to attach to until the embedded ttyd can be retargeted at the new session
+(tk-rbf9r, whose city-repo half tk-xlup8 is written but unapplied). So the web
+`open` *files* the visit and the web `engage` *spawns* the sitting with
+`--no-attach`; the panel copy is explicit that neither attached you. That is a
+follow-on, not a reason to hold this. accept and dismiss have no sitting to
+attach.
 
 ### What the operator is told
 
 `gc-helm.sh`'s exit codes are its contract, and the handler maps each to its own
 status and a stable `reason` slug. The tool's own stderr sentence is passed
-through **verbatim** as `error` — `cmd_open` already writes a different, specific
-sentence per failure (wrong id prefix vs. no ledger answers vs. data plane
-down), and re-deriving that here would be a second copy of the script's
-knowledge.
+through **verbatim** as `error` — each verb already writes a different, specific
+sentence per failure (wrong id prefix vs. no ledger answers vs. data plane down
+vs. a discuss-only row), and re-deriving that here would be a second copy of the
+script's knowledge.
 
 | exit | HTTP | `reason` | meaning |
 |---|---|---|---|
-| 0 | 200 | — | `outcome` is `filed`, or `existing` when one was already open |
-| 2 | 500 | `usage` | the handler and the script disagree about the request — a wiring bug |
+| 0 | 200 | — | open: `outcome` is `filed`/`existing`; the others carry the tool's sentence in `message` |
+| 1 | 422 | `verb_failed` | accept's sling failed — the visit is left open for retry or Discuss |
+| 2 | 500 (open) / 422 (others) | `usage` / `verb_failed` | open: a wiring bug (the id is pre-validated). accept: the row is discuss-only (no recommended formula) — a refusal, not a service fault |
 | 3 | 503 | `environment` | missing dependency, rigs unenumerable, gather failed |
-| 4 | 422 | `verb_failed` | bead not found / unverifiable / filing failed |
-| — | 504 | `timeout` | the tool did not finish; a visit may or may not have been filed — check the bead |
-| — | 503 | `unavailable` | no visit tool resolved, or it could not be run |
+| 4 | 422 | `verb_failed` | bead not found / unverifiable / an engaged or absent visit / filing failed |
+| — | 504 | `timeout` | the tool did not finish; the action may or may not have gone through — check the bead |
+| — | 503 | `unavailable` | no write tool resolved, or it could not be run |
 
 Refused before the subprocess runs: `invalid_bead` (400), `forbidden` (403),
-`busy` (409).
+`busy` (409 — one in-flight run per `(verb, bead)`).
 
 **Exit 3 is knowingly coarse, and deliberately not papered over here.** In the
 script it still collapses a rig-enumeration timeout, a jq parse failure and a
@@ -1227,20 +1246,21 @@ browser is *on* the tailnet, so any page they visit could otherwise write here
 with their network position. So the handler requires a same-origin write
 (`Sec-Fetch-Site`, with `Origin` as the fallback tell for a browser-shaped
 request), and validates the bead id against the id syntax **before** it becomes
-an argv element — an id beginning with `-` would otherwise be read by
-`cmd_open`'s flag loop as a flag. Whether the bead *exists* stays the script's
-gate; a second copy in front of it would only drift.
+an argv element — an id beginning with `-` would otherwise be read by a verb's
+flag loop as a flag. Whether the bead *exists* stays the script's gate; a second
+copy in front of it would only drift.
 
-Concurrent opens of the same bead are collapsed in-process (409 `busy`):
-`cmd_open`'s one-visit-per-subject gate is read-then-create, so a double-click
-could otherwise race it and file the second visit it exists to prevent.
+Concurrent runs of the same `(verb, bead)` are collapsed in-process (409 `busy`):
+the scripts' state checks are read-then-act, so a double-click could otherwise
+race one (open filing a second visit, accept slinging twice). A different verb on
+the same bead — Accept and Dismiss on one row — never contends.
 
 ### Configuration
 
 | env | default | meaning |
 |---|---|---|
-| `GC_HELM_OPEN_TOOL` | set by `gc-helm-svc.sh` to its sibling `gc-helm.sh` | path to the visit tool |
-| `GC_HELM_OPEN_TIMEOUT` | `120s` | bounds one `open` run (Go duration or bare seconds) |
+| `GC_HELM_OPEN_TOOL` | set by `gc-helm-svc.sh` to its sibling `gc-helm.sh` | path to the write tool (name is historical; it serves every verb) |
+| `GC_HELM_OPEN_TIMEOUT` | `120s` | bounds one write-verb run (Go duration or bare seconds) |
 
 The launcher resolves the tool as its own sibling rather than the binary
 guessing `rigs/<rig>/…`: gc-toolkit is rig-imported by four rigs, so there is no

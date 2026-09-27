@@ -3,6 +3,7 @@ import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
 import { resolveTerminalBase, resolveTerminalSession } from './terminal/endpoint';
+import { ActuateButton } from './actuate/ActuateButton';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board shape lives in ./contract.ts — the hand-written mirror of the Go
@@ -259,10 +260,14 @@ function FamilyBlock({
   family,
   drillTarget,
   onOpen,
+  onActuated,
 }: {
   family: Family;
   drillTarget: string | null;
   onOpen: (id: string) => void;
+  // Called after a board write lands, so the acted-on row re-gathers rather than
+  // waiting out the poll interval. App passes its refresh.
+  onActuated: () => void;
 }) {
   const { root, members } = family;
   const headingId = `family-${root.id}`;
@@ -282,6 +287,24 @@ function FamilyBlock({
           </>
         )}
         {root.needs && <> · {root.needs}</>}
+        {/* Accept is the one board-row actuation, mirroring the CLI board's
+            "accept ▸" marker (cmd/helm-svc/board.go). It shows only when the wire
+            says the row is acceptable — a recommendation whose visit is un-engaged
+            — and dispatches accept_formula at the subject then dismisses the visit.
+            Discuss and Dismiss live in the drill panel, the way the CLI keeps them
+            as separate verbs off the marked row. */}
+        {root.acceptable && (
+          <>
+            {' · '}
+            <ActuateButton
+              verb="accept"
+              beadId={root.id}
+              formula={root.accept_formula}
+              compact
+              onDone={onActuated}
+            />
+          </>
+        )}
         {root.section === 'done' && (
           <>
             . A closed family sits below every live one; a row leaves only by ageing out on a
@@ -328,7 +351,21 @@ function FamilyBlock({
                 <td>{m.title}</td>
                 <td>{progressCell(m)}</td>
                 <td>{m.frontier}</td>
-                <td>{m.needs}</td>
+                <td>
+                  {m.needs}
+                  {m.acceptable && (
+                    <>
+                      {' '}
+                      <ActuateButton
+                        verb="accept"
+                        beadId={m.id}
+                        formula={m.accept_formula}
+                        compact
+                        onDone={onActuated}
+                      />
+                    </>
+                  )}
+                </td>
                 <td>{m.section === 'done' ? '' : owedSince(m)}</td>
               </tr>
             ))}
@@ -590,6 +627,7 @@ export function App() {
           family={family}
           drillTarget={drillTarget}
           onOpen={setDrillTarget}
+          onActuated={refresh}
         />
       ))}
 
