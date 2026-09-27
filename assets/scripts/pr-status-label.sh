@@ -8,9 +8,12 @@
 #            One value at a time, and pr-facts.sh recomputes it every cadence pass
 #            from the anchor's posture, holds, and rework children. It is workflow
 #            state, never an approval, and never asserts a PR may merge:
-#            machine-readiness rides pr.machine and the draft flag. derive_value is
-#            the single place its values, what each projects from, and their
-#            precedence are defined.
+#            machine-readiness rides pr.machine and the draft flag. The tri-state
+#            itself — the values, what each projects from, and their precedence —
+#            is decided by one Go package, services/gctk/prstatus, reached through
+#            `gctk pr-status derive` and exported so the helm board derives the
+#            same per-bead state, so a bead's PR label and its board liveness
+#            cannot disagree.
 #   base:    where an approved change lands. A base under integration/ is a convoy
 #            checkpoint, marked so a reviewer never mistakes it for a merge to main
 #            (specs/tk-6bji7k.9/decision.md). Set once at pr-open where the base is
@@ -148,89 +151,43 @@ ensure_group() { # <prefix> <newline-values> <color> <desc-fn> — uses ORIGIN_*
 ensure_labels()      { ensure_group "$LABEL_PREFIX"      "$STATUS_VALUES" "$GROUP_COLOR"      label_desc; }
 ensure_base_labels() { ensure_group "$BASE_LABEL_PREFIX" "$BASE_VALUES"   "$BASE_GROUP_COLOR" base_label_desc; }
 
-# --- the projection derivation --------------------------------------------
+# --- the projection derivation (one Go code path) -------------------------
 
-# The truthiness rule pr-facts.sh and pr-open.sh read holds by, so a hold means
-# the same thing in all three.
-is_set() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
-# The round cap's park pairs merge_hold=signoff_cap with a non-empty signoff_cap
-# (pr-facts.sh is_cap_park); that one pairing is the cap park, distinct from an
-# operator freeze (merge_hold=true) which is_set below still catches as a hold.
-is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
+# The tri-state is computed by one Go package, services/gctk/prstatus, exported
+# so the helm board derives the same per-bead state from it, so a bead's PR label
+# and its board liveness cannot disagree. `gctk pr-status derive --anchor ID`
+# prints working|needs-review|needs-attention, exits 0 on success and 2 when a read did
+# not resolve — the grammar the shell derivation had, so `set`/`reconcile` are
+# unchanged around it. There is deliberately no shell reimplementation: a second
+# code path is the divergence this shared package exists to remove, and the board
+# has no shell to fall back to. When gctk cannot answer, derive exits 2 and the
+# caller leaves the label as it is.
+#
+# The binary is resolved as lifecycle.sh resolves it — an explicit $GCTK_BIN,
+# else the city's deployed build — but with no version-drift fallback, because
+# there is none to fall back to: a binary too old to carry `pr-status` exits
+# non-zero on the unknown subcommand, which reads as "could not derive" and
+# leaves the label untouched until the build order catches up.
+resolve_gctk() { # succeed with GCTK_BIN naming an executable, else fail
+  if [ -z "${GCTK_BIN:-}" ]; then
+    local city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+    [ -z "$city" ] && city="$(gc service list --json 2>/dev/null | jq -r '.city_path // empty' 2>/dev/null || true)"
+    [ -n "$city" ] && GCTK_BIN="$city/.gc/services/gctk/bin/gctk"
+  fi
+  [ "${GCTK_BIN:-}" != "none" ] && [ -n "${GCTK_BIN:-}" ] && [ -x "${GCTK_BIN:-}" ]
+}
 
-# Print the status value the anchor projects to, answering one question: who must
-# act next. Precedence needs-attention > working > needs-review.
-#
-#   needs-attention  a human must weigh in before the city can settle this — to
-#                    unstick a mechanical stop (a signoff-cap park, any merge/rebase
-#                    hold on the anchor, or an approved PR wedged at merge state
-#                    BLOCKED with no rework in flight) or to resolve what a hold
-#                    stands for: an operator freeze, or a topic held for discussion
-#                    before the PR can settle. Unlike needs-review, the head cannot
-#                    settle until the human acts, so it is not a request to review
-#                    the diff.
-#   working          the city holds the ball — live work is anchored to this PR (a
-#                    rework or fix child, a validation pass, a review in flight), or
-#                    an approved PR is merging.
-#   needs-review     the head is settled and the only thing left is a human's
-#                    review verdict: posture review_required/commented/none, no
-#                    hold, no live work anchored to this PR.
-#
-# Reads refinery-computed state off the anchor — the pr-facts.sh posture
-# (pr_posture, stored dated as value@oid@instant) and merge state (pr_merge_state,
-# value@oid), the merge/rebase holds — together with the anchor's in-flight set:
-# any live bead carrying anchor_bead, the same membership test pr-facts.sh applies
-# in its own arms (a rework or fix child, a validation pass, a review all carry it).
-# It does NOT read GitHub's review posture directly or check.<lane>=green: the
-# working->needs-review flip rests on live work anchored to the PR, which closes as
-# that work hands back, so GitHub's sticky changes_requested never traps the label
-# in `working`, and a green that outlives a rewritten commit (tk-4zsj1p) cannot read
-# the label ready. pr_posture is read only to split the approved case (merging vs
-# wedged) and to name the awaiting-review states. Exit 2 when a read does not
-# resolve, so a caller does not flip the label on a guess.
+# derive_value keeps its name and grammar: print the tri-state on stdout, return
+# 1 on a usage error, 2 when the state cannot be determined.
 derive_value() { # <anchor-id>
-  local anchor="$1" arow hold cap rhold posture mstate inflight ninflight
+  local anchor="$1"
   [ -n "$anchor" ] || { warn "derive needs --anchor"; return 1; }
-  arow=$(gc bd show "$anchor" --json 2>/dev/null)
-  if ! printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-    warn "anchor $anchor does not resolve; cannot derive a status"
-    return 2
+  if resolve_gctk; then
+    "$GCTK_BIN" pr-status derive --anchor "$anchor"
+    return $?
   fi
-  hold=$(printf '%s' "$arow" | jq -r '(.[0].metadata.merge_hold // "") | tostring' 2>/dev/null)
-  cap=$(printf '%s' "$arow" | jq -r '(.[0].metadata.signoff_cap // "") | tostring' 2>/dev/null)
-  rhold=$(printf '%s' "$arow" | jq -r '(.[0].metadata.rebase_hold // "") | tostring' 2>/dev/null)
-  # The value is the part before the first '@'; the oid (and, for posture, the
-  # instant) follow it.
-  posture=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_posture // "") | tostring | split("@")[0])' 2>/dev/null)
-  mstate=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_merge_state // "") | tostring | split("@")[0])' 2>/dev/null)
-
-  # The anchor's in-flight set: any live bead carrying anchor_bead. This is the
-  # membership test pr-facts.sh applies in its own arms, over the same live statuses,
-  # so the label and the merge hold agree on who is acting. Counting the whole set,
-  # not just task_kind=rework, is what keeps a human changes-requested batch (a
-  # validation pass) or any other non-rework shape from reading as settled. Repeated
-  # --status flags drop earlier values, so it is one list.
-  inflight=$(gc bd list --metadata-field "anchor_bead=$anchor" \
-    --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null)
-  if ! printf '%s' "$inflight" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    warn "could not read the in-flight set for $anchor; cannot derive a status"
-    return 2
-  fi
-  ninflight=$(printf '%s' "$inflight" | jq 'length' 2>/dev/null); case "$ninflight" in ''|*[!0-9]*) ninflight=0 ;; esac
-
-  # needs-attention: the city stopped without settling; a human must unstick it.
-  if is_cap_park "$hold" "$cap"; then printf 'needs-attention\n'; return 0; fi
-  if is_set "$hold" || is_set "$rhold"; then printf 'needs-attention\n'; return 0; fi
-  if [ "$posture" = "approved" ] && [ "$mstate" = "BLOCKED" ] && [ "$ninflight" -eq 0 ]; then
-    printf 'needs-attention\n'; return 0
-  fi
-
-  # working: the city holds the ball; no human input needed.
-  if [ "$ninflight" -gt 0 ]; then printf 'working\n'; return 0; fi
-  if [ "$posture" = "approved" ]; then printf 'working\n'; return 0; fi
-
-  # needs-review: settled at the head, a human review or re-review is next.
-  printf 'needs-review\n'; return 0
+  warn "gctk unavailable (GCTK_BIN='${GCTK_BIN:-}'); cannot derive a status without the shared code path — leaving the label unchanged"
+  return 2
 }
 
 # --- setting the label ----------------------------------------------------

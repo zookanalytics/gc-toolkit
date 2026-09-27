@@ -12,6 +12,20 @@ harness_init
 SUT="$HERE/pr-status-label.sh"
 REPO="github.com/zook/gc-toolkit"
 
+# The tri-state derivation is `gctk pr-status` (services/gctk); this script
+# reaches it and computes nothing itself, so the derive and reconcile cases
+# below exercise the binary. Build it and point GCTK_BIN at it, overriding the
+# harness's GCTK_BIN=none. gctk shells out to the same stubbed `gc`, so the
+# store fixtures serve it unchanged. There is no shell fallback to fall back on,
+# so no Go toolchain means the only code path was NOT exercised: fail loud.
+ROOT="$(cd "$HERE/../.." && pwd)"
+GCTK_BUILD_LOG="$TMP/gctk-build.log"
+if command -v go >/dev/null 2>&1 && ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
+  export GCTK_BIN="$TMP/gctk"
+else
+  bad "gctk did not build; pr-status derive is gctk-only and was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" 2>/dev/null | tr '\n' ' ')"
+fi
+
 pv() { # <num> <labels-json-array> — a pr_view fixture carrying those labels
   printf '{"number":%s,"state":"OPEN","isDraft":false,"labels":%s}\n' "$1" "$2" \
     > "$STUB_GH_DIR/pr_view_$1.json"
