@@ -62,7 +62,7 @@ REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
 # land, not REVIEW_POOL (the codex pool the merge cadence routes mol-review to).
 # A rig that staffs a dedicated validate pool points this there without an edit.
 VALIDATE_POOL="${REFINERY_RECONCILE_VALIDATE_POOL:-$FIX_POOL}"
-CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness}"
+CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness,triage}"
 INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
 
 # Review dispatch formula (two-lane pilot). Default mol-review — the

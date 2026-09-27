@@ -58,7 +58,7 @@ UNSAFE_RC=3
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-DEFAULT_CHECK_SET="correctness"
+DEFAULT_CHECK_SET="correctness,triage"
 REVIEW_FORMULA="mol-review"
 VALIDATE_FORMULA="mol-validate"
 REVIEW_POOL=""
@@ -70,7 +70,7 @@ FIX_POOL=""
 SLING_VARS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --default)        DEFAULT_CHECK_SET="${2:-correctness}"; shift 2 ;;
+    --default)        DEFAULT_CHECK_SET="${2:-correctness,triage}"; shift 2 ;;
     --review-pool)    REVIEW_POOL="${2:-}"; shift 2 ;;
     --validate-pool)  VALIDATE_POOL="${2:-}"; shift 2 ;;
     --fix-pool)       FIX_POOL="${2:-}"; shift 2 ;;
@@ -87,7 +87,7 @@ for _v in ${SLING_VARS[@]+"${SLING_VARS[@]}"}; do SLING_VAR_ARGS+=(--var "$_v");
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
 case "$(cs_canon "$DEFAULT_CHECK_SET")" in
-  '')       DEFAULT_CHECK_SET="correctness" ;;
+  '')       DEFAULT_CHECK_SET="correctness,triage" ;;
   none|off) DEFAULT_CHECK_SET="none" ;;
 esac
 

@@ -181,6 +181,14 @@ eq "$(meta A1 dispatch_count)" "<absent>" "no dispatch tally is written on the a
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
 
+echo "# the forced baseline: an empty check_set stamps correctness,triage and dispatches both lanes"
+store "[$(anchor A1b pre_open_gate "" "" polecat/a1b)]"
+oid a1b > "$GH_DIR/head_polecat_a1b"
+out=$("$SUT" --default correctness,triage --review-pool "$POOL" --fix-pool "$FIXP" 2>&1); rc=$?
+eq "$rc" 0 "the forced-baseline pass exits 0"
+eq "$(meta A1b check_set)" "correctness,triage" "empty check_set is stamped with the forced baseline correctness,triage"
+has "$out" "2 reviews dispatched" "both the correctness and triage lanes are dispatched"
+
 echo "# stamp that does not persist holds the merge (rc=3)"
 store "[$(anchor A2 pull_request "" "" polecat/a2)]"
 out=$(STUB_DROP_KEYS="A2:check_set" run); rc=$?
