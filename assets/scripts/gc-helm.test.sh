@@ -2502,6 +2502,37 @@ grep -q 'tk-a, tk-b' <<< "$DERR" \
   || bad "(LOOKUPMULTIPLE) missing conflicting ids: $DERR"
 printf '[]\n' > "$D_LIST"
 
+# (IDEMSCRUB) the dedup lookup must survive a control-character-laden `bd list`.
+# A raw C0 byte makes jq reject the whole payload, so an unscrubbed lookup comes
+# back empty and the re-state files a SECOND gate beside the one already open —
+# the duplicate the single-open-demand invariant exists to prevent. demand_lookup
+# scrubs C0 bytes before jq, so a noisy read still finds the open demand and
+# refreshes it. A raw TAB inside a JSON string is the canonical case: invalid to
+# jq, dropped by the scrub, and unrelated to the field the match reads.
+printf '[{"id":"tk-old2","status":"open","metadata":{"gc.demand_for":"tk-kid"},"notes":"noisy\tread"}]\n' > "$D_LIST"
+demand_run tk-kid "operator: pick the backend (after a noisy read)" --by converse
+eq "$DRC" "0" "(IDEMSCRUB) a re-state whose lookup carried a control char still succeeds"
+eq "$(d_gate)" "" "(IDEMSCRUB) …filing no second gate — the open demand was found through the noise"
+grep -q '^bd update tk-old2 ' <<< "$(d_update)" \
+  && ok "(IDEMSCRUB) …refreshing the one already open" \
+  || bad "(IDEMSCRUB) the noisy-read demand was not refreshed: $(d_update)"
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-old2" \
+   "(IDEMSCRUB) …and it names the demand that already existed"
+printf '[]\n' > "$D_LIST"
+
+# (CAPREFRESH) an over-cap RE-STATE, with a demand already open, is rejected by
+# the length gate before the lookup runs — so it neither refreshes the open
+# demand nor files a second one, and the single open demand is left untouched.
+# The gate rejecting is what keeps a too-long re-state from becoming a duplicate.
+printf '[{"id":"tk-old3","status":"open","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+demand_run tk-kid "$T141"
+eq "$DRC" "2" "(CAPREFRESH) an over-cap re-state is a usage error"
+eq "$(d_gate)$(d_update)" "" "(CAPREFRESH) …touching nothing: no second gate, no refresh of the open one"
+grep -q 'cap is 140' <<< "$DERR" \
+  && ok "(CAPREFRESH) …and the refusal names the cap" \
+  || bad "(CAPREFRESH) refusal is silent: $DERR"
+printf '[]\n' > "$D_LIST"
+
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
 # A trap is process-global: one installed inside a helper and left there
 # rewrites how every later line of the caller answers a signal, and outlives
