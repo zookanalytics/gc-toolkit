@@ -2,10 +2,9 @@ package prstatus
 
 import "testing"
 
-// The precedence table, one row per case the shell's derive_value decided and
-// pr-status-label.test.sh asserts. Keeping them here too proves the rule in
-// isolation from the `gc bd` gathering, so a failure names the logic or the
-// wiring, never both at once.
+// The precedence table, one row per case pr-status-label.test.sh asserts.
+// Keeping them here too proves the rule in isolation from the `gc bd` gathering,
+// so a failure names the logic or the wiring, never both at once.
 func TestDerive(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -13,18 +12,18 @@ func TestDerive(t *testing.T) {
 		want State
 	}{
 		{"nothing outstanding", Facts{}, NeedsReview},
-		{"open rework child", Facts{OpenReworkChildren: 1}, Working},
-		{"closed rework child does not count", Facts{OpenReworkChildren: 0}, NeedsReview},
-		{"sticky changes_requested, no open child", Facts{PRPosture: "changes_requested@oid@t"}, NeedsReview},
-		{"changes_requested with an open child", Facts{PRPosture: "changes_requested@oid@t", OpenReworkChildren: 1}, Working},
+		{"one bead in the in-flight set", Facts{InFlightCount: 1}, Working},
+		{"empty in-flight set", Facts{InFlightCount: 0}, NeedsReview},
+		{"sticky changes_requested, empty in-flight set", Facts{PRPosture: "changes_requested@oid@t"}, NeedsReview},
+		{"changes_requested with live work", Facts{PRPosture: "changes_requested@oid@t", InFlightCount: 1}, Working},
 		{"signoff-cap park", Facts{MergeHold: "signoff_cap", SignoffCap: "codex"}, NeedsAttention},
 		{"operator freeze merge_hold=true", Facts{MergeHold: "true"}, NeedsAttention},
 		{"rebase hold", Facts{RebaseHold: "true"}, NeedsAttention},
 		{"approved and merging (CLEAN)", Facts{PRPosture: "approved@oid@t", PRMergeState: "CLEAN@oid"}, Working},
-		{"approved but wedged (BLOCKED), no rework", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid"}, NeedsAttention},
-		{"approved + BLOCKED + open child is live work", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid", OpenReworkChildren: 1}, Working},
-		{"posture commented, no rework", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
-		{"needs-attention outranks working (cap park + open child)", Facts{MergeHold: "signoff_cap", SignoffCap: "codex", OpenReworkChildren: 2}, NeedsAttention},
+		{"approved but wedged (BLOCKED), empty in-flight set", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid"}, NeedsAttention},
+		{"approved + BLOCKED + live work is working", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid", InFlightCount: 1}, Working},
+		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
+		{"needs-attention outranks working (cap park + live work)", Facts{MergeHold: "signoff_cap", SignoffCap: "codex", InFlightCount: 2}, NeedsAttention},
 
 		// merge_hold=signoff_cap WITHOUT a cap value is not the cap park; it is a
 		// plain truthy hold, so isSet still catches it as needs-attention.

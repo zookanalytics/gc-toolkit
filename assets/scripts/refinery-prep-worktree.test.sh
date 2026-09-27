@@ -90,29 +90,36 @@ run_block() { # <rig> <block-file>
 head_of()  { git -C "$1" rev-parse --abbrev-ref HEAD; }
 prep_of()  { echo "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"; }
 
-# --- 3. rebase mode (polecat/* branch). ---------------------------------------
-R="$TMP/rebase"; build_repo "$R" "polecat/wb"
+# --- 3. a per-bead polecat/* branch is brought current by MERGE, not rebase. ----
+R="$TMP/polecat"; build_repo "$R" "polecat/wb"
 export FAKE_META='[{"metadata":{"branch":"polecat/wb","target":"main"}}]'
-run_block "$R/rig" "$TMP/merge.sh" && ok "merge block (rebase mode) exits 0" || bad "merge block (rebase mode) exits 0"
-eq "$(head_of "$R/rig")" "main" "rebase mode: rig root stays on main (never checked out temp)"
+run_block "$R/rig" "$TMP/merge.sh" && ok "merge block (polecat/* branch) exits 0" || bad "merge block (polecat/* branch) exits 0"
+eq "$(head_of "$R/rig")" "main" "polecat/* branch: rig root stays on main (never checked out temp)"
 PW="$(prep_of "$R/rig")"
-[ -d "$PW" ] && ok "rebase mode: branch staged in the prep worktree" || bad "rebase mode: branch staged in the prep worktree" "$PW"
-eq "$(git -C "$PW" rev-parse --abbrev-ref HEAD 2>/dev/null)" "HEAD" "rebase mode: prep worktree is detached (creates no branch)"
+[ -d "$PW" ] && ok "polecat/* branch: staged in the prep worktree" || bad "polecat/* branch: staged in the prep worktree" "$PW"
+eq "$(git -C "$PW" rev-parse --abbrev-ref HEAD 2>/dev/null)" "HEAD" "polecat/* branch: prep worktree is detached (creates no branch)"
 git -C "$R/rig" show-ref --verify --quiet refs/heads/temp \
-  && bad "rebase mode: no local temp branch created (the collision the fix removes)" \
-  || ok "rebase mode: no local temp branch created (the collision the fix removes)"
+  && bad "polecat/* branch: no local temp branch created (the collision the fix removes)" \
+  || ok "polecat/* branch: no local temp branch created (the collision the fix removes)"
 case "$PW" in "$R/rig/.git/"*) ok "prep worktree lives inside the git dir (invisible to working trees)" ;; *) bad "prep worktree lives inside the git dir" "$PW" ;; esac
-eq "$(git -C "$R/rig" status --porcelain | wc -l | tr -d ' ')" "0" "rebase mode: rig root working tree stays clean (no untracked prep dir)"
-# The prepared head actually rebased: it carries the base's landed commit (h) plus the feature (g).
+eq "$(git -C "$R/rig" status --porcelain | wc -l | tr -d ' ')" "0" "polecat/* branch: rig root working tree stays clean (no untracked prep dir)"
+# Brought current by MERGE: the prepared head carries the base's landed commit (h)
+# and the feature (g), the merge completed (no MERGE_HEAD left), and — the tell it
+# was a merge and not a rewrite — origin/polecat/wb is still an ANCESTOR of the
+# prepared head, so the push ships a fast-forward and never a force.
 git -C "$PW" cat-file -e HEAD:h 2>/dev/null && git -C "$PW" cat-file -e HEAD:g 2>/dev/null \
-  && ok "rebase mode: prepared head carries feature rebased onto advanced base" \
-  || bad "rebase mode: prepared head carries feature rebased onto advanced base"
+  && ok "polecat/* branch: prepared head carries the feature and the advanced base" \
+  || bad "polecat/* branch: prepared head carries the feature and the advanced base"
+git -C "$PW" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && bad "polecat/* branch: merge completed (no conflict left)" || ok "polecat/* branch: merge completed (no conflict left)"
+git -C "$PW" merge-base --is-ancestor origin/polecat/wb HEAD \
+  && ok "polecat/* branch: origin/branch stays an ancestor of the prepared head (merged, not rewritten)" \
+  || bad "polecat/* branch: origin/branch stays an ancestor of the prepared head (merged, not rewritten)"
 
 # push block: ships the prepared head -> origin/<branch> without a cwd checkout; root unmoved.
 ( cd "$R/rig" && GC_RIG_ROOT="$R/rig" BRANCH=polecat/wb bash "$TMP/push.sh" ) >/dev/null 2>&1 \
   && ok "push block exits 0" || bad "push block exits 0"
 eq "$(head_of "$R/rig")" "main" "after push: rig root still on main"
-eq "$(git -C "$R/rig" rev-parse origin/polecat/wb)" "$(git -C "$PW" rev-parse HEAD)" "after push: origin/branch == the rebased prepared head"
+eq "$(git -C "$R/rig" rev-parse origin/polecat/wb)" "$(git -C "$PW" rev-parse HEAD)" "after push: origin/branch == the merged prepared head"
 
 # --- 4. idempotency: a leftover prep worktree from an interrupted run. ---------
 run_block "$R/rig" "$TMP/merge.sh" && ok "merge block re-runs cleanly over a leftover prep worktree" || bad "merge block re-runs cleanly over a leftover prep worktree"
@@ -130,10 +137,10 @@ git -C "$PWM" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && bad "merge mod
 # The exact state this bead exists to survive: the old code's `git checkout -b
 # temp` in the root, left there by a mid-flow suspend. A `worktree add -B temp`
 # refuses here ("cannot force update the branch 'temp' used by worktree"), the
-# unstaged rebase then fails, and the flow mis-rejects the work as a target
+# unstaged prepare then fails, and the flow mis-rejects the work as a target
 # conflict while leaving the root stranded. A detached prep worktree touches no
 # `temp` branch, so it stages regardless of what the root is on. The staged-and-
-# rebased assertions are the discriminator: the old `-B temp` add never created
+# prepared assertions are the discriminator: the old `-B temp` add never created
 # the worktree in this state, so neither could hold.
 S="$TMP/stranded"; build_repo "$S" "polecat/wb"
 export FAKE_META='[{"metadata":{"branch":"polecat/wb","target":"main"}}]'
@@ -144,8 +151,8 @@ run_block "$S/rig" "$TMP/merge.sh" \
 PWS="$(prep_of "$S/rig")"
 [ -d "$PWS" ] && ok "pre-stranded root: prep worktree staged despite the root holding temp" || bad "pre-stranded root: prep worktree staged despite the root holding temp" "$PWS"
 git -C "$PWS" cat-file -e HEAD:h 2>/dev/null && git -C "$PWS" cat-file -e HEAD:g 2>/dev/null \
-  && ok "pre-stranded root: prepared head carries feature rebased onto advanced base" \
-  || bad "pre-stranded root: prepared head carries feature rebased onto advanced base"
+  && ok "pre-stranded root: prepared head carries the feature and the advanced base" \
+  || bad "pre-stranded root: prepared head carries the feature and the advanced base"
 eq "$(head_of "$S/rig")" "temp" "pre-stranded root: rig root left exactly as found (un-stranding is reconcile's job, not the refinery's)"
 
 echo "-----"

@@ -409,6 +409,20 @@ type Tile struct {
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
+
+	// PRBranchURL is the GitHub tree-view link for [PRBranch], or empty when the
+	// row has no branch or the rig's repository could not be resolved. The render
+	// path makes no GitHub call, so the repository is learned from a pr_url the
+	// board already holds: every anchor in one rig targets that rig's repository,
+	// so any row carrying a pull request URL names it for the rig's pre-PR rows
+	// too. A rig the board holds no pull request URL for keeps the bare branch.
+	PRBranchURL string `json:"pr_branch_url"`
+
+	// PRPhase is who must act on this merge anchor next — `working`,
+	// `needs-review`, or `needs-attention` — the same status: taxonomy
+	// pr-status-label.sh projects to the GitHub PR list, so the board and the
+	// label read one vocabulary rather than two. Empty on a non-merge row.
+	PRPhase string `json:"pr_phase"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

@@ -48,8 +48,8 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 
 // prStatusDerive gathers the anchor's refinery-computed facts and prints the
 // state prstatus.Derive returns. It reads only what derive_value read: the
-// holds and the dated posture/merge-state off the anchor, and the count of open
-// rework children standing on it.
+// holds and the dated posture/merge-state off the anchor, and the size of the
+// anchor's in-flight set.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	var missing string
@@ -85,29 +85,29 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// The open rework children standing on this anchor. metadata-field selection
-	// lists non-closed by default; the explicit --status keeps it robust, one
-	// comma list because a repeated flag drops earlier values, and --limit 0 so
-	// the client-side field filter sees every candidate.
+	// The anchor's in-flight set: every live bead carrying anchor_bead, any
+	// task_kind, the membership test pr-facts.sh applies in its own arms.
+	// metadata-field selection lists non-closed by default; the explicit --status
+	// keeps it robust, one comma list because a repeated flag drops earlier
+	// values, and --limit 0 so the client-side field filter sees every candidate.
 	rows, ok := client.List(
-		"--metadata-field", "task_kind=rework",
 		"--metadata-field", "anchor_bead="+anchor,
-		"--status", "open,in_progress,blocked",
+		"--status", "open,in_progress,blocked,deferred,hooked,pinned",
 		"--limit", "0",
 		"--json",
 	)
 	if !ok {
-		fmt.Fprintf(stderr, "%s: could not read rework children for %s; cannot derive a status\n", prStatusProg, anchor)
+		fmt.Fprintf(stderr, "%s: could not read the in-flight set for %s; cannot derive a status\n", prStatusProg, anchor)
 		return 2
 	}
 
 	state := prstatus.Derive(prstatus.Facts{
-		MergeHold:          bead.Meta("merge_hold"),
-		SignoffCap:         bead.Meta("signoff_cap"),
-		RebaseHold:         bead.Meta("rebase_hold"),
-		PRPosture:          bead.Meta("pr_posture"),
-		PRMergeState:       bead.Meta("pr_merge_state"),
-		OpenReworkChildren: len(rows),
+		MergeHold:     bead.Meta("merge_hold"),
+		SignoffCap:    bead.Meta("signoff_cap"),
+		RebaseHold:    bead.Meta("rebase_hold"),
+		PRPosture:     bead.Meta("pr_posture"),
+		PRMergeState:  bead.Meta("pr_merge_state"),
+		InFlightCount: len(rows),
 	})
 	fmt.Fprintf(stdout, "%s\n", state)
 	return 0

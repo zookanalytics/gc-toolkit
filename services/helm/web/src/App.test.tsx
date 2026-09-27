@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { App } from './App';
+import { App, resolveDrillTarget } from './App';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board arrives as one ranked list; every row carries its dependency FAMILY
@@ -51,6 +51,8 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_number: 0,
     pr_url: '',
     pr_branch: '',
+    pr_branch_url: '',
+    pr_phase: '',
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
@@ -400,6 +402,29 @@ it('drills into a family root like any other tile', async () => {
   expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy();
 });
 
+it('resolveDrillTarget reads ?drill= and ignores everything else', () => {
+  expect(resolveDrillTarget('')).toBeNull();
+  expect(resolveDrillTarget('?other=1')).toBeNull();
+  expect(resolveDrillTarget('?drill=')).toBeNull();
+  expect(resolveDrillTarget('?drill=%20%20')).toBeNull();
+  expect(resolveDrillTarget('?drill=tk-abc12')).toBe('tk-abc12');
+  expect(resolveDrillTarget('?drill=tk-abc12.3')).toBe('tk-abc12.3');
+});
+
+// A `?drill=<bead>` deep link opens the board straight on that row's drill
+// panel — the target end of a link from a pull request back to a board move.
+it('opens the drill panel for a ?drill= deep link on load', async () => {
+  window.history.replaceState({}, '', '?drill=tk-yps55');
+  try {
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy(),
+    );
+  } finally {
+    window.history.replaceState({}, '', '/');
+  }
+});
+
 // A board renders exactly the families it holds — never an empty one for a band
 // with nothing in it.
 it('renders only the families present', async () => {
@@ -637,6 +662,39 @@ it('identifies a pre-open row without inventing a link', async () => {
   const row = memberRow('tk-root', /wedged before the PR opened/);
   expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
   expect(within(row as HTMLElement).getByText('polecat/tk-pre')).toBeTruthy();
+});
+
+// The pre-PR branch is browsable: when the board resolved the rig's repository,
+// the branch string links to its GitHub tree view rather than reading as bare
+// text.
+it('links a pre-open branch to GitHub when the repo is known', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-link',
+    title: 'a pre-open branch with a known repo',
+    pr_branch: 'polecat/tk-link',
+    pr_branch_url: 'https://github.com/zook/gc-toolkit/tree/polecat/tk-link',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a pre-open branch with a known repo/)).toBeTruthy());
+
+  const row = memberRow('tk-root', /a pre-open branch with a known repo/);
+  const link = within(row as HTMLElement).getByRole('link', { name: 'polecat/tk-link' });
+  expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/tree/polecat/tk-link');
+});
+
+// The phase chip names who must act next in the same words the GitHub status:
+// label carries, so the board and the label do not read as two vocabularies.
+it('shows the PR phase beside the row', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-ph',
+    title: 'a row that needs a review',
+    pr_phase: 'needs-review',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a row that needs a review/)).toBeTruthy());
+
+  const row = memberRow('tk-root', /a row that needs a review/);
+  expect(within(row as HTMLElement).getByText('needs-review')).toBeTruthy();
 });
 
 // An anchor at a human state carries merge_result and can carry no branch and no

@@ -59,6 +59,25 @@ async function fetchBoard(signal: AbortSignal): Promise<Board> {
   return (await res.json()) as Board;
 }
 
+/**
+ * Reads the bead to drill into on load, honouring a `?drill=` override. This is
+ * the target end of a link from outside the board — a pull request, a message —
+ * that resolves to a board ACTION rather than the board's front page: it opens
+ * the row's drill panel, where the board moves (start a conversation) live.
+ * Absent or blank opens nothing, the board's default.
+ *
+ * NOT validated here, for the reason resolveTerminalSession is not: the id
+ * travels to the drill fetch and the open route, both of which check it against
+ * the store server-side. A regex here would be a decorative copy that drifts
+ * from the check that matters, over a string the client controls anyway.
+ */
+export function resolveDrillTarget(search: string): string | null {
+  const raw = new URLSearchParams(search).get('drill');
+  if (raw === null) return null;
+  const trimmed = raw.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 // The date the row started asking. `gc.takeaway_at` is when a sitting recorded
 // what is owed; `updated_at` only bounds it from below, and a backend may read
 // neither. Display only — the ORDER is the service's, and re-deriving it here
@@ -79,12 +98,12 @@ function isPRRow(tile: Tile): boolean {
 /**
  * The pull request this row is about, as a link when one is open.
  *
- * Before the PR opens there is no link to give and the branch is the identity —
- * which is the common case among wedged rows, not an edge one. A row that can
- * name neither says so; it is the anchor at a human state that records no
- * branch, and there the absence is the whole answer. The conversation lives in
- * GitHub and the link is the one click to it; the board never reproduces a
- * comment thread.
+ * Before the PR opens the branch is the identity, and it links to the branch's
+ * GitHub tree view when the rig's repository is known — the common case among
+ * wedged rows, not an edge one. A row that can name neither says so; it is the
+ * anchor at a human state that records no branch, and there the absence is the
+ * whole answer. The conversation lives in GitHub and the link is the one click
+ * to it; the board never reproduces a comment thread.
  */
 function PRLink({ tile }: { tile: Tile }) {
   if (!isPRRow(tile)) return null;
@@ -96,9 +115,26 @@ function PRLink({ tile }: { tile: Tile }) {
     );
   }
   if (tile.pr_branch) {
+    if (tile.pr_branch_url) {
+      return (
+        <a href={tile.pr_branch_url} target="_blank" rel="noreferrer">
+          {tile.pr_branch}
+        </a>
+      );
+    }
     return <span className="sub">{tile.pr_branch}</span>;
   }
   return <span className="sub">not open yet</span>;
+}
+
+/**
+ * The phase indicator: who must act on this merge anchor next, in the same three
+ * values the GitHub status: label carries. A colored chip so the answer reads at
+ * a glance; nothing rendered on a row with no phase.
+ */
+function PRPhaseChip({ tile }: { tile: Tile }) {
+  if (!tile.pr_phase) return null;
+  return <span className={`pr-phase pr-phase--${tile.pr_phase}`}>{tile.pr_phase}</span>;
 }
 
 /**
@@ -323,6 +359,7 @@ function FamilyBlock({
                 <td>{m.rig}</td>
                 <td>{m.kind}</td>
                 <td>
+                  <PRPhaseChip tile={m} />
                   <PRLink tile={m} />
                 </td>
                 <td>{m.title}</td>
@@ -413,7 +450,9 @@ export function App() {
   const [reloadToken, setReloadToken] = useState(0);
   // The tile being drilled into, or null. A tile's id IS a bead id, which is
   // all the drill plane needs to open it.
-  const [drillTarget, setDrillTarget] = useState<string | null>(null);
+  const [drillTarget, setDrillTarget] = useState<string | null>(() =>
+    resolveDrillTarget(window.location.search),
+  );
   // The rig the operator narrowed the view to, or '' for all rigs.
   const [rigFilter, setRigFilter] = useState<string>('');
 

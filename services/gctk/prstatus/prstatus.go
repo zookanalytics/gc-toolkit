@@ -13,11 +13,11 @@
 //
 // Derive reads only refinery-computed state off the anchor: the holds
 // (merge_hold/rebase_hold and the signoff-cap park), the pr-facts.sh posture
-// and merge state, and whether an open rework child stands on the reviewed
-// commit. It does not consult GitHub's review posture directly — the
-// working -> needs-review flip rests on the rework child, which is scoped to
-// the reviewed commit, so a sticky changes_requested never traps the value in
-// working after a rework hands back.
+// and merge state, and the anchor's in-flight set — any live bead carrying
+// anchor_bead, the same membership test pr-facts.sh applies in its own arms. It
+// does not consult GitHub's review posture directly — the working -> needs-review
+// flip rests on that live work, which closes as it hands back, so a sticky
+// changes_requested never traps the value in working after the set empties.
 package prstatus
 
 import "strings"
@@ -26,8 +26,9 @@ import "strings"
 type State string
 
 const (
-	// Working: the city holds the ball — an open rework child stands on the
-	// reviewed commit, or an approved PR is merging. No human input is needed.
+	// Working: the city holds the ball — live work is anchored to the PR (a
+	// rework or fix child, a validation pass, a review, a finding), or an
+	// approved PR is merging. No human input is needed.
 	Working State = "working"
 	// NeedsReview: settled at the head; the only thing left is a human's review
 	// verdict.
@@ -58,9 +59,11 @@ type Facts struct {
 	// PRMergeState is metadata.pr_merge_state, stored value@oid; only the value
 	// before the first '@' is read.
 	PRMergeState string
-	// OpenReworkChildren counts the rework children on this anchor that are still
-	// open, in_progress, or blocked — live work on the reviewed commit.
-	OpenReworkChildren int
+	// InFlightCount is the size of the anchor's in-flight set: every live bead
+	// carrying anchor_bead, any task_kind, over the live statuses pr-facts.sh
+	// counts (a rework or fix child, a validation pass, a review, a finding).
+	// Non-zero means the city is acting on the PR.
+	InFlightCount int
 }
 
 // Derive returns the state the anchor projects. Precedence:
@@ -76,12 +79,12 @@ func Derive(f Facts) State {
 	if isSet(f.MergeHold) || isSet(f.RebaseHold) {
 		return NeedsAttention
 	}
-	if posture == "approved" && mstate == "BLOCKED" && f.OpenReworkChildren == 0 {
+	if posture == "approved" && mstate == "BLOCKED" && f.InFlightCount == 0 {
 		return NeedsAttention
 	}
 
 	// working: the city holds the ball; no human input needed.
-	if f.OpenReworkChildren > 0 {
+	if f.InFlightCount > 0 {
 		return Working
 	}
 	if posture == "approved" {

@@ -38,10 +38,19 @@ func derive(t *testing.T, anchor string) (string, int) {
 }
 
 func TestPRStatusDerive(t *testing.T) {
-	t.Run("open rework child => working", func(t *testing.T) {
+	t.Run("a rework child in the in-flight set => working", func(t *testing.T) {
 		stubGC(t,
 			`[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`,
 			`[{"id":"tk-k","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
+		}
+	})
+
+	t.Run("a non-rework bead in the in-flight set => working", func(t *testing.T) {
+		stubGC(t,
+			`[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`,
+			`[{"id":"tk-v","metadata":{"task_kind":"validation","anchor_bead":"tk-a"}}]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
 			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
 		}

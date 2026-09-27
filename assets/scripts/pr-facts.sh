@@ -10,9 +10,9 @@
 # bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
 # + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING -> classify the head branch
-# (allowlist: only polecat/* may be rewritten, and never a graduation) and file
-# ONE rework child per head to the fix pool, stamped prepare_mode and counted as
+# nothing about the new base); CONFLICTING -> file ONE merge-in rework child per
+# head to the fix pool that brings the branch current by MERGE (no branch shape is
+# rebased or force-pushed), stamped prepare_mode=merge and counted as
 # dispatched only once that stamp AND the route itself read back (dedup: a rework
 # child naming this branch whose rejection_reason names this head; an unstamped
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
@@ -670,9 +670,6 @@ while IFS= read -r row; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
-  # A graduation is the integration-to-main case whatever its branch is named, so
-  # the CONFLICTING arm classifies on this as well as on the branch.
-  grad=$(printf '%s' "$row" | jq -r '.metadata.graduation // ""')
   # deferred-dispatch's arm marker (deferred-dispatch.sh): the pool this work
   # re-offers to once it reads bd-ready, set while the anchor waits and cleared
   # when the reconcile pass slings it. While set, the anchor is deliberately
@@ -1091,34 +1088,21 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # --- WHICH rewrite may be dispatched against this branch. ---------------------
+    # --- HOW the child is told to bring this branch current. ----------------------
     # >>> stale-base-dispatch-mode
-    # This arm dispatches a rewrite rather than performing one, so tk-a0hva's
-    # allowlist on the refinery's own prepare step cannot reach it. Same allowlist
-    # as mol-refinery-patrol's `shared-branch-merge-mode`, deliberately one shape
-    # restated rather than a second discriminator invented here. Only polecat/* is
-    # single-author and disposable enough to rewrite; every other shape, including
-    # one invented next year, must fail to MERGE, which a denylist could not do.
-    # Classified on fix_branch, the branch the child is told to bring current, not
-    # on the anchor's recorded branch. See
-    # specs/tk-rvspf/dispatch-site-branch-classification.md.
-    case "$fix_branch" in
-      polecat/*) prepare_mode=rebase ;;
-      *)         prepare_mode=merge ;;
-    esac
-    # Load-bearing only for a graduation carried on a polecat-shaped branch.
-    if [ "$grad" = "true" ]; then prepare_mode=merge; fi
-    # prepare_mode is what stops the rewrite; mol-polecat-work's
-    # `rejected-branch-resume-mode` reads it. The title and instruction are for
-    # whoever works the bead by hand, and must not contradict it: a merge-mode
-    # child titled "Rebase PR#N" invites exactly what the mode prevents.
-    if [ "$prepare_mode" = "merge" ]; then
-      FIX_TITLE="Merge $base into PR#$num (shared branch $fix_branch):"
-      fix_instruction="Resume in prepare_mode=merge: '$fix_branch' is a SHARED branch, so bring it current by MERGING origin/$base IN (git merge --no-edit origin/$base), resolve conflicts, and push as a fast-forward. Do NOT rebase it and do NOT force-push it: rewriting it orphans the already-merged PRs it carries (tk-a0hva)."
-    else
-      FIX_TITLE="Rebase PR#$num onto $base:"
-      fix_instruction="Resume in prepare_mode=rebase: rebase '$fix_branch' onto origin/$base, resolve conflicts, and force-push with --force-with-lease."
-    fi
+    # This arm dispatches the bring-current rather than performing it. It makes the
+    # same choice as mol-refinery-patrol's `shared-branch-merge-mode`, deliberately
+    # restated where the second actor is chosen rather than a second discriminator
+    # invented here: every branch shape is brought current by MERGING origin/$base
+    # in, never by a rebase. A rebase rewrites history and forces a --force-with-lease
+    # push, which resets the PR's "changes since last review" and drifts its
+    # line-anchored review comments; a merge keeps both, and no shape rewriting means
+    # none can force-push. Classified on fix_branch, the branch the child is told to
+    # bring current, not on the anchor's recorded branch.
+    # See specs/tk-yu4sng/merge-in-for-all-branches.md.
+    prepare_mode=merge
+    FIX_TITLE="Merge $base into PR#$num (branch $fix_branch):"
+    fix_instruction="Resume in prepare_mode=merge: bring '$fix_branch' current by MERGING origin/$base IN (git merge --no-edit origin/$base), resolve conflicts, and push as a fast-forward. Do NOT rebase it and do NOT force-push it: a rewrite resets the PR's review view, and on a shared branch it also orphans the already-merged PRs the branch carries (tk-a0hva)."
     # <<< stale-base-dispatch-mode
     # Do not bring the branch current while the anchor is held for a reason other
     # than the rework itself. anchor_foreign_blocker reads every live blocker on
@@ -1223,8 +1207,8 @@ GATES
       # Orphan adoption BEFORE create: a child this arm created whose stamp then
       # failed carries the deterministic title but no branch metadata — invisible
       # to the branch dedup above, so re-creating would mint a twin every pass.
-      # The title is the classifier's, and stays deterministic for a given head:
-      # the mode is a pure function of the branch name and the graduation marker.
+      # The title is a pure function of the PR number and head branch, so it stays
+      # deterministic for a given head across passes.
       # An unreadable probe dispatches nothing (retry next pass).
       if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
         echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
@@ -1244,11 +1228,12 @@ GATES
       skipped=$((skipped + 1)); continue
     fi
     # The route is stamped separately, after prepare_mode reads back. A dropped
-    # branch or pr_url leaves a child nothing can act on, which is the safe side;
-    # a dropped prepare_mode leaves one that is routable AND rewriting, because
-    # the resume path treats an absent mode as rebase. task_kind and anchor_bead
-    # are the role marker: the child resumes the ANCHOR's own branch, so with no
-    # marker a metadata read cannot tell the child from the anchor.
+    # branch or pr_url leaves a child nothing can act on, which is the safe side.
+    # prepare_mode is stamped merge and the resume path also defaults to merge, so a
+    # dropped mode is safe; the read-back still confirms the child carries the
+    # merge-in instruction it was classified with. task_kind and anchor_bead are the
+    # role marker: the child resumes the ANCHOR's own branch, so with no marker a
+    # metadata read cannot tell the child from the anchor.
     gc bd update "$FIX" \
       --set-metadata task_kind=rework \
       --set-metadata anchor_bead="$id" \
@@ -1336,14 +1321,10 @@ GATES
     CSRC=$(feedback_reviews "$revs_raw" "$rwm")
     DISP=""
     if [ "$choice" = "rework" ]; then
-      # Same allowlist as the CONFLICTING arm's `stale-base-dispatch-mode`: the
-      # child may have to bring the branch current before it can push a fix, and
-      # only polecat/* is disposable enough to rewrite.
-      case "$fix_branch" in
-        polecat/*) prepare_mode=rebase ;;
-        *)         prepare_mode=merge ;;
-      esac
-      if [ "$grad" = "true" ]; then prepare_mode=merge; fi
+      # Same choice as the CONFLICTING arm's `stale-base-dispatch-mode`: the child
+      # may have to bring the branch current before it can push a fix, and every
+      # branch shape is brought current by MERGE, never a rebase/force-push.
+      prepare_mode=merge
       # Deterministic per batch: the same outstanding feedback names the same
       # child, a later batch names a different one. Both halves of the probe
       # matter — a fully stamped hit means this batch was already dispatched and
@@ -1427,17 +1408,18 @@ $CBODY"
       cst=$(gc bd show "$CFIX" --json 2>/dev/null | scrub \
         | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
       if [ "$cst" != "closed" ]; then
-        # An absent prepare_mode resumes as rebase, so a child routed without it
-        # rewrites the very branch the classifier above called shared. Re-stamp
-        # rather than refuse: a batch already covered skips the create block, so
-        # a child stranded by a dropped stamp could take one nowhere else.
+        # prepare_mode is stamped merge and the resume path defaults to merge, so a
+        # child routed without it still merges rather than rewriting. Re-stamp for
+        # metadata completeness rather than refuse: a batch already covered skips
+        # the create block, so a child stranded by a dropped stamp could take one
+        # nowhere else.
         mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
         if [ "$mgot" != "$prepare_mode" ]; then
           gc bd update "$CFIX" --set-metadata prepare_mode="$prepare_mode" >/dev/null 2>&1 || true
           mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
         fi
         if [ "$mgot" != "$prepare_mode" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record prepare_mode=$prepare_mode; left unrouted and NOT watermarking (an absent mode resumes as rebase, which would rewrite '$fix_branch')" >&2
+          echo "$PROG: WARN comment rework $CFIX did not record prepare_mode=$prepare_mode; left unrouted and NOT watermarking (route only a fully-stamped child)" >&2
           skipped=$((skipped + 1)); continue
         fi
         # task_kind=rework is the role marker. The create-path read-back proves
@@ -1678,7 +1660,6 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not render the feedback findings; NOT watermarking (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    FINDING_IDS=""
     ffail=""
     while IFS= read -r frec; do
       [ -n "$frec" ] || continue
@@ -1689,7 +1670,6 @@ $CBODY"
       frid=$(printf '%s' "$frec" | jq -r '(.review_id // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
       if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" 2>/dev/null) && [ -n "$fid" ]; then
-        FINDING_IDS="${FINDING_IDS:+$FINDING_IDS,}$fid"
         # Record which GitHub row and review raised it. finding.comment_id lets the
         # write-back post a declined finding's owed reply into that thread;
         # finding.review_id groups the finding under its review, so the write-back
@@ -1707,22 +1687,15 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not file every feedback finding; NOT watermarking (retry next pass; finding.sh re-adopts the ones already filed)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # A rework child carrying the batch is the fix unit for the findings it
-    # answers: it blocks each one, so closing it unblocks them the way a codex
-    # rework child does (specs/tk-ztapg/review-cycle-architecture.md, "The fix
-    # unit"). A visit-routed batch has no fix unit; a human answers it. The wire
-    # is a required write, fail-closed like the finding filing above: a finding
-    # the validator later rules must-fix blocks the anchor, and only the fix-unit
-    # edge lets closing the child release it, so a lost wire strands the anchor
-    # blocked with nothing to unblock it. A failed wire holds the batch
-    # unwatermarked — upsert re-adopts the filed findings and wire-fix-unit,
-    # idempotent, re-attempts only the missing edges next pass.
-    if [ "$choice" = rework ] && [ -n "${CFIX:-}" ] && [ -n "$FINDING_IDS" ]; then
-      if ! "$FINDING" wire-fix-unit --fix-unit "$CFIX" --anchor "$id" --findings "$FINDING_IDS" >/dev/null 2>&1; then
-        echo "$PROG: WARN $id — PR#$num could not wire rework child $CFIX to findings $FINDING_IDS; NOT watermarking (retry next pass)" >&2
-        skipped=$((skipped + 1)); continue
-      fi
-    fi
+    # The rework child's edges onto the findings it answers are NOT hung here.
+    # Every finding is still unvalidated, and a fix unit that blocked one the
+    # validator later declines would refuse that finding's close (bd will not close
+    # a blocked issue) and stall the validator's triage. The close-ordering edge
+    # onto a finding is hung as the validator rules it must-fix (finding.sh
+    # set-disposition), so the fix unit blocks only the findings it must answer; a
+    # visit-routed batch has no fix unit and a human answers it. The child's own
+    # blocks edge onto the anchor, wired at dispatch, is what holds the merge in the
+    # meantime (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
 
     # The batch boundary goes down WITH the disposition that names it. Derived
     # later, off the disposition, it can be lost: a pass that exits after this
@@ -1974,13 +1947,10 @@ GATES
               echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); child $rc_dup already covers this head, no new child"
               skipped=$((skipped + 1)); continue
             fi
-            # Same allowlist as the conflict arm's stale-base-dispatch-mode: only
-            # polecat/* is disposable enough to rewrite; a graduation on one is not.
-            case "$rc_fix_branch" in
-              polecat/*) rc_prepare=rebase ;;
-              *)         rc_prepare=merge ;;
-            esac
-            [ "$grad" = "true" ] && rc_prepare=merge
+            # Same choice as the conflict arm's stale-base-dispatch-mode: a child
+            # fixing a red check may first bring the branch current, and every
+            # branch shape is brought current by MERGE, never a rebase/force-push.
+            rc_prepare=merge
             RC_REASON="Required check(s) failing on PR#$num at head $head_oid: $rc_names.${rc_urls:+ Run log(s): $rc_urls.} Fix the failing check(s) and push to '$rc_fix_branch'. Do NOT open a new PR: this reworks PR#$num."
             RC_TITLE="Fix failing required check(s) on PR#$num:"
             if [ -n "$rc_stranded" ]; then
@@ -2023,8 +1993,8 @@ GATES
             # Read the role marker + mode back before routing, as the conflict arm
             # does: `gc bd update` returns 0 without writing (the claim guard is one
             # such path), a child routed without anchor_bead is one the next pass's
-            # dedup cannot see, and one without prepare_mode resumes as rebase on a
-            # branch this may have classified shared.
+            # dedup cannot see; prepare_mode is stamped merge and the resume path
+            # defaults to merge, so an absent mode still merges rather than rewrites.
             rc_got=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // "") + "|" + (.prepare_mode // ""))')
             if [ "$rc_got" != "rework|$id|$rc_prepare" ]; then
               gc bd update "$RCFIX" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" --set-metadata prepare_mode="$rc_prepare" >/dev/null 2>&1 || true
