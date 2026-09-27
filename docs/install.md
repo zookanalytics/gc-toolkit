@@ -163,6 +163,7 @@ The pack's checks, and what a failure means:
 | `check-gate-integrity` | gating anchors declare `check_set`; markers are a bare lane-state word (I6+I7) | a hand-written or unmigrated marker |
 | `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-cadence-live` | every pack order fired within its interval (I10) | order not registered for a rig, or the controller is down |
+| `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
 | `check-recycle-capable` | cycle-recycle can fire: a Stop event reaches the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, and no refinery defer guard is latched | the Stop wiring stopped passing the hook its stdin, the transcript shape moved under the measurement, or an uncommitted tracked file has latched the refinery's git-op guard |
