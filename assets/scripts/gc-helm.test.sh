@@ -2170,12 +2170,25 @@ case "$1 ${2:-}" in
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
   "bd list")
     # --parent <id>: the shape-law guard's child probe. Children are the reverse
-    # of D_PARENTS (child|parent); a child id containing CLOSED models a closed
-    # child, which the guard's --status open,... omits, so it is dropped here too.
-    _pp=""; _prev=""
-    for a in "$@"; do [ "$_prev" = "--parent" ] && _pp="$a"; _prev="$a"; done
+    # of D_PARENTS (child|parent[|status]); a child's status is the 3rd field,
+    # default open. A closed child (status closed, or CLOSED in the id) is never a
+    # stranded leg and is dropped. Any other child is returned only when its
+    # status is in the requested --status set, so the probe proves the guard asks
+    # for every non-closed status — hooked and pinned included, as the pack's
+    # live-status set is (a narrower request would read a hooked leg as absent).
+    _pp=""; _ss=""; _prev=""
+    for a in "$@"; do
+      case "$_prev" in --parent) _pp="$a" ;; --status) _ss="$a" ;; esac
+      case "$a" in --status=*) _ss="${a#--status=}" ;; esac
+      _prev="$a"
+    done
     if [ -n "$_pp" ]; then
-      awk -F'|' -v P="$_pp" '$2==P && $1 !~ /CLOSED/ {print $1}' "$D_PARENTS" \
+      awk -F'|' -v P="$_pp" -v S=",${_ss}," '
+        $2==P {
+          st = ($3 == "" ? "open" : $3)
+          if ($1 ~ /CLOSED/ || st == "closed") next
+          if (index(S, "," st ",") > 0) print $1
+        }' "$D_PARENTS" \
         | jq -R . | jq -sc 'map(select(. != "") | {id: ., status: "open"})'
       exit 0
     fi
@@ -2255,10 +2268,12 @@ export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
        D_GATE_EDGES="$TMP/dgateedges" D_LIST_FAIL="$TMP/dlistfail"
 : > "$TMP/dsettled"
 : > "$TMP/dgateedges"
-# <child>|<parent>: tk-kid has a parent (tk-mum); tk-solo has none. The reverse
-# is the shape-law child probe: tk-epic has a non-closed leg (tk-leg) and is a
-# container; tk-doneparent's only leg is closed, so it stays a valid gated bead.
-printf 'tk-kid|tk-mum\ntk-leg|tk-epic\ntk-cleg-CLOSED|tk-doneparent\n' > "$D_PARENTS"
+# <child>|<parent>[|status]: tk-kid has a parent (tk-mum); tk-solo has none. The
+# reverse is the shape-law child probe: tk-epic has a non-closed leg (tk-leg) and
+# is a container; tk-doneparent's only leg is closed, so it stays a valid gated
+# bead; tk-hookepic's only leg (tk-hookleg) is hooked — non-closed, so a cascade
+# strands it, and the guard must request hooked to see it as a container.
+printf 'tk-kid|tk-mum\ntk-leg|tk-epic\ntk-cleg-CLOSED|tk-doneparent\ntk-hookleg|tk-hookepic|hooked\n' > "$D_PARENTS"
 printf 'tk-gone\n'        > "$D_MISSING"
 printf '[]\n'             > "$D_LIST"
 printf 'tk-dem1\n'        > "$D_NEXTID"
@@ -2634,6 +2649,20 @@ eq "$(d_gate)" "" "(SHAPEALSO) …and no gate is filed"
 grep -q 'tk-epic' <<< "$DERR" \
   && ok "(SHAPEALSO) …naming the container --also-blocks target" \
   || bad "(SHAPEALSO) the container also-target is not named: $DERR"
+
+# (SHAPEHOOKED) hooked and pinned are non-closed, so a cascade strands a hooked
+# leg as surely as an open one, and every live-status enumeration in the pack
+# (merge, signoff, pr-facts, demand_lookup) lists them. A container whose only
+# live leg is hooked must be refused; a probe that omitted hooked would read it
+# as a leaf and file the demand, re-opening the cascade this guard closes.
+printf 'tk-shapedem3\n' > "$D_NEXTID"
+demand_run tk-hookepic "operator: decide the in-flight epic" --by converse
+eq "$DRC" "4" "(SHAPEHOOKED) a demand on a bead whose only live leg is hooked is refused"
+eq "$(d_gate)" "" "(SHAPEHOOKED) …and no gate is filed"
+grep -q 'tk-hookleg' <<< "$DERR" \
+  && ok "(SHAPEHOOKED) …naming the hooked leg that would be stranded" \
+  || bad "(SHAPEHOOKED) the hooked leg is not named: $DERR"
+
 printf 'tk-dem1\n' > "$D_NEXTID"
 printf '[]\n' > "$D_LIST"
 

@@ -1359,7 +1359,7 @@ demand_lookup() (
 open_child_ids() (
     _oc_path=$(rig_path_for_bead "$1")
     [ -n "$_oc_path" ] && [ -d "$_oc_path/.beads" ] && export BEADS_DIR="$_oc_path/.beads"
-    gc bd list --parent "$1" --status open,in_progress,blocked,deferred --json --limit 0 2>/dev/null \
+    gc bd list --parent "$1" --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null \
         | scrub | jq -r 'if type == "array" then (.[].id // empty) else empty end' 2>/dev/null
 )
 
