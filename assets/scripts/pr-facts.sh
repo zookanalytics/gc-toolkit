@@ -1041,6 +1041,10 @@ CHILDREN_EOF
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   if [ -n "$rec_target" ] && [ -n "$base" ] && [ "$rec_target" != "$base" ]; then
+    # A pre-merge arm defers retarget handling to the full pass. A retargeted
+    # anchor does not merge this pass, and its feedback is not routed while it
+    # sits on the wrong base, so the early feedback arm skips it.
+    [ "$ROUTE_ONLY" != 1 ] || continue
     UNSETS=()
     while IFS= read -r g; do
       [ -n "$g" ] && UNSETS+=(--unset "check.$g")
@@ -1064,6 +1068,11 @@ GATES
 
   # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
+    # A pre-merge arm defers conflict-rework dispatch to the full pass. A
+    # conflicting anchor cannot merge this pass, its feedback is not routed while
+    # it conflicts (this arm ends the anchor before the feedback arm), and one
+    # dispatch site per pass keeps the dedup window narrow.
+    [ "$ROUTE_ONLY" != 1 ] || continue
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue

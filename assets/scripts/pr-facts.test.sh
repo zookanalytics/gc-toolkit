@@ -2623,6 +2623,33 @@ out=$(run)
 has "$out" "PR#69 is MERGED" "the full pass still records it"
 eq "$(bstatus RC4)" "closed" "…and closes the anchor"
 
+echo "# …a CONFLICTING anchor is deferred to the full pass — no conflict-rework early"
+store "[$(anchor RC9 152)]"
+printf '%s' "$(prview 152 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_152.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_route)
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" \
+  "route-comments-only files no conflict-rework (the full pass owns it)"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and does not wake the fix pool"
+eq "$(meta RC9 merge_result)" "pull_request" "…the anchor is left gating, untouched"
+# Control: the full pass on the SAME fixture dispatches the rework, so the skip
+# above is route mode's doing, not a fixture that could never dispatch.
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" \
+  "the full pass dispatches the conflict-rework on the same fixture"
+
+echo "# …a retargeted anchor is deferred to the full pass — no early transition or escalation"
+store "[$(anchor RC10 153)]"
+printf '%s' "$(prview 153 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_153.json"
+: > "$STUB_ESC_LOG"
+out=$(run_route)
+eq "$(meta RC10 merge_result)" "pull_request" \
+  "route-comments-only does not transition a retargeted anchor (the full pass owns it)"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-retargeted.153" "…and files no retarget escalation early"
+# Control: the full pass on the SAME fixture retargets, proving the skip is route mode's doing.
+out=$(run)
+eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
