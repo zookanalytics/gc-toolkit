@@ -1335,10 +1335,14 @@ Discovery env:
 
 - `GC_HELM_SOURCE` — `beads` | `supervisor`; see *Picking a backend* above.
 - `GC_HELM_CITY_PATH` (else `GC_CITY_PATH`, else `GC_CITY`) — the city root the
-  beads backend enumerates `.beads` and `rigs/*/.beads` under. Required by
-  `helm-svc board`, which has no HTTP fallback by design.
-- `GC_HELM_GC_BIN` — override the `gc` binary the liveness/ownership reads shell
-  out to (otherwise `gc` on `PATH`).
+  beads backend enumerates `.beads` and `rigs/*/.beads` under. With none of them
+  set, helm-svc asks gc which city it resolves (`gc config show --json` →
+  `city_path`) rather than reimplementing discovery, so a plain shell that injects
+  none of these reads the same city gc would. `helm-svc board` has no HTTP
+  fallback by design, so a gc that cannot answer — absent, or resolving no city —
+  leaves it with no city to read.
+- `GC_HELM_GC_BIN` — override the `gc` binary the liveness read and city
+  discovery shell out to (otherwise `gc` on `PATH`).
 - `GC_HELM_SUPERVISOR_URL` (else supervisor.toml port, default `127.0.0.1:8372`)
   and `GC_HELM_CITY` (else parsed from `GC_SERVICE_URL_PREFIX`, else the
   `GC_CITY_PATH` basename) — the HTTP backend's target.

@@ -106,9 +106,17 @@ func serve() {
 	}
 
 	ttl := cacheTTL()
-	src, closeSrc := selectSource()
+	// Resolve the city once. Discovery shells out to gc, and the source, the visit
+	// opener, and the board's pack-health read must all name the same city — so
+	// resolve it here and thread it, rather than have each rediscover.
+	cityPath := source.DiscoverCityPath()
+	src, closeSrc := selectSource(cityPath)
 	defer closeSrc()
-	srv := server.New(src, ttl, server.WithSPA(spaHandler()), server.WithOpener(selectOpener()))
+	srv := server.New(src, ttl,
+		server.WithSPA(spaHandler()),
+		server.WithOpener(selectOpener(cityPath)),
+		server.WithCityPath(cityPath),
+	)
 
 	// The supervisor removes any stale socket before spawning us, so we own
 	// creation. net.Listen("unix") unlinks the socket on close.
@@ -167,8 +175,8 @@ func spaHandler() http.Handler {
 // route existed — the same degradation rule [spaHandler] follows for a broken
 // bundle. The route then answers 503 with the reason rather than 404, so an
 // operator who clicks the action learns why instead of thinking it vanished.
-func selectOpener() server.Opener {
-	o, err := visit.New(source.DiscoverCityPath())
+func selectOpener(cityPath string) server.Opener {
+	o, err := visit.New(cityPath)
 	if err != nil {
 		log.Printf("visit filing unavailable, board is read-only: %v", err)
 		return nil
@@ -213,7 +221,7 @@ func selectOpener() server.Opener {
 // to start. A degraded board that says stale_days 0 is worth more than no board
 // at all, and it preserves this entry point's contract of deciding once and
 // saying so.
-func selectSource() (source.Source, func()) {
+func selectSource(cityPath string) (source.Source, func()) {
 	noop := func() {}
 	want := strings.ToLower(strings.TrimSpace(os.Getenv("GC_HELM_SOURCE")))
 
@@ -230,7 +238,7 @@ func selectSource() (source.Source, func()) {
 		return source.NewSupervisorSource(), noop
 	}
 
-	bs := source.NewBeadsSource()
+	bs := source.NewBeadsSource(source.WithCityPath(cityPath))
 	// This deadline bounds the OPEN, not the handle it leaves behind: the beads
 	// store keeps a database/sql pool and retains no context, so cancelling here
 	// does not disturb the connection the first Gather goes on to reuse.
