@@ -51,6 +51,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_number: 0,
     pr_url: '',
     pr_branch: '',
+    pr_branch_url: '',
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
@@ -637,6 +638,24 @@ it('identifies a pre-open row without inventing a link', async () => {
   const row = memberRow('tk-root', /wedged before the PR opened/);
   expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
   expect(within(row as HTMLElement).getByText('polecat/tk-pre')).toBeTruthy();
+});
+
+// The pre-PR branch is browsable: when the board resolved the rig's repository,
+// the branch string links to its GitHub tree view rather than reading as bare
+// text.
+it('links a pre-open branch to GitHub when the repo is known', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-link',
+    title: 'a pre-open branch with a known repo',
+    pr_branch: 'polecat/tk-link',
+    pr_branch_url: 'https://github.com/zook/gc-toolkit/tree/polecat/tk-link',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a pre-open branch with a known repo/)).toBeTruthy());
+
+  const row = memberRow('tk-root', /a pre-open branch with a known repo/);
+  const link = within(row as HTMLElement).getByRole('link', { name: 'polecat/tk-link' });
+  expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/tree/polecat/tk-link');
 });
 
 // An anchor at a human state carries merge_result and can carry no branch and no

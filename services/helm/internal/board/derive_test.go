@@ -2195,6 +2195,54 @@ func dated(value, oid string, at time.Time) string {
 
 // mergeAnchor is an open merge anchor as the gather produces one: the `merge`
 // kind, whatever metadata the case is about, and its `blocks` blockers.
+// A pre-PR branch links to its GitHub tree view, and the repository comes from
+// a sibling row's pull request URL rather than a GitHub call: every anchor in
+// one rig targets that rig's repository. This is the gap the branch link
+// closes — the branch a person wants to browse before a PR exists.
+func TestPRBranchLinksToGitHubViaSiblingPRURL(t *testing.T) {
+	opened := mergeAnchor("tk-open", map[string]string{
+		"pr_number": "42",
+		"pr_url":    "https://github.com/zookanalytics/gc-toolkit/pull/42",
+	})
+	preopen := mergeAnchor("tk-pre", nil) // branch polecat/tk-pre, no PR yet
+
+	b := BuildBoard([]Anchor{opened, preopen}, fixtureNow, false, nil, Facts{})
+
+	const base = "https://github.com/zookanalytics/gc-toolkit"
+	if got := mustTile(t, b, "tk-pre").PRBranchURL; got != base+"/tree/polecat/tk-pre" {
+		t.Errorf("pre-PR branch link = %q, want the sibling rig's repo + tree/branch", got)
+	}
+	if got := mustTile(t, b, "tk-open").PRBranchURL; got != base+"/tree/polecat/tk-open" {
+		t.Errorf("an opened row links its branch too: got %q", got)
+	}
+}
+
+// With no pull request URL anywhere in the rig, the branch cannot be resolved to
+// a repository, so it stays bare text — the state the board began in, and the
+// same "nothing done" resolve_origin reports on an unresolvable origin
+// (assets/scripts/pr-status-label.sh).
+func TestPRBranchStaysBareWithoutARepo(t *testing.T) {
+	b := BuildBoard([]Anchor{mergeAnchor("tk-pre", nil)}, fixtureNow, false, nil, Facts{})
+	if got := mustTile(t, b, "tk-pre").PRBranchURL; got != "" {
+		t.Errorf("no repo known: pr_branch_url = %q, want empty", got)
+	}
+}
+
+func TestRepoBaseFromPRURL(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/zookanalytics/gc-toolkit/pull/42": "https://github.com/zookanalytics/gc-toolkit",
+		"https://ghe.example.com/team/repo/pull/7":            "https://ghe.example.com/team/repo",
+		"https://github.com/only-owner":                       "", // no repo segment
+		"not-a-url":                                           "",
+		"":                                                    "",
+	}
+	for in, want := range cases {
+		if got := repoBaseFromPRURL(in); got != want {
+			t.Errorf("repoBaseFromPRURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func mergeAnchor(id string, md map[string]string, blockers ...Blocker) Anchor {
 	full := map[string]string{"merge_result": "pull_request", "branch": "polecat/" + id}
 	for k, v := range md {

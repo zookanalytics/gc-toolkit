@@ -2,6 +2,7 @@ package board
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1709,6 +1710,11 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// fold above can change.
 	tagClusters(folded)
 
+	// Turn each pre-PR branch into a GitHub link, learned once per rig from a
+	// pull request URL the board already holds. After the fold, so a dropped
+	// wrapper neither sources a rig's repository nor waits for one.
+	linkPRBranches(folded)
+
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 
 	return Board{
@@ -1719,6 +1725,53 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 		Partial:       partial,
 		PartialErrors: partialErrors,
 	}
+}
+
+// linkPRBranches turns each merge anchor's branch into a GitHub tree-view link.
+// A branch string alone is not browsable and the render path makes no GitHub
+// call, so the repository is the missing half. Every anchor in one rig targets
+// that rig's repository, so a pull request URL already on the board names it:
+// learn the base once per rig from any row that carries a pr_url, then link the
+// branch for every merge-anchor row in the same rig. A rig the board holds no
+// pull request URL for keeps its bare branch text.
+func linkPRBranches(tiles []Tile) {
+	repoByRig := make(map[string]string)
+	for i := range tiles {
+		if tiles[i].PRURL == "" {
+			continue
+		}
+		if _, ok := repoByRig[tiles[i].Rig]; ok {
+			continue
+		}
+		if base := repoBaseFromPRURL(tiles[i].PRURL); base != "" {
+			repoByRig[tiles[i].Rig] = base
+		}
+	}
+	for i := range tiles {
+		if tiles[i].PRBranch == "" {
+			continue
+		}
+		if base := repoByRig[tiles[i].Rig]; base != "" {
+			tiles[i].PRBranchURL = base + "/tree/" + tiles[i].PRBranch
+		}
+	}
+}
+
+// repoBaseFromPRURL reduces a pull request URL to its repository root —
+// scheme://host/owner/repo — or "" when the input is not a URL with at least an
+// owner and a repo. It recovers the host/owner/repo the shell's resolve_origin
+// builds from the git remote (assets/scripts/pr-status-label.sh) from a URL the
+// cadence already recorded, rather than from a second git call.
+func repoBaseFromPRURL(prURL string) string {
+	u, err := url.Parse(prURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/" + parts[0] + "/" + parts[1]
 }
 
 // clusterThreshold is how many rows must share one section-and-needs before the
