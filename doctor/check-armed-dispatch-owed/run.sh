@@ -103,6 +103,12 @@ iso_to_epoch() {
     date -u -d "$1" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || printf ''
 }
 
+# Captured stderr from the batch dependency read below. bd drops an id it cannot
+# resolve with a "(skipped)" warning on this stream and rc=0, so the file's
+# contents are how we tell a complete read from one that missed a candidate.
+dep_stderr=$(mktemp "${TMPDIR:-/tmp}/gctk-armed-dispatch-deperr.XXXXXX" 2>/dev/null) || dep_stderr="${TMPDIR:-/tmp}/gctk-armed-dispatch-deperr.$$"
+trap 'rm -f "$dep_stderr"' EXIT
+
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)] | join("\u001f")' 2>/dev/null)
@@ -180,12 +186,23 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # ids and returns a flat array of edge records across all of them, so the
     # store costs a single query instead of one per candidate — the per-bead call
     # summed past the doctor budget at scale. The default `down` direction makes
-    # each record candidate(issue_id) blocked-by blocker(depends_on_id); an
-    # unresolvable id fails the whole batch with an error OBJECT, which the array
-    # test catches and degrades to a store-not-checked warning.
-    edges_raw=$(run_bounded gc bd dep list "${cand_ids[@]}" --db "$rig_path/.beads" --json 2>/dev/null); erc=$?
+    # each record candidate(issue_id) blocked-by blocker(depends_on_id).
+    edges_raw=$(run_bounded gc bd dep list "${cand_ids[@]}" --db "$rig_path/.beads" --json 2>"$dep_stderr"); erc=$?
     if [ "$erc" -ne 0 ] || ! printf '%s' "$edges_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
         warnings+=("$label: could not batch-read dependency edges for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (rc=$erc) — this store was NOT checked")
+        continue
+    fi
+    # bd resolves each requested id independently: one it cannot find is DROPPED
+    # from the array with rc=0 and a per-id "(skipped)" warning on stderr — it
+    # does not poison the batch. A dropped candidate would reach the join below
+    # with no edges, indistinguishable from a candidate that genuinely has no
+    # blockers, so an old armed_at would read as a firm owed finding instead of
+    # "NOT checked". A read that resolves every requested id is silent (under
+    # --db there is no rig-resolution preface), so any stderr means at least one
+    # candidate's blockers went unread and the edge set is incomplete — degrade
+    # the whole store to not-checked, as the sibling read failures above do.
+    if [ -s "$dep_stderr" ]; then
+        warnings+=("$label: batch dependency read did not resolve every one of ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (\`bd dep list\` warned: $(tr '[:cntrl:]' ' ' < "$dep_stderr")) — this store was NOT checked")
         continue
     fi
     edges=$(printf '%s' "$edges_raw" | scrub | jq -c '[ .[]? | select(.type == "blocks") | {issue_id, depends_on_id} ]' 2>/dev/null)

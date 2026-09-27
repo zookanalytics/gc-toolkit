@@ -6,8 +6,9 @@
 # blocker; dispatchable only recently, within the reconcile window; mid-dispatch
 # via a slung marker; delivered via merge_result; closed; assigned; capped at the
 # configured sling-failure cap, which reconcile has already escalated), the
-# fail-closed probes (unreadable batch dep list, unreadable blocker listing,
-# unreadable armed listing, unreadable rig list, an unresolvable blocker), the
+# fail-closed probes (a batch dep read that fails outright, a candidate the batch
+# dep read drops as unresolvable, unreadable blocker listing, unreadable armed
+# listing, unreadable rig list, an unresolvable blocker), the
 # suspended-rig skip, and the quiet path (no armed beads). The check reads
 # dependencies in bulk: one `bd dep list` for the whole candidate set (edge
 # records) then one `bd list --id` for the blockers' statuses — so a store costs
@@ -41,8 +42,12 @@ GC
 # the real bd shows for each:
 #   * `bd list --has-metadata-key ...`  → the armed listing (per-rig fixture).
 #   * `bd dep list <id...> --json`       → a FLAT array of edge records across all
-#      requested ids ({issue_id, depends_on_id, type}); an id in BD_FAIL_DEP makes
-#      the WHOLE batch answer an error object at exit 1 (one bad id poisons it).
+#      requested ids ({issue_id, depends_on_id, type}), at rc=0. An id in
+#      BD_FAIL_DEP is one bd cannot resolve: it is DROPPED from the array with a
+#      per-id "(skipped)" warning on stderr and rc STAYS 0 — one bad id does not
+#      poison the batch. A fully-resolvable read is silent on stderr.
+#      BD_HARDFAIL_DEP names a store whose whole dep read fails outright (rc!=0),
+#      the shape a broken db or a timeout shows.
 #   * `bd list --id <csv> --all ...`     → the named blocker beads, DROPPING ids
 #      with no row (real --id is silent about a miss). BD_FAIL_BLOCKERS fails it.
 # DEP_CALLS, when set, gets one line per `bd dep list` invocation, so a test can
@@ -95,14 +100,21 @@ case "$sub" in
     [ -n "$is_dep_list" ] || { printf '[]'; exit 0; }
     [ "${#dep_ids[@]}" -gt 0 ] || { printf '[]'; exit 0; }
     [ -n "${DEP_CALLS:-}" ] && echo "$name ${dep_ids[*]}" >> "$DEP_CALLS"
+    # A whole-store hard failure (broken db, timeout): rc!=0, no array.
+    [ "$name" = "${BD_HARDFAIL_DEP:-}" ] && exit 3
+    # Real bd resolves each requested id on its own: one it cannot find is DROPPED
+    # from the result with a "(skipped)" warning on stderr and rc=0, never a
+    # poisoned batch. An id in BD_FAIL_DEP models exactly that dropped id.
+    kept=()
     for did in "${dep_ids[@]}"; do
-      case " ${BD_FAIL_DEP:-} " in *" $did "*)
-        printf '{"error":"resolving %s: no issue found","schema_version":1}' "$did"; exit 1 ;;
+      case " ${BD_FAIL_DEP:-} " in
+        *" $did "*) printf 'warning: resolving %s: no issue found matching "%s" (skipped)\n' "$did" "$did" >&2 ;;
+        *) kept+=("$did") ;;
       esac
     done
     f="$STORES/$name.edges.json"
-    if [ -f "$f" ]; then
-      want=$(printf '%s\n' "${dep_ids[@]}" | jq -R . | jq -sc .)
+    if [ -f "$f" ] && [ "${#kept[@]}" -gt 0 ]; then
+      want=$(printf '%s\n' "${kept[@]}" | jq -R . | jq -sc .)
       jq -c --argjson want "$want" '[ .[] | select(.issue_id as $s | $want | index($s)) ]' "$f"
     else printf '[]'; fi ;;
   *) printf '[]'; exit 0 ;;
@@ -246,14 +258,40 @@ eq "$RC" "0" "with the cap lowered to 2, a 2-failure arm is capped and exempt"
 hasnt "$OUT" "alpha bead a-7e" "the configured-cap override matches deferred-dispatch.sh"
 clear_stores
 
-# --- 8. FAIL CLOSED: the batch dep read is unreadable ------------------------
+# --- 8. FAIL CLOSED: the batch dep read fails outright (rc!=0) ---------------
 armed_store alpha "$(aarmed a-8)"
 edges_store alpha "$(e_blk a-8 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
-OUT=$(BD_FAIL_DEP=a-8 run_check); RC=$?
-eq "$RC" "1" "an unreadable batch dep list warns rather than passing (exit 1)"
+OUT=$(BD_HARDFAIL_DEP=alpha run_check); RC=$?
+eq "$RC" "1" "a batch dep read that fails outright warns rather than passing (exit 1)"
 has "$OUT" "could not batch-read dependency edges" "the store-not-checked reason is named"
-hasnt "$OUT" "owed but not firing" "an unreadable probe is NOT reported as a firm finding"
+hasnt "$OUT" "owed but not firing" "a failed dep read is NOT reported as a firm finding"
+clear_stores
+
+# --- 8a. FAIL CLOSED: a candidate the batch dep read cannot resolve ----------
+#          bd drops it (rc=0, "(skipped)" on stderr), so its edges never arrive.
+#          Without inspecting that stderr, its old armed_at reads as a firm owed
+#          finding rather than "NOT checked" — the fail-closed hole this fixes.
+armed_store alpha "$(aarmed a-8a)"
+edges_store alpha "$(e_blk a-8a b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(BD_FAIL_DEP=a-8a run_check); RC=$?
+eq "$RC" "1" "a candidate the dep read dropped as unresolvable warns rather than passing (exit 1)"
+has "$OUT" "did not resolve every" "the store-not-checked reason names the incomplete read"
+hasnt "$OUT" "owed but not firing" "a dropped (skipped) candidate is NOT reported as a firm owed finding"
+clear_stores
+
+# --- 8f. FAIL CLOSED, whole store: one dropped candidate among healthy ones --
+#          A dropped id makes the batch read incomplete, so the store is NOT
+#          checked as a whole — a co-resident owed arm is not reported off a read
+#          that missed one of its candidates. The next pass re-reads.
+armed_store alpha "$(aarmed a-8f1)" "$(aarmed a-8f2)"
+edges_store alpha "$(e_blk a-8f2 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(BD_FAIL_DEP=a-8f1 run_check); RC=$?
+eq "$RC" "1" "a dropped candidate fails the whole store closed (exit 1)"
+has "$OUT" "did not resolve every" "the store-not-checked reason is named"
+hasnt "$OUT" "alpha bead a-8f2" "a co-resident owed arm is NOT reported off an incomplete read"
 clear_stores
 
 # --- 8b. FAIL CLOSED: the blocker-status read is unreadable ------------------
