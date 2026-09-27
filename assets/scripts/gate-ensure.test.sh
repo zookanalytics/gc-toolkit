@@ -706,6 +706,19 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1"
 eq "$(meta new-2 anchor_bead)" "H1" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.execution_routed_to')" "$POOL" "…and poured"
 
+echo "# a sibling lane never adopts another check's orphan — the title key is per-check"
+# correctness,triage baseline on one anchor: the correctness lane creates a review
+# whose anchor_bead stamp fails (orphan), then the triage lane runs the same pass.
+# The orphan probe keys on the check-specific title, so triage does not adopt the
+# correctness orphan and re-stamp check_name=triage onto a body the emitter wrote
+# for correctness; it mints its own review. A shared title key would let it.
+store "[$(anchor X1 pull_request "correctness,triage" "" polecat/x1)]"
+oid x1 > "$GH_DIR/head_polecat_x1"
+out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
+hasnt "$out" "adopting unstamped review orphan" "the triage lane does not adopt the correctness lane's orphan"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "each lane minted its own review — no cross-lane reuse"
+eq "$(jq '[.[] | select((.id | startswith("new-")) and (.metadata.check_name == "correctness"))] | length' "$STUB_STORE")" "1" "the correctness orphan keeps its own check_name, unclaimed by triage"
+
 echo "# a pour whose exec stamp does not read back is held, not dispatched"
 store "[$(anchor G1 pull_request correctness "" polecat/g1)]"
 oid g1 > "$GH_DIR/head_polecat_g1"

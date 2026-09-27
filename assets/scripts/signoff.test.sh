@@ -992,10 +992,15 @@ fi
 
 # --- --add-gates: triage widens the check_set -------------------------------------
 TRI='{"id":"rv-tri","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"triage","anchor_bead":"tk-anc"},"notes":"triage body"}'
+# A check index at the reviewed commit declaring the checks these cases widen to.
+# --add-gates validates each added name against it. The no-index case (STUB_INDEX
+# unset) is proven separately below, where triage widens nothing.
+IDX="$TMP/widen-index.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\n[checks.triage]\nmethod="m"\npurpose="p"\n[checks.demo]\nmethod="m"\npurpose="p"\n' > "$IDX"
 
 echo "# --add-gates widens check_set and records a triage-add note"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
-out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
 eq "$rc" 0 "a triage approve carrying --add-gates exits 0"
 has "$(meta tk-anc check_set)" "demo" "the added check reaches check_set"
 has "$(notes tk-anc)" "triage-add: demo @" "the widening is recorded as a triage-add note"
@@ -1003,10 +1008,23 @@ has "$out" "check_set now" "the verdict line names the widened check_set"
 
 echo "# --add-gates is monotonic: re-adding a declared check is a no-op"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
-out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates triage 2>&1); rc=$?
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates triage 2>&1); rc=$?
 eq "$rc" 0 "re-adding an already-declared check exits 0"
 eq "$(meta tk-anc check_set)" "correctness,triage" "check_set is unchanged when the check is already declared"
 hasnt "$(notes tk-anc)" "triage-add: triage @" "no triage-add note for a check already present"
+
+echo "# no readable index widens NOTHING — triage adds no check, correctness carries it"
+# The reviewed commit carries no review-checks.toml (STUB_INDEX unset), so there is
+# no declared menu to classify over. A widening would name an undeclared method, so
+# --add-gates is a no-op: the verdict still records, the forced baseline is intact,
+# and no triage-add note is written.
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "a triage approve with no index still records its verdict"
+eq "$(meta tk-anc check_set)" "correctness,triage" "no index means no widening — the forced baseline is unchanged"
+hasnt "$(meta tk-anc check_set)" "demo" "the undeclared check never reaches check_set"
+hasnt "$(notes tk-anc)" "triage-add: demo @" "no triage-add note is written when the widening is refused"
+has "$out" "widens nothing" "the no-op names the no-index rule"
 
 echo "# only a triage approve may widen"
 reset "$ANCHOR_PR"
@@ -1026,8 +1044,6 @@ eq "$rc" 0 "triage on a none anchor still records its verdict"
 eq "$(meta tk-anc check_set)" "none" "the none opt-out stays human-only, not widened"
 
 echo "# --add-gates is validated against the check index at the reviewed commit"
-IDX="$TMP/index.toml"
-printf '[checks.correctness]\nmethod="m"\npurpose="p"\n[checks.triage]\nmethod="m"\npurpose="p"\n[checks.demo]\nmethod="m"\npurpose="p"\n' > "$IDX"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
 out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
 eq "$rc" 0 "a check the index declares is added"
@@ -1040,7 +1056,7 @@ hasnt "$(meta tk-anc check_set)" "nonesuch" "the undeclared check never reaches 
 
 echo "# the widening is read back: a write that does not land leaves the review OPEN"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
-out=$(STUB_DROP_KEYS="tk-anc:check_set" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+out=$(STUB_INDEX="$IDX" STUB_DROP_KEYS="tk-anc:check_set" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
 eq "$rc" 2 "a check_set write that did not read back exits 2 (review left open)"
 has "$out" "did not read back" "the failure names the read-back"
 eq "$(meta tk-anc "check.triage")" "<absent>" "no green marker is stamped when the widening did not persist"

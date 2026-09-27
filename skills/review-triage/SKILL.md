@@ -54,7 +54,8 @@ applies-when column in the index.
 A commit that carries no index is the no-index case below, not a reason to reach
 for the pack's copy or the tree you happen to be in. `signoff.sh` resolves it the
 same way: it validates `--add-gates` against the reviewed commit's own index, and
-accepts a widening unvalidated when that commit carries none.
+widens nothing when that commit carries none — the added checks are dropped and
+correctness carries the change.
 
 ## Deciding
 

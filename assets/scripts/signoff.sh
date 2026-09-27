@@ -648,7 +648,14 @@ apply_triage_decision() {
     if [ "$rc" -eq 1 ]; then
       warn "check '$tok' is not on the index at $REVIEWED_OID; the index is closed and triage classifies over it — nothing written"; exit 1
     fi
-    [ "$rc" -eq 2 ] && warn "no check index is readable at $REVIEWED_OID; accepting '$tok' unvalidated (widening is always safe)"
+    if [ "$rc" -eq 2 ]; then
+      # No index at the reviewed commit: triage has no declared menu to classify
+      # over, so it widens nothing and the standing correctness review carries the
+      # change (the index gap is triage's finding). A check added here would name a
+      # method the repo does not declare, so skip it rather than accept it blind.
+      warn "no check index is readable at $REVIEWED_OID; triage widens nothing without an index — '$tok' not added, correctness carries the change"
+      continue
+    fi
     grep -qx -- "$tok" <<< "$union" && continue
     union="$union
 $tok"

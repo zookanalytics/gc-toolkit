@@ -88,9 +88,12 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
   RIG_DB="$rig_path/.beads"
   echo "== rig $label ($RIG_DB) =="
 
-  # 1) Backing review beads first (open AND closed), so a rewritten anchor never
-  #    outruns its backing. A review bead names the lane in check_name.
-  reviews=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked,closed \
+  # 1) Backing review beads first (the full live status set plus closed), so a
+  #    rewritten anchor never outruns its backing. A review bead names the lane in
+  #    check_name. The live set is the one the rest of the review machinery reads —
+  #    open,in_progress,blocked,deferred,hooked,pinned — so a parked backing is
+  #    migrated too; closed is added for the history a settled lane still rests on.
+  reviews=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked,deferred,hooked,pinned,closed \
     --metadata-field check_name=codex --json --limit 0 2>/dev/null | scrub)
   if printf '%s' "$reviews" | jq -e 'type == "array"' >/dev/null 2>&1; then
     for rid in $(printf '%s' "$reviews" | jq -r '.[]?.id // empty' 2>/dev/null); do
@@ -114,7 +117,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
   #    pass selects the findings to rule by finding.lane=<check>. A finding left
   #    naming `codex` is invisible to the correctness validator, yet still blocks
   #    its anchor — merge held with nothing able to rule it, never a false green.
-  findings=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked,closed \
+  #    A finding is live in deferred/hooked/pinned exactly as in open, so the query
+  #    spans the full live set (plus closed for backing history), never a subset —
+  #    a hooked codex finding skipped here would hold its anchor unresolvable.
+  findings=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked,deferred,hooked,pinned,closed \
     --metadata-field finding.lane=codex --json --limit 0 2>/dev/null | scrub)
   if printf '%s' "$findings" | jq -e 'type == "array"' >/dev/null 2>&1; then
     for fid in $(printf '%s' "$findings" | jq -r '.[]?.id // empty' 2>/dev/null); do
@@ -133,8 +139,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     attention=$((attention + 1))
   fi
 
-  # 3) Anchors: the check_set token and the stray check.codex marker.
-  raw=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked \
+  # 3) Anchors: the check_set token and the stray check.codex marker, across the
+  #    full live status set — an anchor holds its lane as live in deferred/hooked/
+  #    pinned too, so a narrower query would leave one naming the retired check.
+  #    Closed anchors are past gating; their history rides the closed backings above.
+  raw=$(run_bounded gc bd list --db "$RIG_DB" --status open,in_progress,blocked,deferred,hooked,pinned \
     --has-metadata-key check_set --json --limit 0 2>/dev/null | scrub)
   if ! printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "$label: anchor listing unreadable — its check_set/markers were NOT migrated" >&2

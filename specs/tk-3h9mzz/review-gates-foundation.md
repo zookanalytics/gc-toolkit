@@ -78,9 +78,11 @@ or `--check` not declared), 2 (usage).
 `signoff.sh --add-gates` validates each added check name against the index by
 membership: it calls `review-checks.sh --check <name>` and reads the exit code,
 never the method pointer. A name the index does not declare is refused; a repo
-with no index at the reviewed commit accepts the widening unvalidated, because
-widening is always safe. Validating by membership rather than by resolving the
-method keeps the one parser the only thing that understands the format.
+with no index at the reviewed commit widens nothing — triage adds no check and
+the standing correctness review carries the change, because a check added over no
+index would name a method the repo never declared. Validating by membership
+rather than by resolving the method keeps the one parser the only thing that
+understands the format.
 
 ## Composed methods
 

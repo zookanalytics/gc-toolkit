@@ -799,8 +799,12 @@ STRAY
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
     # failed carries the deterministic title but no anchor_bead — invisible to
     # inflight_review, so re-creating would mint a twin every pass. Adopt it
-    # instead. An unreadable probe dispatches nothing (retry next pass).
-    RID_TITLE="Review branch $branch -> $target:"
+    # instead. The title carries the check name, so the orphan identity is
+    # per-check: with a multi-check baseline (correctness,triage) a sibling lane's
+    # half-stamped review is never adopted here and re-stamped with this lane's
+    # check_name onto a body the body-emitter wrote for the other check. An
+    # unreadable probe dispatches nothing (retry next pass).
+    RID_TITLE="Review branch $branch -> $target ($g):"
     if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
       echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
       skipped=$((skipped + 1)); continue

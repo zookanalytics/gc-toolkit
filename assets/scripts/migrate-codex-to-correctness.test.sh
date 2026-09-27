@@ -209,5 +209,30 @@ has "$out" "== rig gc-toolkit" "the named rig is walked"
 hasnt "$out" "== rig other" "the other rig is skipped by --rig"
 
 echo
+echo "# the migration covers the full LIVE status set, not just open/in_progress/blocked"
+# The rest of the review machinery treats deferred, hooked and pinned as live
+# (open,in_progress,blocked,deferred,hooked,pinned). A codex review, finding, or
+# anchor parked in one of those must migrate too: left naming codex it stays live,
+# holding its anchor, while invisible to the correctness validator that must rule it.
+printf '{"rigs":[{"name":"gc-toolkit","path":"%s","suspended":false}]}\n' "$TMP/rig" > "$STUB_RIGS"
+anchor_st() { # id status check_set
+  printf '{"id":"%s","status":"%s","assignee":"","title":"t-%s","metadata":{"check_set":"%s"}}' "$1" "$2" "$1" "$3"
+}
+store "[$(review RH hooked codex),$(review RP pinned codex),$(review RD deferred codex),\
+$(finding FH hooked codex),$(finding FP pinned codex),$(finding FD deferred codex),\
+$(anchor_st AH hooked codex),$(anchor_st AP pinned codex),$(anchor_st AD deferred codex)]"
+out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
+eq "$rc" 0 "apply over the live-status fixture exits 0"
+eq "$(meta RH check_name)" "correctness" "a hooked codex review migrates"
+eq "$(meta RP check_name)" "correctness" "a pinned codex review migrates"
+eq "$(meta RD check_name)" "correctness" "a deferred codex review migrates"
+eq "$(meta FH 'finding.lane')" "correctness" "a hooked codex finding migrates"
+eq "$(meta FP 'finding.lane')" "correctness" "a pinned codex finding migrates"
+eq "$(meta FD 'finding.lane')" "correctness" "a deferred codex finding migrates"
+eq "$(meta AH check_set)" "correctness" "a hooked codex anchor migrates"
+eq "$(meta AP check_set)" "correctness" "a pinned codex anchor migrates"
+eq "$(meta AD check_set)" "correctness" "a deferred codex anchor migrates"
+
+echo
 echo "migrate-codex-to-correctness.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
