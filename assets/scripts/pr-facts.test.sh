@@ -8,7 +8,7 @@
 # merge_hold left alone) while a pending required approving review files no visit
 # and any stale merge-blocked-approval visit is retired; CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds and a live demand veto, unstamped orphans adopted),
-# classified rebase or merge by the head branch and stamped prepare_mode,
+# stamped prepare_mode=merge (every branch brought current by merge, never rebase),
 # counted as dispatched only once that stamp AND the route read back, with a
 # child stranded by a lost route stamp re-routed rather than buried by the
 # dedup; stale-gate -> one re-review child per head, carrying mol-review via
@@ -152,12 +152,12 @@ demand() { # <anchor-id> [status]
     "$1" "${2:-open}" "$1" "$1"
 }
 
-# A parked rebase/rework child: shares the anchor's branch, carries a rework
-# resume (prepare_mode), routed to the fix pool, and — like every child — no
+# A parked rework child: shares the anchor's branch, carries a merge-in resume
+# (prepare_mode=merge), routed to the fix pool, and — like every child — no
 # merge_result of its own. `extra` appends metadata (a rebase_hold freeze);
 # status/assignee default to the parked shape (open, unclaimed).
 child() { # id branch [extra-metadata] [status] [assignee]
-  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","title":"Rebase %s onto main:","metadata":{"branch":"%s","target":"main","prepare_mode":"rebase","gc.routed_to":"rig/gc-toolkit.polecat"%s}}' \
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","title":"Merge main into %s:","metadata":{"branch":"%s","target":"main","prepare_mode":"merge","gc.routed_to":"rig/gc-toolkit.polecat"%s}}' \
     "$1" "${4:-open}" "${5:-}" "$2" "$2" "${3:-}"
 }
 
@@ -339,11 +339,11 @@ eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated on a read that did not land
 eq "$(cat "$STUB_REHOME_LOG")" "" "…and bead-rehome is not called"
 has "$out" "re-reading the anchor failed" "the skip names the failed re-read"
 
-# The auto-dispose closes the anchor; the rebase/rework children parked on its
+# The auto-dispose closes the anchor; the rework children parked on its
 # branch are moot once the PR is gone and re-offer to the fix pool if left open,
 # so the dispose drops them the same sanctioned way — bead-rehome.sh, pointed at
 # the anchor's own successor.
-echo "# an auto-dispose drops the closed PR's parked rebase/rework children"
+echo "# an auto-dispose drops the closed PR's parked rework children"
 store "[$(anchor F2h 28 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-h"'), $(child K1 polecat/x28), $(child K2 polecat/x28)]"
 printf '%s' "$(prview 28 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_28.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
@@ -398,7 +398,7 @@ echo "# CONFLICTING -> one rework child per head"
 store "[$(anchor F4 13)]"
 printf '%s' "$(prview 13 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_13.json"
 out=$(run)
-has "$out" "filed rebase-mode rework new-2 routed to $FIX" "a rework child was filed, classified, and routed"
+has "$out" "filed merge-mode rework new-2 routed to $FIX" "a rework child was filed, classified, and routed"
 eq "$(meta new-2 task_kind)" "rework" "child carries the rework role marker"
 eq "$(meta new-2 anchor_bead)" "F4" "child names the anchor it belongs to"
 eq "$(meta F4 task_kind)" "<absent>" "…and the anchor carries none, so the marker discriminates"
@@ -408,8 +408,9 @@ eq "$(meta new-2 merge_strategy)" "mr" "child is mr-mode"
 eq "$(meta new-2 existing_pr)" "https://github.com/zook/gc-toolkit/pull/13" "child reworks THIS PR"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "child routed to the fix pool"
 has "$(meta new-2 rejection_reason)" "head sha-13" "the rejection reason names the head (the dedup key)"
-eq "$(meta new-2 prepare_mode)" "rebase" "a polecat/* head is classified rebase"
-has "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order names the rewrite"
+eq "$(meta new-2 prepare_mode)" "merge" "every branch shape is brought current by merge, polecat/* included"
+hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "a merge-in work order never names a force-push"
+has "$(meta new-2 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…and forbids the rewrite in words"
 grep -qxF "new-2|blocks|F4" "$STUB_DEPS" && ok "child blocks the anchor" || bad "blocks edge missing"
 eq "$(meta F4 merge_result)" "pull_request" "the anchor keeps gating (no state flip)"
 
@@ -441,7 +442,7 @@ echo "# …while a CLOSED demand is a decision already made: the rework is dispa
 store "[$(anchor F5c 17),$(demand F5c closed)]"
 printf '%s' "$(prview 17 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_17.json"
 out=$(run)
-has "$out" "filed rebase-mode rework new-3 routed to $FIX" "a closed demand holds nothing"
+has "$out" "filed merge-mode rework new-3 routed to $FIX" "a closed demand holds nothing"
 
 echo "# …but a closed demand is not the only hold: any OTHER live blocker on the anchor freezes the dispatch too (tk-nak6pb)"
 # takeaway_is_holding reads only the demand channel. A closed demand is a
@@ -547,7 +548,7 @@ echo "# …and the SAME anchor without the arm dispatches a rework — the arm i
 store "[$(anchor FA1 95)]"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-has "$out" "filed rebase-mode rework" "with no arm, the conflict dispatches a rework"
+has "$out" "filed merge-mode rework" "with no arm, the conflict dispatches a rework"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…exactly one child, now that nothing holds it"
 
 store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
@@ -573,28 +574,28 @@ out=$(run)
 has "$out" "filed merge-mode rework new-2" "the dispatch names the mode it classified"
 eq "$(meta new-2 prepare_mode)" "merge" "an integration/* head is classified merge"
 eq "$(bstatus new-2)" "open" "the child was filed"
-has "$(jq -r '.[] | select(.id == "new-2") | .title' "$STUB_STORE")" "Merge main into PR#28 (shared branch integration/refinery-fixes)" "the TITLE names the mode an operator would act on by hand"
+has "$(jq -r '.[] | select(.id == "new-2") | .title' "$STUB_STORE")" "Merge main into PR#28 (branch integration/refinery-fixes)" "the TITLE names the mode an operator would act on by hand"
 hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "the merge-mode work order must NOT instruct a force-push"
 hasnt "$(meta new-2 rejection_reason)" "rebase 'integration" "…nor a rebase"
 has "$(meta new-2 rejection_reason)" "MERGING origin/main IN" "…it names the non-destructive remedy instead"
 has "$(meta new-2 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…and forbids the rewrite in words too"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "the merge-mode child is still dispatched, not stalled on a human"
 
-echo "# …a graduation on a polecat-shaped branch is classified merge anyway"
+echo "# …a graduation on a polecat-shaped branch is brought current by merge, like every shape"
 store "[$(anchor GD 29 ',"graduation":"true"')]"
 printf '%s' "$(prview 29 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_29.json"
 out=$(run)
-eq "$(meta new-2 prepare_mode)" "merge" "the graduation marker overrides the branch name"
-hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order follows the mode, not the prefix"
+eq "$(meta new-2 prepare_mode)" "merge" "a graduation is brought current by merge, like every branch shape"
+hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order names no force-push"
 
 echo "# …a prepare_mode stamp that does not persist leaves the child UNROUTED"
 store "[$(anchor DM 31)]"
 printf '%s' "$(prview 31 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_31.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
-has "$out" "did not record prepare_mode=rebase; left unrouted" "the lost stamp is caught by the read-back"
+has "$out" "did not record prepare_mode=merge; left unrouted" "the lost stamp is caught by the read-back"
 eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
-eq "$(meta new-2 'gc.routed_to')" "<absent>" "an unstamped child is inert, never routable AND rewriting"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "an unstamped child is inert, never routed with incomplete metadata"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 
 echo "# …a route stamp that does not persist leaves the rework UNDISPATCHED"
@@ -604,7 +605,7 @@ printf '%s' "$(prview 32 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_32.json"
 out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "the route stamp really was dropped"
 has "$out" "did not record gc.routed_to=$FIX; left unrouted" "the lost route stamp is caught by a read-back"
-hasnt "$out" "filed rebase-mode rework new-2 routed to" "an unreachable rework is never reported as dispatched"
+hasnt "$out" "filed merge-mode rework new-2 routed to" "an unreachable rework is never reported as dispatched"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 
 echo "# …and the NEXT pass re-routes it, past the branch dedup that would bury it"
@@ -612,7 +613,7 @@ out=$(run)
 has "$out" "re-routing stranded rework new-2" "the stranded child is adopted, not suppressed as a dup"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and the route lands on the retry"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
-has "$out" "filed rebase-mode rework new-2 routed to $FIX" "…and only now is the dispatch reported"
+has "$out" "filed merge-mode rework new-2 routed to $FIX" "…and only now is the dispatch reported"
 
 echo "# …once routed, the child dedups normally again"
 out=$(run)
@@ -631,7 +632,7 @@ eq "$(meta new-2 task_kind)" "<absent>" "the marker stamp really was dropped"
 eq "$(meta new-2 anchor_bead)" "<absent>" "…both halves of it"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the unmarked child is never routed"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
-hasnt "$out" "filed rebase-mode rework new-2 routed to" "…nor is it reported as dispatched"
+hasnt "$out" "filed merge-mode rework new-2 routed to" "…nor is it reported as dispatched"
 
 echo "# …and the NEXT pass re-stamps it through the stranded arm, then routes"
 out=$(run)
@@ -904,7 +905,7 @@ eq "$(meta new-2 anchor_bead)" "P1" "the child names the anchor — this arm's d
 eq "$(meta new-2 task_kind)" "rework" "…and its role, so a metadata read can tell it from the anchor"
 eq "$(meta new-2 pr_number)" "40" "…and the PR, so merge.sh counts it in flight"
 eq "$(meta new-2 branch)" "polecat/x40" "the child resumes the PR's own branch"
-eq "$(meta new-2 prepare_mode)" "rebase" "a polecat/* head is classified rebase"
+eq "$(meta new-2 prepare_mode)" "merge" "every branch shape is brought current by merge, polecat/* included"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "the child is routed to the fix pool"
 has "$(meta new-2 rejection_reason)" "Do NOT open a new PR" "the work order reworks THIS PR"
 grep -qxF "new-2|blocks|P1" "$STUB_DEPS" && ok "the child blocks the anchor" || bad "blocks edge missing"
@@ -1035,9 +1036,9 @@ eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind 
 eq "$(meta W4 pr_comment_watermark)" "9300" "…and only then does the mark move"
 
 echo "# …a child whose prepare_mode stamp drops is never routed, nor watermarked past"
-# The classifier called this head SHARED. mol-polecat-work reads an absent mode
-# as rebase, so routing the child without it force-pushes the branch the mode
-# exists to spare — the one failure a blocks edge does not contain.
+# mol-polecat-work now resumes an absent mode as MERGE, so a dropped stamp no
+# longer risks a rewrite; the read-back still refuses to route the child until the
+# mode it was classified with is confirmed on the bead.
 store "[$(anchor W6 50 '' 'integration/convoy-77')]"
 printf '%s' "$(prview 50 OPEN BLOCKED MERGEABLE '' 'integration/convoy-77')" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_50.json"
 echo '[]' > "$GH_DIR/reviews_50.json"
@@ -1046,7 +1047,7 @@ printf '[{"id":9600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
 has "$out" "did not record prepare_mode=merge; left unrouted and NOT watermarking" "the lost mode stamp is caught BEFORE the route"
 eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
-eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the child is never routable AND rewriting"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the child is never routed with incomplete metadata"
 eq "$(meta W6 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
 eq "$(meta W6 pr_comment_disposition)" "<absent>" "…with nothing recorded as its disposition"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
@@ -1123,7 +1124,7 @@ echo '[]' > "$GH_DIR/reviews_61.json"
 echo '[]' > "$GH_DIR/comments_61.json"
 out=$(run_posture)
 eq "$(meta_pinned PO2 pr_posture)" "none@sha-61" "the posture is still recorded"
-hasnt "$out" "filed rebase-mode rework" "…but no rework child is filed"
+hasnt "$out" "filed merge-mode rework" "…but no rework child is filed"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…none at all"
 
 echo "# …and MERGED/CLOSED reconciliation is left to the full pass"
@@ -2389,7 +2390,7 @@ printf '[{"type":"required_status_checks","parameters":{"required_status_checks"
 store "[$(anchor RC1 50)]"
 printf '%s' "$(prview 50 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/zook/gc-toolkit/actions/runs/999"}]')" > "$GH_DIR/pr_view_50.json"
 out=$(run)
-has "$out" "required check(s) failing (test); filed rebase-mode rework new-2 routed to $FIX" "the red required check is turned into a routed rework child"
+has "$out" "required check(s) failing (test); filed merge-mode rework new-2 routed to $FIX" "the red required check is turned into a routed rework child"
 eq "$(meta new-2 task_kind)" "rework" "child carries the rework role marker"
 eq "$(meta new-2 anchor_bead)" "RC1" "child names the anchor it belongs to"
 eq "$(meta RC1 task_kind)" "<absent>" "…and the anchor carries none, so the marker discriminates"
@@ -2397,7 +2398,7 @@ eq "$(meta new-2 branch)" "polecat/x50" "child resumes the head branch"
 eq "$(meta new-2 target)" "main" "child targets the base"
 eq "$(meta new-2 merge_strategy)" "mr" "child is mr-mode"
 eq "$(meta new-2 existing_pr)" "https://github.com/zook/gc-toolkit/pull/50" "child reworks THIS PR, opening no second one"
-eq "$(meta new-2 prepare_mode)" "rebase" "a polecat/* head is classified rebase"
+eq "$(meta new-2 prepare_mode)" "merge" "every branch shape is brought current by merge, polecat/* included"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "child routed to the fix pool"
 has "$(meta new-2 rejection_reason)" "head sha-50" "the rejection reason names the head (the dedup key)"
 has "$(meta new-2 rejection_reason)" "test" "…names the failing check"
@@ -2459,7 +2460,7 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0"
 echo "# …and the SAME anchor without the arm files one — the arm is the only thing standing the red check down"
 store "[$(anchor FA3 75)]"
 out=$(run)
-has "$out" "required check(s) failing (test); filed rebase-mode rework" "with no arm, the red check dispatches a rework"
+has "$out" "required check(s) failing (test); filed merge-mode rework" "with no arm, the red check dispatches a rework"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…exactly one child, now that nothing holds it"
 
 echo "# …a BLOCKED PR on a red required check routes too (the filed incident's state)"

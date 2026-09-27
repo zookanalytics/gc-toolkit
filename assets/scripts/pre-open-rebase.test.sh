@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/pre-open-rebase.sh — the conflict observer for
-# pre_open_gate anchors, the arm that files a rebase child for a branch GitHub
+# pre_open_gate anchors, the arm that files a merge-in child for a branch GitHub
 # cannot yet be asked about. Covers: a conflicting branch dispatching ONE child
-# stamped prepare_mode and routed, carrying no PR facts; a branch that still
-# merges dispatching nothing; the branch allowlist (polecat/* rebases, every
-# other shape merges, a graduation merges whatever its branch is named) and its
-# agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
+# stamped prepare_mode=merge and routed, carrying no PR facts; a branch that still
+# merges dispatching nothing; every branch shape brought current by merge (no
+# shape rebases or force-pushes, polecat/* and a graduation included) and this
+# site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
 # rebase_hold on a bead naming the branch, a live demand, no fix pool); dedup on
 # branch and head against a live child, a stranded child re-routed rather than
 # buried, and an unstamped orphan adopted by title; the read-backs that leave a
@@ -88,21 +88,22 @@ eq "$rc" "1" "...and 1 for a real conflict, so the exit status alone cannot tell
 ( cd "$WORK" && git merge-tree --write-tree origin/main origin/polecat/tk-ok >/dev/null 2>&1 ); rc=$?
 eq "$rc" "0" "...and 0 for a branch that still merges"
 
-echo "# a conflicting polecat branch dispatches one rebase child"
+echo "# a conflicting polecat branch dispatches one merge-in child"
 reset "$(pre A1 polecat/tk-c1)"
 OUT=$(run --fix-pool "$POOL")
-has "$OUT" "filed rebase-mode rework" "the arm reports the mode it dispatched"
+has "$OUT" "filed merge-mode rework" "the arm reports the mode it dispatched"
 eq "$(newcount)" "1" "exactly one child is filed"
 K=$(newborn)
 eq "$(meta "$K" branch)" "polecat/tk-c1" "the child names the branch to bring current"
 eq "$(meta "$K" target)" "main" "the child names the target it must merge into"
-eq "$(meta "$K" prepare_mode)" "rebase" "a polecat/* branch is disposable, so the mode is rebase"
+eq "$(meta "$K" prepare_mode)" "merge" "every branch shape is brought current by merge, polecat/* included"
 eq "$(meta "$K" "gc.routed_to")" "$POOL" "the child is routed to the fix pool"
 eq "$(meta "$K" merge_strategy)" "mr" "the child lands through the refinery"
 eq "$(meta "$K" task_kind)" "rework" "the child carries the rework role marker"
 eq "$(meta "$K" anchor_bead)" "A1" "and names its anchor, so a metadata read tells it from the anchor it shares a branch with"
 has "$(meta "$K" rejection_reason)" "head $C1_HEAD" "the reason names the head in the phrasing pr-facts.sh dedups on"
-has "$(meta "$K" rejection_reason)" "force-with-lease" "a rebase-mode work order names the force-push it needs"
+hasnt "$(meta "$K" rejection_reason)" "force-with-lease" "a merge-in work order never names a force-push"
+has "$(meta "$K" rejection_reason)" "Do NOT rebase it and do NOT force-push it" "and forbids the rewrite in words"
 has "$(meta "$K" rejection_reason)" "Do NOT open a PR" "the child is told the anchor opens its own PR"
 eq "$(meta "$K" pr_number)" "<absent>" "no pr_number rides a child filed before any PR exists"
 eq "$(meta "$K" pr_url)" "<absent>" "no pr_url either"
@@ -116,13 +117,13 @@ OUT=$(run --fix-pool "$POOL")
 eq "$(newcount)" "0" "a clean merge files no child"
 has "$OUT" "clean=1" "and is counted as observed-clean, not skipped"
 
-echo "# the branch allowlist"
+echo "# a shared branch is brought current the same way"
 reset "$(pre A3 integration/conv)"
 OUT=$(run --fix-pool "$POOL")
 K=$(newborn)
-eq "$(meta "$K" prepare_mode)" "merge" "a non-polecat branch is shared, so the mode is merge"
-has "$(jq -r --arg k "$K" '.[]|select(.id==$k)|.title' "$STUB_STORE")" "Merge main into shared branch" \
-  "the title names its own mode, so nobody working it by hand rebases"
+eq "$(meta "$K" prepare_mode)" "merge" "an integration branch is brought current by merge, like every shape"
+has "$(jq -r --arg k "$K" '.[]|select(.id==$k)|.title' "$STUB_STORE")" "Merge main into integration/conv" \
+  "the title names the merge, so nobody working it by hand rebases"
 has "$(meta "$K" rejection_reason)" "Do NOT rebase it and do NOT force-push it" "the work order forbids the rewrite"
 hasnt "$(meta "$K" rejection_reason)" "force-with-lease" "and never names a force-push"
 
@@ -175,7 +176,7 @@ eq "$(newcount)" "0" "a child stranded by a lost route stamp is not twinned"
 has "$OUT" "re-routing stranded rework S1" "it is re-routed instead"
 eq "$(meta S1 "gc.routed_to")" "$POOL" "and the route it was missing is stamped"
 
-reset "$(pre AB polecat/tk-c1)" '{"id":"O1","status":"open","assignee":"","title":"Rebase polecat/tk-c1 onto main: base moved, the branch no longer merges","metadata":{}}'
+reset "$(pre AB polecat/tk-c1)" '{"id":"O1","status":"open","assignee":"","title":"Merge main into polecat/tk-c1: base moved, the branch no longer merges","metadata":{}}'
 OUT=$(run --fix-pool "$POOL")
 eq "$(newcount)" "0" "an unstamped orphan carrying the deterministic title is adopted, never twinned"
 has "$OUT" "adopting unstamped rework orphan O1" "and the adoption is reported"
@@ -199,14 +200,14 @@ reset "$(pre AD polecat/tk-c1)"
 export STUB_DROP_KEYS="new-2:prepare_mode"
 OUT=$(run --fix-pool "$POOL")
 has "$OUT" "did not record prepare_mode" "a dropped prepare_mode is caught by the read-back"
-eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than routable-and-rewriting"
-hasnt "$OUT" "filed rebase-mode rework" "it is not counted as dispatched"
+eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than routed with incomplete metadata"
+hasnt "$OUT" "filed merge-mode rework" "it is not counted as dispatched"
 
 reset "$(pre AE polecat/tk-c1)"
 export STUB_DROP_KEYS="new-2:gc.routed_to"
 OUT=$(run --fix-pool "$POOL")
 has "$OUT" "did not record gc.routed_to" "a dropped route is caught by its own read-back"
-hasnt "$OUT" "filed rebase-mode rework" "and is not counted as dispatched"
+hasnt "$OUT" "filed merge-mode rework" "and is not counted as dispatched"
 export STUB_DROP_KEYS=""
 
 reset "$(pre AH polecat/tk-c1)"
@@ -214,7 +215,7 @@ export STUB_DROP_KEYS="new-2:task_kind"
 OUT=$(run --fix-pool "$POOL")
 has "$OUT" "did not record task_kind=rework/anchor_bead" "a role marker that will not persist is caught before the route is stamped"
 eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than dispatched as an anchor-lookalike"
-hasnt "$OUT" "filed rebase-mode rework" "so a child a metadata read cannot tell from its anchor is never counted as dispatched"
+hasnt "$OUT" "filed merge-mode rework" "so a child a metadata read cannot tell from its anchor is never counted as dispatched"
 export STUB_DROP_KEYS=""
 
 echo "# what this arm does not enumerate"
@@ -258,20 +259,21 @@ export STUB_LIST_FAIL=""
 eq "$rc" "1" "an unreadable anchor enumeration exits non-zero"
 has "$OUT" "false all-clear" "rather than reporting that nothing needs a rebase"
 
-echo "# the mirrored predicates agree with pr-facts.sh"
-norm() { sed -e 's/\$fix_branch/$BR/g' -e 's/\$branch/$BR/g' -e 's/[[:space:]][[:space:]]*/ /g' -e 's/^ //' -e 's/ $//'; }
+echo "# neither dispatch site rebases any branch shape (tk-yu4sng: merge-in for all)"
 fence() { awk -v m="$1" '$0 ~ ("# >>> " m) {f=1; next} $0 ~ ("# <<< " m) {f=0} f' "$2"; }
-A=$(fence stale-base-dispatch-mode "$HERE/pr-facts.sh" | sed -n '/^ *case /,/^ *esac/p' | norm)
-B=$(fence pre-open-dispatch-mode "$HERE/pre-open-rebase.sh" | sed -n '/^ *case /,/^ *esac/p' | norm)
+A=$(fence stale-base-dispatch-mode "$HERE/pr-facts.sh")
+B=$(fence pre-open-dispatch-mode "$HERE/pre-open-rebase.sh")
 # Both non-empty first: a fence renamed in either file would otherwise make two
-# empty strings compare equal and retire this guard silently.
+# empty strings pass the checks below and retire this guard silently.
 if [ -n "$A" ] && [ -n "$B" ]; then ok "both dispatch-mode fences are present and non-empty"
-else bad "a dispatch-mode fence is missing (pr-facts='$A' pre-open='$B')"; fi
-eq "$B" "$A" "the branch allowlist is identical to pr-facts.sh's once the variable name is normalised"
-
-GA=$(fence stale-base-dispatch-mode "$HERE/pr-facts.sh" | grep -c 'grad.*=.*"true".*prepare_mode=merge')
-GB=$(fence pre-open-dispatch-mode "$HERE/pre-open-rebase.sh" | grep -c 'grad.*=.*"true".*prepare_mode=merge')
-eq "$GB" "$GA" "and so is the graduation override"
+else bad "a dispatch-mode fence is missing (pr-facts len=${#A} pre-open len=${#B})"; fi
+# The change this test guards: no shape is ever classified rebase, so nothing can
+# force-push. An allowlist could let a new branch shape slip past into a rewrite;
+# an unconditional merge cannot.
+eq "$(printf '%s\n' "$A" | grep -c 'prepare_mode=rebase')" "0" "pr-facts.sh's stale-base dispatch never classifies a branch rebase"
+eq "$(printf '%s\n' "$B" | grep -c 'prepare_mode=rebase')" "0" "pre-open-rebase.sh's dispatch never classifies a branch rebase"
+[ "$(printf '%s\n' "$A" | grep -c 'prepare_mode=merge')" -ge 1 ] && ok "pr-facts.sh's stale-base dispatch sets prepare_mode=merge" || bad "pr-facts.sh's stale-base dispatch sets prepare_mode=merge"
+[ "$(printf '%s\n' "$B" | grep -c 'prepare_mode=merge')" -ge 1 ] && ok "pre-open-rebase.sh's dispatch sets prepare_mode=merge" || bad "pre-open-rebase.sh's dispatch sets prepare_mode=merge"
 
 TA=$(fence takeaway-hold-discriminator "$HERE/pr-facts.sh")
 TB=$(fence takeaway-hold-discriminator "$HERE/pre-open-rebase.sh")
