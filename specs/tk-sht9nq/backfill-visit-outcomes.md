@@ -65,9 +65,14 @@ risk of misclassifying a close nobody classified at the time.
 
 ## Running it
 
-Default is dry-run. `--apply` writes, reads both keys back per visit, and is
-idempotent — it selects only visits whose `gc.outcome` is still empty, so a
-second run finds none.
+Default is dry-run. `--apply` writes both keys, reads them back per visit, and
+converges: it selects a visit with no `gc.outcome`, or one carrying this run's
+`gc.outcome` whose `gc.outcome_reason` does not yet match the reason derived from
+`close_reason`, and skips any visit already holding that final pair. The second
+case is the repair path — a metadata write can land `gc.outcome` while
+`gc.outcome_reason` drops, and an empty-`gc.outcome` filter would never see that
+half-stamped visit again — so re-running drives every in-scope visit to its final
+`(outcome, reason)` pair, and a run over a settled store finds none.
 
 ```bash
 # Report, per store, what would be stamped (read-only):
@@ -82,11 +87,12 @@ assets/scripts/backfill-visit-outcomes.sh --apply --outcome <word>
 To confirm it landed, `doctor/check-visit-outcome-recorded/run.sh` returns
 exit 0 once every store reads clean.
 
-Because the script selects only empty-`gc.outcome` visits, re-running with a
-different `--outcome` will NOT re-stamp visits already carrying `unrecorded`. To
-change the word after the fact, re-select by the old word — for each store,
-`gc bd list --db <store>/.beads … | jq` the visits whose `gc.outcome` is
-`unrecorded`, and `gc bd update --set-metadata gc.outcome=<new>` them.
+Re-running with a different `--outcome` will NOT re-stamp visits already carrying
+`unrecorded`: the selector re-picks a stamped visit only when its `gc.outcome`
+equals THIS run's word, so a run with a new word leaves the old-word visits
+untouched. To change the word after the fact, re-select by the old word — for
+each store, `gc bd list --db <store>/.beads … | jq` the visits whose `gc.outcome`
+is `unrecorded`, and `gc bd update --set-metadata gc.outcome=<new>` them.
 
 ## Disposal
 

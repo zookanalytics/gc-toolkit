@@ -44,6 +44,18 @@ cat >"$FIX/clean.json" <<'JSON'
  {"id":"v-ok","status":"closed","close_reason":"was benign","metadata":{"task_kind":"visit","gc.outcome":"benign"}}
 ]
 JSON
+# HALF holds three rows that all already carry our gc.outcome, to exercise the
+# half-landed-repair path: v-half lost its reason (empty), v-drift has a reason
+# that no longer matches the one derived from close_reason, and v-done is fully
+# and correctly stamped. The selector must re-pick the first two and leave
+# v-done alone — the doctor's empty-outcome set catches none of them.
+cat >"$FIX/half.json" <<'JSON'
+[
+ {"id":"v-half","status":"closed","close_reason":"was superseded by v-root","metadata":{"task_kind":"visit","gc.outcome":"unrecorded","gc.outcome_reason":""}},
+ {"id":"v-drift","status":"closed","close_reason":"was folded into v-root","metadata":{"task_kind":"visit","gc.outcome":"unrecorded","gc.outcome_reason":"stale headline"}},
+ {"id":"v-done","status":"closed","close_reason":"was moot","metadata":{"task_kind":"visit","gc.outcome":"unrecorded","gc.outcome_reason":"was moot"}}
+]
+JSON
 
 # A stub gc. `bd update ... --db D <id> --set-metadata gc.outcome=..` records the
 # stamp under $STATE keyed by db+id; `bd show` reflects it back so the SUT's
@@ -69,6 +81,7 @@ case "${1:-}" in
         case "$db" in
           *active*) cat "$FIX/active.json" ;;
           *clean*)  cat "$FIX/clean.json" ;;
+          *half*)   cat "$FIX/half.json" ;;
           *)        printf '[]' ;;
         esac ;;
       update)
@@ -91,8 +104,8 @@ esac
 STUB
 chmod +x "$BIN/gc"
 
-DIR_ACTIVE="$FIX/store-active"; DIR_CLEAN="$FIX/store-clean"
-DB_ACTIVE="$DIR_ACTIVE/.beads"; DB_CLEAN="$DIR_CLEAN/.beads"
+DIR_ACTIVE="$FIX/store-active"; DIR_CLEAN="$FIX/store-clean"; DIR_HALF="$FIX/store-half"
+DB_ACTIVE="$DIR_ACTIVE/.beads"; DB_CLEAN="$DIR_CLEAN/.beads"; DB_HALF="$DIR_HALF/.beads"
 UPDLOG="$TMPD/updlog"
 
 run() { # run the SUT with the stub on PATH and a fresh update log
@@ -109,7 +122,7 @@ echo "backfill-visit-outcomes.test"
 # --- dry-run: selects the two misses, writes nothing ---------------------------
 OUT="$(run --db "$DB_ACTIVE")"; RC=$?
 is   "dry-run exits 0"                       "$RC" "0"
-has  "dry-run counts both misses"            "$OUT" "2 outcome-less closed visit(s)"
+has  "dry-run counts both misses"            "$OUT" "2 closed visit(s) to stamp"
 has  "dry-run names v-dup"                   "$OUT" "would stamp v-dup"
 has  "dry-run names v-bare"                  "$OUT" "would stamp v-bare"
 hasnt "dry-run ignores the already-stamped"  "$OUT" "v-stamped"
@@ -137,6 +150,24 @@ OUT="$(FAIL_STAMP=1 run --apply --db "$DB_ACTIVE")"; RC=$?
 is  "read-back failure exits 1"              "$RC" "1"
 has "read-back failure is reported"          "$OUT" "did NOT read back"
 
+# --- half-landed repair: a stamp whose gc.outcome landed but whose reason was
+# --- lost (empty) or drifted is re-selected and repaired; a row already holding
+# --- the derived reason is left untouched, so repeated runs converge. Without
+# --- this the doctor's empty-outcome set never sees the half-landed row again. --
+rm -f "$STATE"/*
+OUT="$(run --db "$DB_HALF")"; RC=$?
+is    "half-landed dry-run exits 0"          "$RC" "0"
+has   "empty reason is re-selected"          "$OUT" "would stamp v-half"
+has   "drifted reason is re-selected"        "$OUT" "would stamp v-drift"
+hasnt "matching reason is left alone"        "$OUT" "v-done"
+has   "half-landed counts the two repairs"   "$OUT" "2 closed visit(s) to stamp"
+OUT="$(run --apply --db "$DB_HALF")"; RC=$?
+is    "half-landed apply exits 0"            "$RC" "0"
+has   "half-landed apply stamps both"        "$OUT" "stamped 2/2"
+is    "empty reason repaired from close"     "$(reasonof "$DB_HALF" v-half)"  "was superseded by v-root"
+is    "drifted reason overwritten"           "$(reasonof "$DB_HALF" v-drift)" "was folded into v-root"
+is    "matching-reason row never written"    "$(stamped "$DB_HALF" v-done)"   ""
+
 # --- clean store: nothing to do, exit 0 ----------------------------------------
 OUT="$(run --apply --db "$DB_CLEAN")"; RC=$?
 is  "clean store exits 0"                    "$RC" "0"
@@ -145,11 +176,11 @@ has "clean store reported clean"             "$OUT" "clean"
 # --- rig discovery + --rig filter + suspended skip -----------------------------
 OUT="$(run)"; RC=$?
 is  "discovery exits 0"                      "$RC" "0"
-has "discovery scans active"                 "$OUT" "active: 2 outcome-less"
+has "discovery scans active"                 "$OUT" "active: 2 closed visit(s) to stamp"
 has "discovery scans clean"                  "$OUT" "clean: clean"
 hasnt "discovery skips suspended rig"        "$OUT" "napping"
 OUT="$(run --rig active)"
-has "--rig limits to that rig"               "$OUT" "active: 2 outcome-less"
+has "--rig limits to that rig"               "$OUT" "active: 2 closed visit(s) to stamp"
 hasnt "--rig excludes the other"             "$OUT" "clean:"
 
 echo "  ---- $PASS passed, $FAIL failed ----"

@@ -5,11 +5,16 @@
 # DISPOSABLE: delete this script, its test, and specs/tk-sht9nq/ once every
 # store reads clean and the operator has ratified the outcome word.
 #
-# Scope is the exact set doctor/check-visit-outcome-recorded flags: a bead with
-# task_kind=visit, status=closed, and an empty or absent gc.outcome. Every
-# going-forward close path already stamps the outcome — visit-close.sh, the
-# gc-helm dismiss inline copy, and pr-facts.sh's atomic retire-close — so this
-# finds only the standing legacy backlog, and a second --apply run finds none.
+# Scope is doctor/check-visit-outcome-recorded's set (task_kind=visit,
+# status=closed, empty or absent gc.outcome) plus any row a prior pass left
+# half-stamped: gc.outcome present but gc.outcome_reason empty or not the reason
+# derived from close_reason. A metadata write can land gc.outcome while
+# gc.outcome_reason drops, and the doctor set (empty outcome) no longer sees such
+# a row, so the selector re-selects it here — repeated runs converge every
+# in-scope visit to its final (outcome, reason) pair. Every going-forward close
+# path already stamps the outcome — visit-close.sh, the gc-helm dismiss inline
+# copy, and pr-facts.sh's atomic retire-close — so a first pass over untouched
+# stores finds only the standing legacy backlog.
 #
 # The stamp is two keys the board reads (services/helm/internal/source/facts.go):
 #   gc.outcome        the one-word class, default "unrecorded" — these closes
@@ -99,27 +104,33 @@ for row in "${STORE_ROWS[@]}"; do
     echo "$label: could NOT list beads in $db (rc=$rc) — this store was not backfilled" >&2
     unreadable=$((unreadable + 1)); continue
   fi
-  # The miss set: task_kind=visit, closed, empty gc.outcome. Emit id + the
-  # close_reason to reuse as the outcome reason (control chars flattened).
-  rows=$(printf '%s' "$raw" | scrub | jq -r '
+  # The repair set: task_kind=visit, status=closed, and either no gc.outcome, or
+  # our gc.outcome with a gc.outcome_reason that does not match the reason we
+  # derive from close_reason (a half-landed prior stamp — outcome wrote, reason
+  # dropped). Emit id + that derived reason (control chars flattened, empty
+  # close_reason -> fallback), which is exactly what the stamp below writes, so a
+  # correctly stamped row reads $r == $reason and is skipped: repeated runs are a
+  # no-op once every in-scope visit holds its final pair.
+  rows=$(printf '%s' "$raw" | scrub | jq -r --arg outcome "$OUTCOME" '
     .[]? | select(((.metadata.task_kind // "") | tostring) == "visit")
          | select(((.status // "") | tostring) == "closed")
-         | select(((.metadata["gc.outcome"] // "") | tostring) == "")
-         | ((.id // "") | tostring | gsub("[[:cntrl:]]"; " "))
-           + "\u001f" + ((.close_reason // "") | tostring | gsub("[[:cntrl:]]"; " "))')
+         | (((.close_reason // "") | tostring | gsub("[[:cntrl:]]"; " "))
+            | if . == "" then "closed with no recorded close_reason" else . end) as $reason
+         | (((.metadata["gc.outcome"] // "") | tostring)) as $o
+         | (((.metadata["gc.outcome_reason"] // "") | tostring)) as $r
+         | select($o == "" or ($o == $outcome and $r != $reason))
+         | ((.id // "") | tostring | gsub("[[:cntrl:]]"; " ")) + "\u001f" + $reason')
   if [ $? -ne 0 ]; then
     echo "$label: the visit listing from $db could not be parsed — this store was not backfilled" >&2
     unreadable=$((unreadable + 1)); continue
   fi
   scanned=$((scanned + 1))
-  [ -n "$rows" ] || { echo "$label: clean (no outcome-less closed visits)"; continue; }
+  [ -n "$rows" ] || { echo "$label: clean (nothing to stamp)"; continue; }
 
   store_found=0; store_done=0; store_fail=0
-  while IFS=$'\037' read -r id close_reason; do
+  while IFS=$'\037' read -r id reason; do
     [ -n "$id" ] || continue
     store_found=$((store_found + 1)); total_found=$((total_found + 1))
-    reason="$close_reason"
-    [ -n "$reason" ] || reason="closed with no recorded close_reason"
     if [ "$APPLY" -eq 0 ]; then
       echo "  would stamp $id: gc.outcome=$OUTCOME  gc.outcome_reason=\"${reason:0:100}\""
       continue
@@ -141,7 +152,7 @@ for row in "${STORE_ROWS[@]}"; do
   done <<< "$rows"
 
   if [ "$APPLY" -eq 0 ]; then
-    echo "$label: $store_found outcome-less closed visit(s) would be stamped"
+    echo "$label: $store_found closed visit(s) to stamp"
   else
     echo "$label: stamped $store_done/$store_found (failed $store_fail)"
   fi
@@ -149,7 +160,7 @@ done
 
 echo
 if [ "$APPLY" -eq 0 ]; then
-  echo "DRY-RUN: $total_found outcome-less closed visit(s) across $scanned store(s) would be stamped gc.outcome=$OUTCOME. Re-run with --apply to write."
+  echo "DRY-RUN: $total_found closed visit(s) to stamp across $scanned store(s) (gc.outcome=$OUTCOME). Re-run with --apply to write."
 else
   echo "APPLIED: stamped $total_done/$total_found across $scanned store(s); $total_fail failed read-back."
 fi
