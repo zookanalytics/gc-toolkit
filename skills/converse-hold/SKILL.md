@@ -29,11 +29,13 @@ work a named person must perform, and that one is theirs
 to close, never yours. One open demand per item: a resumed hold refreshes
 the existing bead.
 
-**Stamp BEFORE you wait, not after.** A restart or a crash can take
-this session mid-hold, and these writes are all that survives. Write the
-takeaway to state the decision needed when read cold, and RE-STAMP it on
-every resumed hold: step 1's `action=hold` arm reads `gc.hold_demand` off
-this visit to tell a real hold from a claim that died before step 2.
+**Stamp BEFORE you wait, not after.** The hold IS a demand: until the
+item carries it nothing gates the work behind it or re-asks the question,
+so the stamp lands before you hand control to the operator. Write the
+takeaway to state the decision needed when read cold off the board. The
+same write sets `gc.hold_demand`, the trace step 1's `action=hold` arm
+reads off this visit to tell a real hold from a claim that died before
+step 2.
 
 **The takeaway is the sentence; `held` is the state.** Where `$ITEM`
 already carries an anchor state the transition is skipped, and refused
