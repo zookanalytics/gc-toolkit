@@ -1356,11 +1356,20 @@ demand_lookup() (
 # does not outlive the probe (an --also-blocks target may live in another rig).
 # `bd ready` never offers a closed bead, so a closed child cannot be stranded by
 # a cascade; only the non-closed legs are the shape law's concern here.
+# Exits non-zero when the child list cannot be trusted — the `bd list` read
+# failed, or its payload is not a JSON array — so the caller fails closed rather
+# than reading an unreadable container as a leaf.
 open_child_ids() (
     _oc_path=$(rig_path_for_bead "$1")
     [ -n "$_oc_path" ] && [ -d "$_oc_path/.beads" ] && export BEADS_DIR="$_oc_path/.beads"
-    gc bd list --parent "$1" --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null \
-        | scrub | jq -r 'if type == "array" then (.[].id // empty) else empty end' 2>/dev/null
+    # Capture the read and its status separately: a pipeline swallows the exit
+    # code, and jq maps a non-array payload to empty output, so `bd list | jq`
+    # cannot tell a real leaf from a failed or malformed read. Require the array
+    # before reading ids — a leaf is a valid empty array, an unreadable container
+    # is not.
+    _oc_raw=$(gc bd list --parent "$1" --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null) || return 1
+    printf '%s' "$_oc_raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    printf '%s' "$_oc_raw" | scrub | jq -r '.[].id // empty' 2>/dev/null
 )
 
 cmd_demand() {
@@ -1430,7 +1439,15 @@ cmd_demand() {
     containers=""
     for _c in $gated $also; do
         [ -n "$_c" ] || continue
-        _kids=$(open_child_ids "$_c" | tr '\n' ' ')
+        # Fail closed on an unreadable child list: open_child_ids exits non-zero
+        # when the `bd list` read failed or returned a non-array payload. Reading
+        # that as a leaf would let the demand land on a container whose legs could
+        # not be checked, the cascade this guard exists to refuse.
+        if ! _kids=$(open_child_ids "$_c"); then
+            echo "$PROG: demand: refused — could not read the parent-child child list of $_c, so the shape law (docs/component-model.md, I1) cannot be checked. A 'bd list --parent' that fails or returns a non-array payload is treated as unreadable, never as a leaf: a demand filed on a container whose children could not be read would cascade is_blocked down every leg and strand each one out of bd ready. Retry once the ledger for $_c is readable. Nothing was filed." >&2
+            exit 4
+        fi
+        _kids=$(printf '%s' "$_kids" | tr '\n' ' ')
         _kids="${_kids% }"
         [ -n "$_kids" ] && containers="${containers}$_c (children: $_kids); "
     done

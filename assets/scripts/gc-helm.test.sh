@@ -2183,6 +2183,17 @@ case "$1 ${2:-}" in
       _prev="$a"
     done
     if [ -n "$_pp" ]; then
+      # The shape-law probe must fail closed when the child list cannot be
+      # trusted. Keyed on the probed parent so the gated bead and an
+      # --also-blocks target break independently:
+      #   D_PARENT_FAIL    — a valid-looking array but a non-zero exit (a failed
+      #                      read); the code must not count it just because the
+      #                      payload parses.
+      #   D_PARENT_BADJSON — a non-array {"error":…} object on a zero exit (the
+      #                      shape a resolve-miss returns), which read as "leaf"
+      #                      would silently pass the guard.
+      if [ -f "$D_PARENT_FAIL" ] && grep -qx "$_pp" "$D_PARENT_FAIL" 2>/dev/null; then printf '[]\n'; exit 1; fi
+      if [ -f "$D_PARENT_BADJSON" ] && grep -qx "$_pp" "$D_PARENT_BADJSON" 2>/dev/null; then printf '{"error":"child list unavailable"}\n'; exit 0; fi
       awk -F'|' -v P="$_pp" -v S=",${_ss}," '
         $2==P {
           st = ($3 == "" ? "open" : $3)
@@ -2265,7 +2276,8 @@ chmod +x "$TMP/bin2/gc"
 
 export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
        D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing" D_SETTLED="$TMP/dsettled" \
-       D_GATE_EDGES="$TMP/dgateedges" D_LIST_FAIL="$TMP/dlistfail"
+       D_GATE_EDGES="$TMP/dgateedges" D_LIST_FAIL="$TMP/dlistfail" \
+       D_PARENT_FAIL="$TMP/dparentfail" D_PARENT_BADJSON="$TMP/dparentbadjson"
 : > "$TMP/dsettled"
 : > "$TMP/dgateedges"
 # <child>|<parent>[|status]: tk-kid has a parent (tk-mum); tk-solo has none. The
@@ -2662,6 +2674,60 @@ eq "$(d_gate)" "" "(SHAPEHOOKED) …and no gate is filed"
 grep -q 'tk-hookleg' <<< "$DERR" \
   && ok "(SHAPEHOOKED) …naming the hooked leg that would be stranded" \
   || bad "(SHAPEHOOKED) the hooked leg is not named: $DERR"
+
+# The shape-law child probe must FAIL CLOSED when the child list cannot be
+# trusted: a `bd list --parent` that fails, or answers a non-array {"error":…}
+# object, is unreadable — not proof of a leaf. Read as "leaf" it would let the
+# demand land on a container whose legs were never checked, the cascade the
+# guard exists to refuse. tk-solo is a genuine leaf, so these prove the
+# fail-closed path and not the container path: the OLD probe swallowed the
+# failed/malformed answer as an empty child set and ALLOWED the demand.
+
+# (SHAPEREADFAIL) a failed child-list read on the gated bead is refused.
+printf 'tk-shapedem4\n' > "$D_NEXTID"
+printf 'tk-solo\n' > "$D_PARENT_FAIL"
+demand_run tk-solo "operator: decide the direction" --by converse
+rm -f "$D_PARENT_FAIL"
+eq "$DRC" "4" "(SHAPEREADFAIL) a demand whose gated-bead child-list read fails is refused"
+eq "$(d_gate)" "" "(SHAPEREADFAIL) …and no gate is filed"
+eq "$(d_update)" "" "(SHAPEREADFAIL) …and nothing is stamped"
+eq "$(d_deps)" "" "(SHAPEREADFAIL) …and no blocks edge is wired"
+grep -q 'tk-solo' <<< "$DERR" \
+  && ok "(SHAPEREADFAIL) …naming the bead whose children could not be read" \
+  || bad "(SHAPEREADFAIL) the unreadable bead is not named: $DERR"
+grep -q 'component-model.md' <<< "$DERR" \
+  && ok "(SHAPEREADFAIL) …and cites the shape law" || bad "(SHAPEREADFAIL) no doctrine cite: $DERR"
+
+# (SHAPEBADJSON) a non-array payload on the gated bead is refused too — a zero
+# exit does not make an {"error":…} object a leaf.
+printf 'tk-shapedem5\n' > "$D_NEXTID"
+printf 'tk-solo\n' > "$D_PARENT_BADJSON"
+demand_run tk-solo "operator: decide the direction" --by converse
+rm -f "$D_PARENT_BADJSON"
+eq "$DRC" "4" "(SHAPEBADJSON) a demand whose gated-bead child list is a non-array payload is refused"
+eq "$(d_gate)" "" "(SHAPEBADJSON) …and no gate is filed"
+
+# (SHAPEALSOREADFAIL) an --also-blocks target is a bead the demand blocks too, so
+# an unreadable child list there fails closed on the same terms — even when the
+# primary bead reads clean.
+printf 'tk-shapedem6\n' > "$D_NEXTID"
+printf 'tk-kid\n' > "$D_PARENT_FAIL"
+demand_run tk-solo "operator: decide the direction" --also-blocks tk-kid
+rm -f "$D_PARENT_FAIL"
+eq "$DRC" "4" "(SHAPEALSOREADFAIL) an --also-blocks target whose child-list read fails is refused"
+eq "$(d_gate)" "" "(SHAPEALSOREADFAIL) …and no gate is filed"
+grep -q 'tk-kid' <<< "$DERR" \
+  && ok "(SHAPEALSOREADFAIL) …naming the also-target that could not be read" \
+  || bad "(SHAPEALSOREADFAIL) the unreadable also-target is not named: $DERR"
+
+# (SHAPEALSOBADJSON) …and a non-array payload on an --also-blocks target is
+# refused on the same terms.
+printf 'tk-shapedem7\n' > "$D_NEXTID"
+printf 'tk-kid\n' > "$D_PARENT_BADJSON"
+demand_run tk-solo "operator: decide the direction" --also-blocks tk-kid
+rm -f "$D_PARENT_BADJSON"
+eq "$DRC" "4" "(SHAPEALSOBADJSON) an --also-blocks target with a non-array child list is refused"
+eq "$(d_gate)" "" "(SHAPEALSOBADJSON) …and no gate is filed"
 
 printf 'tk-dem1\n' > "$D_NEXTID"
 printf '[]\n' > "$D_LIST"
