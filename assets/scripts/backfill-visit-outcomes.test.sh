@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # backfill-visit-outcomes.test.sh — the one-shot legacy-visit outcome backfill
-# (assets/scripts/backfill-visit-outcomes.sh): it selects exactly the doctor
-# set (task_kind=visit, closed, empty gc.outcome), stamps gc.outcome and reuses
-# the bead's close_reason as gc.outcome_reason, reads both back, and is
-# idempotent. Dry-run writes nothing; --apply writes and verifies.
+# (assets/scripts/backfill-visit-outcomes.sh): it selects the doctor set
+# (task_kind=visit, closed, empty gc.outcome) plus any half-landed row (its
+# gc.outcome carries this run's word but gc.outcome_reason is not the reason
+# derived from close_reason), stamps both keys, reads them back, and converges
+# so a settled store stamps nothing. Dry-run writes nothing; --apply writes
+# and verifies.
 #
 # Hermetic: stubs gc, reads the repo only; no city, no network.
 set -u
