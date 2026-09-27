@@ -1315,6 +1315,16 @@ cmd_takeaway() {
 # `blocks` edge then runs sibling->sibling; beads REFUSES one from a parent to
 # its own descendant, which is what a demand filed as a CHILD would be.
 #
+# The gated bead itself must be a leaf. A bead with parent-child children is a
+# roll-up container, and beads cascades a blocked parent's is_blocked down every
+# leg (docs/component-model.md, I1: containers do not block, blockers do not
+# parent). A demand on a container therefore drops each non-closed leg out of
+# `bd ready` with no blocker of its own — unoffered by the pool, unfired by
+# deferred-dispatch reconcile, which reads that same predicate. The wait a
+# sitting on a container owes is answered beside its decomposition, not by
+# freezing it, so a container gated bead — or --also-blocks target — is refused,
+# naming the legs and the leaf to target, before any gate is filed.
+#
 # The edge is the record here, not a garnish on it. `takeaway --waiting-on`
 # writes its edge beside prose a human reads, so a rejected edge only warns;
 # any requested edge that did not land leaves that work reading ready while a
@@ -1339,6 +1349,18 @@ demand_lookup() (
               error("multiple demand gates; reconcile before retrying: " + (map(.id) | join(", ")))
             else .[0] // {} end
         end'
+)
+
+# open_child_ids <bead> — the ids of <bead>'s non-closed parent-child children,
+# one per line, empty when it is a leaf. A subshell so the per-bead BEADS_DIR
+# does not outlive the probe (an --also-blocks target may live in another rig).
+# `bd ready` never offers a closed bead, so a closed child cannot be stranded by
+# a cascade; only the non-closed legs are the shape law's concern here.
+open_child_ids() (
+    _oc_path=$(rig_path_for_bead "$1")
+    [ -n "$_oc_path" ] && [ -d "$_oc_path/.beads" ] && export BEADS_DIR="$_oc_path/.beads"
+    gc bd list --parent "$1" --status open,in_progress,blocked,deferred --json --limit 0 2>/dev/null \
+        | scrub | jq -r 'if type == "array" then (.[].id // empty) else empty end' 2>/dev/null
 )
 
 cmd_demand() {
@@ -1398,6 +1420,25 @@ cmd_demand() {
            | ((.id // .depends_on_id // "") | tostring) ]
          | map(select(. != "")) | .[0] // ""' 2>/dev/null || true)
     # <<< demand-sibling-shape
+
+    # >>> demand-shape-law-guard
+    # Refuse before anything is filed: a demand blocks the bead it names, and a
+    # blocks edge on a bead that has non-closed parent-child children cascades
+    # is_blocked down every leg (docs/component-model.md, I1). The gated bead and
+    # every --also-blocks target are each a bead the demand would block, so each
+    # is held to the shape law here.
+    containers=""
+    for _c in $gated $also; do
+        [ -n "$_c" ] || continue
+        _kids=$(open_child_ids "$_c" | tr '\n' ' ')
+        _kids="${_kids% }"
+        [ -n "$_kids" ] && containers="${containers}$_c (children: $_kids); "
+    done
+    if [ -n "$containers" ]; then
+        echo "$PROG: demand: refused — a roll-up container cannot carry a demand: ${containers}per the shape law (docs/component-model.md, I1: containers do not block, blockers do not parent) a blocks edge here cascades is_blocked down every parent-child leg and strands each one out of bd ready — unoffered by the pool, unfired by deferred-dispatch reconcile, which reads that same predicate. File the demand on the specific leaf item(s) that are actually waiting, not the container. Nothing was filed." >&2
+        exit 4
+    fi
+    # <<< demand-shape-law-guard
 
     # --include-gates: the demand is a human gate (issue_type=gate), which
     # `bd list` hides by default; without it every re-state files a second

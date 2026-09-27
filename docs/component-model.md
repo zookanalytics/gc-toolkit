@@ -226,8 +226,10 @@ and the stranding follows from the false statement rather than from the
 cascade. Filed as the graph actually is, `W` sits beside `S` and `S` blocks on
 `W`. That reads correctly, and `W` stays claimable. beads enforces the sharpest
 case of this directly, refusing an edge that would make a parent wait on its
-own descendant. Where a container is wanted for roll-up, it is a bead that
-never blocks.
+own descendant, and `gc-helm.sh demand` enforces the general case for the wait
+it files: it refuses to gate a bead that has non-closed parent-child children
+rather than cascade a block down them. Where a container is wanted for roll-up,
+it is a bead that never blocks.
 
 Two boundaries. A conclusion is prose, stored once and never cleared, and it
 does not become a wait by being written down; that seam is

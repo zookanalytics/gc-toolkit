@@ -2169,6 +2169,16 @@ case "$1 ${2:-}" in
          dependencies: ((if $p != "" then [{id: $p, dependency_type: "parent-child"}] else [] end)
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
   "bd list")
+    # --parent <id>: the shape-law guard's child probe. Children are the reverse
+    # of D_PARENTS (child|parent); a child id containing CLOSED models a closed
+    # child, which the guard's --status open,... omits, so it is dropped here too.
+    _pp=""; _prev=""
+    for a in "$@"; do [ "$_prev" = "--parent" ] && _pp="$a"; _prev="$a"; done
+    if [ -n "$_pp" ]; then
+      awk -F'|' -v P="$_pp" '$2==P && $1 !~ /CLOSED/ {print $1}' "$D_PARENTS" \
+        | jq -R . | jq -sc 'map(select(. != "") | {id: ., status: "open"})'
+      exit 0
+    fi
     # Even a valid-looking response must not count if the command failed.
     if [ -f "$D_LIST_FAIL" ]; then cat "$D_LIST"; exit 1; fi
     cat "$D_LIST" ;;
@@ -2245,7 +2255,10 @@ export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
        D_GATE_EDGES="$TMP/dgateedges" D_LIST_FAIL="$TMP/dlistfail"
 : > "$TMP/dsettled"
 : > "$TMP/dgateedges"
-printf 'tk-kid|tk-mum\n' > "$D_PARENTS"   # tk-kid has a parent; tk-solo has none
+# <child>|<parent>: tk-kid has a parent (tk-mum); tk-solo has none. The reverse
+# is the shape-law child probe: tk-epic has a non-closed leg (tk-leg) and is a
+# container; tk-doneparent's only leg is closed, so it stays a valid gated bead.
+printf 'tk-kid|tk-mum\ntk-leg|tk-epic\ntk-cleg-CLOSED|tk-doneparent\n' > "$D_PARENTS"
 printf 'tk-gone\n'        > "$D_MISSING"
 printf '[]\n'             > "$D_LIST"
 printf 'tk-dem1\n'        > "$D_NEXTID"
@@ -2579,6 +2592,49 @@ eq "$(d_gate)$(d_update)" "" "(CAPREFRESH) …touching nothing: no second gate, 
 grep -q 'cap is 140' <<< "$DERR" \
   && ok "(CAPREFRESH) …and the refusal names the cap" \
   || bad "(CAPREFRESH) refusal is silent: $DERR"
+printf '[]\n' > "$D_LIST"
+
+# (SHAPE) the shape law (docs/component-model.md, I1): a demand blocks the bead
+# it names, and a blocks edge on a bead with non-closed parent-child children
+# cascades is_blocked down every leg and strands them out of bd ready. So a
+# container gated bead is refused before anything is filed, naming the leg and
+# the doctrine, so the wait is filed on the leaf that is actually waiting.
+printf 'tk-shapedem\n' > "$D_NEXTID"
+demand_run tk-epic "operator: decide the epic direction" --by converse
+eq "$DRC" "4" "(SHAPE) a demand on a bead with a non-closed leg is refused"
+eq "$(d_gate)" "" "(SHAPE) …and no gate is filed"
+eq "$(d_update)" "" "(SHAPE) …and nothing is stamped"
+eq "$(d_deps)" "" "(SHAPE) …and no blocks edge is wired"
+grep -q 'container cannot carry a demand' <<< "$DERR" \
+  && ok "(SHAPE) …and the refusal says a container cannot be gated" \
+  || bad "(SHAPE) refusal does not name the container rule: $DERR"
+grep -q 'tk-leg' <<< "$DERR" \
+  && ok "(SHAPE) …naming the leg that would be stranded" \
+  || bad "(SHAPE) the stranded leg is not named: $DERR"
+grep -q 'component-model.md' <<< "$DERR" \
+  && ok "(SHAPE) …and cites the shape law" || bad "(SHAPE) no doctrine cite: $DERR"
+grep -q '^demand ' <<< "$DOUT" \
+  && bad "(SHAPE) a success line was printed for a refused container: $DOUT" \
+  || ok "(SHAPE) …and no success line is printed"
+
+# (SHAPECLOSED) a closed leg cannot be stranded — bd ready never offers it — so
+# a bead whose only parent-child child is closed is still a valid gated bead.
+printf 'tk-shapeok\n' > "$D_NEXTID"
+demand_run tk-doneparent "operator: decide the settled epic" --by converse
+eq "$DRC" "0" "(SHAPECLOSED) a demand on a bead whose only leg is closed is allowed"
+grep -q -- '--type=human' <<< "$(d_gate)" \
+  && ok "(SHAPECLOSED) …and the gate is filed" || bad "(SHAPECLOSED) no gate filed: $(d_gate)"
+
+# (SHAPEALSO) an --also-blocks target is a bead the demand blocks too, so it is
+# held to the shape law on the same terms — even when the primary bead is a leaf.
+printf 'tk-shapedem2\n' > "$D_NEXTID"
+demand_run tk-solo "operator: decide" --also-blocks tk-epic
+eq "$DRC" "4" "(SHAPEALSO) an --also-blocks container is refused on the same terms"
+eq "$(d_gate)" "" "(SHAPEALSO) …and no gate is filed"
+grep -q 'tk-epic' <<< "$DERR" \
+  && ok "(SHAPEALSO) …naming the container --also-blocks target" \
+  || bad "(SHAPEALSO) the container also-target is not named: $DERR"
+printf 'tk-dem1\n' > "$D_NEXTID"
 printf '[]\n' > "$D_LIST"
 
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
