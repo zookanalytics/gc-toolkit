@@ -183,10 +183,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ "${#cand_ids[@]}" -gt 0 ] || continue
 
     # ONE dependency read for the whole candidate set. `bd dep list` takes many
-    # ids and returns a flat array of edge records across all of them, so the
-    # store costs a single query instead of one per candidate — the per-bead call
-    # summed past the doctor budget at scale. The default `down` direction makes
-    # each record candidate(issue_id) blocked-by blocker(depends_on_id).
+    # ids in a single call, so the store costs one query instead of one per
+    # candidate — the per-bead call summed past the doctor budget at scale. The
+    # default `down` direction makes each edge candidate blocked-by blocker; the
+    # extraction below reads that off whichever shape bd returns for the id count.
     edges_raw=$(run_bounded gc bd dep list "${cand_ids[@]}" --db "$rig_path/.beads" --json 2>"$dep_stderr"); erc=$?
     if [ "$erc" -ne 0 ] || ! printf '%s' "$edges_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
         warnings+=("$label: could not batch-read dependency edges for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (rc=$erc) — this store was NOT checked")
@@ -205,7 +205,27 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: batch dependency read did not resolve every one of ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (\`bd dep list\` warned: $(tr '[:cntrl:]' ' ' < "$dep_stderr")) — this store was NOT checked")
         continue
     fi
-    edges=$(printf '%s' "$edges_raw" | scrub | jq -c '[ .[]? | select(.type == "blocks") | {issue_id, depends_on_id} ]' 2>/dev/null)
+    # `bd dep list` returns one of two shapes, and the join below reads only the
+    # first: two or more ids give a flat edge array ({issue_id, depends_on_id,
+    # type}), a lone id gives the annotated dependency beads instead ({id,
+    # dependency_type}, the subject implicit). A store with a single candidate —
+    # the common case — hits the single-id shape, so both are normalized to
+    # {issue_id, depends_on_id} here. Reading the single-id beads with the flat
+    # selector drops every edge, and a candidate still waiting on an open blocker
+    # then reads as zero-blocker and owed — the same false finding the stderr
+    # guard above prevents for a dropped id. A non-empty result in neither shape
+    # is an unread probe: fail closed like the sibling reads.
+    edges_scrubbed=$(printf '%s' "$edges_raw" | scrub)
+    shape=$(printf '%s' "$edges_scrubbed" | jq -r '
+        if   length == 0                      then "empty"
+        elif all(.[]; has("issue_id"))        then "flat"
+        elif all(.[]; has("dependency_type")) then "beads"
+        else                                       "unknown" end' 2>/dev/null)
+    case "$shape" in
+        empty|flat) edges=$(printf '%s' "$edges_scrubbed" | jq -c '[ .[]? | select(.type == "blocks") | {issue_id, depends_on_id} ]' 2>/dev/null) ;;
+        beads)      edges=$(printf '%s' "$edges_scrubbed" | jq -c --arg only "${cand_ids[0]}" '[ .[]? | select(.dependency_type == "blocks") | {issue_id: $only, depends_on_id: .id} ]' 2>/dev/null) ;;
+        *)          warnings+=("$label: could not recognize the \`bd dep list\` output shape for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads — this store was NOT checked"); continue ;;
+    esac
     [ -n "$edges" ] || edges='[]'
 
     # Resolve the blockers' statuses in one more listing: every distinct blocker

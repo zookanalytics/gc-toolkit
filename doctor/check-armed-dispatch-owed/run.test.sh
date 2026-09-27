@@ -41,11 +41,13 @@ GC
 # The stub models exactly the three reads the check makes, and the failure shapes
 # the real bd shows for each:
 #   * `bd list --has-metadata-key ...`  → the armed listing (per-rig fixture).
-#   * `bd dep list <id...> --json`       → a FLAT array of edge records across all
-#      requested ids ({issue_id, depends_on_id, type}), at rc=0. An id in
-#      BD_FAIL_DEP is one bd cannot resolve: it is DROPPED from the array with a
-#      per-id "(skipped)" warning on stderr and rc STAYS 0 — one bad id does not
-#      poison the batch. A fully-resolvable read is silent on stderr.
+#   * `bd dep list <id...> --json`       → TWO shapes by id count, both at rc=0:
+#      two or more ids give a FLAT array of edge records ({issue_id,
+#      depends_on_id, type}); a LONE id gives the annotated dependency beads
+#      ({id, dependency_type}, the subject implicit). An id in BD_FAIL_DEP is one
+#      bd cannot resolve: it is DROPPED with a per-id "(skipped)" warning on
+#      stderr and rc STAYS 0 — one bad id does not poison the batch. A
+#      fully-resolvable read is silent on stderr.
 #      BD_HARDFAIL_DEP names a store whose whole dep read fails outright (rc!=0),
 #      the shape a broken db or a timeout shows.
 #   * `bd list --id <csv> --all ...`     → the named blocker beads, DROPPING ids
@@ -114,8 +116,15 @@ case "$sub" in
     done
     f="$STORES/$name.edges.json"
     if [ -f "$f" ] && [ "${#kept[@]}" -gt 0 ]; then
-      want=$(printf '%s\n' "${kept[@]}" | jq -R . | jq -sc .)
-      jq -c --argjson want "$want" '[ .[] | select(.issue_id as $s | $want | index($s)) ]' "$f"
+      if [ "${#dep_ids[@]}" -eq 1 ]; then
+        # A LONE id: real bd returns the annotated dependency beads
+        # ({id, dependency_type}, subject implicit), not the flat edge array.
+        jq -c --arg only "${dep_ids[0]}" '[ .[] | select(.issue_id == $only) | {id: .depends_on_id, dependency_type: .type} ]' "$f"
+      else
+        # Two or more ids: the flat edge array across all requested ids.
+        want=$(printf '%s\n' "${kept[@]}" | jq -R . | jq -sc .)
+        jq -c --argjson want "$want" '[ .[] | select(.issue_id as $s | $want | index($s)) ]' "$f"
+      fi
     else printf '[]'; fi ;;
   *) printf '[]'; exit 0 ;;
 esac
@@ -186,6 +195,18 @@ blockers_store alpha "$(b_open b-0)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an arm with an open own blocker is correctly waiting (exit 0)"
 has "$OUT" "OK:" "the quiet headline is printed"
+clear_stores
+
+# --- 3b. SINGLE-ID SHAPE: a lone candidate's blockers arrive in bd's single-id
+#          dep-list shape ({id, dependency_type}), not the batch flat-edge array.
+#          Parsing that as the flat array drops the edge, so a candidate still
+#          waiting on an open blocker reads as zero-blocker and owed. --------------
+armed_store alpha "$(aarmed a-3b)"
+edges_store alpha "$(e_blk a-3b b-0)"
+blockers_store alpha "$(b_open b-0)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a lone candidate waiting on an open blocker is exempt (single-id dep shape parsed)"
+hasnt "$OUT" "owed but not firing" "the single-id shape is not misread as a zero-blocker owed arm"
 clear_stores
 
 # --- 4. EXEMPT: dispatchable only recently (within the reconcile window) -----
