@@ -23,15 +23,15 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/web"
 )
 
-// fakeOpener records what it was asked and returns a canned result.
-type fakeOpener struct {
+// fakeActuator records what it was asked and returns a canned result.
+type fakeActuator struct {
 	mu    sync.Mutex
-	calls []string
+	calls []actCall
 
 	res ToolResult
 	err error
 
-	// block, when non-nil, holds Open until it is closed — used to make two
+	// block, when non-nil, holds Run until it is closed — used to make two
 	// requests genuinely concurrent.
 	block chan struct{}
 
@@ -40,15 +40,18 @@ type fakeOpener struct {
 	ctx context.Context
 }
 
-func (f *fakeOpener) handedCtx() context.Context {
+// actCall is one (verb, bead) the handler ran.
+type actCall struct{ verb, bead string }
+
+func (f *fakeActuator) handedCtx() context.Context {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.ctx
 }
 
-func (f *fakeOpener) Open(ctx context.Context, bead string) (ToolResult, error) {
+func (f *fakeActuator) Run(ctx context.Context, verb, bead string) (ToolResult, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, bead)
+	f.calls = append(f.calls, actCall{verb, bead})
 	f.ctx = ctx
 	f.mu.Unlock()
 	if f.block != nil {
@@ -57,10 +60,24 @@ func (f *fakeOpener) Open(ctx context.Context, bead string) (ToolResult, error) 
 	return f.res, f.err
 }
 
-func (f *fakeOpener) seen() []string {
+// seen returns the beads passed, in order — for the tests that only care whether
+// the tool ran on a bead at all.
+func (f *fakeActuator) seen() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]string(nil), f.calls...)
+	out := make([]string, 0, len(f.calls))
+	for _, c := range f.calls {
+		out = append(out, c.bead)
+	}
+	return out
+}
+
+// seenCalls returns the (verb, bead) pairs passed — for the tests that assert
+// which verb a route ran.
+func (f *fakeActuator) seenCalls() []actCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]actCall(nil), f.calls...)
 }
 
 // openReq builds a same-origin POST, the shape the board's fetch sends.
@@ -71,9 +88,9 @@ func openReq(body string) *http.Request {
 	return r
 }
 
-func serveOpen(t *testing.T, o Opener, r *http.Request) *httptest.ResponseRecorder {
+func serveOpen(t *testing.T, o Actuator, r *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
-	s := New(newFake(), time.Minute, WithOpener(o))
+	s := New(newFake(), time.Minute, WithActuator(o))
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, r)
 	return rr
@@ -88,9 +105,9 @@ func decodeOK(t *testing.T, rr *httptest.ResponseRecorder) openResponse {
 	return got
 }
 
-func decodeErr(t *testing.T, rr *httptest.ResponseRecorder) openErrorBody {
+func decodeErr(t *testing.T, rr *httptest.ResponseRecorder) actuateErrorBody {
 	t.Helper()
-	var got openErrorBody
+	var got actuateErrorBody
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode error body: %v (body=%s)", err, rr.Body.String())
 	}
@@ -121,7 +138,7 @@ func TestOpenDistinguishesFiledFromExisting(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeOpener{res: ToolResult{Stdout: tc.stdout}}
+			f := &fakeActuator{res: ToolResult{Stdout: tc.stdout}}
 			rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
@@ -147,7 +164,7 @@ func TestOpenDistinguishesFiledFromExisting(t *testing.T) {
 // An unrecognised success sentence must still read as success: the visit was
 // filed regardless of how the script phrased it.
 func TestOpenUnparsedSuccessIsStillSuccess(t *testing.T) {
-	f := &fakeOpener{res: ToolResult{Stdout: "gc-helm: something new and unrecognised\n"}}
+	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: something new and unrecognised\n"}}
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -216,7 +233,7 @@ func TestOpenExitCodesMapDistinctly(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeOpener{res: ToolResult{ExitCode: tc.exit, Stderr: tc.stderr}}
+			f := &fakeActuator{res: ToolResult{ExitCode: tc.exit, Stderr: tc.stderr}}
 			rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 			if rr.Code != tc.wantStatus {
 				t.Errorf("status = %d, want %d", rr.Code, tc.wantStatus)
@@ -248,7 +265,7 @@ func TestOpenExitThreePassesTheScriptsSentenceThrough(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, s := range sentences {
-		f := &fakeOpener{res: ToolResult{ExitCode: 3, Stderr: s}}
+		f := &fakeActuator{res: ToolResult{ExitCode: 3, Stderr: s}}
 		rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 		got := decodeErr(t, rr)
 		if seen[got.Error] {
@@ -261,7 +278,7 @@ func TestOpenExitThreePassesTheScriptsSentenceThrough(t *testing.T) {
 // A failure with nothing on stderr must not be reported as a success, and must
 // not invent a cause.
 func TestOpenSilentFailureNamesTheExitCode(t *testing.T) {
-	f := &fakeOpener{res: ToolResult{ExitCode: 4}}
+	f := &fakeActuator{res: ToolResult{ExitCode: 4}}
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", rr.Code)
@@ -283,7 +300,7 @@ func TestOpenToolFailures(t *testing.T) {
 		{"unclassified", errors.New("something else"), http.StatusInternalServerError, reasonInternal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeOpener{err: tc.err}
+			f := &fakeActuator{err: tc.err}
 			rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 			if rr.Code != tc.wantStatus {
 				t.Errorf("status = %d, want %d", rr.Code, tc.wantStatus)
@@ -303,7 +320,7 @@ func TestOpenToolFailures(t *testing.T) {
 // the script's duplicate guard keys on exactly the fields that never landed —
 // so the retry files a second one.
 func TestOpenTimeoutDoesNotClaimNothingWasFiled(t *testing.T) {
-	f := &fakeOpener{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
+	f := &fakeActuator{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 	got := decodeErr(t, rr).Error
 	for _, forbidden := range []string{"no visit was filed", "nothing was filed"} {
@@ -323,7 +340,7 @@ func TestOpenTimeoutDoesNotClaimNothingWasFiled(t *testing.T) {
 // validated and the per-bead gate is held, cancelling the request must no longer
 // reach the subprocess — only the opener's own timeout may stop it.
 func TestOpenSurvivesClientDisconnect(t *testing.T) {
-	f := &fakeOpener{res: ToolResult{Stdout: "gc-helm: open: filed visit tk-v1 on tk-abc12\n"}}
+	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: open: filed visit tk-v1 on tk-abc12\n"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`).WithContext(ctx))
 	if rr.Code != http.StatusOK {
@@ -353,8 +370,8 @@ func TestOpenInvalidatesTheBoardCache(t *testing.T) {
 		{"existing", "gc-helm: open: visit tk-v1 is already open on tk-abc12\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeOpener{res: ToolResult{Stdout: tc.stdout}}
-			s := New(newFake(), time.Minute, WithOpener(f))
+			f := &fakeActuator{res: ToolResult{Stdout: tc.stdout}}
+			s := New(newFake(), time.Minute, WithActuator(f))
 			// Warm the cache the way a board read does.
 			if _, err := s.Board(context.Background()); err != nil {
 				t.Fatalf("warm the board: %v", err)
@@ -385,8 +402,8 @@ func TestOpenInvalidatesTheBoardCache(t *testing.T) {
 // ...and a FAILED open must leave the cache alone: nothing changed, and dropping
 // it would make every bad click pay for a fresh gather.
 func TestOpenFailureKeepsTheBoardCache(t *testing.T) {
-	f := &fakeOpener{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
-	s := New(newFake(), time.Minute, WithOpener(f))
+	f := &fakeActuator{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
+	s := New(newFake(), time.Minute, WithActuator(f))
 	if _, err := s.Board(context.Background()); err != nil {
 		t.Fatalf("warm the board: %v", err)
 	}
@@ -422,8 +439,8 @@ func TestOpenRejectsBadBeadIDsWithoutExecuting(t *testing.T) {
 		strings.Repeat("a", 40) + "-" + strings.Repeat("b", 40),
 	} {
 		t.Run(fmt.Sprintf("%q", bad), func(t *testing.T) {
-			f := &fakeOpener{res: ToolResult{Stdout: "should never run"}}
-			body, err := json.Marshal(openRequest{Bead: bad})
+			f := &fakeActuator{res: ToolResult{Stdout: "should never run"}}
+			body, err := json.Marshal(actuateRequest{Bead: bad})
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
@@ -446,8 +463,8 @@ func TestOpenRejectsBadBeadIDsWithoutExecuting(t *testing.T) {
 func TestOpenAcceptsRealBeadIDs(t *testing.T) {
 	for _, good := range []string{"tk-abc12", "tk-yc00g", "tk-eemvf.3", "sl-kg9z6.4.1", "su-ab9je", "gc2-x1y2"} {
 		t.Run(good, func(t *testing.T) {
-			f := &fakeOpener{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on " + good + " (pool p) — x.\n"}}
-			body, err := json.Marshal(openRequest{Bead: good})
+			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on " + good + " (pool p) — x.\n"}}
+			body, err := json.Marshal(actuateRequest{Bead: good})
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
@@ -479,7 +496,7 @@ func TestOpenRefusesCrossSiteWrites(t *testing.T) {
 		{"origin without fetch metadata", "", "https://evil.example", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeOpener{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"}}
+			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"}}
 			r := httptest.NewRequest(http.MethodPost, "/helm/open", strings.NewReader(`{"bead":"tk-abc12"}`))
 			r.Header.Set("Content-Type", "application/json")
 			if tc.fetchSite != "" {
@@ -512,11 +529,11 @@ func TestOpenRefusesCrossSiteWrites(t *testing.T) {
 // two concurrent opens on one bead could each pass it and file two visits —
 // splitting the conversation the gate exists to keep whole.
 func TestOpenCollapsesConcurrentOpensOfTheSameBead(t *testing.T) {
-	f := &fakeOpener{
+	f := &fakeActuator{
 		res:   ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"},
 		block: make(chan struct{}),
 	}
-	s := New(newFake(), time.Minute, WithOpener(f))
+	s := New(newFake(), time.Minute, WithActuator(f))
 
 	first := make(chan int, 1)
 	go func() {
@@ -557,7 +574,7 @@ func TestOpenCollapsesConcurrentOpensOfTheSameBead(t *testing.T) {
 
 // A different bead is never blocked by one in flight.
 func TestOpenDoesNotBlockADifferentBead(t *testing.T) {
-	g := newOpenGate()
+	g := newActuationGate()
 	if !g.enter("tk-abc12") {
 		t.Fatal("first enter refused")
 	}
@@ -571,8 +588,8 @@ func TestOpenDoesNotBlockADifferentBead(t *testing.T) {
 }
 
 func TestOpenRejectsNonPost(t *testing.T) {
-	f := &fakeOpener{}
-	s := New(newFake(), time.Minute, WithOpener(f))
+	f := &fakeActuator{}
+	s := New(newFake(), time.Minute, WithActuator(f))
 	for _, m := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(m, "/helm/open", nil))
@@ -589,7 +606,7 @@ func TestOpenRejectsNonPost(t *testing.T) {
 }
 
 func TestOpenMalformedBody(t *testing.T) {
-	f := &fakeOpener{}
+	f := &fakeActuator{}
 	rr := serveOpen(t, f, openReq(`{"bead":`))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rr.Code)
@@ -620,8 +637,8 @@ func TestOpenRouteBeatsTheSPACatchAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("web.NewHandler: %v", err)
 	}
-	f := &fakeOpener{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"}}
-	s := New(newFake(), time.Minute, WithSPA(spa), WithOpener(f))
+	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"}}
+	s := New(newFake(), time.Minute, WithSPA(spa), WithActuator(f))
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))
 	if rr.Code != http.StatusOK {
@@ -637,8 +654,8 @@ func TestOpenRouteBeatsTheSPACatchAll(t *testing.T) {
 
 // The board itself must be unaffected by the new route.
 func TestBoardStillServesAlongsideOpen(t *testing.T) {
-	f := &fakeOpener{}
-	s := New(newFake(), time.Minute, WithOpener(f))
+	f := &fakeActuator{}
+	s := New(newFake(), time.Minute, WithActuator(f))
 	for _, path := range []string{"/helm", "/", "/healthz"} {
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))

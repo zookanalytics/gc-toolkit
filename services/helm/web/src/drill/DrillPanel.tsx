@@ -6,6 +6,7 @@
 // the operator dives in for is present and honest, including the states where
 // something is missing.
 
+import { ActuateButton } from '../actuate/ActuateButton';
 import { OpenConversation } from '../open/OpenConversation';
 import type { CityEvent, Session } from './client';
 import { PartialNotice } from './PartialNotice';
@@ -113,6 +114,7 @@ export function DrillPanel({ beadId, onClose }: DrillPanelProps) {
         session={session}
         uncertain={sessionUncertain}
         loading={loading}
+        onActed={reload}
       />
 
       <section className="drill-activity">
@@ -141,16 +143,42 @@ export function DrillPanel({ beadId, onClose }: DrillPanelProps) {
   );
 }
 
+// The drill's conversation actions, for any drilled bead: file a visit (open),
+// draw one off the board into a live Discuss sitting (engage), or end it
+// (dismiss). This is where the board's parity with the CLI's conversation verbs
+// lands — the board row carries only Accept, matching the CLI board's "accept ▸"
+// marker, and the fuller set lives here in the per-bead panel.
+//
+// All three are offered unconditionally, even when the session list did not
+// answer: each verb's own gate in gc-helm.sh is what prevents a wrong write
+// (open's one-visit-per-subject gate, engage's un-engaged/rig-live checks,
+// dismiss's idempotent no-op on a subject with no visit), so an uncertain read is
+// no reason to withhold them — and withholding would strand the operator exactly
+// when the board is least informative.
+function DrillActions({ beadId, onActed }: { beadId: string; onActed: () => void }) {
+  return (
+    <div className="drill-conversation">
+      <OpenConversation beadId={beadId} />
+      <ActuateButton verb="engage" beadId={beadId} onDone={onActed} />
+      <ActuateButton verb="dismiss" beadId={beadId} onDone={onActed} />
+    </div>
+  );
+}
+
 function SessionSection({
   beadId,
   session,
   uncertain,
   loading,
+  onActed,
 }: {
   beadId: string;
   session: Session | null;
   uncertain: boolean;
   loading: boolean;
+  // Re-read the drill after a conversation action lands, so the session/visit
+  // state reflects it rather than waiting for a manual refresh.
+  onActed: () => void;
 }) {
   if (session === null) {
     return (
@@ -166,12 +194,7 @@ function SessionSection({
               ? 'Could not tell whether an agent is working this anchor — the session list came back incomplete.'
               : 'No agent is working this anchor right now.'}
         </p>
-        {/* Offered even when the session list did not answer. A visit is filed
-            against the BEAD, and gc-helm.sh's own one-open-visit-per-subject
-            gate is what prevents a duplicate — so an uncertain read is no
-            reason to withhold the action, and withholding it would strand the
-            operator exactly when the board is least informative. */}
-        <OpenConversation beadId={beadId} />
+        <DrillActions beadId={beadId} onActed={onActed} />
       </section>
     );
   }
@@ -192,9 +215,9 @@ function SessionSection({
       )}
       {/* Still offered with a session running: that session is an agent working
           the anchor, which is not the same as a conversation the operator can
-          have about it. The duplicate gate lives in the tool, so the worst case
-          here is being told one is already open. */}
-      <OpenConversation beadId={beadId} />
+          have about it. Each verb's own gate is the guard, so the worst case is
+          being told a visit is already open, or that there is none to dismiss. */}
+      <DrillActions beadId={beadId} onActed={onActed} />
     </section>
   );
 }
