@@ -3,9 +3,10 @@
 // SCOPE (specs/2026-08-review-gates/gctk-promotion.md). Shell stays the pack's
 // lingua franca: anything an agent pastes, anything that must read as
 // documentation, anything under ~150 lines. gctk takes the merge-cadence
-// cluster alone — highest stakes, pure data-plane, and already invoked by its
-// callers as an opaque CLI, so the language behind the command is invisible to
-// them.
+// cluster — highest stakes, pure data-plane, and already invoked by its callers
+// as an opaque CLI, so the language behind the command is invisible to them —
+// plus the PR-status tri-state, the derivation the status: label and the helm
+// board must share from one code path.
 //
 // Each subcommand keeps the byte-identical CLI of the script it replaces: same
 // flags, same exit codes, same stdout grammar. The scripts' own .test.sh
@@ -13,10 +14,13 @@
 // gctk shells out to gc/bd/gh exactly as the scripts did rather than linking
 // the beads library. Same observability, same stubs, same permissions surface.
 //
-// Ported so far: lifecycle. The rest of the cluster (gate-ensure, pr-open,
-// merge, pr-facts, convoy-graduate, signoff) still runs as shell, and
-// assets/scripts/lifecycle.sh remains as the fallback for a city whose gctk
-// build has not landed yet.
+// Ported so far: lifecycle and pr-status. The rest of the merge-cadence cluster
+// (gate-ensure, pr-open, merge, pr-facts, convoy-graduate, signoff) still runs
+// as shell. assets/scripts/lifecycle.sh remains as the fallback for a city whose
+// gctk build has not landed yet; pr-status has none by design — its tri-state
+// lives only in gctk so the status: label and the helm board share one code
+// path, so when the binary is absent or stale pr-status-label.sh leaves the
+// label unchanged rather than deriving it in shell.
 package main
 
 import (
