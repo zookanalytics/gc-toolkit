@@ -1,9 +1,10 @@
 # gctk — the compiled data plane
 
-`gctk` is the merge cadence's data-plane logic as one Go binary. It is a port,
-not a redesign: each subcommand keeps the byte-identical CLI of the script it
-replaces, so no formula, order, prompt, or doctor check changes when a port
-lands.
+`gctk` is the pack's compiled data plane as one Go binary: the merge cadence's
+logic, plus the PR-status tri-state that the `status:` label and the helm board
+must share. It is a port, not a redesign: each subcommand keeps the
+byte-identical CLI of the script it replaces, so no formula, order, prompt, or
+doctor check changes when a port lands.
 
 Scope and rationale: `specs/2026-08-review-gates/gctk-promotion.md`.
 
@@ -16,17 +17,26 @@ Scope and rationale: `specs/2026-08-review-gates/gctk-promotion.md`.
 Shell stays the pack's lingua franca. Formula steps and prompt fragments can
 only carry shell, and it fits the small glue that remains. The merge-cadence
 cluster is the exception: highest stakes, pure data-plane, no cross-media
-sharing, and its callers already treat it as an opaque CLI.
+sharing, and its callers already treat it as an opaque CLI. `pr-status` is
+compiled for the opposite reason: the `status:` label (shell) and the helm
+board (Go) must derive the tri-state from one code path, and only a shared
+compiled package keeps them from diverging.
 
 ## Ported so far
 
 | Subcommand | Replaces | State |
 |---|---|---|
 | `lifecycle` | `assets/scripts/lifecycle.sh` | ported; the script remains as the fallback |
+| `pr-status` | `pr-status-label.sh`'s `derive_value` | ported; no fallback — the label is left unchanged when the binary is absent or stale |
 
 Still shell: `gate-ensure`, `pr-open`, `merge`, `pr-facts`, `convoy-graduate`,
 `signoff`. The spec's port order is `lifecycle` first (everything else calls
 it), then `merge`, then the rest — one subcommand per PR.
+
+`pr-status` is not a cadence port: it is the working | needs-review |
+needs-attention tri-state that `pr-status-label.sh` and the helm board share
+(`services/gctk/prstatus`). The label writer stays in shell, the derivation
+lives in gctk, and it has no shell fallback (see below).
 
 `refinery-reconcile.sh` stays a thin shell driver: identity discovery, arm
 ordering, the rc=3 interlock. The cadence has to remain readable as a script.
@@ -45,8 +55,8 @@ against each implementation, and why the port needs no test suite of its own.
 
 ## The fallback, and when it goes away
 
-Until a subcommand's binary is deployed, its script answers. `lifecycle.sh`
-resolves the binary explicitly — `$GCTK_BIN`, else the
+Until a cadence subcommand's binary is deployed, its script answers.
+`lifecycle.sh` resolves the binary explicitly — `$GCTK_BIN`, else the
 `.gc/services/gctk/bin/gctk` under `$GC_CITY_PATH`, `$GC_CITY` or
 `$GC_CITY_ROOT`, else the `city_path` that `gc service list --json` reports —
 and `exec`s it when one is there. `GCTK_BIN=none` forces the shell
@@ -62,7 +72,19 @@ Resolution is never a walk up from the script's own path. The hermetic suites
 run from a tree that lives inside a live city, and a filesystem hunt would find
 that city's binary and quietly stop testing the script.
 
-The scripts are deleted when the last port lands and the fallback drops.
+`pr-status` has no such fallback. Its derivation lives only in gctk — the helm
+board (Go) has no shell to fall back to, so a shell copy would be the divergence
+the shared package exists to remove. `pr-status-label.sh` resolves the binary
+the same way `lifecycle.sh` does (`$GCTK_BIN`, else the city's deployed build),
+but with no version-drift fallback. When the binary is missing — `GCTK_BIN=none`,
+unset with no deployed build, or not executable — `derive_value` warns and
+returns 2 without deriving. When it is stale — too old to carry `pr-status` —
+the unknown subcommand exits non-zero, which reads the same way. Either way
+`gctk pr-status derive`'s exit-2 grammar leaves each best-effort caller's label
+unchanged, so a city without a current gctk gets a stale-but-safe label, never a
+wrong one.
+
+The cadence scripts are deleted when the last port lands and the fallback drops.
 
 ## Build and deploy
 
