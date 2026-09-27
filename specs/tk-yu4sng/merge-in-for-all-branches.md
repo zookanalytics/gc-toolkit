@@ -34,9 +34,9 @@ move.
 
 ## Where the choice is made and performed
 
-Four sites carry the merge-in choice. Three dispatch a bring-current child,
+Four sites carry the merge-in choice. Two dispatch a bring-current child,
 classifying its `prepare_mode` as `merge` and handing it a merge-in
-instruction; the fourth performs the merge itself:
+instruction; the other two perform the merge themselves:
 
 - `assets/scripts/pre-open-rebase.sh` (`pre-open-dispatch-mode`) — for a
   pre-open anchor whose recorded branch conflicts with its target, files one
