@@ -17,13 +17,14 @@
 # vanished. The work was recorded correctly and the operator was never
 # told. Two endings produce that same disappearance —
 #   1. deliberate close (step 6 → step 7 drains, the session goes), and
-#   2. an unattended kill, which clears the scrollback and, under
-#      wake_mode=fresh, respawns a clean session — the thread is
-#      unrecoverable, not hidden.
+#   2. an unattended kill. The per-model sittings run wake_mode=resume, so
+#      the respawn replays the thread; only the legacy fresh pool, or a
+#      failed resume, comes back without it.
 # Nothing pack-owned runs at kill time, so the contract has to hold the
 # line in two places, and BOTH are load-bearing:
 #   • the durable trace is stamped when the hold BEGINS, not only at
-#     close — that is the only thing that survives an interruption; and
+#     close — it is the demand gate the board reads and work blocks on,
+#     and it is also what a fresh respawn or a failed resume finds; and
 #   • a deliberate close ends with a sign-off — a plain-language wrap-up
 #     of what the sitting settled — so the last line the operator sees is
 #     an ending rather than an unanswered question.
@@ -330,7 +331,7 @@ fi
 echo "── how a thread ends is documented where the role can see it ──"
 have "prompt carries an ending rule" 'How this thread ends' "$PROMPT"
 have "ending rule names the clock it is off" 'idle_timeout' "$PROMPT"
-have "ending rule states the thread is unrecoverable" 'wake_mode' "$PROMPT"
+have "ending rule names the template's wake_mode" 'wake_mode' "$PROMPT"
 # The rule's whole content is WHICH act ends a sitting. A rule that names
 # neither the visit closing nor the operator's own lever leaves the role
 # believing a clock owns the ending.
@@ -338,15 +339,17 @@ have "ending rule names the visit close as the ending" 'ends when its visit clos
 have "ending rule names the operator lever" 'gc-helm dismiss' "$PROMPT"
 
 # The Hold definition is page one, and a definition outranks a rule
-# further down: from "a hold has no timeout" the role reasons straight
-# to "nothing can take this session", and the definition is where the
-# session reads it first, so correcting the ending rule alone is not
-# enough. The bare claim stays banned with the idle clock off: a health
-# restart, a city restart and a crash still end a hold, and the definition
-# has to say so or the mandatory stamp below reads as ritual.
+# further down: it is where the session reads what a hold is first, so
+# correcting the ending rule alone is not enough — the reason the stamp is
+# mandatory has to be right here too. That reason is the demand: the hold
+# files a gate the board reads and dependent work blocks on, and a hold
+# that files none parks a bead nothing re-asks. The idle clock being off
+# does not make the session immortal — DecideMaxSessionAge can still
+# restart it, and the running templates resume the thread — but the stamp
+# does not rest on that; it rests on the demand.
 lacks "no 'a hold has no timeout' claim in the definition" \
     'A hold has no timeout' "$PROMPT" \
-    "no idle clock is not no ending: a restart or a crash still takes a held sitting, with no farewell"
+    "no idle clock is not no ending: a held sitting still ends when its visit closes (sign-off or dismiss)"
 HOLD_DEF="$(awk '/^- \*\*Hold\*\*/ {f=1} f && /^$/ {exit} f {print}' "$PROMPT")"
 if printf '%s\n' "$HOLD_DEF" | grep -q 'idle_timeout'; then
     ok "the Hold definition states what does and does not end a hold"
@@ -354,17 +357,17 @@ else
     bad "the Hold definition states what does and does not end a hold" \
         "the definition itself must say the clock is off and the visit close is the ending, not only the rule further down"
 fi
-if printf '%s\n' "$HOLD_DEF" | grep -q 'restart'; then
-    ok "the Hold definition still names an ending the role cannot control"
+if printf '%s\n' "$HOLD_DEF" | grep -q 'demand'; then
+    ok "the Hold definition ties the mandatory stamp to the demand it files"
 else
-    bad "the Hold definition still names an ending the role cannot control" \
-        "no clock is not no interruption; drop this and the mandatory stamp below loses its reason"
+    bad "the Hold definition ties the mandatory stamp to the demand it files" \
+        "the stamp is mandatory because the hold IS a demand — the gate the item blocks on and re-surfaces under; that reason, not restart-fear, is what a tidy edit must not drop"
 fi
 if printf '%s\n' "$HOLD_DEF" | grep -q 'mandatory'; then
     ok "the Hold definition makes the hold-time stamp mandatory"
 else
     bad "the Hold definition makes the hold-time stamp mandatory" \
-        "a reapable hold makes the step-4 takeaway required, not advisory"
+        "the hold's demand gate makes the step-5 takeaway required, not advisory"
 fi
 
 echo "── the agent config no longer claims timeouts do not end a sitting ──"
