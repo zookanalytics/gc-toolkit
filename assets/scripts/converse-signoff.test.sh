@@ -99,13 +99,18 @@ for f in "$PROMPT" "$ATOML" "$HELM" "$ENGAGE" \
     }
 done
 
-echo "── the hold stamps the takeaway BEFORE waiting (survives a reap) ──"
-# The reap defense in full: without a stamp written at hold time, a reaped
-# sitting leaves nothing at all — the visit is in_progress, the subject is
-# silent, and the thread that knew why is gone. The takeaway on the item, the
-# demand gate and the gc.hold_demand read-back ship as converse-hold.sh (run
-# against stubs in converse-hold.test.sh, which also pins the stamp to the item
-# and the writer search); here the prompt is pinned to CALL it before it waits.
+echo "── the hold stamps the takeaway BEFORE waiting (the stamp files the demand) ──"
+# The stamp written at hold time IS the demand: it files the gate the board
+# reads and dependent work blocks on, so a hold that writes none parks a bead
+# nothing re-asks. The same write leaves the gc.hold_demand trace that step 1's
+# action=hold arm reads back to tell a real hold from a claim that died before
+# step 2. Under wake_mode=resume the thread replays across a restart, so the
+# stamp does not rest on surviving a kill; a fresh respawn or a failed resume is
+# the one case that comes back without the thread, and there the durable trace
+# is what a reader finds instead. The takeaway on the item, the demand gate and
+# the gc.hold_demand read-back ship as converse-hold.sh (run against stubs in
+# converse-hold.test.sh, which also pins the stamp to the item and the writer
+# search); here the prompt is pinned to CALL it before it waits.
 have "the hold runs converse-hold.sh before it waits" 'converse-hold.sh' "$SK_HOLD"
 have "the hold skill keeps the stamp-before-wait invariant" 'Stamp BEFORE you wait' "$SK_HOLD"
 
