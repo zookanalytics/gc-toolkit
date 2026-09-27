@@ -234,6 +234,20 @@ export interface Tile {
    * Always present.
    */
   group_root: string;
+  /**
+   * The GitHub tree-view link for `pr_branch`, or `''` when the row has no
+   * branch or the rig's repository could not be resolved. The board makes no
+   * GitHub call: the repository is learned from a `pr_url` already on the board,
+   * since every anchor in one rig targets that rig's repository. A rig the board
+   * holds no pull request URL for keeps the bare branch text.
+   */
+  pr_branch_url: string;
+  /**
+   * Who must act on this merge anchor next — `'working'`, `'needs-review'`, or
+   * `'needs-attention'` — the same status: taxonomy the GitHub PR list carries,
+   * so the board and the label read one vocabulary. `''` on a non-merge row.
+   */
+  pr_phase: string;
 }
 
 /**

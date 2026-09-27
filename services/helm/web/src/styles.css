@@ -113,6 +113,30 @@ th {
 }
 
 /*
+ * The PR phase chip: who must act on a merge anchor next, in the three status:
+ * values the GitHub PR list carries. One shared shape, colored by value so the
+ * answer reads at a glance — needs-attention loudest, working quietest.
+ */
+.pr-phase {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  margin-right: 0.4em;
+  white-space: nowrap;
+}
+
+.pr-phase--needs-attention {
+  color: #b3261e;
+}
+
+.pr-phase--needs-review {
+  color: #8a6100;
+}
+
+.pr-phase--working {
+  opacity: 0.7;
+}
+
+/*
  * Parked conversations (tk-2v08m). A second section rather than more rows: these
  * are findable-not-urgent, and the whole point is that they do not compete with
  * the ranked table above.
