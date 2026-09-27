@@ -29,9 +29,10 @@ import (
 
 const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
+  gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
   gctk version                    the revision this binary was built from
 
-Run "gctk lifecycle" for that subcommand's verbs.
+Run "gctk lifecycle" or "gctk pr-status" for that subcommand's verbs.
 `
 
 func main() {
@@ -46,6 +47,8 @@ func run(args []string, stdout, stderr *os.File) int {
 	switch args[0] {
 	case "lifecycle":
 		return cli.Lifecycle(args[1:], stdout, stderr)
+	case "pr-status":
+		return cli.PRStatus(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version())
 		return 0
