@@ -11,6 +11,20 @@ harness_init
 SUT="$HERE/pr-status-label.sh"
 REPO="github.com/zook/gc-toolkit"
 
+# The tri-state derivation is `gctk pr-status` (services/gctk); this script
+# reaches it and computes nothing itself, so the derive and reconcile cases
+# below exercise the binary. Build it and point GCTK_BIN at it, overriding the
+# harness's GCTK_BIN=none. gctk shells out to the same stubbed `gc`, so the
+# store fixtures serve it unchanged. There is no shell fallback to fall back on,
+# so no Go toolchain means the only code path was NOT exercised: fail loud.
+ROOT="$(cd "$HERE/../.." && pwd)"
+GCTK_BUILD_LOG="$TMP/gctk-build.log"
+if command -v go >/dev/null 2>&1 && ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
+  export GCTK_BIN="$TMP/gctk"
+else
+  bad "gctk did not build; pr-status derive is gctk-only and was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" 2>/dev/null | tr '\n' ' ')"
+fi
+
 pv() { # <num> <labels-json-array> — a pr_view fixture carrying those labels
   printf '{"number":%s,"state":"OPEN","isDraft":false,"labels":%s}\n' "$1" "$2" \
     > "$STUB_GH_DIR/pr_view_$1.json"
@@ -48,6 +62,36 @@ eq "$("$SUT" derive --anchor tk-a)" "needs-review" "sticky changes_requested + n
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"changes_requested@abc123@t"}},
         {"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "working" "changes_requested + an open rework child => working"
+
+# working — the in-flight set is ANY live bead anchored here, not just task_kind=rework.
+# A human changes-requested batch travels the validation-pass path (task_kind=validation),
+# which leaves no rework child; before the whole set was read it fell through to
+# needs-review while the city was mid-change.
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"validation","anchor_bead":"tk-a","check_name":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "an open validation pass (human changes-requested batch) => working"
+
+# working — an open finding on the anchor is live work too. This is the shape that
+# stays open through a converse-held fold round (findings close only as their fix lands).
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a","finding.lane":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "an open finding on the anchor => working"
+
+# working — an in-flight review child (a re-review that will move the head) is live work.
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-r","status":"in_progress","metadata":{"task_kind":"review","anchor_bead":"tk-a","check_name":"codex"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "an in-flight review child => working"
+
+# needs-review — a CLOSED validation pass no longer holds working (status-scoped, like the child).
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-v","status":"closed","metadata":{"task_kind":"validation","anchor_bead":"tk-a"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a closed validation pass hands back to needs-review"
+
+# needs-review — the set is anchor-scoped: live work on ANOTHER anchor never flips this
+# PR. A bare "any live bead" test without the anchor_bead filter would fail this.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-other"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-review" "live work anchored to another PR does not flip this one"
 
 # needs-attention — the signoff round cap parked the anchor for a person.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"signoff_cap","signoff_cap":"codex"}}]'

@@ -2193,6 +2193,102 @@ func dated(value, oid string, at time.Time) string {
 	return value + "@" + oid + "@" + at.Format(time.RFC3339)
 }
 
+// prPhase answers who acts next in the same values and precedence as
+// pr-status-label.sh's derive_value; these cases mirror that script's, since it
+// stamps nothing on the bead for the board to read instead.
+func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
+	merge := func(md map[string]string) Anchor {
+		full := map[string]string{mdMergeResult: "pull_request"}
+		for k, v := range md {
+			full[k] = v
+		}
+		return Anchor{ID: "tk-x", Metadata: full}
+	}
+	cases := []struct {
+		name string
+		a    Anchor
+		kids int
+		want string
+	}{
+		{"non-merge row has no phase", Anchor{Metadata: map[string]string{}}, 0, ""},
+		{"operator freeze needs attention", merge(map[string]string{mdMergeHold: "true"}), 0, PhaseNeedsAttention},
+		{"rebase hold needs attention", merge(map[string]string{mdRebaseHold: "true"}), 0, PhaseNeedsAttention},
+		{"cap park needs attention", merge(map[string]string{mdMergeHold: "signoff_cap", mdSignoffCap: "3"}), 0, PhaseNeedsAttention},
+		{"approved but blocked with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMergeState: "BLOCKED@abc"}), 0, PhaseNeedsAttention},
+		{"approved and blocked but reworking is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "BLOCKED@abc"}), 1, PhaseWorking},
+		{"open rework child is working", merge(map[string]string{mdPRPosture: "review_required@abc"}), 2, PhaseWorking},
+		{"approved and mergeable is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "CLEAN@abc"}), 0, PhaseWorking},
+		{"settled awaiting review needs review", merge(map[string]string{mdPRPosture: "review_required@abc"}), 0, PhaseNeedsReview},
+		{"falsy holds do not count", merge(map[string]string{mdMergeHold: "false", mdRebaseHold: "0", mdPRPosture: "commented@abc"}), 0, PhaseNeedsReview},
+	}
+	for _, tc := range cases {
+		if got := prPhase(tc.a, tc.kids); got != tc.want {
+			t.Errorf("%s: prPhase = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The open-rework count comes from the children the board gathers — each names
+// its anchor in anchor_bead — so an anchor with one is working even with nothing
+// else recorded.
+func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
+	anchor := mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"})
+	kid := Anchor{ID: "tk-anc.rw", Source: kindRework, Rig: "gc-toolkit", Metadata: map[string]string{mdAnchorBead: "tk-anc"}}
+
+	b := BuildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{})
+	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseWorking {
+		t.Errorf("an anchor with an open rework child is working: got %q", got)
+	}
+}
+
+// A pre-PR branch links to its GitHub tree view, and the repository comes from
+// a sibling row's pull request URL rather than a GitHub call: every anchor in
+// one rig targets that rig's repository. This is the gap the branch link
+// closes — the branch a person wants to browse before a PR exists.
+func TestPRBranchLinksToGitHubViaSiblingPRURL(t *testing.T) {
+	opened := mergeAnchor("tk-open", map[string]string{
+		"pr_number": "42",
+		"pr_url":    "https://github.com/zookanalytics/gc-toolkit/pull/42",
+	})
+	preopen := mergeAnchor("tk-pre", nil) // branch polecat/tk-pre, no PR yet
+
+	b := BuildBoard([]Anchor{opened, preopen}, fixtureNow, false, nil, Facts{})
+
+	const base = "https://github.com/zookanalytics/gc-toolkit"
+	if got := mustTile(t, b, "tk-pre").PRBranchURL; got != base+"/tree/polecat/tk-pre" {
+		t.Errorf("pre-PR branch link = %q, want the sibling rig's repo + tree/branch", got)
+	}
+	if got := mustTile(t, b, "tk-open").PRBranchURL; got != base+"/tree/polecat/tk-open" {
+		t.Errorf("an opened row links its branch too: got %q", got)
+	}
+}
+
+// With no pull request URL anywhere in the rig, the branch cannot be resolved to
+// a repository, so it stays bare text — the state the board began in, and the
+// same "nothing done" resolve_origin reports on an unresolvable origin
+// (assets/scripts/pr-status-label.sh).
+func TestPRBranchStaysBareWithoutARepo(t *testing.T) {
+	b := BuildBoard([]Anchor{mergeAnchor("tk-pre", nil)}, fixtureNow, false, nil, Facts{})
+	if got := mustTile(t, b, "tk-pre").PRBranchURL; got != "" {
+		t.Errorf("no repo known: pr_branch_url = %q, want empty", got)
+	}
+}
+
+func TestRepoBaseFromPRURL(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/zookanalytics/gc-toolkit/pull/42": "https://github.com/zookanalytics/gc-toolkit",
+		"https://ghe.example.com/team/repo/pull/7":            "https://ghe.example.com/team/repo",
+		"https://github.com/only-owner":                       "", // no repo segment
+		"not-a-url":                                           "",
+		"":                                                    "",
+	}
+	for in, want := range cases {
+		if got := repoBaseFromPRURL(in); got != want {
+			t.Errorf("repoBaseFromPRURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // mergeAnchor is an open merge anchor as the gather produces one: the `merge`
 // kind, whatever metadata the case is about, and its `blocks` blockers.
 func mergeAnchor(id string, md map[string]string, blockers ...Blocker) Anchor {
