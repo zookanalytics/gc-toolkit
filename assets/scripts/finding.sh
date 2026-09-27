@@ -142,11 +142,12 @@ edge_exists() { # <blocker> blocks <blocked> ?  (reads the blocked's down-blocke
 }
 
 # The open fix unit standing on <anchor>, or empty. A fix unit is a live
-# blocks-dep child of the anchor carrying a non-empty source_review_bead — the
-# bead request-changes (or the feedback arm) files and routes to answer the
-# anchor's findings. must-fix wiring reads it to hang the close-ordering edge
-# the fix unit's landing releases; a batch a human answers (a visit-routed feedback
-# batch) has no fix unit, so this is empty and the must-fix finding still holds the
+# blocks-dep child of the anchor carrying a non-empty source_review_bead, which
+# request-changes stamps on the one child it files to answer the anchor's findings
+# (the same discriminator gate-ensure's open_rework_child reads). must-fix wiring
+# reads it to hang the close-ordering edge the fix unit's landing releases. A
+# feedback batch (pr-facts) files no such fix unit — its child carries no
+# source_review_bead — so this is empty and the must-fix finding still holds the
 # merge through its own anchor edge. Non-zero rc = the ledger would not read.
 anchor_fix_unit() { # <anchor-id>
   local raw
