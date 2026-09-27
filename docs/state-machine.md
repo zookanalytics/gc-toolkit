@@ -426,6 +426,52 @@ open, `signoff.sh` flips it on each verdict, and `pr-facts.sh` reconciles it eve
 pass so a missed event self-heals. Every write is pinned to the origin, and a
 label is not an approval.
 
+## The base label (GitHub projection)
+
+The `status:` label says who must act next; it does not say where an approved
+change lands. A checkpoint pull request into a convoy integration branch is at once
+`status: needs-review` and targeted away from `main`, so the base is a second,
+orthogonal dimension carried by a sibling `base:` group.
+
+| Label | Meaning |
+|---|---|
+| `base: integration` | the base is `integration/<convoy-id>`: approving the PR mints a phase into the integration branch, and `main` does not move until graduation |
+
+A `main`-targeted pull request is the default and carries no `base:` label. The
+convoy id is not encoded in the label; it rides a standing banner in the pull
+request body, set at the same moment. Both surfaces are set at pr-open where the
+base is known (`assets/scripts/pr-open.sh`), and `pr-status-label.sh mark-base` is
+the label's single writer. Unlike `status:`, the base marker is standing: a pull
+request's base does not change, so it is set once and never reconciled. The two
+groups are independent: the `status:` writer removes only `status:` values, and
+`mark-base` only ever adds a `base:` label
+([specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md), "Where a
+checkpoint lands"; [specs/tk-6bji7k.9/decision.md](../specs/tk-6bji7k.9/decision.md)).
+
+A `main`-targeted PR carries neither marker; an integration-targeted PR carries
+both. Those two markers are all that sets a checkpoint apart from a mainline PR:
+
+```text
+PR targeting main
+  PR list   status: needs-review
+  PR body   ## Summary
+            ...
+
+PR targeting integration/<convoy-id>
+  PR list   status: needs-review   base: integration
+  PR body   > [!IMPORTANT]
+            > This pull request merges into integration/<convoy-id>, not main.
+            >
+            > Approving it mints this phase into the convoy integration branch,
+            > and main does not move. The broader review runs at graduation,
+            > when the integration branch is carried to main.
+            ## Summary
+            ...
+```
+
+GitHub renders the body blockquote as an `[!IMPORTANT]` alert box above the
+summary, and lists `base: integration` beside `status:` in its own colour.
+
 ## The machine axis
 
 Checks say whether one review passed. **`pr.machine`** says what the merge cadence
