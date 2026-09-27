@@ -10,10 +10,11 @@
 # exactly — and against a ROOT it offers the root itself to a pool as work.
 #
 # What is exercised here:
-#   * CLASSIFICATION on the four shapes that reach the disposal, including the
-#     order dependencies: a visit is the source bead of its own molecule and
-#     must be read as a visit, and a root carries gc.kind/gc.formula_contract
-#     where a step carries gc.step_ref;
+#   * CLASSIFICATION on the five shapes that reach the disposal, including the
+#     order dependencies: a visit and a review are each the source bead of their
+#     own molecule and must be recognised by task_kind before the source arm,
+#     and a root carries gc.kind/gc.formula_contract where a step carries
+#     gc.step_ref;
 #   * the ROOT arm writing NOTHING, and in particular never reaching the
 #     open+unassigned+routed shape a pool can claim;
 #   * the STEP arm releasing the dead session's pin while the chain survives:
