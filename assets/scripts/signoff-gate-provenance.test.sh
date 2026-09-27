@@ -153,10 +153,10 @@ export STUB_LSREMOTE="$HEAD_OID" STUB_PR_HEAD="$HEAD_OID"
 seed() {
   cat > "$STUB_STORE" <<STORE
 [{"id":"tk-anc","status":"open","assignee":"","notes":"",
-  "metadata":{"merge_result":"pull_request","check_set":"codex","branch":"polecat/tk-anc",
+  "metadata":{"merge_result":"pull_request","check_set":"correctness","branch":"polecat/tk-anc",
               "target":"main","pr_number":"42","pr_url":"https://github.com/acme/alpha/pull/42"}},
  {"id":"rv-1","status":"in_progress","assignee":"pool/x","notes":"findings",
-  "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc"}}]
+  "metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-anc"}}]
 STORE
   : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
 }
@@ -166,7 +166,7 @@ echo "# signoff's own output satisfies the provenance check"
 seed
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "the post-open approve records a verdict"
-eq "$(meta tk-anc check.codex)" "green" "…still stamping the green marker signoff writes"
+eq "$(meta tk-anc check.correctness)" "green" "…still stamping the green marker signoff writes"
 eq "$(meta rv-1 reviewed_oid)" "$HEAD_OID" "…and recording the same commit on the review bead"
 OUT=$(bash "$CHECK" 2>&1); RC=$?
 eq "$RC" 0 "the provenance check passes on the store signoff just wrote"

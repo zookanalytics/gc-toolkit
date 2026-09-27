@@ -15,8 +15,8 @@ probe_blockers() { gc bd dep list "$1" --direction=down -t blocks --json | jq -r
 # ---------------------------------------------------------------------------
 # finding.key: rebase-stable and lane-scoped.
 # ---------------------------------------------------------------------------
-K1=$("$SUT" key --lane codex --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
-K2=$("$SUT" key --lane codex --locus "assets/scripts/foo.sh:99:bar()" --message "unquoted   expansion in the loop")
+K1=$("$SUT" key --lane correctness --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
+K2=$("$SUT" key --lane correctness --locus "assets/scripts/foo.sh:99:bar()" --message "unquoted   expansion in the loop")
 eq "$K1" "$K2" "key strips line numbers, case and whitespace so it survives a rebase"
 K3=$("$SUT" key --lane arch --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
 if [ "$K1" != "$K3" ]; then ok "key is lane-scoped"; else bad "key collides across lanes"; fi
@@ -24,28 +24,28 @@ if [ "$K1" != "$K3" ]; then ok "key is lane-scoped"; else bad "key collides acro
 # ---------------------------------------------------------------------------
 # upsert: files a finding bead with the full metadata contract.
 # ---------------------------------------------------------------------------
-store '[{"id":"tk-anc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"42"}}]'
-F1=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
+store '[{"id":"tk-anc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","pr_number":"42"}}]'
+F1=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
 eq "$(meta "$F1" task_kind)" "finding" "upsert stamps task_kind=finding"
 eq "$(meta "$F1" anchor_bead)" "tk-anc" "upsert stamps anchor_bead"
-eq "$(meta "$F1" 'finding.lane')" "codex" "upsert stamps finding.lane"
+eq "$(meta "$F1" 'finding.lane')" "correctness" "upsert stamps finding.lane"
 eq "$(meta "$F1" 'finding.disposition')" "unvalidated" "a fresh finding is unvalidated"
-eq "$(meta "$F1" 'finding.source')" "machine:codex" "source defaults to machine:<lane>"
+eq "$(meta "$F1" 'finding.source')" "machine:correctness" "source defaults to machine:<lane>"
 eq "$(meta "$F1" 'finding.key')" "$K1" "upsert stamps the computed key"
 
 # ---------------------------------------------------------------------------
 # dedup: re-raising the same objection creates nothing; a distinct one does.
 # ---------------------------------------------------------------------------
 BEFORE=$(jq 'length' "$STUB_STORE")
-F1b=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/foo.sh:88:bar()" --message "unquoted   Expansion in the loop")
+F1b=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/foo.sh:88:bar()" --message "unquoted   Expansion in the loop")
 eq "$F1b" "$F1" "re-raising the same objection returns the existing finding"
 eq "$(jq 'length' "$STUB_STORE")" "$BEFORE" "…and files no second bead"
-F2=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/baz.sh:qux()" --message "missing error handling on the write")
+F2=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/baz.sh:qux()" --message "missing error handling on the write")
 if [ "$F2" != "$F1" ]; then ok "a distinct objection is a distinct finding"; else bad "distinct objection collided"; fi
 
 # Same key on a DIFFERENT anchor is a different finding (dedup is per-anchor).
-store "$(jq -c '. + [{"id":"tk-anc2","status":"open","assignee":"","title":"a2","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}}]' "$STUB_STORE")"
-F1_other=$("$SUT" upsert --anchor tk-anc2 --lane codex --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
+store "$(jq -c '. + [{"id":"tk-anc2","status":"open","assignee":"","title":"a2","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness"}}]' "$STUB_STORE")"
+F1_other=$("$SUT" upsert --anchor tk-anc2 --lane correctness --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
 if [ "$F1_other" != "$F1" ]; then ok "the same key on another anchor is its own finding"; else bad "dedup crossed anchors"; fi
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ eq "$(grep -c "^$F1|blocks|tk-anc$" "$STUB_DEPS")" "1" "re-running must-fix adds
 # ---------------------------------------------------------------------------
 # set-disposition deferred: discovered-from holds nothing — the probe ignores it.
 # ---------------------------------------------------------------------------
-F3=$("$SUT" upsert --anchor tk-anc --lane codex --locus "docs/x.md" --message "stale reference to a retired script")
+F3=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "docs/x.md" --message "stale reference to a retired script")
 "$SUT" set-disposition --finding "$F3" --anchor tk-anc --disposition deferred --reason "the rewrite it needs lands in the next PR"
 eq "$(meta "$F3" 'finding.disposition')" "deferred" "disposition recorded as deferred"
 # A deferred finding holds nothing and outlives the merge: its bead is the only
@@ -78,7 +78,7 @@ hasnt " $(probe_blockers tk-anc) " " $F3 " "merge.sh's probe does NOT see the de
 # edge, or merge.sh keeps reading the finding as a live blocker and a deferred
 # finding holds the merge it must not (regression).
 # ---------------------------------------------------------------------------
-F5=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/qux.sh:main()" --message "double-quote the array expansion")
+F5=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/qux.sh:main()" --message "double-quote the array expansion")
 "$SUT" set-disposition --finding "$F5" --anchor tk-anc --disposition must-fix
 has " $(probe_blockers tk-anc) " " $F5 " "must-fix first wires the finding as a live blocker"
 "$SUT" set-disposition --finding "$F5" --anchor tk-anc --disposition deferred
@@ -90,7 +90,7 @@ has "$(deps)" "$F5|discovered-from|tk-anc" "must-fix -> deferred keeps the disco
 # ---------------------------------------------------------------------------
 # set-disposition declined: closed with the reason, holding nothing.
 # ---------------------------------------------------------------------------
-F4=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/foo.sh:helper()" --message "nit: rename for clarity")
+F4=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/foo.sh:helper()" --message "nit: rename for clarity")
 "$SUT" set-disposition --finding "$F4" --anchor tk-anc --disposition declined --reason "cosmetic, not worth a round"
 eq "$(meta "$F4" 'finding.disposition')" "declined" "disposition recorded as declined"
 eq "$(bstatus "$F4")" "closed" "declined finding is closed"
@@ -132,7 +132,7 @@ if "$SUT" open-must-fix --anchor tk-anc --lane arch >/dev/null; then bad "open-m
 # leaves a validated one (must-fix) alone.
 # ---------------------------------------------------------------------------
 eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the approve"
-"$SUT" close-unvalidated --anchor tk-anc --lane codex --reason "lane approved"
+"$SUT" close-unvalidated --anchor tk-anc --lane correctness --reason "lane approved"
 eq "$(bstatus "$F2")" "closed" "close-unvalidated closes the unvalidated finding"
 eq "$(bstatus "$F1")" "open" "close-unvalidated leaves the must-fix finding for the validator/fix unit"
 
@@ -155,7 +155,7 @@ if "$SUT" open-must-fix --anchor tk-anc >/dev/null; then bad "open-must-fix stil
 
 # A must-fix finding NO fix unit blocks is an objection nothing has answered
 # yet: close-answered must leave it open, or it drops the objection.
-F6=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/new.sh:go()" --message "guard the nil deref")
+F6=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/new.sh:go()" --message "guard the nil deref")
 "$SUT" set-disposition --finding "$F6" --anchor tk-anc --disposition must-fix
 "$SUT" close-answered --anchor tk-anc
 eq "$(bstatus "$F6")" "open" "close-answered leaves a must-fix finding no fix unit blocks (unanswered objection)"

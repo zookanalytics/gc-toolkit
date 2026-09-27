@@ -31,22 +31,22 @@ SUT="$SD/merge.sh"
 # check_set declares the lane; the anchor carries no check.<lane> marker — a
 # lane's green is DERIVED from a backing review bead, not stored on the anchor.
 anchor() { # id num extra-json
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/x%s","merged_target":"main","check_set":"codex"%s}}' \
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/x%s","merged_target":"main","check_set":"correctness"%s}}' \
     "$1" "$2" "$2" "$2" "${3:-}"
 }
-# A closed approve review bead backing <anchor>'s <lane> (default codex) — the
+# A closed approve review bead backing <anchor>'s <lane> (default correctness) — the
 # green record lane-state.sh derives, in place of the retired check.<lane>=green
 # marker. reviewed_oid is what a local backing bead must carry to green a lane.
 rev() { # anchor [lane] [oid]
   printf '{"id":"rev-%s","status":"closed","assignee":"","notes":"approve","metadata":{"task_kind":"review","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","signoff_verdict":"approve"}}' \
-    "$1" "$1" "${2:-codex}" "${3:-sha-r}"
+    "$1" "$1" "${2:-correctness}" "${3:-sha-r}"
 }
 # An open finding on <anchor>, its disposition and lane settable. A must-fix
 # finding also carries a blocks edge onto the anchor (wired in STUB_DEPS by the
 # caller), which is what merge.sh's blocker probe reads.
 finding() { # id anchor [disposition] [lane]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.disposition":"%s","finding.lane":"%s","finding.key":"%s:0"}}' \
-    "$1" "$2" "${3:-must-fix}" "${4:-codex}" "${4:-codex}"
+    "$1" "$2" "${3:-must-fix}" "${4:-correctness}" "${4:-correctness}"
 }
 prview() { # num state mergeState extra-json
   printf '{"state":"%s","isDraft":false,"baseRefName":"main","headRefName":"polecat/x%s","headRefOid":"sha-%s","headRepository":{"name":"gc-toolkit"},"headRepositoryOwner":{"login":"zook"},"isCrossRepository":false,"mergeStateStatus":"%s","mergeable":"MERGEABLE","reviewDecision":"","url":"https://github.com/zook/gc-toolkit/pull/%s","mergeCommit":{"oid":"merged-sha-%s"}%s}' \
@@ -145,24 +145,24 @@ store "[$(anchor M5 14)]"
 printf '%s' "$(prview 14 OPEN CLEAN)" > "$GH_DIR/pr_view_14.json"
 echo '[]' > "$GH_DIR/reviews_14.json"
 out=$("$SUT" 2>&1)
-has "$out" "lane 'codex' does not derive green" "an unreviewed lane holds"
+has "$out" "lane 'correctness' does not derive green" "an unreviewed lane holds"
 
 echo "# every other lane state holds too"
 store "[$(anchor M5b 15)]"
 printf '%s' "$(prview 15 OPEN CLEAN)" > "$GH_DIR/pr_view_15.json"
 echo '[]' > "$GH_DIR/reviews_15.json"
 out=$("$SUT" 2>&1)
-has "$out" "lane 'codex' does not derive green" "a fixing lane holds the merge"
+has "$out" "lane 'correctness' does not derive green" "a fixing lane holds the merge"
 
-echo "# a codex lane with no local review bead derives green from an operator's GitHub approval"
+echo "# a correctness lane with no local review bead derives green from an operator's GitHub approval"
 # The fallback-backed anchor: no review-outcome bead, but a human APPROVED the
-# PR. The shared derivation backs the lane off that approval, so a codex-only
+# PR. The shared derivation backs the lane off that approval, so a correctness-only
 # anchor is not stranded on lane state — it merges without a local review bead.
 store "[$(anchor M5c 47)]"
 printf '%s' "$(prview 47 OPEN CLEAN)" > "$GH_DIR/pr_view_47.json"
 printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-47","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_47.json"
 out=$("$SUT" 2>&1)
-has "$out" "merged + recorded M5c" "an operator's GitHub approval backs the codex lane green when no local review bead exists"
+has "$out" "merged + recorded M5c" "an operator's GitHub approval backs the correctness lane green when no local review bead exists"
 
 echo "# unclosed children hold: metadata key, dep edge, tracking_only opt-out"
 store "[$(anchor M6 16), $(rev M6), {\"id\":\"rw-1\",\"status\":\"blocked\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"16\"}}]"
@@ -282,7 +282,7 @@ has "$out" "merged + recorded MF1" "every lane green and no open must-fix: the m
 : > "$STUB_DEPS"
 
 echo "# approval arms"
-store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
+store "[$(anchor A1 20 ',"check_set":"correctness,approval"'), $(rev A1)]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
 echo '[]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
@@ -293,12 +293,12 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded A1" "an external APPROVED at the live head satisfies it"
 
 printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
-store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
+store "[$(anchor A1 20 ',"check_set":"correctness,approval"'), $(rev A1)]"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review at the live head" "an approval of an OLD head does not count"
 
 printf '[{"user":{"login":"gc-city-bot"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
-store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
+store "[$(anchor A1 20 ',"check_set":"correctness,approval"'), $(rev A1)]"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review" "a self-approval never counts"
 
@@ -320,7 +320,7 @@ store "[$(anchor A4 23), $(rev A4)]"
 printf '%s' "$(prview 23 OPEN CLEAN)" > "$GH_DIR/pr_view_23.json"
 printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_23.json"
 out=$("$SUT" 2>&1)
-has "$out" "standing CHANGES_REQUESTED" "the veto holds a codex-only anchor too"
+has "$out" "standing CHANGES_REQUESTED" "the veto holds a correctness-only anchor too"
 
 echo "# BLOCKED where thread resolution is required names the unresolved-thread cause"
 store "[$(anchor U1 30), $(rev U1)]"
@@ -739,7 +739,7 @@ HOOK
 chmod +x "$TMP/hook3.sh"
 : > "$STUB_GH_LOG"
 out=$(STUB_SHOW_HOOK="$TMP/hook3.sh" "$SUT" 2>&1)
-has "$out" "lane codex is no longer green; merge held" "the terminal re-read catches the lane leaving green mid-pass"
+has "$out" "lane correctness is no longer green; merge held" "the terminal re-read catches the lane leaving green mid-pass"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 52" "…and the merge was withheld"
 eq "$(bstatus T3)" "open" "the anchor was not closed"
 
@@ -867,7 +867,7 @@ echo "# a lane short of green is progressing; the cap's park is the wedge"
 # string "signoff_cap" AND signoff_cap is non-empty. signoff.sh writes that
 # literal for its round-cap park; an operator's own hold writes merge_hold=true.
 store "[$(anchor V3 82),
-        $(anchor V4 83 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"')]"
+        $(anchor V4 83 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
 printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
@@ -891,7 +891,7 @@ eq "$(pinned V4b)" "<absent>" "…and nothing records it as the cap's wedge"
 # not the cap's wedge, even beside a signoff_cap value orphaned by an earlier
 # park the operator has since taken over.
 echo "# an operator hold beside a STALE orphan signoff_cap is not the cap's wedge"
-store "[$(anchor V4c 91 ',"merge_hold":"true","signoff_cap":"codex"')]"
+store "[$(anchor V4c 91 ',"merge_hold":"true","signoff_cap":"correctness"')]"
 printf '%s' "$(prview 91 OPEN CLEAN)" > "$GH_DIR/pr_view_91.json"
 echo '[]' > "$GH_DIR/reviews_91.json"
 out=$("$SUT" 2>&1)
@@ -899,7 +899,7 @@ has "$out" "merge_hold set (operator gate)" "the hold still holds the merge"
 eq "$(pinned V4c)" "<absent>" "…but the orphaned signoff_cap does not make it the cap's wedge"
 
 echo "# gates green and waiting on a person: settled, not wedged"
-store "[$(anchor V5 84 ',"check_set":"codex,approval"'), $(rev V5)]"
+store "[$(anchor V5 84 ',"check_set":"correctness,approval"'), $(rev V5)]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
 echo '[]' > "$GH_DIR/reviews_84.json"
 out=$("$SUT" 2>&1)
@@ -907,7 +907,7 @@ has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
 echo "# recording a verdict moves no route"
-store "[$(anchor V8 87 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"')]"
+store "[$(anchor V8 87 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
 echo '[]' > "$GH_DIR/reviews_87.json"

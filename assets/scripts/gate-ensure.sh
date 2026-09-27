@@ -58,7 +58,7 @@ UNSAFE_RC=3
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-DEFAULT_CHECK_SET="codex"
+DEFAULT_CHECK_SET="correctness"
 REVIEW_FORMULA="mol-review"
 VALIDATE_FORMULA="mol-validate"
 REVIEW_POOL=""
@@ -70,7 +70,7 @@ FIX_POOL=""
 SLING_VARS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --default)        DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
+    --default)        DEFAULT_CHECK_SET="${2:-correctness}"; shift 2 ;;
     --review-pool)    REVIEW_POOL="${2:-}"; shift 2 ;;
     --validate-pool)  VALIDATE_POOL="${2:-}"; shift 2 ;;
     --fix-pool)       FIX_POOL="${2:-}"; shift 2 ;;
@@ -87,7 +87,7 @@ for _v in ${SLING_VARS[@]+"${SLING_VARS[@]}"}; do SLING_VAR_ARGS+=(--var "$_v");
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
 case "$(cs_canon "$DEFAULT_CHECK_SET")" in
-  '')       DEFAULT_CHECK_SET="codex" ;;
+  '')       DEFAULT_CHECK_SET="correctness" ;;
   none|off) DEFAULT_CHECK_SET="none" ;;
 esac
 
@@ -199,8 +199,8 @@ open_rework_child() { # <anchor-id>
 # anchor_bead is this anchor; while any is open every lane derives validating and
 # no review may be dispatched — the validator rules the whole diff, so a review
 # that read it now would read a state no one intends to ship. More than one can
-# be live at once: pr-facts.sh opens a human-lane pass beside a codex pass,
-# because a codex pass holds the merge but cannot rule human findings. Non-zero
+# be live at once: pr-facts.sh opens a human-lane pass beside a correctness pass,
+# because a correctness pass holds the merge but cannot rule human findings. Non-zero
 # rc = the ledger could not answer; the caller holds the dispatch, the same as an
 # unreadable in-flight lookup.
 open_validation_passes() { # <anchor-id>
@@ -543,8 +543,8 @@ STRAY
   # pass IS the fresh whole-diff review; this arm dispatches mol-validate ONTO it
   # so the validator runs and rules the batch's findings, a second dispatch shape
   # in the same authority rather than a second authority. More than one pass can
-  # be live at once — pr-facts.sh opens a human-lane pass beside a codex pass,
-  # because a codex pass holds the merge but cannot rule human findings — so this
+  # be live at once — pr-facts.sh opens a human-lane pass beside a correctness pass,
+  # because a correctness pass holds the merge but cannot rule human findings — so this
   # iterates every open pass rather than the first: a first pass already
   # dispatched must not shadow a newer sibling that still needs a validator. Each
   # pass carries its own dispatch note (its opener built it from

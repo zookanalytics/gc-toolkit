@@ -182,7 +182,7 @@ writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
 [gates]
 # check_set: comma list of gate names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
-check_set_default = "codex"
+check_set_default = "correctness"
 check_set_sentinel = "none"
 # check.<g> = <state>, one bare lane-state word never bound to a commit. green
 # written only by signoff.sh; cleared/re-armed only by the merge cadence. Merge
@@ -505,7 +505,7 @@ keys = [
   "dispatch_count", "dispatch_backstop.<g>",
 ]
 # check_set and check.<g> carry their mechanics in [gates] above: check_set is
-# the comma list of gate names (default `codex` stamped by gate-ensure.sh when
+# the comma list of gate names (default `correctness` stamped by gate-ensure.sh when
 # empty, sentinel `none` the opt-out, `approval` the external-review lane), and
 # empty is never `none` — a reader holds the merge closed on it. check.<g> is
 # one lane marker per gate, the only value the pack writes into it being `green`
@@ -526,7 +526,7 @@ keys = [
 #   same shape. Absent is a legacy review closed before the stamp existed, which
 #   still backs a lane only via gc.outcome=recorded. Never cleared; set once.
 # check_name — the lane a review or backing bead speaks for, defaulting to
-#   `codex` when absent. Written on the review child by gate-ensure.sh and on a
+#   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
 #   the provenance check. Never cleared.
 # anchor_bead — the gating anchor a review, rework, finding or visit child

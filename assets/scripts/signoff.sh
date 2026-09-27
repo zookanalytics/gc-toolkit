@@ -183,7 +183,7 @@ if [ "$REVIEW_STATUS" = "closed" ]; then
   exit 1
 fi
 CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
-[ -n "$CHECK_NAME" ] || CHECK_NAME=codex
+[ -n "$CHECK_NAME" ] || CHECK_NAME=correctness
 
 # The anchor the gate lands on: the durable anchor_bead stamp first, the
 # blocks edge second. Unresolvable is a refusal — a verdict with nowhere to

@@ -214,7 +214,7 @@ esac
 # update rather than adding a second one.
 store '[{"id":"d-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
-"$SUT" transition d-6 --to pull_request --set-dated "pr.machine=settled@$OID" --set check_set=codex >/dev/null 2>&1
+"$SUT" transition d-6 --to pull_request --set-dated "pr.machine=settled@$OID" --set check_set=correctness >/dev/null 2>&1
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "a dated key rides the ONE atomic update"
 
 # Shape refusals: the writer supplies value and oid, this script supplies the
@@ -274,11 +274,11 @@ writes_when "a changed verdict writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
   n-2 --to pull_request --set-dated "pr.machine=wedged-exception@$OID"
 writes_when "a changed --set writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"check_set\":\"codex\"}}" \
-  n-2 --to pull_request --set check_set=codex,ci
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\"}}" \
+  n-2 --to pull_request --set check_set=correctness,ci
 writes_when "a --set of an absent key writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
-  n-2 --to pull_request --set check_set=codex
+  n-2 --to pull_request --set check_set=correctness
 writes_when "a --unset of a present key writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"rejection_reason\":\"old\"}}" \
   n-2 --to pull_request --unset rejection_reason
@@ -403,7 +403,7 @@ eq "$(meta a-8 'gc.takeaway_settled')" "" "…leaving the park's own disposition
 echo "# detached states"
 store '[{"id":"d-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"gc.routed_to":"rig/pool"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition d-1 --to pre_open_gate --assignee "" --set check_set=codex 2>&1)"; rc=$?
+out="$("$SUT" transition d-1 --to pre_open_gate --assignee "" --set check_set=correctness 2>&1)"; rc=$?
 eq "$rc" 0 "transition to pre_open_gate exits 0"
 eq "$(meta d-1 'gc.routed_to')" "" "pre_open_gate clears the route automatically"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update"
@@ -437,7 +437,7 @@ has "$out" "gc.routed_to" "the unverified route is named"
 echo "# detached states clear the assignee"
 store '[{"id":"h-1","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition h-1 --to pre_open_gate --set check_set=codex 2>&1)"; rc=$?
+out="$("$SUT" transition h-1 --to pre_open_gate --set check_set=correctness 2>&1)"; rc=$?
 eq "$rc" 0 "entry to pre_open_gate exits 0"
 eq "$(bassignee h-1)" "" "the handoff assignee is cleared without the caller asking"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update as the state"
@@ -497,7 +497,7 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 # The tk-9heqfh shape: a sitting ended holding and left its subject waiting on
 # nobody — no state, empty route, the hold recorded only as takeaway prose.
 # Through this writer that attempt is refused rather than recorded.
-store '[{"id":"tk-9heqfh","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — PR#477 is codex-green and one approval from landing; needs a ruling"}}]'
+store '[{"id":"tk-9heqfh","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — PR#477 is correctness-green and one approval from landing; needs a ruling"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition tk-9heqfh --to held --route "" 2>&1)"; rc=$?
 eq "$rc" 1 "the found tk-9heqfh state is unreachable through the writer"

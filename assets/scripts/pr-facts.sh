@@ -1293,7 +1293,7 @@ GATES
   # the mark.
   # The batch is the same whether the posture reads `commented` or
   # `changes_requested`. A CHANGES_REQUESTED holds the merge on its own, and a
-  # hold is not an answer: objections nothing routes converge to codex-green
+  # hold is not an answer: objections nothing routes converge to correctness-green
   # untouched, while the commits landing meanwhile read as rework that addressed
   # them.
   if [ "$unanswered" = 1 ]; then
@@ -1496,14 +1496,14 @@ $CBODY"
     # rules: mol-validate selects findings by finding.lane == check_name, and
     # review-outcome.sh backs or supersedes that one exact lane. A human batch's
     # findings carry finding.lane=human, so the pass names human. The whole
-    # check_set is wrong here: a multi-lane value like codex,arch is one synthetic
+    # check_set is wrong here: a multi-lane value like correctness,arch is one synthetic
     # lane no finding carries and no anchor declares, so the validator would match
     # no findings and back a lane that does not exist. It is left unrouted: a
     # validating lane is dispatched to mol-validate by gate-ensure.sh, so the bead
     # is opened here and armed there. The dedup is the live
     # human-lane pass: it selects a task_kind=validation bead carrying
     # check_name=human, not any validation bead. gate-ensure's quiescence
-    # (open_validation_pass) reads any lane, so a codex pass on this anchor holds
+    # (open_validation_pass) reads any lane, so a correctness pass on this anchor holds
     # the merge but never rules the human findings; counting it here would
     # watermark the batch with no human-lane pass behind it. One live human pass
     # rules every open human finding on the anchor, so a second reconcile over the
@@ -1533,7 +1533,7 @@ $CBODY"
         # half of its one shaping write drop; the bead then carries anchor_bead=$id
         # — so the probe above lists it — but the human-lane selector skips it
         # because task_kind is not "validation", or check_name is unset. It is this
-        # anchor's pass by title, distinct from a real codex-lane pass (check_name
+        # anchor's pass by title, distinct from a real correctness-lane pass (check_name
         # set to another lane), so reclaim only a title match whose lane is unset or
         # already human and let the shape gate below repair the missing key, rather
         # than mint a twin that would double-block the anchor.
@@ -1574,7 +1574,7 @@ $CBODY"
       # validator-path selectors read — gate-ensure's open_validation_pass keys its
       # quiescence on it, and gate-ensure's validation-pass dispatch selects the
       # passes it slings mol-validate onto by it — anchor_bead scopes the findings,
-      # check_name is the lane it selects them by (a missing one defaults to codex,
+      # check_name is the lane it selects them by (a missing one defaults to correctness,
       # so the human findings would go unruled), and reviewed_oid is the pin it
       # needs to back the lane. The one write below stamps all four together, so any
       # can be the half that drops; a pass missing task_kind still matches an
@@ -1690,7 +1690,7 @@ $CBODY"
       skipped=$((skipped + 1)); continue
     fi
     # A rework child carrying the batch is the fix unit for the findings it
-    # answers: it blocks each one, so closing it unblocks them the way a codex
+    # answers: it blocks each one, so closing it unblocks them the way a correctness
     # rework child does (specs/tk-ztapg/review-cycle-architecture.md, "The fix
     # unit"). A visit-routed batch has no fix unit; a human answers it. The wire
     # is a required write, fail-closed like the finding filing above: a finding
