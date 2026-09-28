@@ -243,9 +243,25 @@ if [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$SUCCESSOR_STORE" ]; th
     die "successor pointer did NOT stick on $ORIGIN (read back gc.superseded_by='${GOT_SUCC:-}' gc.superseded_by_store='${GOT_STORE:-}'); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
 fi
 if [ -n "$STAMP_OUTCOME" ]; then
+    # Read back BOTH stamps and repair once before gating the close. The board
+    # shows gc.outcome_reason as the sitting's headline (comment above), so a
+    # close that lands gc.outcome but drops the reason still leaves an illegible
+    # row that no re-run repairs — PRIOR_OUTCOME is then nonempty and STAMP_OUTCOME
+    # never re-arms. One --set-metadata pair can read back empty while the update
+    # exits 0, so both are the precondition, the same guard visit-close.sh and
+    # gc-helm.sh's dismiss verb apply.
     GOT_OUTCOME=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
-    if [ "$GOT_OUTCOME" != "$KIND" ]; then
-        die "visit outcome did NOT stick on $ORIGIN (read back gc.outcome='${GOT_OUTCOME:-}'); NOT closing it — a closed visit with no recorded gc.outcome is a sitting the board cannot report and no re-run reaches. The bead is still visible; re-run once the store accepts the write" 4
+    GOT_OUTCOME_REASON=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome_reason"] // empty' 2>/dev/null || true)
+    if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
+        bd_at "$ORIGIN_PATH" update "$ORIGIN" \
+            --set-metadata gc.outcome="$KIND" \
+            --set-metadata gc.outcome_reason="$REASON" >/dev/null 2>&1 || true
+        CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
+        GOT_OUTCOME=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
+        GOT_OUTCOME_REASON=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome_reason"] // empty' 2>/dev/null || true)
+    fi
+    if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
+        die "visit outcome did NOT stick on $ORIGIN (read back gc.outcome='${GOT_OUTCOME:-}' gc.outcome_reason='${GOT_OUTCOME_REASON:-}'); NOT closing it — a closed visit needs the outcome word the board groups by AND the reason headline it shows, and once it closes no re-run reaches it. The bead is still visible; re-run once the store accepts the write" 4
     fi
 fi
 

@@ -37,7 +37,9 @@
 #       never overwritten;
 #   (u) an already-closed visit missing the outcome is repaired with it;
 #   (v) an outcome that does not read back refuses the close, the same way a
-#       dropped pointer does — a closed outcome-less visit is unreachable.
+#       dropped pointer does — a closed outcome-less visit is unreachable;
+#   (w) a dropped gc.outcome_reason refuses the close too — the board shows the
+#       reason as the sitting's headline, so an outcome without it is unreadable.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -163,11 +165,14 @@ case "$sub" in
         --set-metadata)
           # FAKE_BD_DROP_META simulates a write that reports success and does
           # not persist — the case the read-back guard exists for.
-          # FAKE_BD_DROP_OUTCOME drops ONLY the gc.outcome key (leaving its
-          # reason) to exercise the visit-outcome read-back gate on its own.
+          # FAKE_BD_DROP_OUTCOME drops ONLY the gc.outcome key and
+          # FAKE_BD_DROP_OUTCOME_REASON drops ONLY the gc.outcome_reason key
+          # (each leaving the other) to exercise either half of the
+          # visit-outcome read-back gate on its own.
           drop=""
           [ -z "${FAKE_BD_DROP_META:-}" ] || drop=1
           case "$2" in gc.outcome=*) [ -z "${FAKE_BD_DROP_OUTCOME:-}" ] || drop=1 ;; esac
+          case "$2" in gc.outcome_reason=*) [ -z "${FAKE_BD_DROP_OUTCOME_REASON:-}" ] || drop=1 ;; esac
           [ -n "$drop" ] || printf 'm.%s\n' "$2" >> "$f"
           shift 2 ;;
         --append-notes)
@@ -462,6 +467,21 @@ eq "$rc" 4 "a visit outcome that does not read back refuses the close"
 eq "$(field alpha status al-visit4)" open "the visit stays OPEN when the outcome did not stick"
 has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome"
 eq "$(field alpha m.gc.superseded_by al-visit4)" bt-vsucc4 "the pointer is still recorded, so the bead is findable"
+
+# --- (w) a dropped gc.outcome_reason refuses the close too -----------------
+# gc.outcome_reason is the sitting's board headline, so the read-back gate must
+# cover the reason as well as the word: dropping only the reason must leave the
+# visit OPEN, not close it into a headline-less row that no re-run can repair
+# (PRIOR_OUTCOME is nonempty once gc.outcome lands, so a re-run never re-arms).
+mkbead alpha open al-visit5
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit5"
+mkbead beta open bt-vsucc5
+rc=0; FAKE_BD_DROP_OUTCOME_REASON=1 run --origin al-visit5 --successor bt-vsucc5 --kind folded || rc=$?
+eq "$rc" 4 "a visit outcome_reason that does not read back refuses the close"
+eq "$(field alpha status al-visit5)" open "the visit stays OPEN when the reason did not stick"
+has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome stamp"
+eq "$(field alpha m.gc.outcome_reason al-visit5)" "" "the reason really was dropped by the fake"
+eq "$(field alpha m.gc.superseded_by al-visit5)" bt-vsucc5 "the pointer is still recorded, so the bead is findable"
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"
