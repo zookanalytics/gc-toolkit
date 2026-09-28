@@ -137,8 +137,11 @@ validator does. The review bead it reads
 is already a first-class, queryable bead: `gate-ensure.sh` creates it at
 dispatch with `task_kind`, `anchor_bead`, `check_name` and `reviewed_oid`, and
 `signoff.sh` closes it with `gc.outcome=recorded` and `signoff_verdict`. The
-`reviewed_oid` it carries is a dispatch pin, read by no gate as a claim about a
-commit.
+`reviewed_oid` it carries is a dispatch pin. No lane's `green` reads it as a
+claim about a commit — green derives head-independently — but one gate does
+compare it to the live head: the per-head re-dispatch bar in the Quiescence
+section, which forbids a second whole-diff review at a head already judged
+without making any lane's green depend on a commit.
 
 The must-fix half is already structural. A must-fix finding holds its anchor by
 a `blocks` edge, and `merge.sh` already reads every live `blocks` blocker of the
@@ -364,6 +367,33 @@ fix is half-applied produces findings against a state no one intended to ship,
 and the rework that answers them is the no-op kind the declination texts are
 full of.
 
+### The per-head bar
+
+The four clauses serialise dispatch while a review is live or the anchor is
+being acted on. One window they do not cover is the one a `request-changes`
+verdict opens. The verdict closes the review bead, and the fix unit and findings
+it files are separate, later writes; the fourth clause reads live statuses only,
+so between the close and those writes becoming visible the closed review is
+invisible to it, and no must-fix finding, fix unit, or validation pass is open
+yet. A dispatch in that window pours a second whole-diff review at the unchanged
+head — the 83 by another route, the request-changes counterpart of the approve
+path a closed approve already settles oid-independently.
+
+`gate-ensure.sh` closes the window with a per-head bar. Before a fresh dispatch
+it reads the lane's closed review beads and refuses when one records a verdict
+(`gc.outcome=recorded`) at the live head. The bar is race-free because the
+signal is on the review bead itself: `reviewed_oid` is pinned at dispatch and
+`gc.outcome=recorded` rides the same write that closes the bead, so the instant a
+review leaves the in-flight set it enters the closed-and-judged set, with no gap.
+A superseded review (`gc.outcome=superseded`) is excluded, so the two paths back
+to `unreviewed` — a moved head, which carries a different oid, and the validator
+superseding the lane's standing verdict (an approve backing, or the recorded
+request-changes review itself when no backing exists) — still pour a fresh
+review. Green is untouched: no lane's `green` compares `reviewed_oid` to a head,
+so a green lane survives new commits as
+before. The invariant the bar enforces is narrow: at most one whole-diff review
+per (anchor, lane, head).
+
 This is exactly the question `tk-j5wrs` raised as unowned — "what is currently
 acting on this anchor" — now given a purpose and a single owner. It gets one
 definition because one authority computes it. That authority is
@@ -405,12 +435,15 @@ whole-diff read being spent on it. A comment that overturns an assumption the
 diff rests on is what decision 3 answers yes to.
 
 **The validator ruling a fresh whole-diff review warranted returns that lane to
-`unreviewed`.** It marks the lane's already-closed approve-review bead
+`unreviewed`.** It marks the lane's already-closed review bead
 `gc.outcome=superseded` — the same stamp `signoff.sh` writes to retire a review
-whose pin left the branch — so the approve half of the derivation no longer holds
-and the lane owes a full review again. It is the only path back to `unreviewed`,
-for human input and machine input alike, which is the judged-convergence ruling
-applied to both.
+whose pin left the branch. When the lane held an approve backing, its green half
+no longer holds; when the lane stood on a request-changes verdict with no
+backing, that recorded verdict is what is retired, which lifts `gate-ensure.sh`'s
+per-head bar so the fresh review pours at the unmoved head. Either way the lane
+owes a full review again. It is the only path back to `unreviewed`, for human
+input and machine input alike, which is the judged-convergence ruling applied to
+both.
 
 The signal already exists and is already deduped. `pr-facts.sh` records a
 `commented` posture against `pr_comment_watermark` and `pr_review_watermark`,
@@ -561,8 +594,9 @@ stored lane marker itself.
   grammar clause and `check-gate-marker-provenance`'s marker audit go with it.
 - The 211 re-reviews on a new head go, because a commit no longer invalidates
   a lane.
-- The 83 same-head duplicates go, because one authority dispatches and
-  quiescence forbids a second dispatch while anything is acting.
+- The 83 same-head duplicates go, because one authority dispatches, quiescence
+  forbids a second dispatch while anything is acting, and the per-head bar
+  forbids one at a head already judged once the review that judged it has closed.
 - The dispatch ceiling stops being a convergence proxy. `GC_MAX_REVIEW_DISPATCHES`
   and its `dispatch_backstop.<g>` escalation exist because a converging PR could
   exhaust its budget on redundant rounds and park on the operator's board as a

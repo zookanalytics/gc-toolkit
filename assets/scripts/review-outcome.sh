@@ -25,10 +25,15 @@
 #                   derives green once nothing else holds it. Idempotent — a lane
 #                   already backed gets no second bead.
 #   supersede-lane  Rule "a fresh whole-diff review is warranted": stamp
-#                   gc.outcome=superseded on the lane's approve backing(s), the
-#                   same stamp signoff.sh writes to retire a review whose pin left
-#                   the branch, so the approve half no longer holds and the lane
-#                   owes a full review again.
+#                   gc.outcome=superseded on the lane's standing review(s) — the
+#                   approve backing(s) lane-state.sh reads for green, and any
+#                   recorded request-changes verdict gate-ensure.sh's per-head bar
+#                   reads — the same stamp signoff.sh writes to retire a review
+#                   whose pin left the branch. The lane then owes a full review
+#                   again, and the per-head bar lets the fresh one through at the
+#                   unmoved head. A bare request-changes lane has no approve
+#                   backing, so retiring only backings would leave its verdict
+#                   standing and the bar blocking the re-review this rules for.
 #   supersede-anchor  The anchor-wide form of supersede-lane, for a human
 #                   feedback batch (check_name=human) the validator ruled has not
 #                   converged. A batch rules the whole diff, so it supersedes the
@@ -88,32 +93,57 @@ backing_ids() { # <anchor> <lane>
     | .[].id' 2>/dev/null
 }
 
-# Supersede every live approve backing of one lane — the write that returns the
-# lane to unreviewed. Echoes the count retired on success; returns 2 (fail
-# closed) when the store would not read, a supersede write is refused, or a
-# backing still reads live afterward. The note is passed in so the per-lane and
-# anchor-wide callers each phrase their own reason. Shared by supersede-lane and
-# supersede-anchor so the two cannot drift on what "retire a backing" means.
-supersede_lane_backings() { # <anchor> <lane> <note>
+# The closed reviews a supersede must retire — a strict superset of the backings
+# above. It keeps every approve backing (so superseding still un-greens the lane)
+# and adds any recorded verdict: gate-ensure.sh's per-head bar reads
+# gc.outcome=recorded at the head, so a bare request-changes lane, which has no
+# approve backing, would otherwise keep its verdict standing and the bar blocking
+# the re-review the validator ruled for. Retiring it stamps the superseded state
+# the bar already excludes. Ids on stdout, one per line; exit 2 when the store
+# would not read so a caller never mistakes an unreadable store for "nothing stands".
+superseding_review_ids() { # <anchor> <lane>
+  local anchor="$1" lane="$2" rows
+  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  printf '%s' "$rows" | jq -r --arg lane "$lane" '
+    [ .[] | (.metadata // {}) as $m
+          | select((($m.task_kind // "") | tostring) == "review")
+          | select(((($m.check_name // "") | tostring) | if . == "" then "codex" else . end) == $lane)
+          | select(((.status // "") | tostring | ascii_downcase) == "closed")
+          | (($m.signoff_verdict // "") | tostring) as $sv
+          | (($m["gc.outcome"] // "") | tostring) as $oc
+          | select(($sv == "approve" and $oc != "superseded") or ($oc == "recorded")) ]
+    | .[].id' 2>/dev/null
+}
+
+# Supersede every live review standing for one lane — the write that returns the
+# lane to unreviewed and lifts the per-head bar. Echoes the count retired on
+# success; returns 2 (fail closed) when the store would not read, a supersede
+# write is refused, or a review still reads live afterward. The note is passed in
+# so the per-lane and anchor-wide callers each phrase their own reason. Shared by
+# supersede-lane and supersede-anchor so the two cannot drift on what "retire the
+# lane's standing review" means.
+supersede_lane_reviews() { # <anchor> <lane> <note>
   local anchor="$1" lane="$2" note="$3" ids rc id n=0 still
-  ids=$(backing_ids "$anchor" "$lane"); rc=$?
-  [ "$rc" -eq 2 ] && { warn "could not read review outcomes on $anchor; nothing superseded"; return 2; }
-  # Nothing backs the lane: it is already not green, so there is nothing to
-  # retire. Report the no-op and succeed — the validator's intent (the lane owes
-  # a fresh review) already holds.
+  ids=$(superseding_review_ids "$anchor" "$lane"); rc=$?
+  [ "$rc" -eq 2 ] && { warn "could not read reviews on $anchor; nothing superseded"; return 2; }
+  # Nothing stands for the lane: it already owes a fresh review, so there is
+  # nothing to retire. Report the no-op and succeed — the validator's intent
+  # already holds.
   [ -n "$ids" ] || { echo 0; return 0; }
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     gc bd update "$id" --set-metadata gc.outcome=superseded --append-notes "$note" >/dev/null 2>&1 \
-      || { warn "could not supersede approve outcome $id on lane $lane"; return 2; }
+      || { warn "could not supersede review $id on lane $lane"; return 2; }
     n=$((n + 1))
   done <<EOF
 $ids
 EOF
-  # Prove the supersede landed: a backing that still reads as live would leave the
-  # lane green when the validator ruled it must be re-reviewed.
-  still=$(backing_ids "$anchor" "$lane") || { warn "could not read back the $lane backing after supersede"; return 2; }
-  [ -z "$still" ] || { warn "lane $lane still has a live approve backing after supersede: $still"; return 2; }
+  # Prove the supersede landed: a review that still reads live would leave the
+  # lane green (an approve backing) or the per-head bar armed (a recorded
+  # request-changes verdict) when the validator ruled it must be re-reviewed.
+  still=$(superseding_review_ids "$anchor" "$lane") || { warn "could not read back the $lane reviews after supersede"; return 2; }
+  [ -z "$still" ] || { warn "lane $lane still has a live review after supersede: $still"; return 2; }
   echo "$n"
 }
 
@@ -184,7 +214,7 @@ cmd_supersede_lane() {
   local note="validator: superseded — a fresh whole-diff review is warranted"
   [ -n "$reason" ] && note="validator: superseded — $reason"
   local n
-  n=$(supersede_lane_backings "$anchor" "$lane" "$note") || exit 2
+  n=$(supersede_lane_reviews "$anchor" "$lane" "$note") || exit 2
   echo "$n"
 }
 
@@ -225,7 +255,7 @@ cmd_supersede_anchor() {
   local lane total=0 c
   while IFS= read -r lane; do
     [ -n "$lane" ] || continue
-    c=$(supersede_lane_backings "$anchor" "$lane" "$note") || exit 2
+    c=$(supersede_lane_reviews "$anchor" "$lane" "$note") || exit 2
     total=$((total + c))
   done <<EOF
 $lanes
