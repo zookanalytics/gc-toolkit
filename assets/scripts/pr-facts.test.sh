@@ -1920,6 +1920,59 @@ eq "$(reacted 45 NC-45)" "true" "the visit still acknowledges the comment"
 eq "$(treply 45 T-45)" "" "a visit is a person's to answer, so the city never replies into their thread"
 eq "$(tresolved 45 T-45)" "false" "…and never resolves their thread"
 
+# ---- CONFLICTING PR: acknowledgment is decoupled from merge state (defect A) ----
+# A conflicting/DIRTY PR still routes its review feedback. The bring-current arm
+# stands down while feedback is outstanding, so the routing arm files the rework,
+# opens the validation pass, captures the finding with finding.comment_id, and the
+# write-back reacts — none of it gated on mergeability. The guard the conflict gate
+# protected moves to the landing path: the rework carries prepare_mode=merge, so
+# the refinery brings the branch current at landing and no merge is attempted while
+# the base conflicts.
+echo "# a CONFLICTING PR still acknowledges an unengaged human review"
+store "[$(anchor CFA 120)]"
+printf '%s' "$(prview 120 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_120.json"
+echo '[]' > "$GH_DIR/reviews_120.json"
+printf '[{"id":100,"user":{"login":"johnzook"},"body":"please address this"}]' > "$GH_DIR/comments_120.json"
+printf '%s' "$(one_thread 120 "please address this")" > "$GH_DIR/threads_120.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+CFDISP=$(meta CFA pr_comment_disposition)
+has "$CFDISP" "rework:" "the disposition is recorded, so a conflicting PR's feedback is routed and the write-back has a batch"
+CFRW="${CFDISP#rework:}"
+CFID=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "CFA") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$CFID" "<none>" "the comment becomes a finding on the anchor even though the PR conflicts"
+eq "$(meta "$CFID" 'finding.lane')" "human" "…on the human lane the validator rules"
+eq "$(meta "$CFID" 'finding.comment_id')" "100" "…carrying the comment id the write-back replies into"
+CFVP=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "CFA") | select((.metadata.check_name // "") == "human") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$CFVP" "<none>" "…and a human-lane validation pass is opened on the conflicting anchor"
+eq "$(meta "$CFRW" prepare_mode)" "merge" "the rework brings the branch current by merge — the guard the gate protected, now on the landing path"
+eq "$(meta "$CFRW" target)" "main" "…landing onto the base the refinery merges in"
+eq "$(meta "$CFRW" branch)" "polecat/x120" "…on the PR's own branch"
+eq "$(meta "$CFRW" 'gc.routed_to')" "$FIX" "…routed to the fix pool"
+eq "$(meta CFA merge_result)" "pull_request" "the anchor keeps gating; no merge or state flip on a conflicting PR"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and pr-facts never merges the conflicting PR"
+eq "$(reacted 120 NC-120)" "true" "the routed comment gets its EYES reaction even though the PR conflicts"
+eq "$(treply 120 T-120)" "" "no inline reply while the rework is still open — the reply names the landing commit"
+
+echo "# …and once that rework lands, the conflicting PR's thread gets its inline reply and resolve"
+bmut "$CFRW" '.status = "closed"'
+out=$(run)
+has "$(treply 120 T-120)" "Addressed in sha-120" "the reply names the landing commit, posted into the conflicting PR's thread"
+has "$(treply 120 T-120)" "$CFRW" "…and the bead that carried the work"
+eq "$(tresolved 120 T-120)" "true" "…and the thread is resolved behind it"
+
+echo "# a CONFLICTING PR with NO outstanding feedback still files the bring-current rework"
+store "[$(anchor CFB 121)]"
+printf '%s' "$(prview 121 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_121.json"
+echo '[]' > "$GH_DIR/reviews_121.json"
+echo '[]' > "$GH_DIR/comments_121.json"
+out=$(run)
+has "$out" "filed merge-mode rework" "with nothing to acknowledge, the bring-current arm still dispatches"
+CFB_RW=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "CFB") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$CFB_RW" "<none>" "…a bring-current rework child exists"
+eq "$(meta "$CFB_RW" prepare_mode)" "merge" "…carrying prepare_mode=merge"
+eq "$(meta CFB pr_comment_disposition)" "<absent>" "…and no comment disposition, since there was no feedback to route"
+
 # ---- the peer model: a declined human objection is answered, never silenced ----
 # The validator may overrule a human on the merits (finding declined), but it
 # owes them the reason on their PR: it stamps the answer (finding.reply) and the

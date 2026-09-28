@@ -1066,12 +1066,17 @@ GATES
     continue
   fi
 
-  # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
-  if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
-    # A pre-merge arm defers conflict-rework dispatch to the full pass. A
-    # conflicting anchor cannot merge this pass, its feedback is not routed while
-    # it conflicts (this arm ends the anchor before the feedback arm), and one
-    # dispatch site per pass keeps the dedup window narrow.
+  # --- CONFLICTING: an operator freeze defers everything; else bring current -----
+  # A conflicting/DIRTY anchor cannot merge this pass. An operator freeze on it —
+  # merge_hold, rebase_hold, an open decision demand, or an armed re-dispatch —
+  # defers the whole anchor, its feedback included, until the freeze lifts; this
+  # block enforces that and ends the anchor before the feedback arm. Absent a
+  # freeze it falls through: the block below brings a conflict with nothing
+  # outstanding current, and a conflict carrying feedback reaches the
+  # feedback-routing arm, so review acknowledgment is never gated on mergeability.
+  if { [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; }; then
+    # A pre-merge pass (--route-comments-only) defers a conflicting anchor to the
+    # full pass; it cannot merge while it conflicts either way.
     [ "$ROUTE_ONLY" != 1 ] || continue
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
@@ -1101,6 +1106,15 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but the anchor is armed to re-dispatch when ready (gc.dispatch_when_ready=$armed); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
+  fi
+
+  # Not frozen. Bring a conflicting anchor current with a dedicated child ONLY when
+  # it carries no unanswered feedback. When feedback IS outstanding the
+  # feedback-routing arm below files ONE prepare_mode=merge rework that answers the
+  # comments and brings the branch current together, so a bring-current child here
+  # would race it on the same branch; the LANDING is where a mergeable base is
+  # required, and the refinery reaches it by merging the base in.
+  if { [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; } && [ "$unanswered" != 1 ]; then
     fix_branch="${head_ref:-$branch}"
     if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
       echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
@@ -1303,12 +1317,14 @@ GATES
   fi
 
   # --- unanswered review feedback routes to something ---------------------------
-  # Reached only when the anchor is otherwise clear: the conflict and stale-gate
-  # arms above already left a child in flight holding the merge, and the feedback
-  # gets its own dispatch on the pass after that child lands. Whatever this
-  # routes to holds the merge until it closes, and the watermarks move only once
-  # the routing has read back — feedback nothing answered can never fall below
-  # the mark.
+  # Reached when the anchor is otherwise clear, and also when it CONFLICTS but is
+  # not frozen and carries unanswered feedback: the conflict block above brings a
+  # clean conflict current and defers a frozen anchor, so a not-frozen conflict
+  # with feedback falls through to here and acknowledgment is not gated on
+  # mergeability. Whatever this routes to holds the merge until it closes; a rework
+  # carries prepare_mode=merge, so the refinery brings the branch current at
+  # landing rather than merging over a conflict. The watermarks move only once the
+  # routing has read back — feedback nothing answered can never fall below the mark.
   # The batch is the same whether the posture reads `commented` or
   # `changes_requested`. A CHANGES_REQUESTED holds the merge on its own, and a
   # hold is not an answer: objections nothing routes converge to codex-green
