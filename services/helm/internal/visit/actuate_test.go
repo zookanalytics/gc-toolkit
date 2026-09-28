@@ -55,32 +55,61 @@ func TestNewReportsAnUnresolvableScript(t *testing.T) {
 	}
 }
 
-// The verb, then the bead — as two argv elements, never one string.
-func TestOpenPassesVerbAndBeadAsSeparateArgs(t *testing.T) {
-	writeScript(t, `printf 'argc=%s a1=%s a2=%s\n' "$#" "$1" "$2"`)
+// The verb, then the bead — as separate argv elements, never one string. engage
+// carries the fixed HTTP-safety flags (--no-input --no-attach); every other verb
+// is just <verb> <bead>.
+func TestRunPassesVerbAndBeadAsSeparateArgs(t *testing.T) {
+	writeScript(t, `printf 'argc=%s a1=%s a2=%s a3=%s a4=%s\n' "$#" "$1" "$2" "$3" "$4"`)
 	o, err := New("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	res, err := o.Open(context.Background(), "tk-abc12")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+	for _, tc := range []struct {
+		verb string
+		want string
+	}{
+		{"open", "argc=2 a1=open a2=tk-abc12 a3= a4="},
+		{"accept", "argc=2 a1=accept a2=tk-abc12 a3= a4="},
+		{"dismiss", "argc=2 a1=dismiss a2=tk-abc12 a3= a4="},
+		{"engage", "argc=4 a1=engage a2=tk-abc12 a3=--no-input a4=--no-attach"},
+	} {
+		res, err := o.Run(context.Background(), tc.verb, "tk-abc12")
+		if err != nil {
+			t.Fatalf("Run(%s): %v", tc.verb, err)
+		}
+		if !strings.Contains(res.Stdout, tc.want) {
+			t.Errorf("Run(%s) stdout = %q, want it to contain %q", tc.verb, res.Stdout, tc.want)
+		}
 	}
-	if want := "argc=2 a1=open a2=tk-abc12"; !strings.Contains(res.Stdout, want) {
-		t.Errorf("stdout = %q, want it to contain %q", res.Stdout, want)
+}
+
+// An unknown verb is a wiring fault, reported as a Go error without running the
+// script at all — the handlers pass fixed literals, so this can only be a bug.
+func TestRunRejectsAnUnknownVerb(t *testing.T) {
+	writeScript(t, "echo RAN; exit 0\n")
+	o, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := o.Run(context.Background(), "sabotage", "tk-abc12")
+	if err == nil {
+		t.Fatal("Run accepted an unknown verb")
+	}
+	if strings.Contains(res.Stdout, "RAN") {
+		t.Errorf("the script ran for an unknown verb: %q", res.Stdout)
 	}
 }
 
 // A non-zero exit is a RESULT: the HTTP layer maps the script's codes, so
 // turning one into a Go error here would erase the distinction it maps on.
-func TestOpenReportsExitCodesAsResults(t *testing.T) {
+func TestRunReportsExitCodesAsResults(t *testing.T) {
 	for _, code := range []int{2, 3, 4, 9} {
 		writeScript(t, "echo out; echo err >&2; exit "+strconv.Itoa(code)+"\n")
 		o, err := New("")
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
-		res, err := o.Open(context.Background(), "tk-abc12")
+		res, err := o.Run(context.Background(), "open", "tk-abc12")
 		if err != nil {
 			t.Fatalf("exit %d returned a Go error: %v", code, err)
 		}
@@ -96,7 +125,7 @@ func TestOpenReportsExitCodesAsResults(t *testing.T) {
 // A run killed by the deadline must classify as a timeout. Without the ctx.Err
 // check first it would surface as a signal-shaped ExitError and be mapped as
 // though the script had chosen that code.
-func TestOpenClassifiesATimeout(t *testing.T) {
+func TestRunClassifiesATimeout(t *testing.T) {
 	writeScript(t, "sleep 5\n")
 	o, err := New("")
 	if err != nil {
@@ -105,7 +134,7 @@ func TestOpenClassifiesATimeout(t *testing.T) {
 	o.timeout = 50 * time.Millisecond
 
 	start := time.Now()
-	res, err := o.Open(context.Background(), "tk-abc12")
+	res, err := o.Run(context.Background(), "open", "tk-abc12")
 	if !errors.Is(err, server.ErrToolTimeout) {
 		t.Fatalf("err = %v, want ErrToolTimeout", err)
 	}
@@ -124,7 +153,7 @@ func TestOpenClassifiesATimeout(t *testing.T) {
 }
 
 // A caller that gives up must not be reported as the tool timing out.
-func TestOpenPropagatesCallerCancellation(t *testing.T) {
+func TestRunPropagatesCallerCancellation(t *testing.T) {
 	writeScript(t, "sleep 5\n")
 	o, err := New("")
 	if err != nil {
@@ -135,14 +164,14 @@ func TestOpenPropagatesCallerCancellation(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
-	if _, err := o.Open(ctx, "tk-abc12"); err == nil {
+	if _, err := o.Run(ctx, "open", "tk-abc12"); err == nil {
 		t.Fatal("a cancelled call returned no error")
 	}
 }
 
 // A script that cannot be executed at all is a different failure from one that
 // ran and failed: the operator's move is to fix the deployment, not the bead.
-func TestOpenReportsAnUnrunnableScript(t *testing.T) {
+func TestRunReportsAnUnrunnableScript(t *testing.T) {
 	path := writeScript(t, "exit 0\n")
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatalf("chmod: %v", err)
@@ -151,7 +180,7 @@ func TestOpenReportsAnUnrunnableScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := o.Open(context.Background(), "tk-abc12"); !errors.Is(err, server.ErrToolUnavailable) {
+	if _, err := o.Run(context.Background(), "open", "tk-abc12"); !errors.Is(err, server.ErrToolUnavailable) {
 		t.Fatalf("err = %v, want ErrToolUnavailable", err)
 	}
 }

@@ -45,6 +45,39 @@ func TestRenderTableCountsTheDoneBandSeparately(t *testing.T) {
 	}
 }
 
+// A recommendation row (Acceptable) marks its ask with the accept affordance and
+// the legend names the verb; a discuss-only gate shows neither.
+func TestRenderTableMarksAcceptableRows(t *testing.T) {
+	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
+	tiles := []board.Tile{
+		{
+			ID: "tk-rec", Rig: "gc-toolkit", Kind: "human", Title: "a recommendation",
+			Severity: board.SevElevated, Section: board.SectionGate, Owed: true, Held: true,
+			Frontier: "owed", Needs: "retire the wedged PR", RankScore: 2_000_000,
+			Acceptable: true, AcceptFormula: "mol-dispose-pr",
+		},
+		{
+			ID: "tk-plain", Rig: "gc-toolkit", Kind: "human", Title: "a discuss-only gate",
+			Severity: board.SevElevated, Section: board.SectionGate, Owed: true, Held: true,
+			Frontier: "owed", Needs: "let's talk it through", RankScore: 1_000_000,
+		},
+	}
+	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
+	var out strings.Builder
+	renderTable(&out, b, tiles, b.GeneratedAt, len(tiles))
+	got := out.String()
+
+	if !strings.Contains(got, "accept ▸ retire the wedged PR") {
+		t.Errorf("an acceptable row marks its ask with the accept affordance; got:\n%s", got)
+	}
+	if strings.Contains(got, "accept ▸ let's talk it through") {
+		t.Errorf("a discuss-only row must not be marked acceptable; got:\n%s", got)
+	}
+	if !strings.Contains(got, "gc-helm.sh accept <id>") {
+		t.Errorf("the legend names the accept verb; got:\n%s", got)
+	}
+}
+
 func TestRenderTableShowsTheDoneRowAndThatItAgesOut(t *testing.T) {
 	b, tiles := doneBoard()
 	var out strings.Builder
