@@ -211,6 +211,21 @@ cheap. The goal loop is event-driven.
 No process polls the goal. The keeper is a reaction wired to close events,
 realized as a control bead rather than a daemon, which is what keeps it cheap.
 
+**Every bound resolves on a close.** At each verdict the judge reads all three
+bounds: the iterations and tokens consumed, and the wall-clock elapsed since
+arming. It routes `exhausted` the moment one has tripped. Iterations and tokens
+advance only while an iteration runs, so judging them when it closes catches
+them exactly. Wall-clock advances even while nothing runs, so it carries one
+more rule: each iteration is bounded by the time left in the goal's wall-clock
+budget, held as the iteration's own deadline, so an iteration cannot outlive the
+budget it spends. A wedged or over-running iteration is terminated at that
+deadline, and that termination is itself a close, so the judge fires on it and
+reads the wall-clock as tripped. The bound on the iteration, not a clock
+watching the goal, is what guarantees the close, and the loop stays
+event-driven. A goal that must be judged while no iteration is in flight, such
+as one waiting on an external change, carries the bounded re-check below rather
+than a standing poll.
+
 The loop is not a static cycle. A graph cycle is rejected, and a
 `[steps.loop] until=` clause is inert and runs exactly one iteration
 (docs/gascity-packs.md). Iteration comes from the control bead re-arming on
