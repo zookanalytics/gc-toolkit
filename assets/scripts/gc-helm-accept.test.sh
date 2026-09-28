@@ -50,15 +50,19 @@ mkdir -p "$TMP/bin"
 #   the SUBJECT id -> open, gc.recommended_formula = $FAKE_FORMULA (empty =>
 #     discuss-only), no gc.superseded_by (so the resolver passes it through);
 #     $FAKE_SUBJECT_MODE=missing makes it the {"error":…} not-found object.
-#   the VISIT id   -> a task_kind=visit bead tracking the subject, and carrying
-#     gc.outcome=dismissed so dismiss's stamp read-back (meta_now) is satisfied
-#     without the stub having to model state.
+#   the VISIT id   -> a task_kind=visit bead tracking the subject, with its
+#     gc.outcome and gc.outcome_reason read back from the state $FAKE_OUTCOME_DIR
+#     holds. dismiss stamps both on the visit and reads both back before the
+#     irreversible close, so the stub models that write-then-read rather than
+#     faking a fixed outcome; an unstamped visit reads empty, as the store answers
+#     before dismiss runs.
 # `bd list` (the accept guard's live-visit read AND dismiss's visit lookup)
 # yields one visit on the subject when $FAKE_VISIT is set, with status
 # $FAKE_VISIT_STATUS (default open), assignee $FAKE_VISIT_ASSIGNEE and
 # gc.session_name $FAKE_VISIT_SESSION — the fields the un-engaged predicate
-# reads; $FAKE_LIST_MODE=notarray/fail drives the fail-closed path. sling/close/
-# update are recorded; sling's exit is $FAKE_SLING_RC.
+# reads; $FAKE_LIST_MODE=notarray/fail drives the fail-closed path. sling and
+# close are recorded; update is recorded AND persists gc.outcome/gc.outcome_reason
+# to $FAKE_OUTCOME_DIR; sling's exit is $FAKE_SLING_RC.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 sub="${1:-}"; verb="${2:-}"
@@ -74,18 +78,24 @@ case "$sub" in
         id="$3"
         case "$id" in
           "${FAKE_VISIT_ID:-__novisit__}")
+            # gc.outcome / gc.outcome_reason read back from the state the `update`
+            # arm persisted, so dismiss's read-back sees exactly what it stamped;
+            # an unstamped visit reads empty, the way the store answers before
+            # dismiss runs.
+            oc="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id" 2>/dev/null || true)"
+            or="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reason" 2>/dev/null || true)"
             if [ -n "${FAKE_VISIT_EDGE:-}" ]; then
               # The su-ab9je shape: the continuation_group stamp landed EMPTY and
               # only the tracks edge names the subject, rendered in the bd show
               # dep shape {dependency_type, id}.
-              jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" \
+              jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" --arg oc "$oc" --arg or "$or" \
                 '[{id:$i, status:"open", title:"visit on the subject",
-                   metadata:{task_kind:"visit","gc.continuation_group":"","gc.outcome":"dismissed"},
+                   metadata:{task_kind:"visit","gc.continuation_group":"","gc.outcome":$oc,"gc.outcome_reason":$or},
                    dependencies:[{id:$s, dependency_type:"tracks"}]}]'
             else
-              jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" \
+              jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" --arg oc "$oc" --arg or "$or" \
                 '[{id:$i, status:"open", title:"visit on the subject",
-                   metadata:{task_kind:"visit","gc.continuation_group":$s,"gc.outcome":"dismissed"}}]'
+                   metadata:{task_kind:"visit","gc.continuation_group":$s,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
             fi ;;
           "${FAKE_SUBJECT_ID:-__nosubj__}")
             case "${FAKE_SUBJECT_MODE:-found}" in
@@ -110,15 +120,40 @@ case "$sub" in
                metadata:{task_kind:"visit","gc.continuation_group":$s,"gc.session_name":$se}}]'
         else printf '[]\n'; fi ;;
       close)  printf '%s\n' "$*" >> "$FAKE_CALLS" ;;
-      update) printf '%s\n' "$*" >> "$FAKE_CALLS" ;;
+      update)
+        printf '%s\n' "$*" >> "$FAKE_CALLS"
+        # Persist the dismiss stamps so `bd show` reads them back: gc.outcome to
+        # $FAKE_OUTCOME_DIR/<id>, gc.outcome_reason to <id>.reason, keyed by the
+        # bead id ($3). dismiss reads both back before the irreversible close, so
+        # the stub models the write instead of faking a fixed outcome.
+        for a in "$@"; do
+          case "$a" in
+            gc.outcome=*)        [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
+            gc.outcome_reason=*) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome_reason=}" > "$FAKE_OUTCOME_DIR/$3.reason" ;;
+          esac
+        done ;;
     esac ;;
 esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+# pr-visit-comment.sh stub. dismiss updates the subject's PR reminder after it
+# closes a visit; point that tool at a recording no-op so the close path stays
+# hermetic (no gh, no network), the way gc-helm.test.sh and gc-helm-engage.test.sh do.
+cat > "$TMP/bin/rec-pvc" <<'PVC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${REC_PVC_LOG:-/dev/null}"
+exit 0
+PVC
+chmod +x "$TMP/bin/rec-pvc"
+
 export PATH="$TMP/bin:$PATH"
 export FAKE_CALLS="$TMP/calls"
+# The visit's dismiss stamps land here and read back from here, so the stub
+# models the store's write-then-read instead of faking a fixed outcome.
+export FAKE_OUTCOME_DIR="$TMP/outcomes"; mkdir -p "$FAKE_OUTCOME_DIR"
+export GC_VISIT_COMMENT_TOOL="$TMP/bin/rec-pvc" REC_PVC_LOG="$TMP/pvc.log"
 # Hermetic: no inherited fixture hook, no ambient rig steering the resolver, and
 # the cache stays out of the operator's real dir.
 unset GC_HELM_FIXTURE GC_RIG || true
@@ -127,6 +162,7 @@ export TMPDIR="$TMP"
 # run_accept <arg...> -> sets RC/OUT/ERR/CALLS from the per-case FAKE_* env.
 run_accept() {
     : > "$FAKE_CALLS"
+    rm -f "$FAKE_OUTCOME_DIR"/* 2>/dev/null || true
     set +e
     OUT="$(sh "$SCRIPT" accept "$@" 2>"$TMP/err")"; RC=$?
     set -e
