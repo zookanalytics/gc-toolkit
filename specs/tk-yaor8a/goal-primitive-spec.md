@@ -57,13 +57,14 @@ then a tuning molecule across days, each iteration a fresh unit of work, all
 judged against the same oracle.
 
 This spec is the middle layer. Above it, a vision layer: epics carry visions,
-and a PM-shaped refinement loop distills crisp goal contracts from them
+and a PM-shaped refinement loop distills measurable goal contracts from them
 (separate design, tk-h2s7hj.1). Below it, goal-keeper v1 (tk-tutb46) executes
-and judges. Oracle hardness is a dial: deterministic oracles run autonomously
-within budget, rubric oracles carry a human lane, and operator weight scales
-with oracle softness. Document-shaped goals (a PRD meeting a graded checklist
-bar) are legal citizens of this same primitive through the rubric lane the
-judge architecture already defines.
+and judges. v1 judges deterministic oracles only. A goal stated only in prose,
+because no measurable contract has been written for it yet, lives in the vision
+layer until the refinement loop distills it to a measurable contract; not-yet
+crisp is a legal state, not an exclusion. Rubric-lane judging, which is how
+document-shaped goals such as a PRD meeting a graded checklist are measured,
+belongs to that refinement design (tk-h2s7hj.1).
 
 How it differs from what exists:
 
@@ -75,18 +76,24 @@ How it differs from what exists:
 
 ## 2. The goal contract
 
-Required fields:
+A minimal contract is three things: a measurable end state, a check, and a
+budget.
 
 | Field | Meaning |
 |---|---|
-| `statement` | the goal in plain language; the agreement between operator and city |
-| `oracle` | the machine-checkable definition of done: a command or metric-and-threshold (deterministic), or a rubric-lane judge where no deterministic measure exists |
-| `invariants` | conditions that must hold on every iteration (the suite stays green, no public API breaks, the oracle artifact is unmodified); a violated invariant fails the iteration even when the oracle passes |
+| `statement` | the measurable end state in plain language; the agreement between operator and city |
+| `oracle` | the machine-checkable definition of done: a command or a metric-and-threshold, judged by an exit code or a comparison |
 | `budget.max_iterations` | cap on attempts |
 | `budget.token_budget` | cumulative token cap across iterations |
 | `budget.wall_clock` | a deadline, relative or absolute |
-| `bound_clause` | what happens when any bound trips: a routed handoff to `escalation_target` carrying the reason and the closest-approach evidence, never a silent stop |
-| `escalation_target` | who receives impossible, stalled, and exhausted handoffs; a human by default |
+
+Optional, defaulted by the keeper where a goal does not state them:
+
+| Field | Meaning |
+|---|---|
+| `invariants` | conditions that must hold on every iteration (the suite stays green, no public API breaks); a violated invariant fails the iteration even when the oracle passes |
+| `bound_clause` | override for what happens when a bound trips; the keeper default is a routed handoff to the escalation target carrying the reason and the closest-approach evidence, never a silent stop |
+| `escalation_target` | override for who receives impossible, stalled, and exhausted handoffs; the keeper default is a human |
 | `owner` / `provenance` | who set the goal and why |
 
 The budget is three-way on purpose. Iterations bound count, tokens bound cost,
@@ -94,56 +101,38 @@ and wall-clock bounds latency; a goal that would converge in twenty iterations
 but blow the token budget at eight should stop at eight, and the operator sees
 which bound tripped.
 
-**Where the contract lives.** The locked parts (oracle, invariants, budget)
-live in a committed artifact (for example `specs/<goal-bead>/goal.toml`),
-committed to the target branch before the work that chases it. The lock is
-enforced against that committed copy, never against a value the iteration
-worker can rewrite. An iteration worker can write bead metadata, so the
-contract is forgeable when stored there, as is any hash or commit pointer that
-names it: a worker that loosens the oracle rewrites the stored value to match,
-and the keeper would compare a tampered artifact to a tampered reference.
+**Where the contract lives.** The contract lives on the goal bead. When the
+keeper arms the goal it records a snapshot of the contract — the oracle, the
+budget, and any invariants — and before each verdict the judge re-reads the
+contract and compares it to that snapshot. A match means the goal is unchanged
+and the verdict stands. A mismatch means the contract moved after arming, so the
+keeper re-arms against the current contract with a fresh snapshot rather than
+judging against goalposts that have moved, and records the change in the verdict
+trail.
 
-**The lock is one pinned commit.** The keeper measures against a single
-immutable commit, the lock commit, pinned when the goal is armed and before the
-first iteration runs. It is not the moving tip of the target branch: that tip
-advances as unrelated work merges over the goal's life, and a keeper that read
-the tip would adopt whatever oracle, invariants, or budget a later merge left
-there, silently moving the definition of done. A commit is content-addressed,
-so the lock commit always yields the same contract and no iteration can make
-that name resolve to different content. The pin itself lives in a keeper-owned
-reference the iteration worker cannot rewrite, such as a protected ref under
-`refs/goals/<goal-bead>/`, never bead metadata, which is disqualified for the
-pointer for the same reason it is disqualified for the contract. Each iteration
-the keeper reads the contract at the lock commit and compares the iteration's
-copy against it; any difference is a real edit to the oracle and fails the
-iteration. This is the failing-test-first discipline generalized from a test
-suite to any oracle.
+The threat model is a cooperative-but-fallible worker, so integrity is
+tamper-evident, not tamper-proof. A contract change is made visible in the trail
+and re-arms the goal; it is not prevented. This is the failing-test-first
+discipline as prior art runs it: the definition of done is recorded so a change
+to it shows, not walled off behind a reference the worker cannot reach.
 
-**A live goal changes only by a deliberate re-lock.** Editing the oracle,
-invariants, or budget commits a new contract and moves the pin to the new lock
-commit through that same keeper-owned reference, recorded in the verdict trail
-as its own event with its provenance. The lock never moves as a side effect of
-the target branch advancing, so a worker's edit to the contract artifact reads
-as gaming while an operator's re-lock reads as a new agreement.
+**A live goal changes by editing the bead.** Changing the oracle, budget, or
+invariants is an edit to the goal bead; the next verdict finds the snapshot
+mismatch, re-arms against the new contract, and records the change with its
+provenance. An operator who finds a goal incorrectly stated edits it the same
+way. Editing the bead is the whole of it: the edit is the change and the trail
+is its record.
 
-The operational state (current iteration, verdict trail, budget consumed, the
-last not-yet reason) lives on the goal bead's metadata and a repo trail file.
-It is durable so any iteration can crash and the next resumes from it. The lock
-commit is not part of this mutable state: its pin is the keeper-owned reference
-above, and the contract is the copy at that commit, which the keeper reads for
-itself.
+The operational state — current iteration, verdict trail, budget consumed, the
+last not-yet reason — lives on the goal bead and a repo trail file alongside the
+contract. It is durable, so any iteration can crash and the next resumes from
+it.
 
-**Deterministic example.** Goal: p99 read-path latency under 200ms. `oracle` is
-a benchmark command whose measured p99 is compared to 200ms, exit 0 only when
-under. `invariants`: the full suite stays green, and the benchmark harness file
-is unmodified. `budget`: 8 iterations, a token cap, 72 hours. On each iteration
-close the keeper runs the benchmark itself and compares.
-
-**Rubric example.** Goal: the onboarding runbook is followable by a new
-operator with no gaps. No deterministic measure exists. `oracle` is two rubric
-lanes on different providers, each rendering a binary pass or fail against a
-stated checklist, with a synthesizer requiring agreement. Disagreement routes
-to a human.
+**Example.** Goal: p99 read-path latency under 200ms. `oracle` is a benchmark
+command whose measured p99 is compared to 200ms, exit 0 only when under.
+`budget`: 8 iterations, a token cap, 72 hours. An optional `invariant` keeps the
+full suite green. On each iteration close the keeper runs the benchmark itself
+and compares.
 
 ## 3. Judge architecture
 
@@ -151,36 +140,26 @@ The governing rule: a model cannot judge its own homework. The worker is never
 the judge.
 
 - **Separation is structural.** The worker of an iteration never renders that
-  iteration's verdict. A deterministic oracle is run by the keeper, which
-  gathers its own evidence; a rubric oracle runs as its own lane beads on their
-  own providers, in sessions separate from the worker's. Iterations are
-  pool-routed so each runs in a fresh session with no carried context
-  (docs/gascity-packs.md); a named-agent loop keeps one assignee and collapses
-  worker and judge into a single conversation.
-- **Deterministic oracle first.** Where the end state is measurable by a
-  command or a metric threshold, that measurement is the judge: binary
-  pass/fail from an exit code or a comparison. No model judgment is introduced
-  where a number decides. A deterministic oracle cannot be talked out of its
-  verdict.
-- **Rubric lanes only where measurement is impossible.** Then: two or more
-  lanes, each on a different provider; each renders a binary pass/fail against
-  explicit criteria, because a binary verdict is a decision and a Likert score
-  is not; a synthesizer makes the single call and requires agreement.
-- **Cross-model divergence is the gaming detector.** When lanes on different
-  models disagree, the goal is under-specified or the worker is gaming the
-  rubric. Route to a human; do not pick a winner.
+  iteration's verdict. The keeper runs the oracle and gathers its own evidence,
+  in a session separate from the worker's. Iterations are pool-routed so each
+  runs in a fresh session with no carried context (docs/gascity-packs.md); a
+  named-agent loop keeps one assignee and collapses worker and judge into a
+  single conversation.
+- **The oracle is deterministic.** v1 judges by a command or a metric
+  threshold: binary pass/fail from an exit code or a comparison. No model
+  judgment is introduced where a number decides, and a deterministic oracle
+  cannot be talked out of its verdict. A goal whose end state has no
+  deterministic measure is judged by rubric lanes, a separate design
+  (tk-h2s7hj.1), and enters v1 once distilled to a deterministic contract.
 - **The judge gathers its own evidence.** It re-runs the oracle and reads the
   branch, artifacts, and metrics directly. It never reads the worker's summary
   of its own success as evidence. Agents plant self-assessments and edit tests
   to pass; evidence the judge did not gather itself is not evidence.
-- **The oracle is locked.** Each iteration the keeper compares the contract
-  artifact against the copy at the lock commit: the immutable commit pinned when
-  the goal was armed (Section 2), read through a keeper-owned reference no
-  iteration can rewrite, never the moving tip of the target branch. Because the
-  lock commit is immutable and its pin is not worker-writable, neither an
-  iteration's edit nor a later merge to the target branch can move the definition
-  of done. A mismatch means an iteration edited the oracle: a hard fail and a
-  gaming signal, routed to a human.
+- **The contract is tamper-evident.** Before each verdict the keeper compares
+  the goal's current contract to the snapshot it recorded at arming (Section 2).
+  A mismatch means the contract changed after arming: the keeper re-arms against
+  the current contract and records the change, rather than judging against moved
+  goalposts. The change is made visible, not prevented.
 
 ## 4. Verdict taxonomy
 
@@ -222,9 +201,9 @@ cheap. The goal loop is event-driven.
   in-city sweep concluded this substrate covers the goal loop with no engine
   change. The control bead is the keeper's, assigned to no iteration worker;
   arming the goal, before the first iteration is spawned, is when the keeper
-  pins the lock commit in its keeper-owned reference (Section 2).
-- On re-arm, the judge fires: the deterministic oracle, the rubric lanes, or
-  both, gathering evidence and rendering a verdict.
+  records the contract snapshot (Section 2).
+- On re-arm, the judge fires: the keeper runs the oracle, gathers evidence, and
+  renders a verdict.
 - The verdict drives the next action: `met` closes the goal, `not-yet` spawns
   the next iteration, and `impossible`, `stalled`, or `exhausted` route to the
   escalation target.
@@ -297,15 +276,17 @@ design. The full surveys are in tk-nt5uda's notes.
 - **mol-review-quorum (engine-core, available by reference).** Teaches the
   two-lane shape with a per-lane provider and model and a synthesizer that makes
   the single call and treats an unknown lane verdict as a hard contract failure.
-  The rubric oracle reuses this shape.
+  The rubric oracle, deferred to tk-h2s7hj.1, reuses this shape.
 - **Claude Code `/goal`.** Teaches the verdict taxonomy (met, not-yet with a
   reason, impossible) and the separate small judge model. Diverges: `/goal` is
   session-scoped and its judge runs no tools, judging only surfaced evidence,
   while this judge is durable and gathers its own evidence.
 - **Kiro, Spec Kit, Factory.** Teaches spec-as-contract and failing-test-first.
-  The oracle lock is that discipline: the definition of done is committed before
-  the work, pinned to an immutable commit, and every iteration is measured
-  against that pinned copy, so no worker can move the definition of done.
+  Factory commits the failing tests, so tampering shows in the diff: the
+  discipline is visibility, not prevention. The tamper-evident contract is that
+  discipline — the keeper snapshots the contract at arming and every verdict
+  compares against it, so a change to the definition of done is visible in the
+  trail and re-arms the goal.
 
 No surveyed construct is a standing goal, stated as a measurable condition
 about the world, that generates work until reality measures it met. That is
@@ -316,26 +297,18 @@ what this primitive is.
 To goal-keeper v1 (tk-tutb46), pack-level formulas and scripts, no engine
 change:
 
-- The contract serialization and its lock. The locked contract (oracle,
-  invariants, and budget) is written to a target-branch committed artifact (for
-  example `specs/<goal-bead>/goal.toml`) that the keeper reads for itself; those
-  fields never live in worker-writable bead metadata, where an iteration could
-  forge the lock. The keeper pins one immutable lock commit when the goal is
-  armed, before the first iteration, and reads the contract from that commit
-  rather than the moving target-branch tip; the pin lives in a keeper-owned
-  reference the iteration worker cannot rewrite, and a legitimate contract change
-  is a deliberate re-lock to a new commit, not a silent adoption of a moved tip.
-  Only mutable operational state (iteration count, verdict trail, budget
-  consumed, the last not-yet reason) lives in bead metadata or the repo trail.
-  This spec fixes the required fields, where each lives, and that the lock is a
-  pinned immutable commit; it leaves the file format and the pinning reference's
-  scheme to the implementation.
+- The contract on the goal bead, and the snapshot the keeper records at arming.
+  The keeper snapshots the contract when it arms the goal and compares the
+  current contract to that snapshot before each verdict; a mismatch re-arms the
+  goal against the current contract and records the change in the trail. This
+  spec fixes the required fields — a measurable end state, a deterministic
+  oracle, a three-way budget — the optional fields, and that integrity is
+  tamper-evident; it leaves the snapshot's storage and the trail format to the
+  implementation.
 - The spawn-on-not-yet wiring: which formula pours the next iteration, and how
   the reason is threaded into the next work bead's dispatch note.
 - Session policy: iterations are pool-routed for fresh context; the iteration
   molecules must not set session affinity to require.
-- The rubric-lane count and quorum per goal; a default of two lanes and
-  unanimous agreement.
 
 To the engine (gc-vz6v0): first-class convergence telemetry. The keeper carries
 a hand-rolled trail until it lands.
@@ -348,3 +321,9 @@ external landscape, in-city prior art, and the gc-toolkit convergence audit —
 are recorded in tk-nt5uda's notes and are the input to this spec. Implementation
 follow-up: tk-tutb46, which blocks on this bead. Engine telemetry request:
 gc-vz6v0, gascity store.
+
+The 2026-09-20 constraint that the oracle is locked before iterating was amended
+by operator ruling 2026-09-28 (sitting tk-eywd7n): integrity is recorded and
+tamper-evident, matching the Factory.ai prior art where committing the failing
+tests makes tampering visible in the diff rather than preventing it. v1 scope is
+deterministic oracles only; rubric-lane judging is deferred to tk-h2s7hj.1.
