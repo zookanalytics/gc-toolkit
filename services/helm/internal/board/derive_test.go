@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 func ptr(i int) *int { return &i }
@@ -2193,9 +2195,11 @@ func dated(value, oid string, at time.Time) string {
 	return value + "@" + oid + "@" + at.Format(time.RFC3339)
 }
 
-// prPhase answers who acts next in the same values and precedence as
-// pr-status-label.sh's derive_value; these cases mirror that script's, since it
-// stamps nothing on the bead for the board to read instead.
+// prPhase answers who acts next and why by delegating to prstatus.Derive — the
+// same code pr-status-label.sh's derive_value runs — so the board and the label
+// read one taxonomy. Each case asserts the value AND that prPhase returns exactly
+// what prstatus.Derive does over the same facts, which is what makes "one code
+// path, cannot disagree" a fact rather than a comment.
 func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 	merge := func(md map[string]string) Anchor {
 		full := map[string]string{mdMergeResult: "pull_request"}
@@ -2204,40 +2208,90 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		}
 		return Anchor{ID: "tk-x", Metadata: full}
 	}
+	inflight := func(active, blocked int) Facts {
+		return Facts{PRInflight: map[string]InflightCounts{"tk-x": {Active: active, Blocked: blocked}}}
+	}
+	withVisit := func(f Facts) Facts {
+		f.Visits = map[string]bool{"tk-x": true}
+		return f
+	}
 	cases := []struct {
-		name string
-		a    Anchor
-		kids int
-		want string
+		name    string
+		a       Anchor
+		f       Facts
+		want    string
+		wantAtt string
 	}{
-		{"non-merge row has no phase", Anchor{Metadata: map[string]string{}}, 0, ""},
-		{"operator freeze needs attention", merge(map[string]string{mdMergeHold: "true"}), 0, PhaseNeedsAttention},
-		{"rebase hold needs attention", merge(map[string]string{mdRebaseHold: "true"}), 0, PhaseNeedsAttention},
-		{"cap park needs attention", merge(map[string]string{mdMergeHold: "signoff_cap", mdSignoffCap: "3"}), 0, PhaseNeedsAttention},
-		{"approved but blocked with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMergeState: "BLOCKED@abc"}), 0, PhaseNeedsAttention},
-		{"approved and blocked but reworking is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "BLOCKED@abc"}), 1, PhaseWorking},
-		{"open rework child is working", merge(map[string]string{mdPRPosture: "review_required@abc"}), 2, PhaseWorking},
-		{"approved and mergeable is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "CLEAN@abc"}), 0, PhaseWorking},
-		{"settled awaiting review needs review", merge(map[string]string{mdPRPosture: "review_required@abc"}), 0, PhaseNeedsReview},
-		{"falsy holds do not count", merge(map[string]string{mdMergeHold: "false", mdRebaseHold: "0", mdPRPosture: "commented@abc"}), 0, PhaseNeedsReview},
+		{"non-merge row has no phase", Anchor{ID: "tk-x", Metadata: map[string]string{}}, Facts{}, "", ""},
+		{"operator freeze needs attention", merge(map[string]string{mdMergeHold: "true"}), Facts{}, PhaseNeedsAttention, string(prstatus.ReasonMergeHold)},
+		{"rebase hold needs attention", merge(map[string]string{mdRebaseHold: "true"}), Facts{}, PhaseNeedsAttention, string(prstatus.ReasonRebaseHold)},
+		{"cap park needs attention", merge(map[string]string{mdMergeHold: "signoff_cap", mdSignoffCap: "3"}), Facts{}, PhaseNeedsAttention, string(prstatus.ReasonCapPark)},
+		{"approved but blocked with no active work needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMergeState: "BLOCKED@abc"}), Facts{}, PhaseNeedsAttention, string(prstatus.ReasonApprovedWedged)},
+		{"approved and blocked but active work is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "BLOCKED@abc"}), inflight(1, 0), PhaseWorking, ""},
+		{"an active in-flight member is working", merge(map[string]string{mdPRPosture: "review_required@abc"}), inflight(2, 0), PhaseWorking, ""},
+		{"approved and mergeable is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "CLEAN@abc"}), Facts{}, PhaseWorking, ""},
+		{"settled awaiting review needs review", merge(map[string]string{mdPRPosture: "review_required@abc"}), Facts{}, PhaseNeedsReview, ""},
+		{"falsy holds do not count", merge(map[string]string{mdMergeHold: "false", mdRebaseHold: "0", mdPRPosture: "commented@abc"}), Facts{}, PhaseNeedsReview, ""},
+		// The blocked frontier this fix adds: a set that is all blocked is not the
+		// city holding the ball. A human visit on it is a conversation awaiting
+		// engagement; without one it has stalled.
+		{"blocked-only frontier stalls", merge(map[string]string{mdPRPosture: "review_required@abc"}), inflight(0, 1), PhaseNeedsAttention, string(prstatus.ReasonStall)},
+		{"blocked frontier with a visit awaits engagement", merge(map[string]string{mdPRPosture: "review_required@abc"}), withVisit(inflight(0, 1)), PhaseNeedsAttention, string(prstatus.ReasonVisitEngage)},
+		{"an active member alongside a blocked one is still working", merge(map[string]string{mdPRPosture: "review_required@abc"}), inflight(1, 1), PhaseWorking, ""},
 	}
 	for _, tc := range cases {
-		if got := prPhase(tc.a, tc.kids); got != tc.want {
-			t.Errorf("%s: prPhase = %q, want %q", tc.name, got, tc.want)
+		gotPhase, gotAtt := prPhase(tc.a, tc.f)
+		if gotPhase != tc.want || gotAtt != tc.wantAtt {
+			t.Errorf("%s: prPhase = (%q, %q), want (%q, %q)", tc.name, gotPhase, gotAtt, tc.want, tc.wantAtt)
+		}
+		if !isMergeAnchor(tc.a) {
+			continue
+		}
+		// One code path: recomputing the phase directly through prstatus.Derive over
+		// the same facts must match, so the board can never derive a value the label
+		// would not.
+		in := tc.f.PRInflight[tc.a.ID]
+		wantState, wantReason := prstatus.Derive(prstatus.Facts{
+			MergeHold:        tc.a.Metadata[mdMergeHold],
+			SignoffCap:       tc.a.Metadata[mdSignoffCap],
+			RebaseHold:       tc.a.Metadata[mdRebaseHold],
+			PRPosture:        tc.a.Metadata[mdPRPosture],
+			PRMergeState:     tc.a.Metadata[mdPRMergeState],
+			InFlightActive:   in.Active,
+			InFlightBlocked:  in.Blocked,
+			HumanVisitAwaits: tc.f.Visits[tc.a.ID],
+		})
+		if gotPhase != string(wantState) || gotAtt != string(wantReason) {
+			t.Errorf("%s: prPhase (%q,%q) diverged from prstatus.Derive (%q,%q)", tc.name, gotPhase, gotAtt, wantState, wantReason)
 		}
 	}
 }
 
-// The open-rework count comes from the children the board gathers — each names
-// its anchor in anchor_bead — so an anchor with one is working even with nothing
-// else recorded.
-func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
+// The in-flight set the phase reads is Facts.PRInflight — the anchor_bead members
+// the source gathers, blocked included — the same membership the PR label counts.
+// An active member is the city working; a blocked-only frontier needs a human,
+// and a visit on it names the reason.
+func TestPRPhaseReadsInflightFromFacts(t *testing.T) {
 	anchor := mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"})
-	kid := Anchor{ID: "tk-anc.rw", Source: kindRework, Rig: "gc-toolkit", Metadata: map[string]string{mdAnchorBead: "tk-anc"}}
 
-	b := BuildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{})
-	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseWorking {
-		t.Errorf("an anchor with an open rework child is working: got %q", got)
+	working := BuildBoard([]Anchor{anchor}, fixtureNow, false, nil,
+		Facts{PRInflight: map[string]InflightCounts{"tk-anc": {Active: 1}}})
+	if got := mustTile(t, working, "tk-anc").PRPhase; got != PhaseWorking {
+		t.Errorf("an active in-flight member is working: got %q", got)
+	}
+
+	stalled := BuildBoard([]Anchor{anchor}, fixtureNow, false, nil,
+		Facts{PRInflight: map[string]InflightCounts{"tk-anc": {Blocked: 1}}})
+	if st := mustTile(t, stalled, "tk-anc"); st.PRPhase != PhaseNeedsAttention || st.PRAttention != string(prstatus.ReasonStall) {
+		t.Errorf("a blocked-only frontier needs attention/stall: got %q/%q", st.PRPhase, st.PRAttention)
+	}
+
+	engaged := BuildBoard([]Anchor{anchor}, fixtureNow, false, nil, Facts{
+		PRInflight: map[string]InflightCounts{"tk-anc": {Blocked: 1}},
+		Visits:     map[string]bool{"tk-anc": true},
+	})
+	if en := mustTile(t, engaged, "tk-anc"); en.PRPhase != PhaseNeedsAttention || en.PRAttention != string(prstatus.ReasonVisitEngage) {
+		t.Errorf("a blocked frontier with a visit awaits engagement: got %q/%q", en.PRPhase, en.PRAttention)
 	}
 }
 

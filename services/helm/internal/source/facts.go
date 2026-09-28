@@ -428,11 +428,14 @@ func sessionStates(ctx context.Context, gc gcClient, g *gatherState) map[string]
 }
 
 // buildFacts assembles the joins into the value BuildBoard consumes.
-func buildFacts(sittings []board.Sitting, inflight map[string][]string, owners map[string]string, rigs []rigRef) board.Facts {
+func buildFacts(sittings []board.Sitting, inflight map[string][]string, owners map[string]string, rigs []rigRef, prInflight map[string]board.InflightCounts) board.Facts {
 	f := board.Facts{
 		Inflight:   inflight,
 		OwnerState: owners,
 		Sittings:   sittings,
+	}
+	if len(prInflight) > 0 {
+		f.PRInflight = prInflight
 	}
 	if visits := visitSubjects(sittings); len(visits) > 0 {
 		f.Visits = make(map[string]bool, len(visits))

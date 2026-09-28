@@ -128,6 +128,19 @@ store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"signoff_cap","sig
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (cap park + open child)"
 
+# needs-attention — a frontier whose only live work is BLOCKED is not the city
+# holding the ball; a blocked child (blocked on a human, or stalled) needs a
+# person. The label is coarse: visit-engage vs stall is the board's to render.
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-k","status":"blocked","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a blocked-only in-flight frontier => needs-attention, not working"
+
+# working — an ACTIVE child alongside a blocked one is the city still moving.
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-k","status":"blocked","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-r","status":"in_progress","metadata":{"task_kind":"review","anchor_bead":"tk-a"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "an active child alongside a blocked one => working"
+
 store '[]'
 "$SUT" derive --anchor tk-a >/dev/null 2>&1
 eq "$?" "2" "an unresolvable anchor exits 2 — derive never guesses a status"

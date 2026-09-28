@@ -74,8 +74,12 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 			return nil, errors.New("a closed-bead query must bound its window with ClosedAfter")
 		}
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
+	case filter.Status == nil && filter.HasMetadataKey == "anchor_bead" && slices.Equal(filter.Statuses, prInflightStatuses):
+		// The PR-phase in-flight query: every live bead carrying anchor_bead over
+		// the label's wider live-status scope, so the board counts the blocked
+		// members the label counts.
 	default:
-		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins) or status=closed+ClosedAfter (closed rows)")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), statuses=prInflight+anchor_bead (pr-phase), or status=closed+ClosedAfter (closed rows)")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -2218,5 +2222,40 @@ func TestPRRowsCostNoCallPerPullRequest(t *testing.T) {
 	if manyCalls != oneCalls {
 		t.Errorf("the gather spent %d external calls on 25 pull requests and %d on one — "+
 			"a per-PR call is exactly what the bead is read to avoid", manyCalls, oneCalls)
+	}
+}
+
+// The board's PR-phase in-flight set is gathered the way the PR label counts it:
+// every live bead carrying anchor_bead, any task_kind, blocked included and
+// closed excluded — one keyed read per rig, grouped by anchor. Sharing that
+// membership is what keeps the board phase and the GitHub label from disagreeing
+// on a blocked frontier.
+func TestGatherSumsPRInflightLikeTheLabel(t *testing.T) {
+	blocked := func(i *beads.Issue) *beads.Issue { i.Status = beads.StatusBlocked; return i }
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{failMeta: map[string]error{}, issues: map[string][]*beads.Issue{
+		"task": {
+			// tk-a1: one progressing member, one blocked, one closed (excluded).
+			issue("tk-a1-rw", "rework on a1", "task", 2, now, `{"task_kind":"rework","anchor_bead":"tk-a1"}`),
+			blocked(issue("tk-a1-find", "finding on a1", "task", 2, now, `{"task_kind":"finding","anchor_bead":"tk-a1"}`)),
+			closedIssue("tk-a1-old", "closed round on a1", "task", 2, now, now, `{"task_kind":"review","anchor_bead":"tk-a1"}`),
+			// tk-a2: only a blocked child — the frontier that must read needs-attention.
+			blocked(issue("tk-a2-rw", "blocked rework on a2", "task", 2, now, `{"task_kind":"rework","anchor_bead":"tk-a2"}`)),
+			// A bead carrying no anchor_bead joins no set.
+			issue("tk-loose", "unrelated open work", "task", 2, now, `{}`),
+		},
+	}}
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	want := map[string]board.InflightCounts{
+		"tk-a1": {Active: 1, Blocked: 1},
+		"tk-a2": {Active: 0, Blocked: 1},
+	}
+	if got := res.Facts.PRInflight; !maps.Equal(got, want) {
+		t.Errorf("PRInflight = %+v, want %+v", got, want)
 	}
 }
