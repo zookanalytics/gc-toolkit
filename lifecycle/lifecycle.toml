@@ -444,22 +444,26 @@ keys = [
 #   `pr` is written only by mol-refinery-patrol.toml, auto-promoting a bead whose
 #   direct push was rejected for branch protection into the PR pipeline. Read by
 #   mol-refinery-patrol.toml and signoff.sh. Never cleared. Enum `mr | pr | direct`.
-# prepare_mode — the refinery's branch classification, re-stamped on every
-#   prepare: `rebase` for a disposable per-bead branch, `merge` for a shared one
-#   (an integration branch carrying already-merged PRs). Written by pr-facts.sh,
-#   pre-open-rebase.sh and mol-refinery-patrol.toml; honored on resume by the
-#   polecat, which merges (never rebases) a `merge` branch. Absent would resume
-#   as rebase, so pr-facts.sh refuses to route a child whose mode did not stick.
-#   Never cleared. Enum `rebase | merge`.
+# prepare_mode — how the refinery brings a rework branch current before it lands.
+#   Every branch shape (per-bead `polecat/*`, shared `integration/*`, a
+#   graduation) is stamped `merge`: the branch is brought current by merging
+#   origin/<target> in, never rebased, so no shape is rewritten or force-pushed.
+#   Written by pr-facts.sh, pre-open-rebase.sh and mol-refinery-patrol.toml. The
+#   prepare and resume paths merge the target in whatever the stamp says; an
+#   absent value resolves to merge too, so a dropped stamp cannot select a
+#   rewrite. A dispatch site reads the stamp back and routes a child only once it
+#   sticks, and pre-open-rebase.test.sh holds both dispatch sites to `merge`.
+#   Never cleared. Enum `rebase | merge`; only `merge` is stamped.
 # rejection_reason — why the last attempt bounced, embedding `head <oid>` so a
 #   later pass can tell which head it spoke for. Written by the refinery
 #   (pr-facts.sh, signoff.sh, pre-open-rebase.sh, mol-polecat-work.toml); read at
 #   load-context to resume rather than redo, and by pr-facts.sh to dedup a child
 #   already covering a head. Cleared with `--unset` on the merged transition and
 #   by the polecat once it has resumed. Freeform instruction text.
-# graduation — `true` forces prepare_mode=merge, the flag convoy-graduate.sh sets
-#   when an integration branch graduates; read by pr-facts.sh, absent leaves the
-#   branch-name classification standing. Never cleared.
+# graduation — `true`, set on the convoy bead by convoy-graduate.sh when an
+#   integration branch is carried to the default branch. prepare_mode is `merge`
+#   for every branch shape, so this flag does not change how the branch is
+#   brought current. Never cleared.
 # blocked_reason — the human-readable reason an anchor sits in a human state
 #   (existing_pr unusable, a PR closed or retargeted out of band). Written by
 #   pr-facts.sh and molecule-hold.sh; it is also a [holds] marker, so a live
