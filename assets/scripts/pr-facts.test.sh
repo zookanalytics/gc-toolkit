@@ -427,6 +427,24 @@ eq "$(bstatus VJ)" "closed" "the stale rework-or-close visit is retired in the s
 eq "$(meta VJ 'gc.outcome')" "moot" "…closed moot, the decision it asked for is made"
 eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated — the disposition consummated completely"
 
+# The children are dropped BEFORE the anchor close, to clear their hold. When the
+# close is then refused for a reason dropping them does not clear — a separate
+# open blocker, a foreign disposition — the children are already gone. The
+# pr-dispose-failed escalation must NAME them, or an operator who reverses the
+# disposition finds them disposed with nothing saying so.
+echo "# a refused anchor close names the children already disposed in the escalation"
+: > "$STUB_DEPS"
+store "[$(anchor F2m 33 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-m"'), $(child K5 polecat/x33), {\"id\":\"BLK\",\"status\":\"open\",\"title\":\"unrelated blocker\",\"notes\":\"\",\"metadata\":{}}]"
+gc bd dep BLK --blocks F2m >/dev/null 2>&1   # a blocker that is NOT a parked child, so dropping the children never clears it
+printf '%s' "$(prview 33 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_33.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus K5)" "closed" "the parked child is dropped before the anchor close"
+eq "$(bstatus F2m)" "open" "…but the anchor close is still refused (another blocker), so it is left OPEN"
+has "$(cat "$STUB_ESC_LOG")" "--subject F2m --key pr-dispose-failed.33" "escalated under the dispose-failed key"
+has "$(cat "$STUB_ESC_LOG")" "K5" "…the escalation names the child that was already disposed"
+has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it if the disposition is wrong"
+
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"
 printf '%s' "$(prview 12 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_12.json"

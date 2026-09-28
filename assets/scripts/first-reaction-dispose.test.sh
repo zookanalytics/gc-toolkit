@@ -98,6 +98,13 @@ case "$1 ${2:-}" in
   "bd close") printf 'CLOSE %s\n' "$*" >> "$FAKE_LOG" ;;
   "sling "*) printf 'SLING %s\n' "$*" >> "$FAKE_LOG"
     [ -n "${FAKE_SLING_FAILS:-}" ] && exit 1 ;;
+  "formula show")
+    printf 'FORMULA %s\n' "$*" >> "$FAKE_LOG"
+    # A recommended mol either resolves or it does not; FAKE_FORMULA_MISSING lists
+    # names this run must treat as unresolvable, so the ruling exit's probe refuses
+    # a typo the way the live `gc formula show` would (exit 1 on a name it cannot
+    # load). Any other name falls through to the default success below.
+    for _m in ${FAKE_FORMULA_MISSING:-}; do [ "${3:-}" = "$_m" ] && exit 1; done ;;
 esac
 exit 0
 GC
@@ -405,6 +412,20 @@ RECO_UL=$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1); RECO_HL=$(grep -n -m
    && ok "(RECO) …in the record write, before the act" \
    || bad "(RECO) …in the record write, before the act (UPDATE=$RECO_UL HELM=$RECO_HL)"
 has "--waiting-on tk-visit1" "$LOG" "(RECO) …and the visit still holds the subject"
+
+# A recommended formula that does not resolve is a usage error, refused before the
+# record: Accept slings this exact name, so a typo would stamp a live
+# gc.recommended_formula and render an 'accept ▸' that fails at gc sling on every
+# click. Validated the way --route/--then-route are against the roster.
+export FAKE_FORMULA_MISSING="mol-typo"
+run tk-sub --disposition ruling --reason "operator authority" \
+    --takeaway "recommend: execute via mol-typo — Accept or Discuss" \
+    --visit tk-visit1 --recommended-formula mol-typo
+eq "$RC" "2" "(RECO) a --recommended-formula that does not resolve is refused (usage error)"
+hasnt "UPDATE" "$LOG" "(RECO) …nothing is recorded on an unresolved formula"
+hasnt "HELM" "$LOG" "(RECO) …and the act does not run"
+has "does not resolve to a formula" "$ERR" "(RECO) …the message names the unresolved formula"
+unset FAKE_FORMULA_MISSING
 
 # Discuss-only ruling: no --recommended-formula, nothing is stamped, the visit
 # stays plain (no Accept). This is the path the change leaves untouched.

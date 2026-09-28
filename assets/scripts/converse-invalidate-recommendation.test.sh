@@ -45,6 +45,7 @@ case "${2:-}" in
     update) printf 'update %s\n' "$*" >>"$LOG" ;;
     close)  printf 'close %s\n' "$*" >>"$LOG" ;;
     show)
+        printf 'show %s\n' "$*" >>"$LOG"
         case "${MODE:-present}" in
             empty)      jq -nc '[{id:"tk-sub",metadata:{}}]' ;;
             stubborn)   jq -nc '[{id:"tk-sub",metadata:{"gc.recommended_formula":"mol-x"}}]' ;;
@@ -78,6 +79,10 @@ has "the same write appends the reason and the withdrawn formula" \
 echo "── the strip and the note ride ONE update (record and act are atomic) ──"
 is "exactly one update is written on the happy path" \
    "$(grep -c '^update ' "$LOG")" "1"
+
+echo "── presence and the was-value come from ONE read (no TOCTOU between them) ──"
+is "exactly one show precedes the write (not one for has() and one for was)" \
+   "$(awk '/^update /{exit} /^show /{n++} END{print n+0}' "$LOG")" "1"
 
 echo "── a subject with no recommendation is a no-op, and writes nothing ──"
 : >"$LOG"

@@ -2151,6 +2151,12 @@ cmd_dismiss() {
 # un-engaged. Sets UNENGAGED_STATE (unengaged|engaged|absent|unreadable) and
 # UNENGAGED_WHY for the caller's message; returns 0 only when un-engaged.
 UNENGAGED_STATE=""; UNENGAGED_WHY=""
+# The listing subject_unengaged read, left for a caller that then dismisses the
+# same subject (accept) so cmd_dismiss reuses it rather than scanning the store a
+# second time. Set only once the read parsed as a JSON array, with the BEADS_DIR
+# it was read under — cmd_dismiss reuses it only when its own pin resolves the
+# same store.
+UNENGAGED_LISTING=""; UNENGAGED_LISTING_DIR=""
 subject_unengaged() {
     _subj="$1"; UNENGAGED_STATE=""; UNENGAGED_WHY=""
     if ! _uv_json=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
@@ -2160,6 +2166,7 @@ subject_unengaged() {
     if ! printf '%s' "$_uv_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
         UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="'gc bd list' did not answer a JSON array"; return 1
     fi
+    UNENGAGED_LISTING="$_uv_json"; UNENGAGED_LISTING_DIR="${BEADS_DIR:-}"
     # One jq pass mirroring unengagedVisit: the subject's visits, then the
     # in_progress and bound suppressor tests and the open test over them, in that
     # order. A jq failure is a listing this cannot read, not an un-engaged
@@ -2196,6 +2203,33 @@ subject_unengaged() {
         absent)    UNENGAGED_WHY="no open visit on the subject"; return 1 ;;
         *) UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="the visit state did not resolve to a known token"; return 1 ;;
     esac
+}
+
+# accept_mark_dispatched <subject> <formula> — record that Accept dispatched
+# <formula>, and withdraw the live recommendation, in one write:
+# gc.recommended_formula_dispatched=<formula> is the record a re-run reads to
+# resume the dismiss rather than sling again, and stripping gc.recommended_formula
+# — the key the board's Accept derivation reads — stops a later open visit on the
+# same subject from re-offering a formula that already ran (a second dispatch of
+# the same execution). The strip has a reader, so it is read back and retried
+# once; the function returns non-zero if the live key will not clear or the marker
+# did not stick, and the caller then refuses the dismiss, so a survivor never
+# rides through as Accept still live. Idempotent: a resume re-runs it to finish a
+# strip a prior run left half-done.
+accept_mark_dispatched() {
+    _amd_subj="$1"; _amd_formula="$2"
+    gc bd update "$_amd_subj" \
+        --set-metadata "gc.recommended_formula_dispatched=$_amd_formula" \
+        --unset-metadata gc.recommended_formula \
+        --append-notes "Accept dispatched $_amd_formula; gc.recommended_formula withdrawn so a later visit cannot re-offer it." \
+        >/dev/null 2>&1 || true
+    _amd_live=$(meta_now "$_amd_subj" gc.recommended_formula)
+    if [ -n "$_amd_live" ]; then
+        gc bd update "$_amd_subj" --unset-metadata gc.recommended_formula >/dev/null 2>&1 || true
+        _amd_live=$(meta_now "$_amd_subj" gc.recommended_formula)
+    fi
+    _amd_mark=$(meta_now "$_amd_subj" gc.recommended_formula_dispatched)
+    [ -z "$_amd_live" ] && [ "$_amd_mark" = "$_amd_formula" ]
 }
 
 # ── Verb: accept ─────────────────────────────────────────────────────
@@ -2276,21 +2310,47 @@ cmd_accept() {
         fi
         bead="$visit_of"
         # Re-read so the recommended-formula check reads the SUBJECT, not the
-        # visit that pointed at it.
+        # visit that pointed at it — and re-verify it resolves, the same fail-closed
+        # read the first resolve took. A transient failure here leaves subject_clean
+        # empty; without this the formula reads empty and accept would wrongly report
+        # the subject "discuss-only" (exit 2) on a state it could not read, where the
+        # contract is to fail closed (exit 4).
         subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
+        subject=$(printf '%s' "$subject_clean" \
+            | jq -r --arg b "$bead" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
+                 else empty end' 2>/dev/null || true)
+        if [ -z "$subject" ]; then
+            echo "$PROG: accept: could not verify the subject '$bead' this visit names — 'gc bd show' returned no bead with that id. Nothing dispatched." >&2
+            exit 4
+        fi
     fi
 
-    # No gc.recommended_formula means discuss-only: there is nothing to dispatch,
-    # so accept refuses rather than dismissing a decision the operator has not
-    # made. This is the same key the board derives Accept-ability from, so a
-    # refusal here is a row the board would not have offered Accept on.
-    formula=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
-                  | (.metadata["gc.recommended_formula"] // "")
-             else empty end' 2>/dev/null || true)
-    if [ -z "$formula" ]; then
+    # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
+    # records one Accept that already dispatched (its live key stripped in the same
+    # write). Read both from the payload:
+    #  - neither present -> discuss-only: nothing to dispatch, so accept refuses
+    #    rather than dismissing a decision the operator has not made. This is the
+    #    key the board derives Accept-ability from, so a refusal is a row the board
+    #    would not have offered Accept on.
+    #  - the dispatched marker present -> a prior run slung the formula and stripped
+    #    the live key, but did not finish (its dismiss failed, or its strip did not
+    #    stick). RESUME: finish the strip and the dismiss; never sling again — that
+    #    is the second dispatch of the same execution this exists to prevent.
+    _accept_meta() {
+        printf '%s' "$subject_clean" \
+            | jq -r --arg b "$bead" --arg k "$1" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.metadata[$k] // "")
+                 else empty end' 2>/dev/null || true
+    }
+    formula=$(_accept_meta "gc.recommended_formula")
+    dispatched=$(_accept_meta "gc.recommended_formula_dispatched")
+    resume=0
+    if [ -n "$dispatched" ]; then
+        resume=1; formula="$dispatched"
+    elif [ -z "$formula" ]; then
         echo "$PROG: accept: $bead carries no gc.recommended_formula — it is discuss-only. Engage it to decide. Nothing dispatched." >&2
         exit 2
     fi
@@ -2311,27 +2371,48 @@ cmd_accept() {
     # un-engaged predicate the board derives Accept from, refusing BEFORE the
     # sling — and before the dismiss below could force-close a held visit over
     # its holder's claim. Fail closed: a state this cannot read is not proof the
-    # visit is un-engaged.
+    # visit is un-engaged. On a resume the sling already ran, so an absent visit
+    # means the prior run's dismiss also landed and there is nothing left to do.
     if ! subject_unengaged "$bead"; then
         case "$UNENGAGED_STATE" in
             engaged) echo "$PROG: accept: $bead has an engaged visit — $UNENGAGED_WHY. The board offers Accept only on an un-engaged visit; take it up in the sitting (Discuss) or dismiss it there. Nothing dispatched." >&2 ;;
-            absent)  echo "$PROG: accept: $bead has no un-engaged open visit — $UNENGAGED_WHY. Accept actuates a recommendation the board is offering; there is nothing here to accept. Nothing dispatched." >&2 ;;
+            absent)
+                if [ "$resume" = 1 ]; then
+                    echo "$PROG: accept: $bead was already dispatched ($formula) and its visit already dismissed — nothing left to do."
+                    exit 0
+                fi
+                echo "$PROG: accept: $bead has no un-engaged open visit — $UNENGAGED_WHY. Accept actuates a recommendation the board is offering; there is nothing here to accept. Nothing dispatched." >&2 ;;
             *)       echo "$PROG: accept: could not read $bead's live visit state — $UNENGAGED_WHY. Refusing rather than dispatching on an unread state. Nothing dispatched." >&2 ;;
         esac
         exit 4
     fi
 
     # Dispatch the recommendation AT the subject: the subject is the routed
-    # anchor (--on) and is also passed as gc.var.issue so a formula that reads
-    # its card by that var finds it.
-    if ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula" --var "issue=$bead"; then
+    # anchor (--on) and is also passed as gc.var.issue so a formula that reads its
+    # card by that var finds it. A resume skips the sling — it already ran — and
+    # only finishes the record and the dismiss.
+    if [ "$resume" = 1 ]; then
+        echo "$PROG: accept: $bead already carries a dispatched recommendation ($formula); resuming its dismiss, not dispatching again" >&2
+    elif ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula" --var "issue=$bead"; then
         echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed." >&2
         exit 1
+    else
+        echo "$PROG: accept: dispatched $formula at $bead"
     fi
-    echo "$PROG: accept: dispatched $formula at $bead"
 
-    # The recommendation is dispatched, so the operator's decision is made:
-    # dismiss the visit. The dismiss verb closes every open visit on the subject.
+    # Record the dispatch and withdraw the live recommendation before the dismiss.
+    # If the live key will not clear, refuse the dismiss: a survivor is Accept still
+    # live, which a later open visit on the subject could dispatch a second time.
+    if ! accept_mark_dispatched "$bead" "$formula"; then
+        echo "$PROG: accept: dispatched $formula at $bead, but could not withdraw gc.recommended_formula (it still reads live). NOT dismissing: a later visit could re-offer Accept and dispatch $formula again. Clear gc.recommended_formula on $bead by hand, then dismiss its visit." >&2
+        exit 4
+    fi
+
+    # The recommendation is dispatched, so the operator's decision is made: dismiss
+    # the visit, reusing the listing subject_unengaged already read so cmd_dismiss
+    # does not scan the store a second time. The dismiss verb closes every open
+    # visit on the subject.
+    SITTING_LISTING="$UNENGAGED_LISTING"; SITTING_LISTING_DIR="$UNENGAGED_LISTING_DIR"
     cmd_dismiss "$bead" --reason "${accept_reason:-accepted: dispatched $formula}"
 }
 

@@ -790,6 +790,12 @@ while IFS= read -r row; do
         # alone, and a review bead on the branch carries no prepare_mode and is
         # left to signoff. A rebase_hold is an operator's freeze on the branch, so
         # a held child is reported, never closed out from under them.
+        # Track the children disposed below. They are closed BEFORE the anchor's
+        # own close (to clear their blocks-hold), so a refused anchor close past
+        # this point leaves them already gone — the pr-dispose-failed escalation
+        # names them, or an operator who reverses the disposition finds them
+        # disposed with nothing saying so.
+        disposed_kids=""
         anchor_branch=$(printf '%s' "$fresh" | jq -r '.[0].metadata.branch // ""')
         if [ -n "$anchor_branch" ]; then
           if kids=$(bd_list --status=open --metadata-field branch="$anchor_branch"); then
@@ -803,6 +809,7 @@ while IFS= read -r row; do
                    ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
                    --note "Parked rework child of $id on '$anchor_branch'; moot once PR#$num closed $disp_kind" >/dev/null 2>&1; then
                 echo "$PROG: $id — dropped parked child $kid ('$anchor_branch' is moot once the PR is disposed)"
+                disposed_kids="${disposed_kids:+$disposed_kids }$kid"
               else
                 echo "$PROG: $id — could not drop parked child $kid; dispose it by hand: bead-rehome.sh --origin $kid --successor $disp_succ --kind not-needed" >&2
               fi
@@ -848,10 +855,16 @@ CHILDREN_EOF
           # Close refused, a conflicting successor, or a bad invocation — a human
           # is needed. Surface THAT, under its own key, and leave the anchor open
           # carrying the marker; still never the generic rework-or-close visit.
+          # The parked children were disposed above, before this close — so a
+          # refusal here has already closed them. Say which, so an operator who
+          # reverses the disposition knows what to restore rather than finding
+          # them gone.
           echo "$PROG: $id — PR#$num disposition recorded but bead-rehome refused (rc=$rrc); escalating, anchor left open" >&2
           printf '%s\n' "$rout" >&2
+          kids_disposed_note=""
+          [ -n "$disposed_kids" ] && kids_disposed_note=" The branch's parked rework/rebase children ($disposed_kids) were ALREADY disposed (closed not-needed -> $disp_succ) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
           escalate "$id" "pr-dispose-failed.$num" \
-            "PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand."
+            "PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand.$kids_disposed_note"
           skipped=$((skipped + 1)); continue
         fi
       fi ;;

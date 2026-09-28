@@ -100,9 +100,18 @@ case "$sub" in
           "${FAKE_SUBJECT_ID:-__nosubj__}")
             case "${FAKE_SUBJECT_MODE:-found}" in
               missing) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1 ;;
-              *) jq -n --arg i "$id" --arg f "${FAKE_FORMULA:-}" \
+              *)
+                # The live recommendation is FAKE_FORMULA until an accept strip is
+                # logged for this subject (reco_stripped), then it reads absent —
+                # the store behaviour accept's mark-dispatched read-back relies on.
+                # The dispatched marker is FAKE_DISPATCHED (an already-actuated
+                # subject a resume reads) or what a strip write recorded.
+                _live="${FAKE_FORMULA:-}"; [ -e "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reco_stripped" ] && _live=""
+                _disp="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reco_dispatched" 2>/dev/null || printf '%s' "${FAKE_DISPATCHED:-}")"
+                jq -n --arg i "$id" --arg f "$_live" --arg d "$_disp" \
                    '[{id:$i, status:"open", title:"the subject",
-                      metadata:( if $f=="" then {} else {"gc.recommended_formula":$f} end )}]' ;;
+                      metadata:( (if $f=="" then {} else {"gc.recommended_formula":$f} end)
+                                 + (if $d=="" then {} else {"gc.recommended_formula_dispatched":$d} end) )}]' ;;
             esac ;;
           *) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1 ;;
         esac ;;
@@ -125,12 +134,20 @@ case "$sub" in
         # Persist the dismiss stamps so `bd show` reads them back: gc.outcome to
         # $FAKE_OUTCOME_DIR/<id>, gc.outcome_reason to <id>.reason, keyed by the
         # bead id ($3). dismiss reads both back before the irreversible close, so
-        # the stub models the write instead of faking a fixed outcome.
+        # the stub models the write instead of faking a fixed outcome. accept's
+        # mark-dispatched write is modelled the same way: reco_dispatched records
+        # gc.recommended_formula_dispatched, and an --unset of gc.recommended_formula
+        # records reco_stripped so the read-back sees the key gone — unless
+        # FAKE_STRIP_FAILS models a silent drop the read-back must catch.
+        _prev=""
         for a in "$@"; do
           case "$a" in
             gc.outcome=*)        [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
             gc.outcome_reason=*) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome_reason=}" > "$FAKE_OUTCOME_DIR/$3.reason" ;;
+            gc.recommended_formula_dispatched=*) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.recommended_formula_dispatched=}" > "$FAKE_OUTCOME_DIR/$3.reco_dispatched" ;;
+            gc.recommended_formula) [ "$_prev" = "--unset-metadata" ] && [ -z "${FAKE_STRIP_FAILS:-}" ] && [ -n "${FAKE_OUTCOME_DIR:-}" ] && : > "$FAKE_OUTCOME_DIR/$3.reco_stripped" ;;
           esac
+          _prev="$a"
         done ;;
     esac ;;
 esac
@@ -189,6 +206,47 @@ grep -q "bd close $VIS" <<< "$CALLS" \
 order_ok="$(awk -v v="$VIS" '/^sling /{s=NR} $0 ~ ("^bd close " v){c=NR} END{print (s>0 && c>0 && s<c) ? "yes" : "no"}' <<< "$CALLS")"
 eq "$order_ok" "yes" "(DISPATCH) sling happens BEFORE the dismiss"
 
+# --- (MARK) a landed Accept strips the live recommendation and records the dispatch
+# So a later open visit on the subject cannot re-offer Accept for a formula that
+# already ran (a second dispatch), and a re-run resumes rather than re-slinging.
+run_accept "$SUBJ"
+eq "$RC" "0" "(MARK) accepting exits 0"
+grep -q "bd update $SUBJ .*--unset-metadata gc.recommended_formula" <<< "$CALLS" \
+  && ok "(MARK) the live gc.recommended_formula is withdrawn on dispatch" || bad "(MARK) strip (calls: $CALLS)"
+grep -q "bd update $SUBJ .*gc.recommended_formula_dispatched=$FORMULA" <<< "$CALLS" \
+  && ok "(MARK) the dispatched formula is recorded" || bad "(MARK) dispatched marker (calls: $CALLS)"
+# The withdrawal must land before the dismiss: a dismiss that closed the visit
+# first would leave a window where the live key is still readable.
+mark_ok="$(awk -v v="$VIS" '/^bd update .*--unset-metadata gc.recommended_formula/{m=NR} $0 ~ ("^bd close " v){c=NR} END{print (m>0 && c>0 && m<c) ? "yes":"no"}' <<< "$CALLS")"
+eq "$mark_ok" "yes" "(MARK) the withdrawal lands before the dismiss"
+
+# --- (RESUME) a subject already dispatched (marker set, live key gone) resumes ---
+# The prior run slung and withdrew the recommendation but its dismiss did not
+# finish. accept must NOT sling again — that is the double dispatch — and must
+# finish the dismiss.
+export FAKE_FORMULA="" FAKE_DISPATCHED="$FORMULA"
+run_accept "$SUBJ"
+eq "$RC" "0" "(RESUME) a dispatched-marked subject with an open visit exits 0"
+grep -q '^sling ' <<< "$CALLS" \
+  && bad "(RESUME) must NOT sling again — that is a second dispatch (calls: $CALLS)" \
+  || ok "(RESUME) does not sling again"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && ok "(RESUME) finishes the dismiss" || bad "(RESUME) visit dismissed (calls: $CALLS)"
+unset FAKE_DISPATCHED; export FAKE_FORMULA="$FORMULA"
+
+# --- (STRIPFAIL) the withdrawal will not stick -> fail closed, dismiss nothing ---
+# A live key that survives is Accept still live; refuse the dismiss so a later
+# visit cannot dispatch the formula a second time.
+export FAKE_STRIP_FAILS=1
+run_accept "$SUBJ"
+eq "$RC" "4" "(STRIPFAIL) a withdrawal that will not stick fails closed (exit 4)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && bad "(STRIPFAIL) must NOT dismiss when the recommendation could not be withdrawn (calls: $CALLS)" \
+  || ok "(STRIPFAIL) the visit is not dismissed"
+grep -qi 'still reads live' <<< "$ERR" \
+  && ok "(STRIPFAIL) names the key that would not withdraw" || bad "(STRIPFAIL) message (err: $ERR)"
+unset FAKE_STRIP_FAILS
+
 # --- (DISCUSSONLY) no gc.recommended_formula -> refuse, dispatch nothing -------
 export FAKE_FORMULA=""
 run_accept "$SUBJ"
@@ -216,6 +274,21 @@ eq "$RC" "0" "(VISITEDGE) an edge-only visit id still resolves and dispatches"
 grep -q "sling .*$SUBJ --on $FORMULA" <<< "$CALLS" \
   && ok "(VISITEDGE) slings the subject named by the tracks edge" || bad "(VISITEDGE) sling targets subject (calls: $CALLS)"
 unset FAKE_VISIT_EDGE
+
+# --- (REREADVERIFY) the subject re-read after visit resolution fails -> exit 4 ---
+# A visit id resolves to its subject, which is re-read to read gc.recommended_formula.
+# If THAT read fails transiently the formula reads empty; without re-verifying the
+# re-read, accept would misreport the subject "discuss-only" (exit 2). The contract
+# for an unverifiable subject is to fail closed (exit 4). The first read (of the
+# visit) succeeds; only the subject re-read is made to fail.
+export FAKE_SUBJECT_MODE=missing
+run_accept "$VIS"
+eq "$RC" "4" "(REREADVERIFY) a failed subject re-read after visit resolution fails closed (exit 4)"
+[ -z "$CALLS" ] \
+  && ok "(REREADVERIFY) nothing slung on an unverifiable re-read" || bad "(REREADVERIFY) must dispatch nothing (calls: $CALLS)"
+grep -qi 'this visit names' <<< "$ERR" \
+  && ok "(REREADVERIFY) names the subject it could not verify on the re-read" || bad "(REREADVERIFY) message (err: $ERR)"
+export FAKE_SUBJECT_MODE=found
 
 # --- (SLINGFAIL) a failed dispatch leaves the visit, dismisses nothing ---------
 export FAKE_SLING_RC=1

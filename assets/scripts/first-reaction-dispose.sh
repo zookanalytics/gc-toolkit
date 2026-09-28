@@ -197,6 +197,15 @@ case "$DISPOSITION" in
         [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
         same_store "$VISIT" "$BEAD" \
             || usage_die "--visit $VISIT is in another store than $BEAD; a blocks edge onto it reports success and holds nothing (component-model I1). File the visit in ${BEAD%%-*}'s store, then record it here."
+        # Accept slings this exact mol name, so validate it resolves before the
+        # record is written — the roster discipline --route/--then-route already
+        # take. Unvalidated, a typo stamps a live gc.recommended_formula, the board
+        # renders 'accept ▸', and every click fails at gc sling. A usage error here
+        # refuses it at the source instead.
+        if [ -n "$RECOMMENDED_FORMULA" ]; then
+            gc formula show "$RECOMMENDED_FORMULA" >/dev/null 2>&1 \
+                || usage_die "--recommended-formula '$RECOMMENDED_FORMULA' does not resolve to a formula (gc formula show found none). Accept slings this exact name; fix the typo, or run 'gc formula list' for the roster."
+        fi
         ;;
 esac
 
@@ -374,8 +383,11 @@ gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
     || die "could not record the disposition on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
 
 # ── The recommendation must be true before the act ───────────────────
-# gc.recommended_formula is presence-sensitive: the operator's Accept and
-# converse-invalidate-recommendation.sh read it with has(). The bulk update
+# gc.recommended_formula is read as a NON-EMPTY value by every reader — the
+# board's Accept derivation (services/helm/internal/board/derive.go tests
+# `rf != ""`), gc-helm.sh accept, and converse-invalidate-recommendation.sh — so
+# a present-but-empty key is no live recommendation, and the stale-clear above
+# tests it the same non-empty way. The bulk update
 # above reports success without proving this one key moved, and a silent drop
 # is invisible until the operator meets the wrong affordance — a dropped set
 # files a recommendation visit that offers only Discuss, a dropped stale-clear
