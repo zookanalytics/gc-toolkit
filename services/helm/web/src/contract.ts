@@ -248,6 +248,14 @@ export interface Tile {
    * so the board and the label read one vocabulary. `''` on a non-merge row.
    */
   pr_phase: string;
+  /**
+   * Why a `'needs-attention'` phase needs a person — `'cap-park'`,
+   * `'merge-hold'`, `'rebase-hold'`, `'approved-wedged'`, `'visit-engage'`, or
+   * `'stall'`. The phase stays coarse; this carries the specificity, telling a
+   * visit awaiting engagement apart from a stalled frontier. `''` on a non-merge
+   * row and on any row not needing attention.
+   */
+  pr_attention: string;
 }
 
 /**

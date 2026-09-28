@@ -47,9 +47,10 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 }
 
 // prStatusDerive gathers the anchor's refinery-computed facts and prints the
-// state prstatus.Derive returns. It reads only what derive_value read: the
-// holds and the dated posture/merge-state off the anchor, and the size of the
-// anchor's in-flight set.
+// state prstatus.Derive returns. It reads the holds and the dated
+// posture/merge-state off the anchor, and the anchor's in-flight set split by
+// whether each member is progressing or blocked — a frontier that is all blocked
+// is needs-attention, not working.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	var missing string
@@ -101,13 +102,30 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	state := prstatus.Derive(prstatus.Facts{
-		MergeHold:     bead.Meta("merge_hold"),
-		SignoffCap:    bead.Meta("signoff_cap"),
-		RebaseHold:    bead.Meta("rebase_hold"),
-		PRPosture:     bead.Meta("pr_posture"),
-		PRMergeState:  bead.Meta("pr_merge_state"),
-		InFlightCount: len(rows),
+	// Split the in-flight set by status: a blocked member is not the city holding
+	// the ball. The same membership pr-facts.sh counts, partitioned the way Derive
+	// reads it.
+	active, blocked := 0, 0
+	for i := range rows {
+		if rows[i].StatusLower() == "blocked" {
+			blocked++
+		} else {
+			active++
+		}
+	}
+
+	// The label is coarse: it prints only the state, which is needs-attention for
+	// a blocked frontier whether or not a visit is on it. The reason (visit-engage
+	// vs stall) is the board's to render, so HumanVisitAwaits stays false here and
+	// the reason is discarded.
+	state, _ := prstatus.Derive(prstatus.Facts{
+		MergeHold:       bead.Meta("merge_hold"),
+		SignoffCap:      bead.Meta("signoff_cap"),
+		RebaseHold:      bead.Meta("rebase_hold"),
+		PRPosture:       bead.Meta("pr_posture"),
+		PRMergeState:    bead.Meta("pr_merge_state"),
+		InFlightActive:  active,
+		InFlightBlocked: blocked,
 	})
 	fmt.Fprintf(stdout, "%s\n", state)
 	return 0

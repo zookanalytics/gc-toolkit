@@ -423,6 +423,14 @@ type Tile struct {
 	// pr-status-label.sh projects to the GitHub PR list, so the board and the
 	// label read one vocabulary rather than two. Empty on a non-merge row.
 	PRPhase string `json:"pr_phase"`
+
+	// PRAttention names the cause behind a `needs-attention` PRPhase —
+	// `cap-park`, `merge-hold`, `rebase-hold`, `approved-wedged`, `visit-engage`,
+	// or `stall` — so a surface renders WHY a person is needed without
+	// re-deriving it. The phase stays coarse; this carries the specificity, and
+	// tells a visit awaiting engagement apart from a frontier that has stalled.
+	// Empty on a non-merge row and on any row not needing attention.
+	PRAttention string `json:"pr_attention"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —
@@ -535,9 +543,24 @@ func (s Sitting) Headline() string {
 // render. A zero Facts is legal and means "the gather could not supply these":
 // every anchor then reads as unheld, with nothing in flight and no owner
 // liveness known.
+// InflightCounts summarizes an anchor's in-flight set for the PR phase: the live
+// beads carrying anchor_bead, split by whether each is progressing or blocked.
+// It is the board's half of the membership the PR label reads through
+// `gc bd list --metadata-field anchor_bead=… --status …`, so the phase both
+// surfaces project rests on one set.
+type InflightCounts struct {
+	Active  int
+	Blocked int
+}
+
 type Facts struct {
 	// Visits holds the ids of anchors an open visit bead names.
 	Visits map[string]bool
+	// PRInflight maps a merge anchor id to its in-flight set summary. The phase
+	// derivation reads it so the board counts the same anchor_bead members, blocked
+	// included, that the PR label counts — the divergence a separate rework-only,
+	// open-only count used to create.
+	PRInflight map[string]InflightCounts
 	// Inflight maps a WORK-BEAD id — an anchor's CHILD, not the anchor — to the
 	// session names of the live graph.v2 workflows standing over it. The gather
 	// resolves each live workflow root through its input convoy to that

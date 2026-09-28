@@ -13,11 +13,17 @@
 //
 // Derive reads only refinery-computed state off the anchor: the holds
 // (merge_hold/rebase_hold and the signoff-cap park), the pr-facts.sh posture
-// and merge state, and the anchor's in-flight set — any live bead carrying
-// anchor_bead, the same membership test pr-facts.sh applies in its own arms. It
-// does not consult GitHub's review posture directly — the working -> needs-review
-// flip rests on that live work, which closes as it hands back, so a sticky
-// changes_requested never traps the value in working after the set empties.
+// and merge state, and the anchor's in-flight set — the live beads carrying
+// anchor_bead, the same membership test pr-facts.sh applies in its own arms,
+// split by whether each is progressing or blocked. A frontier whose live work
+// is entirely blocked is not the city holding the ball: a human must unstick it,
+// so it derives needs-attention, not working. Derive does not consult GitHub's
+// review posture directly — the working -> needs-review flip rests on live work,
+// which closes as it hands back, so a sticky changes_requested never traps the
+// value in working after the set empties.
+//
+// Alongside the state, Derive returns the Reason naming the needs-attention
+// cause, so a consumer can render why a person is needed without re-deriving it.
 package prstatus
 
 import "strings"
@@ -26,7 +32,7 @@ import "strings"
 type State string
 
 const (
-	// Working: the city holds the ball — live work is anchored to the PR (a
+	// Working: the city holds the ball — live work is progressing on the PR (a
 	// rework or fix child, a validation pass, a review, a finding), or an
 	// approved PR is merging. No human input is needed.
 	Working State = "working"
@@ -34,9 +40,30 @@ const (
 	// verdict.
 	NeedsReview State = "needs-review"
 	// NeedsAttention: stopped without settling — a human must weigh in before the
-	// city can settle it (a signoff-cap park, a merge or rebase hold, or an
-	// approved PR wedged at merge state BLOCKED with no rework in flight).
+	// city can settle it (a signoff-cap park, a merge or rebase hold, an approved
+	// PR wedged at merge state BLOCKED with no live work, or a frontier whose only
+	// live work is blocked).
 	NeedsAttention State = "needs-attention"
+)
+
+// Reason names the needs-attention cause. It is empty for working and
+// needs-review, and for a needs-attention that outran every named cause. The
+// value is coarse enough to render as a chip and specific enough to tell a visit
+// awaiting engagement from a frontier that has simply stalled.
+type Reason string
+
+const (
+	ReasonNone           Reason = ""
+	ReasonCapPark        Reason = "cap-park"
+	ReasonMergeHold      Reason = "merge-hold"
+	ReasonRebaseHold     Reason = "rebase-hold"
+	ReasonApprovedWedged Reason = "approved-wedged"
+	// ReasonVisitEngage: the live frontier is blocked and an open human visit
+	// holds the anchor — a conversation awaits engagement.
+	ReasonVisitEngage Reason = "visit-engage"
+	// ReasonStall: the live frontier is blocked with no human visit on it — work
+	// that stopped, with nothing moving it.
+	ReasonStall Reason = "stall"
 )
 
 // Facts is the anchor's refinery-computed state as stored. Each string field
@@ -59,40 +86,63 @@ type Facts struct {
 	// PRMergeState is metadata.pr_merge_state, stored value@oid; only the value
 	// before the first '@' is read.
 	PRMergeState string
-	// InFlightCount is the size of the anchor's in-flight set: every live bead
-	// carrying anchor_bead, any task_kind, over the live statuses pr-facts.sh
-	// counts (a rework or fix child, a validation pass, a review, a finding).
+	// InFlightActive is how much of the anchor's in-flight set is progressing:
+	// the live beads carrying anchor_bead, any task_kind, whose status is not
+	// blocked (a rework or fix child, a validation pass, a review, a finding).
 	// Non-zero means the city is acting on the PR.
-	InFlightCount int
+	InFlightActive int
+	// InFlightBlocked is how much of that same set is blocked. A set that is all
+	// blocked, with nothing progressing, is a frontier a human must unstick.
+	InFlightBlocked int
+	// HumanVisitAwaits reports that an open human visit is holding the anchor. It
+	// only distinguishes the reason a blocked frontier carries (visit-engage vs
+	// stall); it does not by itself change the state.
+	HumanVisitAwaits bool
 }
 
-// Derive returns the state the anchor projects. Precedence:
-// needs-attention > working > needs-review.
-func Derive(f Facts) State {
+// Derive returns the state the anchor projects and the reason behind a
+// needs-attention. Precedence: needs-attention > working > needs-review.
+func Derive(f Facts) (State, Reason) {
 	posture := before(f.PRPosture, "@")
 	mstate := before(f.PRMergeState, "@")
 
 	// needs-attention: the city stopped without settling; a human must unstick it.
 	if isCapPark(f.MergeHold, f.SignoffCap) {
-		return NeedsAttention
+		return NeedsAttention, ReasonCapPark
 	}
-	if isSet(f.MergeHold) || isSet(f.RebaseHold) {
-		return NeedsAttention
+	if isSet(f.MergeHold) {
+		return NeedsAttention, ReasonMergeHold
 	}
-	if posture == "approved" && mstate == "BLOCKED" && f.InFlightCount == 0 {
-		return NeedsAttention
+	if isSet(f.RebaseHold) {
+		return NeedsAttention, ReasonRebaseHold
+	}
+	// A live frontier with nothing progressing and something blocked is not
+	// working — ordered above the working arm so a blocked-only set never reads
+	// working, and above the approved wedge so the blocked frontier names its own
+	// cause. An open human visit on it means a conversation awaits engagement;
+	// without one the work has stalled.
+	if f.InFlightActive == 0 && f.InFlightBlocked > 0 {
+		if f.HumanVisitAwaits {
+			return NeedsAttention, ReasonVisitEngage
+		}
+		return NeedsAttention, ReasonStall
+	}
+	// Reached only with the in-flight set empty (a blocked-only set returned
+	// above), so this is an approved PR wedged at BLOCKED with no live work.
+	if posture == "approved" && mstate == "BLOCKED" && f.InFlightActive == 0 {
+		return NeedsAttention, ReasonApprovedWedged
 	}
 
 	// working: the city holds the ball; no human input needed.
-	if f.InFlightCount > 0 {
-		return Working
+	if f.InFlightActive > 0 {
+		return Working, ReasonNone
 	}
 	if posture == "approved" {
-		return Working
+		return Working, ReasonNone
 	}
 
 	// needs-review: settled at the head, a human review or re-review is next.
-	return NeedsReview
+	return NeedsReview, ReasonNone
 }
 
 // isSet is the truthiness rule pr-facts.sh, pr-open.sh and pr-status-label.sh

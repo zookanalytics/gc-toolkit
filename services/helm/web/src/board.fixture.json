@@ -61,7 +61,8 @@
       "section": "stalled",
       "group_root": "tk-eemvf",
       "pr_branch_url": "",
-      "pr_phase": ""
+      "pr_phase": "",
+      "pr_attention": ""
     },
     {
       "id": "gt-1a2b3",
@@ -111,7 +112,8 @@
       "cluster_key": "all 2 closed — graduate",
       "group_root": "gt-1a2b3",
       "pr_branch_url": "",
-      "pr_phase": ""
+      "pr_phase": "",
+      "pr_attention": ""
     },
     {
       "id": "tk-01n5cc",
@@ -162,7 +164,8 @@
       "section": "review",
       "group_root": "tk-01n5cc",
       "pr_branch_url": "",
-      "pr_phase": ""
+      "pr_phase": "",
+      "pr_attention": ""
     },
     {
       "id": "tk-9tbbk",
@@ -213,7 +216,8 @@
       "section": "done",
       "group_root": "tk-9tbbk",
       "pr_branch_url": "",
-      "pr_phase": ""
+      "pr_phase": "",
+      "pr_attention": ""
     }
   ],
   "sittings": [

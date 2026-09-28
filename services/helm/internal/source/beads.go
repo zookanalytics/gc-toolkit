@@ -431,6 +431,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 
 	var sittings []board.Sitting
 	var roots []workflowRoot
+	prInflight := map[string]board.InflightCounts{}
 	for _, r := range rigs {
 		st, err := s.store(ctx, r)
 		if err != nil {
@@ -440,6 +441,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 		s.gatherRig(ctx, g, st, r, now)
 		sittings = append(sittings, s.rigSittings(ctx, st, r, g, now)...)
 		roots = append(roots, s.workflowRoots(ctx, st, r, g)...)
+		s.accumulatePRInflight(ctx, g, st, r, prInflight)
 	}
 
 	if !g.anyOK {
@@ -451,10 +453,56 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 
 	return &Result{
 		Anchors:       g.anchors,
-		Facts:         buildFacts(sittings, inflight, owners, rigs),
+		Facts:         buildFacts(sittings, inflight, owners, rigs, prInflight),
 		Partial:       g.partial,
 		PartialErrors: g.partialErrs,
 	}, nil
+}
+
+// prInflightStatuses is the live-status scope the PR label's in-flight query
+// uses (`--status open,in_progress,blocked,deferred,hooked,pinned`); the board
+// reads the same scope so its phase counts the same membership the label does.
+// The beads root package re-exports only the first four as constants, so hooked
+// and pinned are named by their store status strings — the values types.Status
+// carries — rather than dropped, which would narrow the board below the label.
+var prInflightStatuses = []beads.Status{
+	beads.StatusOpen, beads.StatusInProgress, beads.StatusBlocked,
+	beads.StatusDeferred, beads.Status("hooked"), beads.Status("pinned"),
+}
+
+// accumulatePRInflight sums each merge anchor's in-flight set for the PR phase:
+// every live bead carrying anchor_bead (any task_kind — the same population the
+// label's `--metadata-field anchor_bead=… --status …` query returns, gathered
+// here in one keyed read per rig rather than one per anchor), split by whether
+// it is blocked. A blocked-only set is what makes a frontier read needs-attention
+// on the board exactly as it does on the label.
+func (s *BeadsSource) accumulatePRInflight(ctx context.Context, g *gatherState, st beadStore, r rigRef, out map[string]board.InflightCounts) {
+	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
+		Statuses:       prInflightStatuses,
+		HasMetadataKey: "anchor_bead",
+		SkipWisps:      true,
+	})
+	if err != nil {
+		g.note(true, []string{"pr-inflight@" + r.name + ": " + err.Error()})
+		return
+	}
+	g.ok()
+	for _, iss := range issues {
+		if iss == nil {
+			continue
+		}
+		anchor := decodeMetadata(iss.Metadata)["anchor_bead"]
+		if anchor == "" {
+			continue
+		}
+		c := out[anchor]
+		if iss.Status == beads.StatusBlocked {
+			c.Blocked++
+		} else {
+			c.Active++
+		}
+		out[anchor] = c
+	}
 }
 
 // typedAnchorKinds are the anchor kinds selected by ISSUE TYPE. The list is

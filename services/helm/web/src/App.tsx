@@ -130,11 +130,20 @@ function PRLink({ tile }: { tile: Tile }) {
 /**
  * The phase indicator: who must act on this merge anchor next, in the same three
  * values the GitHub status: label carries. A colored chip so the answer reads at
- * a glance; nothing rendered on a row with no phase.
+ * a glance; nothing rendered on a row with no phase. When the phase needs
+ * attention, the reason rides the chip's tooltip so the why is one hover away
+ * without widening the coarse label.
  */
 function PRPhaseChip({ tile }: { tile: Tile }) {
   if (!tile.pr_phase) return null;
-  return <span className={`pr-phase pr-phase--${tile.pr_phase}`}>{tile.pr_phase}</span>;
+  return (
+    <span
+      className={`pr-phase pr-phase--${tile.pr_phase}`}
+      title={tile.pr_attention || undefined}
+    >
+      {tile.pr_phase}
+    </span>
+  );
 }
 
 /**
