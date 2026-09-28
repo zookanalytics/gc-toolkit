@@ -240,9 +240,9 @@ branch current by merging its base in and pushes a fast-forward, never a rebase,
 amend, or force-push (`assets/scripts/pr-facts.sh`, the resume instruction). That
 keeps a reviewer's inline comments anchored to the commits they were left on, and
 it keeps the approved commit reachable on the branch, which is the base
-`materiality.sh` measures the change against — a rewrite that drops it answers
-`gone`, and the merge holds for a fresh look rather than merging a change it
-cannot weigh. History is rewritten only between rounds, and only on the
+`materiality.sh` measures the change against — a rewrite that drops it leaves no
+base to measure, so the read does not resolve and the merge holds for a fresh
+look rather than merging a change it cannot weigh. History is rewritten only between rounds, and only on the
 disposable feature branch, never on a shared or integration branch that carries
 already-merged pull requests. The land itself is one squash
 (`assets/scripts/merge.sh`), so the change reaches `main` as a single legible

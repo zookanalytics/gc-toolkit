@@ -79,8 +79,9 @@ holds. Within a round a fix is a commit: the rework child merges its base in and
 pushes a fast-forward, never a rebase, amend, or force-push. That keeps a
 reviewer's inline comments anchored to the commits they were left on, and keeps
 the approved commit reachable — the base `materiality.sh` measures against. A
-rewrite that drops the approved commit off the branch answers `gone`, and the
-merge then holds for a fresh look rather than merging a change it cannot weigh.
+rewrite that drops the approved commit off the branch leaves no base to measure,
+so the read does not resolve and the merge then holds for a fresh look rather
+than merging a change it cannot weigh.
 
 History is rewritten only between rounds, and only on the disposable feature
 branch, never on a shared or integration branch that carries already-merged pull
