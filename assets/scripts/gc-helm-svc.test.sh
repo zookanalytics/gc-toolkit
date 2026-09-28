@@ -44,6 +44,7 @@
 #   (REBUILD)     rebuilds when a source is newer than the binary
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
 #   (GOMOD)       a go.mod-only change still counts as newer (tk-ohdex)
+#   (DEPMOD)      a change in a local replace-dep (services/gctk) forces a rebuild
 #
 #   readability — the second staleness axis (tk-00o34c)
 #   (READABLE)    a current binary that can read the stores reports ok, builds nothing
@@ -97,6 +98,8 @@
 #   (STATUSDEL)   a deletion-only change rebuilds — `find -newer` is blind to an
 #                 input that no longer exists, and the record must never name a
 #                 revision the binary was not built from
+#   (DEPREV)      a sibling-subtree revision change rebuilds when mtime is blind;
+#                 SOURCE_REV spans every local replace-dep, not just services/helm
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
 #
@@ -308,6 +311,19 @@ commit_fixture() { # <dir> -> the new revision on stdout
     git -C "$1/services/helm" rev-parse 'HEAD:./' 2>/dev/null
 }
 
+# Wire a local replace-dependency into the fixture the way services/helm wires
+# the real prstatus core: a sibling services/gctk module reached through a
+# `=> ../gctk` replace in helm's go.mod. The stub toolchain never compiles it;
+# what matters is that the builder resolves the replace and folds the sibling's
+# sources into both its staleness identity and its mtime scan.
+add_gctk_dep() {
+    mkdir -p "$ROOT/services/gctk"
+    printf 'module gctk\n\ngo 1.26.5\n'   > "$ROOT/services/gctk/go.mod"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus.go"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/extra.go"
+    printf 'require gctk v0.0.0\n\nreplace gctk => ../gctk\n' >> "$ROOT/services/helm/go.mod"
+}
+
 # `has`, not `//`: jq's alternative operator treats FALSE as absent, so a
 # `// ""` reader would report restart_pending=false as an empty string and the
 # cleared case would pass against the wrong value.
@@ -456,6 +472,23 @@ eq "$RC" 0 "(CURRENT) exits 0 when the binary is current"
 has "$OUT" "up to date" "(CURRENT) says so"
 absent "$RECORD" "(CURRENT) the toolchain was never invoked"
 present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch is untouched"
+
+# --- case: a change in a local replace-dep (services/gctk) rebuilds -----------
+# helm-svc embeds services/gctk — the shared prstatus core the PR label writer
+# also derives from — through a `=> ../gctk` replace. A change confined to that
+# sibling touches no file under services/helm, so unless the mtime scan spans the
+# replace-deps the builder reports the binary current while the label path has
+# already moved, and the board and the label diverge again.
+fixture
+add_gctk_dep
+cache_binary
+touch "$ROOT/services/gctk/prstatus.go"
+[ -z "$(find "$ROOT/services/helm" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPMOD) the change is confined to services/gctk — nothing under services/helm is newer" \
+    || bad "(DEPMOD) something under services/helm is newer; the case would not isolate the sibling"
+run_build
+eq "$RC" 0 "(DEPMOD) exits 0"
+present "$RECORD" "(DEPMOD) a services/gctk source change forces a helm rebuild"
 
 # ==============================================================================
 # READABILITY — the second staleness axis (tk-00o34c)
@@ -944,6 +977,33 @@ run_build
 eq "$RC" 0 "(STATUSDEL) the next tick exits 0"
 present "$RECORD" "(STATUSDEL) the deleted input forces a rebuild"
 eq "$(status_field binary_rev)" "$REV_E" "(STATUSDEL) so binary_rev names a revision the binary was really built from"
+
+# --- case: a sibling-subtree revision change rebuilds when mtime is blind -----
+# The revision identity catches what `find -newer` cannot see — a deletion. It
+# must span the replace-deps too: a file removed from services/gctk leaves
+# nothing newer than the binary, so only a SOURCE_REV that covers the sibling's
+# subtree forces the rebuild. Without it the record names a revision the binary
+# was never built from, exactly the STATUSDEL failure but one module over.
+fixture
+add_gctk_dep
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+GCTK_REV1="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+run_build
+eq "$RC" 0 "(DEPREV) the first build exits 0"
+has "$(status_field source_rev)" "$GCTK_REV1" "(DEPREV) source_rev spans the replaced sibling's subtree"
+rm -f "$RECORD"
+git -C "$ROOT" rm -q "services/gctk/extra.go" >/dev/null 2>&1 || true
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+GCTK_REV2="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+[ -n "$GCTK_REV2" ] && [ "$GCTK_REV2" != "$GCTK_REV1" ] \
+    && ok "(DEPREV) the sibling deletion advanced its subtree" \
+    || bad "(DEPREV) the sibling subtree did not advance; the case cannot reach the blind spot"
+[ -z "$(find "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPREV) the deletion leaves nothing newer — the mtime test is blind here" \
+    || bad "(DEPREV) something is newer than the binary; the case would not reach the revision path"
+run_build
+eq "$RC" 0 "(DEPREV) the next tick exits 0"
+present "$RECORD" "(DEPREV) a sibling-subtree revision change forces a rebuild"
 
 # --- case: published but not serving -----------------------------------------
 fixture

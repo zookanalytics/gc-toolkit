@@ -135,5 +135,6 @@ part of this spec is unimplemented-and-unowned:
   tri-state becomes a first-class field on every tile (today `pr_phase` is empty
   on a non-merge row) and the frontier speaks it, so the board's primary
   vocabulary is the liveness state.
-- **A branch-commit liveness signal** (unfiled; contingent), if the render path
-  is ever allowed the read, to close the "recent branch commits" gap named above.
+- **A branch-commit liveness signal** (tk-ikpyzn.8). The render path makes no git
+  read today, so this stays contingent; it would close the "recent branch
+  commits" gap named above.
