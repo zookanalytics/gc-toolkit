@@ -1,0 +1,130 @@
+description = """
+Drive a measurable goal to met, one bounded iteration at a time, judged by an
+oracle the worker never runs. The goal is a contract carried by a bead
+(docs/goal-keeper.md): a measurable statement, a deterministic oracle, and a
+three-way budget of iterations, tokens, and wall-clock. This formula is the
+loop that converges the goal; `assets/scripts/goal-arm.sh` records the contract
+snapshot and pours it, and `assets/scripts/goal-judge.sh` is the judge.
+
+The loop is a check loop (`[steps.check]`, formulas v2). Each iteration is one
+pool-routed session that reads the goal's current `not_yet` reason and does one
+bounded unit of work toward the statement, then closes its own bead. Closing
+runs the judge: it re-reads the contract, re-runs the oracle against reality,
+and renders one verdict — met, not-yet, impossible, stalled, or exhausted. A
+not-yet fails the exit condition and the loop appends the next iteration with
+the reason threaded forward; every other verdict is terminal and stops the loop.
+
+The judge is separate from the worker on purpose: a model cannot judge its own
+homework. The iteration session that does the work never renders the verdict,
+the judge runs the oracle itself and reads reality rather than the worker's
+summary, and each iteration runs in a fresh pool session with none of the
+previous one's context.
+
+**Iterations must be pool-routed.** Sling this formula at a pool, never a named
+agent — a check loop only recycles the worker session and clears context when
+the attempt target is a pool (docs/gascity-packs.md §6). The step declares no
+assignee, which `[steps.check]` forbids anyway.
+
+**Budget lives on the goal, not here.** `max_attempts` below is a hard ceiling
+that bounds pathological churn. The real budget is `goal.budget.*` on the goal
+bead, which an operator edits, and the judge enforces all three bounds at every
+verdict: it renders `exhausted` and parks the goal the moment the iteration
+count, the wall-clock deadline, or (once engine token telemetry lands) the token
+budget trips. On the ceiling's last attempt the judge parks the goal itself,
+because the orchestrator closes the control bead and nothing runs after it — the
+same exhaustion handback the other check loops in this repo carry.
+
+Never close the goal bead from an iteration: the judge closes it on `met` and
+reassigns it to the escalation target on a park. An iteration closes only its
+own iteration bead.
+"""
+formula = "mol-goal-keeper"
+version = 1
+
+# The `iterate` step uses [steps.check], a v2-only construct.
+[requires]
+formula_compiler = ">=2.0.0"
+
+[[steps]]
+id = "iterate"
+title = "One bounded iteration toward the goal, then let the judge measure"
+description = """
+You are **one iteration of a goal loop**. Read this whole step before you touch
+anything. Nothing from a previous iteration is in your context — by design.
+Determine where the goal stands from the bead and reality, never from memory.
+
+The goal bead carries the contract and all loop state (docs/goal-keeper.md). It
+is this iteration's `{{issue}}`:
+
+```bash
+GOAL={{issue}}
+GOAL_JSON=$(gc bd show "$GOAL" --json)
+STATEMENT=$(printf '%s' "$GOAL_JSON" | jq -r '.[0].metadata."goal.statement" // empty')
+REASON=$(printf '%s' "$GOAL_JSON" | jq -r '.[0].metadata."goal.not_yet_reason" // empty')
+```
+
+**1. Read the goal and the reason forward.** `goal.statement` is the measurable
+end state. `goal.not_yet_reason` is the judge's last verdict on what is still
+wrong — it is your assignment this iteration. On the first iteration it is the
+baseline reason `goal-arm.sh` recorded. If it is empty, do the smallest concrete
+thing that moves the statement toward true and say so in your evidence.
+
+**2. Do one bounded unit of work toward the statement, against the reason.**
+Keep it to one focused unit — the loop is how the goal spans many units, not a
+license to attempt all of it at once. The work is whatever the reason calls for:
+an analysis that settles a decision, a configuration change, or a focused code
+change slung as its own `mol-polecat-work` bead. If the work is a code change
+that must land, sling it as a normal pool work bead and record its id as your
+evidence; do not open a PR from this iteration.
+
+**3. Record your evidence on the goal bead.** The judge reads reality, not your
+summary, but the trail needs a durable pointer to what this iteration produced —
+a commit, a bead id, a measured value:
+
+```bash
+gc bd update "$GOAL" --append-notes "goal iteration: <what you did> — evidence: <commit|bead|value>"
+```
+
+Never stamp a verdict, never edit `goal.oracle.*` or `goal.budget.*`, and never
+touch `goal.snapshot` or `goal.trail` — those are the judge's. Changing the
+contract to make the oracle pass is the one move this design exists to stop; the
+judge compares the contract to its arming snapshot and re-arms on any change, so
+a tamper shows in the trail.
+
+**4. Close your iteration bead — closing is what runs the judge.** Close by the
+explicit id your `gc hook --claim --json` returned; `$GC_BEAD_ID` is unset for a
+pool-claimed polecat and a guarded close silently no-ops, stalling the loop.
+
+```bash
+gc bd close "<your-iteration-bead-id>" --reason "goal iteration complete"
+gc runtime drain-ack
+```
+
+Never close the goal bead: the judge closes it on `met` and reassigns it to the
+escalation target on a park. Never close the `iterate` control bead: the
+orchestrator closes it when the loop terminates.
+
+**Exit criteria (for the step, not for you):** the oracle measures the goal met.
+Any iteration that leaves reality closer to the statement, with its evidence
+recorded, has done its job — the judge decides whether another is needed.
+"""
+
+[steps.check]
+# Hard ceiling on iterations, a backstop against pathological churn — NOT the
+# goal's budget. The real cap is goal.budget.max_iterations on the goal bead,
+# which the judge enforces and which an operator edits without touching this
+# formula. This number only bounds a goal whose contract sets no smaller cap.
+# On the last attempt the judge parks the goal itself (goal.status=parked,
+# reassigned to the escalation target), because the orchestrator closes the
+# control bead gc.outcome=fail and nothing runs after it.
+max_attempts = 50
+
+[steps.check.check]
+mode = "exec"
+path = "../assets/scripts/goal-judge.sh"
+# The judge reads the contract, runs the oracle, renders a verdict, and writes
+# the trail. It runs inline in the control dispatcher on a sandboxed PATH
+# (bd, gc, jq), so the oracle it runs must be a fast deterministic measurement —
+# a bead-store query or a quick metric — not a long build or benchmark. 2m is
+# slack for that measurement plus the trail write and a park handback.
+timeout = "2m"

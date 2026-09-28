@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- agents: 17 · formulas: 25
+- agents: 17 · formulas: 26
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -66,6 +66,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
 | [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,220 | 555 |
+| [`mol-goal-keeper`](formulas/mol-goal-keeper.md) | `city` | 2,968 | 742 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
