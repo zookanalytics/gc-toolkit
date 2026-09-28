@@ -175,22 +175,27 @@ func TestActuateRoutesShareTheWriteMiddleware(t *testing.T) {
 	}
 }
 
-// The in-process gate keys on (verb, bead): a double-clicked Accept collapses,
-// but Accept and Dismiss on one row never block each other.
-func TestActuationGateIsPerVerbAndBead(t *testing.T) {
+// The in-process gate keys on the subject (bead): every write verb mutates its
+// visit, so a double-clicked Accept collapses AND an Accept racing a Dismiss on
+// one subject is held. The refusal names the verb already running.
+func TestActuationGateSerializesWritesPerSubject(t *testing.T) {
 	g := newActuationGate()
-	if !g.enter("accept:tk-abc12") {
+	if ok, _ := g.enter("tk-abc12", "accept"); !ok {
 		t.Fatal("first enter refused")
 	}
-	if g.enter("accept:tk-abc12") {
-		t.Error("a second accept on the same bead was admitted while one was in flight")
+	if ok, running := g.enter("tk-abc12", "accept"); ok {
+		t.Error("a second accept on the same subject was admitted while one was in flight")
+	} else if running != "accept" {
+		t.Errorf("busy verb = %q, want %q", running, "accept")
 	}
-	if !g.enter("dismiss:tk-abc12") {
-		t.Error("dismiss was blocked by an in-flight accept on the same bead")
+	if ok, running := g.enter("tk-abc12", "dismiss"); ok {
+		t.Error("dismiss was admitted while an accept on the same subject was in flight — the accept/dismiss race is open")
+	} else if running != "accept" {
+		t.Errorf("busy verb = %q, want %q", running, "accept")
 	}
-	g.leave("accept:tk-abc12")
-	if !g.enter("accept:tk-abc12") {
-		t.Error("accept stayed locked after leave")
+	g.leave("tk-abc12")
+	if ok, _ := g.enter("tk-abc12", "accept"); !ok {
+		t.Error("subject stayed locked after leave")
 	}
 }
 

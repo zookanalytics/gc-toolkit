@@ -575,14 +575,14 @@ func TestOpenCollapsesConcurrentOpensOfTheSameBead(t *testing.T) {
 // A different bead is never blocked by one in flight.
 func TestOpenDoesNotBlockADifferentBead(t *testing.T) {
 	g := newActuationGate()
-	if !g.enter("tk-abc12") {
+	if ok, _ := g.enter("tk-abc12", "open"); !ok {
 		t.Fatal("first enter refused")
 	}
-	if !g.enter("tk-other") {
+	if ok, _ := g.enter("tk-other", "open"); !ok {
 		t.Error("a different bead was refused while another was in flight")
 	}
 	g.leave("tk-abc12")
-	if !g.enter("tk-abc12") {
+	if ok, _ := g.enter("tk-abc12", "open"); !ok {
 		t.Error("bead stayed locked after leave")
 	}
 }

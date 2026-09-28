@@ -93,10 +93,11 @@ export interface ActuateButtonProps {
 
 export function ActuateButton({ beadId, verb, formula, compact, onDone }: ActuateButtonProps) {
   const [state, setState] = useState<State>({ phase: 'idle' });
-  // One in-flight request per mount. The service also collapses concurrent runs
-  // of the same (verb, bead) (409 busy) — that is the real guard, since two
-  // browsers can click at once; this just keeps a double-click from making a
-  // request it already knows the answer to.
+  // One in-flight request per mount. The service also serializes concurrent
+  // writes on one subject (409 busy) — that is the real guard, since two browsers
+  // can click at once, or one can Accept while another Dismisses the same row;
+  // this just keeps a double-click from making a request it already knows the
+  // answer to.
   const inFlight = useRef(false);
   // The bead this button is currently pointed at, readable from inside a settled
   // promise.

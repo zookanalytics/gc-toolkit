@@ -36,10 +36,12 @@ package server
 //     being read from another page; a POST surface is. See [checkWriteOrigin].
 //
 //  3. DOUBLE-FIRE. The scripts' state checks are read-then-act, which is not
-//     atomic, and a button is double-clicked routinely. Two concurrent runs of
-//     one verb on one bead would race those checks — filing a second visit,
-//     slinging a formula twice. [actuationGate] collapses concurrent requests
-//     for the same (verb, bead) in-process.
+//     atomic, and a button is double-clicked routinely. Concurrent writes on one
+//     subject race those checks whether they are the same verb (a double-clicked
+//     Accept filing a second visit or slinging twice) or two verbs the UI offers
+//     on one row at once (Accept slinging after Dismiss closed the visit it was
+//     about to dismiss). [actuationGate] serializes writes per subject (bead)
+//     in-process, so one subject's verbs never overlap.
 
 import (
 	"context"
@@ -133,27 +135,31 @@ func validBeadID(s string) bool {
 	return len(s) <= maxBeadIDLen && beadIDRE.MatchString(s)
 }
 
-// actuationGate collapses concurrent runs of the SAME (verb, bead). See the
-// double-fire note in the file header. A different verb or a different bead never
-// contends: accept and dismiss on one bead are distinct intents, and two beads
-// never share a key.
+// actuationGate serializes concurrent writes on ONE subject (bead). See the
+// double-fire note in the file header. Every write verb (open, accept, engage,
+// dismiss) mutates the subject's visit, so on one subject they are mutually
+// exclusive: a board-row Accept and a drill-panel Dismiss must not overlap, or
+// Accept can sling after Dismiss has closed the visit. Two different beads never
+// contend — they never share a key. inFlight maps a held bead to the verb
+// running on it, so a refusal can name what to wait for.
 type actuationGate struct {
 	mu       sync.Mutex
-	inFlight map[string]bool
+	inFlight map[string]string
 }
 
-func newActuationGate() *actuationGate { return &actuationGate{inFlight: map[string]bool{}} }
+func newActuationGate() *actuationGate { return &actuationGate{inFlight: map[string]string{}} }
 
-// enter claims the key, reporting false when a request for it is already
-// running. The caller must call leave when it took the claim.
-func (g *actuationGate) enter(key string) bool {
+// enter claims key for verb, reporting ok=false and the verb already running on
+// it when a request for it is in flight. The caller must call leave when it took
+// the claim.
+func (g *actuationGate) enter(key, verb string) (bool, string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.inFlight[key] {
-		return false
+	if running, busy := g.inFlight[key]; busy {
+		return false, running
 	}
-	g.inFlight[key] = true
-	return true
+	g.inFlight[key] = verb
+	return true, ""
 }
 
 func (g *actuationGate) leave(key string) {
@@ -207,15 +213,16 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 		return ToolResult{}, "", false
 	}
 
-	// Keyed on (verb, bead): a double-clicked Accept collapses, but Accept and
-	// Dismiss on one row — or the same verb on two rows — never block each other.
-	gateKey := verb + ":" + bead
-	if !s.gate.enter(gateKey) {
+	// Keyed on the subject (bead): every write verb mutates its visit, so a
+	// double-clicked Accept, and an Accept racing a Dismiss on one row, both
+	// collapse to one in-flight write. The same verb on two different beads still
+	// runs concurrently. The refusal names the verb already holding the subject.
+	if ok, running := s.gate.enter(bead, verb); !ok {
 		writeActuateError(w, http.StatusConflict, reasonBusy,
-			"already running "+verb+" on "+bead+" — wait for that to finish")
+			"already running "+running+" on "+bead+" — wait for that to finish")
 		return ToolResult{}, "", false
 	}
-	defer s.gate.leave(gateKey)
+	defer s.gate.leave(bead)
 
 	// THE SIDE EFFECT DOES NOT DIE WITH THE CLIENT (review of PR#421, P1).
 	//
