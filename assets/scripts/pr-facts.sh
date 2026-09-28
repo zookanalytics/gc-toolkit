@@ -81,7 +81,11 @@
 # merge still gates on an explicit one.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
-# Args: --fix-pool <pool>. Caller: refinery-reconcile.sh
+# Args: --fix-pool <pool>; --posture-only (the cheap pre-merge arm: record
+# posture and stop); --route-comments-only (the pre-merge arm that routes
+# operator feedback and stops after it, skipping the write-back sweep and every
+# non-feedback arm, so a pass killed before the full arm has still picked the
+# feedback up). Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
 
@@ -118,11 +122,12 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
 
-FIX_POOL=""; POSTURE_ONLY=0
+FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --fix-pool)     FIX_POOL="${2:-}"; shift 2 ;;
-    --posture-only) POSTURE_ONLY=1; shift ;;
+    --fix-pool)            FIX_POOL="${2:-}"; shift 2 ;;
+    --posture-only)        POSTURE_ONLY=1; shift ;;
+    --route-comments-only) ROUTE_ONLY=1; shift ;;
     *) shift ;;
   esac
 done
@@ -627,8 +632,8 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 # still clears its visits, and in every rig's cadence so each store cleans its own.
 # Fail closed on an unreadable subject: a visit whose anchor cannot be read this
 # pass is left for the next, never retired on a read that did not land.
-# --posture-only writes nothing here.
-if [ "$POSTURE_ONLY" != 1 ]; then
+# The pre-merge arms (--posture-only, --route-comments-only) write nothing here.
+if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if av_visits=$(bd_list --status=open --metadata-field "escalation_key=merge-blocked-approval"); then
     while IFS="$(printf '\t')" read -r avid avsubj; do
       [ -n "${avid:-}" ] || continue
@@ -711,9 +716,10 @@ while IFS= read -r row; do
   [ -n "$target" ] || target="$base"
 
   # --- PR merged (out-of-band, or a died record): record it ----------------------
-  # Reconciliation is the full pass's; --posture-only writes a posture and
-  # nothing else, so a MERGED or CLOSED anchor falls through to the OPEN filter.
-  if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ]; then
+  # Reconciliation is the full pass's; the pre-merge arms (--posture-only,
+  # --route-comments-only) reconcile no terminal state, so a MERGED or CLOSED
+  # anchor falls through to the OPEN filter.
+  if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
     if [ -z "$merge_oid" ]; then
@@ -740,7 +746,7 @@ while IFS= read -r row; do
   fi
 
   # --- PR closed unmerged: out-of-band close ------------------------------------
-  if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ]; then
+  if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
     # A deliberate supersede/not-planned close records its disposition on the
     # still-open anchor before the PR closes (assets/scripts/pr-dispose.sh):
     # the bead-rehome kind, the successor, and an optional store. When it is
@@ -869,8 +875,8 @@ CHILDREN_EOF
   # open one, so this seam stays independent of the draft gate below. Best-effort
   # and idempotent — pr-status-label.sh derives working/needs-review/needs-attention
   # from the anchor's own state and writes only on a change. Full pass only: the
-  # --posture-only pre-merge arm records posture and touches no PR label.
-  if [ "$POSTURE_ONLY" != 1 ]; then
+  # pre-merge arms record posture and touch no PR label.
+  if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
     cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
     "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$num" \
       --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "$cur_labels" \
@@ -1024,14 +1030,21 @@ CHILDREN_EOF
   fi
 
   # merge.sh reads posture off the bead and never asks GitHub, so the record has
-  # to be no older than the merge arm that reads it. --posture-only is that
-  # earlier pass: it writes the posture and stops here, leaving every dispatch
-  # arm below to the full pass that runs after merge.
+  # to be no older than the merge arm that reads it. --posture-only is the
+  # earliest pre-merge pass: it writes the posture and stops here.
+  # --route-comments-only runs on into the feedback-routing arm below (and stops
+  # after it), so operator feedback is picked up before merge too rather than
+  # waiting for the full pass at the tail; every other dispatch arm is the full
+  # pass's, after merge.
   [ "$POSTURE_ONLY" != 1 ] || continue
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   if [ -n "$rec_target" ] && [ -n "$base" ] && [ "$rec_target" != "$base" ]; then
+    # A pre-merge arm defers retarget handling to the full pass. A retargeted
+    # anchor does not merge this pass, and its feedback is not routed while it
+    # sits on the wrong base, so the early feedback arm skips it.
+    [ "$ROUTE_ONLY" != 1 ] || continue
     UNSETS=()
     while IFS= read -r g; do
       [ -n "$g" ] && UNSETS+=(--unset "check.$g")
@@ -1055,6 +1068,11 @@ GATES
 
   # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
+    # A pre-merge arm defers conflict-rework dispatch to the full pass. A
+    # conflicting anchor cannot merge this pass, its feedback is not routed while
+    # it conflicts (this arm ends the anchor before the feedback arm), and one
+    # dispatch site per pass keeps the dedup window narrow.
+    [ "$ROUTE_ONLY" != 1 ] || continue
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
@@ -1731,6 +1749,12 @@ $CBODY"
     continue
   fi
 
+  # --route-comments-only stops here: routing operator feedback above is the whole
+  # of its mandate. Every arm below (BLOCKED, superseded-CHANGES_REQUESTED
+  # dismissal, unengaged review threads, red required checks) and the write-back
+  # sweep are the full pass's, which runs after merge.
+  [ "$ROUTE_ONLY" != 1 ] || continue
+
   # --- BLOCKED: escalate an unresolved-thread block; a pending approval is not one ----
   # A PR whose city-side feedback is all routed can still sit on branch
   # protection. The one cause this cadence escalates is an unresolved review
@@ -2079,9 +2103,10 @@ acked=0; replied=0; resolved=0
 owe() { local i; for i in $(printf '%s' "$1" | tr ',' ' '); do
   case " $wowing " in *" $i "*) : ;; *) wowing="$wowing $i" ;; esac
 done; }
-# --posture-only answers one question for the merge arm and writes nothing to
-# GitHub; the full pass that follows it carries the write-back.
-if [ "$POSTURE_ONLY" = 1 ]; then
+# The pre-merge arms answer for the merge arm (--posture-only) or route feedback
+# early (--route-comments-only) and write nothing to GitHub; the full pass that
+# follows them carries the write-back.
+if [ "$POSTURE_ONLY" = 1 ] || [ "$ROUTE_ONLY" = 1 ]; then
   WB_ANCHORS=""
 elif ! WB_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request); then
   echo "$PROG: write-back sweep skipped — could not re-read the anchors" >&2
@@ -2580,6 +2605,13 @@ if [ "$POSTURE_ONLY" = 1 ]; then
   # immediately before merge.sh and holds the merge arm on a non-zero. The full
   # pass runs after merge, where the same rc would gate nothing.
   [ "$unpostured" -eq 0 ] || exit 1
+elif [ "$ROUTE_ONLY" = 1 ]; then
+  # The early feedback arm, run right after the posture arm and before merge, so
+  # operator feedback is routed on the same tick the posture is stamped instead of
+  # waiting for the full pass at the tail. Its rc holds nothing: routing is
+  # best-effort and the full pass re-runs it idempotently, so refinery-reconcile
+  # reports a non-zero but never holds merge on it.
+  echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
 else
   echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
 fi
