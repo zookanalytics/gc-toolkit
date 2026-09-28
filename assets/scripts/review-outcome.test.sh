@@ -63,6 +63,22 @@ if N0=$("$SUT" supersede-lane --anchor tk-anc --lane nolane); then ok "supersede
 eq "$N0" "0" "…and reports zero retired"
 
 # ---------------------------------------------------------------------------
+# supersede-lane retires a standing request-changes verdict, not just an approve
+# backing. A bare request-changes lane has no backing, so retiring only backings
+# left the closed verdict at gc.outcome=recorded — exactly what gate-ensure.sh's
+# per-head bar reads to block a re-review at the unmoved head, wedging the
+# validator-ordered re-review. The superseded stamp is the signal the bar excludes.
+# ---------------------------------------------------------------------------
+RC_ANCHOR='{"id":"tk-rcanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"91"}}'
+RC_REVIEW='{"id":"tk-rcrev","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-rcanc","reviewed_oid":"305c7b69","signoff_verdict":"request-changes","gc.outcome":"recorded"}}'
+store "[$RC_ANCHOR, $RC_REVIEW]"
+if green tk-rcanc codex; then bad "a request-changes-only lane derived green"; else ok "a request-changes-only lane is not green (setup)"; fi
+NRC=$("$SUT" supersede-lane --anchor tk-rcanc --lane codex --reason "validator ordered a fresh whole-diff look at the unmoved head")
+eq "$NRC" "1" "supersede-lane retires the standing request-changes verdict (was a silent no-op)"
+eq "$(meta tk-rcrev 'gc.outcome')" "superseded" "the request-changes review is stamped superseded — the signal the per-head bar excludes"
+has "$(notes tk-rcrev)" "validator ordered a fresh whole-diff look" "the supersede reason is recorded on the request-changes review"
+
+# ---------------------------------------------------------------------------
 # back-lane after supersede: a superseded backing does not block a fresh one.
 # ---------------------------------------------------------------------------
 ID3=$("$SUT" back-lane --anchor tk-anc --lane codex --oid abcd1234)

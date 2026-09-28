@@ -387,8 +387,10 @@ signal is on the review bead itself: `reviewed_oid` is pinned at dispatch and
 review leaves the in-flight set it enters the closed-and-judged set, with no gap.
 A superseded review (`gc.outcome=superseded`) is excluded, so the two paths back
 to `unreviewed` — a moved head, which carries a different oid, and the validator
-superseding a backing — still pour a fresh review. Green is untouched: no lane's
-`green` compares `reviewed_oid` to a head, so a green lane survives new commits as
+superseding the lane's standing verdict (an approve backing, or the recorded
+request-changes review itself when no backing exists) — still pour a fresh
+review. Green is untouched: no lane's `green` compares `reviewed_oid` to a head,
+so a green lane survives new commits as
 before. The invariant the bar enforces is narrow: at most one whole-diff review
 per (anchor, lane, head).
 
@@ -433,12 +435,15 @@ whole-diff read being spent on it. A comment that overturns an assumption the
 diff rests on is what decision 3 answers yes to.
 
 **The validator ruling a fresh whole-diff review warranted returns that lane to
-`unreviewed`.** It marks the lane's already-closed approve-review bead
+`unreviewed`.** It marks the lane's already-closed review bead
 `gc.outcome=superseded` — the same stamp `signoff.sh` writes to retire a review
-whose pin left the branch — so the approve half of the derivation no longer holds
-and the lane owes a full review again. It is the only path back to `unreviewed`,
-for human input and machine input alike, which is the judged-convergence ruling
-applied to both.
+whose pin left the branch. When the lane held an approve backing, its green half
+no longer holds; when the lane stood on a request-changes verdict with no
+backing, that recorded verdict is what is retired, which lifts `gate-ensure.sh`'s
+per-head bar so the fresh review pours at the unmoved head. Either way the lane
+owes a full review again. It is the only path back to `unreviewed`, for human
+input and machine input alike, which is the judged-convergence ruling applied to
+both.
 
 The signal already exists and is already deduped. `pr-facts.sh` records a
 `commented` posture against `pr_comment_watermark` and `pr_review_watermark`,
