@@ -138,13 +138,24 @@ case "$sub" in
         # mark-dispatched write is modelled the same way: reco_dispatched records
         # gc.recommended_formula_dispatched, and an --unset of gc.recommended_formula
         # records reco_stripped so the read-back sees the key gone — unless
-        # FAKE_STRIP_FAILS models a silent drop the read-back must catch.
+        # FAKE_STRIP_FAILS models a silent drop the strip read-back must catch.
+        # FAKE_MARK_FAILS models that same silent drop for the dispatched marker, but
+        # ONLY on the combined write (the one that also carries --unset-metadata); the
+        # standalone --set retry lands, so the marker read-back-and-retry is what
+        # makes it stick.
+        _is_combined=no
+        case " $* " in *" --unset-metadata "*) _is_combined=yes ;; esac
         _prev=""
         for a in "$@"; do
           case "$a" in
             gc.outcome=*)        [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
             gc.outcome_reason=*) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome_reason=}" > "$FAKE_OUTCOME_DIR/$3.reason" ;;
-            gc.recommended_formula_dispatched=*) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.recommended_formula_dispatched=}" > "$FAKE_OUTCOME_DIR/$3.reco_dispatched" ;;
+            gc.recommended_formula_dispatched=*)
+              if [ -n "${FAKE_MARK_FAILS:-}" ] && [ "$_is_combined" = yes ]; then
+                : # silent drop: the combined write loses the dispatched marker
+              elif [ -n "${FAKE_OUTCOME_DIR:-}" ]; then
+                printf '%s' "${a#gc.recommended_formula_dispatched=}" > "$FAKE_OUTCOME_DIR/$3.reco_dispatched"
+              fi ;;
             gc.recommended_formula) [ "$_prev" = "--unset-metadata" ] && [ -z "${FAKE_STRIP_FAILS:-}" ] && [ -n "${FAKE_OUTCOME_DIR:-}" ] && : > "$FAKE_OUTCOME_DIR/$3.reco_stripped" ;;
           esac
           _prev="$a"
@@ -246,6 +257,24 @@ grep -q "bd close $VIS" <<< "$CALLS" \
 grep -qi 'still reads live' <<< "$ERR" \
   && ok "(STRIPFAIL) names the key that would not withdraw" || bad "(STRIPFAIL) message (err: $ERR)"
 unset FAKE_STRIP_FAILS
+
+# --- (MARKDROP) the combined write drops the dispatched marker -> retry it -------
+# If the combined write silently loses gc.recommended_formula_dispatched while its
+# strip lands, a re-run reads neither the live key nor the marker, calls the
+# subject discuss-only, and never resumes the dismiss — stranding a dispatched
+# recommendation with its visit open. The marker write has a reader, so it is read
+# back and retried like the strip; the retry is a standalone --set (no --unset in
+# the same call) that lands, so the marker survives and the dismiss proceeds here.
+export FAKE_MARK_FAILS=1
+run_accept "$SUBJ"
+eq "$RC" "0" "(MARKDROP) a dropped marker is retried and accept still completes (exit 0)"
+retry_ok="$(awk '/^bd update .*gc\.recommended_formula_dispatched='"$FORMULA"'/ && $0 !~ /--unset-metadata/ {n++} END{print (n>0)?"yes":"no"}' <<< "$CALLS")"
+eq "$retry_ok" "yes" "(MARKDROP) the dropped marker is re-set on its own, not only in the combined write"
+[ -s "$FAKE_OUTCOME_DIR/$SUBJ.reco_dispatched" ] \
+  && ok "(MARKDROP) the dispatched marker sticks, so a re-run resumes rather than re-slinging" || bad "(MARKDROP) marker not persisted after the retry"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && ok "(MARKDROP) the visit is dismissed once the marker sticks" || bad "(MARKDROP) visit dismissed (calls: $CALLS)"
+unset FAKE_MARK_FAILS
 
 # --- (DISCUSSONLY) no gc.recommended_formula -> refuse, dispatch nothing -------
 export FAKE_FORMULA=""

@@ -2211,11 +2211,15 @@ subject_unengaged() {
 # resume the dismiss rather than sling again, and stripping gc.recommended_formula
 # — the key the board's Accept derivation reads — stops a later open visit on the
 # same subject from re-offering a formula that already ran (a second dispatch of
-# the same execution). The strip has a reader, so it is read back and retried
-# once; the function returns non-zero if the live key will not clear or the marker
-# did not stick, and the caller then refuses the dismiss, so a survivor never
-# rides through as Accept still live. Idempotent: a resume re-runs it to finish a
-# strip a prior run left half-done.
+# the same execution). Both writes have a reader, so both are read back and
+# retried once: the strip because a survivor is Accept still live, and the marker
+# because a re-run that finds neither the live key nor the marker reads the
+# subject as discuss-only and cannot resume the dismiss — so a marker the combined
+# write silently dropped would strand a dispatched recommendation with its visit
+# still open. The function returns non-zero if the live key will not clear or the
+# marker will not stick, and the caller then refuses the dismiss, so a survivor
+# never rides through as Accept still live. Idempotent: a resume re-runs it to
+# finish a write a prior run left half-done.
 accept_mark_dispatched() {
     _amd_subj="$1"; _amd_formula="$2"
     gc bd update "$_amd_subj" \
@@ -2229,6 +2233,10 @@ accept_mark_dispatched() {
         _amd_live=$(meta_now "$_amd_subj" gc.recommended_formula)
     fi
     _amd_mark=$(meta_now "$_amd_subj" gc.recommended_formula_dispatched)
+    if [ "$_amd_mark" != "$_amd_formula" ]; then
+        gc bd update "$_amd_subj" --set-metadata "gc.recommended_formula_dispatched=$_amd_formula" >/dev/null 2>&1 || true
+        _amd_mark=$(meta_now "$_amd_subj" gc.recommended_formula_dispatched)
+    fi
     [ -z "$_amd_live" ] && [ "$_amd_mark" = "$_amd_formula" ]
 }
 
