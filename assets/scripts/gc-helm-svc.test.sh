@@ -102,6 +102,9 @@
 #                 SOURCE_REV spans every local replace-dep, not just services/helm
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
+#   (BEHINDMAIN)  a checkout behind origin/main under the helm sources records
+#                 the gap (behind_main) and is NEVER rebuilt for it — report-only
+#   (ONMAIN)      a checkout level with origin/main records no drift
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -1033,6 +1036,54 @@ fi
 grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
     && ok "(STATUSTMP) the record is published by rename, never written in place" \
     || bad "(STATUSTMP) the record is no longer published by rename"
+
+# --- case: a checkout behind origin/main is REPORTED, never rebuilt for it ----
+# The board read "helm: ok" while the served binary was three PRs behind main:
+# every staleness axis above keys on the LOCAL checkout, so a checkout parked
+# off-main keeps its binary current with THAT branch and reports a clean row.
+# behind_main is the axis that sees the gap against main — and it must NOT feed
+# the rebuild decision, because a checkout may be off-main on purpose and the
+# SOURCE_REV subtree-hash identity is what decides a build.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+# One more helm-source commit, parked on origin/main only; HEAD stays at A, so
+# HEAD is one helm-source commit behind origin/main.
+printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+git -C "$ROOT" add -A >/dev/null 2>&1
+git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
+# reconcile-rig-checkouts keeps origin fresh; pin the fetch marker so the case
+# reuses it (the common path) and never reaches the network.
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(BEHINDMAIN) the first build exits 0"
+BEHIND1="$(status_field behind_main)"
+[ "${BEHIND1:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(BEHINDMAIN) the record counts the checkout as behind origin/main" \
+    || bad "(BEHINDMAIN) behind_main is '$BEHIND1', want >= 1"
+# Now current with its own sources: being behind main must not force a rebuild.
+rm -f "$RECORD" "$RECORD.out"
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(BEHINDMAIN) the next tick exits 0"
+absent "$RECORD" "(BEHINDMAIN) behind-main alone never rebuilds — the subtree-hash identity still decides"
+has "$OUT" "up to date" "(BEHINDMAIN) the binary is current with its own sources"
+BEHIND2="$(status_field behind_main)"
+[ "${BEHIND2:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(BEHINDMAIN) the drift is still recorded on the no-op tick" \
+    || bad "(BEHINDMAIN) behind_main is '$BEHIND2' on the no-op tick, want >= 1"
+
+# --- case: a checkout level with origin/main records no drift -----------------
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(ONMAIN) exits 0"
+eq "$(status_field behind_main)" "0" "(ONMAIN) a checkout level with origin/main records no drift"
 
 # ==============================================================================
 # STATIC GUARDS
