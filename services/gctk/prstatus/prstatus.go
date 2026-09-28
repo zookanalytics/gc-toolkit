@@ -100,6 +100,26 @@ type Facts struct {
 	HumanVisitAwaits bool
 }
 
+// FindingDispositionDeferred is the metadata.finding.disposition value marking a
+// finding punted to a follow-up. Such a finding is not work owed on the current
+// PR — it belongs to a later one — so it is not part of the anchor's in-flight
+// set: leaving it open must not pin the PR at working. The set has two computers,
+// the label's (services/gctk/internal/cli/prstatus.go) and the board's
+// (services/helm/internal/source/beads.go); both drop a member carrying this
+// disposition through CountsInFlight, so they cannot disagree over a deferred
+// finding.
+const FindingDispositionDeferred = "deferred"
+
+// CountsInFlight reports whether an anchor_bead member counts toward the anchor's
+// in-flight set. findingDisposition is the member's metadata.finding.disposition,
+// read as `(v // "") | tostring` renders it. The test keys on the disposition,
+// not the bead status: a finding disposed deferred is excluded whatever its
+// status, and a genuinely paused non-finding bead in status deferred — which
+// carries no finding.disposition — still counts.
+func CountsInFlight(findingDisposition string) bool {
+	return findingDisposition != FindingDispositionDeferred
+}
+
 // Derive returns the state the anchor projects and the reason behind a
 // needs-attention. Precedence: needs-attention > working > needs-review.
 func Derive(f Facts) (State, Reason) {

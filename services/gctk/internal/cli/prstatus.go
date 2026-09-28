@@ -103,10 +103,16 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Split the in-flight set by status: a blocked member is not the city holding
-	// the ball. The same membership pr-facts.sh counts, partitioned the way Derive
-	// reads it.
+	// the ball. A finding disposed deferred is dropped first — punted to a
+	// follow-up, not work owed on this PR, so it belongs in neither count.
+	// prstatus.CountsInFlight keys on the disposition rather than the status, so a
+	// genuinely paused non-finding bead in status deferred still counts, and the
+	// board's split (services/helm/internal/source/beads.go) applies the same rule.
 	active, blocked := 0, 0
 	for i := range rows {
+		if !prstatus.CountsInFlight(rows[i].Meta("finding.disposition")) {
+			continue
+		}
 		if rows[i].StatusLower() == "blocked" {
 			blocked++
 		} else {
