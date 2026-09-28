@@ -531,6 +531,17 @@ printf '%s' "$(prview 97 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_97.json"
 out=$(run)
 has "$out" "rework CW1 already covers branch 'polecat/x97' at this head, no new child" "the anchor's own rework child is excluded from the guard, so the dedup runs"
 
+echo "# …and that own rework child, parked for a person in the held lifecycle state, still covers — the merge_result stamp does not drop it"
+# converse-hold transitions an unanchored child to `held`, stamping
+# merge_result=held; the child still owns the branch, so dropping it on the
+# merge_result test alone would re-mint a merge-current twin every pass.
+store "[$(anchor FBK3 98),$(child HW1 polecat/x98 ',"task_kind":"rework","anchor_bead":"FBK3","merge_result":"held"' blocked)]"
+gc bd dep HW1 --blocks FBK3 >/dev/null 2>&1
+printf '%s' "$(prview 98 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_98.json"
+out=$(run)
+has "$out" "rework HW1 already covers branch 'polecat/x98' at this head, no new child" "a rework child parked in the held lifecycle state (merge_result=held) still covers the branch"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+
 echo "# …but that own rework child, ITSELF held by a live decision demand, DOES veto: the demand gates the branch both share"
 # A base-supersession or reconcile decision is filed on the in-flight rework
 # (gc.demand_for=<child>), not the anchor. The child is on the anchor's own
