@@ -57,9 +57,9 @@ func TestPRStatusDerive(t *testing.T) {
 	})
 
 	t.Run("a deferred finding is not in-flight => needs-review, not working", func(t *testing.T) {
-		// PR843's shape (tk-wtmlz3): the sole remaining member is a finding
-		// disposed deferred, left open. It is punted to a follow-up, not work owed
-		// on this PR, so it must not pin the label at working.
+		// The sole remaining live member is a finding disposed deferred, left
+		// open. It is punted to a follow-up, not work owed on this PR, so it must
+		// not pin the label at working.
 		stubGC(t,
 			`[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`,
 			`[{"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a","finding.disposition":"deferred"}}]`)
