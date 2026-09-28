@@ -391,10 +391,7 @@ A sweep whose findings were all already tracked, and a `state=complete` with
 nothing but `ok`, append nothing. So does a sweep that only `started` — the
 ledger records what happened, not what is pending.
 
-Two adjacent duties, run every cycle whatever the sweep is doing:
-- Closing a bead that names a doctor finding? Close it through
-  `$SCRIPTS/doctor-finding-gate.sh` — it re-runs the check first, so the
-  ledger cannot say "fixed" while the check still fires.
+Also run every cycle, whatever the sweep is doing:
 - Stuck sessions: read `$SCRIPTS/quota-park-nudge.sh --status`
   (closed-field surface) instead of session panes. `quota_park=yes` is a
   healthy park — never a warrant. A session it reports `escalated=1`

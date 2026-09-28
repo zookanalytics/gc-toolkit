@@ -443,6 +443,9 @@ echo "── an abort BEFORE the decision runs the pass ──"
 # code actually under test.
 sed 's|^trap on_exit EXIT$|trap on_exit EXIT\nexit 3|' "$SCRIPT" > "$TMP/aborting.sh"
 chmod +x "$TMP/aborting.sh"
+# The copy sources its sibling visit-identity.sh by $0-relative path, so the
+# shared predicate lib has to travel with it into the temp dir.
+cp "$(dirname "$SCRIPT")/visit-identity.sh" "$TMP/visit-identity.sh"
 grep -qx 'exit 3' "$TMP/aborting.sh" && ok "abort injection landed" \
     || bad "abort injection landed" "the trap line moved — this test is checking nothing"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
@@ -728,6 +731,11 @@ WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
+# The classify block matches visit coverage through the shared predicate, which
+# liveness-sweep.sh sources before it. Supply the same defs ($VISIT_IDENTITY_JQ)
+# from the real lib so the extracted block resolves them and cannot drift.
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/visit-identity.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"

@@ -35,6 +35,15 @@
 # Caller: the converse prompt's claim loop.
 set -u
 
+# The one definition of what subject a visit covers (its tracks-edge identity,
+# gc.continuation_group stamp as fallback), shared with gc-helm.sh, converse-fold
+# .sh and the sweeps. Exposes $VISIT_IDENTITY_JQ. The recovery below stays scoped
+# to task_kind=visit — tracks is not a visit-only edge, so a non-visit must not
+# borrow a group from it.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || { echo "converse-claim: cannot source visit-identity.sh from $HERE" >&2; exit 3; }
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -122,12 +131,9 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 # writer-side loss (tk-ax6y4) is repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
     GROUP=$(printf '%s' "$BEAD_JSON" \
-        | jq -r 'if type == "array" then (.[0] // {}) else {} end
+        | jq -r "$VISIT_IDENTITY_JQ"'if type == "array" then (.[0] // {}) else {} end
                  | select(((.metadata // {}).task_kind // "") == "visit")
-                 | [ ((.dependencies // [])[]?
-                       | select((((.type // .dependency_type // "") | tostring)) == "tracks")
-                       | ((.depends_on_id // .id // "") | tostring)) ]
-                 | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf '')
+                 | visit_subject' 2>/dev/null || printf '')
     [ -n "$GROUP" ] && echo "$PROG: the claim reported no continuation group for $BEAD; recovered '$GROUP' from its tracks edge" >&2
 fi
 
@@ -208,6 +214,19 @@ if [ "$REASON" = "existing_assignment" ]; then
     if [ -n "$OUTCOME" ]; then
         if finish_close "$BEAD" "$OUTCOME"; then
             echo "$PROG: $BEAD carried gc.outcome=$OUTCOME with no close; closed it here" >&2
+            # The stranded close also updates the visit's PR reminder, the way a
+            # normal close does — the original session posted the "open" reminder
+            # and died before the close, so nothing else marks it closed.
+            # pr-visit-comment.sh reads the summary and actions converse-signoff.sh
+            # stashed before the death and refuses unless the visit is closed; its
+            # stdout is discarded so it cannot disturb the action=finish line the
+            # caller parses. GROUP is the subject: its gc.continuation_group stamp,
+            # else the tracks edge recovered above.
+            PVC=""
+            for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+                [ -x "$cand/assets/scripts/pr-visit-comment.sh" ] && { PVC="$cand/assets/scripts/pr-visit-comment.sh"; break; }
+            done
+            [ -n "$PVC" ] && [ -n "$GROUP" ] && "$PVC" close --visit "$BEAD" --subject "$GROUP" >/dev/null 2>&1 || true
         else
             # Still a finish: sending the caller back to waiting on a
             # sitting that is over is the defect itself, and the caller's own

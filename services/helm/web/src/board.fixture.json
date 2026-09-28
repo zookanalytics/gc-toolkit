@@ -61,7 +61,9 @@
       "section": "stalled",
       "group_root": "tk-eemvf",
       "acceptable": false,
-      "accept_formula": ""
+      "accept_formula": "",
+      "pr_branch_url": "",
+      "pr_phase": ""
     },
     {
       "id": "gt-1a2b3",
@@ -111,7 +113,9 @@
       "cluster_key": "all 2 closed — graduate",
       "group_root": "gt-1a2b3",
       "acceptable": false,
-      "accept_formula": ""
+      "accept_formula": "",
+      "pr_branch_url": "",
+      "pr_phase": ""
     },
     {
       "id": "tk-01n5cc",
@@ -162,7 +166,9 @@
       "section": "review",
       "group_root": "tk-01n5cc",
       "acceptable": true,
-      "accept_formula": "mol-dispose-pr"
+      "accept_formula": "mol-dispose-pr",
+      "pr_branch_url": "",
+      "pr_phase": ""
     },
     {
       "id": "tk-9tbbk",
@@ -213,7 +219,9 @@
       "section": "done",
       "group_root": "tk-9tbbk",
       "acceptable": false,
-      "accept_formula": ""
+      "accept_formula": "",
+      "pr_branch_url": "",
+      "pr_phase": ""
     }
   ],
   "sittings": [
@@ -224,6 +232,7 @@
       "title": "visit: tk-eemvf — tile density",
       "status": "in_progress",
       "outcome": "",
+      "outcome_reason": "",
       "session": "gc-toolkit__converse-1",
       "opened_at": "2026-08-11T14:40:00Z",
       "takeaway": "",
@@ -236,6 +245,7 @@
       "title": "visit: gt-1a2b3 — the convoy is complete",
       "status": "closed",
       "outcome": "diagnosed",
+      "outcome_reason": "",
       "session": "gascity__converse-2",
       "opened_at": "2026-08-11T09:12:00Z",
       "closed_at": "2026-08-11T09:48:00Z",

@@ -125,6 +125,31 @@ func (c *Client) Show(id string) *Bead {
 	return &rows[0]
 }
 
+// List runs `gc bd list <args>` and decodes the JSON array it prints. ok is
+// false when the output does not decode as an array — the fail-closed signal
+// the scripts read from `jq -e 'type == "array"'`, so a caller refuses to act
+// on a miss rather than reading it as an empty result. Show's exit-status and
+// preface handling applies unchanged: the status is not consulted, and the
+// rig-preface line rides stderr, so stdout is the payload whatever gc warned
+// about. An empty selection is a well-formed `[]` — rows nil, ok true.
+func (c *Client) List(args ...string) (rows []Bead, ok bool) {
+	full := append([]string{"bd", "list"}, args...)
+	cmd := exec.Command(c.bin, full...)
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			return nil, false
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
+	dec.UseNumber()
+	if err := dec.Decode(&rows); err != nil {
+		return nil, false
+	}
+	return rows, true
+}
+
 // Update runs one `gc bd update`, returning its combined output. Callers pass
 // the whole transition in a single call: a partial write is the failure mode
 // the atomic update exists to prevent.

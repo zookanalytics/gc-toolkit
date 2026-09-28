@@ -543,6 +543,38 @@ dismiss_superseded() {
   done
 }
 
+# A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind on it when
+# the PR was withdrawn or superseded — awaits only pr-facts.sh's terminal close. A
+# verdict that lands in that window (a review dispatched before the disposal, ruling
+# after it) is moot: the PR will not ship, so stamping green, filing a rework child,
+# or opening a validation pass would each spawn work on a dead anchor, and the pass
+# would hang a blocks edge that holds the very close the disposal is waiting on. Write
+# nothing to the anchor. Close the review the caller drains behind as moot — not
+# recorded, so it backs no lane green (lane-state.sh), and not superseded, so
+# gate-ensure pours no fresh review at the live head — then exit. pr-facts.sh
+# consummates the disposition; gate-ensure.sh skips the same anchor for the same
+# reason. Marker absence is trustworthy only when the re-read resolved: an
+# unreadable fresh row cannot be told from an undisposed anchor, so an
+# unresolvable probe leaves the review open rather than falling through.
+DISPOSED_ROW=$(bd_json show "$ANCHOR")
+if ! is_rows "$DISPOSED_ROW"; then
+  warn "disposition re-read of anchor $ANCHOR returned no row; a failed read cannot be told from an undisposed anchor, so refusing to stamp a marker or file rework on a possibly-disposed anchor. Review $REVIEW_BEAD left open for a retry."
+  exit 2
+fi
+DISPOSED=$(row_meta "$DISPOSED_ROW" "gc.pr_close_disposition_kind")
+if [ -n "$DISPOSED" ]; then
+  gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=moot \
+    --append-notes "signoff: $VERDICT verdict is MOOT — anchor $ANCHOR was disposed (gc.pr_close_disposition_kind=$DISPOSED) before this verdict was ruled. No marker stamped, no rework filed, no validation pass opened; pr-facts.sh consummates the disposition." \
+    --status=closed >/dev/null 2>&1 || true
+  DISPOSED_ST=$(row_field "$(bd_json show "$REVIEW_BEAD")" status)
+  if [ "$DISPOSED_ST" != "closed" ]; then
+    warn "anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSED) but closing review $REVIEW_BEAD as moot did not read back (status='$DISPOSED_ST'); review left open for a retry"
+    exit 2
+  fi
+  echo "signoff: anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSED); $VERDICT verdict is moot — no marker stamped, no rework filed, no validation pass opened. Review $REVIEW_BEAD closed."
+  exit 0
+fi
+
 if [ "$VERDICT" = "approve" ]; then
   # A legacy `exception@<oid>` marker is an operator-granted gate exception that
   # predates this cadence's park shape. migrate-lane-states.sh is what rewrites
@@ -623,9 +655,9 @@ if [ -z "$FIX_TARGET" ]; then
   exit 2
 fi
 REASON_HEAD=$(head -n 1 "$BODY_FILE" | cut -c1-200)
-# The objections themselves are now the findings this child blocks; the
-# rejection_reason carries the one-line summary and points the resumed worker at
-# the beads, rather than being the whole record.
+# The objections are filed as findings beside this child; the rejection_reason
+# carries the one-line summary and points the resumed worker at the beads, rather
+# than being the whole record.
 if [ "$FINDING_COUNT" -gt 0 ]; then
   REJECTION_REASON="signoff requested changes: address the $FINDING_COUNT finding(s) this bead blocks. $REASON_HEAD"
 else
@@ -714,14 +746,13 @@ if ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
   gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
 fi
 
-# Point the fix unit at every finding it answers: the many-to-one relation and
-# the close ordering (bd refuses to close a blocked issue, so no finding closes
-# before its work does). The anchor edge above already holds the merge, so a
-# missing finding edge costs the finding's later auto-close, never the hold.
-if [ -n "$FINDING_IDS" ]; then
-  "$FINDING" wire-fix-unit --fix-unit "$FIX_BEAD" --anchor "$ANCHOR" --findings "$FINDING_IDS" >/dev/null 2>&1 \
-    || warn "could not wire fix unit $FIX_BEAD to all findings ($FINDING_IDS); the anchor edge still holds the merge"
-fi
+# The fix unit's edges onto the findings it answers are NOT hung here. Every
+# finding is still unvalidated at this point, and a fix unit that blocked one the
+# validator later declines would refuse that finding's close (bd will not close a
+# blocked issue) and stall the validator's triage. The close-ordering edge onto a
+# finding is hung as the validator rules that finding must-fix (finding.sh
+# set-disposition), so the fix unit blocks only the findings it must answer. The
+# anchor edge above is what holds the merge in the meantime.
 
 # Verify the work order — every field the resumed workflow reads — and the
 # blocks edge BEFORE the pour, so a claimed rework can never run against absent

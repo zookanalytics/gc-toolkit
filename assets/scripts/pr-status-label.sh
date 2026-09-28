@@ -1,26 +1,41 @@
 #!/usr/bin/env bash
-# pr-status-label.sh — the single writer of the workflow-owned `status:` GitHub
-# PR label. It projects the city's own workflow state — who must act on a PR
-# next — onto GitHub's pull request list, where that state is otherwise invisible
-# until you open the PR. One filterable value per open PR says whether the city
-# holds the ball, a human should review the head, or a human must weigh in before
-# the PR can settle. It is workflow state, never an approval, and never asserts a
-# PR may merge: machine-readiness rides pr.machine and the draft flag.
+# pr-status-label.sh — the single writer of the workflow-owned GitHub PR labels.
+# It projects the city's own state onto GitHub's pull request list, where that
+# state is otherwise invisible until you open the PR. Two orthogonal groups:
 #
-# The label is one value from a mutually-exclusive `status:` group: setting one
-# value removes any other, so a later phase adds a value rather than redesigning.
-# derive_value below is the single place the values, what each projects from, and
-# their precedence are defined.
+#   status:  who must act on the PR next — the city holds the ball, a human should
+#            review the head, or a human must weigh in before the PR can settle.
+#            One value at a time, and pr-facts.sh recomputes it every cadence pass
+#            from the anchor's posture, holds, and rework children. It is workflow
+#            state, never an approval, and never asserts a PR may merge:
+#            machine-readiness rides pr.machine and the draft flag. The tri-state
+#            itself — the values, what each projects from, and their precedence —
+#            is decided by one Go package, services/gctk/prstatus, reached through
+#            `gctk pr-status derive` and exported so the helm board derives the
+#            same per-bead state, so a bead's PR label and its board liveness
+#            cannot disagree.
+#   base:    where an approved change lands. A base under integration/ is a convoy
+#            checkpoint, marked so a reviewer never mistakes it for a merge to main
+#            (specs/tk-6bji7k.9/decision.md). Set once at pr-open where the base is
+#            known and standing thereafter — a PR's base does not change — so it is
+#            not reconciled the way status: is. A main-targeted PR is the default
+#            and carries no base: label. mark_base is its writer.
+#
+# The two groups never touch: set matches only labels under `status: `, so it never
+# removes a base: label, and mark_base only ever adds a base: label. A checkpoint PR
+# is `status: needs-review` and `base: integration` at once, which a mutually
+# exclusive shared group could not express.
 #
 # Every GitHub write is pinned to a repository the caller resolved (--repo), the
 # same origin-pinning pr-open.sh and pr-facts.sh already apply; gh-origin-guard.sh
 # guards agent-typed gh, not a script's own calls.
 #
 # Verbs:
-#   ensure   --repo Q [--host H]                          create the status: labels if missing
-#   derive   --anchor ID                                  print working | needs-review | needs-attention
-#   set      --pr N --value V --repo Q [--host H] [--current-labels CSV]
+#   ensure    --repo Q [--host H]                         create the status: labels if missing
+#   derive    --anchor ID                                 print working | needs-review | needs-attention
+#   set       --pr N --value V --repo Q [--host H] [--current-labels CSV]
 #   reconcile --anchor ID --pr N --repo Q [--host H] [--current-labels CSV]
+#   mark-base --pr N --target BRANCH --repo Q [--host H]  stamp base: from the target (no-op off integration/)
 #
 # Exit: 0 done (set may be a no-op) · 1 usage/refused · 2 a read did not resolve
 # (the caller leaves the label as-is rather than flipping it blind). Not set -e.
@@ -53,6 +68,21 @@ is_status_value() { # <value>
   case "$1" in
     working|needs-review|needs-attention) return 0 ;;
     *) return 1 ;;
+  esac
+}
+
+# The sibling `base:` group: where an approved change lands. One value today —
+# `integration` marks a checkpoint into a convoy integration branch. A distinct
+# colour so it reads as a second dimension, not another status; override for a city
+# that wants another. A 6-hex value, no leading '#'.
+BASE_LABEL_PREFIX="base: "
+BASE_VALUES="integration"
+BASE_GROUP_COLOR="${GC_PR_BASE_LABEL_COLOR:-5319E7}"
+
+base_label_desc() { # <value> — the label's GitHub description (GitHub caps these at 100 chars)
+  case "$1" in
+    integration) printf 'Workflow: checkpoint into integration; approval mints a phase, not a merge to main.' ;;
+    *)           printf 'Workflow base label.' ;;
   esac
 }
 
@@ -96,105 +126,68 @@ resolve_origin() { # sets ORIGIN_HOST, ORIGIN_REPO, ORIGIN_REPO_Q from --repo or
 
 # --- label existence ------------------------------------------------------
 
-# Create any status: label missing from the repo. Idempotent: reads the label
-# list once and creates only what is absent, so a steady state does no write.
-# A read that fails is not proof a label is missing, so it creates nothing.
-ensure_labels() { # uses ORIGIN_*
-  local have rc v name
+# Create any label in a group missing from the repo. Idempotent: reads the label
+# list once and creates only what is absent, so a steady state does no write. A
+# read that fails is not proof a label is missing, so it creates nothing. descfn
+# names a function called per value for the GitHub description.
+ensure_group() { # <prefix> <newline-values> <color> <desc-fn> — uses ORIGIN_*
+  local prefix="$1" values="$2" color="$3" descfn="$4" have rc v name
   have=$(gh label list --repo "$ORIGIN_REPO_Q" --limit 200 --json name -q '.[].name' 2>/dev/null); rc=$?
   if [ "$rc" -ne 0 ]; then
     warn "could not list labels on $ORIGIN_REPO_Q (rc=$rc); not creating any"
     return 2
   fi
-  printf '%s\n' "$STATUS_VALUES" | while IFS= read -r v; do
+  printf '%s\n' "$values" | while IFS= read -r v; do
     [ -n "$v" ] || continue
-    name="${LABEL_PREFIX}${v}"
+    name="${prefix}${v}"
     if ! printf '%s\n' "$have" | grep -Fxq "$name"; then
       gh label create "$name" --repo "$ORIGIN_REPO_Q" \
-        --color "$GROUP_COLOR" --description "$(label_desc "$v")" >/dev/null 2>&1 \
+        --color "$color" --description "$("$descfn" "$v")" >/dev/null 2>&1 \
         || warn "could not create label '$name' on $ORIGIN_REPO_Q"
     fi
   done
   return 0
 }
+ensure_labels()      { ensure_group "$LABEL_PREFIX"      "$STATUS_VALUES" "$GROUP_COLOR"      label_desc; }
+ensure_base_labels() { ensure_group "$BASE_LABEL_PREFIX" "$BASE_VALUES"   "$BASE_GROUP_COLOR" base_label_desc; }
 
-# --- the projection derivation --------------------------------------------
+# --- the projection derivation (one Go code path) -------------------------
 
-# The truthiness rule pr-facts.sh and pr-open.sh read holds by, so a hold means
-# the same thing in all three.
-is_set() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
-# The round cap's park pairs merge_hold=signoff_cap with a non-empty signoff_cap
-# (pr-facts.sh is_cap_park); that one pairing is the cap park, distinct from an
-# operator freeze (merge_hold=true) which is_set below still catches as a hold.
-is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
-
-# Print the status value the anchor projects to, answering one question: who must
-# act next. Precedence needs-attention > working > needs-review.
+# The tri-state is computed by one Go package, services/gctk/prstatus, exported
+# so the helm board derives the same per-bead state from it, so a bead's PR label
+# and its board liveness cannot disagree. `gctk pr-status derive --anchor ID`
+# prints working|needs-review|needs-attention, exits 0 on success and 2 when a read did
+# not resolve — the grammar the shell derivation had, so `set`/`reconcile` are
+# unchanged around it. There is deliberately no shell reimplementation: a second
+# code path is the divergence this shared package exists to remove, and the board
+# has no shell to fall back to. When gctk cannot answer, derive exits 2 and the
+# caller leaves the label as it is.
 #
-#   needs-attention  a human must weigh in before the city can settle this — to
-#                    unstick a mechanical stop (a signoff-cap park, any merge/rebase
-#                    hold on the anchor, or an approved PR wedged at merge state
-#                    BLOCKED with no rework in flight) or to resolve what a hold
-#                    stands for: an operator freeze, or a topic held for discussion
-#                    before the PR can settle. Unlike needs-review, the head cannot
-#                    settle until the human acts, so it is not a request to review
-#                    the diff.
-#   working          the city holds the ball — an open rework child stands on the
-#                    reviewed commit, or an approved PR is merging.
-#   needs-review     the head is settled and the only thing left is a human's
-#                    review verdict: posture review_required/commented/none, no
-#                    hold, no open rework.
-#
-# Reads only refinery-computed state off the anchor — the pr-facts.sh posture
-# (pr_posture, stored dated as value@oid@instant) and merge state (pr_merge_state,
-# value@oid), the merge/rebase holds — and the rework children. It does NOT read
-# GitHub's review posture directly or check.<lane>=green: the working->needs-review
-# flip rests on the rework child, which is scoped to the reviewed commit, so
-# GitHub's sticky changes_requested never traps the label in `working` after a
-# rework hands back, and a green that outlives a rewritten commit (tk-4zsj1p)
-# cannot read the label ready. pr_posture is read only to split the approved case
-# (merging vs wedged) and to name the awaiting-review states. Exit 2 when a read
-# does not resolve, so a caller does not flip the label on a guess.
+# The binary is resolved as lifecycle.sh resolves it — an explicit $GCTK_BIN,
+# else the city's deployed build — but with no version-drift fallback, because
+# there is none to fall back to: a binary too old to carry `pr-status` exits
+# non-zero on the unknown subcommand, which reads as "could not derive" and
+# leaves the label untouched until the build order catches up.
+resolve_gctk() { # succeed with GCTK_BIN naming an executable, else fail
+  if [ -z "${GCTK_BIN:-}" ]; then
+    local city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+    [ -z "$city" ] && city="$(gc service list --json 2>/dev/null | jq -r '.city_path // empty' 2>/dev/null || true)"
+    [ -n "$city" ] && GCTK_BIN="$city/.gc/services/gctk/bin/gctk"
+  fi
+  [ "${GCTK_BIN:-}" != "none" ] && [ -n "${GCTK_BIN:-}" ] && [ -x "${GCTK_BIN:-}" ]
+}
+
+# derive_value keeps its name and grammar: print the tri-state on stdout, return
+# 1 on a usage error, 2 when the state cannot be determined.
 derive_value() { # <anchor-id>
-  local anchor="$1" arow hold cap rhold posture mstate kids nkids
+  local anchor="$1"
   [ -n "$anchor" ] || { warn "derive needs --anchor"; return 1; }
-  arow=$(gc bd show "$anchor" --json 2>/dev/null)
-  if ! printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-    warn "anchor $anchor does not resolve; cannot derive a status"
-    return 2
+  if resolve_gctk; then
+    "$GCTK_BIN" pr-status derive --anchor "$anchor"
+    return $?
   fi
-  hold=$(printf '%s' "$arow" | jq -r '(.[0].metadata.merge_hold // "") | tostring' 2>/dev/null)
-  cap=$(printf '%s' "$arow" | jq -r '(.[0].metadata.signoff_cap // "") | tostring' 2>/dev/null)
-  rhold=$(printf '%s' "$arow" | jq -r '(.[0].metadata.rebase_hold // "") | tostring' 2>/dev/null)
-  # The value is the part before the first '@'; the oid (and, for posture, the
-  # instant) follow it.
-  posture=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_posture // "") | tostring | split("@")[0])' 2>/dev/null)
-  mstate=$(printf '%s' "$arow" | jq -r '((.[0].metadata.pr_merge_state // "") | tostring | split("@")[0])' 2>/dev/null)
-
-  # An open rework child stands on the anchor. metadata-field selection lists
-  # non-closed by default; the explicit --status keeps it robust if that default
-  # changes. Repeated --status flags drop earlier values, so it is one list.
-  kids=$(gc bd list --metadata-field task_kind=rework --metadata-field "anchor_bead=$anchor" \
-    --status open,in_progress,blocked --limit 0 --json 2>/dev/null)
-  if ! printf '%s' "$kids" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    warn "could not read rework children for $anchor; cannot derive a status"
-    return 2
-  fi
-  nkids=$(printf '%s' "$kids" | jq 'length' 2>/dev/null); case "$nkids" in ''|*[!0-9]*) nkids=0 ;; esac
-
-  # needs-attention: the city stopped without settling; a human must unstick it.
-  if is_cap_park "$hold" "$cap"; then printf 'needs-attention\n'; return 0; fi
-  if is_set "$hold" || is_set "$rhold"; then printf 'needs-attention\n'; return 0; fi
-  if [ "$posture" = "approved" ] && [ "$mstate" = "BLOCKED" ] && [ "$nkids" -eq 0 ]; then
-    printf 'needs-attention\n'; return 0
-  fi
-
-  # working: the city holds the ball; no human input needed.
-  if [ "$nkids" -gt 0 ]; then printf 'working\n'; return 0; fi
-  if [ "$posture" = "approved" ]; then printf 'working\n'; return 0; fi
-
-  # needs-review: settled at the head, a human review or re-review is next.
-  printf 'needs-review\n'; return 0
+  warn "gctk unavailable (GCTK_BIN='${GCTK_BIN:-}'); cannot derive a status without the shared code path — leaving the label unchanged"
+  return 2
 }
 
 # --- setting the label ----------------------------------------------------
@@ -241,15 +234,40 @@ set_label() { # <pr-number> <value> [<current-labels-csv or newline>]
   return 0
 }
 
+# --- the base marker ------------------------------------------------------
+
+# Stamp the base: dimension on a PR from its target. A target under integration/ is
+# a convoy checkpoint and earns `base: integration`; any other base (main) is the
+# default and earns nothing, so this is a no-op there. Additive and idempotent: it
+# only ever adds the label — gh treats adding a present label as a no-op — and it
+# never touches the orthogonal status: label. Standing, not reconciled: pr-open
+# calls it once where the base is known, and a PR's base does not change.
+mark_base() { # <pr-number> <target>
+  local num="$1" target="$2" name
+  [ -n "$num" ] || { warn "mark-base needs --pr"; return 1; }
+  case "$target" in
+    integration/*) : ;;
+    *) return 0 ;;
+  esac
+  ensure_base_labels
+  name="${BASE_LABEL_PREFIX}integration"
+  if ! gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --add-label "$name" >/dev/null 2>&1; then
+    warn "could not add '$name' to PR#$num on $ORIGIN_REPO_Q"
+    return 2
+  fi
+  return 0
+}
+
 # --- argv -----------------------------------------------------------------
 
 VERB="${1:-}"; [ -n "$VERB" ] && shift
-ANCHOR=""; PR=""; VALUE=""; REPO=""; HOST=""; CURRENT=""
+ANCHOR=""; PR=""; VALUE=""; REPO=""; HOST=""; CURRENT=""; TARGET=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --anchor)          ANCHOR="${2:-}"; shift 2 || exit 1 ;;
     --pr)              PR="${2:-}"; shift 2 || exit 1 ;;
     --value)           VALUE="${2:-}"; shift 2 || exit 1 ;;
+    --target)          TARGET="${2:-}"; shift 2 || exit 1 ;;
     --repo)            REPO="${2:-}"; shift 2 || exit 1 ;;
     --host)            HOST="${2:-}"; shift 2 || exit 1 ;;
     --current-labels)  CURRENT="${2:-}"; shift 2 || exit 1 ;;
@@ -274,6 +292,9 @@ case "$VERB" in
       exit "$dr"
     fi
     set_label "$PR" "$V" "$CURRENT"; exit $? ;;
+  mark-base)
+    resolve_origin "$REPO" "$HOST" || exit 2
+    mark_base "$PR" "$TARGET"; exit $? ;;
   ''|-h|--help|help)
     cat >&2 <<'USAGE'
 usage: pr-status-label.sh <verb> [options]
@@ -281,6 +302,7 @@ usage: pr-status-label.sh <verb> [options]
   derive    --anchor ID
   set       --pr N --value working|needs-review|needs-attention --repo Q [--host H] [--current-labels CSV]
   reconcile --anchor ID --pr N --repo Q [--host H] [--current-labels CSV]
+  mark-base --pr N --target BRANCH --repo Q [--host H]
 USAGE
     [ -n "$VERB" ] && exit 0 || exit 1 ;;
   *) warn "unknown verb '$VERB'"; exit 1 ;;

@@ -347,8 +347,8 @@ since_format = "RFC 3339 UTC"
 # whichever script or formula owns that bead's dispatch. The recurring shapes: an
 # escalation or visit routed to its handler pool or parked to `human`
 # (escalate.sh, gc-helm.sh, mol-visit.toml, mol-first-reaction.toml,
-# mol-feedback-distiller.toml); a rework child or a doctor finding routed to its
-# fix pool (pr-facts.sh, pre-open-rebase.sh, doctor-finding-gate.sh); a review
+# mol-feedback-distiller.toml); a rework child routed to its fix pool
+# (pr-facts.sh, pre-open-rebase.sh); a review
 # bead's pool route restored after an abandoned round (mol-review.toml). A route
 # value is a rig-qualified pool identity (<rig>/<agent>) or
 # the park sentinel `human` ([machine] park_route); the pool
@@ -444,22 +444,26 @@ keys = [
 #   `pr` is written only by mol-refinery-patrol.toml, auto-promoting a bead whose
 #   direct push was rejected for branch protection into the PR pipeline. Read by
 #   mol-refinery-patrol.toml and signoff.sh. Never cleared. Enum `mr | pr | direct`.
-# prepare_mode — the refinery's branch classification, re-stamped on every
-#   prepare: `rebase` for a disposable per-bead branch, `merge` for a shared one
-#   (an integration branch carrying already-merged PRs). Written by pr-facts.sh,
-#   pre-open-rebase.sh and mol-refinery-patrol.toml; honored on resume by the
-#   polecat, which merges (never rebases) a `merge` branch. Absent would resume
-#   as rebase, so pr-facts.sh refuses to route a child whose mode did not stick.
-#   Never cleared. Enum `rebase | merge`.
+# prepare_mode — how the refinery brings a rework branch current before it lands.
+#   Every branch shape (per-bead `polecat/*`, shared `integration/*`, a
+#   graduation) is stamped `merge`: the branch is brought current by merging
+#   origin/<target> in, never rebased, so no shape is rewritten or force-pushed.
+#   Written by pr-facts.sh, pre-open-rebase.sh and mol-refinery-patrol.toml. The
+#   prepare and resume paths merge the target in whatever the stamp says; an
+#   absent value resolves to merge too, so a dropped stamp cannot select a
+#   rewrite. A dispatch site reads the stamp back and routes a child only once it
+#   sticks, and pre-open-rebase.test.sh holds both dispatch sites to `merge`.
+#   Never cleared. Enum `rebase | merge`; only `merge` is stamped.
 # rejection_reason — why the last attempt bounced, embedding `head <oid>` so a
 #   later pass can tell which head it spoke for. Written by the refinery
 #   (pr-facts.sh, signoff.sh, pre-open-rebase.sh, mol-polecat-work.toml); read at
 #   load-context to resume rather than redo, and by pr-facts.sh to dedup a child
 #   already covering a head. Cleared with `--unset` on the merged transition and
 #   by the polecat once it has resumed. Freeform instruction text.
-# graduation — `true` forces prepare_mode=merge, the flag convoy-graduate.sh sets
-#   when an integration branch graduates; read by pr-facts.sh, absent leaves the
-#   branch-name classification standing. Never cleared.
+# graduation — `true`, set on the convoy bead by convoy-graduate.sh when an
+#   integration branch is carried to the default branch. prepare_mode is `merge`
+#   for every branch shape, so this flag does not change how the branch is
+#   brought current. Never cleared.
 # blocked_reason — the human-readable reason an anchor sits in a human state
 #   (existing_pr unusable, a PR closed or retargeted out of band). Written by
 #   pr-facts.sh and molecule-hold.sh; it is also a [holds] marker, so a live
@@ -622,6 +626,12 @@ keys = [
   # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
   # pass does not answer the same thread twice.
   "finding.reply_posted",
+  # The databaseId of the GitHub review that raised a human finding, stamped by
+  # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's
+  # human findings by their originating review, so once every finding one review
+  # raised has closed the write-back dismisses THAT review and re-requests its
+  # author — per-review, independent of other reviews on the same PR.
+  "finding.review_id",
 ]
 
 [metadata.pr_posture]
@@ -829,18 +839,11 @@ keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",
   "finding.about", "finding.recurrence_of",
-  "doctor_check", "doctor_finding_predecessor",
 ]
 # finding.key here is the same prefix the review findings use
 # ([metadata.review_findings]); the two families share the name and are told
 # apart by task_kind, and only these patrol keys (scope, digest, the seen
 # timestamps, occurrences, about, recurrence_of) belong to this one.
-# doctor_check — the doctor check a finding names, the handle
-#   doctor-finding-gate.sh keys its convergent dedup on (a bead also "names" a
-#   check by a whole token in its title). A check name; not cleared.
-# doctor_finding_predecessor — the prior finding this one converges onto, so a
-#   check's repeated findings collapse to one line rather than accreting. Written
-#   by doctor-finding-gate.sh. A bead id; not cleared.
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session

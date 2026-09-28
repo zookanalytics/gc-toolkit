@@ -3,12 +3,13 @@
 #
 # THE BUG: mol-witness-patrol step recover-orphaned-beads part 3 (salvage) reads
 # metadata.work_dir and metadata.branch and part 4 verifies a branch merged. A
-# polecat stamps those on the work (source) bead alone; a visit, a graph.v2 step
-# and a graph.v2 root carry neither by construction. So the husk guard refused
-# salvage for them and the fall-through filed a no-signal witness-salvage-refused,
-# and part 4 read `unknown` off an empty branch and escalated
-# witness-branch-recovery-unknown. On the gc-toolkit rig those non-work beads were
-# roughly a third of every recovery pass.
+# polecat stamps those on the work (source) bead alone; a visit, a review, a
+# graph.v2 step and a graph.v2 root carry neither by construction (a review's
+# review_branch names the anchor under review, not work of its own). So the husk
+# guard refused salvage for them and the fall-through filed a no-signal
+# witness-salvage-refused, and part 4 read `unknown` off an empty branch and
+# escalated witness-branch-recovery-unknown. On the gc-toolkit rig those non-work
+# beads were roughly a third of every recovery pass.
 #
 # THE FIX: a scope gate classifies the bead the way part 5's orphan-dispose.sh
 # does and sets IS_WORK_BEAD=1 only for a `source` work bead. The salvage block
@@ -20,7 +21,7 @@
 #   * the gate EXTRACTED VERBATIM from the formula (between the salvage-scope-gate
 #     markers), run exactly as the witness runs it — BEAD_JSON from `gc bd show`,
 #     no set -e — so the test cannot drift from the shipped instruction;
-#   * IS_WORK_BEAD across the four shapes recovery hands part 3, the precedence
+#   * IS_WORK_BEAD across the five shapes recovery hands part 3, the precedence
 #     (a visit outranks a step_ref), and the fail-safe (an unreadable bead
 #     defaults to the work-bead path, so a real orphan is never skipped);
 #   * CONFORMANCE: the gate and the real orphan-dispose.sh run over ONE store and
@@ -71,10 +72,11 @@ gate_says() {
   ' "$TMP/gate.sh" 2>/dev/null
 }
 
-# --- The four shapes recovery hands part 3 (as in orphan-dispose.test.sh). ----
+# --- The five shapes recovery hands part 3 (as in orphan-dispose.test.sh). ----
 # The step's assignee and gc.session_id both name the dead session; the root
-# carries gc.kind/gc.formula_contract and only gc.session_name; the visit carries
-# task_kind; the work bead carries a branch and no kind/step markers.
+# carries gc.kind/gc.formula_contract and only gc.session_name; the visit and the
+# review carry task_kind (a review's review_branch names the anchor under review,
+# not work of its own); the work bead carries a branch and no kind/step markers.
 fixture() {
   store '[
     {"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"Implement the solution",
@@ -90,6 +92,12 @@ fixture() {
     {"id":"tk-visit","status":"in_progress","assignee":"lx-dead","title":"visit",
      "metadata":{"task_kind":"visit","gc.routed_to":"gc-toolkit/gc-toolkit.converse",
                  "gc.continuation_group":"cg-visit","gc.session_id":"lx-dead"}},
+    {"id":"tk-review","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+     "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
+                 "review_branch":"polecat/tk-anc","review_base":"main",
+                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
+                 "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
+                 "gc.session_id":"lx-dead","gc.session_name":"polecat-5-pool"}},
     {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "workflow_id":"tk-root","gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}
@@ -101,6 +109,7 @@ fixture
 eq "$(gate_says tk-step)"  "0" "graph.v2 step  -> not a work bead (skip salvage)"
 eq "$(gate_says tk-root)"  "0" "graph.v2 root  -> not a work bead (skip salvage)"
 eq "$(gate_says tk-visit)" "0" "visit          -> not a work bead (skip salvage)"
+eq "$(gate_says tk-review)" "0" "review         -> not a work bead (skip salvage/verify)"
 eq "$(gate_says tk-work)"  "1" "source work bead -> IS_WORK_BEAD=1 (salvage runs)"
 
 # A visit that also carries step metadata is still a visit — task_kind outranks a
@@ -118,10 +127,11 @@ eq "$(gate_says tk-missing)" "1" "absent bead -> defaults to the work-bead path"
 
 echo "--- conformance: the gate and orphan-dispose.sh agree ---"
 # Both classifiers read the same store. class=source is exactly the work-bead
-# case, so IS_WORK_BEAD must be 1 there and 0 for visit/workflow-root/workflow-step.
-# If either classifier's precedence drifts, this fails.
+# case, so IS_WORK_BEAD must be 1 there and 0 for
+# visit/review/workflow-root/workflow-step. If either classifier's precedence
+# drifts, this fails.
 fixture
-for id in tk-step tk-root tk-visit tk-work; do
+for id in tk-step tk-root tk-visit tk-review tk-work; do
   CLASS="$("$SCRIPT" "$id" --json | jq -r '.class // ""')"
   GW="$(gate_says "$id")"
   WANT=$([ "$CLASS" = "source" ] && echo 1 || echo 0)

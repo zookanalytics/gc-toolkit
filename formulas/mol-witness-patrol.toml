@@ -412,29 +412,32 @@ else, escalate
 (`escalate.sh --subject <bead> --key witness-branch-recovery-unknown ...`) and
 treat the branch's state as unknown rather than gone.
 
-Salvage and the verify below run only for a work bead; a visit or a graph.v2
-step or root has no worktree to salvage and no branch to verify. Classify first,
-the way part 5's `orphan-dispose.sh` does, and for anything but a `source` work
-bead skip straight to part 5:
+Salvage and the verify below run only for a work bead; a visit, a review, or a
+graph.v2 step or root has no worktree to salvage and no branch of its own to
+verify. Classify first, the way part 5's `orphan-dispose.sh` does, and for
+anything but a `source` work bead skip straight to part 5:
 ```bash
 # >>> salvage-scope-gate
 # Salvage and part 4's merge-verify are WORK-BEAD operations: both read
 # metadata.work_dir and metadata.branch, which a polecat stamps on the work
-# (source) bead alone. A visit, a graph.v2 step and a graph.v2 root carry
-# neither, so salvaging one refuses on the husk guard and files a no-signal
-# witness-salvage-refused, and verifying one reads `unknown` off an empty branch
-# and escalates witness-branch-recovery-unknown. Classify the bead as part 5's
-# orphan-dispose.sh does — task_kind=visit, then a root (gc.kind=workflow or
-# gc.formula_contract=graph.v2), then a step (gc.step_ref), else a source — and
-# salvage only a source; anything else skips to part 5, which releases or skips
-# it by that same class. salvage-scope-gate.test.sh runs this gate and
-# orphan-dispose.sh over one set of fixtures and asserts they agree, so the two
-# classifiers cannot drift. An unreadable classification defaults to the
-# work-bead path: recovery is load-bearing and salvage self-guards on the husk
-# check, so it never skips a real orphan.
+# (source) bead alone. A visit, a review, a graph.v2 step and a graph.v2 root
+# carry neither — a review's review_branch names the anchor under review, not
+# work of its own — so salvaging one refuses on the husk guard and files a
+# no-signal witness-salvage-refused, and verifying one reads `unknown` off an
+# empty branch and escalates witness-branch-recovery-unknown. Classify the bead
+# as part 5's orphan-dispose.sh does — task_kind=visit, then task_kind=review,
+# then a root (gc.kind=workflow or gc.formula_contract=graph.v2), then a step
+# (gc.step_ref), else a source — and salvage only a source; anything else skips
+# to part 5, which releases or skips it by that same class.
+# salvage-scope-gate.test.sh runs this gate and orphan-dispose.sh over one set of
+# fixtures and asserts they agree, so the two classifiers cannot drift. An
+# unreadable classification defaults to the work-bead path: recovery is
+# load-bearing and salvage self-guards on the husk check, so it never skips a
+# real orphan.
 IS_WORK_BEAD=$(printf '%s' "$BEAD_JSON" | jq -r '
   (.[0].metadata // {}) as $m
   | if   ($m.task_kind // "") == "visit" then "0"
+    elif ($m.task_kind // "") == "review" then "0"
     elif (($m["gc.kind"] // "") == "workflow") or (($m["gc.formula_contract"] // "") == "graph.v2") then "0"
     elif ($m["gc.step_ref"] // "") != "" then "0"
     else "1" end' 2>/dev/null)
@@ -468,7 +471,7 @@ A push of work that may already be on origin is idempotent and never loses
 commits, while `unknown` must never be read as gone:
 ```bash
 if [ "$IS_WORK_BEAD" != "1" ]; then
-  echo "not a work bead (a visit, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
+  echo "not a work bead (a visit, a review, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
 elif [ "$BRANCH_ON_ORIGIN" = "present" ]; then
   echo "branch already on origin — worktree disposable; skipping salvage." >&2
 elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" --owning-origin "$OWNING_ORIGIN_URL" --bead <bead>; then
@@ -488,8 +491,8 @@ When a work bead's worktree is a husk or gone and its branch is not on the ownin
 origin (or a guard refused), the work may be lost: file the refusal best-effort
 (`patrol-finding.sh --scope witness-findings --key witness-salvage-refused
 --about <bead> ...`) and fall through — recovery is load-bearing, the notice
-advisory. A visit or a graph.v2 step or root never reaches this branch; the scope
-gate has no worktree to lose for it and sent it to part 5.
+advisory. A visit, a review, or a graph.v2 step or root never reaches this
+branch; the scope gate has no worktree to lose for it and sent it to part 5.
 
 **4. Verify before reset (work beads only).** A bead the scope gate marked
 not-a-work-bead has no branch to verify, so skip straight to part 5. For a work
@@ -589,9 +592,14 @@ else
 fi
 ```
 
-Six kinds reach it and only two are returned to the pool. A **visit** gives up
-its assignee and nothing else, because its route, continuation group and
-task_kind are its identity. A **workflow step under a live root** gives up the
+Each kind is disposed by what it is. Some kinds return a bead to a pool to be
+claimed again, and some of those return it only when the work has not already
+reached a downstream court. A **visit** gives up its assignee and nothing else,
+because its route, continuation group and task_kind are its identity. A
+**review** is the source bead of its own mol-review molecule and carries no
+worktree of its own, so it disposes by the source contract below — recognised by
+task_kind before the source arm the way a visit is, and reopened to its review
+pool. A **workflow step under a live root** gives up the
 dead session's pin and keeps the rest, so the molecule resumes at that same step
 under whoever claims it next. A **workflow root** is skipped: nothing claims a
 root, it closes when its workflow-finalize step closes, and setting it open,
@@ -599,8 +607,8 @@ unassigned and routed is what makes a pool offer the root itself as work.
 Everything else is a **source bead** and goes to
 `gc workflow delete-source --apply` followed by `gc workflow reopen-source`.
 
-The other two kinds turn on the step's root, which the disposal reads before it
-releases anything. A step whose **root has CLOSED** has no molecule left to
+The remaining step dispositions turn on the step's root, which the disposal reads
+before it releases anything. A step whose **root has CLOSED** has no molecule left to
 resume — releasing it would hand a finished chain to a pool as fresh work — so
 it goes to `dead-molecule-dispose.sh`, which de-routes every member of the chain
 before it closes any of them. A step whose **root will not read** is left
@@ -629,7 +637,7 @@ whole filter exists to stop. Gate the record on the disposal's own verdict:
 ```bash
 # >>> recovery-stamp-gate
 # STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
-# (result=disposed: a released visit or step, or a delegated source). Every other
+# (result=disposed: a released visit or step, or a delegated source or review). Every other
 # verdict — skipped (a root, or a source already in a downstream court), partial,
 # failed, or an unread empty — returned nothing to the pool, so no recovery is
 # stamped and no crash-loop rate is read.

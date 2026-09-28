@@ -184,13 +184,19 @@ case "$1 ${2:-}" in
     # like a visit that was never stamped. FAKE_OUTCOME_DROP is the write below
     # that exits 0 and yet does not land.
     outcome="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id" 2>/dev/null || true)"
+    # gc.outcome_reason reads back the same way, from FAKE_OUTCOME_DIR/<id>.reason.
+    # dismiss reads it back beside gc.outcome, so a reason that lands empty while
+    # the outcome lands is caught before the irreversible close. FAKE_OUTCOME_REASON_DROP
+    # is the write below that exits 0 and yet does not land — the reason lost on
+    # its own, which is the drop the read-back must refuse the close on.
+    outcome_reason="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reason" 2>/dev/null || true)"
     # A visit id (v-*) answers with its fixture row from FAKE_STEPS_JSON, so a
     # verb handed a VISIT (the board lists parked visits as rows of their own)
     # sees task_kind=visit and the subject it tracks, the way the store would.
     # gc.outcome still reads back from FAKE_OUTCOME_DIR, as for any bead.
     case "$id" in v-*)
-      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" \
-            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
+      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" --arg or "$outcome_reason" \
+            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc | .metadata["gc.outcome_reason"] = $or ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
          && [ "$vrow" != "[]" ]; then
         printf '%s\n' "$vrow"; exit 0
       fi ;;
@@ -207,8 +213,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -261,6 +267,16 @@ case "$1 ${2:-}" in
           case "${FAKE_OUTCOME_DROP:-}" in
             1) ;;
             *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
+          esac ;;
+        # gc.outcome_reason lands beside gc.outcome so the read-back sees the
+        # headline the board shows for a no-takeaway close. FAKE_OUTCOME_REASON_DROP=1
+        # loses every one though the call exits 0 — the reason dropped while the
+        # outcome lands, no repair write recovering it — so the read-back must
+        # refuse the close on the reason alone.
+        gc.outcome_reason=*)
+          case "${FAKE_OUTCOME_REASON_DROP:-}" in
+            1) ;;
+            *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome_reason=}" > "$FAKE_OUTCOME_DIR/$3.reason" ;;
           esac ;;
         # gc.execution_routed_to is CLEARED via --unset-metadata, so its token
         # arrives bare (no =value). A landed clear empties FAKE_EXEC, so the
@@ -1471,8 +1487,16 @@ cat > "$TMP/visits.json" <<'JSON'
 JSON
 export FAKE_STEPS_JSON="$TMP/visits.json"
 
-: > "$TMP/updates"; : > "$TMP/closes"
-DOUT="$(sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
+# A recorder standing in for pr-visit-comment.sh, to prove dismiss updates the
+# subject's PR reminder when it closes a sitting's visit.
+cat > "$TMP/rec-pvc" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$REC_PVC_LOG"
+REC
+chmod +x "$TMP/rec-pvc"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/pvc.log"
+DOUT="$(GC_VISIT_COMMENT_TOOL="$TMP/rec-pvc" REC_PVC_LOG="$TMP/pvc.log" sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
 DERR="$(cat "$TMP/derr")"
 
 # (DISMISS-SITTING) the held visit is closed, and over its holder's claim: bd
@@ -1517,6 +1541,17 @@ else
     bad "(DISMISS-NOSUBJECT) dismiss wrote the subject (got: $(grep -E '^bd update A-PARKED' "$TMP/updates"))"
 fi
 
+# (DISMISS-PRCOMMENT) the closed sitting's visit gets its PR reminder updated to
+# closed. The subject A-PARKED is passed, the closed visit v-HELD is named, and
+# the outcome is dismissed. update-only in the tool itself means a subject with
+# no PR is a silent no-op; here the recorder proves the wiring fires with the
+# right arguments.
+if grep -qF -- 'close --visit v-HELD --subject A-PARKED --outcome dismissed' "$TMP/pvc.log"; then
+    ok "(DISMISS-PRCOMMENT) the dismissed visit's PR reminder is updated to closed"
+else
+    bad "(DISMISS-PRCOMMENT) the PR reminder was not updated on dismiss (got: $(cat "$TMP/pvc.log"))"
+fi
+
 # (DISMISS-SCOPE) another subject's visit is not collateral.
 if [ -z "$(grep -E '^bd close v-OTHER' "$TMP/closes" || true)" ]; then
     ok "(DISMISS-SCOPE) a visit on a different subject is untouched"
@@ -1538,6 +1573,33 @@ if grep -qE '^bd close v-EDGE' "$TMP/closes"; then
     ok "(DISMISS-EDGE) a visit found only by its tracks edge is closed too"
 else
     bad "(DISMISS-EDGE) an empty group stamp hid the visit (closes: $(cat "$TMP/closes"))"
+fi
+
+# (DISMISS-JSON) --json prints the machine object and NAMES which identity each
+# closed visit matched — the same shared predicate open reports. stdout is pure
+# JSON; the human progress lines move to stderr. A-PARKED matches its visit by
+# the gc.continuation_group stamp; A-EDGE matches by the tracks edge.
+: > "$TMP/updates"; : > "$TMP/closes"
+JOUT="$(sh "$SCRIPT" dismiss A-PARKED --json 2>"$TMP/jerr")"; JERR="$(cat "$TMP/jerr")"
+if printf '%s' "$JOUT" | jq -e '.subject == "A-PARKED" and .closed == 1 and .ok == true and .matched[0].identity == "continuation_group"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) --json names the matched identity (continuation_group) and the close count"
+else
+    bad "(DISMISS-JSON) --json object wrong (got: ${JOUT:-<nothing>})"
+fi
+grep -q 'by continuation_group identity' <<< "$JERR" \
+  && ok "(DISMISS-JSON) stderr also names which identity matched" \
+  || bad "(DISMISS-JSON) stderr must name the identity (err: $JERR)"
+if printf '%s' "$JOUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) stdout is a single JSON object, not human text"
+else
+    bad "(DISMISS-JSON) stdout was not clean JSON (got: $JOUT)"
+fi
+: > "$TMP/updates"; : > "$TMP/closes"
+EJOUT="$(sh "$SCRIPT" dismiss A-EDGE --json 2>/dev/null)"
+if printf '%s' "$EJOUT" | jq -e '.matched[0].identity == "tracks"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) an edge-only visit is named as a 'tracks' match"
+else
+    bad "(DISMISS-JSON) edge match identity wrong (got: ${EJOUT:-<nothing>})"
 fi
 
 # (DISMISS-IDEM) a subject with no open visit has no sitting to end and says so,
@@ -1615,7 +1677,7 @@ eq "$(grep -c '^bd close v-NOSTAMP' "$TMP/closes" || true)" "0" \
 eq "$(grep -c '^bd update A-STAMPLESS' "$TMP/updates" || true)" "0" \
    "(DISMISS-UNSTAMPED) …and the subject is never written"
 eq "$NRC" "4" "(DISMISS-UNSTAMPED) …and the run fails, so a caller cannot read it as a dismiss"
-if grep -q 'could not stamp gc.outcome on visit v-NOSTAMP; it was NOT closed' <<< "$NOUT"; then
+if grep -q 'could not stamp the outcome on visit v-NOSTAMP; it was NOT closed' <<< "$NOUT"; then
     ok "(DISMISS-UNSTAMPED) …and it names the visit and says the close was withheld"
 else
     bad "(DISMISS-UNSTAMPED) the refused stamp reads as a warning beside a close that happened anyway (got: $NOUT)"
@@ -1643,7 +1705,7 @@ eq "$(grep -c '^bd update v-DROP --set-metadata gc.outcome=dismissed' "$TMP/upda
 eq "$(grep -c '^bd update A-DROP' "$TMP/updates" || true)" "0" \
    "(DISMISS-DROPPED) …and the subject is never written"
 eq "$DRPRC" "4" "(DISMISS-DROPPED) …and the run fails, so a caller cannot read it as a dismiss"
-if grep -q "gc.outcome on visit v-DROP read back as '<empty>', not 'dismissed'" <<< "$DRPOUT"; then
+if grep -q "visit v-DROP did not read back (gc.outcome='<empty>'" <<< "$DRPOUT"; then
     ok "(DISMISS-DROPPED) …and it names the read-back that came up empty"
 else
     bad "(DISMISS-DROPPED) the silent drop reads as a close that happened anyway (got: $DRPOUT)"
@@ -1652,6 +1714,38 @@ if grep -q 'was NOT dismissed' <<< "$DRPOUT"; then
     ok "(DISMISS-DROPPED) …and it says the subject was not dismissed"
 else
     bad "(DISMISS-DROPPED) the refusal is not stated as one (got: $DRPOUT)"
+fi
+
+# (DISMISS-REASON-DROPPED) the read-back covers the reason as well as the
+# outcome. gc.outcome_reason is the headline the board shows a no-takeaway close
+# by (board.Sitting.Headline in services/helm/internal/board/model.go), and an
+# empty one drops the row to the subject's bare title. So a store that lands
+# gc.outcome=dismissed but silently drops gc.outcome_reason — the exit-0 write
+# that does not persist — must still withhold the close, the same both-stamp
+# guard visit-close.sh applies. Read back on the outcome alone, the close would
+# proceed and the sitting would end illegibly. v-DROP is unassigned, so its close
+# would otherwise succeed; the dropped reason is the only thing withholding it,
+# which isolates the reason read-back from a close that would have failed anyway.
+# The outcome files are shared across dismiss cases, so clear them first: this
+# case needs the outcome to LAND while only the reason drops.
+: > "$TMP/updates"; : > "$TMP/closes"
+rm -f "$TMP/outcomes/v-DROP" "$TMP/outcomes/v-DROP.reason"
+RDRC=0
+RDOUT="$(FAKE_OUTCOME_REASON_DROP=1 sh "$SCRIPT" dismiss A-DROP 2>&1)" || RDRC=$?
+eq "$(grep -c '^bd close v-DROP' "$TMP/closes" || true)" "0" \
+   "(DISMISS-REASON-DROPPED) a reason that exits 0 but does not land leaves the visit unclosed"
+eq "$(grep -c '^bd update v-DROP --set-metadata gc.outcome=dismissed' "$TMP/updates" || true)" "2" \
+   "(DISMISS-REASON-DROPPED) …read back and written once more before it is given up on"
+eq "$RDRC" "4" "(DISMISS-REASON-DROPPED) …and the run fails, so a caller cannot read it as a dismiss"
+if grep -q "visit v-DROP did not read back (gc.outcome='dismissed', gc.outcome_reason='<empty>')" <<< "$RDOUT"; then
+    ok "(DISMISS-REASON-DROPPED) …and it names the reason as the stamp that came up empty while the outcome landed"
+else
+    bad "(DISMISS-REASON-DROPPED) the dropped reason reads as a close that happened anyway (got: $RDOUT)"
+fi
+if grep -q 'was NOT dismissed' <<< "$RDOUT"; then
+    ok "(DISMISS-REASON-DROPPED) …and it says the subject was not dismissed"
+else
+    bad "(DISMISS-REASON-DROPPED) the refusal is not stated as one (got: $RDOUT)"
 fi
 
 # (DISMISS-BLIND) a visit lookup that did not ANSWER is not a subject with no
@@ -2454,6 +2548,37 @@ eq "$(d_gate)$(d_update)$(d_gate_resolve)" "" "(LOOKUPMULTIPLE) neither gate is 
 grep -q 'tk-a, tk-b' <<< "$DERR" \
   && ok "(LOOKUPMULTIPLE) diagnostic identifies both gates" \
   || bad "(LOOKUPMULTIPLE) missing conflicting ids: $DERR"
+printf '[]\n' > "$D_LIST"
+
+# (IDEMSCRUB) the dedup lookup must survive a control-character-laden `bd list`.
+# A raw C0 byte makes jq reject the whole payload, so an unscrubbed lookup comes
+# back empty and the re-state files a SECOND gate beside the one already open —
+# the duplicate the single-open-demand invariant exists to prevent. demand_lookup
+# scrubs C0 bytes before jq, so a noisy read still finds the open demand and
+# refreshes it. A raw TAB inside a JSON string is the canonical case: invalid to
+# jq, dropped by the scrub, and unrelated to the field the match reads.
+printf '[{"id":"tk-old2","status":"open","metadata":{"gc.demand_for":"tk-kid"},"notes":"noisy\tread"}]\n' > "$D_LIST"
+demand_run tk-kid "operator: pick the backend (after a noisy read)" --by converse
+eq "$DRC" "0" "(IDEMSCRUB) a re-state whose lookup carried a control char still succeeds"
+eq "$(d_gate)" "" "(IDEMSCRUB) …filing no second gate — the open demand was found through the noise"
+grep -q '^bd update tk-old2 ' <<< "$(d_update)" \
+  && ok "(IDEMSCRUB) …refreshing the one already open" \
+  || bad "(IDEMSCRUB) the noisy-read demand was not refreshed: $(d_update)"
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-old2" \
+   "(IDEMSCRUB) …and it names the demand that already existed"
+printf '[]\n' > "$D_LIST"
+
+# (CAPREFRESH) an over-cap RE-STATE, with a demand already open, is rejected by
+# the length gate before the lookup runs — so it neither refreshes the open
+# demand nor files a second one, and the single open demand is left untouched.
+# The gate rejecting is what keeps a too-long re-state from becoming a duplicate.
+printf '[{"id":"tk-old3","status":"open","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+demand_run tk-kid "$T141"
+eq "$DRC" "2" "(CAPREFRESH) an over-cap re-state is a usage error"
+eq "$(d_gate)$(d_update)" "" "(CAPREFRESH) …touching nothing: no second gate, no refresh of the open one"
+grep -q 'cap is 140' <<< "$DERR" \
+  && ok "(CAPREFRESH) …and the refusal names the cap" \
+  || bad "(CAPREFRESH) refusal is silent: $DERR"
 printf '[]\n' > "$D_LIST"
 
 # ── the rig-enumeration helper restores the caller's trap table ──────────────

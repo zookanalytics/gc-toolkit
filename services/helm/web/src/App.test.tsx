@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { App } from './App';
+import { App, resolveDrillTarget } from './App';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board arrives as one ranked list; every row carries its dependency FAMILY
@@ -51,6 +51,8 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_number: 0,
     pr_url: '',
     pr_branch: '',
+    pr_branch_url: '',
+    pr_phase: '',
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
@@ -93,6 +95,7 @@ const SITTINGS: Sitting[] = [
     title: 'visit: tk-epic — what the canvas owes the operator',
     status: 'in_progress',
     outcome: '',
+    outcome_reason: '',
     session: 'gc-toolkit__converse-1',
     opened_at: '2026-08-21T18:34:00Z',
     takeaway: '',
@@ -105,6 +108,7 @@ const SITTINGS: Sitting[] = [
     title: 'visit: tk-yps55 — the raw script path',
     status: 'closed',
     outcome: 'diagnosed',
+    outcome_reason: '',
     session: 'gc-toolkit__converse-2',
     opened_at: '2026-08-21T17:20:00Z',
     closed_at: '2026-08-21T17:54:00Z',
@@ -463,6 +467,29 @@ it('drills into a family root like any other tile', async () => {
   expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy();
 });
 
+it('resolveDrillTarget reads ?drill= and ignores everything else', () => {
+  expect(resolveDrillTarget('')).toBeNull();
+  expect(resolveDrillTarget('?other=1')).toBeNull();
+  expect(resolveDrillTarget('?drill=')).toBeNull();
+  expect(resolveDrillTarget('?drill=%20%20')).toBeNull();
+  expect(resolveDrillTarget('?drill=tk-abc12')).toBe('tk-abc12');
+  expect(resolveDrillTarget('?drill=tk-abc12.3')).toBe('tk-abc12.3');
+});
+
+// A `?drill=<bead>` deep link opens the board straight on that row's drill
+// panel — the target end of a link from a pull request back to a board move.
+it('opens the drill panel for a ?drill= deep link on load', async () => {
+  window.history.replaceState({}, '', '?drill=tk-yps55');
+  try {
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy(),
+    );
+  } finally {
+    window.history.replaceState({}, '', '/');
+  }
+});
+
 // A board renders exactly the families it holds — never an empty one for a band
 // with nothing in it.
 it('renders only the families present', async () => {
@@ -513,6 +540,42 @@ it('shows running sittings and recently closed ones with their outcome', async (
   expect(within(done).getByText('the raw-path launcher finding')).toBeTruthy();
 });
 
+it('shows a dedup close’s outcome reason as its headline when it left no takeaway', async () => {
+  const deduped: Board = {
+    ...BOARD,
+    sittings: [
+      {
+        id: 'tk-vst10',
+        rig: 'gc-toolkit',
+        subject: 'tk-epic',
+        title: 'visit: tk-epic — the pool-offer line that says nothing',
+        status: 'closed',
+        outcome: 'moot',
+        outcome_reason: 'moot: premise died, subject already closed',
+        session: 'gc-toolkit__converse-10',
+        opened_at: '2026-08-21T18:34:00Z',
+        closed_at: '2026-08-21T18:40:00Z',
+        takeaway: '',
+        subject_title: 'the attention-canvas epic topic',
+      },
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(deduped), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(region('converse sittings')).toBeTruthy());
+
+  const row = within(region('converse sittings')).getByText('tk-vst10').closest('tr') as HTMLElement;
+  expect(within(row).getByText('moot')).toBeTruthy();
+  // No takeaway: the headline is the outcome reason (why it closed), so the
+  // dedup close reads as a decision rather than falling back to the topic.
+  expect(within(row).getByText('moot: premise died, subject already closed')).toBeTruthy();
+  expect(within(row).queryByText(/the pool-offer line that says nothing/)).toBeNull();
+});
+
 it('shows the outcome on a running sitting a dismissal stamped but could not close', async () => {
   const stuck: Board = {
     ...BOARD,
@@ -524,6 +587,7 @@ it('shows the outcome on a running sitting a dismissal stamped but could not clo
         title: 'visit: tk-epic — the operator ended it from the board',
         status: 'in_progress',
         outcome: 'dismissed',
+        outcome_reason: '',
         session: 'gc-toolkit__converse-9',
         opened_at: '2026-08-21T18:34:00Z',
         takeaway: '',
@@ -663,6 +727,39 @@ it('identifies a pre-open row without inventing a link', async () => {
   const row = memberRow('tk-root', /wedged before the PR opened/);
   expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
   expect(within(row as HTMLElement).getByText('polecat/tk-pre')).toBeTruthy();
+});
+
+// The pre-PR branch is browsable: when the board resolved the rig's repository,
+// the branch string links to its GitHub tree view rather than reading as bare
+// text.
+it('links a pre-open branch to GitHub when the repo is known', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-link',
+    title: 'a pre-open branch with a known repo',
+    pr_branch: 'polecat/tk-link',
+    pr_branch_url: 'https://github.com/zook/gc-toolkit/tree/polecat/tk-link',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a pre-open branch with a known repo/)).toBeTruthy());
+
+  const row = memberRow('tk-root', /a pre-open branch with a known repo/);
+  const link = within(row as HTMLElement).getByRole('link', { name: 'polecat/tk-link' });
+  expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/tree/polecat/tk-link');
+});
+
+// The phase chip names who must act next in the same words the GitHub status:
+// label carries, so the board and the label do not read as two vocabularies.
+it('shows the PR phase beside the row', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-ph',
+    title: 'a row that needs a review',
+    pr_phase: 'needs-review',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a row that needs a review/)).toBeTruthy());
+
+  const row = memberRow('tk-root', /a row that needs a review/);
+  expect(within(row as HTMLElement).getByText('needs-review')).toBeTruthy();
 });
 
 // An anchor at a human state carries merge_result and can carry no branch and no
@@ -859,13 +956,13 @@ const MULTI_RIG: Board = {
   sittings: [
     {
       id: 'tk-vs-gct', rig: 'gc-toolkit', subject: 'tk-gct', title: 'visit: tk-gct',
-      status: 'closed', outcome: 'diagnosed', session: 'gc-toolkit__converse-1',
+      status: 'closed', outcome: 'diagnosed', outcome_reason: '', session: 'gc-toolkit__converse-1',
       opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
       takeaway: '', subject_title: 'the gc-toolkit topic',
     },
     {
       id: 'tk-vs-gcy', rig: 'gascity', subject: 'tk-gcy', title: 'visit: tk-gcy',
-      status: 'closed', outcome: 'diagnosed', session: 'gascity__converse-1',
+      status: 'closed', outcome: 'diagnosed', outcome_reason: '', session: 'gascity__converse-1',
       opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
       takeaway: '', subject_title: 'the gascity topic',
     },

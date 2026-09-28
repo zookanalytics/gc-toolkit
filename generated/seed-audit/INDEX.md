@@ -34,10 +34,10 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,326 | 1,331 |
-| [`converse`](agents/converse.md) | 32,229 | 8,057 |
-| [`converse-codex`](agents/converse-codex.md) | 32,229 | 8,057 |
-| [`converse-fable`](agents/converse-fable.md) | 32,229 | 8,057 |
-| [`converse-opus`](agents/converse-opus.md) | 32,229 | 8,057 |
+| [`converse`](agents/converse.md) | 32,589 | 8,147 |
+| [`converse-codex`](agents/converse-codex.md) | 32,589 | 8,147 |
+| [`converse-fable`](agents/converse-fable.md) | 32,589 | 8,147 |
+| [`converse-opus`](agents/converse-opus.md) | 32,589 | 8,147 |
 | [`deacon`](agents/deacon.md) | 13,017 | 3,254 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
@@ -69,7 +69,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
-| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,911 | 1,227 |
+| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 4,924 | 1,231 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,912 | 728 |

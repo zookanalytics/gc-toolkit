@@ -9,6 +9,12 @@
 .beads/*
 !.beads/config.yaml
 !.beads/metadata.json
+# bd's workspace gate sits BESIDE .beads, not inside it (`<dir>/.beads.gate.lock`),
+# so the pattern above never covers it. These flock files are never deleted, so
+# every scope root accumulates one as an untracked stray -- which `git status
+# --porcelain` reports and mol-polecat-work's self-review clean-tree check
+# (assets/scripts/self-review-check.sh) then reads as a dirty tree and re-spins.
+*.gate.lock*
 .claude/skills/
 .gc/
 /scripts/

@@ -86,9 +86,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    38, and this arm holds the pass lock while it runs — pruned, so a branch
    deleted on origin does not linger as a ref the probe would believe. Per
    anchor it then requires both sides to resolve there and probes
-   `git merge-tree --write-tree`; a conflict files the same rebase child arm 5
-   files for a PR anchor, classified by the same branch allowlist and stamped
-   `prepare_mode`. It runs before `pr-open.sh` because that arm ends its
+   `git merge-tree --write-tree`; a conflict files the same merge-in rework
+   child arm 5 files for a PR anchor, stamped `prepare_mode=merge` (every branch
+   shape is brought current by merge, never rebase). It runs before `pr-open.sh`
+   because that arm ends its
    domain: once an anchor carries a PR, `mergeable` answers the question and
    arm 5 owns the dispatch. Both arms probe children on `metadata.branch` and
    write the same `head <oid>` phrasing, so whichever sees a branch first
@@ -135,6 +136,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
    other anchor's too.
+
+   **3a. pr-facts.sh --route-comments-only** — the feedback routing of arm 5, run
+   early, before merge. Arm 5 runs after merge and near the pass tail, so a pass
+   the timeout kills between the posture record and arm 5 leaves the operator's
+   review stamped-as-seen by the posture yet unrouted, sometimes for hours, while
+   the anchor reads as handled. This arm closes that window: it re-reads each open
+   anchor's feedback and dispatches the same rework child or visit and opens the
+   same validation pass arm 5 would, then stops — no write-back sweep, no
+   external-fact reconciliation, none of the arms that belong after merge, so it
+   is cheap and finishes on the early tick. Arm 5 still runs the routing
+   idempotently (a landed batch's watermark and `pr_comment_disposition` make the
+   re-run a no-op) and still owns the write-back and the terminal-state records.
+   Its rc is reported but holds nothing: routing is not the posture interlock, and
+   the full pass is the backstop. The observability half is
+   `doctor/check-feedback-routing-owed`, which flags an anchor whose posture still
+   says a human is waiting with no disposition past a window.
 4. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
@@ -213,8 +230,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
    rework child or a visit. The posture write is idempotent, so re-running it
-   here after arm 3 costs nothing when nothing changed. Routing lives only in
-   this arm: arm 3 records, this one decides what answers it. Each batch it
+   here after arm 3 costs nothing when nothing changed. The routing runs in two
+   places by design: arm 3a picks the feedback up early, before merge, and this
+   arm re-runs the same routing idempotently — a landed batch's watermark and
+   `pr_comment_disposition` make the second run a no-op — while owning the
+   write-back sweep and the terminal-state records that only make sense after
+   merge. Arm 3 records the posture; arm 3a and this arm decide what answers it.
+   Each batch it
    routes also opens one validation pass on the anchor — a
    `task_kind=validation` bead, unrouted, blocking the anchor — from which
    `gate-ensure.sh`'s quiescence holds a fresh whole-diff review while the
@@ -269,8 +291,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    have recorded no work — either `work_outcome=no-op`, or no work-product key
    at all (`branch`, `work_dir`, `pr_number`, `pr_url`, `merge_result`,
    `gc.work_commit`). "No work" cannot be read off an absent `branch`: on a
-   rebase or rework dispatch that field names the TWIN's branch, so most
-   verified no-op duplicates carry one. A bead somebody else owns — assigned,
+   rework dispatch that field names the TWIN's branch, so most verified no-op
+   duplicates carry one. A bead somebody else owns — assigned,
    `in_progress`, a review bead, a step bead, or already pointed at a different
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 4 merged or arm 5 recorded on this pass is
@@ -281,7 +303,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    that and none of them touch it, so a reviewer approves a scope the body does
    not describe. For each open anchor recording a `pr_number`, this arm reads
    the branch's bead ledger — `branch` (committed onto the branch: the anchor,
-   plus every rework and rebase hand-back), `fold_target` (folded onto it by a
+   plus every rework hand-back), `fold_target` (folded onto it by a
    polecat), and `merged_target` with `merge_result=merged` (landed its own PR
    into it) — and splices the list into a delimited section at the end of the
    body. The title is left alone: it names the anchor, and the body is where a

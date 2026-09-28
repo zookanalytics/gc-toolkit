@@ -10,9 +10,9 @@
 # bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
 # + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING -> classify the head branch
-# (allowlist: only polecat/* may be rewritten, and never a graduation) and file
-# ONE rework child per head to the fix pool, stamped prepare_mode and counted as
+# nothing about the new base); CONFLICTING -> file ONE merge-in rework child per
+# head to the fix pool that brings the branch current by MERGE (no branch shape is
+# rebased or force-pushed), stamped prepare_mode=merge and counted as
 # dispatched only once that stamp AND the route itself read back (dedup: a rework
 # child naming this branch whose rejection_reason names this head; an unstamped
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
@@ -70,9 +70,22 @@
 # awaiting its acknowledgement. A thread a human answered after the city's reply
 # is left open, and so is one holding a comment above the mark: no batch covers
 # that comment, so nothing has answered it yet.
+# The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
+# as GitHub's own blocking signal until someone clears it; once every finding a
+# particular human review raised has closed — a must-fix fixed and landed, or a
+# decline replied and resolved above — that review is answered in full, so the
+# sweep dismisses it (clearing the block) and re-requests its author, per-review
+# via finding.review_id so one reviewer clears independently of another. The
+# confidence is the validator's, carried by the finding's closure, never a commit
+# oid, so a later push does not reopen it. A dismissal is not an approval: the
+# merge still gates on an explicit one.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
-# Args: --fix-pool <pool>. Caller: refinery-reconcile.sh
+# Args: --fix-pool <pool>; --posture-only (the cheap pre-merge arm: record
+# posture and stop); --route-comments-only (the pre-merge arm that routes
+# operator feedback and stops after it, skipping the write-back sweep and every
+# non-feedback arm, so a pass killed before the full arm has still picked the
+# feedback up). Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
 
@@ -109,11 +122,12 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
 
-FIX_POOL=""; POSTURE_ONLY=0
+FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --fix-pool)     FIX_POOL="${2:-}"; shift 2 ;;
-    --posture-only) POSTURE_ONLY=1; shift ;;
+    --fix-pool)            FIX_POOL="${2:-}"; shift 2 ;;
+    --posture-only)        POSTURE_ONLY=1; shift ;;
+    --route-comments-only) ROUTE_ONLY=1; shift ;;
     *) shift ;;
   esac
 done
@@ -399,11 +413,15 @@ gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
 # on the /files page its inline comments live on, so an objection stated in the
 # body alone reaches a page-pointing work order as nothing at all.
 feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> <issue-comments-json> <issue-mark> — markdown on stdout
-  jq -nr --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
-         --argjson icmts "$5" --argjson imark "$6" \
+  # The JSON lists go in on stdin, never as --argjson: one that exceeds the OS
+  # per-argument limit (Linux MAX_ARG_STRLEN, 128 KiB) makes jq fail to exec, and
+  # a busy PR's comment list clears it. `input` reads them back in printed order.
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
+  jq -nr --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" \
          --arg self "$SELF_LOGIN" '
     def clip($n): if (length) > $n then (.[0:$n] + "\n\n_(truncated — the rest is on the PR)_") else . end;
     def body: ((.body // "") | tostring);
+    (input) as $revs | (input) as $cmts | (input) as $icmts |
     ([ $revs[] | select(((.user.login // "") | tostring) != $self)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
@@ -433,35 +451,42 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
 # finding.sh normalizes it out of the key, so a rebase that renumbers the file
 # does not re-raise the finding. An empty body is no objection and is dropped, so
 # a bodyless CHANGES_REQUESTED contributes only through its inline comments.
-feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message,comment_id}
+feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message,comment_id,review_id}
   # comment_id is the GitHub databaseId of the row that raised the objection.
   # For an INLINE review comment it is also the databaseId the reviewThread
   # carries, so the write-back can find the thread and post a declined finding's
   # owed reply into it; a review-body or Conversation comment has no thread, so
   # its id matches none and the write-back answers those on the PR itself.
-  jq -nc --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
-         --argjson icmts "$5" --argjson imark "$6" --arg self "$SELF_LOGIN" '
+  # review_id is the databaseId of the PR review the objection belongs to — its
+  # own id for a review body, the parent review's for an inline comment — so the
+  # write-back groups an anchor's human findings by review and dismisses one when
+  # all of its findings clear. A Conversation comment belongs to no review, so it
+  # carries none and holds no review's dismissal.
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
+  jq -nc --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" --arg self "$SELF_LOGIN" '
     def body: ((.body // "") | tostring);
     def has_body: ((body | gsub("[[:space:]]"; "")) != "");
+    (input) as $revs | (input) as $cmts | (input) as $icmts |
     ([ $revs[] | select(((.user.login // "") | tostring) != $self)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $rmark)
               | { login: ((.user.login // "?") | tostring), locus: "PR review", message: body,
-                  comment_id: ((.id // 0) | tostring) } ])
+                  comment_id: ((.id // 0) | tostring), review_id: ((.id // 0) | tostring) } ])
   + ([ $cmts[] | select(((.user.login // "") | tostring) != $self)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $cmark)
               | { login: ((.user.login // "?") | tostring),
                   locus: (((.path // "PR conversation") | tostring)
                           + (if ((.line // .original_line) != null) then ":" + ((.line // .original_line) | tostring) else "" end)),
-                  message: body, comment_id: ((.id // 0) | tostring) } ])
+                  message: body, comment_id: ((.id // 0) | tostring),
+                  review_id: ((.pull_request_review_id // "") | tostring) } ])
   + ([ $icmts[] | select(((.user.login // "") | tostring) != $self)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $imark)
               | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
-                  comment_id: ((.id // 0) | tostring) } ])' 2>/dev/null
+                  comment_id: ((.id // 0) | tostring), review_id: "" } ])' 2>/dev/null
 }
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
@@ -472,7 +497,9 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
 # them. A comment naming no review, or naming one the review list does not
 # carry, is standalone and stays.
 live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
-  jq -nc --argjson revs "$1" --argjson cmts "$2" '
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; } | \
+  jq -nc '
+    (input) as $revs | (input) as $cmts |
     ([ $revs[]
        | select(((.state // "") | tostring) == "DISMISSED")
        | ((.id // 0) | tostring) ]) as $retired
@@ -485,7 +512,9 @@ live_comments() { # <reviews-json> <comments-json> — comments no dismissal ret
 # the body filter above keeps it out of the watermark: it is the review holding
 # the merge, and its inline comments are what the child has to answer.
 feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
-  jq -nr --argjson revs "$1" --argjson rmark "$2" --arg self "$SELF_LOGIN" '
+  printf '%s\n' "$1" | \
+  jq -nr --argjson rmark "$2" --arg self "$SELF_LOGIN" '
+    (input) as $revs |
     [ $revs[] | select(((.user.login // "") | tostring) != $self)
               | select(((.id // 0) | tonumber) > $rmark)
               | select((((.state // "") | tostring) == "CHANGES_REQUESTED")
@@ -603,8 +632,8 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 # still clears its visits, and in every rig's cadence so each store cleans its own.
 # Fail closed on an unreadable subject: a visit whose anchor cannot be read this
 # pass is left for the next, never retired on a read that did not land.
-# --posture-only writes nothing here.
-if [ "$POSTURE_ONLY" != 1 ]; then
+# The pre-merge arms (--posture-only, --route-comments-only) write nothing here.
+if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if av_visits=$(bd_list --status=open --metadata-field "escalation_key=merge-blocked-approval"); then
     while IFS="$(printf '\t')" read -r avid avsubj; do
       [ -n "${avid:-}" ] || continue
@@ -646,9 +675,6 @@ while IFS= read -r row; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
-  # A graduation is the integration-to-main case whatever its branch is named, so
-  # the CONFLICTING arm classifies on this as well as on the branch.
-  grad=$(printf '%s' "$row" | jq -r '.metadata.graduation // ""')
   # deferred-dispatch's arm marker (deferred-dispatch.sh): the pool this work
   # re-offers to once it reads bd-ready, set while the anchor waits and cleared
   # when the reconcile pass slings it. While set, the anchor is deliberately
@@ -690,9 +716,10 @@ while IFS= read -r row; do
   [ -n "$target" ] || target="$base"
 
   # --- PR merged (out-of-band, or a died record): record it ----------------------
-  # Reconciliation is the full pass's; --posture-only writes a posture and
-  # nothing else, so a MERGED or CLOSED anchor falls through to the OPEN filter.
-  if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ]; then
+  # Reconciliation is the full pass's; the pre-merge arms (--posture-only,
+  # --route-comments-only) reconcile no terminal state, so a MERGED or CLOSED
+  # anchor falls through to the OPEN filter.
+  if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
     if [ -z "$merge_oid" ]; then
@@ -719,7 +746,7 @@ while IFS= read -r row; do
   fi
 
   # --- PR closed unmerged: out-of-band close ------------------------------------
-  if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ]; then
+  if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
     # A deliberate supersede/not-planned close records its disposition on the
     # still-open anchor before the PR closes (assets/scripts/pr-dispose.sh):
     # the bead-rehome kind, the successor, and an optional store. When it is
@@ -853,8 +880,8 @@ CHILDREN_EOF
   # open one, so this seam stays independent of the draft gate below. Best-effort
   # and idempotent — pr-status-label.sh derives working/needs-review/needs-attention
   # from the anchor's own state and writes only on a change. Full pass only: the
-  # --posture-only pre-merge arm records posture and touches no PR label.
-  if [ "$POSTURE_ONLY" != 1 ]; then
+  # pre-merge arms record posture and touch no PR label.
+  if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
     cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
     "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$num" \
       --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "$cur_labels" \
@@ -1008,14 +1035,21 @@ CHILDREN_EOF
   fi
 
   # merge.sh reads posture off the bead and never asks GitHub, so the record has
-  # to be no older than the merge arm that reads it. --posture-only is that
-  # earlier pass: it writes the posture and stops here, leaving every dispatch
-  # arm below to the full pass that runs after merge.
+  # to be no older than the merge arm that reads it. --posture-only is the
+  # earliest pre-merge pass: it writes the posture and stops here.
+  # --route-comments-only runs on into the feedback-routing arm below (and stops
+  # after it), so operator feedback is picked up before merge too rather than
+  # waiting for the full pass at the tail; every other dispatch arm is the full
+  # pass's, after merge.
   [ "$POSTURE_ONLY" != 1 ] || continue
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   if [ -n "$rec_target" ] && [ -n "$base" ] && [ "$rec_target" != "$base" ]; then
+    # A pre-merge arm defers retarget handling to the full pass. A retargeted
+    # anchor does not merge this pass, and its feedback is not routed while it
+    # sits on the wrong base, so the early feedback arm skips it.
+    [ "$ROUTE_ONLY" != 1 ] || continue
     UNSETS=()
     while IFS= read -r g; do
       [ -n "$g" ] && UNSETS+=(--unset "check.$g")
@@ -1039,6 +1073,11 @@ GATES
 
   # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
+    # A pre-merge arm defers conflict-rework dispatch to the full pass. A
+    # conflicting anchor cannot merge this pass, its feedback is not routed while
+    # it conflicts (this arm ends the anchor before the feedback arm), and one
+    # dispatch site per pass keeps the dedup window narrow.
+    [ "$ROUTE_ONLY" != 1 ] || continue
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
@@ -1072,34 +1111,21 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # --- WHICH rewrite may be dispatched against this branch. ---------------------
+    # --- HOW the child is told to bring this branch current. ----------------------
     # >>> stale-base-dispatch-mode
-    # This arm dispatches a rewrite rather than performing one, so tk-a0hva's
-    # allowlist on the refinery's own prepare step cannot reach it. Same allowlist
-    # as mol-refinery-patrol's `shared-branch-merge-mode`, deliberately one shape
-    # restated rather than a second discriminator invented here. Only polecat/* is
-    # single-author and disposable enough to rewrite; every other shape, including
-    # one invented next year, must fail to MERGE, which a denylist could not do.
-    # Classified on fix_branch, the branch the child is told to bring current, not
-    # on the anchor's recorded branch. See
-    # specs/tk-rvspf/dispatch-site-branch-classification.md.
-    case "$fix_branch" in
-      polecat/*) prepare_mode=rebase ;;
-      *)         prepare_mode=merge ;;
-    esac
-    # Load-bearing only for a graduation carried on a polecat-shaped branch.
-    if [ "$grad" = "true" ]; then prepare_mode=merge; fi
-    # prepare_mode is what stops the rewrite; mol-polecat-work's
-    # `rejected-branch-resume-mode` reads it. The title and instruction are for
-    # whoever works the bead by hand, and must not contradict it: a merge-mode
-    # child titled "Rebase PR#N" invites exactly what the mode prevents.
-    if [ "$prepare_mode" = "merge" ]; then
-      FIX_TITLE="Merge $base into PR#$num (shared branch $fix_branch):"
-      fix_instruction="Resume in prepare_mode=merge: '$fix_branch' is a SHARED branch, so bring it current by MERGING origin/$base IN (git merge --no-edit origin/$base), resolve conflicts, and push as a fast-forward. Do NOT rebase it and do NOT force-push it: rewriting it orphans the already-merged PRs it carries (tk-a0hva)."
-    else
-      FIX_TITLE="Rebase PR#$num onto $base:"
-      fix_instruction="Resume in prepare_mode=rebase: rebase '$fix_branch' onto origin/$base, resolve conflicts, and force-push with --force-with-lease."
-    fi
+    # This arm dispatches the bring-current rather than performing it. It makes the
+    # same choice as mol-refinery-patrol's `shared-branch-merge-mode`, deliberately
+    # restated where the second actor is chosen rather than a second discriminator
+    # invented here: every branch shape is brought current by MERGING origin/$base
+    # in, never by a rebase. A rebase rewrites history and forces a --force-with-lease
+    # push, which resets the PR's "changes since last review" and drifts its
+    # line-anchored review comments; a merge keeps both, and no shape rewriting means
+    # none can force-push. Classified on fix_branch, the branch the child is told to
+    # bring current, not on the anchor's recorded branch.
+    # See specs/tk-yu4sng/merge-in-for-all-branches.md.
+    prepare_mode=merge
+    FIX_TITLE="Merge $base into PR#$num (branch $fix_branch):"
+    fix_instruction="Resume in prepare_mode=merge: bring '$fix_branch' current by MERGING origin/$base IN (git merge --no-edit origin/$base), resolve conflicts, and push as a fast-forward. Do NOT rebase it and do NOT force-push it: a rewrite resets the PR's review view, and on a shared branch it also orphans the already-merged PRs the branch carries (tk-a0hva)."
     # <<< stale-base-dispatch-mode
     # Do not bring the branch current while the anchor is held for a reason other
     # than the rework itself. anchor_foreign_blocker reads every live blocker on
@@ -1204,8 +1230,8 @@ GATES
       # Orphan adoption BEFORE create: a child this arm created whose stamp then
       # failed carries the deterministic title but no branch metadata — invisible
       # to the branch dedup above, so re-creating would mint a twin every pass.
-      # The title is the classifier's, and stays deterministic for a given head:
-      # the mode is a pure function of the branch name and the graduation marker.
+      # The title is a pure function of the PR number and head branch, so it stays
+      # deterministic for a given head across passes.
       # An unreadable probe dispatches nothing (retry next pass).
       if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
         echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
@@ -1225,11 +1251,12 @@ GATES
       skipped=$((skipped + 1)); continue
     fi
     # The route is stamped separately, after prepare_mode reads back. A dropped
-    # branch or pr_url leaves a child nothing can act on, which is the safe side;
-    # a dropped prepare_mode leaves one that is routable AND rewriting, because
-    # the resume path treats an absent mode as rebase. task_kind and anchor_bead
-    # are the role marker: the child resumes the ANCHOR's own branch, so with no
-    # marker a metadata read cannot tell the child from the anchor.
+    # branch or pr_url leaves a child nothing can act on, which is the safe side.
+    # prepare_mode is stamped merge and the resume path also defaults to merge, so a
+    # dropped mode is safe; the read-back still confirms the child carries the
+    # merge-in instruction it was classified with. task_kind and anchor_bead are the
+    # role marker: the child resumes the ANCHOR's own branch, so with no marker a
+    # metadata read cannot tell the child from the anchor.
     gc bd update "$FIX" \
       --set-metadata task_kind=rework \
       --set-metadata anchor_bead="$id" \
@@ -1317,14 +1344,10 @@ GATES
     CSRC=$(feedback_reviews "$revs_raw" "$rwm")
     DISP=""
     if [ "$choice" = "rework" ]; then
-      # Same allowlist as the CONFLICTING arm's `stale-base-dispatch-mode`: the
-      # child may have to bring the branch current before it can push a fix, and
-      # only polecat/* is disposable enough to rewrite.
-      case "$fix_branch" in
-        polecat/*) prepare_mode=rebase ;;
-        *)         prepare_mode=merge ;;
-      esac
-      if [ "$grad" = "true" ]; then prepare_mode=merge; fi
+      # Same choice as the CONFLICTING arm's `stale-base-dispatch-mode`: the child
+      # may have to bring the branch current before it can push a fix, and every
+      # branch shape is brought current by MERGE, never a rebase/force-push.
+      prepare_mode=merge
       # Deterministic per batch: the same outstanding feedback names the same
       # child, a later batch names a different one. Both halves of the probe
       # matter — a fully stamped hit means this batch was already dispatched and
@@ -1408,17 +1431,18 @@ $CBODY"
       cst=$(gc bd show "$CFIX" --json 2>/dev/null | scrub \
         | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
       if [ "$cst" != "closed" ]; then
-        # An absent prepare_mode resumes as rebase, so a child routed without it
-        # rewrites the very branch the classifier above called shared. Re-stamp
-        # rather than refuse: a batch already covered skips the create block, so
-        # a child stranded by a dropped stamp could take one nowhere else.
+        # prepare_mode is stamped merge and the resume path defaults to merge, so a
+        # child routed without it still merges rather than rewriting. Re-stamp for
+        # metadata completeness rather than refuse: a batch already covered skips
+        # the create block, so a child stranded by a dropped stamp could take one
+        # nowhere else.
         mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
         if [ "$mgot" != "$prepare_mode" ]; then
           gc bd update "$CFIX" --set-metadata prepare_mode="$prepare_mode" >/dev/null 2>&1 || true
           mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
         fi
         if [ "$mgot" != "$prepare_mode" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record prepare_mode=$prepare_mode; left unrouted and NOT watermarking (an absent mode resumes as rebase, which would rewrite '$fix_branch')" >&2
+          echo "$PROG: WARN comment rework $CFIX did not record prepare_mode=$prepare_mode; left unrouted and NOT watermarking (route only a fully-stamped child)" >&2
           skipped=$((skipped + 1)); continue
         fi
         # task_kind=rework is the role marker. The create-path read-back proves
@@ -1659,7 +1683,6 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not render the feedback findings; NOT watermarking (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    FINDING_IDS=""
     ffail=""
     while IFS= read -r frec; do
       [ -n "$frec" ] || continue
@@ -1667,14 +1690,18 @@ $CBODY"
       flocus=$(printf '%s' "$frec" | jq -r '.locus // empty')
       fmsg=$(printf '%s' "$frec" | jq -r '.message // empty')
       fcid=$(printf '%s' "$frec" | jq -r '(.comment_id // "") | tostring')
+      frid=$(printf '%s' "$frec" | jq -r '(.review_id // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
       if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" 2>/dev/null) && [ -n "$fid" ]; then
-        FINDING_IDS="${FINDING_IDS:+$FINDING_IDS,}$fid"
-        # Record which GitHub row raised it, so the write-back can post a declined
-        # finding's owed reply into that thread. Best-effort: a missing id only
-        # drops the decline reply back to a PR-level answer, never the merge hold,
-        # so it does not gate the batch the way the finding filing above does.
+        # Record which GitHub row and review raised it. finding.comment_id lets the
+        # write-back post a declined finding's owed reply into that thread;
+        # finding.review_id groups the finding under its review, so the write-back
+        # dismisses that review once all of its findings clear. Best-effort: a
+        # missing comment id drops the decline reply back to a PR-level answer and a
+        # missing review id drops only this review's auto-dismissal, never the merge
+        # hold, so neither gates the batch the way the finding filing above does.
         case "$fcid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.comment_id="$fcid" >/dev/null 2>&1 || true ;; esac
+        case "$frid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.review_id="$frid" >/dev/null 2>&1 || true ;; esac
       else
         ffail=1; break
       fi
@@ -1683,22 +1710,15 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not file every feedback finding; NOT watermarking (retry next pass; finding.sh re-adopts the ones already filed)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # A rework child carrying the batch is the fix unit for the findings it
-    # answers: it blocks each one, so closing it unblocks them the way a codex
-    # rework child does (specs/tk-ztapg/review-cycle-architecture.md, "The fix
-    # unit"). A visit-routed batch has no fix unit; a human answers it. The wire
-    # is a required write, fail-closed like the finding filing above: a finding
-    # the validator later rules must-fix blocks the anchor, and only the fix-unit
-    # edge lets closing the child release it, so a lost wire strands the anchor
-    # blocked with nothing to unblock it. A failed wire holds the batch
-    # unwatermarked — upsert re-adopts the filed findings and wire-fix-unit,
-    # idempotent, re-attempts only the missing edges next pass.
-    if [ "$choice" = rework ] && [ -n "${CFIX:-}" ] && [ -n "$FINDING_IDS" ]; then
-      if ! "$FINDING" wire-fix-unit --fix-unit "$CFIX" --anchor "$id" --findings "$FINDING_IDS" >/dev/null 2>&1; then
-        echo "$PROG: WARN $id — PR#$num could not wire rework child $CFIX to findings $FINDING_IDS; NOT watermarking (retry next pass)" >&2
-        skipped=$((skipped + 1)); continue
-      fi
-    fi
+    # The rework child's edges onto the findings it answers are NOT hung here.
+    # Every finding is still unvalidated, and a fix unit that blocked one the
+    # validator later declines would refuse that finding's close (bd will not close
+    # a blocked issue) and stall the validator's triage. The close-ordering edge
+    # onto a finding is hung as the validator rules it must-fix (finding.sh
+    # set-disposition), so the fix unit blocks only the findings it must answer; a
+    # visit-routed batch has no fix unit and a human answers it. The child's own
+    # blocks edge onto the anchor, wired at dispatch, is what holds the merge in the
+    # meantime (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
 
     # The batch boundary goes down WITH the disposition that names it. Derived
     # later, off the disposition, it can be lost: a pass that exits after this
@@ -1733,6 +1753,12 @@ $CBODY"
     fi
     continue
   fi
+
+  # --route-comments-only stops here: routing operator feedback above is the whole
+  # of its mandate. Every arm below (BLOCKED, superseded-CHANGES_REQUESTED
+  # dismissal, unengaged review threads, red required checks) and the write-back
+  # sweep are the full pass's, which runs after merge.
+  [ "$ROUTE_ONLY" != 1 ] || continue
 
   # --- BLOCKED: escalate an unresolved-thread block; a pending approval is not one ----
   # A PR whose city-side feedback is all routed can still sit on branch
@@ -1950,13 +1976,10 @@ GATES
               echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); child $rc_dup already covers this head, no new child"
               skipped=$((skipped + 1)); continue
             fi
-            # Same allowlist as the conflict arm's stale-base-dispatch-mode: only
-            # polecat/* is disposable enough to rewrite; a graduation on one is not.
-            case "$rc_fix_branch" in
-              polecat/*) rc_prepare=rebase ;;
-              *)         rc_prepare=merge ;;
-            esac
-            [ "$grad" = "true" ] && rc_prepare=merge
+            # Same choice as the conflict arm's stale-base-dispatch-mode: a child
+            # fixing a red check may first bring the branch current, and every
+            # branch shape is brought current by MERGE, never a rebase/force-push.
+            rc_prepare=merge
             RC_REASON="Required check(s) failing on PR#$num at head $head_oid: $rc_names.${rc_urls:+ Run log(s): $rc_urls.} Fix the failing check(s) and push to '$rc_fix_branch'. Do NOT open a new PR: this reworks PR#$num."
             RC_TITLE="Fix failing required check(s) on PR#$num:"
             if [ -n "$rc_stranded" ]; then
@@ -1999,8 +2022,8 @@ GATES
             # Read the role marker + mode back before routing, as the conflict arm
             # does: `gc bd update` returns 0 without writing (the claim guard is one
             # such path), a child routed without anchor_bead is one the next pass's
-            # dedup cannot see, and one without prepare_mode resumes as rebase on a
-            # branch this may have classified shared.
+            # dedup cannot see; prepare_mode is stamped merge and the resume path
+            # defaults to merge, so an absent mode still merges rather than rewrites.
             rc_got=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // "") + "|" + (.prepare_mode // ""))')
             if [ "$rc_got" != "rework|$id|$rc_prepare" ]; then
               gc bd update "$RCFIX" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" --set-metadata prepare_mode="$rc_prepare" >/dev/null 2>&1 || true
@@ -2085,9 +2108,10 @@ acked=0; replied=0; resolved=0
 owe() { local i; for i in $(printf '%s' "$1" | tr ',' ' '); do
   case " $wowing " in *" $i "*) : ;; *) wowing="$wowing $i" ;; esac
 done; }
-# --posture-only answers one question for the merge arm and writes nothing to
-# GitHub; the full pass that follows it carries the write-back.
-if [ "$POSTURE_ONLY" = 1 ]; then
+# The pre-merge arms answer for the merge arm (--posture-only) or route feedback
+# early (--route-comments-only) and write nothing to GitHub; the full pass that
+# follows them carries the write-back.
+if [ "$POSTURE_ONLY" = 1 ] || [ "$ROUTE_ONLY" = 1 ]; then
   WB_ANCHORS=""
 elif ! WB_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request); then
   echo "$PROG: write-back sweep skipped — could not re-read the anchors" >&2
@@ -2474,6 +2498,95 @@ $wdrows
 WB_DECLINES
   fi
 
+  # --- dismiss a human review and re-request its author once all of its findings
+  #     clear ------------------------------------------------------------------
+  # A human CHANGES_REQUESTED holds the merge and is GitHub's own blocking signal.
+  # It stands until someone clears it, and the person who reads the PR reads that
+  # signal, so a review answered in full but left standing tells them the opposite
+  # of the truth. Once every finding one review raised has closed — a must-fix
+  # fixed and landed, or a decline replied and resolved by the arms above — that
+  # review is answered, so dismiss it (clearing CHANGES_REQUESTED) and re-request
+  # its author, putting the reviewer back in their review-requested queue to judge
+  # the result. Per-review, keyed on finding.review_id: one reviewer clears
+  # independently of another on the same PR. The confidence is the validator's,
+  # carried by the finding's closure (the validator ruled it and the fix landed or
+  # the decline was answered), never a commit oid — a later push does not reopen
+  # this. Dismissal is not approval: the merge still gates on an explicit one. Only
+  # a pass that read the threads cleanly acts, the same $wplan_ok gate the reply
+  # and resolve arms above turn on.
+  if [ "$wplan_ok" = 1 ]; then
+    # Every finding on this anchor that names a review, open and closed, grouped by
+    # that review. A review is answered when every one of its findings is closed and
+    # every declined finding has had its owed reply posted and its thread resolved
+    # (finding.reply_posted=1). A declined finding closes when the validator stamps
+    # finding.reply, which is before the reply/resolve arm above delivers that answer,
+    # so closure alone does not mean answered. A deferred or still-unruled finding is
+    # open, so its review is not yet clear.
+    if wrf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
+      wrev_ready=$(printf '%s' "$wrf" | jq -rc '
+          [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+                | select(((.metadata["finding.review_id"] // "") | tostring) != "")
+                | { rid: ((.metadata["finding.review_id"]) | tostring),
+                    open: (((.status // "") | tostring) != "closed"),
+                    disp: ((.metadata["finding.disposition"] // "") | tostring),
+                    lane: ((.metadata["finding.lane"] // "") | tostring),
+                    reply: ((.metadata["finding.reply"] // "") | tostring),
+                    reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
+                    title: ((.title // "") | tostring) } ]
+          | group_by(.rid)
+          | [ .[] | { rid: .[0].rid,
+                      ready: (all(.[];
+                                  (.open == false)
+                                  and (( .lane == "human" and .disp == "declined"
+                                         and .reply != "" and .reply_posted != "1" ) | not))),
+                      lines: [ .[] | "- " + (.title | sub("^finding\\[[^]]*\\]: "; "")) + ": "
+                                 + (if .disp == "declined" then "resolved by an accepted decline"
+                                    elif .disp == "must-fix" then "addressed by a change"
+                                    else "resolved" end) ] } ]
+          | .[] | select(.ready) | @base64' 2>/dev/null)
+      while IFS= read -r wrr; do
+        [ -n "$wrr" ] || continue
+        wrrj=$(printf '%s' "$wrr" | base64 -d 2>/dev/null) || continue
+        wrid=$(printf '%s' "$wrrj" | jq -r '.rid // empty')
+        [ -n "$wrid" ] || continue
+        # The live review this id names. Only a human CHANGES_REQUESTED is this
+        # arm's to clear: our own superseded block is the reconcile arm's, above;
+        # an already-DISMISSED or otherwise non-blocking review needs nothing, and
+        # its DISMISSED state is the idempotency — a repeat pass finds nothing to do.
+        wrstate=$(printf '%s' "$wview" | jq -r --arg r "$wrid" \
+          '[ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0].state // empty' 2>/dev/null)
+        wrlogin=$(printf '%s' "$wview" | jq -r --arg r "$wrid" \
+          '[ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0].author.login // empty' 2>/dev/null)
+        [ "$wrstate" = "CHANGES_REQUESTED" ] || continue
+        [ -n "$wrlogin" ] && [ "$wrlogin" != "$SELF_LOGIN" ] || continue
+        wrlines=$(printf '%s' "$wrrj" | jq -r '.lines[]?' 2>/dev/null)
+        wrmsg="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed and a fresh review is requested.
+
+$wrlines
+
+Dismissal does not mark approval; the merge still gates on an explicit approving review."
+        # Re-request the author FIRST, so a re-queue that cannot land holds the
+        # dismissal with it: both are in scope, and a dismissal alone would drop
+        # the reviewer instead of re-queuing them. Re-requesting a past reviewer is
+        # allowed, so the retry after a failed dismiss repeats it harmlessly.
+        if ! gh_api_origin -X POST "repos/$ORIGIN_REPO/pulls/$wnum/requested_reviewers" \
+             -f "reviewers[]=$wrlogin" >/dev/null 2>&1; then
+          echo "$PROG: $wid — PR#$wnum could not re-request $wrlogin for review $wrid; NOT dismissing (retry next pass)" >&2
+          continue
+        fi
+        if gh_api_origin -X PUT "repos/$ORIGIN_REPO/pulls/$wnum/reviews/$wrid/dismissals" \
+             -f message="$wrmsg" >/dev/null 2>&1; then
+          dismissed_n=$((dismissed_n + 1))
+          echo "$PROG: $wid — PR#$wnum dismissed human review $wrid and re-requested $wrlogin (its findings all cleared)"
+        else
+          echo "$PROG: $wid — PR#$wnum re-requested $wrlogin but could not dismiss review $wrid; retry next pass" >&2
+        fi
+      done <<WB_REVIEW_CLEARS
+$wrev_ready
+WB_REVIEW_CLEARS
+    fi
+  fi
+
   # The plan is this pass's own read of GitHub, so a plan that could not be built
   # retires nothing.
   if [ "$wbatch_ok" = 1 ] && [ "$wplan_ok" = 1 ]; then
@@ -2497,6 +2610,13 @@ if [ "$POSTURE_ONLY" = 1 ]; then
   # immediately before merge.sh and holds the merge arm on a non-zero. The full
   # pass runs after merge, where the same rc would gate nothing.
   [ "$unpostured" -eq 0 ] || exit 1
+elif [ "$ROUTE_ONLY" = 1 ]; then
+  # The early feedback arm, run right after the posture arm and before merge, so
+  # operator feedback is routed on the same tick the posture is stamped instead of
+  # waiting for the full pass at the tail. Its rc holds nothing: routing is
+  # best-effort and the full pass re-runs it idempotently, so refinery-reconcile
+  # reports a non-zero but never holds merge on it.
+  echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
 else
   echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
 fi

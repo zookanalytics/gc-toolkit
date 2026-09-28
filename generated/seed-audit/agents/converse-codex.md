@@ -64,8 +64,10 @@ Definitions:
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The visit stays `in_progress`
   throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
-  sitting ends only when its VISIT closes (**How this thread ends**). A
-  restart can still take it, so the hold-time stamp (step 5) is mandatory.
+  sitting ends only when its VISIT closes (**How this thread ends**). The
+  hold IS a demand, so the hold-time stamp (step 5) is mandatory: it files
+  the gate the item blocks on and re-surfaces under, and a hold that files
+  none parks a bead nothing re-asks.
 
 **A wait is an edge onto a bead, and a bead is either ready or blocked.**
 There is no parked state: what a person owes is a demand bead, what a
@@ -235,11 +237,16 @@ The loop, every visit:
    HOLDER=""
    eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER)=')"
    ```
-   **Fold only when `$HOLDER` is another visit's id** — then append
-   `folded into $HOLDER` to the subject's notes, stamp your visit
-   `gc.outcome=folded`, close it, and go to step 8. When `$HOLDER` is
-   `$VISIT` you are the holder: prep and continue. When it is EMPTY the
-   listing did not read, which proves nothing — hold.
+   **Fold only when `$HOLDER` is another visit's id** — then close your visit
+   through the shared guarded close, which appends the reading to the subject,
+   stamps `gc.outcome=folded` and its board-visible reason, and closes:
+   ```bash
+   "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
+     --outcome folded --reason "folded into $HOLDER"
+   ```
+   Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
+   continue. When it is EMPTY the listing did not read, which proves nothing —
+   hold.
 
 **Steps 2–8 — the working procedure lives in skills that load when you
 reach the step.** Step 1 is the entry point and stays inline; steps 2
@@ -315,16 +322,16 @@ Rules:
   later pass, once its visit reads closed or gone, and frees the
   `max_active_sessions` slot; it reaps only an UNATTACHED pane, so a
   closed-visit sitting you are still attached to waits until it is no
-  longer attended. A health restart can still take a held sitting
-  mid-thread, and the kill clears the scrollback; whether the respawn
-  replays the thread or starts clean depends on the template's
-  `wake_mode`, so no sitting may rely on the thread surviving. The
-  sign-off has to land before you close, not after;
-  stamp the takeaway when the hold BEGINS (step 5); append the
-  outcome as soon as a sitting settles anything (step 6); and never leave
-  a decision live only in the thread. Assume every message may be the last
-  the operator sees. Mechanism: `docs/gascity-human-engagement.md` → "How
-  a held sitting ends".
+  longer attended. The per-model sittings run `wake_mode = "resume"`
+  (`agents/converse-opus/agent.toml`), so a health restart replays the
+  thread and the sitting continues; the durable demand and the step-1
+  re-claim guard cover the rare respawn that comes up without it. The
+  record never lives only in the thread, and the discipline is unchanged:
+  the sign-off has to land before you close, not after; stamp the takeaway
+  when the hold BEGINS (step 5); and append the outcome as soon as a
+  sitting settles anything (step 6). That is what the board reads and a
+  later reader inherits. Mechanism: `docs/gascity-human-engagement.md` →
+  "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is

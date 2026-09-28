@@ -50,6 +50,13 @@ finding() { # id anchor [disposition] [lane]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.disposition":"%s","finding.lane":"%s","finding.key":"%s:0"}}' \
     "$1" "$2" "${3:-must-fix}" "${4:-codex}" "${4:-codex}"
 }
+# An anchor like pre(), but targeting integration/<convoy> instead of main — the
+# owned-convoy checkpoint tk-6bji7k.9 marks with a banner and a base: label.
+pre_int() { # id branch convoy
+  pre "$1" "$2" | jq -c --arg t "integration/$3" '.metadata.merged_target=$t'
+}
+# The labels on a PR view fixture, sorted and comma-joined.
+pv_labels() { jq -r '[.labels[]?.name] | sort | join(",")' "$GH_DIR/pr_view_$1.json"; }
 
 echo "# adopt an existing OPEN PR"
 store "[$(pre A1 polecat/a1)]"
@@ -470,6 +477,58 @@ has "$tlog" "--title fix(pr-open): keep the bead id in the title (ttpfx) --body-
 hasnt "$tlog" "chore: fix(pr-open):" "…and no derived type is prepended to it"
 has "$tlog" "--title chore: Tidy the enumerate step (ttbare) --body-file" \
     "a bead with no issue_type falls back to chore"
+
+# The label writer pr-open delegates to. It is absent from the SUT dir above, where
+# the reconcile/mark-base calls are best-effort and silently no-op without it (no
+# earlier case asserts a label). Installed now so the cases below exercise the real
+# status: reconcile and the base: mark, and can read the labels back off the PR.
+cp "$HERE/pr-status-label.sh" "$SD/pr-status-label.sh"
+
+echo "# an integration-targeted PR opens with a checkpoint banner and the base: label (tk-6bji7k.9)"
+# The base is integration/<convoy-id>, so the body leads with a standing banner
+# naming the integration base and the mint-a-phase meaning, and the PR list carries
+# the sibling base: integration label — both set here where the base is known.
+store "[$(pre_int INT1 polecat/int1 tk-5kk1zh), $(rev INT1)]"
+echo "sha-int1" > "$GH_DIR/head_polecat_int1"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/91"
+printf '%s' "$(prrow 91 OPEN polecat/int1 sha-int1 integration/tk-5kk1zh)" > "$GH_DIR/pr_view_91.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta INT1 merge_result)" "pull_request" "the integration checkpoint opens and flips"
+ibody=$(cat "$GH_DIR/pr_create_body.txt")
+has "$ibody" "[!IMPORTANT]" "the created body carries an alert banner"
+has "$ibody" 'merges into `integration/tk-5kk1zh`, not `main`' "…naming the integration base, not main"
+has "$ibody" "mints this phase" "…and states that approving it mints a phase"
+has "$ibody" "runs at graduation" "…and that the broader review runs at graduation"
+has "$(pv_labels 91)" "base: integration" "the base: integration label is stamped on the PR"
+
+echo "# a main-targeted PR gets no banner and no base: label — the default is unmarked"
+store "[$(pre M1 polecat/m1), $(rev M1)]"
+echo "sha-m1" > "$GH_DIR/head_polecat_m1"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/92"
+printf '%s' "$(prrow 92 OPEN polecat/m1 sha-m1 main)" > "$GH_DIR/pr_view_92.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta M1 merge_result)" "pull_request" "the mainline PR opens"
+hasnt "$(cat "$GH_DIR/pr_create_body.txt")" "[!IMPORTANT]" "no checkpoint banner on a main-targeted PR"
+hasnt "$(pv_labels 92)" "base:" "no base: label on a main-targeted PR"
+
+echo "# adopting an OPEN integration PR splices the banner in and stamps the base: label"
+# The body carries the marked region with a stale summary; the refresh re-splices a
+# freshly composed region, and for an integration target that region now leads with
+# the banner. The adoption path also stamps the base: label, like the create path.
+store "[$(pre_int INT2 polecat/int2 tk-5kk1zh)]"
+STALEI=$(printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'Old summary.' '' \
+  '## Refinery handoff' '' '- Issue: INT2' '<!-- /gc:pr-summary -->')
+prrow 93 OPEN polecat/int2 sha-int2 integration/tk-5kk1zh | jq --arg b "$STALEI" '. + {body:$b}' > "$GH_DIR/pr_view_93.json"
+printf '[%s]' "$(prrow 93 OPEN polecat/int2 sha-int2 integration/tk-5kk1zh)" > "$GH_DIR/pr_list_polecat_int2.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta INT2 merge_result)" "pull_request" "the integration PR is adopted and flips"
+inewbody=$(jq -r '.body' "$GH_DIR/pr_view_93.json")
+has "$inewbody" "[!IMPORTANT]" "the refreshed body carries the checkpoint banner"
+has "$inewbody" 'integration/tk-5kk1zh' "…naming the integration base"
+has "$(pv_labels 93)" "base: integration" "adoption also stamps the base: label"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

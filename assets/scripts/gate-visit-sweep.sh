@@ -49,6 +49,10 @@ scrub() { tr -d '\000-\037'; }
 PROG="gate-visit-sweep"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
+# The one definition of what subject a visit covers, shared with gc-helm.sh,
+# converse-fold.sh and liveness-sweep.sh. Exposes $VISIT_IDENTITY_JQ.
+# shellcheck source=visit-identity.sh
+. "$SCRIPT_DIR/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $SCRIPT_DIR" >&2; exit 1; }
 
 command -v jq >/dev/null 2>&1 \
     || { echo "$PROG: jq is required but not found in PATH" >&2; exit 1; }
@@ -120,15 +124,14 @@ while IFS=$'\t' read -r gate_id gated title; do
         STALE=$((STALE + 1)); continue
     fi
 
-    # A visit already standing for the gated bead: the same union of stamp,
-    # tracks edge and stall_root that liveness-sweep reads as "conversing".
-    visit=$(printf '%s' "$LIVE_RAW" | jq -r --arg s "$gated" '
+    # A visit already standing for the gated bead. visit_covers is the shared
+    # identity test (tracks edge, gc.continuation_group fallback). The stall_root
+    # arm is retained as an advisory liveness read per the tk-fhlqce ruling:
+    # nothing writes stall_root today, so it is inert, and its removal (once the
+    # edge is proven to cover the same visits) is tracked as a follow-up.
+    visit=$(printf '%s' "$LIVE_RAW" | jq -r --arg s "$gated" "$VISIT_IDENTITY_JQ"'
       [ .[] | select((.metadata.task_kind // "") == "visit")
-        | select(((.metadata["gc.continuation_group"] // "") == $s)
-                 or ((.metadata.stall_root // "") == $s)
-                 or ([ .dependencies[]?
-                       | select((.type // "") == "tracks")
-                       | select((.depends_on_id // "") == $s) ] | length > 0))
+        | select(visit_covers($s) or ((.metadata.stall_root // "") == $s))
         | .id ] | first // empty' 2>/dev/null || true)
 
     if [ -n "$visit" ]; then

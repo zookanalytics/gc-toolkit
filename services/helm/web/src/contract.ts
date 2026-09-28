@@ -249,6 +249,20 @@ export interface Tile {
    * `acceptable` is false. Always present.
    */
   accept_formula: string;
+  /**
+   * The GitHub tree-view link for `pr_branch`, or `''` when the row has no
+   * branch or the rig's repository could not be resolved. The board makes no
+   * GitHub call: the repository is learned from a `pr_url` already on the board,
+   * since every anchor in one rig targets that rig's repository. A rig the board
+   * holds no pull request URL for keeps the bare branch text.
+   */
+  pr_branch_url: string;
+  /**
+   * Who must act on this merge anchor next — `'working'`, `'needs-review'`, or
+   * `'needs-attention'` — the same status: taxonomy the GitHub PR list carries,
+   * so the board and the label read one vocabulary. `''` on a non-merge row.
+   */
+  pr_phase: string;
 }
 
 /**
@@ -276,6 +290,15 @@ export interface Sitting {
    * sitting reading `dismissed` until it is closed or signed off over.
    */
   outcome: string;
+  /**
+   * The one-line human-readable sentence naming WHY the visit closed
+   * (`gc.outcome_reason`): "moot: premise died, subject already closed",
+   * "folded into <holder>", or what a held sitting signed off on. `outcome` is
+   * the word to group by; this is the sentence to read, so a dedup close reads
+   * as a decision rather than a dropped need. `''` when the writer stamped only
+   * the word.
+   */
+  outcome_reason: string;
   /** The converse session that ran it — what an operator attaches to. */
   session: string;
   /** RFC 3339. Omitted when the source could not read the stamp. */

@@ -140,3 +140,50 @@ func TestShowReadsThePayloadWhateverGcExitsWith(t *testing.T) {
 		t.Error("Show != nil when gc could not be started")
 	}
 }
+
+// List decodes the array `gc bd list` prints, and fails CLOSED (ok=false) on
+// anything that is not an array — the same signal the scripts got from
+// `jq -e 'type == "array"'`. An empty selection is `[]`: rows nil, ok true.
+func TestListDecodesArrayAndFailsClosed(t *testing.T) {
+	writeGC := func(t *testing.T, body string) {
+		t.Helper()
+		bin := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bin, "gc"), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+
+	t.Run("two rows", func(t *testing.T) {
+		writeGC(t, `echo '[{"id":"k1","metadata":{"task_kind":"rework"}},{"id":"k2","metadata":{}}]'`)
+		rows, ok := New().List("--metadata-field", "task_kind=rework")
+		if !ok || len(rows) != 2 {
+			t.Fatalf("List = (%d rows, ok=%v), want (2, true)", len(rows), ok)
+		}
+	})
+
+	t.Run("empty selection is ok", func(t *testing.T) {
+		writeGC(t, `echo '[]'`)
+		rows, ok := New().List()
+		if !ok || len(rows) != 0 {
+			t.Fatalf("List on [] = (%d rows, ok=%v), want (0, true)", len(rows), ok)
+		}
+	})
+
+	t.Run("a non-array fails closed", func(t *testing.T) {
+		// bd show returns an object when nothing resolves; a list that answered
+		// that way must not read as an empty result.
+		writeGC(t, `echo '{"error":"nope"}'`)
+		if _, ok := New().List(); ok {
+			t.Error("List on an object = ok true; want ok false (fail closed)")
+		}
+	})
+
+	t.Run("gc that cannot run fails closed", func(t *testing.T) {
+		bin := t.TempDir() // no gc in it
+		t.Setenv("PATH", bin)
+		if _, ok := New().List(); ok {
+			t.Error("List with no gc on PATH = ok true; want ok false")
+		}
+	})
+}

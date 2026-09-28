@@ -270,17 +270,29 @@ destination that varies silently with the shell's directory is the worst
 failure mode an intake path can have.
 
 **The `prefix+a` keybinding picks the rig rather than defaulting it.** After the
-message popup, `tmux-visit-prompt.sh` shows a chooser of every rig — a suspended
-or not-running one is tagged, not withheld, since `gc rig suspend` keeps the
-beads store accessible and a report filed there is recorded and triaged on
-resume — defaulted to the rig of the pane the key was pressed in (its `GC_RIG`,
-else the `<rig>__<agent>` session-name prefix; absent on a pane that names no
-rig, where the operator just picks). Enter confirms that default or the operator
-picks another, and the choice rides through as `--rig`. This is board context,
-not cwd: the pane belongs to one rig explicitly, and the operator sees and
-confirms the target in the chooser rather than having it vary under them. A
-broken or empty `gc rig list` skips the chooser and leaves the intake on the CLI
-default.
+message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
+hq/city-workspace store — that store runs no reaction pool, so a topic filed
+there would park on the board with nobody to engage it, and it is dropped from
+the picker rather than offered. A suspended or not-running rig is still tagged,
+not withheld, since `gc rig suspend` keeps the beads store accessible and a
+report filed there is recorded and triaged on resume. The picker is defaulted to
+the rig of the pane the key was pressed in (its `GC_RIG`, else the
+`<rig>__<agent>` session-name prefix; absent on a pane that names no rig, where
+the operator just picks). Enter confirms that default or the operator picks
+another, and the choice rides through as `--rig`. This is board context, not
+cwd: the pane belongs to one rig explicitly, and the operator sees and confirms
+the target in the chooser rather than having it vary under them. A broken or
+empty `gc rig list` skips the chooser and leaves the intake on the CLI default.
+
+**A target with no reaction agent is refused, not filed.** `gc-visit-open.sh`
+reads the roster before it files: a rig with neither a proactive pool nor a
+registered converse cannot engage an operator topic, so the intake refuses such
+a target and files nothing rather than stranding the topic on the board. This
+backstops the chooser exclusion and also catches a `--rig` target, a
+non-interactive caller, or a bead id whose own rig is pool-less. Registration is
+the bar, not liveness: a suspended rig keeps its registered agents and still
+files (triaged on resume). An unreadable roster refuses nothing, so a degraded
+data plane never blocks an intake.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
 `mol-first-reaction` at the new subject. That formula triages the subject and
@@ -598,7 +610,10 @@ Two runtime endings the idle setting does not own, and both still reach converse
   that cycling, so `converse-reap` above is what collects its settled sitting.
 - **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
   health restart can still take a held sitting out from under a reader. The
-  trace-before-you-wait discipline holds for exactly this reason.
+  per-model converse templates run `wake_mode = "resume"`, so that restart
+  replays the thread and the sitting continues; the trace-before-you-wait
+  discipline holds because the demand is the durable gate the board reads
+  and the work blocks on, not because the thread is lost.
 
 The cost is real: a held visit nobody answers holds a `max_active_sessions`
 slot indefinitely, where an idle clock would recycle it. The bound is the
@@ -660,22 +675,24 @@ that field:
   consecutive same-anchor defers, then `DecideAssignedWorkExhausted`
   forces the stop under its own `assigned_work_exhausted` reason. At
   `patrol_interval = "30s"` the defer buys ~90 seconds, not immortality.
-- **The kill erases the evidence.** The stop path calls
-  `ClearScrollback` (`cmd/gc/session_reconciler.go`), wiping the pane's
-  history, and the converse template's `wake_mode = "fresh"` makes the
-  respawn a clean provider session. Contrast `wake_mode = "resume"`,
-  which replays the provider transcript across gaps far longer than the
-  timeout (measured at ~15h, `specs/tk-oml75/spike-report.md` §1). So a
-  reaped converse thread is **unrecoverable, not merely hidden**, and no
-  remedy may assume the operator can reopen it.
+- **The kill clears the pane; a resume sitting replays past it.** The stop
+  path calls `ClearScrollback` (`cmd/gc/session_reconciler.go`), wiping the
+  pane's history. The per-model converse templates run `wake_mode =
+  "resume"`, which replays the provider transcript across gaps far longer
+  than the timeout (measured at ~15h, `specs/tk-oml75/spike-report.md` §1),
+  so a restarted sitting comes back with its thread. Only the legacy
+  `converse` pool is `wake_mode = "fresh"`, which respawns a clean provider
+  session; there the thread is gone and the durable trace is what a fresh
+  respawn reads instead.
 
-*Seam:* **nothing pack-owned runs at kill time**, so a warn-before-reap
-is not available to us; the pack's only lever is to have already written
-the trace. Hence the converse contract stamps the subject's takeaway when
-the hold *begins* (not only at close) — a reap then leaves a dated record
-of what the sitting was waiting for — and every deliberate close of a
-**held** sitting ends with a sign-off block naming the outcome and the
-subject to look at next.
+*Seam:* **nothing pack-owned runs at kill time**, so there is no
+warn-before-reap. The converse contract stamps the subject's takeaway when
+the hold *begins* (not only at close) because that stamp IS the demand —
+the gate the board reads and dependent work blocks on — so it has to land
+before the wait, not because a pane might be lost; a fresh respawn or a
+failed resume then still finds a dated record of what the sitting was
+waiting for. Every deliberate close of a **held** sitting ends with a
+sign-off block naming the outcome and the subject to look at next.
 
 *Longevity is not the remedy, and taking the clock off is not longevity.*
 Raising `idle_timeout` only widens the window in which a dead thread looks
