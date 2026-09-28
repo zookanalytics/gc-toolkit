@@ -190,9 +190,19 @@ check_set_sentinel = "none"
 # out (docs/state-machine.md is the vocabulary's normative source); it is kept
 # here as the declaration the state-space invariant (I2/I6) describes.
 marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
-# `approval` as a check_set member is satisfied only by an external APPROVED
-# review at the live head, never by a check.approval marker.
+# `approval` as a check_set member is satisfied by an external APPROVED review
+# from another account, never by a check.approval marker. The approval persists
+# across commits and the city never dismisses it, so the merge does not require
+# it AT the head; it requires that the change since the approved commit is not
+# material (materiality.sh). A material change since the sign-off owes a
+# re-review and holds the merge.
 approval_member = "approval"
+# approval_materiality = `<stands|owed>@<approved-oid>..<head-oid>` on the anchor:
+# an agent's verdict on whether the change since the approved commit is material.
+# `stands` covers the head; `owed` holds for re-review. The verdict binds to the
+# head it judged, so a later commit is unjudged. materiality.sh is the only
+# writer, and it is an issued verdict, never a cadence auto-promotion.
+approval_materiality_verbs = ["stands", "owed"]
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
 # I1 holds that a hold is a `blocks` edge to a live bead in the same store, so
@@ -502,6 +512,7 @@ keys = [
 [metadata.gates]
 keys = [
   "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict",
+  "approval_materiality",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
@@ -522,6 +533,14 @@ keys = [
 #   Written by signoff.sh and pr-facts.sh, each reading it back before the
 #   irreversible dismissal; read by merge.sh. Absent means that path armed
 #   nothing. Never cleared.
+# approval_materiality — `<stands|owed>@<approved-oid>..<head-oid>` on the anchor:
+#   an agent's verdict on whether the change since a standing human approval is
+#   material. `stands` covers the head (merge.sh treats the approval gate as met);
+#   `owed` holds for re-review. The verdict binds to the (approved, head) pair it
+#   judged, so a later head is unjudged and falls back to a fresh read.
+#   materiality.sh is the only writer — an issued verdict, never a cadence
+#   auto-promotion (specs/tk-w26b6/stale-gate-re-dispatch.md). Read by merge.sh
+#   through materiality.sh. Overwritten per head; not otherwise cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same update that closes the review bead (signoff.sh; review-outcome.sh
 #   writes `approve` on a back-lane outcome). lane-state.sh derives a lane green

@@ -22,7 +22,7 @@ harness_init
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
-  "$HERE/lane-state.sh" "$HERE/finding.sh"
+  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/materiality.sh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
@@ -286,16 +286,42 @@ store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
 echo '[]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review at the live head" "check_set approval with no review holds"
+has "$out" "no external APPROVED review on the pull request" "check_set approval with no review holds"
 
 printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded A1" "an external APPROVED at the live head satisfies it"
 
+# An approval given at an OLD commit still stands: the sign-off persists across
+# commits and is never dismissed, so the merge asks materiality, not identity.
+# A content change since it (compare shows files) is a re-review owed.
 printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
+printf '%s' '{"files":[{"filename":"x.sh","patch":"@@ -1 +1 @@ changed"}]}' > "$GH_DIR/compare_sha-OLD...sha-20.json"
 store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review at the live head" "an approval of an OLD head does not count"
+has "$out" "the change since is material" "an approval of an OLD head with a material change owes a re-review"
+hasnt "$out" "merged + recorded A1" "…and the PR does not merge under the stale sign-off"
+
+# The same old approval, but the head added nothing over it: immaterial, so the
+# sign-off stands and the PR merges without asking for a fresh approval.
+printf '{"files":[]}' > "$GH_DIR/compare_sha-OLD...sha-20.json"
+store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded A1" "an approval of an OLD head with an immaterial change still merges"
+
+# An agent's recorded stands verdict covers a content change since the approval.
+printf '{"files":[{"filename":"x.sh","patch":"@@"}]}' > "$GH_DIR/compare_sha-OLD...sha-20.json"
+store "[$(anchor A1 20 ',"check_set":"codex,approval","approval_materiality":"stands@sha-OLD..sha-20"'), $(rev A1)]"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded A1" "an agent's stands verdict merges a content change under the standing approval"
+
+# A materiality read that cannot resolve holds fail-closed — never a merge on an
+# unknown change since the sign-off.
+rm -f "$GH_DIR/compare_sha-OLD...sha-20.json"
+store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
+out=$("$SUT" 2>&1)
+has "$out" "could not be read" "an unreadable materiality check holds the merge"
+hasnt "$out" "merged + recorded A1" "…and does not merge"
 
 printf '[{"user":{"login":"gc-city-bot"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
 store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"

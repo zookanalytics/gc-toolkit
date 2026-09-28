@@ -15,9 +15,12 @@
 # every declared lane DERIVES green through lane-state.sh (no stored marker; a
 # lane with no local review bead is backed by an operator's GitHub approval on
 # the PR, the shared fallback); approval (armed by the check_set
-# member, signoff_dismissed, or a DISMISSED review of our own — satisfied only
-# by a latest APPROVED from another account at the live head; a standing
-# CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
+# member, signoff_dismissed, or a DISMISSED review of our own — satisfied by a
+# standing APPROVED from another account whose change since the approved commit
+# is not material, per materiality.sh: the approval persists across commits and
+# is never dismissed, so a moved head does not by itself unapprove the PR, and a
+# re-review is owed only on a material change; a standing CHANGES_REQUESTED from
+# any other account vetoes); no unclosed rework/review
 # child or open must-fix finding (metadata keys naming this PR AND dependency
 # edges, the finding held by its own blocks edge; unreadable holds);
 # mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
@@ -59,6 +62,11 @@ RENDERER="$SCRIPTS_DIR/render-seed-audit.sh"
 # merge and publish never drift on which lane is green (a second implementation
 # of the predicate is how two actors come to disagree about one anchor).
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
+# Whether a standing human approval still covers the live head. The approval
+# persists across commits (never dismissed), so the merge does not require it AT
+# the head; it requires that the change since the approved commit is not
+# material. materiality.sh makes that judgment.
+MATERIALITY="$SCRIPTS_DIR/materiality.sh"
 # The repository this pass merges into, resolved through git so a run with no
 # checkout under it simply has no committed artifact to keep current.
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -536,14 +544,18 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
   # Latest state-bearing review per non-self reviewer (DISMISSED shadows its
-  # author's older rows); approvals count only at the live head.
-  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" --arg head "$head_oid" '
+  # author's older rows). A standing APPROVED counts wherever it was given: the
+  # commit it names is the base materiality.sh diffs the head against, not a
+  # binding on the approval. The most recent approval is the one the merge leans
+  # on, so its commit is the base; a CHANGES_REQUESTED still vetoes.
+  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" '
     ([ .[] | select((.user.login // "") != $self)
        | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
      | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
+    | ([ $latest[] | select(.state == "APPROVED") ] | sort_by(.submitted_at // "") | last) as $appr
     | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
-        approver: ([ $latest[] | select(.state == "APPROVED")
-                     | select((.commit_id // "") == $head) | (.user.login // "") ] | .[0] // ""),
+        approver: (($appr.user.login) // ""),
+        approved_oid: (($appr.commit_id) // ""),
         self_dismissed: ([ .[] | select($self != "") | select((.user.login // "") == $self)
                            | select(.state == "DISMISSED") ] | length) }' 2>/dev/null)
   if [ -z "$rstate" ]; then
@@ -584,9 +596,30 @@ while IFS= read -r row; do
       # That is `settled`, and the approval clause of the owed rule is what makes
       # the row the operator's rather than nobody's.
       record_machine "$id" "settled" "$head_oid" "$aroute"
-      echo "$PROG: PR#$num no external APPROVED review at the live head $head_oid (approval armed by: check_set/signoff_dismissed/own dismissed review); merge held (anchor $id)"
+      echo "$PROG: PR#$num no external APPROVED review on the pull request (approval armed by: check_set/signoff_dismissed/own dismissed review); merge held (anchor $id)"
       held=$((held + 1)); continue
     fi
+    # A standing approval exists; it need not be AT the head. The approval
+    # persists across commits and the city never dismisses it, so the merge asks
+    # a narrower question: is the change since the approved commit material?
+    # materiality.sh answers at-head/immaterial/stands (the sign-off covers the
+    # head) or owed (a re-review is owed first); an unreadable answer holds.
+    approved_oid=$(printf '%s' "$rstate" | jq -r '.approved_oid // ""')
+    mverdict=$("$MATERIALITY" classify --anchor "$id" --approved-oid "$approved_oid" --head "$head_oid" 2>/dev/null); mrc=$?
+    if [ "$mrc" -ne 0 ]; then
+      echo "$PROG: PR#$num materiality of the change since $approver's approval at $approved_oid could not be read; merge held (anchor $id)"
+      held=$((held + 1)); continue
+    fi
+    case "$mverdict" in
+      at-head|immaterial|stands) : ;;
+      *)
+        # A material change landed under the standing approval: the sign-off no
+        # longer covers the head, so a re-review is owed. The row is the
+        # operator's — `settled`, whose owed rule puts it on their queue.
+        record_machine "$id" "settled" "$head_oid" "$aroute"
+        echo "$PROG: PR#$num has $approver's approval at $approved_oid but the change since is material ($mverdict); re-review owed; merge held (anchor $id)"
+        held=$((held + 1)); continue ;;
+    esac
   fi
 
   # --- mergeStateStatus: CLEAN, or UNSTABLE decided on required contexts only ----

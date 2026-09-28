@@ -209,14 +209,45 @@ validator writes; `fixing` is also what the retired `reconcile-gate-verdicts.sh`
 left behind, migrated. The full lane state machine is
 [specs/tk-ztapg/review-cycle-architecture.md](../specs/tk-ztapg/review-cycle-architecture.md).
 
-`approval` takes no marker of its own. `merge.sh` satisfies it from an
-external APPROVED review at the live head, never from the city's own account
-and never from a `check.approval` marker. `lifecycle/lifecycle.toml` records
-that rule. What the *reviewer* did short of a verdict is posture, not a gate:
-see [Posture](#posture) below. **`signoff.sh` is the single writer of gate
-verdicts** (component-model I7). A verdict binds to no commit: the reviewed oid
-is recorded on the review bead and named in the posted artifact, and nothing
+`approval` takes no marker of its own. `merge.sh` satisfies it from an external
+APPROVED review by another account, never from the city's own account and never
+from a `check.approval` marker. The approval persists across commits — the city
+never dismisses a human verdict, and GitHub's dismiss-stale-on-push is off — so
+the merge does not require it AT the head. It requires that the change since the
+approved commit is not **material**: a sign-off stands across a change that does
+not alter the reviewed diff in substance, and a re-review is owed only on a
+material change. Requiring the approval at the head instead would re-review a
+pure rebase and every trivial fixup, which is not what the sign-off meant, and
+the approved commit is the base the change is measured from, not a binding on the
+review. `materiality.sh` makes that judgment: a no-op rewrite is immaterial
+mechanically, and a content change since the sign-off is judged by an agent whose
+verdict is recorded in `approval_materiality` — a material change owes a
+re-review and holds the merge
+([specs/tk-6bji7k.6/decision.md](../specs/tk-6bji7k.6/decision.md);
+[specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md)). This is the
+approval gate's counterpart to *Green survives new commits*, and it is only the
+human gate's: the machine lanes above stay commit-agnostic. `lifecycle/lifecycle.toml`
+records the rule. What the *reviewer* did short of a verdict is posture, not a
+gate: see [Posture](#posture) below. **`signoff.sh` is the single writer of gate
+verdicts** (component-model I7). A lane verdict binds to no commit: the reviewed
+oid is recorded on the review bead and named in the posted artifact, and nothing
 compares it to a head.
+
+**The commit discipline a review round keeps.** The materiality read stands on
+two properties of the branch, and the round's commit discipline is what holds
+them. Within a round, a fix is added as a commit — the rework child brings the
+branch current by merging its base in and pushes a fast-forward, never a rebase,
+amend, or force-push (`assets/scripts/pr-facts.sh`, the resume instruction). That
+keeps a reviewer's inline comments anchored to the commits they were left on, and
+it keeps the approved commit reachable on the branch, which is the base
+`materiality.sh` measures the change against — a rewrite that drops it answers
+`gone`, and the merge holds for a fresh look rather than merging a change it
+cannot weigh. History is rewritten only between rounds, and only on the
+disposable feature branch, never on a shared or integration branch that carries
+already-merged pull requests. The land itself is one squash
+(`assets/scripts/merge.sh`), so the change reaches `main` as a single legible
+commit whatever the round count
+([specs/tk-6bji7k.6/decision.md](../specs/tk-6bji7k.6/decision.md)).
 
 One shape no cadence pass can rewrite. `merge.sh` and gate-ensure both read
 only the gates named in `check_set`, so a `check.<g>` outside it is dispatched
