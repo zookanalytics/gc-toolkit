@@ -1075,9 +1075,15 @@ GATES
   # outstanding current, and a conflict carrying feedback reaches the
   # feedback-routing arm, so review acknowledgment is never gated on mergeability.
   if { [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; }; then
-    # A pre-merge pass (--route-comments-only) defers a conflicting anchor to the
-    # full pass; it cannot merge while it conflicts either way.
-    [ "$ROUTE_ONLY" != 1 ] || continue
+    # A pre-merge pass (--route-comments-only) cannot merge a conflicting anchor
+    # either way, so the dedicated bring-current child below is the full pass's.
+    # But acknowledgment is not gated on mergeability: a conflicting anchor
+    # carrying unanswered feedback still runs the freeze checks below and falls
+    # through to the feedback-routing arm, which files the merge-mode rework that
+    # answers the comments and brings the branch current together. Only a
+    # conflicting anchor with nothing outstanding has no early work, and defers
+    # whole to the full pass.
+    [ "$ROUTE_ONLY" != 1 ] || [ "$unanswered" = 1 ] || continue
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue

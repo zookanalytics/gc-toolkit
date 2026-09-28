@@ -2676,13 +2676,13 @@ out=$(run)
 has "$out" "PR#69 is MERGED" "the full pass still records it"
 eq "$(bstatus RC4)" "closed" "…and closes the anchor"
 
-echo "# …a CONFLICTING anchor is deferred to the full pass — no conflict-rework early"
+echo "# …a CONFLICTING anchor with nothing outstanding is deferred to the full pass — no early bring-current child"
 store "[$(anchor RC9 152)]"
 printf '%s' "$(prview 152 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_152.json"
 : > "$STUB_SESSION_LOG"
 out=$(run_route)
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" \
-  "route-comments-only files no conflict-rework (the full pass owns it)"
+  "route-comments-only files no bring-current child for a conflict with no feedback (the full pass owns it)"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and does not wake the fix pool"
 eq "$(meta RC9 merge_result)" "pull_request" "…the anchor is left gating, untouched"
 # Control: the full pass on the SAME fixture dispatches the rework, so the skip
@@ -2690,6 +2690,40 @@ eq "$(meta RC9 merge_result)" "pull_request" "…the anchor is left gating, unto
 out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" \
   "the full pass dispatches the conflict-rework on the same fixture"
+
+echo "# …but a CONFLICTING anchor carrying unanswered feedback routes that feedback early — acknowledgment is not gated on mergeability"
+# The window this arm exists to close is a cadence killed before the full pass:
+# a conflicting PR is exactly the shape whose human feedback sat stamped-as-seen
+# yet unrouted. The dedicated bring-current child stays the full pass's, but the
+# feedback-routing arm's merge-mode rework — which answers the comments AND
+# brings the branch current together — must land on the early tick too.
+store "[$(anchor RC11 154)]"
+printf '%s' "$(prview 154 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_154.json"
+echo '[]' > "$GH_DIR/reviews_154.json"
+printf '[{"id":15401,"user":{"login":"human1"},"body":"please fix this","path":"a.sh"}]' > "$GH_DIR/comments_154.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_route); rc=$?
+eq "$rc" 0 "the route pass still exits 0 on a conflicting anchor with feedback"
+rc11_child=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "RC11") | .id ][0] // "<none>"' "$STUB_STORE")
+hasnt "$rc11_child" "<none>" "the conflicting anchor's feedback is routed to a rework child early"
+eq "$(meta RC11 pr_comment_disposition)" "rework:$rc11_child" "…the disposition is recorded on the early tick"
+eq "$(meta RC11 pr_comment_watermark)" "15401" "…and the watermark advanced to the routed comment"
+eq "$(meta "$rc11_child" prepare_mode)" "merge" "…the rework is prepare_mode=merge, bringing the conflicting branch current by merge — not a bring-current child racing it"
+eq "$(meta "$rc11_child" 'gc.routed_to')" "$FIX" "…and is routed to the fix pool"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…the fix pool is woken early"
+rc11_fid=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "RC11") | .id ][0] // "<none>"' "$STUB_STORE")
+hasnt "$rc11_fid" "<none>" "…a finding bead is filed for the comment"
+eq "$(meta "$rc11_fid" 'finding.comment_id')" "15401" "…carrying finding.comment_id, so the write-back can find the row it came from"
+hasnt "$(vpass_id RC11)" "<none>" "…and the human-lane validation pass is opened early"
+# Control: the SAME conflicting fixture with the feedback removed defers whole,
+# proving the unanswered feedback — not the conflict — is what makes route mode act.
+store "[$(anchor RC11b 155)]"
+printf '%s' "$(prview 155 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_155.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_route)
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.anchor_bead // "") == "RC11b")] | length' "$STUB_STORE")" "0" \
+  "a conflicting anchor with no feedback still files nothing early — the gate is the feedback, not the conflict"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and wakes no pool"
 
 echo "# …a retargeted anchor is deferred to the full pass — no early transition or escalation"
 store "[$(anchor RC10 153)]"
