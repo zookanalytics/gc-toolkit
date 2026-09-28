@@ -29,7 +29,15 @@
 #   (p) every repair command the script hands back runs through `gc bd`;
 #   (q) the successor is required under EVERY kind, `not-needed` included —
 #       the kind where nothing carries the work forward is where dropping the
-#       pointer looks reasonable, and it is exactly as unreadable there.
+#       pointer looks reasonable, and it is exactly as unreadable there;
+#   (r) a task_kind=visit origin also records gc.outcome (= the kind) and
+#       gc.outcome_reason (= the close reason), so the board can report it;
+#   (s) a non-visit origin records NO gc.outcome — the field is a sitting's;
+#   (t) an outcome the visit already carries is the sitting's own word and is
+#       never overwritten;
+#   (u) an already-closed visit missing the outcome is repaired with it;
+#   (v) an outcome that does not read back refuses the close, the same way a
+#       dropped pointer does — a closed outcome-less visit is unreachable.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -155,7 +163,12 @@ case "$sub" in
         --set-metadata)
           # FAKE_BD_DROP_META simulates a write that reports success and does
           # not persist — the case the read-back guard exists for.
-          [ -n "${FAKE_BD_DROP_META:-}" ] || printf 'm.%s\n' "$2" >> "$f"
+          # FAKE_BD_DROP_OUTCOME drops ONLY the gc.outcome key (leaving its
+          # reason) to exercise the visit-outcome read-back gate on its own.
+          drop=""
+          [ -z "${FAKE_BD_DROP_META:-}" ] || drop=1
+          case "$2" in gc.outcome=*) [ -z "${FAKE_BD_DROP_OUTCOME:-}" ] || drop=1 ;; esac
+          [ -n "$drop" ] || printf 'm.%s\n' "$2" >> "$f"
           shift 2 ;;
         --append-notes)
           printf 'notes=%s\n' "$2" >> "$f"; shift 2 ;;
@@ -392,6 +405,63 @@ rc=0; run --origin al-origin15 --successor al-succ15 --kind folded --dry-run || 
 eq "$rc" 0 "--dry-run succeeds over a wait edge"
 has "$(cat "$TMP/out")" "drop the 'blocked by al-succ15' wait edge" "--dry-run names the edge it would drop"
 eq "$(grep -c '^dep\.al-succ15=' "$TMP/rigs/alpha/.beads/al-origin15")" 1 "--dry-run does not drop it"
+
+# --- (r) a visit origin also records the outcome the board reads -----------
+# doctor/check-visit-outcome-recorded flags a closed task_kind=visit with no
+# gc.outcome — a sitting the board cannot report. bead-rehome is a visit-close
+# path (converse dispositions re-home visits), so it stamps the outcome beside
+# the pointer: gc.outcome = the kind, gc.outcome_reason = the close reason.
+mkbead alpha open al-visit1
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit1"
+mkbead beta open bt-vsucc1
+rc=0; run --origin al-visit1 --successor bt-vsucc1 --kind not-needed --note "premise fixed by bt-vsucc1" || rc=$?
+eq "$rc" 0 "a visit re-home succeeds"
+eq "$(field alpha status al-visit1)" closed "the visit is closed"
+eq "$(field alpha m.gc.outcome al-visit1)" not-needed "gc.outcome records the kind as the sitting's outcome"
+has "$(field alpha m.gc.outcome_reason al-visit1)" "not needed, per bt-vsucc1 in rig:beta" "gc.outcome_reason carries the close reason as the headline"
+has "$(field alpha m.gc.outcome_reason al-visit1)" "premise fixed by bt-vsucc1" "the headline carries the note too"
+
+# --- (s) a non-visit origin records NO outcome (the field is visit-only) ---
+# gc.outcome is a sitting's column; a work bead or task carries its disposition
+# elsewhere, so re-homing one must not invent one.
+mkbead alpha open al-task1
+mkbead beta open bt-tsucc1
+rc=0; run --origin al-task1 --successor bt-tsucc1 --kind re-homed || rc=$?
+eq "$rc" 0 "a non-visit re-home succeeds"
+eq "$(field alpha m.gc.outcome al-task1)" "" "a non-visit origin gets no gc.outcome"
+
+# --- (t) an outcome the visit already records is the sitting's own word -----
+# A visit closed through visit-close.sh and later re-homed already carries the
+# word the sitting signed off with; the re-home must not overwrite it.
+mkbead alpha open al-visit2
+printf 'm.task_kind=visit\nm.gc.outcome=dismissed\n' >> "$TMP/rigs/alpha/.beads/al-visit2"
+mkbead beta open bt-vsucc2
+rc=0; run --origin al-visit2 --successor bt-vsucc2 --kind folded || rc=$?
+eq "$rc" 0 "a visit that already has an outcome still re-homes"
+eq "$(field alpha m.gc.outcome al-visit2)" dismissed "the sitting's own outcome word is not overwritten"
+
+# --- (u) an already-closed visit missing the outcome is repaired -----------
+# This is tk-iooouz's shape: bead-rehome closed the visit before this guard, so
+# the repair path stamps the outcome the same as the live close does.
+mkbead alpha closed al-visit3
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit3"
+mkbead beta open bt-vsucc3
+rc=0; run --origin al-visit3 --successor bt-vsucc3 --kind duplicate || rc=$?
+eq "$rc" 0 "an already-closed visit missing the outcome is repaired"
+eq "$(field alpha status al-visit3)" closed "it stays closed"
+eq "$(field alpha m.gc.outcome al-visit3)" duplicate "the missing outcome is stamped on the closed visit"
+
+# --- (v) an outcome that does not read back refuses the close --------------
+# The same permanence as the pointer: once the visit closes no re-run reaches
+# it, so a dropped outcome stamp leaves the visit OPEN, not silently closed.
+mkbead alpha open al-visit4
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit4"
+mkbead beta open bt-vsucc4
+rc=0; FAKE_BD_DROP_OUTCOME=1 run --origin al-visit4 --successor bt-vsucc4 --kind folded || rc=$?
+eq "$rc" 4 "a visit outcome that does not read back refuses the close"
+eq "$(field alpha status al-visit4)" open "the visit stays OPEN when the outcome did not stick"
+has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome"
+eq "$(field alpha m.gc.superseded_by al-visit4)" bt-vsucc4 "the pointer is still recorded, so the bead is findable"
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

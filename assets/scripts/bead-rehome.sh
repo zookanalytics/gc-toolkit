@@ -5,8 +5,13 @@
 # question gets asked, so it is stamped and READ BACK before the close; this
 # script would rather leave the origin OPEN than close it unpointed.
 # Writes, in order: pointer on the origin (verified), a populated close reason
-# (kind + successor + store), a best-effort back-pointer on the successor. An
-# already-closed origin is the REPAIR path: pointer + appended note only.
+# (kind + successor + store), a best-effort back-pointer on the successor. When
+# the origin is a task_kind=visit it also stamps the outcome the board reads —
+# gc.outcome = the kind, gc.outcome_reason = that close reason — verified before
+# the close, because a closed visit with no gc.outcome is a sitting the board
+# cannot report and no re-run reaches it (doctor/check-visit-outcome-recorded).
+# An already-closed origin is the REPAIR path: pointer + appended note, plus that
+# outcome when the visit lacks one.
 # Also drops an origin->successor `blocks` wait edge on the way: `bd close`
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
@@ -185,35 +190,63 @@ esac
 REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 [ -n "$NOTE" ] && REASON="$REASON — $NOTE"
 
+# A closed task_kind=visit with no gc.outcome is a sitting the board cannot
+# report (doctor/check-visit-outcome-recorded projects gc.outcome as the OUTCOME
+# column and gc.outcome_reason as the headline), and once a visit closes no
+# re-run reaches it — the permanence visit-close.sh guards. So when the origin
+# is a visit the outcome is stamped beside the pointer below and gates the close
+# the same way. The --kind IS the disposition, so it is the outcome word, and
+# $REASON is its headline. An outcome the visit already records is the sitting's
+# own word and is left untouched (a visit closed through visit-close.sh, then
+# re-homed, already carries the word it signed off with).
+ORIGIN_KIND=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // empty' 2>/dev/null || true)
+PRIOR_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
+STAMP_OUTCOME=""
+if [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_OUTCOME" ]; then STAMP_OUTCOME=1; fi
+
 if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
         CLOSE_PLAN="already closed — pointer + note only, close reason left as-is"
     else
         CLOSE_PLAN="$REASON"
     fi
+    STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
+    [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason>"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
     else
         EDGE_PLAN="none ($ORIGIN carries no wait edge to $SUCCESSOR)"
     fi
-    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     gc.superseded_by=%s gc.superseded_by_store=%s\n  edge:      %s\n  close:     %s\n  actor:     %s\n' \
+    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     %s\n  edge:      %s\n  close:     %s\n  actor:     %s\n' \
         "$ORIGIN" "${ORIGIN_STATUS:-unknown}" "$ORIGIN_STORE" \
-        "$SUCCESSOR" "$SUCCESSOR_STORE" "$SUCCESSOR" "$SUCCESSOR_STORE" \
+        "$SUCCESSOR" "$SUCCESSOR_STORE" "$STAMP_PLAN" \
         "$EDGE_PLAN" "$CLOSE_PLAN" "${ACTOR:-<bd default>}"
     exit 0
 fi
 
-# 1. Stamp the pointer and prove it landed: the close below is gated on the
-# read-back, not on an exit status.
-bd_at "$ORIGIN_PATH" update "$ORIGIN" \
-    --set-metadata gc.superseded_by="$SUCCESSOR" \
-    --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE" >/dev/null 2>&1 || true
+# 1. Stamp the pointer — and, for a visit, the outcome the board reads — and
+# prove they landed: the close below is gated on the read-back, not on an exit
+# status. Both go in one update; a --set-metadata write bypasses bd's close
+# guard, so it lands even on a visit this actor cannot close under.
+STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
+            --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
+if [ -n "$STAMP_OUTCOME" ]; then
+    STAMP_META+=(--set-metadata gc.outcome="$KIND" \
+                 --set-metadata gc.outcome_reason="$REASON")
+fi
+bd_at "$ORIGIN_PATH" update "$ORIGIN" "${STAMP_META[@]}" >/dev/null 2>&1 || true
 
 CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
 GOT_SUCC=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null || true)
 GOT_STORE=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by_store"] // empty' 2>/dev/null || true)
 if [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$SUCCESSOR_STORE" ]; then
     die "successor pointer did NOT stick on $ORIGIN (read back gc.superseded_by='${GOT_SUCC:-}' gc.superseded_by_store='${GOT_STORE:-}'); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
+fi
+if [ -n "$STAMP_OUTCOME" ]; then
+    GOT_OUTCOME=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
+    if [ "$GOT_OUTCOME" != "$KIND" ]; then
+        die "visit outcome did NOT stick on $ORIGIN (read back gc.outcome='${GOT_OUTCOME:-}'); NOT closing it — a closed visit with no recorded gc.outcome is a sitting the board cannot report and no re-run reaches. The bead is still visible; re-run once the store accepts the write" 4
+    fi
 fi
 
 # 1b. Drop ONLY the wait edge to THIS successor: it would refuse the close,
