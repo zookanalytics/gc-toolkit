@@ -4,6 +4,13 @@ go 1.26.5
 
 require github.com/steveyegge/beads v1.2.2-0.20260825072917-62d211937bd3
 
+// prstatus is the shared tri-state core; the helm board and the PR label writer
+// derive the status: taxonomy from it. Same repo, separate module, so a local
+// replace points at the sibling checkout.
+require github.com/zookanalytics/gc-toolkit/services/gctk v0.0.0-00010101000000-000000000000
+
+replace github.com/zookanalytics/gc-toolkit/services/gctk => ../gctk
+
 require (
 	cel.dev/expr v0.25.2 // indirect
 	cloud.google.com/go v0.121.6 // indirect
