@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
@@ -474,8 +475,10 @@ var prInflightStatuses = []beads.Status{
 // every live bead carrying anchor_bead (any task_kind — the same population the
 // label's `--metadata-field anchor_bead=… --status …` query returns, gathered
 // here in one keyed read per rig rather than one per anchor), split by whether
-// it is blocked. A blocked-only set is what makes a frontier read needs-attention
-// on the board exactly as it does on the label.
+// it is blocked. A finding disposed deferred is dropped from the set through the
+// same prstatus.CountsInFlight rule the label's split runs, so the board and the
+// label cannot disagree over one. A blocked-only set is what makes a frontier
+// read needs-attention on the board exactly as it does on the label.
 func (s *BeadsSource) accumulatePRInflight(ctx context.Context, g *gatherState, st beadStore, r rigRef, out map[string]board.InflightCounts) {
 	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
 		Statuses:       prInflightStatuses,
@@ -491,8 +494,16 @@ func (s *BeadsSource) accumulatePRInflight(ctx context.Context, g *gatherState, 
 		if iss == nil {
 			continue
 		}
-		anchor := decodeMetadata(iss.Metadata)["anchor_bead"]
+		md := decodeMetadata(iss.Metadata)
+		anchor := md["anchor_bead"]
 		if anchor == "" {
+			continue
+		}
+		// A finding disposed deferred is punted to a follow-up, not work owed on
+		// this PR, so it counts toward neither Active nor Blocked. Keying on the
+		// disposition rather than the status leaves a paused non-finding bead in
+		// status deferred still counted.
+		if !prstatus.CountsInFlight(md["finding.disposition"]) {
 			continue
 		}
 		c := out[anchor]

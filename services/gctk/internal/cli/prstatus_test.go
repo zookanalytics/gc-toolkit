@@ -56,6 +56,29 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 	})
 
+	t.Run("a deferred finding is not in-flight => needs-review, not working", func(t *testing.T) {
+		// PR843's shape (tk-wtmlz3): the sole remaining member is a finding
+		// disposed deferred, left open. It is punted to a follow-up, not work owed
+		// on this PR, so it must not pin the label at working.
+		stubGC(t,
+			`[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`,
+			`[{"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a","finding.disposition":"deferred"}}]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-review\n")
+		}
+	})
+
+	t.Run("a paused non-finding bead in status deferred still counts => working", func(t *testing.T) {
+		// The exclusion keys on finding.disposition, not on the deferred status, so
+		// a genuinely paused non-finding bead is unaffected and still holds the ball.
+		stubGC(t,
+			`[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`,
+			`[{"id":"tk-d","status":"deferred","metadata":{"task_kind":"task","anchor_bead":"tk-a"}}]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
+		}
+	})
+
 	t.Run("operator freeze => needs-attention", func(t *testing.T) {
 		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_hold":true}}]`, `[]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {

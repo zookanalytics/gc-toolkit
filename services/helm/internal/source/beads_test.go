@@ -2235,12 +2235,17 @@ func TestGatherSumsPRInflightLikeTheLabel(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	store := &fakeStore{failMeta: map[string]error{}, issues: map[string][]*beads.Issue{
 		"task": {
-			// tk-a1: one progressing member, one blocked, one closed (excluded).
+			// tk-a1: one progressing member, one blocked, one closed (excluded), and
+			// an open finding disposed deferred (excluded — punted to a follow-up).
 			issue("tk-a1-rw", "rework on a1", "task", 2, now, `{"task_kind":"rework","anchor_bead":"tk-a1"}`),
 			blocked(issue("tk-a1-find", "finding on a1", "task", 2, now, `{"task_kind":"finding","anchor_bead":"tk-a1"}`)),
 			closedIssue("tk-a1-old", "closed round on a1", "task", 2, now, now, `{"task_kind":"review","anchor_bead":"tk-a1"}`),
+			issue("tk-a1-def", "deferred finding on a1", "task", 2, now, `{"task_kind":"finding","anchor_bead":"tk-a1","finding.disposition":"deferred"}`),
 			// tk-a2: only a blocked child — the frontier that must read needs-attention.
 			blocked(issue("tk-a2-rw", "blocked rework on a2", "task", 2, now, `{"task_kind":"rework","anchor_bead":"tk-a2"}`)),
+			// tk-a3: only an open deferred finding — an empty in-flight set, so it
+			// never appears in the map and the label reads needs-review, not working.
+			issue("tk-a3-def", "deferred finding on a3", "task", 2, now, `{"task_kind":"finding","anchor_bead":"tk-a3","finding.disposition":"deferred"}`),
 			// A bead carrying no anchor_bead joins no set.
 			issue("tk-loose", "unrelated open work", "task", 2, now, `{}`),
 		},
