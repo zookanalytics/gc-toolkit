@@ -328,6 +328,19 @@ store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review" "a self-approval never counts"
 
+# Two standing approvers: the merge weighs the MOST RECENT one's commit as the
+# materiality base, not the older. human1 approved sha-OLD (a material change
+# since); human2 approved sha-20 (the live head) later. The merge leans on
+# human2's at-head approval and merges; weighing the older approval would read a
+# material change and hold. This is the base materiality.sh's approved_oid_of
+# selects too, so a recorded verdict and this merge agree on the approved oid.
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1},{"user":{"login":"human2"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T02:00:00Z","id":2}]' > "$GH_DIR/reviews_20.json"
+printf '{"files":[{"filename":"x.sh","patch":"@@ -1 +1 @@ changed"}]}' > "$GH_DIR/compare_sha-OLD...sha-20.json"
+store "[$(anchor A1 20 ',"check_set":"codex,approval"'), $(rev A1)]"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded A1" "with two standing approvers, the merge weighs the most recent approval (human2 at head), not the older"
+hasnt "$out" "the change since is material" "…so the older approval's material change does not hold it"
+
 echo "# signoff_dismissed and an own DISMISSED review arm the requirement"
 store "[$(anchor A2 21 ',"signoff_dismissed":"r9@sha-21"'), $(rev A2)]"
 printf '%s' "$(prview 21 OPEN CLEAN)" > "$GH_DIR/pr_view_21.json"

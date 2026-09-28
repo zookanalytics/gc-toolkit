@@ -94,6 +94,28 @@ reviews '[{"id":1,"user":{"login":"johnzook"},"state":"APPROVED","commit_id":"aa
 eq "$(classify --anchor tk-anc --head hhhh)" "none" "an approval the same reviewer later retracted is not standing"
 
 # ---------------------------------------------------------------------------
+# Two standing approvers: record keys its marker on the MOST RECENT approval —
+# the base merge.sh's reducer weighs (assets/scripts/merge.sh approval arm) — so
+# the verdict an agent records is the one the merge gate reads back. group_by
+# orders by login, so the first row after the reduction is the alphabetically
+# first reviewer (alpha at the old commit), not the most recent (zeta at the new
+# commit); keying the marker on that old commit would leave merge — which weighs
+# zeta's new commit — unable to match it, and the hold would stay owed under a
+# recorded stands verdict.
+# ---------------------------------------------------------------------------
+store "[$ANCHOR]"
+reviews '[{"id":1,"user":{"login":"alpha"},"state":"APPROVED","commit_id":"oldsha","submitted_at":"2026-09-28T10:00:00Z"},{"id":2,"user":{"login":"zeta"},"state":"APPROVED","commit_id":"newsha","submitted_at":"2026-09-28T11:00:00Z"}]'
+eq "$(record --anchor tk-anc --verdict stands --head hhhh)" "stands@newsha..hhhh" "record keys the marker on the most recent standing approval (zeta at 11:00), not the first"
+eq "$(meta tk-anc approval_materiality)" "stands@newsha..hhhh" "…and persists that marker on the anchor"
+# The merge gate weighs the same most-recent approval (newsha), so classify reads
+# the recorded stands back — record and merge agree on the approved oid.
+eq "$(classify --anchor tk-anc --approved-oid newsha --head hhhh)" "stands" "the most-recent approved oid reads the recorded verdict back"
+# A classify keyed on the stale first approval (oldsha) does not match the marker
+# and falls through to a fresh judgment — owed on a content change.
+compare "oldsha...hhhh" '{"files":[{"filename":"x.sh","patch":"@@"}]}'
+eq "$(classify --anchor tk-anc --approved-oid oldsha --head hhhh)" "owed" "the stale first-approval oid does not match the recorded verdict"
+
+# ---------------------------------------------------------------------------
 # Fail-closed reads: an unreadable reviews history or compare exits 2, which
 # the merge gate reads as owed, never as covered.
 # ---------------------------------------------------------------------------

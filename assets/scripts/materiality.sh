@@ -79,12 +79,15 @@ origin_slug() {
   printf '%s' "$slug"
 }
 
-# The commit of the latest APPROVED review by a non-city account on <pr>, echoed
-# on stdout; empty (exit 0) when there is no standing approval; non-zero when the
-# reviews history could not be read. The city never posts an APPROVED review
-# (signoff.sh posts --comment), so an APPROVED is a human's; a per-reviewer
-# latest-row reduction lets a later CHANGES_REQUESTED or DISMISSED by the same
-# account retract an earlier approval.
+# The commit of the most recent standing APPROVED review by a non-city account on
+# <pr> — the same row merge.sh's approval reducer weighs, so a verdict record
+# writes keys on the base the merge gate reads back — echoed on stdout; empty
+# (exit 0) when there is no standing approval; non-zero when the reviews history
+# could not be read. The city never posts an APPROVED review (signoff.sh posts
+# --comment), so an APPROVED is a human's; a per-reviewer latest-row reduction
+# lets a later CHANGES_REQUESTED or DISMISSED by the same account retract an
+# earlier approval, and among the survivors the most recent APPROVED is the one
+# the merge leans on.
 approved_oid_of() { # <slug> <pr>
   local slug="$1" pr="$2" body
   command -v gh >/dev/null 2>&1 || return 1
@@ -93,7 +96,7 @@ approved_oid_of() { # <slug> <pr>
   printf '%s' "$body" | scrub | jq -sr '
     [ .[][]? | select((.state // "") == "APPROVED" or (.state // "") == "CHANGES_REQUESTED" or (.state // "") == "DISMISSED") ]
     | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)
-    | [ .[] | select((.state // "") == "APPROVED") | (.commit_id // "") ] | .[0] // ""' 2>/dev/null
+    | [ .[] | select((.state // "") == "APPROVED") ] | sort_by(.submitted_at // "") | last | (.commit_id // "")' 2>/dev/null
 }
 
 # The live head of <pr>, echoed on stdout; non-zero when it could not be read.
