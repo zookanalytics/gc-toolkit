@@ -2,9 +2,11 @@
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
 # the arm ORDER (gate-ensure, pre-open-rebase, pr-open, pr-facts --posture-only,
-# merge, pr-facts, convoy-graduate, review-sweep, duplicate-sweep, pr-stack) — the posture arm runs BEFORE
+# pr-facts --route-comments-only, merge, pr-facts, convoy-graduate, review-sweep,
+# duplicate-sweep, pr-stack) — the posture arm runs BEFORE
 # merge.sh reads posture off the bead and would otherwise read one written a
-# pass ago;
+# pass ago, and the feedback arm runs before merge too so a pass killed at the
+# tail has still routed operator feedback;
 # the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
 # merge because the same pass must not fail the order; a non-zero posture arm holds it too,
 # because merge.sh validates the posture that arm records), exercised by
@@ -58,7 +60,7 @@ for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convo
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-eq "$order" "gate-ensure.sh,pre-open-rebase.sh,pr-open.sh,pr-facts.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,duplicate-sweep.sh,pr-stack.sh" "the arms ran in the load-bearing order"
+eq "$order" "gate-ensure.sh,pre-open-rebase.sh,pr-open.sh,pr-facts.sh,pr-facts.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,duplicate-sweep.sh,pr-stack.sh" "the arms ran in the load-bearing order (posture + feedback before merge, full pr-facts after)"
 dup_line=$(grep '^duplicate-sweep' "$ARM_LOG")
 has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTOR=<refinery>"
 # pr-stack writes PR bodies and no bead, so it carries neither projection: an
@@ -74,7 +76,10 @@ case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
 esac
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
-facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool')
+# The full pr-facts arm: --fix-pool and no pre-merge mode flag (the posture arm
+# carries neither, the feedback arm carries --route-comments-only).
+facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool' | grep -v -- '--route-comments-only')
+eq "$(printf '%s\n' "$facts_line" | wc -l | tr -d ' ')" 1 "the full pr-facts arm ran exactly once"
 has "$facts_line" "--fix-pool myrig/gc-toolkit.polecat" "pr-facts got the derived fix pool"
 hasnt "$facts_line" "--review-pool" "…and no review pool: it dispatches no reviews"
 has "$facts_line" "|myrig/gc-toolkit.refinery|" "pr-facts ran as BEADS_ACTOR=<refinery>"
@@ -90,6 +95,21 @@ merge_at=$(grep -n '^merge.sh' "$ARM_LOG" | head -1 | cut -d: -f1)
 [ -n "$posture_at" ] && [ -n "$merge_at" ] && [ "$posture_at" -lt "$merge_at" ] \
   && ok "posture is recorded BEFORE merge reads it" \
   || bad "posture arm did not run before merge (posture=$posture_at merge=$merge_at)"
+
+# The early feedback arm routes operator feedback before merge, so a pass killed
+# at the tail (before the full pr-facts arm) has still picked it up. It carries a
+# fix pool (it dispatches rework children) but the --route-comments-only flag.
+route_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--route-comments-only')
+eq "$(printf '%s\n' "$route_line" | wc -l | tr -d ' ')" 1 "the feedback arm ran exactly once"
+has "$route_line" "--fix-pool myrig/gc-toolkit.polecat" "the feedback arm got the derived fix pool"
+has "$route_line" "|myrig/gc-toolkit.refinery|" "the feedback arm ran as BEADS_ACTOR=<refinery>"
+route_at=$(grep -n '^pr-facts.*--route-comments-only' "$ARM_LOG" | head -1 | cut -d: -f1)
+[ -n "$posture_at" ] && [ -n "$route_at" ] && [ "$posture_at" -lt "$route_at" ] \
+  && ok "the feedback arm runs after the posture arm" \
+  || bad "feedback arm did not run after posture (posture=$posture_at route=$route_at)"
+[ -n "$route_at" ] && [ -n "$merge_at" ] && [ "$route_at" -lt "$merge_at" ] \
+  && ok "the feedback arm routes BEFORE merge (a tail-killed pass has still picked feedback up)" \
+  || bad "feedback arm did not run before merge (route=$route_at merge=$merge_at)"
 grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
 has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
 has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
@@ -313,7 +333,16 @@ hasnt "$GATE" '{{' "the block is template-free (executable verbatim)"
 GSD="$TMP/gsd"; mkdir -p "$GSD"
 printf '#!/usr/bin/env bash\nexit 3\n' > "$GSD/gate-ensure.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/pr-open.sh"
-printf '#!/usr/bin/env bash\necho "posture $*" >> "${BLOCK_SENTINEL:?}"\n' > "$GSD/pr-facts.sh"
+# pr-facts is invoked twice in the block — --posture-only, then
+# --route-comments-only — so the stub records a token per mode.
+cat > "$GSD/pr-facts.sh" <<'PF'
+#!/usr/bin/env bash
+case "$*" in
+  *--posture-only*)        echo posture  >> "${BLOCK_SENTINEL:?}" ;;
+  *--route-comments-only*) echo feedback >> "${BLOCK_SENTINEL:?}" ;;
+  *)                       echo facts    >> "${BLOCK_SENTINEL:?}" ;;
+esac
+PF
 printf '#!/usr/bin/env bash\necho ran >> "${MERGE_SENTINEL:?}"\necho merge >> "${BLOCK_SENTINEL:?}"\n' > "$GSD/merge.sh"
 chmod +x "$GSD"/*.sh
 export MERGE_SENTINEL="$TMP/merge-ran"; : > "$MERGE_SENTINEL"
@@ -329,19 +358,29 @@ gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite rc=3" || ok "(block) rc=3 held merge.sh"
 has "$gout" "MERGE_HELD=1" "(block) the hold flag is set"
 # Recording a fact is not a dispatch: a held merge still gets a fresh posture,
-# so the pass that finally merges is not reading a stale one.
-has "$(cat "$BLOCK_SENTINEL")" "posture --posture-only" "(block) the posture arm runs even when merge is HELD"
+# so the pass that finally merges is not reading a stale one. The feedback arm
+# runs under the hold too — routing operator feedback does not wait on merge.
+has "$(cat "$BLOCK_SENTINEL")" "posture" "(block) the posture arm runs even when merge is HELD"
+has "$(cat "$BLOCK_SENTINEL")" "feedback" "(block) the feedback arm runs even when merge is HELD"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/gate-ensure.sh"
 : > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && ok "(block) a clean gate-ensure lets merge.sh run" || bad "(block) merge.sh did not run after a clean gate-ensure"
 has "$gout" "MERGE_HELD=0" "(block) the hold flag is clear"
-eq "$(paste -sd, - < "$BLOCK_SENTINEL")" "posture --posture-only,merge" "(block) posture is recorded before merge reads it"
+eq "$(paste -sd, - < "$BLOCK_SENTINEL")" "posture,feedback,merge" "(block) posture and feedback both run, in that order, before merge reads posture"
 
 # The posture arm's rc is the second half of the same interlock: merge.sh
 # validates the posture this arm records, so an arm that could not record one
 # must not be followed by a merge in the same pass.
-printf '#!/usr/bin/env bash\necho "posture $*" >> "${BLOCK_SENTINEL:?}"\nexit 1\n' > "$GSD/pr-facts.sh"
+# Only the posture arm fails here; the feedback arm exits 0, so the hold under
+# test is unambiguously the posture arm's.
+cat > "$GSD/pr-facts.sh" <<'PF'
+#!/usr/bin/env bash
+case "$*" in
+  *--posture-only*) echo posture >> "${BLOCK_SENTINEL:?}"; exit 1 ;;
+  *)                echo other   >> "${BLOCK_SENTINEL:?}"; exit 0 ;;
+esac
+PF
 : > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite an unrecordable posture" || ok "(block) a non-zero posture arm held merge.sh"

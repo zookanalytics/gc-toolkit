@@ -15,8 +15,11 @@
 #     pool-route.sh against the live agent set; either way the conditional rig
 #     prefix that renders bare for a rig-less caller is gone (a pool offer is
 #     read by exact string equality, so a bare address sits silently forever)
-#   - the three metadata stamps ride one --set-metadata flag each
-#     (comma-joined pairs become one garbage value)
+#   - the three metadata stamps are each present and load-bearing, riding
+#     either their own --set-metadata flag (comma-joined pairs become one
+#     garbage value, so each rides its own) or a key in the create's jq-built
+#     --metadata JSON (which stamps the identity atomically with the create, so
+#     an interrupted stamp cannot leave a visit its dedup can never match)
 #   - the visit is wired to its subject with a tracks edge (parent-child
 #     would transmit the subject's blocked state to the visit)
 #   - the visit title carries the "visit: " brand
@@ -36,6 +39,17 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 have() { if grep -qF -- "$2" "$3"; then ok "$1"; else bad "$1" "missing: $2"; fi; }
+
+# A load-bearing stamp rides EITHER its own --set-metadata flag (the own-flag
+# form guards the comma-joined-pairs trap) OR a key in the create's jq-built
+# --metadata JSON, which cannot hit that trap and stamps the identity atomically
+# with the create. Accept both. $2 is the --set-metadata ERE, $3 the JSON key ERE.
+stamped() { # <block> <set-metadata-ERE> <json-key-ERE>
+    printf '%s' "$1" | grep -qE -- "$2" && return 0
+    printf '%s' "$1" | grep -qF -- '--metadata "' \
+        && printf '%s' "$1" | grep -qE -- "\"$3\"[[:space:]]*:" && return 0
+    return 1
+}
 
 extract() { # extract marked blocks from one file to stdout, blocks separated by \x1e
     awk '/# >>> gate-visit/{inb=1; next} /# <<< gate-visit/{inb=0; printf "\x1e"; next} inb' "$1"
@@ -112,12 +126,15 @@ check_file() {
         fi
         printf '%s' "$block" | grep -qE 'gc bd create -t task --title "visit: ' \
             && ok "$name: visit title brand" || bad "$name: visit title brand" 'no `--title "visit: …"` create'
-        printf '%s' "$block" | grep -qF -- '--set-metadata "gc.routed_to=$POOL"' \
-            && ok "$name: routed_to stamp, own flag" || bad "$name: routed_to stamp, own flag" "stamp absent or malformed"
-        printf '%s' "$block" | grep -qE -- '--set-metadata "gc\.continuation_group=' \
-            && ok "$name: continuation_group stamp, own flag" || bad "$name: continuation_group stamp, own flag" "stamp absent or malformed"
-        printf '%s' "$block" | grep -qF -- '--set-metadata "task_kind=visit"' \
-            && ok "$name: task_kind stamp, own flag" || bad "$name: task_kind stamp, own flag" "stamp absent or malformed"
+        stamped "$block" '--set-metadata "gc\.routed_to=\$POOL"' 'gc\.routed_to' \
+            && ok "$name: routed_to stamped (own flag or create --metadata)" \
+            || bad "$name: routed_to stamped" "no gc.routed_to via --set-metadata or the create's --metadata"
+        stamped "$block" '--set-metadata "gc\.continuation_group=' 'gc\.continuation_group' \
+            && ok "$name: continuation_group stamped (own flag or create --metadata)" \
+            || bad "$name: continuation_group stamped" "no gc.continuation_group via --set-metadata or the create's --metadata"
+        stamped "$block" '--set-metadata "task_kind=visit"' 'task_kind' \
+            && ok "$name: task_kind stamped (own flag or create --metadata)" \
+            || bad "$name: task_kind stamped" "no task_kind via --set-metadata or the create's --metadata"
         printf '%s' "$block" | grep -qF -- '[ -n "$VISIT" ] && [ "$VISIT" != "null" ]' \
             && ok "$name: create id guarded before use" || bad "$name: create id guarded before use" 'no `[ -n "$VISIT" ] && [ "$VISIT" != "null" ]` guard after the create'
         printf '%s' "$block" | grep -q -- '--type=tracks' \

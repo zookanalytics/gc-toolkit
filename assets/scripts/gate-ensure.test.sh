@@ -155,6 +155,15 @@ validation() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"validation","anchor_bead":"%s","check_name":"%s"}}' \
     "$1" "$2" "${3:-correctness}"
 }
+# A CLOSED request-changes review recording a verdict at <head-oid> — the per-head
+# fingerprint reviewed_at_head reads. Unlike backed() it does NOT back the lane
+# green (signoff_verdict is request-changes), so the lane stays ungreen and the
+# pass reaches the dispatch decision, where the per-head bar sits. <oc> overrides
+# the outcome so a superseded control can prove the bar excludes it.
+judged_rc() { # <id> <anchor> <head-oid> [oc=recorded] [lane=codex]
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"%s","anchor_bead":"%s","reviewed_oid":"%s","signoff_verdict":"request-changes","gc.outcome":"%s"}}' \
+    "$1" "${5:-codex}" "$2" "$3" "${4:-recorded}"
+}
 
 echo "# stamping the default"
 store "[$(anchor A1 pre_open_gate "" "" polecat/a1)]"
@@ -323,6 +332,51 @@ store "[$(anchor Q4 pull_request correctness "" polecat/q4),
 oid q4 > "$GH_DIR/head_polecat_q4"
 out=$(run)
 has "$out" "1 reviews dispatched" "a closed validation pass holds nothing, so the unreviewed lane dispatches"
+
+echo "# per-head bar: a closed request-changes review at the live head bars a second whole-diff review"
+# The measured defect (PRs 793/803/824/843: two request-changes codex reviews at
+# one commit, minutes apart). The first review is CLOSED with a recorded verdict
+# and reviewed_oid == the live head; the fix unit and findings it files are not yet
+# visible (the race window), so quiescence does not hold and inflight_review
+# (live-status only) sees nothing. Before the fix the lane reads eligible and a
+# second review pours; the bar reads the closed review's own pin and refuses.
+store "[$(anchor PH1 pull_request codex "" polecat/ph1), $(judged_rc rc-ph1 PH1 "$(oid ph1)")]"
+oid ph1 > "$GH_DIR/head_polecat_ph1"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "0 reviews dispatched" "a head already carrying a recorded verdict is not re-reviewed"
+has "$out" "head $(oid ph1) already reviewed by rc-ph1" "…and the closed review pinning the head is named"
+hasnt "$(cat "$STUB_GC_LOG")" "bd create" "…so no second review bead is created"
+
+echo "# per-head bar: a MOVED head is re-reviewed (the bar is per-head, not per-lane)"
+# The request-changes review judged an OLD commit; the branch has since moved. A
+# further review is warranted after the head moves, so the bar — keyed on the exact
+# oid — does not fire and a fresh review pours at the live head.
+store "[$(anchor PH2 pull_request codex "" polecat/ph2), $(judged_rc rc-ph2 PH2 "$(oid ph2-old)")]"
+oid ph2-new > "$GH_DIR/head_polecat_ph2"
+out=$(run)
+has "$out" "1 reviews dispatched" "a request-changes review at a departed head does not bar the live head"
+rid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$rid" reviewed_oid)" "$(oid ph2-new)" "…and the fresh review pins the moved head"
+
+echo "# per-head bar: a SUPERSEDED review at the live head does not bar (validator re-review)"
+# The validator returns a lane to unreviewed by superseding its backing, so the
+# gate authority pours a fresh review at the live head. A superseded review carries
+# gc.outcome=superseded, not recorded, so the bar excludes it even at the same oid.
+store "[$(anchor PH3 pull_request codex "" polecat/ph3), $(judged_rc rc-ph3 PH3 "$(oid ph3)" superseded)]"
+oid ph3 > "$GH_DIR/head_polecat_ph3"
+out=$(run)
+has "$out" "1 reviews dispatched" "a superseded review at the head is excluded — the validator's re-review still pours"
+
+echo "# per-head bar: the approve path is untouched — a green lane never reaches the bar"
+# A closed approve at the live head derives the lane green (lane-state.sh), which
+# settles it before the dispatch decision. The bar sits downstream of green, so an
+# approve at the head neither dispatches nor triggers the bar.
+store "[$(anchor PH4 pull_request codex "" polecat/ph4), {\"id\":\"ap-ph4\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"PH4\",\"reviewed_oid\":\"$(oid ph4)\",\"signoff_verdict\":\"approve\",\"gc.outcome\":\"recorded\"}}]"
+oid ph4 > "$GH_DIR/head_polecat_ph4"
+out=$(run)
+has "$out" "0 reviews dispatched" "a green lane is settled, so nothing dispatches"
+hasnt "$out" "already reviewed by" "…and the per-head bar is never reached (green short-circuits first)"
 
 echo "# the validator is dispatched onto an open, undispatched validation pass"
 # The pass quiesces the lane (no review), and this arm slings mol-validate ONTO

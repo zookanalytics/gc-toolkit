@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 // rankSeverityMultiplier and rankWeightMultiplier keep the three rank_score
@@ -98,6 +100,20 @@ func (f Facts) wfLive(childID string) bool {
 		}
 	}
 	return false
+}
+
+// anchorInFlight is the anchor's own live-work count, in the shape
+// [prstatus.Facts.InFlightCount] reads: 1 when a live graph.v2 workflow stands
+// over the anchor bead itself, else 0. Feeding it to [prstatus.Derive] lets a
+// non-merge bead's liveness read Working exactly when the city is acting on it,
+// from the same rule and code the PR label uses. It is the anchor-level signal
+// only; a bead's children roll up through [rollUp], and folding those into one
+// board-wide phase is a later slice of the derivation model.
+func (f Facts) anchorInFlight(a Anchor) int {
+	if f.wfLive(a.ID) {
+		return 1
+	}
+	return 0
 }
 
 // rollup is every count and id-list the derivation reads off an anchor's
@@ -337,7 +353,51 @@ const (
 	// mdAnchorBead is the merge anchor a review or rework child names — the
 	// family root it hangs off, used by the grouping walk as a direct edge.
 	mdAnchorBead = "anchor_bead"
+	// mdRecommendedFormula is the execution mol a reaction names on a subject
+	// when its ruling has a determinable action. Its presence is what makes a
+	// visit a recommendation (Accept + Discuss) rather than a plain one
+	// (Discuss only); the board reads it to derive [Tile.Acceptable].
+	mdRecommendedFormula = "gc.recommended_formula"
 )
+
+// The visit bead's own status, as carried on [Sitting.Status]: a parked visit
+// is open, a converse-claimed one in_progress, an ended one closed.
+const (
+	sittingOpen       = "open"
+	sittingInProgress = "in_progress"
+	sittingClosed     = "closed"
+)
+
+// unengagedVisit reports whether subject has a visit no one has engaged: a
+// non-closed sitting standing OPEN on it that carries neither a claim
+// (in_progress), a bound session, nor a bound assignee. engage binds the visit
+// by assignee while it is still open and before the hook claim promotes it to
+// in_progress and stamps the session, so an open visit with an assignee is a
+// pending engagement, not an un-engaged one. It reads facts.Sittings rather
+// than Tile.Held because Held does not distinguish an open visit from a claimed
+// one — both are non-closed sittings. This is the passive half of the
+// Accept/Discuss invalidation rule: a live sitting suppresses Accept, and
+// leaving the sitting without a ruling (the visit reverts to open) restores it.
+func unengagedVisit(subject string, sittings []Sitting) bool {
+	parked := false
+	for _, s := range sittings {
+		if s.Subject != subject {
+			continue
+		}
+		// A claimed sitting, or a non-closed one a session or an assignee is
+		// bound to, is a live conversation the operator is holding: it
+		// suppresses Accept whatever else is on the subject. The assignee arm
+		// covers the pending-engagement window — engage binds the visit by
+		// assignee while it is still open, before the claim stamps the session.
+		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
+			return false
+		}
+		if s.Status == sittingOpen {
+			parked = true
+		}
+	}
+	return parked
+}
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
 // own right, and therefore carries its ask on a row of its own rather than as
@@ -897,10 +957,6 @@ const (
 	postureApproved         = "approved"
 	postureReviewRequired   = "review_required"
 	postureNone             = "none"
-
-	// mergeStateBlocked is GitHub's mergeStateStatus when it withholds the merge;
-	// pr-facts.sh records it as pr_merge_state.
-	mergeStateBlocked = "BLOCKED"
 )
 
 // isMergeAnchor reports whether this row is a merge anchor at all. Only those
@@ -1538,10 +1594,14 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	isRuled := ruled(a, takeaway, waitingOpen)
 	isRuledInFlight := ruledInFlight(a, takeaway, waitingOpen)
 	// A parked subject — a takeaway with no human route — whose own work bead is
-	// covered by a live workflow is being acted on, not disposed of. Liveness is
-	// re-derived here through the same [Facts.wfLive] join every other in-flight
-	// signal uses, so a molecule that has since drained stops counting at once.
-	parkedInFlight := a.Source == "parked" && f.wfLive(a.ID)
+	// covered by a live workflow is being acted on, not disposed of. The board
+	// reads that liveness through the shared prstatus core — a non-empty in-flight
+	// set is the city holding the ball (Working), the same tri-state the PR label
+	// projects — rather than from the static gc.takeaway key. Liveness re-derives
+	// through the same [Facts.wfLive] join every other in-flight signal uses, so a
+	// molecule that has since drained stops counting at once.
+	parkedInFlight := a.Source == "parked" &&
+		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
@@ -1666,6 +1726,16 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		PRApproval:     approval,
 		PROwedSince:    owedSince,
 	}
+	// Accept-ability: a subject carrying a recommended execution formula whose
+	// visit is un-engaged offers Accept as well as Discuss — the formula
+	// dispatched at the subject and the visit dismissed in one procedural order.
+	// It is a property of the SUBJECT, so a visit wrapper (task_kind=visit) never
+	// carries it; the fold leaves it on the subject tile the wrapper folds onto.
+	if rf := a.Metadata[mdRecommendedFormula]; rf != "" && a.Metadata["task_kind"] != wrapperVisit && unengagedVisit(a.ID, f.Sittings) {
+		t.Acceptable = true
+		t.AcceptFormula = rf
+	}
+
 	// The band is a function of the finished tile, so the visit fold can re-run
 	// it after flipping a folded subject to owed. ClusterKey stays empty here;
 	// it needs the whole board to know a template recurs, so BuildBoard sets it.
@@ -1788,12 +1858,12 @@ func repoBaseFromPRURL(prURL string) string {
 }
 
 // The phase values — the mutually-exclusive status: taxonomy
-// pr-status-label.sh projects to a GitHub PR label. Precedence when inputs
-// overlap is needs-attention > working > needs-review.
+// pr-status-label.sh projects to a GitHub PR label, defined by the shared
+// prstatus package so the board and the label name the states from one source.
 const (
-	PhaseWorking        = "working"
-	PhaseNeedsReview    = "needs-review"
-	PhaseNeedsAttention = "needs-attention"
+	PhaseWorking        = string(prstatus.Working)
+	PhaseNeedsReview    = string(prstatus.NeedsReview)
+	PhaseNeedsAttention = string(prstatus.NeedsAttention)
 )
 
 // classifyPRPhases stamps each merge anchor's phase — who must act on it next.
@@ -1825,65 +1895,30 @@ func classifyPRPhases(tiles []Tile, anchors []Anchor) {
 	}
 }
 
-// prPhase answers who must act on a merge anchor next, in the three values and
-// precedence assets/scripts/pr-status-label.sh's derive_value uses: the status:
-// label on the GitHub PR list and this indicator read one taxonomy. It reads the
-// refinery-computed holds and posture off the anchor and the open-rework count
-// the board gathers, and never calls GitHub. Empty on a non-merge row.
+// prPhase answers who must act on a merge anchor next, delegating to
+// prstatus.Derive — the same function assets/scripts/pr-status-label.sh runs
+// through `gctk pr-status derive` to write the GitHub PR list's status: label.
+// The board and the label derive the state from one code path, so a bead's board
+// liveness and its PR label cannot disagree. Empty on a non-merge row.
 //
-// derive_value is the authority for the values and their precedence; it stamps
-// nothing back on the bead, so this reads the same inputs rather than its result,
-// and the two must change together.
+// The facts are read straight off the anchor: prstatus splits the dated
+// posture/merge-state on '@' and applies the hold truthiness itself, so the raw
+// metadata values pass through as stored. openReworkKids is the board's count of
+// the anchor's open review/rework children (each names it in anchor_bead); the
+// label counts the anchor's whole in-flight set, and closing that input gap is a
+// separate story.
 func prPhase(a Anchor, openReworkKids int) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	hold := a.Metadata[mdMergeHold]
-	signoffCap := a.Metadata[mdSignoffCap]
-	rebaseHold := a.Metadata[mdRebaseHold]
-	posture := beforeAt(a.Metadata[mdPRPosture])
-	mstate := beforeAt(a.Metadata[mdPRMergeState])
-
-	switch {
-	// needs-attention: the city stopped without settling; a human must unstick it.
-	case isCapPark(hold, signoffCap), isHoldSet(hold), isHoldSet(rebaseHold):
-		return PhaseNeedsAttention
-	case posture == postureApproved && mstate == mergeStateBlocked && openReworkKids == 0:
-		return PhaseNeedsAttention
-	// working: the city holds the ball; no human input needed.
-	case openReworkKids > 0, posture == postureApproved:
-		return PhaseWorking
-	// needs-review: settled at the head, a human review or re-review is next.
-	default:
-		return PhaseNeedsReview
-	}
-}
-
-// beforeAt returns the value before the first '@' — the <value>@<oid>[@<instant>]
-// shape lifecycle.sh writes, read the way derive_value does (split("@")[0]).
-func beforeAt(v string) string {
-	if i := strings.IndexByte(v, '@'); i >= 0 {
-		return v[:i]
-	}
-	return v
-}
-
-// isHoldSet is the truthiness rule pr-facts.sh, pr-open.sh and pr-status-label.sh
-// read a hold by, so a hold means the same thing in all of them.
-func isHoldSet(v string) bool {
-	switch v {
-	case "", "false", "False", "FALSE", "0", "null":
-		return false
-	default:
-		return true
-	}
-}
-
-// isCapPark is the round cap's park — merge_hold=signoff_cap paired with a
-// non-empty signoff_cap — distinct from an operator freeze (merge_hold=true),
-// which isHoldSet still catches as a hold.
-func isCapPark(hold, signoffCap string) bool {
-	return hold == "signoff_cap" && signoffCap != ""
+	return string(prstatus.Derive(prstatus.Facts{
+		MergeHold:     a.Metadata[mdMergeHold],
+		SignoffCap:    a.Metadata[mdSignoffCap],
+		RebaseHold:    a.Metadata[mdRebaseHold],
+		PRPosture:     a.Metadata[mdPRPosture],
+		PRMergeState:  a.Metadata[mdPRMergeState],
+		InFlightCount: openReworkKids,
+	}))
 }
 
 // clusterThreshold is how many rows must share one section-and-needs before the

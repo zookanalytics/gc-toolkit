@@ -7,7 +7,9 @@
 # for this pass, not a fault), pre-open-rebase (the conflict observer for
 # anchors that have no PR yet, so it runs while they still have none),
 # pr-open, pr-facts --posture-only (the posture
-# merge reads must be written in the same pass), merge (BEADS_ACTOR projected to
+# merge reads must be written in the same pass), pr-facts --route-comments-only
+# (route operator feedback early, before merge, so a pass killed before the full
+# arm has still picked it up; BEADS_ACTOR projected), merge (BEADS_ACTOR projected to
 # the refinery so its closes and records are attributed to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
 # review-sweep (cleanup over closed anchors; no projection, no merge authority),
@@ -242,6 +244,20 @@ if [ "$posture_rc" != 0 ]; then
   FAILED="${FAILED}pr-posture rc=$posture_rc; "
   note "pr-posture rc=$posture_rc — merge.sh HELD this pass"
 fi
+
+# (2c) pr-feedback: route operator PR feedback on the same early tick the posture
+# is stamped, before merge. The full pr-facts arm (arm 4) runs after merge and is
+# where routing used to live alone, so a pass the timeout killed after the posture
+# arm but before arm 4 left the feedback stamped-as-seen yet unrouted for hours.
+# This arm closes that window: it does only the routing (skipping the write-back
+# sweep and every non-feedback arm), so it is cheap and finishes early. The full
+# arm re-runs the same routing idempotently and still owns the write-back and the
+# external-fact reconciliation. BEADS_ACTOR is projected so the children it
+# dispatches are attributed to the refinery, like the full arm; its rc is reported
+# but never holds merge — routing is not the posture interlock.
+( export BEADS_ACTOR="$AGENT"
+  run_pass "(2c) pr-feedback" pr-facts.sh --route-comments-only --fix-pool "$FIX_POOL" ) \
+  || FAILED="${FAILED}pr-feedback rc=$?; "
 
 # (3) merge: BEADS_ACTOR projected in a subshell so its closes and records are
 # attributed to the refinery in the events log. The anchors it closes are

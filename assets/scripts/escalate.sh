@@ -415,29 +415,33 @@ BODY="$MESSAGE"
 
 Raised from $RAISED_BY, which is ephemeral. The visit hangs on this standing subject so the sitting's outcome and takeaway have a bead that outlives the cycle."
 
-VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$BODY" --json 2>/dev/null || true)
+# The identity metadata is stamped in the create itself. The dedup listing
+# above finds a prior visit by escalation_key — and, for a durable subject, by
+# gc.continuation_group — so a visit that exists without those stamps is
+# invisible to it, and the next call for the same situation files a duplicate.
+# A create followed by a separate stamp is two writes; an interruption between
+# them leaves an unstamped visit that nothing can dedup against. One write
+# cannot: the bead and its dedup keys land together or not at all.
+# escalation_raised_by (provenance for a redirected visit, whose subject is then
+# the bucket) rides the same object; empty when the subject was not redirected.
+VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$SUBJECT" --arg key "$KEY" --arg raised "$RAISED_BY" \
+  '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit", "escalation_key": $key}
+   + (if $raised == "" then {} else {"escalation_raised_by": $raised} end)')
+VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$BODY" --metadata "$VISIT_META" --json 2>/dev/null || true)
 VISIT=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { create_err=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
        echo "escalate: bd create returned no id${create_err:+: $create_err} — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }
-gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
-  --set-metadata "gc.continuation_group=$SUBJECT" \
-  --set-metadata "task_kind=visit" \
-  --set-metadata "escalation_key=$KEY"
-# Provenance for a redirected visit: the subject is the bucket, so without
-# this the sitting cannot tell which cycle raised it. Not load-bearing — a
-# stamp that misses costs traceability, never the disposition.
-[ -n "$RAISED_BY" ] && gc bd update "$VISIT" --set-metadata "escalation_raised_by=$RAISED_BY"
 gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # tracks, NOT parent-child: a parent-child edge transmits the subject's
 # blocked state to the visit, unclaimable exactly where conversation is owed.
 # Read the group stamp back and repair it from the subject if it landed
-# empty: it can land present-but-empty while every sibling stamp in the
-# same update lands, and an empty group disables converse's group-scoped
-# re-claim fence — and here also this script's own dedup listing for a
-# durable subject. Repair and warn, never exit — this block files the one
-# visit for its scope, and on a persistent miss the tracks edge still
-# carries the subject for guards that read the union.
+# empty: it can land present-but-empty even when the create's other stamps
+# land, and an empty group disables converse's group-scoped re-claim fence —
+# and here also this script's own dedup listing for a durable subject. Repair
+# and warn, never exit — this block files the one visit for its scope, and on
+# a persistent miss the tracks edge still carries the subject for guards that
+# read the union.
 GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
 if [ "$GROUP_GOT" != "$SUBJECT" ]; then
   echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '$SUBJECT' — repairing" >&2

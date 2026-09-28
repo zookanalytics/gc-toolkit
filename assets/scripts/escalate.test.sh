@@ -69,14 +69,19 @@ case "${1:-}" in
   create)
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "bd: refused" >&2; exit 1; }
     shift
-    title=""; body=""
+    title=""; body=""; meta="{}"
     while [ $# -gt 0 ]; do
       case "$1" in
         --title) shift; title="$1" ;;
         -d) shift; body="$1" ;;
+        --metadata) shift; meta="${1:-}"; [ -n "$meta" ] || meta="{}" ;;
       esac
       shift || true
     done
+    # A create that returns an id but drops the metadata — the readback guard's
+    # reason to exist. Distinct from STUB_UPD_FAIL, which no longer touches the
+    # identity stamps now that they ride the create.
+    [ -n "${STUB_CREATE_NOMETA:-}" ] && meta="{}"
     # One create can fail while another lands: the run that mints a standing
     # subject issues two, and the fail-open arm is only reachable when the
     # first fails by itself.
@@ -86,8 +91,12 @@ case "${1:-}" in
     esac
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX")
-    jq -c --arg id "vis-$n" --arg t "$title" --arg d "$body" \
-      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":{},"notes":""}]' \
+    # The real `gc bd create` stamps --metadata (a JSON object) into the bead
+    # atomically with the create; model that so the create carries the identity
+    # the same way, and a run whose follow-up writes are lost still leaves a
+    # dedup-complete visit.
+    jq -c --arg id "vis-$n" --arg t "$title" --arg d "$body" --argjson m "$meta" \
+      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":$m,"notes":""}]' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
     printf '{"id":"vis-%s"}\n' "$n" ;;
   update)
@@ -116,7 +125,8 @@ chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
-      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL 2>/dev/null || true
+      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL \
+      STUB_CREATE_NOMETA 2>/dev/null || true
 # The live agent set the route is matched against. converse exists ONLY
 # rig-scoped, which is what makes the bare name unroutable.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
@@ -293,6 +303,25 @@ has "$out" "already open" "says the visit already exists"
 reset '[{"id":"vis-0","status":"in_progress","assignee":"conv/1","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "0" "a CLAIMED (in_progress) visit also suppresses"
+
+echo "# the create stamps the dedup keys, so a lost follow-up write cannot orphan a visit"
+# The failure this closes: a visit created without its escalation_key — the
+# stamp landing in a separate write that never ran — is invisible to the dedup
+# listing, so the next identical escalation mints a second visit. Stamping the
+# identity in the create means a run whose every post-create write fails still
+# leaves a dedup-complete visit. STUB_UPD_FAIL fails every update to prove no
+# follow-up write is relied on.
+reset
+STUB_UPD_FAIL=1
+out1=$("$SUT" --subject tk-orphan --key stuck --message "first" 2>&1); rc1=$?
+eq "$rc1" 0 "the first escalation succeeds with no follow-up update at all"
+eq "$(visits)" "1" "one visit filed"
+eq "$(meta vis-1 escalation_key)" "stuck" "the create stamped escalation_key without any update"
+eq "$(meta vis-1 gc.continuation_group)" "tk-orphan" "…and the continuation_group the durable dedup also needs"
+out2=$("$SUT" --subject tk-orphan --key stuck --message "second" 2>&1)
+eq "$(visits)" "1" "the repeat dedups to the one open visit — no orphan, no duplicate"
+has "$out2" "already open" "the repeat reports the visit is already open"
+unset STUB_UPD_FAIL
 
 echo "# an already-open visit that routes nowhere is repointed, not counted"
 # The create-side gate cannot reach a visit that already exists. One filed
@@ -577,8 +606,8 @@ out=$(STUB_CREATE_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 1 "a failed create exits 1"
 has "$out" "no id" "and says the create returned nothing"
 reset
-out=$(STUB_UPD_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "stamps that do not read back exit 1"
+out=$(STUB_CREATE_NOMETA=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "a create that drops the identity stamps is caught at read-back and exits 1"
 has "$out" "repair:" "and print the repair command"
 
 echo "# the deacon's filed visits reach its incident ledger"

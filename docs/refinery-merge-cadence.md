@@ -136,6 +136,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
    other anchor's too.
+
+   **3a. pr-facts.sh --route-comments-only** — the feedback routing of arm 5, run
+   early, before merge. Arm 5 runs after merge and near the pass tail, so a pass
+   the timeout kills between the posture record and arm 5 leaves the operator's
+   review stamped-as-seen by the posture yet unrouted, sometimes for hours, while
+   the anchor reads as handled. This arm closes that window: it re-reads each open
+   anchor's feedback and dispatches the same rework child or visit and opens the
+   same validation pass arm 5 would, then stops — no write-back sweep, no
+   external-fact reconciliation, none of the arms that belong after merge, so it
+   is cheap and finishes on the early tick. Arm 5 still runs the routing
+   idempotently (a landed batch's watermark and `pr_comment_disposition` make the
+   re-run a no-op) and still owns the write-back and the terminal-state records.
+   Its rc is reported but holds nothing: routing is not the posture interlock, and
+   the full pass is the backstop. The observability half is
+   `doctor/check-feedback-routing-owed`, which flags an anchor whose posture still
+   says a human is waiting with no disposition past a window.
 4. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
@@ -214,8 +230,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
    rework child or a visit. The posture write is idempotent, so re-running it
-   here after arm 3 costs nothing when nothing changed. Routing lives only in
-   this arm: arm 3 records, this one decides what answers it. Each batch it
+   here after arm 3 costs nothing when nothing changed. The routing runs in two
+   places by design: arm 3a picks the feedback up early, before merge, and this
+   arm re-runs the same routing idempotently — a landed batch's watermark and
+   `pr_comment_disposition` make the second run a no-op — while owning the
+   write-back sweep and the terminal-state records that only make sense after
+   merge. Arm 3 records the posture; arm 3a and this arm decide what answers it.
+   Each batch it
    routes also opens one validation pass on the anchor — a
    `task_kind=validation` bead, unrouted, blocking the anchor — from which
    `gate-ensure.sh`'s quiescence holds a fresh whole-diff review while the

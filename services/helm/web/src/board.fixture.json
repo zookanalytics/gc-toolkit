@@ -60,6 +60,8 @@
       "pr_approval": "",
       "section": "stalled",
       "group_root": "tk-eemvf",
+      "acceptable": false,
+      "accept_formula": "",
       "pr_branch_url": "",
       "pr_phase": ""
     },
@@ -110,6 +112,8 @@
       "section": "cleanup",
       "cluster_key": "all 2 closed — graduate",
       "group_root": "gt-1a2b3",
+      "acceptable": false,
+      "accept_formula": "",
       "pr_branch_url": "",
       "pr_phase": ""
     },
@@ -161,6 +165,8 @@
       "pr_owed_since": "2026-08-08T11:02:00Z",
       "section": "review",
       "group_root": "tk-01n5cc",
+      "acceptable": true,
+      "accept_formula": "mol-dispose-pr",
       "pr_branch_url": "",
       "pr_phase": ""
     },
@@ -212,6 +218,8 @@
       "pr_approval": "",
       "section": "done",
       "group_root": "tk-9tbbk",
+      "acceptable": false,
+      "accept_formula": "",
       "pr_branch_url": "",
       "pr_phase": ""
     }

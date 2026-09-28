@@ -174,9 +174,13 @@ a human card is the minority exit. It is one of exactly four:
   closer — a capable pool that re-checks the conclusion and closes the bead when
   it agrees, or escalates to the operator when it does not. A first reaction
   never closes a bead itself; it routes, and the closer closes.
-- **ruling** — the operator's judgment is the next move and no worker can stand
-  in for it: a genuine fork with several reasonable directions, an irreversible
-  or destructive action, or a policy call. The exit files a visit.
+- **ruling** — the operator's judgment is the next move, in one of two shapes.
+  One no worker can stand in for: a genuine fork with several reasonable
+  directions, an irreversible or destructive action, or a policy call —
+  Discuss-only. The other is a recommendation: a determinable action only
+  converse/operator authority may take (retire an in-flight PR, supersede its
+  anchor; authority-map rows 28-30), where you name the execution mol so the
+  operator can Accept it from the visit. Both file a visit (step 1d).
 
 Move the bead forward when you can: take **actionable** when you can state the
 done condition, **blocked** when a named bead has to land first, and **close**
@@ -193,7 +197,14 @@ never sweep the do-it-now part into the human wait.
 
 "The operator would probably want to see this" is still not a ruling. A ruling
 is a fork, an irreversible action, or a policy call — never something a
-confident worker could carry forward on its own.
+confident worker could carry forward on its own — or a determinable action
+reserved to converse/operator authority, which you recommend by naming its
+execution mol.
+
+When the ruling is a recommendation, its card is what the execution worker
+reads via `bd show` if the operator Accepts: broad direction, not a spec — the
+bead's own content plus `execute via <mol>`, naming the formula that action
+takes.
 
 Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
 on a snapshot that may have moved by the time the human reads it (design Risk
@@ -364,7 +375,16 @@ when the conclusion itself is the operator's to make, that is a ruling (1d).
 visit.** Reserve this for what no worker can carry forward: a genuine fork with
 several reasonable directions, an irreversible or destructive action, or a
 policy call. It is the minority case — if you can name the work take 1a, and if
-the honest conclusion is that there is nothing to do take 1c. The visit form is
+the honest conclusion is that there is nothing to do take 1c.
+
+A ruling can also carry a recommendation: a determinable action only
+converse/operator authority may take (retire an in-flight PR, supersede its
+anchor; authority-map rows 28-30), where you name the execution mol with
+`--recommended-formula <mol>`. That stamps `gc.recommended_formula` on the
+subject so the operator can Accept it from the visit; its `--takeaway` carries
+the recommendation, and its card (from `first-reaction`) is the execution
+guidance, broad direction not a spec. Omit `--recommended-formula` for a plain
+Discuss-only ruling. The visit form is
 mol-visit's, spelled inline:
 
 ```bash
@@ -406,7 +426,11 @@ if [ "$GROUP_GOT" != "$WORK_BEAD_ID" ]; then
   fi
 fi
 # <<< gate-visit
+# A fork, irreversible action, or policy call — Discuss-only (no --recommended-formula):
 "$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the fork, irreversible action, or policy call only the operator can decide>" --takeaway "<the ≤140-char headline>" --visit "$VISIT"
+# A recommendation — a determinable converse/operator-authority action, naming
+# the execution mol so the operator can Accept it from the visit:
+"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the action, and why it is converse/operator authority>" --takeaway "<the ≤140-char headline, e.g. 'recommend: <action>; execute via <mol>'>" --visit "$VISIT" --recommended-formula <execution-mol>
 ```
 
 **2. Close THIS step bead, then drain.** Run this only after the exit block

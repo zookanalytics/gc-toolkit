@@ -85,9 +85,11 @@ printf '%s' "$WORK_BEAD_JSON" | jq '.[0].metadata'  # Check for existing metadat
 Two dispatch surfaces can reach one work bead — this workflow, and a direct
 pool route left on the bead itself. When both fire, two workers set up the same
 branch and one silently destroys the other's commits. Before touching the
-workspace, prove that the bead is not already in flight elsewhere:
+workspace, prove that the bead is neither in flight nor already completed
+elsewhere:
 
 ```bash
+# >>> load-context-duplicate-dispatch-hold
 WORK_STATUS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].status // empty')
 WORK_OWNER=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].assignee // empty')
 if [ -z "$WORK_STATUS" ]; then
@@ -96,30 +98,55 @@ if [ -z "$WORK_STATUS" ]; then
   WORK_OWNER="${WORK_OWNER:-unreadable}"
 fi
 OWNER_LIVE=0
+DONE_ELSEWHERE=""
 case "$WORK_OWNER" in
   ""|"$GC_SESSION_NAME"|"$GC_SESSION_ID"|"$GC_AGENT"|"$GC_ALIAS") ;;   # unowned, or owned by you
   *)
-    if [ "$WORK_STATUS" = "in_progress" ] || [ "$WORK_STATUS" = "unknown" ]; then
-      # An assignee can be any of the three forms a claim writes: the session
-      # name (what `gc bd update --claim` sets), the session id, or the agent
-      # address. Match all of them — a session record exposes them as
-      # .session_name, .id and .alias respectively, and has no .name field.
-      OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
-      # No answer means you could not disprove a live owner — assume one.
-      [ -z "$OWNER_LIVE" ] && OWNER_LIVE=1
-    fi ;;
+    case "$WORK_STATUS" in
+      in_progress|unknown)
+        # In flight: a live worker may still hold it, so the hold is gated on
+        # that owner being alive. An assignee is any of the three forms a claim
+        # writes — the session name (what `gc bd update --claim` sets), the
+        # session id, or the agent address — and a session record exposes them
+        # as .session_name, .id and .alias respectively, with no .name field.
+        # Match all of them.
+        OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
+        # No answer means you could not disprove a live owner — assume one.
+        [ -z "$OWNER_LIVE" ] && OWNER_LIVE=1 ;;
+      *)
+        # Open or closed under a foreign assignee is a completed hand-off, not a
+        # live conflict: the refinery handoff leaves the bead open, assigned to
+        # the refinery, route cleared, and a merge leaves it closed. A fresh or
+        # rework dispatch reaches load-context with an empty assignee (routed by
+        # gc.routed_to, cleared on re-dispatch), so a foreign one here means
+        # another dispatch already carried the work past this point. Building it
+        # now rebuilds a branch that already has a PR, so the liveness gate does
+        # not apply — hold regardless.
+        DONE_ELSEWHERE="already handed off or merged ($WORK_STATUS, held by $WORK_OWNER); another dispatch carried it to completion" ;;
+    esac ;;
 esac
-# >>> load-context-duplicate-dispatch-hold
-if [ "$OWNER_LIVE" != "0" ]; then
-  gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused: $GC_SESSION_NAME found $WORK_BEAD_ID already $WORK_STATUS under live $WORK_OWNER."
+# A merge_result stamp means a PR or merge already exists for THIS bead — fresh
+# work is its own anchor — and it outlives a cleared assignee, so a bead the
+# handoff left unowned would otherwise sail its open PR through the arms above.
+if [ "$OWNER_LIVE" = "0" ] && [ -z "$DONE_ELSEWHERE" ]; then
+  WORK_MERGE_RESULT=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
+  [ -n "$WORK_MERGE_RESULT" ] && DONE_ELSEWHERE="already carrying merge_result=$WORK_MERGE_RESULT; a PR or merge exists for this bead"
+fi
+if [ "$OWNER_LIVE" != "0" ] || [ -n "$DONE_ELSEWHERE" ]; then
+  if [ -n "$DONE_ELSEWHERE" ]; then
+    DUP_REASON="$DONE_ELSEWHERE"
+  else
+    DUP_REASON="already $WORK_STATUS under live $WORK_OWNER"
+  fi
+  gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused: $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
   SCRIPTS=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
   : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
-  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is already $WORK_STATUS under live $WORK_OWNER, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Decide which dispatch owns the bead, then re-offer that one."; then
+  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is $DUP_REASON, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. If the work is done, close this visit and the redundant molecule; if two dispatches are live, decide which owns the bead, then re-offer that one."; then
     echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
-  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID is already $WORK_STATUS under live $WORK_OWNER"; then
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID $DUP_REASON"; then
     gc runtime drain-ack
   else
     echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -166,9 +193,13 @@ The same rule covers every other reason you might decline this bead. A polecat
 that judges the work already delivered, or the premise falsified, holds the
 molecule the same way and drains; it never leaves a claimable step behind.
 
-Owner liveness, not staleness, is the gate: an idle pool worker between claims
-looks identical to an abandoned one. Only a session absent from
-`gc session list --state all` is safely gone.
+Owner liveness gates the in-flight case only: an idle pool worker between
+claims looks identical to an abandoned one, so an `in_progress` bead is a
+conflict only while its owner is present in `gc session list --state all` — a
+crashed owner leaves the work yours to take, and only a session absent from
+that list is safely gone. A bead already handed off (open or closed under a
+foreign assignee) or carrying a `merge_result` is finished rather than in
+flight, and holds regardless of any session's liveness.
 
 **4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
 

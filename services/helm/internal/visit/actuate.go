@@ -1,12 +1,14 @@
-// Package visit runs the city's visit-filing verb on behalf of the board.
+// Package visit runs the city's helm WRITE verbs on behalf of the board.
 //
-// It is a thin exec wrapper and nothing else. `gc-helm.sh open` owns what a
-// visit IS — the gate-visit block, the subject-existence gate, the
-// one-open-visit-per-subject gate, rig resolution, the board cache bust — and
-// this package exists so the HTTP layer can reach that one copy rather than
-// grow a second. The same reuse discipline assets/scripts/gc-visit-open.sh
-// follows, for the same reason: assets/scripts/gate-visit.test.sh guards a
-// single canonical copy, and a Go reimplementation would be an unguarded one.
+// It is a thin exec wrapper and nothing else. `gc-helm.sh` owns what each verb
+// DOES — open files a visit, accept slings the subject's recommended formula and
+// dismisses the visit, engage spawns a Discuss sitting on the visit, dismiss
+// closes the visit — together with subject resolution, the one-open-visit-per-
+// subject gate, rig resolution and the board cache bust. This package exists so
+// the HTTP layer can reach that one copy rather than grow a second. The same
+// reuse discipline assets/scripts/gc-visit-open.sh follows, for the same reason:
+// assets/scripts/gate-visit.test.sh guards a single canonical copy, and a Go
+// reimplementation would be an unguarded one.
 package visit
 
 import (
@@ -25,16 +27,17 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/server"
 )
 
-// DefaultTimeout bounds one `gc-helm.sh open` run.
+// DefaultTimeout bounds one gc-helm.sh write-verb run.
 //
-// Generous on purpose. The verb is not one command: it enumerates rigs (itself
+// Generous on purpose. No verb is one command: open enumerates rigs (itself
 // bounded at 30s by default, GC_HELM_RIG_TIMEOUT), reads the subject, scans the
 // city's open beads for an existing visit, then creates and stamps a bead and
-// files a dependency edge. Each of those is a `gc`/`bd` call against Dolt, and
-// under city load the CLI startup cost alone is seconds. Cutting a slow-but-
-// working open short would report failure for a visit that then appears anyway
-// — the worst outcome available, because the operator's retry is what splits
-// the conversation.
+// files a dependency edge; accept adds a sling and a dismiss; engage spawns a
+// converse session. Each of those is a `gc`/`bd` call against Dolt, and under
+// city load the CLI startup cost alone is seconds. Cutting a slow-but-working
+// run short would report failure for a side effect that then appears anyway —
+// the worst outcome available, because the operator's retry is what splits the
+// conversation (open) or double-dispatches (accept).
 const DefaultTimeout = 120 * time.Second
 
 // killGrace bounds how long Wait may block AFTER the deadline has fired and the
@@ -43,8 +46,9 @@ const DefaultTimeout = 120 * time.Second
 // and the only question is how long the handler waits to say so.
 const killGrace = 2 * time.Second
 
-// Opener runs the `open` verb as a subprocess. It satisfies [server.Opener].
-type Opener struct {
+// Actuator runs a gc-helm.sh write verb as a subprocess. It satisfies
+// [server.Actuator].
+type Actuator struct {
 	// script is the absolute path to gc-helm.sh.
 	script string
 	// dir is the working directory for the run: the city root, so `gc`'s city
@@ -54,29 +58,31 @@ type Opener struct {
 	timeout time.Duration
 }
 
-// New builds an Opener, or reports why the write route cannot be served.
+// New builds an Actuator, or reports why the write routes cannot be served.
 //
 // RESOLUTION ORDER, and why there is no rig-name guess in it:
 //
 //  1. GC_HELM_OPEN_TOOL — an explicit path. This is what the launcher sets
 //     (assets/scripts/gc-helm-svc.sh exports the sibling gc-helm.sh next to
 //     itself), so the normal deployment always resolves, and it is what tests
-//     point at a stub. It mirrors GC_HELM_GC_BIN in internal/source.
+//     point at a stub. It mirrors GC_HELM_GC_BIN in internal/source. The name is
+//     historical — it predates accept/engage/dismiss — and names the one script
+//     every write verb shells out to.
 //  2. `gc-helm.sh` on PATH.
 //
 // Deliberately NOT a third guess at "rigs/<rig>/assets/scripts/gc-helm.sh".
 // gc-toolkit is rig-imported by four rigs, so there is no single correct rig
 // name to hardcode, and picking one would silently run a DIFFERENT rig's copy
 // of the script than the binary was built from. A service that cannot resolve
-// the script serves the whole board and refuses this one route with a message
-// naming the variable — which is recoverable — rather than filing visits
-// through a script nobody chose.
-func New(cityPath string) (*Opener, error) {
+// the script serves the whole board and refuses the write routes with a message
+// naming the variable — which is recoverable — rather than acting through a
+// script nobody chose.
+func New(cityPath string) (*Actuator, error) {
 	script, err := resolveScript()
 	if err != nil {
 		return nil, err
 	}
-	return &Opener{script: script, dir: cityPath, timeout: timeout()}, nil
+	return &Actuator{script: script, dir: cityPath, timeout: timeout()}, nil
 }
 
 func resolveScript() (string, error) {
@@ -98,8 +104,8 @@ func resolveScript() (string, error) {
 
 // timeout reads GC_HELM_OPEN_TIMEOUT as a Go duration ("90s") or a bare number
 // of seconds, falling back to [DefaultTimeout]. Zero and negative fall back
-// too: an instantly-expiring deadline would fail every open before the script
-// could file anything, which is not a tuning knob.
+// too: an instantly-expiring deadline would fail every run before the script
+// could do anything, which is not a tuning knob.
 func timeout() time.Duration {
 	v := strings.TrimSpace(os.Getenv("GC_HELM_OPEN_TIMEOUT"))
 	if v == "" {
@@ -115,12 +121,36 @@ func timeout() time.Duration {
 }
 
 // Script is the resolved path, for logging at startup.
-func (o *Opener) Script() string { return o.script }
+func (o *Actuator) Script() string { return o.script }
 
-// Open runs `gc-helm.sh open <bead>` and returns its result.
+// argvFor builds the script argv for one write verb. The bead is always the
+// first positional and has already been validated to the bead-id shape by the
+// handler, so it can never be read as a flag. An unknown verb returns ok=false:
+// the caller passes fixed literals, so a false here is a wiring fault, reported
+// as an internal error rather than run.
+//
+// engage is the one verb that carries fixed extra flags. Over HTTP there is no
+// TTY to prompt at and no tmux pane to attach, so --no-input drives engage's
+// flag-driven one-shot path (no prompts) and --no-attach spawns the Discuss
+// sitting WITHOUT attaching. The operator then attaches from the terminal tile
+// or the sessions picker — exactly how `open`'s filed visit is reached, and the
+// documented use of engage's --no-attach (the tmux board picker uses it too).
+// Every other semantic is the CLI's, unchanged (tk-hsm4d9).
+func argvFor(verb, bead string) ([]string, bool) {
+	switch verb {
+	case "open", "accept", "dismiss":
+		return []string{verb, bead}, true
+	case "engage":
+		return []string{verb, bead, "--no-input", "--no-attach"}, true
+	default:
+		return nil, false
+	}
+}
+
+// Run executes `gc-helm.sh <verb> <bead>` and returns its result.
 //
 // A non-zero exit is a RESULT, not an error: the exit codes are the script's
-// contract and the HTTP layer maps them (see internal/server/open.go). Only a
+// contract and the HTTP layer maps them (see internal/server/actuate.go). Only a
 // failure to run or to finish is an error, and those are reported as the
 // sentinels [server.ErrToolUnavailable] and [server.ErrToolTimeout] so the
 // mapping can tell them apart from each other and from an exit code.
@@ -128,11 +158,17 @@ func (o *Opener) Script() string { return o.script }
 // The bead argument is passed as an argv element — there is no shell, so no
 // quoting question arises. It has already been validated against the bead-id
 // shape by the handler, which is what keeps it from being read as a flag.
-func (o *Opener) Open(ctx context.Context, bead string) (server.ToolResult, error) {
+func (o *Actuator) Run(ctx context.Context, verb, bead string) (server.ToolResult, error) {
+	args, ok := argvFor(verb, bead)
+	if !ok {
+		// A wiring fault, not a tool failure: the handlers pass fixed verbs.
+		return server.ToolResult{}, fmt.Errorf("unknown helm write verb %q", verb)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, o.script, "open", bead)
+	cmd := exec.CommandContext(ctx, o.script, args...)
 	if o.dir != "" {
 		cmd.Dir = o.dir
 		cmd.Env = append(os.Environ(), "GC_CITY_PATH="+o.dir)

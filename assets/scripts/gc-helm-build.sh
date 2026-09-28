@@ -42,6 +42,35 @@ done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOD="$(cd "$HERE/../../services/helm" && pwd)"
+
+# Every `replace <module> => <local path>` in helm's go.mod points at a sibling
+# module whose sources are compiled into helm-svc — services/gctk holds the
+# prstatus tri-state core the PR-label writer also derives from. Those sources
+# are build inputs, so SOURCE_REV (the staleness identity) and newer_than_binary
+# (the mtime scan) below both span them: a change confined to a replaced sibling
+# must rebuild and restart helm-svc, or the board serves stale logic while the
+# label path has already moved. Reading the replace directives rather than a
+# hard-coded sibling name keeps every future local module covered by construction.
+local_dep_mods() {
+    awk '
+        function rhs(   i) { for (i = 1; i <= NF; i++) if ($i == "=>") return $(i + 1); return "" }
+        $1 == "replace" && $2 == "(" { inblock = 1; next }
+        inblock && $1 == ")"         { inblock = 0; next }
+        $1 == "replace" && /=>/      { print rhs(); next }
+        inblock && /=>/              { print rhs() }
+    ' "$MOD/go.mod" 2>/dev/null | while IFS= read -r _p; do
+        case "$_p" in
+            /*)        ( cd "$_p"      2>/dev/null && pwd ) ;;
+            ./*|../*)  ( cd "$MOD/$_p" 2>/dev/null && pwd ) ;;
+            *) continue ;;   # a versioned module-path replacement, not a local dir
+        esac
+    done
+}
+LOCAL_DEP_MODS=()
+while IFS= read -r _m; do
+    if [ -n "$_m" ]; then LOCAL_DEP_MODS+=("$_m"); fi
+done < <(local_dep_mods)
+
 SERVICE_NAME="${GC_HELM_SERVICE_NAME:-helm}"
 GC_BIN="${GC_HELM_GC_BIN:-gc}"
 
@@ -135,8 +164,16 @@ RESTART_PENDING="$STATE_ROOT/restart-pending"
 STATUS="$STATE_ROOT/build-status.json"
 # HEAD:./ is the tree hash of $MOD at HEAD — the identity of this module's
 # committed inputs, deletions included. The repo HEAD would move on every
-# merge to main and cost a rebuild plus a service restart for each.
+# merge to main and cost a rebuild plus a service restart for each. Each local
+# module helm replaces in adds its own subtree hash, so a sibling-only change
+# moves SOURCE_REV without widening the identity to all of main.
 SOURCE_REV="$(git -C "$MOD" rev-parse 'HEAD:./' 2>/dev/null || true)"
+if [ -n "$SOURCE_REV" ]; then
+    for _dep in ${LOCAL_DEP_MODS[@]+"${LOCAL_DEP_MODS[@]}"}; do
+        _dep_rev="$(git -C "$_dep" rev-parse 'HEAD:./' 2>/dev/null || true)"
+        [ -n "$_dep_rev" ] && SOURCE_REV="$SOURCE_REV $_dep_rev"
+    done
+fi
 
 # A field of the previous record, or empty. A build that failed keeps the last
 # good binary serving, so its built_at and binary_rev must survive the failure
@@ -238,9 +275,10 @@ write_status() { # <kind> [detail]
 
 # Build inputs: *.go, go.mod/go.sum (explicit — `-name '*.go'` misses them,
 # and a dependency-only bump must still rebuild, tk-ohdex), and web/dist
-# (go:embed). node_modules pruned.
+# (go:embed). Scanned across $MOD and every local module it replaces in, so a
+# sibling-only edit is seen as newer. node_modules pruned.
 newer_than_binary() {
-    find "$MOD" -name node_modules -prune -o \( -name '*.go' -o -name go.mod -o -name go.sum -o -path "$MOD/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
+    find "$MOD" ${LOCAL_DEP_MODS[@]+"${LOCAL_DEP_MODS[@]}"} -name node_modules -prune -o \( -name '*.go' -o -name go.mod -o -name go.sum -o -path "$MOD/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
 }
 
 # Is the pid alive? Tells a live scratch dir from a stranded one.

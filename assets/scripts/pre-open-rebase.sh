@@ -328,8 +328,9 @@ while IFS= read -r row; do
   fi
   # The route is stamped separately, after prepare_mode reads back. A dropped
   # branch leaves a child nothing can act on, which is the safe side; a dropped
-  # prepare_mode leaves one that is routable AND rewriting, because the resume
-  # path treats an absent mode as rebase. task_kind and anchor_bead are the role
+  # prepare_mode leaves one that reads as a review bead rather than a rework
+  # resume — pr-facts.sh keys that distinction on a non-empty prepare_mode — so
+  # it escapes the rework handling. task_kind and anchor_bead are the role
   # marker: the child resumes the ANCHOR's own branch, so with no marker a
   # metadata read cannot tell the child from the anchor.
   #

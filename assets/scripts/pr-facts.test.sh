@@ -107,6 +107,12 @@ export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # pre-recorded disposition through. The contract that matters here: on success
 # it stamps gc.superseded_by and CLOSES the origin; STUB_REHOME_RC models the
 # refusals it reports without closing (4 transient, 5/6 a human is needed).
+# It also models the real open-children hold: the close is NOT --force, so an
+# OPEN bead that still `blocks` the origin refuses it with exit 5 (bead-rehome.sh
+# :254-263). Without that, a stub that closed straight through a blocking rework
+# child would green-light the strand pr-facts's dispose-children-first order
+# exists to prevent — an anchor stranded open behind a rework child it cannot
+# close.
 cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
@@ -122,6 +128,16 @@ while [ $# -gt 0 ]; do
 done
 rc="${STUB_REHOME_RC:-0}"
 if [ "$rc" != "0" ]; then echo "bead-rehome (stub): refusing rc=$rc" >&2; exit "$rc"; fi
+# Real close: drop ONLY the origin->successor wait edge, then close WITHOUT
+# --force. Any OTHER open blocker (a rework child that blocks this anchor) refuses
+# the close, leaving the bead OPEN and pointed — exit 5, the shape pr-facts reads
+# as "a human is needed" and never as a clean dispose.
+gc bd dep remove "$origin" "$succ" >/dev/null 2>&1 || true
+if [ "$(gc bd dep list "$origin" --direction=down -t blocks --json 2>/dev/null \
+        | jq '[ .[] | select((.status // "open") != "closed") ] | length' 2>/dev/null || echo 0)" != "0" ]; then
+  echo "bead-rehome (stub): $origin has an OPEN blocker; non-force close refused (exit 5)" >&2
+  exit 5
+fi
 if [ -n "$store" ]; then
   gc bd update "$origin" --status=closed --set-metadata "gc.superseded_by=$succ" --set-metadata "gc.superseded_by_store=$store" >/dev/null 2>&1 || exit 5
 else
@@ -382,6 +398,52 @@ printf '%s' "$(prview 31 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_31.json"
 out=$(run)
 eq "$(bstatus K3)" "closed" "the child is dropped"
 has "$(cat "$STUB_REHOME_LOG")" "--origin K3 --successor ot-k --kind not-needed --successor-store rig:other" "the child drop carries the same successor store as the anchor"
+
+# A rework child holds a `blocks` edge on its anchor, so the anchor's own
+# non-force close is REFUSED while the child is open. The child must be dropped
+# FIRST, in this same pass — drop it after the anchor close and the anchor can
+# never close (its blocker is what fails the close), so it strands OPEN with its
+# pointer stamped and a human has to finish it by hand. The bead-rehome stub
+# models that open-blocker refusal, so this case fails against a dispose that
+# closes the anchor before its children.
+echo "# a blocking rework child is dropped BEFORE the anchor close, so the anchor is not stranded"
+: > "$STUB_DEPS"
+store "[$(anchor F2j 30 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-j"'), $(child RC polecat/x30 ',"task_kind":"rework","anchor_bead":"F2j"'), {\"id\":\"VJ\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"pr-abandoned.30\",\"gc.continuation_group\":\"F2j\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+gc bd dep RC --blocks F2j >/dev/null 2>&1   # the edge that refuses the anchor's close while RC is open
+printf '%s' "$(prview 30 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_30.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus RC)" "closed" "the blocking rework child is dropped"
+eq "$(bstatus F2j)" "closed" "…so the anchor's own close is no longer refused — disposed, not stranded"
+eq "$(meta F2j 'gc.superseded_by')" "tk-j" "the anchor carries its terminal pointer"
+eq "$(meta RC 'gc.superseded_by')" "tk-j" "…and the child is superseded by the anchor's successor"
+has "$(cat "$STUB_REHOME_LOG")" "--origin RC --successor tk-j --kind not-needed" "the child is dropped as not-needed -> the anchor's successor"
+rc_ln=$(grep -n -- "--origin RC " "$STUB_REHOME_LOG" | head -1 | cut -d: -f1)
+an_ln=$(grep -n -- "--origin F2j " "$STUB_REHOME_LOG" | head -1 | cut -d: -f1)
+{ [ -n "$rc_ln" ] && [ -n "$an_ln" ] && [ "$rc_ln" -lt "$an_ln" ]; } \
+  && ok "the child close precedes the anchor close (completeness by construction, not a next-pass retry)" \
+  || bad "the child must be disposed before the anchor close (rc_ln='$rc_ln' an_ln='$an_ln')"
+eq "$(bstatus VJ)" "closed" "the stale rework-or-close visit is retired in the same consummation"
+eq "$(meta VJ 'gc.outcome')" "moot" "…closed moot, the decision it asked for is made"
+eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated — the disposition consummated completely"
+
+# The children are dropped BEFORE the anchor close, to clear their hold. When the
+# close is then refused for a reason dropping them does not clear — a separate
+# open blocker, a foreign disposition — the children are already gone. The
+# pr-dispose-failed escalation must NAME them, or an operator who reverses the
+# disposition finds them disposed with nothing saying so.
+echo "# a refused anchor close names the children already disposed in the escalation"
+: > "$STUB_DEPS"
+store "[$(anchor F2m 33 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-m"'), $(child K5 polecat/x33), {\"id\":\"BLK\",\"status\":\"open\",\"title\":\"unrelated blocker\",\"notes\":\"\",\"metadata\":{}}]"
+gc bd dep BLK --blocks F2m >/dev/null 2>&1   # a blocker that is NOT a parked child, so dropping the children never clears it
+printf '%s' "$(prview 33 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_33.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus K5)" "closed" "the parked child is dropped before the anchor close"
+eq "$(bstatus F2m)" "open" "…but the anchor close is still refused (another blocker), so it is left OPEN"
+has "$(cat "$STUB_ESC_LOG")" "--subject F2m --key pr-dispose-failed.33" "escalated under the dispose-failed key"
+has "$(cat "$STUB_ESC_LOG")" "K5" "…the escalation names the child that was already disposed"
+has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it if the disposition is wrong"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"
@@ -2557,6 +2619,98 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/145/reviews/560/dismissals" "a delivered decline reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/145/requested_reviewers" "…and its author is re-requested"
 has "$(cat "$STUB_GH_LOG")" "resolved by an accepted decline" "…the dismiss message names the accepted decline"
+
+# ---- --route-comments-only: route operator feedback early, before merge --------
+# The tk-8qtkvv divergence: --posture-only stamps commented/changes_requested on
+# the cheap pre-merge tick, but routing lived only in the full arm at the pass
+# TAIL (after merge). A pass the timeout killed in between left the feedback
+# stamped-as-seen yet unrouted for hours. This mode routes on the early tick too:
+# it does the SAME routing the full arm does, then stops — no write-back sweep,
+# no MERGED/CLOSED reconciliation, none of the non-feedback arms.
+# The `new-N` bead counter is high this late in the run, so the child id is read
+# back from the store rather than assumed.
+run_route() { "$SUT" --route-comments-only --fix-pool "$FIX" 2>&1; }
+
+echo "# --route-comments-only: an unanswered comment is routed to a fix-pool child"
+store "[$(anchor RC1 66)]"
+printf '%s' "$(prview 66 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_66.json"
+echo '[]' > "$GH_DIR/reviews_66.json"
+printf '[{"id":6601,"user":{"login":"human1"},"body":"please change this","path":"a.sh"}]' > "$GH_DIR/comments_66.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_route); rc=$?
+eq "$rc" 0 "a route-comments-only pass exits 0"
+has "$out" "route-comments-only" "the summary names the mode"
+eq "$(meta_pinned RC1 pr_posture)" "commented@sha-66" "posture is still recorded (the arm re-reads it to route)"
+rc1_child=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | .id ][0] // "<none>"' "$STUB_STORE")
+eq "$(meta RC1 pr_comment_disposition)" "rework:$rc1_child" "the comment is routed on the early tick, disposition recorded"
+eq "$(meta RC1 pr_comment_watermark)" "6601" "…and the watermark advanced to the routed comment"
+eq "$(meta "$rc1_child" anchor_bead)" "RC1" "the child names the anchor"
+eq "$(meta "$rc1_child" task_kind)" "rework" "…and carries its role marker"
+eq "$(meta "$rc1_child" 'gc.routed_to')" "$FIX" "…and is routed to the fix pool"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "the fix pool is woken"
+eq "$(vpass_id RC1)" "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | .id ][0] // "<none>"' "$STUB_STORE")" \
+  "the batch opens its validation pass here too, exactly as the full arm does"
+
+echo "# …a human hold routes the same batch to a visit, early (the full arm's choice)"
+store "[$(anchor RC2 67 ',"merge_hold":"true"')]"
+printf '%s' "$(prview 67 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_67.json"
+echo '[]' > "$GH_DIR/reviews_67.json"
+printf '[{"id":6701,"user":{"login":"human1"},"body":"hmm"}]' > "$GH_DIR/comments_67.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
+out=$(run_route)
+eq "$(meta RC2 pr_comment_disposition | sed 's/visit:.*/visit/')" "visit" "a held anchor's feedback goes to a visit, on the early tick"
+has "$(cat "$STUB_ESC_LOG")" "merge_hold is set" "…and the visit records why no work could be routed"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work routed under the hold"
+
+echo "# …route-comments-only does NOT run the write-back sweep (the full pass owns it)"
+store "[$(anchor RC3 68 "$(wb_meta rework:KX)"), $(child KX open)]"
+printf '%s' "$(prview 68 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_68.json"
+threads 68 "$(one_thread 68)"
+out=$(run_route)
+eq "$(reacted 68 NC-68)" "false" "no EYES reaction: the write-back sweep did not run in route mode"
+hasnt "$out" "comments acknowledged" "…and the route summary reports no write-back"
+# Control: the full pass on the SAME fixture reacts, so the false above is the
+# mode's doing, not a fixture that could never react.
+out=$(run)
+eq "$(reacted 68 NC-68)" "true" "the full pass reacts on the same fixture, proving it discriminates"
+
+echo "# …and MERGED/CLOSED reconciliation is left to the full pass, like --posture-only"
+store "[$(anchor RC4 69)]"
+printf '%s' "$(prview 69 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_69.json"
+out=$(run_route)
+hasnt "$out" "is MERGED" "a merged PR is not reconciled by the feedback arm"
+eq "$(bstatus RC4)" "open" "…the anchor is left exactly as it was"
+eq "$(meta RC4 merge_result)" "pull_request" "…with its state untouched"
+out=$(run)
+has "$out" "PR#69 is MERGED" "the full pass still records it"
+eq "$(bstatus RC4)" "closed" "…and closes the anchor"
+
+echo "# …a CONFLICTING anchor is deferred to the full pass — no conflict-rework early"
+store "[$(anchor RC9 152)]"
+printf '%s' "$(prview 152 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_152.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_route)
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" \
+  "route-comments-only files no conflict-rework (the full pass owns it)"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and does not wake the fix pool"
+eq "$(meta RC9 merge_result)" "pull_request" "…the anchor is left gating, untouched"
+# Control: the full pass on the SAME fixture dispatches the rework, so the skip
+# above is route mode's doing, not a fixture that could never dispatch.
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" \
+  "the full pass dispatches the conflict-rework on the same fixture"
+
+echo "# …a retargeted anchor is deferred to the full pass — no early transition or escalation"
+store "[$(anchor RC10 153)]"
+printf '%s' "$(prview 153 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_153.json"
+: > "$STUB_ESC_LOG"
+out=$(run_route)
+eq "$(meta RC10 merge_result)" "pull_request" \
+  "route-comments-only does not transition a retargeted anchor (the full pass owns it)"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-retargeted.153" "…and files no retarget escalation early"
+# Control: the full pass on the SAME fixture retargets, proving the skip is route mode's doing.
+out=$(run)
+eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

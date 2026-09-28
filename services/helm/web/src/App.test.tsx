@@ -57,6 +57,8 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_conversation: '',
     pr_approval: '',
     section: 'active',
+    acceptable: false,
+    accept_formula: '',
     ...over,
   };
 }
@@ -302,6 +304,69 @@ it('orders members within a family by the move they want', async () => {
     .getAllByText(/^(review|gate|stalled|active|cleanup|done)$/)
     .map((e) => e.textContent);
   expect(bands).toEqual(['review', 'gate']);
+});
+
+// The Accept affordance is the board's one row-level actuation: it renders only
+// where the wire says the row is `acceptable`, names the formula it would
+// dispatch, and — proven in ActuateButton.test.tsx — POSTs helm/accept. A
+// discuss-only row (acceptable false) carries no button, the same split the CLI
+// board's "accept ▸" marker makes.
+it('renders Accept on an acceptable member row and not on a discuss-only one', async () => {
+  serve([
+    tile({ id: 'tk-root', kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
+    tile({
+      id: 'tk-rec',
+      kind: 'gate',
+      title: 'a recommendation to accept',
+      severity: 'ELEVATED',
+      section: 'gate',
+      group_root: 'tk-root',
+      acceptable: true,
+      accept_formula: 'mol-dispose-pr',
+      needs: 'ruling recorded — accept to actuate',
+    }),
+    tile({
+      id: 'tk-plain',
+      kind: 'gate',
+      title: 'a discuss-only gate',
+      severity: 'ELEVATED',
+      section: 'gate',
+      group_root: 'tk-root',
+      needs: "let's talk it through",
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a recommendation to accept/)).toBeTruthy());
+
+  const rec = memberRow('tk-root', /a recommendation to accept/);
+  expect(within(rec as HTMLElement).getByRole('button', { name: /accept ▸ mol-dispose-pr/i })).toBeTruthy();
+
+  const plain = memberRow('tk-root', /a discuss-only gate/);
+  expect(within(plain as HTMLElement).queryByRole('button', { name: /accept/i })).toBeNull();
+});
+
+// The root's own recommendation shows in the family banner — the same place the
+// root's "needs" sentence and PR link render — not a member row.
+it('renders Accept in the family banner when the root is acceptable', async () => {
+  serve([
+    tile({
+      id: 'tk-recroot',
+      kind: 'decision',
+      title: 'a root that is itself a recommendation',
+      severity: 'ELEVATED',
+      section: 'gate',
+      acceptable: true,
+      accept_formula: 'mol-supersede',
+      needs: 'ruling recorded — accept to actuate',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a root that is itself a recommendation/)).toBeTruthy());
+
+  const accept = within(region('tk-recroot')).getByRole('button', { name: /accept ▸ mol-supersede/i });
+  expect(accept).toBeTruthy();
+  // In the banner, not a member table row.
+  expect(accept.closest('tr')).toBeNull();
 });
 
 // The never-blank contract. "Nothing is owed by you" is this page's most

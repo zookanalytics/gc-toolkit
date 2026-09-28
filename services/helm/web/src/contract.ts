@@ -235,6 +235,21 @@ export interface Tile {
    */
   group_root: string;
   /**
+   * Set when this row can be ACCEPTED: the subject carries a recommended
+   * execution formula (`gc.recommended_formula`) and its visit is un-engaged, so
+   * a person can dispatch that formula at the subject and dismiss the visit in
+   * one procedural order — the extra move a recommendation row offers over a
+   * discuss-only gate. A live sitting suppresses it and leaving without a ruling
+   * restores it. Always present (Go bool); false on every non-recommendation row.
+   */
+  acceptable: boolean;
+  /**
+   * The `gc.recommended_formula` Accept would dispatch, so a surface can name
+   * what accepting does without re-reading the subject bead. Empty exactly when
+   * `acceptable` is false. Always present.
+   */
+  accept_formula: string;
+  /**
    * The GitHub tree-view link for `pr_branch`, or `''` when the row has no
    * branch or the rig's repository could not be resolved. The board makes no
    * GitHub call: the repository is learned from a `pr_url` already on the board,

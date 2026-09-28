@@ -17,8 +17,13 @@
 # dispatch goes out only when QUIESCENCE holds: no review is dispatched while
 # anything is acting on the anchor — an open must-fix finding on any lane, a
 # fix unit in flight, a validation pass in flight, or a full review already in
-# flight on the lane. That predicate is what forbids the same head being read
-# twice. A dispatch stamps metadata + a blocks edge first (fail-closed), takes
+# flight on the lane. That predicate forbids the same head being read twice
+# WHILE a review is live or the anchor is being acted on; once a request-changes
+# review has CLOSED, the per-head bar (reviewed_at_head) forbids it, refusing a
+# second whole-diff review at a head already carrying a recorded, non-superseded
+# verdict — the durable backstop for the window between the close and the fix
+# unit and findings it files, which the transient quiescence beads do not yet
+# cover. A dispatch stamps metadata + a blocks edge first (fail-closed), takes
 # its body from review-dispatch-body.sh, then pours formula and route in one
 # call (gc sling <review-pool> <bead> --on mol-review), pinned to the live head
 # (signoff.sh binds the verdict) with fix_target_pool for the rework route.
@@ -172,6 +177,37 @@ inflight_review() { # <anchor-id> <gate>
     | (if (.reach | not) then ("stranded " + .id)
        elif (.poured and (.routed | not) and (.claimed | not)) then ("poured " + .id)
        else .id end)' 2>/dev/null
+}
+
+# A CLOSED review bead already recording a verdict for <anchor>/<gate> at exactly
+# <head>? Echoes its id. This is the per-head bar: the approve path pins the lane
+# green oid-independently, so it never re-dispatches, but a request-changes lane
+# is not green and, once its review bead closes, inflight_review (live-status
+# only) no longer sees it — leaving suppression to the transient fix unit and
+# findings, which are filed in separate writes after the close. This probe reads
+# the review bead itself instead. reviewed_oid was pinned at dispatch and
+# gc.outcome=recorded rides the SAME write that closes the bead (signoff.sh
+# close_review), so the instant a review leaves inflight_review's live set it
+# enters this closed set: the two hand off on one atomic write, with no window a
+# fresh pour can slip through. A superseded review is excluded (gc.outcome is
+# then superseded, not recorded, and signoff clears its pin on a moved head): that
+# is exactly the head-move or validator-ordered re-review this bar must let
+# through, the same exclusion lane-state.sh's green backing makes. Non-zero rc =
+# the ledger could not answer; the caller holds the dispatch, like every probe
+# here.
+reviewed_at_head() { # <anchor-id> <gate> <head>
+  local raw
+  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 1
+  printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
+    [ .[]
+      | (.metadata // {}) as $m
+      | select((($m.task_kind // "") | tostring) == "review")
+      | select(((($m.check_name // "") | tostring) | if . == "" then "codex" else . end) == $g)
+      | select(((.status // "") | tostring | ascii_downcase) == "closed")
+      | select((($m.reviewed_oid // "") | tostring) == $h)
+      | select((($m["gc.outcome"] // "") | tostring) == "recorded")
+      | .id ]
+    | (.[0] // empty)' 2>/dev/null
 }
 
 # An open rework child already filed under <anchor>? Echoes its id. A rework
@@ -780,6 +816,31 @@ STRAY
     if [ -n "$quiesce_hold" ]; then
       echo "$PROG: $id gate '$g' is quiesced ($quiesce_reason); the anchor is being acted on, so no review is dispatched"
       held=$((held + 1)); continue
+    fi
+
+    # Per-head bar — the request-changes equivalent of the approve path's
+    # oid-independent green pin. We reach here only when the lane is not green,
+    # nothing is in flight on it, and quiescence does not hold: exactly the
+    # window a request-changes verdict opens between closing its review bead and
+    # the fix unit and findings it files becoming visible to the quiescence
+    # probes above. The verdict itself is durable the instant that window opens
+    # (reviewed_oid pinned at dispatch, gc.outcome=recorded written with the
+    # close), so a closed non-superseded review recording a verdict at THIS head
+    # means the head was already judged, and a second whole-diff review would be
+    # the redundant read the (anchor, gate, head) invariant forbids. A moved head
+    # carries a different oid and is not barred; a superseded review is excluded,
+    # so a validator returning the lane to unreviewed still re-pours. An
+    # unreadable head cannot prove a duplicate, so it degrades to the
+    # quiescence-only suppression above; an unreadable ledger fails closed.
+    if [ -n "$head" ]; then
+      if ! JUDGED=$(reviewed_at_head "$id" "$g" "$head"); then
+        echo "$PROG: $id gate '$g' per-head bar probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      if [ -n "$JUDGED" ]; then
+        echo "$PROG: $id gate '$g' head $head already reviewed by $JUDGED (closed, verdict recorded); no second whole-diff review at an unmoved head"
+        held=$((held + 1)); continue
+      fi
     fi
 
     if [ -z "$REVIEW_POOL" ]; then

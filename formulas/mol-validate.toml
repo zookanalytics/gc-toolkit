@@ -353,9 +353,11 @@ comment its reviewer never read, so a converged human batch runs neither line.
 **If it has NOT converged — a fresh whole-diff review is warranted.**
 
 A reviewer's lane batch supersedes its own lane, returning it to `unreviewed` so
-the check authority pours a fresh review at the live head. On a request-changes
-batch there is no approve backing yet; supersede-lane is then a no-op success and
-the lane already owes its review.
+the check authority pours a fresh review at the live head. supersede-lane retires
+the lane's standing verdict whether or not it is an approve backing: on a
+request-changes batch there is no backing, so it retires the recorded
+request-changes review itself, which is what lifts gate-ensure's per-head bar and
+lets the fresh review pour at the unmoved head.
 ```bash
 [ "$LANE" != human ] && "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "<one line: what still needs a whole-diff look>"
 ```
