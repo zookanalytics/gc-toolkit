@@ -1,6 +1,6 @@
 ---
 name: Legacy visit-outcome backfill — decision and runbook
-description: Why doctor/check-visit-outcome-recorded's 326 legacy outcome-less closed visits are backfilled with gc.outcome=unrecorded, the evidence the guard is complete so a one-time backfill holds, and how to run and re-run assets/scripts/backfill-visit-outcomes.sh.
+description: Why doctor/check-visit-outcome-recorded's 326 legacy outcome-less closed visits are backfilled with gc.outcome=unrecorded, the going-forward close paths that stamp the outcome with the check as their backstop, and how to run and re-run assets/scripts/backfill-visit-outcomes.sh.
 ---
 
 # Legacy visit-outcome backfill
@@ -18,7 +18,7 @@ backlog, which the operator ruled to drain and let the check go quiet (visit
 tk-baltss, recorded on tk-lnrrji). `assets/scripts/backfill-visit-outcomes.sh`
 drains it.
 
-## The backlog is static, and the guard is complete
+## The backlog is static, and the guard is enforced
 
 Two claims must hold for a one-time backfill to be the right remedy rather than
 a treadmill. Both were checked at implementation, 2026-09-27.
@@ -29,13 +29,18 @@ a treadmill. Both were checked at implementation, 2026-09-27.
 most recent stamped close was 2026-09-27 00:03, one of 609 stamped there with a
 full vocabulary — moot, benign, routed, dismissed, folded, and the rest).
 
-**Every close path that can close a visit stamps `gc.outcome` first.** An audit
-of every close site in `assets/scripts/` and `services/` found five paths that
-close a `task_kind=visit` bead — `visit-close.sh`, `gc-helm.sh` dismiss,
-`converse-close-out.sh` (delegates to `visit-close.sh`), and the two
-`pr-facts.sh` retire-closes — and each guarantees `gc.outcome` is present on the
-closed visit. `converse-claim.sh`'s stranded-recovery close only runs on a visit
-already carrying the stamp. No path leaves a closed visit outcome-less.
+**Every close path that can close a visit stamps `gc.outcome` first, and the
+check backstops the ones that do not.** Six close sites in `assets/scripts/` and
+`services/` close a `task_kind=visit` bead — `visit-close.sh`, `gc-helm.sh`
+dismiss, `converse-close-out.sh` (delegates to `visit-close.sh`), the two
+`pr-facts.sh` retire-closes, and `bead-rehome.sh` (which stamps `gc.outcome` =
+its `--kind` and `gc.outcome_reason` = the close reason on a visit origin) — and
+each guarantees `gc.outcome` is present on the closed visit. `converse-claim.sh`'s
+stranded-recovery close only runs on a visit already carrying the stamp. A static
+audit cannot promise it has found every close site, so it does not have to:
+`doctor/check-visit-outcome-recorded` scans every closed visit in every store, so
+a close site that reaches the store outcome-less surfaces as this finding — a
+bounded ledger repair plus the missing stamp — rather than as silent board rot.
 
 The count is 326: loomington 203, gc-toolkit 111, signal-loom 6, gascity 5,
 shutupandlisten 1. loomington holds most of it and is nearly all automated
