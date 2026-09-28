@@ -53,18 +53,22 @@ case "${1:-}" in
     jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$STORE" ;;
   create)
     shift
-    title=""; body=""
+    title=""; body=""; meta="{}"
     while [ $# -gt 0 ]; do
       case "$1" in
         --title) shift; title="${1:-}" ;;
         -d) shift; body="${1:-}" ;;
+        --metadata) shift; meta="${1:-}"; [ -n "$meta" ] || meta="{}" ;;
       esac
       shift || true
     done
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     tmp=$(mktemp)
-    jq -c --arg id "up-$n" --arg t "$title" --arg d "$body" \
-      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":{},"notes":""}]' \
+    # The real `gc bd create` stamps --metadata (a JSON object) atomically; model
+    # it so the visit carries the identity the create sets, not only what a
+    # follow-up update writes.
+    jq -c --arg id "up-$n" --arg t "$title" --arg d "$body" --argjson m "$meta" \
+      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":$m,"notes":""}]' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
     printf '{"id":"up-%s"}\n' "$n" ;;
   update)
