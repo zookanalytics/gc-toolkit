@@ -425,6 +425,33 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// The executor identity is the third field of the same let-go. gc.session_id
+	// and gc.session_name name the session that claimed the bead, so they belong
+	// to the assignee and go with it whenever the assignee is cleared — the
+	// repool that hands a rejected rework back to the pool, the handback that
+	// routes a bead to a human, and the detached-state clear above all reach here
+	// with an empty assignee. A survivor is residue the moment the bead next
+	// carries a route (doctor/executor-identity-residue reports it) and a stale
+	// orphan-recovery pin the runtime resolves a dead owner from. --unset-metadata
+	// bypasses bd's anti-steal guard, so no status gate is needed; if the assignee
+	// clear beside it is refused on an in_progress bead, the whole update rolls
+	// back and the pins stay with the live claim that still owns them. The
+	// post-write read-back covers these like the route and assignee arms.
+	if o.assigneeSet && o.assignee == "" {
+		for _, pin := range []string{"gc.session_id", "gc.session_name"} {
+			has := false
+			for _, u := range o.unsets {
+				if u == pin {
+					has = true
+					break
+				}
+			}
+			if !has {
+				o.unsets = append(o.unsets, pin)
+			}
+		}
+	}
+
 	// A park must NAME what is owed. The helm board spends an anchor's
 	// gc.takeaway as its NEEDS sentence and, finding none on a row routed to a
 	// person, reports that nobody recorded a question — so a route to the park

@@ -474,6 +474,54 @@ store '[{"id":"h-6","status":"open","assignee":"rig/gc-toolkit.refinery","notes"
 "$SUT" transition h-6 --to retargeted --route rig/mechanik >/dev/null 2>&1
 eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assignee alone"
 
+# --- unassigning takes the executor identity with it ----------------------------
+# gc.session_id and gc.session_name name the session that claimed the bead, so
+# they are the third field of the same let-go as the route and the assignee. The
+# mr-aware-rejection repool hands a rejected rework back to the pool with
+# --assignee ""; a stamp that survives is doctor/executor-identity-residue's
+# report the moment the bead next carries a route, and the runtime's stale
+# orphan-recovery pin. So the clear rides the same atomic update as the unassign.
+echo "# unassigning clears the executor identity"
+store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-dead","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition x-1 --to unanchored --assignee "" --route gc-toolkit/gc-toolkit.polecat --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
+eq "$rc" 0 "the mr-aware-rejection repool shape exits 0"
+eq "$(bassignee x-1)" "" "the repool cleared the assignee"
+eq "$(meta x-1 'gc.session_id')" "<absent>" "gc.session_id went with the assignee"
+eq "$(meta x-1 'gc.session_name')" "<absent>" "gc.session_name went with the assignee"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the identity clear rides the ONE atomic update"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "gc.session_id is unset in that call"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_name" "gc.session_name is unset in that call"
+
+# The detached auto-clear reaches the same arm: no --assignee is passed, the
+# handoff assignee is cleared without the caller asking, and the pins follow it.
+store '[{"id":"x-2","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"gc.session_id":"lx-dead2","gc.session_name":"rig--rig__polecat-2-pool"}}]'
+out="$("$SUT" transition x-2 --to pre_open_gate --set check_set=codex 2>&1)"; rc=$?
+eq "$rc" 0 "entry to pre_open_gate exits 0"
+eq "$(bassignee x-2)" "" "the detached clear cleared the assignee"
+eq "$(meta x-2 'gc.session_id')" "<absent>" "…and the pins followed: gc.session_id"
+eq "$(meta x-2 'gc.session_name')" "<absent>" "…and gc.session_name"
+
+# The pins are the assignee's: a live claim keeps them. On an in_progress bead
+# the assignee clear is refused (bd's anti-steal guard), so no --assignee reaches
+# bd, the arm never fires, and the identity stays with the session that holds it.
+store '[{"id":"x-3","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-live","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition x-3 --to pull_request --expect pull_request --route "" --set pr_number=9 2>&1)"; rc=$?
+eq "$rc" 0 "a transition on an in_progress anchor still lands"
+eq "$(meta x-3 'gc.session_id')" "lx-live" "a live claim keeps gc.session_id"
+eq "$(meta x-3 'gc.session_name')" "rig--rig__polecat-1-pool" "a live claim keeps gc.session_name"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when the assignee is not cleared"
+
+# An explicit new assignee wins over the clear, and its identity is not stripped:
+# the field is the assignee's, and this names one.
+store '[{"id":"x-4","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate","gc.session_id":"lx-keep","gc.session_name":"rig--rig__polecat-3-pool"}}]'
+: > "$STUB_GC_LOG"
+"$SUT" transition x-4 --to pull_request --assignee "rig/mechanik" >/dev/null 2>&1
+eq "$(bassignee x-4)" "rig/mechanik" "an explicit --assignee wins over the declared clear"
+eq "$(meta x-4 'gc.session_id')" "lx-keep" "a named assignee keeps gc.session_id"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when an assignee is named"
+
 store '[{"id":"h-7","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
 out="$(STUB_DROP_KEYS="h-7:assignee" "$SUT" transition h-7 --to pull_request 2>&1)"; rc=$?
 eq "$rc" 2 "a clear that did not land exits 2 (verification mismatch)"
