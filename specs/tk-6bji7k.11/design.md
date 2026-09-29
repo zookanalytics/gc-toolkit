@@ -95,21 +95,38 @@ anchor as the lane's **approved baseline**, two facts bound to that lane:
 
 - `approved_oid` — the commit the approval stands on. For a city verdict this is
   the review bead's `reviewed_oid`, which `signoff.sh` already writes. For a
-  human GitHub approval it is the approving review's `commit_id`, which
-  `pr-facts.sh` already observes when it records `pr_posture=approved@<oid>`.
+  human GitHub approval it is the latest external `APPROVED` review's own
+  `commit_id`, the commit that reviewer actually read. `pr-facts.sh` takes that from the pull request's
+  reviews endpoint (`repos/{repo}/pulls/{n}/reviews`), where each review carries
+  its own `.commit_id`; it already reads that endpoint, and already filters
+  reviews on `.commit_id` to dismiss superseded blocks. The `approved_oid` is
+  deliberately not the oid in `pr_posture=approved@<oid>`. That posture pins to
+  the live `headRefOid`, and `reviewDecision` stays `APPROVED` across the ordinary
+  pushes that follow an approval, so the posture re-records `approved@<new head>`
+  on every pass. Reading the posture oid as the approved commit would set
+  `approved_oid` to the drifted head, making `base...approved_oid` and
+  `base...head` the same range; the classifier would then compare the change
+  against itself and always return `stands`, which is the drift it exists to
+  catch.
 - `approved_scope_digest` — a digest of the bead's scope-bearing content at that
   moment: its title and the requirements body of its description, normalized
   (whitespace-collapsed, trailing operational sections excluded). The bead's
   appended notes are excluded on purpose — dispatch notes, breadcrumbs, and
   routing diagnosis are operational churn, not scope.
 
-The baseline is written by whichever writer records the approval: `signoff.sh`
-when it stamps an approving verdict, and `pr-facts.sh` when it first records an
-`approved` posture from a human GitHub review. Both already write at that instant,
-so this adds a field to an existing write, not a new pass. A lane that has no
-recorded baseline — approved before this ships, or never approved — has no drift
-by definition; the baseline is captured the next time the lane goes green, so the
-rule applies going forward and re-reviews nothing retroactively.
+The baseline is written by whichever writer records a fresh approval. `signoff.sh`
+writes it when it stamps an approving verdict. `pr-facts.sh` writes it when a new
+external `APPROVED` review appears on the reviews endpoint, identified by a review
+id and `commit_id` it has not already captured. The trigger is a new sign-off
+event, not the aggregate `reviewDecision` still reading `APPROVED` at a later
+head. A standing approval that `pr-facts.sh` re-observes after an ordinary push
+must not recapture: doing so would move the baseline forward to the drifted head
+and erase the very drift the classifier exists to catch, before it ever runs.
+Both writers already write at the instant a fresh approval lands, so this adds a
+field to an existing write, not a new pass. A lane that has no recorded baseline —
+approved before this ships, or never approved — has no drift by definition; the
+baseline is captured the next time a fresh approval lands, so the rule applies
+going forward and re-reviews nothing retroactively.
 
 ### Detection: two conditions, read in check-selection
 
