@@ -229,10 +229,10 @@ func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 	}
 }
 
-// The overview's leading glyph shows a visit too, not just a person's move: ○ a
+// The overview's leading glyph encodes a visit as well as a person's move: ○ a
 // row an open visit holds, ◉ a row that is both held and wants a person, ● a
-// plain person's move. Before this the family view spent ● on wants-person alone
-// and a visit was invisible there (tk-jlzsdz).
+// plain person's move. In this view ● means wants-a-person, so a held row takes
+// its own ○ rather than colliding with it.
 func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
 	tiles := []board.Tile{
