@@ -16,8 +16,9 @@
 # rule is only that a call resolves — never that the definition come from the
 # library. So the rule needs no exemptions: define it or source it.
 #
-# Scanned: *.sh, command position only. Quoted spans are blanked and whole-line
-# comments skipped, so a name stated in prose or a string is not a finding. A
+# Scanned: *.sh, command position only. String literals are blanked and
+# whole-line comments skipped, so a name in prose or a string is not a finding;
+# a command substitution keeps its code, so a call inside "$(bd_list ...)" is. A
 # definition `bd_json()` is not a call — the trailing class excludes `(`.
 #
 # Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
@@ -40,20 +41,71 @@ DEF_FN_RE='^[[:space:]]*function[[:space:]]+(bd_json|bd_list)([[:space:]]|\(|$)'
 SRC_RE='^[[:space:]]*(\.|source)[[:space:]].*'"$LIB"
 FIX='fix: source bd-lib.sh (. "${GC_BD_LIB:-$DIR/bd-lib.sh}") or define the helper (learned rule: bd-helper-in-scope)'
 
-# strip_quoted <line> — blanks single- and double-quoted spans so a name inside a
-# string cannot read as a command. Backslash escapes consume the character they
-# protect. Same shape as raw-bd-invocation.sh.
+# strip_quoted <line> — blanks quoted STRING content so a name inside a string
+# literal cannot read as a command, while keeping command substitutions ($(...)
+# and `...`) as code: a helper called inside "$(bd_list ...)" runs at runtime
+# even though it sits within double quotes, so its bytes must survive the scan.
+# Single-quoted spans expand nothing and stay fully blanked; backslash escapes
+# consume the character they protect.
 strip_quoted() {
-    local s="$1" out="" q="" ch i n=${#1}
+    local s="$1" out="" ch nx i n=${#1}
+    # Context stack, top last: S single-quote, D double-quote, C $(...), B `...`.
+    # An empty stack is unquoted code. Each C frame carries a paren depth in `pd`
+    # so a nested ( ) or a $(( )) closes on its own matching ), not the first one.
+    local -a st=() pd=()
+    local top si pi
     for (( i = 0; i < n; i++ )); do
         ch="${s:i:1}"
-        if [ "$ch" = "\\" ]; then i=$((i + 1)); [ -n "$q" ] || out+="  "; continue; fi
-        if [ -n "$q" ]; then
-            [ "$ch" = "$q" ] && { q=""; out+=" "; continue; }
-            out+=" "; continue
+        top=""; [ "${#st[@]}" -gt 0 ] && top="${st[${#st[@]}-1]}"
+
+        # Single quote: everything literal until the closing '.
+        if [ "$top" = S ]; then
+            out+=" "
+            [ "$ch" = "'" ] && { si=$(( ${#st[@]} - 1 )); unset "st[$si]"; }
+            continue
         fi
-        case "$ch" in "'" | '"') q="$ch"; out+=" "; continue ;; esac
-        out+="$ch"
+
+        # Double quote: literal text, but $( and ` open live command subs.
+        if [ "$top" = D ]; then
+            if [ "$ch" = "\\" ]; then out+="  "; i=$((i + 1)); continue; fi
+            if [ "$ch" = '"' ]; then out+=" "; si=$(( ${#st[@]} - 1 )); unset "st[$si]"; continue; fi
+            if [ "$ch" = '`' ]; then out+='`'; st+=(B); continue; fi
+            if [ "$ch" = '$' ]; then
+                nx="${s:i+1:1}"
+                [ "$nx" = '(' ] && { out+='$('; st+=(C); pd+=(1); i=$((i + 1)); continue; }
+            fi
+            out+=" "
+            continue
+        fi
+
+        # Code contexts: unquoted, C $(...), or B `...`.
+        if [ "$ch" = "\\" ]; then out+="  "; i=$((i + 1)); continue; fi
+        case "$ch" in
+            "'") out+=" "; st+=(S); continue ;;
+            '"') out+=" "; st+=(D); continue ;;
+            '`')
+                if [ "$top" = B ]; then out+='`'; si=$(( ${#st[@]} - 1 )); unset "st[$si]"
+                else out+='`'; st+=(B); fi
+                continue ;;
+            '$')
+                nx="${s:i+1:1}"
+                if [ "$nx" = '(' ]; then out+='$('; st+=(C); pd+=(1); i=$((i + 1)); continue; fi
+                out+='$'; continue ;;
+            '(')
+                out+='('
+                [ "$top" = C ] && { pi=$(( ${#pd[@]} - 1 )); pd[pi]=$(( pd[pi] + 1 )); }
+                continue ;;
+            ')')
+                out+=')'
+                if [ "$top" = C ]; then
+                    pi=$(( ${#pd[@]} - 1 )); pd[pi]=$(( pd[pi] - 1 ))
+                    if [ "${pd[pi]}" -le 0 ]; then
+                        si=$(( ${#st[@]} - 1 )); unset "st[$si]"; unset "pd[$pi]"
+                    fi
+                fi
+                continue ;;
+            *) out+="$ch"; continue ;;
+        esac
     done
     printf '%s' "$out"
 }

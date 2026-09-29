@@ -683,6 +683,21 @@ has "$OUT" "dangling.sh:2:" "the bd_json call is reported"
 has "$OUT" "dangling.sh:3:" "the bd_list call is reported"
 has "$OUT" "bd-helper-in-scope" "the finding names the rule"
 
+# A call inside a double-quoted command substitution is a real runtime call —
+# the surrounding quotes do not make it inert. Blanking the whole quoted span
+# would miss it and leave the guard fail-open for the ordinary rows="$(...)"
+# style.
+plantbd "$TMP/quoted-cmdsub.sh" <<'FIX'
+#!/usr/bin/env bash
+rows="$(@L@ --status open)"
+meta="$(@J@ show "$1")"
+echo "$rows $meta"
+FIX
+runbd "$TMP/quoted-cmdsub.sh"
+eq "$RC" 1 "a call inside a double-quoted command substitution is still a finding"
+has "$OUT" "quoted-cmdsub.sh:2:" "the bd_list call in \"\$(...)\" is reported"
+has "$OUT" "quoted-cmdsub.sh:3:" "the bd_json call in \"\$(...)\" is reported"
+
 echo "── bd-helper-in-scope: what is not ──"
 
 # Sourcing the library puts both helpers in scope.
@@ -716,6 +731,17 @@ echo "use @L@ to read rows"
 FIX
 runbd "$TMP/prose.sh"
 eq "$RC" 0 "a name in a comment or a string is not a call"
+
+# A helper name passed as an argument inside a command substitution is not a
+# call in command position — scanning the substitution's code must not
+# over-report it.
+plantbd "$TMP/cmdsub-arg.sh" <<'FIX'
+#!/usr/bin/env bash
+out="$(echo @L@ @J@)"
+echo "$out"
+FIX
+runbd "$TMP/cmdsub-arg.sh"
+eq "$RC" 0 "a helper name passed as an argument inside \$(...) is not a call"
 
 # A definition line is not itself a call, even though the name is on it.
 plantbd "$TMP/defonly.sh" <<'FIX'
