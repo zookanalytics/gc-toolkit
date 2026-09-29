@@ -354,9 +354,9 @@ const (
 	// family root it hangs off, used by the grouping walk as a direct edge.
 	mdAnchorBead = "anchor_bead"
 	// mdRecommendedFormula is the execution mol a reaction names on a subject
-	// when its ruling has a determinable action. Its presence is what makes a
-	// visit a recommendation (Accept + Discuss) rather than a plain one
-	// (Discuss only); the board reads it to derive [Tile.Acceptable].
+	// via the recommend disposition. Its presence is what makes a visit a
+	// recommendation (Accept + Discuss) rather than a plain ruling (Discuss
+	// only); the board reads it to derive [Tile.Acceptable].
 	mdRecommendedFormula = "gc.recommended_formula"
 )
 
