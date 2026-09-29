@@ -30,6 +30,10 @@ scrub() { tr -d '\000-\037'; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
+# The composable "may this bead be finalized?" precondition set. An open visit
+# tracking the origin holds its close, the same subject-scoped precondition
+# merge.sh applies to a merge (docs/finalize-gate.md). Overridable for a test.
+FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
 ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""
@@ -300,6 +304,16 @@ if [ "$ORIGIN_STATUS" = "closed" ]; then
         "$ORIGIN" "$ORIGIN_STORE" "$SUCCESSOR" "$SUCCESSOR_STORE"
     printf 'bead-rehome: its close reason is unchanged and may still be bare; bd show renders the reason, not the pointer, so the appended note is what a reader sees.\n'
 else
+    # Finalize gate: an OPEN visit tracking this bead holds its close, the same
+    # subject-scoped precondition merge.sh applies to a merge (docs/finalize-gate.md).
+    # The successor pointer is already stamped, so a hold here leaves an OPEN,
+    # pointed, findable bead — the shape a refused close below also leaves. The
+    # release is to conclude the open visit, then re-run this close.
+    if ! FG_REASON=$("$FINALIZE_GATE" check "$ORIGIN" 2>/dev/null); then
+        echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}." >&2
+        echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Conclude the open visit, then re-run this close." >&2
+        exit 5
+    fi
     # Deliberately NOT --force: the same flag overrides a foreign assignee and
     # an open-children hold. A refusal leaves an OPEN, pointed, findable bead.
     CLOSE_ERR=""
