@@ -90,10 +90,14 @@ refinery -> integration/<id> -> default-branch graduation PR -> operator approve
 
 Design-gated work has two operator gates. Gate 1 is the checkpoint PR into the
 integration branch: the operator reviews the design on-branch before any
-implementation starts. Gate 2 is the graduation PR from the integration branch
-to the default branch: the operator reviews the whole unit, design and
-implementation together, before it lands. All-in-one work has only gate 2; the
-graduation PR reviews everything at once.
+implementation starts. It is a merge gate on the design child's checkpoint PR,
+armed by the `approval` lane in that child's check set and enforced by `merge.sh`
+(Section 3.1). The design child cannot close, and the deferred implementation
+cannot dispatch, until an operator's APPROVED review stands at the checkpoint
+PR's live head. Gate 2 is the graduation PR from the integration branch to the
+default branch: the operator reviews the whole unit, design and implementation
+together, before it lands. All-in-one work has only gate 2; the graduation PR
+reviews everything at once.
 
 ## 3. mol-design-convoy — the molecule
 
@@ -106,7 +110,7 @@ no worktree of its own. Its steps:
 |---|---|
 | `load-context` | Read the subject (the initiative) via `{{convoy_id}}` / `gc.var.issue`; read its recommendation card for the design topic and the intended implementation breakdown; resolve `design_gated` (a var, default `true`). |
 | `seed-convoy` | Run `convoy-seed.sh` (below): create the owned convoy, set `target = integration/<convoy-id>`, cut and push the branch from a disposable worktree. Idempotent on resume. |
-| `arm-design` | File the design child, link it parent-child to the convoy, sling `mol-polecat-work` to the pool. The child lands its design doc on the integration branch and the refinery opens the checkpoint PR. |
+| `arm-design` | File the design child, link it parent-child to the convoy, sling `mol-polecat-work` to the pool. For `design_gated=true`, stamp the design child's `check_set` with the `approval` lane (`codex,approval`) to arm gate 1 (Section 3.1). The child lands its design doc on the integration branch and the refinery opens the checkpoint PR. |
 | `arm-implementation` | File the implementation child(ren), link parent-child to the convoy. `design_gated=true`: a `blocks` edge from the design child plus a `deferred-dispatch.sh arm`. `design_gated=false`: sling them now. |
 | `drain` | Close the step chain and drain. |
 
@@ -140,6 +144,43 @@ resolution predicate, not about orchestration. The seed step's `gc convoy
 create` runs in a live session as an action, and the children resolve their
 `base_branch` from the inherited `metadata.target`, not from `gc convoy`. The
 two do not collide.
+
+### 3.1 Arming gate 1
+
+Gate 1 has to be a hold the merge machinery enforces, not a convention. The city
+lands an anchor's PR through `merge.sh`, which requires an operator's APPROVED
+review only when the anchor's `check_set` names the `approval` lane, or a
+`signoff_dismissed` or own-dismissed-review marker arms it
+(`assets/scripts/merge.sh:568-590`). With none of those, `merge.sh` lands the
+checkpoint PR as soon as the codex lane derives green, closing the design child
+and firing the deferred implementation with no operator in the loop. Branch
+protection does not close the gap: `merge.sh` reads only
+`required_approving_review_count` from the branch ruleset
+(`assets/scripts/merge.sh:137-153`), and an integration branch carries signature
+rules rather than a required approving review, so protection never imposes the
+approval.
+
+So for `design_gated=true`, `arm-design` stamps the `approval` lane onto the
+design child's `check_set`: the default is `codex`, and the design child carries
+`codex,approval`. Two mechanics carry that stamp to where `merge.sh` reads it.
+
+- The refinery stamps `check_set` at merge-push, from its own var (default
+  `codex`), in the one lifecycle transition that moves the anchor to
+  `pre_open_gate` or `pull_request`
+  (`formulas/mol-refinery-patrol.toml:654-662,749,751`). That write overwrites,
+  so the mechanism slice (Section 8) teaches it to prefer an `approval`-bearing
+  `check_set` already on the anchor over the bare var default. Without that
+  change the arm is erased before the checkpoint PR opens.
+- `pr-open.sh` drops `approval` from the pre-open lane checks
+  (`assets/scripts/pr-open.sh:87-91`), because an external review cannot exist
+  before the PR does. So the stamp does not block opening the checkpoint PR; it
+  binds only at merge. That is what a checkpoint is: the PR opens for the
+  operator to read, and the approval lane holds the merge until the operator
+  approves.
+
+All-in-one (`design_gated=false`) leaves the design child on the `codex` default,
+so its checkpoint PR lands on codex-green and the sole operator gate is gate 2 at
+graduation.
 
 ## 4. Reaching it from converse
 
@@ -194,11 +235,14 @@ plain-work-bead case.
 Design-gated is the default; all-in-one is an operator-selectable override
 through the `design_gated` var.
 
-- **Design-gated** (`design_gated=true`): implementation is armed behind the
-  design child's closure, so it dispatches only after the operator approves and
-  merges the checkpoint PR. Two gates. Use it when the design decision genuinely
-  gates the implementation shape, the blast radius is high, or the design is
-  uncertain. Cost: implementation waits for the design round-trip.
+- **Design-gated** (`design_gated=true`): the design child carries the `approval`
+  lane in its check set (Section 3.1), so `merge.sh` holds the checkpoint PR until
+  an operator's APPROVED review stands at its live head. The design child closes
+  only when that PR merges, and implementation is armed behind that closure, so
+  implementation dispatches only after the operator approves. Two gates. Use it
+  when the design decision genuinely gates the implementation shape, the blast
+  radius is high, or the design is uncertain. Cost: implementation waits for the
+  design round-trip.
 - **All-in-one** (`design_gated=false`): design and implementation dispatch
   together and land on the integration branch in parallel, reviewed once at
   graduation. Use it when the shape is already agreed and the design doc is
@@ -238,8 +282,13 @@ The owner is the converse design-convoy epic (tk-2gt6r2), which carries
 design's approval, the implementation is two slices:
 
 - **Mechanism.** `formulas/mol-design-convoy.toml` (the five-step molecule of
-  Section 3) and `assets/scripts/convoy-seed.sh` (create, cut, push from a
-  disposable worktree, idempotent), each with a hermetic test; plus the
+  Section 3, including `arm-design`'s `approval`-lane stamp for `design_gated=true`)
+  and `assets/scripts/convoy-seed.sh` (create, cut, push from a disposable
+  worktree, idempotent), each with a hermetic test; the merge-push `check_set`
+  resolution in `formulas/mol-refinery-patrol.toml:654-662` taught to prefer an
+  `approval`-bearing `check_set` already on the anchor over the bare var default,
+  so gate 1's arm survives to `merge.sh` (Section 3.1), with a test that a
+  `codex,approval` anchor keeps both lanes through merge-push; plus the
   authoritative doc that states the pattern as what is true once it lands —
   folded into `docs/state-machine.md` and `docs/refinery-merge-cadence.md`, or a
   new `docs/design-convoy.md` — reconciling the cadence-arm numbering, which
