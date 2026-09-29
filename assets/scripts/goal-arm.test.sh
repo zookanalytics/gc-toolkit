@@ -58,6 +58,18 @@ eq "$rc" "2" "missing max-iterations -> exit 2"
 set +e; goal_meta '{}'; run goal1 --dry-run --statement s --oracle-kind metric --oracle-command "echo 1" --compare le --max-iterations 3 >/dev/null 2>&1; rc=$?; set -e
 eq "$rc" "2" "metric without threshold -> exit 2"
 
+# metric with a punctuation-only / malformed threshold -> exit 2. A character
+# class alone accepts '-', '+', '.', '1-2', '1.2.3', which the judge's awk
+# would then coerce to a number.
+for bad_t in - + . 1-2 1.2.3; do
+  set +e; goal_meta '{}'; run goal1 --dry-run --statement s --oracle-kind metric --oracle-command "echo 1" --compare le --threshold "$bad_t" --max-iterations 3 >/dev/null 2>&1; rc=$?; set -e
+  eq "$rc" "2" "malformed threshold '$bad_t' -> exit 2"
+done
+
+# a decimal threshold is accepted: the strict parser must not over-tighten
+set +e; goal_meta '{}'; run goal1 --dry-run --statement s --oracle-kind metric --oracle-command "echo 1" --compare le --threshold 29.5 --max-iterations 3 >/dev/null 2>&1; rc=$?; set -e
+eq "$rc" "0" "decimal threshold 29.5 -> exit 0 (accepted)"
+
 # complete metric via flags, dry-run: valid, prints snapshot, does NOT sling/write
 goal_meta '{}'
 set +e; out=$(run goal1 --dry-run "${FULL[@]}" 2>&1); rc=$?; set -e

@@ -116,6 +116,16 @@ read_goal() {
 
 meta() { printf '%s' "$GOAL_JSON" | jq -r --arg k "$1" '.[0].metadata[$k] // empty' 2>/dev/null; }
 
+# True when the argument is a decimal awk will compare as a number: optional
+# sign, then digits with an optional fraction, or a bare fraction, anchored end
+# to end. Sign- or dot-only strings ('-', '+', '.') and embedded operators
+# ('1-2') are rejected here rather than passed to awk, which coerces them to a
+# number.
+is_number() {
+	local re='^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)$'
+	[[ "$1" =~ $re ]]
+}
+
 # Canonical serialization of the contract, for the tamper-evident snapshot.
 # Delegated to goal-canonical.sh so arm and judge compute it identically — see
 # that script's header on why a second implementation would break re-arming.
@@ -353,16 +363,12 @@ metric)
 	if [ "$ORACLE_RC" -ne 0 ]; then
 		METRIC_ERR="metric oracle exited $ORACLE_RC: ${ORACLE_LAST:-no output}"
 	else
-		case "$VALUE" in
-		'' | *[!0-9.+-]*) METRIC_ERR="metric oracle printed a non-numeric value: '${VALUE}'" ;;
-		esac
+		is_number "$VALUE" || METRIC_ERR="metric oracle printed a non-numeric value: '${VALUE}'"
 	fi
 	if [ -n "$METRIC_ERR" ]; then
 		MET=1; VALUE=""; REASON="$METRIC_ERR"
 	else
-		case "$THRESHOLD" in
-		'' | *[!0-9.+-]*) fail "goal.oracle.threshold is not numeric: '${THRESHOLD}'" ;;
-		esac
+		is_number "$THRESHOLD" || fail "goal.oracle.threshold is not numeric: '${THRESHOLD}'"
 		# awk does the float compare; met per the operator.
 		CMP=$(awk -v v="$VALUE" -v t="$THRESHOLD" -v op="$COMPARE" 'BEGIN{
 			if (op=="lt") print (v<t)?1:0;

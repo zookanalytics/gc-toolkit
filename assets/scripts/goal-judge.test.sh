@@ -156,6 +156,32 @@ set +e; run_judge 1; RC=$?; set -e
 eq "$RC" "1" "broken oracle: not-yet (exit 1), never met"
 hasnt "$L" "goal.status=met" "broken oracle: does not mark met"
 
+# --- fail-closed: a punctuation-only or malformed metric value is not a number.
+# A character class alone accepts '-', '+', '.', '1-2', '1.2.3'; awk then
+# coerces them (e.g. '-' to 0) and would false-report the goal met.
+for badv in - + . 1-2 1.2.3; do
+  scenario "{\"goal.statement\":\"cut it\",\"goal.oracle.kind\":\"metric\",\"goal.oracle.command\":\"echo $badv\",\"goal.oracle.compare\":\"le\",\"goal.oracle.threshold\":\"30\",\"goal.budget.max_iterations\":\"6\"}"
+  set +e; run_judge 1; RC=$?; set -e
+  eq "$RC" "1" "malformed metric value '$badv': not-yet (exit 1), never met"
+  hasnt "$L" "goal.status=met" "malformed metric value '$badv': does not mark met"
+done
+
+# --- a malformed THRESHOLD is rejected, not coerced (defense in depth:
+# goal-arm.sh validates it first, but the judge must not let a hand-edited
+# contract through — coercing '-' to 0 here would mark an unmet goal met under
+# a ge comparison).
+scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 25","goal.oracle.compare":"ge","goal.oracle.threshold":"-","goal.budget.max_iterations":"6"}'
+set +e; run_judge 1; RC=$?; set -e
+eq "$RC" "1" "malformed threshold '-': not-yet (exit 1), never met"
+hasnt "$L" "goal.status=met" "malformed threshold '-': does not mark met"
+
+# --- a decimal value under a decimal threshold is still met: the strict parser
+# must not over-tighten and reject legitimate fractions.
+scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 29.5","goal.oracle.compare":"le","goal.oracle.threshold":"30.0","goal.budget.max_iterations":"6"}'
+set +e; run_judge 1; RC=$?; set -e
+eq "$RC" "0" "decimal 29.5 le 30.0: met (exit 0)"
+has "$L" "goal.status=met" "decimal 29.5 le 30.0: marks met"
+
 # --- a broken metric oracle flows through the shared bounds and parks at the
 # iteration budget, rather than exiting past every bound (finding: metric oracle
 # errors took the early not_yet path, skipping wall-clock/budget/stall/ceiling)

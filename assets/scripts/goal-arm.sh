@@ -137,6 +137,15 @@ done
 EFF_JSON="[{\"metadata\": $EFF_META}]"
 m() { printf '%s' "$EFF_JSON" | jq -r --arg k "$1" '.[0].metadata[$k] // empty' 2>/dev/null; }
 
+# True when the argument is a decimal number: optional sign, then digits with
+# an optional fraction, or a bare fraction, anchored end to end. Rejects sign-
+# or dot-only strings ('-', '+', '.') and embedded operators ('1-2') that a
+# character class alone would accept and the judge's awk would coerce.
+is_number() {
+	local re='^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)$'
+	[[ "$1" =~ $re ]]
+}
+
 # Validate the effective contract.
 MISSING=()
 [ -n "$(m goal.statement)" ] || MISSING+=("goal.statement (--statement)")
@@ -146,7 +155,9 @@ MAXIT=$(m goal.budget.max_iterations)
 case "$MAXIT" in '' ) MISSING+=("goal.budget.max_iterations (--max-iterations)") ;; *[!0-9]*) die "goal.budget.max_iterations must be a positive integer (got '$MAXIT')" 2 ;; esac
 if [ "$KIND" = "metric" ]; then
 	case "$(m goal.oracle.compare)" in lt|le|gt|ge) ;; *) MISSING+=("goal.oracle.compare must be lt|le|gt|ge (--compare)") ;; esac
-	case "$(m goal.oracle.threshold)" in '' ) MISSING+=("goal.oracle.threshold (--threshold)") ;; *[!0-9.+-]*) die "goal.oracle.threshold must be numeric" 2 ;; esac
+	THRESHOLD=$(m goal.oracle.threshold)
+	if [ -z "$THRESHOLD" ]; then MISSING+=("goal.oracle.threshold (--threshold)")
+	elif ! is_number "$THRESHOLD"; then die "goal.oracle.threshold must be numeric (got '$THRESHOLD')" 2; fi
 fi
 if [ "${#MISSING[@]}" -gt 0 ]; then
 	warn "incomplete contract; cannot arm. Missing/invalid:"
