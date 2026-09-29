@@ -47,7 +47,8 @@ A goal has two different questions asked of it, and each has its own oracle.
 - The **readiness oracle** asks whether the contract is crisp enough to carry. It
   is a graded reading of the candidate contract: is the end state measurable, is
   the check judgeable by a non-worker, is the scope a slice. This is the rubric
-  oracle the goal primitive spec defers here (goal-primitive-spec.md Section 1).
+  oracle. Distilling a candidate into a crisp contract is what the goal
+  primitive spec defers to this design (goal-primitive-spec.md Boundaries).
 
 The two never merge. A goal whose measures are well-defined still passes
 through the readiness oracle first, because "the metric is well-defined" and
