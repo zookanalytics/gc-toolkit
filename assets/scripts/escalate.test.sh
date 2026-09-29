@@ -122,8 +122,35 @@ case "${1:-}" in
 esac
 STUB
 chmod +x "$BIN/gc"
+
+# Fake visit-close.sh for the --retract path: record each call as
+# `<visit>|<subject>|<outcome>|<reason>` and, so the not-closed arm can be
+# exercised, exit non-zero when STUB_VISIT_CLOSE_FAIL is set — as the real
+# visit-close.sh exits non-zero when the close does not land. escalate.sh reaches
+# it through the GC_ESCALATE_VISIT_CLOSE_TOOL override, so the real one beside the
+# SUT is never touched.
+cat > "$BIN/visit-close.sh" <<'VC'
+#!/usr/bin/env bash
+visit=""; subject=""; outcome=""; reason=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --visit)   visit="${2:-}";   shift 2 ;;
+    --subject) subject="${2:-}"; shift 2 ;;
+    --outcome) outcome="${2:-}"; shift 2 ;;
+    --reason)  reason="${2:-}";  shift 2 ;;
+    --force)   shift ;;
+    *)         shift ;;
+  esac
+done
+printf '%s|%s|%s|%s\n' "$visit" "$subject" "$outcome" "$reason" >> "${STUB_VISIT_CLOSE_LOG:?}"
+[ -n "${STUB_VISIT_CLOSE_FAIL:-}" ] && exit 4
+exit 0
+VC
+chmod +x "$BIN/visit-close.sh"
+
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
+export GC_ESCALATE_VISIT_CLOSE_TOOL="$BIN/visit-close.sh" STUB_VISIT_CLOSE_LOG="$TMP/visit-close.log"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
       STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL \
       STUB_CREATE_NOMETA 2>/dev/null || true
@@ -146,10 +173,13 @@ STANDING='{"id":"sub-0","status":"open","assignee":"","title":"triage: escalatio
 reset() {
   printf '%s' "${1:-[]}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
+  : > "$STUB_VISIT_CLOSE_LOG"; unset STUB_VISIT_CLOSE_FAIL 2>/dev/null || true
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 field()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 visits() { cat "$STUB_SEQ"; }   # creates issued since reset (the seed bead is vis-0)
+vclog()  { cat "$STUB_VISIT_CLOSE_LOG"; }        # visit-close.sh calls the retract made
+vccount(){ wc -l < "$STUB_VISIT_CLOSE_LOG" | tr -d ' '; }   # how many calls
 
 echo "# files a visit in the canonical gate-visit shape"
 reset
@@ -781,6 +811,74 @@ out=$(STUB_UPD_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "a failed tally write still exits 0"
 eq "$(visits)" "0" "and still files nothing"
 has "$out" "could not record the recurrence" "and says the tally was lost"
+
+echo "# --retract closes the open visit for a subject as moot"
+# The counterpart to filing: a self-healing subject (reconcile) whose divergence
+# resolved retracts its lingering board visit, routing the moot close through
+# visit-close.sh with the reading passed through as the outcome reason.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — diverged","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message "rigs/alpha is back in sync" 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when it closes a visit"
+eq "$(visits)" "0" "retract files no new visit"
+eq "$(vccount)" "1" "retract calls visit-close.sh exactly once"
+eq "$(vclog)" "vis-7|tk-sub|moot|rigs/alpha is back in sync" "closes the tracked visit as moot, subject and reading passed through"
+has "$out" "retracted visit vis-7 on tk-sub" "reports what it retracted"
+
+echo "# --retract is a no-op success when no open visit matches"
+# Idempotent: a second pass, or a subject that never raised one, changes nothing.
+reset '[]'
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract with no matching visit exits 0"
+eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+has "$out" "no open visit" "and says there was nothing to retract"
+
+echo "# --retract fails closed when the open-visit lookup is unreadable"
+# The mirror of the filing dedup's fail-OPEN (an unreadable listing files a
+# duplicate — a duplicate beats a mute): retract must NOT read an unreadable
+# lookup as "no visit" and let its caller close the subject, because that strands
+# the still-open visit it could not see. A matching visit exists but the lookup
+# is down, so retract exits non-zero and closes nothing.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — diverged","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$(STUB_LIST_FAIL=1 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 1 "retract exits 1 when the open-visit lookup is unreadable"
+eq "$(vccount)" "0" "and closes no visit on an unreadable lookup"
+has "$out" "could not read open visits" "and says the lookup was unreadable, not that there was nothing to retract"
+
+echo "# --retract matches on BOTH the key and the subject"
+# A visit for another subject, or another situation under this subject, is left
+# alone — the same conjunction the filing dedup uses.
+reset '[{"id":"vis-8","status":"open","assignee":"","title":"visit: tk-other — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
+"$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m >/dev/null 2>&1
+eq "$(vccount)" "0" "a visit whose continuation_group is another subject is not retracted"
+reset '[{"id":"vis-8","status":"open","assignee":"","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"other-situation","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+"$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m >/dev/null 2>&1
+eq "$(vccount)" "0" "a visit for another situation key is not retracted"
+
+echo "# --retract leaves an in_progress (claimed) visit for its holder"
+# A human already engaged it; the recheck-premise skill folds mootness in at
+# their prep, so an unattended caller must not close it under them. Only OPEN
+# visits are retracted.
+reset '[{"id":"vis-9","status":"in_progress","assignee":"someone","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when the only match is claimed"
+eq "$(vccount)" "0" "and does not close the claimed visit"
+has "$out" "no open visit" "treating a claimed visit as none to retract"
+
+echo "# --retract refuses an ephemeral subject"
+# A wisp's visits hang on the standing triage bucket keyed by --key alone, so
+# there is no one subject-scoped visit to retract.
+reset '[]'
+out=$("$SUT" --retract --subject tk-wisp-abc --key k --message m 2>&1); rc=$?
+eq "$rc" 2 "retract on an ephemeral subject is a usage error"
+eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+
+echo "# --retract reports a close that did not land"
+# visit-close.sh guards its own close; a non-zero exit means the visit stays open
+# for a human, and retract surfaces that as a failure rather than a false success.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$(STUB_VISIT_CLOSE_FAIL=1 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 1 "retract exits 1 when visit-close.sh does not close the visit"
+has "$out" "did not close" "and says the visit stays open"
 
 echo
 echo "escalate.test.sh: $PASS passed, $FAIL failed"
