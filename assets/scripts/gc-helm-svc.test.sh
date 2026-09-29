@@ -105,6 +105,9 @@
 #   (BEHINDMAIN)  a checkout behind origin/main under the helm sources records
 #                 the gap (behind_main) and is NEVER rebuilt for it — report-only
 #   (ONMAIN)      a checkout level with origin/main records no drift
+#   (FETCHFAIL)   a failed origin fetch still advances the fetch cadence marker,
+#                 so an unreachable origin costs one attempt per TTL, not one per
+#                 tick, and the gap is still reported off the last origin ref
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -1084,6 +1087,44 @@ date +%s > "$STATE/origin-fetch-at"
 run_build
 eq "$RC" 0 "(ONMAIN) exits 0"
 eq "$(status_field behind_main)" "0" "(ONMAIN) a checkout level with origin/main records no drift"
+
+# --- case: a FAILED origin fetch still advances the fetch cadence -------------
+# The behind_main fetch is bounded to one attempt per GC_HELM_ORIGIN_FETCH_TTL so
+# a 5-minute build tick does not fetch every time. The marker that bounds it used
+# to advance only after a SUCCESSFUL fetch, so an unreachable or unauthenticated
+# origin left it absent and every later tick re-attempted the fetch — the
+# report-only check spending network on every tick instead of degrading quietly
+# until the TTL expired. The marker must advance on the ATTEMPT.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+# Behind main under the helm sources, so the block runs and reaches the fetch.
+A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+git -C "$ROOT" add -A >/dev/null 2>&1
+git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
+# The fixture configures no `origin` remote, so the fetch this tick attempts
+# FAILS. Clear the marker so the cadence gate is open and the tick attempts it.
+rm -f "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(FETCHFAIL) a failed origin fetch does not fail the build"
+present "$STATE/origin-fetch-at" \
+    "(FETCHFAIL) a failed fetch still records the attempt, so the cadence advances"
+BEHIND_FF="$(status_field behind_main)"
+[ "${BEHIND_FF:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(FETCHFAIL) the drift is still reported off the last origin ref despite the failed fetch" \
+    || bad "(FETCHFAIL) behind_main is '$BEHIND_FF' after a failed fetch, want >= 1"
+# The next tick within the TTL must SKIP the fetch. Hold the marker fresh but a
+# few seconds in the past: a re-fetch would restamp it to the current second, so
+# an unchanged value proves the tick did not re-attempt before the TTL expired.
+SENTINEL="$(( $(date +%s) - 5 ))"
+printf '%s\n' "$SENTINEL" > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(FETCHFAIL) the next tick exits 0"
+eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
+    "(FETCHFAIL) a fresh marker keeps the next tick from re-fetching before the TTL"
 
 # ==============================================================================
 # STATIC GUARDS

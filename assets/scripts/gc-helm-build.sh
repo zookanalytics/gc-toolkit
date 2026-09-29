@@ -195,9 +195,10 @@ fi
 # identity exists to avoid — the requirement is to REPORT drift, not to rebuild
 # on it. The comparison wants a fresh origin ref: reconcile-rig-checkouts fetches
 # origin on its own cadence, so it is usually already current, and this fetch is
-# bounded to at most once per GC_HELM_ORIGIN_FETCH_TTL (default 1800s; 0 disables
-# it and leans on reconcile) so a 5-minute tick does not fetch every time. Every
-# step degrades to "gap unknown" (0), never to a failed build.
+# bounded to at most one ATTEMPT per GC_HELM_ORIGIN_FETCH_TTL (default 1800s; 0
+# disables it and leans on reconcile) so a 5-minute tick does not fetch every
+# time, and a failing origin costs one attempt per TTL rather than one per tick.
+# Every step degrades to "gap unknown" (0), never to a failed build.
 BEHIND_MAIN=0
 REPO_ROOT="$(git -C "$MOD" rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -n "$REPO_ROOT" ]; then
@@ -218,10 +219,15 @@ if [ -n "$REPO_ROOT" ]; then
         LAST_S=0
         [ -f "$FETCH_MARK" ] && LAST_S="$(cat "$FETCH_MARK" 2>/dev/null || echo 0)"
         case "$LAST_S" in ''|*[!0-9]*) LAST_S=0 ;; esac
+        # Record the attempt BEFORE fetching, not only on success. The cost the
+        # cadence bounds is the fetch ATTEMPT, so a marker advanced only after a
+        # successful fetch leaves an unreachable or unauthenticated origin
+        # re-attempting on every later tick. Advancing it here holds a failing
+        # origin to one attempt per TTL; the gap below still reads off the last
+        # origin ref, so a lost fetch degrades to a stale count, never a failure.
         if [ "$FETCH_TTL" -gt 0 ] && [ "$((NOW_S - LAST_S))" -ge "$FETCH_TTL" ]; then
-            if git -C "$REPO_ROOT" fetch --quiet --no-tags origin "${DEFAULT_REF#origin/}" 2>/dev/null; then
-                printf '%s\n' "$NOW_S" > "$FETCH_MARK" 2>/dev/null || true
-            fi
+            printf '%s\n' "$NOW_S" > "$FETCH_MARK" 2>/dev/null || true
+            git -C "$REPO_ROOT" fetch --quiet --no-tags origin "${DEFAULT_REF#origin/}" 2>/dev/null || true
         fi
         # Commits the default branch carries under the helm sources that HEAD
         # lacks: 0 when on main and current, when ahead, or when the ref is absent.
