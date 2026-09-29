@@ -115,7 +115,7 @@ rest score, so the reader checks them first.
 | R1 | Bounded cadence | Does the contract state its cadence and met condition: batch size, checkpoints, and when the goal is done? |
 | R2 | Kill criteria | Is what makes the goal impossible or stalled stated, so a bound trips into a reason? |
 | R3 | Vision traceability | Does the goal name the vision outcome it serves? |
-| R4 | Slice discipline | Is the goal a vertical slice with no forward dependency, so each unit of work moves the measured value? |
+| R4 | Slice discipline | Is the goal a vertical slice with no forward dependency, so each unit of work moves a contract criterion, measured or graded? |
 | R5 | MVP scope | Is this the smallest goal that moves the outcome, with nothing added that does not change the measured condition? |
 | R6 | Invariants | Where a regression is possible, is what must hold throughout stated? |
 | R7 | Provenance | Is who set the goal, and why, recorded? |
@@ -214,7 +214,7 @@ binary-checkable against it (goal-primitive-spec.md Section 5).
 
 | Invariant | Binary check |
 |---|---|
-| Vertical slice | Closing this unit changes a measured value, rather than adding a layer that pays off only later. |
+| Vertical slice | Closing this unit moves a contract criterion, measured or graded, rather than adding a layer that pays off only later. |
 | No forward dependency | No open `blocks` blocker on the unit's work bead cites unstated prerequisite work. |
 | One focused change | The `not-yet` reason names one task, not a program, so the unit fits a fresh session's context. |
 | Observable increment | The unit writes an evidence reference (a commit, a measured value) to the verdict trail. |
