@@ -508,10 +508,9 @@ func fixtureBoard() board.Board {
 				Needs:     takeaway,
 				RankScore: 3014004,
 				// The per-bead liveness, set on every LIVE row and led by the
-				// frontier. This epic reads its OWN state — nothing is working the
-				// epic bead itself, so needs-review — because aggregating a parent
-				// up its children's states is a later slice (specs/tk-ikpyzn.1); the
-				// in-flight child in the counts is the signal that slice will fold in.
+				// frontier. This epic reads its OWN anchor-level state — nothing is
+				// working the epic bead itself, so needs-review — not an aggregate
+				// over its children.
 				Phase: board.PhaseNeedsReview,
 				// A dead owner under it, so classifySection bands it stalled.
 				Section: board.SectionStalled,

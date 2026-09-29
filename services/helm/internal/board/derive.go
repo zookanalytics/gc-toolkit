@@ -1941,8 +1941,6 @@ func beadPhase(a Anchor, f Facts, openReworkKids int) string {
 // merge anchor counts its open review/rework children (each names it in
 // [mdAnchorBead]), the set prPhase has always fed; any other bead reads the
 // live-workflow signal standing over its own bead ([Facts.anchorInFlight]).
-// Folding a bead's whole child set into that count instead is a later slice of
-// the derivation model (specs/tk-ikpyzn.1).
 func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	inFlight := openReworkKids
 	if !isMergeAnchor(a) {

@@ -451,9 +451,8 @@ type Tile struct {
 	//
 	// Empty on a terminal (closed) row, where the live vocabulary has no answer
 	// — the same not-applicable empty PRPhase leaves off a non-merge row. The
-	// in-flight input a merge anchor and a plain bead each feed the core is still
-	// the narrower per-anchor signal; folding a bead's whole child set into it is
-	// a later slice of the derivation model (specs/tk-ikpyzn.1).
+	// in-flight input a merge anchor and a plain bead each feed the core is the
+	// narrower per-anchor signal.
 	Phase string `json:"phase"`
 }
 
