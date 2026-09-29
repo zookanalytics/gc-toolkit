@@ -94,6 +94,7 @@ scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.co
 set +e; run_judge 1; RC=$?; set -e
 eq "$RC" "1" "not-yet: exit 1"
 has "$L" "goal.trail=" "not-yet: records the trail"
+has "$L" "goal.not_yet_reason=measured 40, need le 30" "not-yet: threads the current reason to goal.not_yet_reason (the field the iteration step reads)"
 hasnt "$L" "goal.status=" "not-yet: does not set a terminal status"
 
 # --- exhausted (iteration budget) --------------------------------------------
@@ -110,17 +111,26 @@ set +e; run_judge 1; RC=$?; set -e
 eq "$RC" "0" "exhausted(wall-clock): exit 0"
 has "$L" "goal.parked_verdict=exhausted" "exhausted(wall-clock): verdict exhausted"
 
-# --- stalled: same reason and no improvement vs the previous attempt ---------
-scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 40","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"99","goal.trail":"[{\"attempt\":1,\"verdict\":\"not-yet\",\"reason\":\"measured 40, need le 30\",\"value\":\"40\"}]"}'
+# --- stalled: same signature and no improvement vs the previous attempt ------
+scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 40","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"99","goal.trail":"[{\"attempt\":1,\"verdict\":\"not-yet\",\"reason\":\"measured 40, need le 30\",\"value\":\"40\",\"sig\":\"need le 30\"}]"}'
 set +e; run_judge 2; RC=$?; set -e
 eq "$RC" "0" "stalled: exit 0"
 has "$L" "goal.parked_verdict=stalled" "stalled: verdict stalled"
 
-# --- not-yet when progressing (value improved) even with same reason shape ---
-scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 35","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"99","goal.trail":"[{\"attempt\":1,\"verdict\":\"not-yet\",\"reason\":\"measured 40, need le 30\",\"value\":\"40\"}]"}'
+# --- not-yet when progressing (value improved) even with same signature ------
+scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 35","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"99","goal.trail":"[{\"attempt\":1,\"verdict\":\"not-yet\",\"reason\":\"measured 40, need le 30\",\"value\":\"40\",\"sig\":\"need le 30\"}]"}'
 set +e; run_judge 2; RC=$?; set -e
 eq "$RC" "1" "progressing: exit 1 (not stalled — value moved toward threshold)"
 hasnt "$L" "goal.status=parked" "progressing: does not park"
+
+# --- stalled on a WORSENING metric: the value changes each attempt (so the
+# reason text changes) but the value-free signature is stable, so the stall is
+# still caught instead of burning the whole budget (finding: stall keyed on
+# reason never fired when the measured value moved) --------------------------
+scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 45","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"99","goal.trail":"[{\"attempt\":1,\"verdict\":\"not-yet\",\"reason\":\"measured 40, need le 30\",\"value\":\"40\",\"sig\":\"need le 30\"}]"}'
+set +e; run_judge 2; RC=$?; set -e
+eq "$RC" "0" "stalled(worsening): exit 0 — value moved away but the signature matched"
+has "$L" "goal.parked_verdict=stalled" "stalled(worsening): parks despite the changed value"
 
 # --- impossible (command oracle exits 3) -------------------------------------
 scenario '{"goal.statement":"cut it","goal.oracle.kind":"command","goal.oracle.command":"exit 3","goal.budget.max_iterations":"6"}'
@@ -145,6 +155,20 @@ scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.co
 set +e; run_judge 1; RC=$?; set -e
 eq "$RC" "1" "broken oracle: not-yet (exit 1), never met"
 hasnt "$L" "goal.status=met" "broken oracle: does not mark met"
+
+# --- a broken metric oracle flows through the shared bounds and parks at the
+# iteration budget, rather than exiting past every bound (finding: metric oracle
+# errors took the early not_yet path, skipping wall-clock/budget/stall/ceiling)
+scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo notanumber","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"2"}'
+set +e; run_judge 2; RC=$?; set -e
+eq "$RC" "0" "broken oracle at budget: exit 0 (parks, not an early not-yet exit)"
+has "$L" "goal.parked_verdict=exhausted" "broken oracle at budget: parks exhausted through the bounds"
+
+# --- same for a nonzero-exit oracle ------------------------------------------
+scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"exit 2","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"2"}'
+set +e; run_judge 2; RC=$?; set -e
+eq "$RC" "0" "oracle nonzero-exit at budget: exit 0 (parks)"
+has "$L" "goal.parked_verdict=exhausted" "oracle nonzero-exit at budget: parks exhausted through the bounds"
 
 # --- tamper re-arm: a snapshot that disagrees re-arms and still judges --------
 scenario '{"goal.statement":"cut it","goal.oracle.kind":"metric","goal.oracle.command":"echo 25","goal.oracle.compare":"le","goal.oracle.threshold":"30","goal.budget.max_iterations":"6"}' '{"stale":"snapshot"}'

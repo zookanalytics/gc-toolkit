@@ -78,7 +78,16 @@ note() { printf 'goal-judge: %s\n' "$1" >&2; }
 # has tripped, which the callers check before reaching here.
 not_yet() {
 	note "not-yet: $1"
-	record_trail not-yet "$1" "${2:-}"
+	record_trail not-yet "$1" "${2:-}" "${3:-}"
+	# Thread the verdict forward: mol-goal-keeper's iterate step reads
+	# goal.not_yet_reason as its assignment, and goal-arm.sh seeds only the
+	# baseline, so without this write every iteration after the first re-reads
+	# that stale baseline instead of the judge's current reason.
+	if [ -n "$GOAL" ]; then
+		# raw-bd: gc bd loads the city config, which can be cold in the condition env
+		bd update "$GOAL" --set-metadata "goal.not_yet_reason=$1" >/dev/null 2>&1 ||
+			note "WARN: could not thread not_yet_reason forward on $GOAL"
+	fi
 	exit 1
 }
 
@@ -119,8 +128,9 @@ canonical_contract() {
 # not read back as an array; a blind append is how an audit log grows without
 # bound exactly when something is wrong.
 record_trail() {
-	local verdict="$1" reason="$2" value="${3:-}"
+	local verdict="$1" reason="$2" value="${3:-}" sig="${4:-}"
 	[ -n "$GOAL" ] || return 0
+	[ -n "$sig" ] || sig="$reason"
 	local attempt="${GC_ITERATION:-}"
 	case "$attempt" in '' | *[!0-9]*) attempt=0 ;; esac
 
@@ -130,10 +140,11 @@ record_trail() {
 		--arg verdict "$verdict" \
 		--arg reason "$reason" \
 		--arg value "$value" \
+		--arg sig "$sig" \
 		--arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
 		--arg iter "${GC_BEAD_ID:-}" \
 		'{attempt:$attempt, verdict:$verdict, reason:$reason, value:$value,
-		  at:$at, iteration_bead:$iter}
+		  sig:$sig, at:$at, iteration_bead:$iter}
 		 | with_entries(select(.value != null and .value != ""))' 2>/dev/null) || return 0
 	[ -n "$entry" ] || return 0
 
@@ -320,34 +331,52 @@ ORACLE_LAST=$(printf '%s\n' "$ORACLE_OUT" | grep -v '^[[:space:]]*$' | tail -n 1
 MET=1          # 1 = not met, 0 = met
 VALUE=""
 REASON=""
+# The stall signature: the stable part of a not-met verdict, without the
+# measured value. Section 6c keys the stall check on this, not on REASON, so a
+# metric whose value changes each attempt (and so changes REASON) is still
+# recognized as the same wedged failure. Empty falls back to REASON there.
+SIGNATURE=""
 
 case "$ORACLE_KIND" in
 metric)
 	VALUE="$ORACLE_LAST"
 	COMPARE=$(meta "goal.oracle.compare")
 	THRESHOLD=$(meta "goal.oracle.threshold")
+	# An oracle that cannot produce a comparable measurement — nonzero exit, or
+	# empty/non-numeric output — is a not-met with an actionable reason, threaded
+	# through section 6 like any other not-met so the shared bounds still park it.
+	# Exiting early here (the old not_yet path) skipped the wall-clock, iteration
+	# budget, stall, and ceiling checks, so a permanently broken metric oracle
+	# looped until the formula ceiling stopped the control bead without ever
+	# parking the goal for a human.
+	METRIC_ERR=""
 	if [ "$ORACLE_RC" -ne 0 ]; then
-		not_yet "metric oracle exited $ORACLE_RC: ${ORACLE_LAST:-no output}" ""
+		METRIC_ERR="metric oracle exited $ORACLE_RC: ${ORACLE_LAST:-no output}"
+	else
+		case "$VALUE" in
+		'' | *[!0-9.+-]*) METRIC_ERR="metric oracle printed a non-numeric value: '${VALUE}'" ;;
+		esac
 	fi
-	case "$VALUE" in
-	'' | *[!0-9.+-]*) not_yet "metric oracle printed a non-numeric value: '${VALUE}'" "" ;;
-	esac
-	case "$THRESHOLD" in
-	'' | *[!0-9.+-]*) fail "goal.oracle.threshold is not numeric: '${THRESHOLD}'" ;;
-	esac
-	# awk does the float compare; met per the operator.
-	CMP=$(awk -v v="$VALUE" -v t="$THRESHOLD" -v op="$COMPARE" 'BEGIN{
-		if (op=="lt") print (v<t)?1:0;
-		else if (op=="le") print (v<=t)?1:0;
-		else if (op=="gt") print (v>t)?1:0;
-		else if (op=="ge") print (v>=t)?1:0;
-		else print "err";
-	}')
-	case "$CMP" in
-	1) MET=0; REASON="measured $VALUE ${COMPARE} threshold $THRESHOLD — met" ;;
-	0) MET=1; REASON="measured $VALUE, need ${COMPARE} $THRESHOLD" ;;
-	*) fail "goal.oracle.compare must be one of lt le gt ge (got '${COMPARE}')" ;;
-	esac
+	if [ -n "$METRIC_ERR" ]; then
+		MET=1; VALUE=""; REASON="$METRIC_ERR"
+	else
+		case "$THRESHOLD" in
+		'' | *[!0-9.+-]*) fail "goal.oracle.threshold is not numeric: '${THRESHOLD}'" ;;
+		esac
+		# awk does the float compare; met per the operator.
+		CMP=$(awk -v v="$VALUE" -v t="$THRESHOLD" -v op="$COMPARE" 'BEGIN{
+			if (op=="lt") print (v<t)?1:0;
+			else if (op=="le") print (v<=t)?1:0;
+			else if (op=="gt") print (v>t)?1:0;
+			else if (op=="ge") print (v>=t)?1:0;
+			else print "err";
+		}')
+		case "$CMP" in
+		1) MET=0; REASON="measured $VALUE ${COMPARE} threshold $THRESHOLD — met" ;;
+		0) MET=1; REASON="measured $VALUE, need ${COMPARE} $THRESHOLD"; SIGNATURE="need ${COMPARE} $THRESHOLD" ;;
+		*) fail "goal.oracle.compare must be one of lt le gt ge (got '${COMPARE}')" ;;
+		esac
+	fi
 	;;
 command | "")
 	# Exit 0 = met; 3 = impossible (reserved); anything else = not met.
@@ -373,9 +402,12 @@ if [ -n "$INV" ] && [ "$INV" != "[]" ]; then
 		[ -n "$inv_cmd" ] || continue
 		if ! bash -c "$inv_cmd" >/dev/null 2>&1; then
 			# Broken invariant is a not-yet regardless of the oracle: the reason
-			# is to restore the invariant.
+			# is to restore the invariant. The invariant, not any metric measured
+			# above, is the failure signature now, so clear a metric SIGNATURE and
+			# let section 6c fall back to this reason.
 			MET=1
 			REASON="invariant violated: $inv_cmd"
+			SIGNATURE=""
 			break
 		fi
 	done <<-INVEOF
@@ -425,18 +457,23 @@ fi
 
 # 6c. stalled: the same failure signature as the previous attempt, with no
 # closest-approach improvement. Detecting the wedge early parks before the rest
-# of the budget burns. Progressing-but-slow (the value moved toward threshold)
-# stays not-yet.
+# of the budget burns. The signature is value-free on purpose: a metric reason
+# embeds the measured value, so keying the stall on the reason would never fire
+# when the value moves — even when it moves away from the threshold. Keying on
+# the signature and comparing the measured value separately catches a wedged or
+# worsening metric, while progressing-but-slow (the value moved toward the
+# threshold) stays not-yet.
 if [ -z "$REASON" ]; then
 	# A not-yet with no actionable reason is a stall by definition.
 	park stalled "oracle failed with no actionable reason" "$VALUE"
 	exit 0
 fi
+[ -n "$SIGNATURE" ] || SIGNATURE="$REASON"
 PRIOR=$(trail_array)
 PREV=$(printf '%s' "$PRIOR" | jq -c '[.[] | select(.verdict=="not-yet")] | last // {}' 2>/dev/null)
-PREV_REASON=$(printf '%s' "$PREV" | jq -r '.reason // empty' 2>/dev/null)
+PREV_SIG=$(printf '%s' "$PREV" | jq -r '.sig // .reason // empty' 2>/dev/null)
 PREV_VALUE=$(printf '%s' "$PREV" | jq -r '.value // empty' 2>/dev/null)
-if [ -n "$PREV_REASON" ] && [ "$PREV_REASON" = "$REASON" ]; then
+if [ -n "$PREV_SIG" ] && [ "$PREV_SIG" = "$SIGNATURE" ]; then
 	IMPROVED=1
 	if [ -n "$VALUE" ] && [ -n "$PREV_VALUE" ]; then
 		COMPARE=$(meta "goal.oracle.compare")
@@ -456,4 +493,4 @@ fi
 
 # 6d. ceiling backstop, then keep iterating.
 park_if_ceiling_reached "$REASON"   # parks and exits 0 only if the ceiling is hit
-not_yet "$REASON" "$VALUE"
+not_yet "$REASON" "$VALUE" "$SIGNATURE"
