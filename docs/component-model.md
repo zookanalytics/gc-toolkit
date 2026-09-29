@@ -194,8 +194,13 @@ a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture
 window is operator feedback that reads as consumed while nothing has routed it; a
 `pr_unengaged_threads` marker at the same head is a tracked hold and exempt;
 warn-only).
-That is the whole set: **21 checks,
-each asserting a live structural property** — none greps the source for a past fix.
+A tenth non-invariant check, `doctor/check-demo-toolchain`, reports readiness
+rather than structure: whether the demo:capture toolchain — Node, a Chromium
+build, ffmpeg, and `OPENAI_API_KEY` — is resolvable, warn-only, so a demo
+session learns before it captures whether the clip will narrate or degrade to a
+silent, captioned one.
+That is the whole set: **22 checks — 21 asserting a live structural property
+and one reporting toolchain readiness** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
 
