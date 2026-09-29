@@ -17,7 +17,9 @@
 # unreadable git status fails the guard closed rather than healing on an
 # unproven-clean tree; (k) a path staged with local-only content whose worktree
 # copy matches the remote fails the guard closed, so reset --hard cannot discard
-# the staged content.
+# the staged content; (l) a rig root parked off the default branch (HEAD on a
+# feature/integration branch ahead of origin) is surfaced and left untouched,
+# not silently counted advanced by a no-op fast-forward.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -351,6 +353,32 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/iota" rev-parse HEAD)" "$IOTA_LOCAL" "staged local-only content (hidden by an upstream-matching worktree) blocks the heal"
 eq "$(esc_count iota)" "1" "staged local-only content escalates instead of healing"
 eq "$(git -C "$TMP/iota" show :f.txt)" "staged-local-only" "the staged local-only content is left untouched"
+
+# kappa: the rig root parked off the default branch — an agent checked out an
+# integration branch in the rig root and left a seed commit on it, ahead of
+# origin/main. `merge --ff-only origin/main` reports "Already up to date", so a
+# HEAD-blind reconciler counts it advanced; the parked-off-default check must
+# surface it instead, mutating nothing.
+git init -q -b main "$TMP/kappa.src"; commit "$TMP/kappa.src" k1; commit "$TMP/kappa.src" k2
+git clone -q --bare "$TMP/kappa.src" "$TMP/kappa.git"
+git clone -q "$TMP/kappa.git" "$TMP/kappa"                       # on main == origin/main
+git -C "$TMP/kappa" checkout -q -b integration/seed origin/main  # park off the default branch
+echo seed > "$TMP/kappa/seed.txt"; git -C "$TMP/kappa" add -A; git -C "$TMP/kappa" commit -qm seed
+KAPPA_PARKED="$(git -C "$TMP/kappa" rev-parse HEAD)"
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"kappa","path":"$TMP/kappa"}
+]}
+JSON
+: > "$TMP/escalations"
+KAPPA_OUT="$(bash "$SCRIPT")"
+eq "$(git -C "$TMP/kappa" rev-parse HEAD)" "$KAPPA_PARKED" "a rig parked off the default branch is not mutated"
+eq "$(git -C "$TMP/kappa" symbolic-ref --short HEAD)" "integration/seed" "a parked rig is left on its branch, not force-moved"
+eq "$(esc_count kappa)" "1" "a rig parked off the default branch is escalated"
+eq "$(open_count kappa)" "1" "a rig parked off the default branch files a reconcile bead"
+grep -q '0 advanced' <<< "$KAPPA_OUT" && ok "a parked rig is not counted as advanced" || bad "a parked rig is not counted as advanced (got '$KAPPA_OUT')"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
