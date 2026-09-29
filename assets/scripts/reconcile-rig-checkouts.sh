@@ -94,6 +94,25 @@ escalate_divergence() {
         --subject "$subject" --key "$key" --message "$message"
 }
 
+# Retract the tracking visit for a subject whose divergence has resolved. The
+# subject bead auto-closes on a clean sync, but escalate.sh filed a board-visible
+# visit routed to a human, and a human-routed visit is not auto-claimed — so a
+# self-heal before the operator engages it leaves a moot visit lingering on the
+# board. The subject tracks exactly this one divergence and clears only on a
+# clean sync, so subject-resolved is premise-moot here: close the open visit as
+# moot through the same escalate.sh that filed it (--retract folds the reading
+# onto the subject and stamps gc.outcome=moot via visit-close.sh). Only an
+# unengaged (open) visit is touched; one a human already claimed is theirs. A
+# failure is reported, never fatal — the subject still closes and the next patrol
+# retries the retract. Called BEFORE the subject close so the reading folds onto
+# the subject while it is still open.
+retract_visit() {
+    local subject="$1" key="$2" message="$3"
+    GC_RIG="$RECONCILE_RIG" "$ESCALATE_SH" --retract \
+        --subject "$subject" --key "$key" --message "$message" \
+        || warn "could not retract the tracking visit for $subject — it stays on the board until the next patrol"
+}
+
 advanced=0; healed=0; blocked=0
 rigs=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"') || exit 0
 
@@ -116,11 +135,16 @@ while IFS=$'\t' read -r name path; do
     [ "$local_branch" = "$default_branch" ] || parked="HEAD is on ${local_branch:-<detached HEAD>}, not $default_branch"
 
     if [ -z "$parked" ] && git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
-        # Advanced or already up to date — clear any lingering escalation.
+        # Advanced or already up to date — clear any lingering escalation: retract
+        # the tracking visit as moot, then close the subject.
         advanced=$((advanced + 1))
         bead=$(open_bead "$name")
-        [ -n "$bead" ] && gc bd --rig "$RECONCILE_RIG" close "$bead" \
-            --reason "rigs/$name fast-forwarded cleanly to $remote" >/dev/null 2>&1 || true
+        if [ -n "$bead" ]; then
+            retract_visit "$bead" "reconcile-diverged-$name" \
+                "rigs/$name fast-forwarded cleanly to $remote; the divergence this visit tracked is resolved."
+            gc bd --rig "$RECONCILE_RIG" close "$bead" \
+                --reason "rigs/$name fast-forwarded cleanly to $remote" >/dev/null 2>&1 || true
+        fi
         continue
     fi
 
@@ -164,8 +188,12 @@ while IFS=$'\t' read -r name path; do
         if [ "$unique_tracked" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
             healed=$((healed + 1))
             bead=$(open_bead "$name")
-            [ -n "$bead" ] && gc bd --rig "$RECONCILE_RIG" close "$bead" \
-                --reason "rigs/$name auto-healed: already-upstream, reset --hard to $remote" >/dev/null 2>&1 || true
+            if [ -n "$bead" ]; then
+                retract_visit "$bead" "reconcile-diverged-$name" \
+                    "rigs/$name auto-healed (already-upstream, reset --hard to $remote); the divergence this visit tracked is resolved."
+                gc bd --rig "$RECONCILE_RIG" close "$bead" \
+                    --reason "rigs/$name auto-healed: already-upstream, reset --hard to $remote" >/dev/null 2>&1 || true
+            fi
             continue
         fi
     fi

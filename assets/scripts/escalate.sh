@@ -6,6 +6,10 @@
 # so this is for what only a human can answer.
 #   escalate.sh --subject <bead-id> --key <situation-key> --message <text>
 #               [--pool <rig-qualified pool>]
+# The counterpart verb retracts a visit whose situation resolved on its own,
+# closing it as moot through visit-close.sh (the guarded moot/benign close) so a
+# self-healing subject does not leave a moot visit on the board:
+#   escalate.sh --retract --subject <bead-id> --key <situation-key> --message <reading>
 # Callers: formulas/mol-refinery-patrol.toml, formulas/mol-dog-shutdown-dance.toml,
 # the refinery's merge path (pr-open.sh, pr-facts.sh, merge.sh, gate-ensure.sh),
 # a blocked polecat, and a patrol emergency that needs a human now.
@@ -32,7 +36,8 @@
 # A CLOSED visit answers too: a situation a sitting closed `moot` or `benign`
 # is not re-filed for GC_ESCALATE_VERDICT_WINDOW seconds (default 86400, 0
 # disables), and each suppressed repeat is tallied on that visit.
-# Exit: 0 filed, already open, repointed or inside the verdict window · 1 unroutable/could not file/verify · 2 usage
+# Exit: 0 filed, already open, repointed, inside the verdict window, or (--retract)
+# closed as moot / no open visit to close · 1 unroutable/could not file/verify/close · 2 usage
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -47,7 +52,15 @@ usage() {
   cat >&2 <<'U'
 usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
                    [--pool <rig-qualified pool>]
+       escalate.sh --retract --subject <bead-id> --key <situation-key>
+                   --message <one-line reading>
 
+  --retract  close the OPEN visit for this subject+key as moot, instead of
+             filing one, when the situation it raised resolved on its own.
+             --message is the reading folded onto the subject and stamped as the
+             visit's outcome reason. The caller owns the judgment that the
+             premise is gone; no matching open visit is a no-op success. Needs a
+             durable subject.
   --subject  the bead the escalation is about; the visit tracks it (required).
              A durable bead also narrows the dedup to that bead; an ephemeral
              one (a patrol wisp) cannot, so there the key alone is the
@@ -80,13 +93,14 @@ U
 
 warn() { echo "escalate: $*" >&2; }
 
-SUBJECT=""; KEY=""; MESSAGE=""; POOL_ARG=""
+SUBJECT=""; KEY=""; MESSAGE=""; POOL_ARG=""; RETRACT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) SUBJECT="${2:-}"; shift 2 || { usage; exit 2; } ;;
     --key)     KEY="${2:-}";     shift 2 || { usage; exit 2; } ;;
     --message) MESSAGE="${2:-}"; shift 2 || { usage; exit 2; } ;;
     --pool)    POOL_ARG="${2:-}"; shift 2 || { usage; exit 2; } ;;
+    --retract) RETRACT=1; shift ;;
     -h|--help) usage; exit 2 ;;
     *) warn "unknown argument '$1'"; usage; exit 2 ;;
   esac
@@ -152,6 +166,55 @@ if [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; then
 fi
 
 bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+
+# >>> retract-moot
+# --retract closes the OPEN visit this script filed for a subject, as moot, when
+# the situation it raised resolved on its own. It is the counterpart to filing:
+# escalate.sh owns the visit's identity — escalation_key, narrowed to a durable
+# subject by gc.continuation_group — so it is the one place that can find that
+# visit again without a caller re-deriving the match and drifting from it. A
+# caller reaches this only once it has decided the premise is gone; that judgment
+# is the caller's, because whether a resolved subject implies a moot premise is
+# per-subject-type (reconcile-rig-checkouts.sh retracts here because its subject
+# tracks exactly one divergence and clears only on a clean sync, which does not
+# generalize to every visit).
+#
+# Only an OPEN visit is retracted. A visit a human already claimed (in_progress)
+# is theirs to close: the recheck-premise skill folds mootness in at their prep,
+# and an unattended caller must not close a conversation out from under them.
+# The close routes through visit-close.sh, the one guarded close — it folds the
+# reading onto the subject's notes, stamps gc.outcome=moot and gc.outcome_reason
+# (so the board reads a decision, not a dropped need), and closes the visit. No
+# matching open visit is success: retract is idempotent, so a second pass, or a
+# subject that never raised one, exits 0 having changed nothing. The store is the
+# ambient GC_RIG, pinned to the subject's own rig by the board-route block above
+# exactly as the filing path pins it.
+if [ "$RETRACT" = 1 ]; then
+  case "$SUBJECT" in
+    *-wisp-*) warn "--retract needs a durable subject; an ephemeral wisp's visits hang on the standing triage bucket keyed by --key alone, so there is no one subject-scoped visit to retract"; exit 2 ;;
+  esac
+  VISIT_CLOSE="${GC_ESCALATE_VISIT_CLOSE_TOOL:-$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/visit-close.sh}"
+  [ -x "$VISIT_CLOSE" ] || { warn "visit-close.sh not found or not executable ($VISIT_CLOSE); cannot retract the visit as moot"; exit 1; }
+  # The same open-visit identity the filing dedup matches on, re-checked field by
+  # field because a listing that silently ignored a filter would match the wrong
+  # bead.
+  RETRACT_VISIT=$(bd_json list --status=open --metadata-field "escalation_key=$KEY" \
+      --metadata-field "gc.continuation_group=$SUBJECT" --limit=20 \
+    | jq -r --arg k "$KEY" --arg s "$SUBJECT" \
+        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id) else empty end' 2>/dev/null \
+    | head -n 1)
+  if [ -z "$RETRACT_VISIT" ]; then
+    echo "escalate: no open visit for $SUBJECT [$KEY] to retract — nothing to do"
+    exit 0
+  fi
+  if "$VISIT_CLOSE" --visit "$RETRACT_VISIT" --subject "$SUBJECT" --outcome moot --reason "$MESSAGE"; then
+    echo "escalate: retracted visit $RETRACT_VISIT on $SUBJECT [$KEY] as moot"
+    exit 0
+  fi
+  warn "visit-close.sh did not close $RETRACT_VISIT; it stays open for a human"
+  exit 1
+fi
+# <<< retract-moot
 
 # The route gate is pool-route.sh, shared with every other copy of this
 # block: one implementation decides what "addresses somebody" means, so a
