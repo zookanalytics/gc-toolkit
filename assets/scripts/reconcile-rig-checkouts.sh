@@ -103,14 +103,20 @@ escalate_divergence() {
 # moot through the same escalate.sh that filed it (--retract folds the reading
 # onto the subject and stamps gc.outcome=moot via visit-close.sh). Only an
 # unengaged (open) visit is touched; one a human already claimed is theirs. A
-# failure is reported, never fatal — the subject still closes and the next patrol
-# retries the retract. Called BEFORE the subject close so the reading folds onto
-# the subject while it is still open.
+# failure returns non-zero so the caller skips the subject close: bd list defaults
+# away from closed beads and open_bead does not pass --all, so a subject closed
+# after a failed retract cannot be rediscovered to retry, and its human-routed
+# visit would linger. Leaving the subject open on failure is the retry handle —
+# the next patrol re-finds it and retries. Called BEFORE the subject close so the
+# reading folds onto the subject while it is still open.
 retract_visit() {
     local subject="$1" key="$2" message="$3"
-    GC_RIG="$RECONCILE_RIG" "$ESCALATE_SH" --retract \
-        --subject "$subject" --key "$key" --message "$message" \
-        || warn "could not retract the tracking visit for $subject — it stays on the board until the next patrol"
+    if GC_RIG="$RECONCILE_RIG" "$ESCALATE_SH" --retract \
+        --subject "$subject" --key "$key" --message "$message"; then
+        return 0
+    fi
+    warn "could not retract the tracking visit for $subject — leaving its subject open so the next patrol retries"
+    return 1
 }
 
 advanced=0; healed=0; blocked=0
@@ -140,10 +146,14 @@ while IFS=$'\t' read -r name path; do
         advanced=$((advanced + 1))
         bead=$(open_bead "$name")
         if [ -n "$bead" ]; then
-            retract_visit "$bead" "reconcile-diverged-$name" \
-                "rigs/$name fast-forwarded cleanly to $remote; the divergence this visit tracked is resolved."
-            gc bd --rig "$RECONCILE_RIG" close "$bead" \
-                --reason "rigs/$name fast-forwarded cleanly to $remote" >/dev/null 2>&1 || true
+            # Close the subject only once its visit is retracted or proven absent
+            # (retract_visit exit 0). On a failed retract, leave the subject open
+            # as the retry handle — closing it strands the visit unretractable.
+            if retract_visit "$bead" "reconcile-diverged-$name" \
+                "rigs/$name fast-forwarded cleanly to $remote; the divergence this visit tracked is resolved."; then
+                gc bd --rig "$RECONCILE_RIG" close "$bead" \
+                    --reason "rigs/$name fast-forwarded cleanly to $remote" >/dev/null 2>&1 || true
+            fi
         fi
         continue
     fi
@@ -189,10 +199,14 @@ while IFS=$'\t' read -r name path; do
             healed=$((healed + 1))
             bead=$(open_bead "$name")
             if [ -n "$bead" ]; then
-                retract_visit "$bead" "reconcile-diverged-$name" \
-                    "rigs/$name auto-healed (already-upstream, reset --hard to $remote); the divergence this visit tracked is resolved."
-                gc bd --rig "$RECONCILE_RIG" close "$bead" \
-                    --reason "rigs/$name auto-healed: already-upstream, reset --hard to $remote" >/dev/null 2>&1 || true
+                # Same gate as the fast-forward path: close the subject only when
+                # its visit is retracted or proven absent, else keep it open as the
+                # retry handle.
+                if retract_visit "$bead" "reconcile-diverged-$name" \
+                    "rigs/$name auto-healed (already-upstream, reset --hard to $remote); the divergence this visit tracked is resolved."; then
+                    gc bd --rig "$RECONCILE_RIG" close "$bead" \
+                        --reason "rigs/$name auto-healed: already-upstream, reset --hard to $remote" >/dev/null 2>&1 || true
+                fi
             fi
             continue
         fi

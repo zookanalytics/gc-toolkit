@@ -832,6 +832,18 @@ eq "$rc" 0 "retract with no matching visit exits 0"
 eq "$(vccount)" "0" "and calls visit-close.sh not at all"
 has "$out" "no open visit" "and says there was nothing to retract"
 
+echo "# --retract fails closed when the open-visit lookup is unreadable"
+# The mirror of the filing dedup's fail-OPEN (an unreadable listing files a
+# duplicate — a duplicate beats a mute): retract must NOT read an unreadable
+# lookup as "no visit" and let its caller close the subject, because that strands
+# the still-open visit it could not see. A matching visit exists but the lookup
+# is down, so retract exits non-zero and closes nothing.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — diverged","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$(STUB_LIST_FAIL=1 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 1 "retract exits 1 when the open-visit lookup is unreadable"
+eq "$(vccount)" "0" "and closes no visit on an unreadable lookup"
+has "$out" "could not read open visits" "and says the lookup was unreadable, not that there was nothing to retract"
+
 echo "# --retract matches on BOTH the key and the subject"
 # A visit for another subject, or another situation under this subject, is left
 # alone — the same conjunction the filing dedup uses.

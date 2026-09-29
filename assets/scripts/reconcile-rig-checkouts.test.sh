@@ -119,9 +119,12 @@ while [ $# -gt 0 ]; do
 done
 # The moot-retract counterpart records apart from filings so the file counts
 # stay exact; the real one closes the tracked visit through visit-close.sh
-# (proven in escalate.test.sh), and is a no-op success when none is open.
+# (proven in escalate.test.sh), and is a no-op success when none is open. It
+# exits non-zero under FAKE_RETRACT_FAIL, as the real one does on an unreadable
+# lookup or a close that did not land, so the caller's skip-close gate is testable.
 if [ "$retract" = 1 ]; then
   printf '%s|%s\n' "$key" "$subject" >> "$FAKE_RETRACTIONS"
+  [ -n "${FAKE_RETRACT_FAIL:-}" ] && exit 1
   exit 0
 fi
 printf '%s|%s|%s\n' "$key" "$subject" "$pool" >> "$FAKE_ESCALATIONS"
@@ -406,6 +409,46 @@ eq "$(git -C "$TMP/kappa" symbolic-ref --short HEAD)" "integration/seed" "a park
 eq "$(esc_count kappa)" "1" "a rig parked off the default branch is escalated"
 eq "$(open_count kappa)" "1" "a rig parked off the default branch files a reconcile bead"
 grep -q '0 advanced' <<< "$KAPPA_OUT" && ok "a parked rig is not counted as advanced" || bad "a parked rig is not counted as advanced (got '$KAPPA_OUT')"
+
+# lambda: a recovered rig whose visit retract FAILS must keep its reconcile
+# subject OPEN. open_bead lists open beads only (no --all), so the subject is the
+# only handle the next patrol has to retry the retract; closing it after a failed
+# retract would strand the human-routed visit unretractable — the phantom demand
+# this change exists to clear. A later pass whose retract succeeds closes it.
+git init -q -b main "$TMP/lambda.src"; commit "$TMP/lambda.src" l1; commit "$TMP/lambda.src" l2
+git clone -q --bare "$TMP/lambda.src" "$TMP/lambda.git"
+git clone -q "$TMP/lambda.git" "$TMP/lambda"                     # HEAD = l2 (pre-rewrite SHA)
+git -C "$TMP/lambda.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # same tree, new SHA
+git -C "$TMP/lambda.src" push -qf "$TMP/lambda.git" main
+LAMBDA_REMOTE="$(git -C "$TMP/lambda.git" rev-parse main)"
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"lambda","path":"$TMP/lambda"}
+]}
+JSON
+
+# File lambda's reconcile bead first (auto-heal disabled: escalate, don't heal).
+: > "$TMP/escalations"; : > "$TMP/retractions"
+RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
+eq "$(open_count lambda)" "1" "lambda files a reconcile bead while diverged"
+LAMBDA_BEAD="$(bead_for lambda)"
+
+# Auto-heal enabled but the retract fails: lambda heals, the retract is attempted,
+# and because it did not land the subject is NOT closed.
+: > "$TMP/retractions"
+FAKE_RETRACT_FAIL=1 bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/lambda" rev-parse HEAD)" "$LAMBDA_REMOTE" "lambda still heals to origin even when the retract fails"
+eq "$(retract_count lambda)" "1" "a retract is attempted on the healed rig"
+eq "$(open_count lambda)" "1" "a FAILED retract leaves the reconcile subject OPEN as the retry handle"
+eq "$(bead_for lambda)" "$LAMBDA_BEAD" "the same subject stays open — no fresh bead is filed"
+
+# Next patrol, the retract succeeds: the still-open subject is re-found and closed.
+: > "$TMP/retractions"
+bash "$SCRIPT" >/dev/null
+eq "$(retract_count lambda)" "1" "the next patrol retries the retract on the still-open subject"
+eq "$(open_count lambda)" "0" "a successful retract finally closes the subject"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

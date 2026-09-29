@@ -195,13 +195,25 @@ if [ "$RETRACT" = 1 ]; then
   esac
   VISIT_CLOSE="${GC_ESCALATE_VISIT_CLOSE_TOOL:-$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/visit-close.sh}"
   [ -x "$VISIT_CLOSE" ] || { warn "visit-close.sh not found or not executable ($VISIT_CLOSE); cannot retract the visit as moot"; exit 1; }
+  # Read the open visits for this subject+key. An unreadable read is not proof no
+  # visit exists: bd_json discards bd's stderr, so a failed list, a non-array
+  # error value, or unparseable output all arrive as text that is not a JSON
+  # array. Treating that as "nothing to do" (exit 0) would let a caller close the
+  # subject while its visit stays open, recreating the phantom demand retract
+  # exists to clear — so fail closed unless the read parses as an array. A
+  # readable array with no match keeps the idempotent no-op.
+  RETRACT_LISTING=$(bd_json list --status=open --metadata-field "escalation_key=$KEY" \
+      --metadata-field "gc.continuation_group=$SUBJECT" --limit=20)
+  if ! printf '%s' "$RETRACT_LISTING" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    warn "could not read open visits for $SUBJECT [$KEY]; NOT retracting — the visit's state is unknown and its subject must not be closed on an unreadable lookup"
+    exit 1
+  fi
   # The same open-visit identity the filing dedup matches on, re-checked field by
   # field because a listing that silently ignored a filter would match the wrong
   # bead.
-  RETRACT_VISIT=$(bd_json list --status=open --metadata-field "escalation_key=$KEY" \
-      --metadata-field "gc.continuation_group=$SUBJECT" --limit=20 \
+  RETRACT_VISIT=$(printf '%s' "$RETRACT_LISTING" \
     | jq -r --arg k "$KEY" --arg s "$SUBJECT" \
-        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id) else empty end' 2>/dev/null \
+        '.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id' \
     | head -n 1)
   if [ -z "$RETRACT_VISIT" ]; then
     echo "escalate: no open visit for $SUBJECT [$KEY] to retract — nothing to do"
