@@ -1,344 +1,169 @@
 ---
 name: Goal Primitive Spec
-description: The measurable-goal contract, judge architecture, verdict taxonomy, loop mechanics, and telemetry for goal-centric work that iterates until reality measures the goal met. Design input for goal-keeper v1 (tk-tutb46).
+description: The goal contract carried at epic altitude: measured baselines and operator-graded qualities embedded in the epic body, advanced in batches and judged by an independent reader at evaluation checkpoints. Covers the verdict taxonomy, judge independence, and the tamper-evident contract; automation waits on the goals experiment (tk-h2s7hj.4).
 ---
 
 # Goal Primitive
 
-A goal is a measurable condition about the world, carried by a bead, that
-generates work until the condition is measured met by something other than the
-worker that did the work.
+A goal is a measurable condition about the world, carried at epic altitude as a
+contract embedded in the epic's body. It generates work until the condition is
+measured met by a reader other than the worker that did the work.
 
-Today the city converges on artifact approval: review loops iterate a diff
-until reviewers approve it. The goal primitive moves the convergence target
-from the delta to the value. The judge asks whether reality now meets a stated
-condition, not whether a reviewer likes a change. Almost everything the city
-does is already a form of convergence; this primitive names the target as a
-world condition and keeps generating work until that condition holds.
+The city already converges on artifact approval: review loops iterate a diff
+until reviewers approve it. A goal moves the convergence target from the delta
+to the value. The judge asks whether reality now meets a stated condition, not
+whether a reviewer likes a change.
 
-Three properties separate a goal from every construct surveyed for this design
-(the surveys are recorded in tk-nt5uda's notes):
+Three properties separate a goal from an ordinary epic:
 
-- **Durable.** The goal outlives any session or molecule. Claude Code's
-  `/goal` is session-scoped and dies with the session; a goal here is standing
-  state.
-- **World-measured.** The oracle reads reality: a metric, a benchmark, a test
-  exit code. Per-molecule check loops and Kiro's per-task criteria converge on
-  an approved artifact; a goal converges on a measured condition.
-- **Work-generating.** The goal spawns work one bounded iteration at a time
-  until the oracle measures met, then presents the converged result rather
-  than the first plausible attempt.
+- **Durable.** The goal is standing state in the epic body, outliving any
+  session or molecule.
+- **World-measured.** The measures read reality: a count, a benchmark, or a
+  doctor result, never the worker's account of its own work.
+- **Convergent.** The goal drives batches of work until the measures read met,
+  and presents the converged result rather than the first plausible attempt.
 
 ## Scope
 
-**Mandate.** The goal primitive's contract, judge architecture, verdict
-taxonomy, loop mechanics, and telemetry: what a goal is, how it is judged, how
-it terminates, and what it records.
+**Mandate.** What a goal is, how its contract is stated, how it is judged, how
+it terminates, and what it records, for goals carried at epic altitude.
 
-**Boundaries.** This is the design record for tk-yaor8a. It fixes the contract
-and the architecture; it does not implement them. The implementation is
-goal-keeper v1 (tk-tutb46), pack-level formulas and scripts, which reads this
-spec as landed. The engine telemetry request is gc-vz6v0 in the gascity store.
-Vendoring the unimported review-loop packs is a separate action item, out of
-scope here.
+**Boundaries.** This is the design record for tk-yaor8a. It fixes the shape of
+the contract and how a goal is judged; it does not build tooling. The running
+instance is goal-one (tk-y0abyu), under the goals experiment (tk-h2s7hj.4).
+Distilling a vision into an epic-shaped contract is a separate design
+(tk-h2s7hj.1). Automation is out of scope until the experiment harvests what is
+mechanical (Section 7).
 
-## 1. The primitive
+## 1. Carriage
 
-A goal is a contract plus a loop, carried by a bead. The carrier may be an
-epic bead or a dedicated goal bead; the primitive is the contract and the loop,
-not a new bead type. Whether goals enrich the existing epic type or get their
-own type is an implementation choice and does not change this design.
+The carrier is an epic. The contract is embedded in the epic's body: the
+statement, the measured criteria, the graded criteria, the cadence, the met
+condition, the oracle, and the backstop invariant. There is no dedicated goal
+bead and no `goal.*` metadata; the epic text is the whole of the contract.
 
-A goal typically spans multiple units of work and is sized by the condition it
-states; the carrier may be any bead. An epic may carry or distill goals; a
-goal need not belong to an epic. One goal, cutting p99 latency below a
-threshold, can spawn an implementation molecule, then a profiling molecule,
-then a tuning molecule across days, each iteration a fresh unit of work, all
-judged against the same oracle.
+A goal spans many units of work and is sized by the condition it states. One
+goal, shrinking an operating surface below a set of targets, drives a batch of
+PRs, then a checkpoint, then the next batch, all read against the same measures.
+goal-one (tk-y0abyu) is the running example: an epic whose body states its own
+measured and graded criteria and its checkpoint cadence.
 
-This spec is the middle layer. Above it, a vision layer: epics carry visions,
-and a PM-shaped refinement loop distills measurable goal contracts from them
-(separate design, tk-h2s7hj.1). Below it, goal-keeper v1 (tk-tutb46) executes
-and judges. v1 judges deterministic oracles only. A goal stated only in prose,
-because no measurable contract has been written for it yet, lives in the vision
-layer until the refinement loop distills it to a measurable contract; not-yet
-crisp is a legal state, not an exclusion. Rubric-lane judging, which is how
-document-shaped goals such as a PRD meeting a graded checklist are measured,
-belongs to that refinement design (tk-h2s7hj.1).
+## 2. The contract
 
-How it differs from what exists:
+The contract is multi-criteria: numbers where reality has numbers, grades where
+it does not.
 
-| Construct | What it is | What a goal adds |
-|---|---|---|
-| `epic` type (today) | an organizing container, excluded from the routed pool query | a threshold and a loop: an epic that measures and drives |
-| per-molecule check loop | converges one molecule on artifact approval, inside one workflow | convergence across molecules on a world condition |
-| session-scoped `/goal` | judges a transcript until the session ends | durable state independent of any session |
-
-## 2. The goal contract
-
-A minimal contract is three things: a measurable end state, a check, and a
-budget.
-
-| Field | Meaning |
+| Part | Meaning |
 |---|---|
-| `statement` | the measurable end state in plain language; the agreement between operator and city |
-| `oracle` | the machine-checkable definition of done: a command or a metric-and-threshold, judged by an exit code or a comparison |
-| `budget.max_iterations` | cap on attempts |
-| `budget.token_budget` | cumulative token cap across iterations |
-| `budget.wall_clock` | a deadline, relative or absolute |
+| Statement | the world condition to change, in plain language; the agreement between operator and city |
+| Measured criteria | conditions with a numeric baseline and a direction or target, read from reality; targets may be provisional and re-aimed at a checkpoint |
+| Graded criteria | qualities a reader judges rather than measures, graded at each checkpoint |
+| Cadence | the batch size and checkpoint rhythm: work advances in batches of roughly a few PRs, each batch closing with a checkpoint |
+| Met condition | the measured targets hold and the graded criteria pass across two consecutive checkpoints |
+| Oracle | how the measures are re-run: a re-runnable script where one exists, otherwise the census method recorded with the goal |
+| Invariant | a backstop that must hold throughout, so a measure cannot be moved by breaking something |
 
-Optional, defaulted by the keeper where a goal does not state them:
+The measured and graded split is the point. A surface count or a benchmark is a
+measure; "one obvious way to do a thing" or "breakage trending down" is a grade.
+Both are in the contract, and both are read at every checkpoint.
 
-| Field | Meaning |
-|---|---|
-| `invariants` | conditions that must hold on every iteration (the suite stays green, no public API breaks); a violated invariant fails the iteration even when the oracle passes |
-| `bound_clause` | override for what happens when a bound trips; the keeper default is a routed handoff to the escalation target carrying the reason and the closest-approach evidence, never a silent stop |
-| `escalation_target` | override for who receives impossible, stalled, and exhausted handoffs; the keeper default is a human |
-| `owner` / `provenance` | who set the goal and why |
+The oracle is itself part of the surface a goal measures, since a census script
+is one more script, so the accounting counts it. The invariant is what keeps the
+measures honest: no capability is deleted to move a number.
 
-The budget is three-way on purpose. Iterations bound count, tokens bound cost,
-and wall-clock bounds latency; a goal that would converge in twenty iterations
-but blow the token budget at eight should stop at eight, and the operator sees
-which bound tripped.
+The contract lives in the epic body. Changing it is an edit to that body
+(Section 6).
 
-**Where the contract lives.** The contract lives on the goal bead. When the
-keeper arms the goal it records a snapshot of the contract — the oracle, the
-budget, and any invariants — and before each verdict the judge re-reads the
-contract and compares it to that snapshot. A match means the goal is unchanged
-and the verdict stands. A mismatch means the contract moved after arming, so the
-keeper re-arms against the current contract with a fresh snapshot rather than
-judging against goalposts that have moved, and records the change in the verdict
-trail.
+## 3. Judging
 
-The threat model is a cooperative-but-fallible worker, so integrity is
-tamper-evident, not tamper-proof. A contract change is made visible in the trail
-and re-arms the goal; it is not prevented. This is the failing-test-first
-discipline as prior art runs it: the definition of done is recorded so a change
-to it shows, not walled off behind a reference the worker cannot reach.
+The governing rule: a model cannot judge its own homework. The worker of a batch
+never renders the checkpoint verdict on it.
 
-**A live goal changes by editing the bead.** Changing the oracle, budget, or
-invariants is an edit to the goal bead; the next verdict finds the snapshot
-mismatch, re-arms against the new contract, and records the change with its
-provenance. An operator who finds a goal incorrectly stated edits it the same
-way. Editing the bead is the whole of it: the edit is the change and the trail
-is its record.
-
-The operational state — current iteration, verdict trail, budget consumed, the
-last not-yet reason — lives on the goal bead and a repo trail file alongside the
-contract. It is durable, so any iteration can crash and the next resumes from
-it.
-
-**Example.** Goal: p99 read-path latency under 200ms. `oracle` is a benchmark
-command whose measured p99 is compared to 200ms, exit 0 only when under.
-`budget`: 8 iterations, a token cap, 72 hours. An optional `invariant` keeps the
-full suite green. On each iteration close the keeper runs the benchmark itself
-and compares.
-
-## 3. Judge architecture
-
-The governing rule: a model cannot judge its own homework. The worker is never
-the judge.
-
-- **Separation is structural.** The worker of an iteration never renders that
-  iteration's verdict. The keeper runs the oracle and gathers its own evidence,
-  in a session separate from the worker's. Iterations are pool-routed so each
-  runs in a fresh session with no carried context (docs/gascity-packs.md); a
-  named-agent loop keeps one assignee and collapses worker and judge into a
-  single conversation.
-- **The oracle is deterministic.** v1 judges by a command or a metric
-  threshold: binary pass/fail from an exit code or a comparison. No model
-  judgment is introduced where a number decides, and a deterministic oracle
-  cannot be talked out of its verdict. A goal whose end state has no
-  deterministic measure is judged by rubric lanes, a separate design
-  (tk-h2s7hj.1), and enters v1 once distilled to a deterministic contract.
-- **The judge gathers its own evidence.** It re-runs the oracle and reads the
-  branch, artifacts, and metrics directly. It never reads the worker's summary
-  of its own success as evidence. Agents plant self-assessments and edit tests
-  to pass; evidence the judge did not gather itself is not evidence.
-- **The contract is tamper-evident.** Before each verdict the keeper compares
-  the goal's current contract to the snapshot it recorded at arming (Section 2).
-  A mismatch means the contract changed after arming: the keeper re-arms against
-  the current contract and records the change, rather than judging against moved
-  goalposts. The change is made visible, not prevented.
+- **The judge reads reality, not the worker's summary.** It re-runs the measures
+  itself and reads the branch, the artifacts, and the counts directly. A
+  worker's account of its own success is not evidence: agents plant
+  self-assessments and edit checks to pass.
+- **The judge sits at a checkpoint.** Evaluation runs in a sitting on the epic,
+  where the operator re-measures and grades. Whether any grading is later
+  delegated to a reader other than the operator is decided from the experiment,
+  not assumed now.
+- **Measured and graded criteria are judged together.** The measures decide the
+  countable criteria; the operator grades the qualities. A measured target met
+  while a graded quality regressed is not the goal met.
 
 ## 4. Verdict taxonomy
 
-The judge renders one verdict on each iteration's close.
+At a checkpoint the judge renders one verdict on the goal.
 
 | Verdict | Trigger | Action |
 |---|---|---|
-| `met` | oracle passes and invariants hold | terminal: close the goal, present the converged result |
-| `not-yet` | oracle fails and another iteration can help | non-terminal: append the reason to the verdict trail, decrement budget, spawn the next iteration with the reason fed forward |
-| `impossible` | the goal cannot be met as stated (contradiction, unsatisfiable oracle, hard external blocker) | terminal: routed handoff to `escalation_target` with the reason |
-| `stalled` | no progress across iterations (a repeating failure signature), before any budget bound trips | terminal: routed handoff with the reason and the repeating signature |
-| `exhausted` | a budget bound (iterations, tokens, or wall-clock) trips while still progressing | terminal: routed handoff with the bound that tripped and the closest-approach evidence |
+| `met` | measures hold and graded criteria pass, across two consecutive checkpoints | terminal: close the goal, present the converged result |
+| `not-yet` | the goal is progressing but the criteria do not yet hold | non-terminal: record what is still short, aim the next batch at it |
+| `impossible` | the goal cannot be met as stated: a contradiction, an unsatisfiable target, a hard external blocker | terminal: return to the operator with the reason |
+| `stalled` | the measures stop moving across checkpoints, a repeating failure signature | terminal: return to the operator with the reason and the signature |
+| `exhausted` | the goal runs past the cost it was worth while still progressing | terminal: return to the operator with what ran out and the closest approach |
 
-`not-yet` is the only non-terminal verdict. Its reason is what the loop carries
-forward: the judge states what is still wrong, and that statement is input to
-the next iteration. A `not-yet` with no actionable reason is treated as
-`stalled`.
+`not-yet` is the only non-terminal verdict, and its reason is what the next batch
+carries forward. The judge states what is still wrong, and that statement aims
+the next batch. A `not-yet` with no actionable reason is treated as `stalled`.
 
-Stalled and exhausted are distinct, and the distinction is what makes a bound
-useful. Stalled means the loop is not moving (the same failure every attempt)
-and should park early, before the rest of the budget burns. Exhausted means the
-loop was moving but ran out of room. Both are routed handoffs carrying reasons;
-neither is a silent stop. Detecting stalled early turns a cap from "burn to the
-limit, then give up" into "park with a reason the moment it stops paying."
+`impossible`, `stalled`, and `exhausted` all return the goal to the operator to
+reshape or retire, never a silent stop. Stalled and exhausted are distinct, and
+the distinction is what makes a checkpoint useful. Stalled means the goal is not
+moving and should stop early, before more batches burn. Exhausted means it was
+moving but is no longer worth the remaining cost.
 
-## 5. Loop mechanics
+## 5. Advancing in batches
 
-The binding constraint is no new standing watcher unless proven necessary and
-cheap. The goal loop is event-driven.
+Work advances in batches, not in a single pass and not in an automated
+per-iteration loop. A batch is a small set of changes, roughly a few PRs, aimed
+at the current `not-yet` reason. When the batch lands, a checkpoint sitting
+re-runs the measures, grades the qualities, records what the batch moved on the
+experiment record (tk-h2s7hj.4), and aims the next batch. The rhythm is batch,
+checkpoint, batch, and the goal is met only when two consecutive checkpoints
+pass.
 
-- The goal spawns one iteration: a pool-routed molecule, its work derived from
-  the current `not-yet` reason.
-- A control bead, one per goal, blocks-depends on that iteration. When the
-  iteration closes, the control bead re-arms and the judge runs. The trigger is
-  the close event, not a clock. This is the mechanism the engine's check loops
-  already use: the control bead is a `gc.kind=ralph` bead that re-arms when its
-  blocking iteration closes, and its clone for a pool target is assigned to no
-  one, so the next iteration is a fresh session (docs/gascity-packs.md). The
-  in-city sweep concluded this substrate covers the goal loop with no engine
-  change. The control bead is the keeper's, assigned to no iteration worker;
-  arming the goal, before the first iteration is spawned, is when the keeper
-  records the contract snapshot (Section 2).
-- On re-arm, the judge fires: the keeper runs the oracle, gathers evidence, and
-  renders a verdict.
-- The verdict drives the next action: `met` closes the goal, `not-yet` spawns
-  the next iteration, and `impossible`, `stalled`, or `exhausted` route to the
-  escalation target.
+The operator decides at each checkpoint whether to continue. There is no control
+bead, no standing watcher, and no engine loop; the motion is manual by design
+(Section 7).
 
-No process polls the goal. The keeper is a reaction wired to close events,
-realized as a control bead rather than a daemon, which is what keeps it cheap.
+## 6. Integrity
 
-**Every bound resolves on a close.** At each verdict the judge reads all three
-bounds: the iterations and tokens consumed, and the wall-clock elapsed since
-arming. It routes `exhausted` the moment one has tripped. Iterations and tokens
-advance only while an iteration runs, so judging them when it closes catches
-them exactly. Wall-clock advances even while nothing runs, so it carries one
-more rule: each iteration is bounded by the time left in the goal's wall-clock
-budget, held as the iteration's own deadline, so an iteration cannot outlive the
-budget it spends. A wedged or over-running iteration is terminated at that
-deadline, and that termination is itself a close, so the judge fires on it and
-reads the wall-clock as tripped. The bound on the iteration, not a clock
-watching the goal, is what guarantees the close, and the loop stays
-event-driven. A goal that must be judged while no iteration is in flight, such
-as one waiting on an external change, carries the bounded re-check below rather
-than a standing poll.
+The threat model is a cooperative-but-fallible worker, so integrity is
+tamper-evident, not tamper-proof.
 
-The loop is not a static cycle. A graph cycle is rejected, and a
-`[steps.loop] until=` clause is inert and runs exactly one iteration
-(docs/gascity-packs.md). Iteration comes from the control bead re-arming on
-close and growing the graph at runtime, not from a loop written into the
-formula graph.
+The contract lives in the open, in the epic body, so a change to the goalposts
+is a visible edit in the epic's history. It is made to show, not walled off
+behind a reference the worker cannot reach. This is the failing-test-first
+discipline as prior art runs it: the definition of done is recorded so a change
+to it shows rather than being prevented.
 
-**Fresh context, durable state.** Each iteration runs in a fresh pool session
-and does one task against the current reason, then closes. All loop state (the
-iteration count, the verdict trail, the budget consumed, the last reason) lives
-on the goal bead and in the repo, and each iteration writes
-its artifacts as it goes. Nothing the loop needs lives only in a session's
-context, so any iteration can crash and the next resumes from durable state.
+The judge re-runs the measures itself (Section 3), so a worker cannot move a
+criterion by reporting a number it did not earn. The backstop invariant holds
+the line the measures cannot: no capability is deleted to move a measure.
 
-**The narrow cadence exception.** Some goals measure a world variable that
-changes independent of our work, such as an external latency that can drift or
-a dependency that can regress upstream. An event-driven judge that fires only
-on our own work's close can miss such a regression. A goal of that shape may
-carry a bounded re-check cadence. This is the "necessary and cheap" exception:
-the default is event-driven, any cadence is justified per goal and is itself
-bounded, and a goal whose oracle depends only on our own artifacts never needs
-one.
+A live goal changes by editing the epic body, through a before-and-after the
+operator approves (the change discipline lives in the distillation design,
+tk-h2s7hj.1). The edit is the change and the epic's history is its record.
 
-## 6. Telemetry
+## 7. What is deliberately absent
 
-A per-attempt record, append-only on the goal bead and a repo trail, carries
-for each iteration: the index, the verdict, the reason, an evidence reference
-(a commit, a branch, a measured value), wall-clock, tokens, and a digest of the
-oracle output. This trail is where the `not-yet` reason is drawn from and where
-the operator reads how a goal is converging.
+There is no keeper, no `goal.*` metadata, no per-iteration loop, and no standing
+watcher. A goal is run by hand: batches of work, a checkpoint sitting to
+re-measure and grade, and a manual record of what each batch moved.
 
-The wedge signal compares consecutive failure signatures; a repeat is the
-`stalled` trigger. Tracking closest-approach, whether the measured value is
-moving toward the threshold, separates progressing-but-slow from stalled, and
-detecting the wedge early is what lets `stalled` park before `exhausted`.
-
-First-class convergence telemetry (per-iteration timings and progress, wedge
-detection) is requested of the engine as gc-vz6v0. The keeper is designed
-against that interface. Until it lands, the keeper hand-rolls the trail, writing
-and reading its own per-iteration record. The one live hand-rolled exemplar
-today is the `iteration_timings` block in the upstream-rebase formula, which
-records per attempt when the attempt was minted, when a session started it, when
-its work closed, when the check ran, and the verdict with its reason. The
-hand-rolled trail carries the same fields as the requested interface, so the
-fallback is forward-compatible.
-
-## 7. What this learns from existing constructs
-
-Greenfield-first means these are studied to learn from, not to bound the
-design. The full surveys are in tk-nt5uda's notes.
-
-- **Check loops / ralph (engine primitive).** In-repo, the one authored
-  adoption is the upstream-rebase formula in the gascity-keeper pack. Its
-  control bead re-arms on iteration close, its clone for a pool target is
-  unassigned so each attempt is a fresh session, and it caps churn at a
-  max-attempts budget read off the control bead. Because nothing runs after that
-  budget is exhausted, its check script performs the handback itself on the last
-  failing attempt rather than relying on a step that never runs. A deterministic
-  gate reads durable state and fail-closes when it cannot: the rebase check
-  reads the control bead, while lane-state.sh derives a lane's green from the
-  review-bead graph and treats an unreadable store as not green. Diverges: a
-  check loop converges one molecule on artifact approval; a goal converges the
-  world across molecules.
-- **mol-review-quorum (engine-core, available by reference).** Teaches the
-  two-lane shape with a per-lane provider and model and a synthesizer that makes
-  the single call and treats an unknown lane verdict as a hard contract failure.
-  The rubric oracle, deferred to tk-h2s7hj.1, reuses this shape.
-- **Claude Code `/goal`.** Teaches the verdict taxonomy (met, not-yet with a
-  reason, impossible) and the separate small judge model. Diverges: `/goal` is
-  session-scoped and its judge runs no tools, judging only surfaced evidence,
-  while this judge is durable and gathers its own evidence.
-- **Kiro, Spec Kit, Factory.** Teaches spec-as-contract and failing-test-first.
-  Factory commits the failing tests, so tampering shows in the diff: the
-  discipline is visibility, not prevention. The tamper-evident contract is that
-  discipline — the keeper snapshots the contract at arming and every verdict
-  compares against it, so a change to the definition of done is visible in the
-  trail and re-arms the goal.
-
-No surveyed construct is a standing goal, stated as a measurable condition
-about the world, that generates work until reality measures it met. That is
-what this primitive is.
-
-## 8. Handed to implementation and to the engine
-
-To goal-keeper v1 (tk-tutb46), pack-level formulas and scripts, no engine
-change:
-
-- The contract on the goal bead, and the snapshot the keeper records at arming.
-  The keeper snapshots the contract when it arms the goal and compares the
-  current contract to that snapshot before each verdict; a mismatch re-arms the
-  goal against the current contract and records the change in the trail. This
-  spec fixes the required fields — a measurable end state, a deterministic
-  oracle, a three-way budget — the optional fields, and that integrity is
-  tamper-evident; it leaves the snapshot's storage and the trail format to the
-  implementation.
-- The spawn-on-not-yet wiring: which formula pours the next iteration, and how
-  the reason is threaded into the next work bead's dispatch note.
-- Session policy: iterations are pool-routed for fresh context; the iteration
-  molecules must not set session affinity to require.
-
-To the engine (gc-vz6v0): first-class convergence telemetry. The keeper carries
-a hand-rolled trail until it lands.
+This absence is a decision, not a gap. The goals experiment (tk-h2s7hj.4) runs
+goal-one (tk-y0abyu) this way, and at each checkpoint it records what was
+mechanical, what needed judgment, and what the contract text wanted but lacked.
+The minimal automation worth building is designed from that record once a couple
+of checkpoints have run, rather than ahead of the evidence. It is plausibly no
+more than re-measuring at a batch's close and posting the delta.
 
 ## Provenance
 
-Operator-approved slate item 5, sitting tk-nt5uda (visit tk-rfxy3e),
-2026-09-20. The binding operator constraints and the three condensed surveys —
-external landscape, in-city prior art, and the gc-toolkit convergence audit —
-are recorded in tk-nt5uda's notes and are the input to this spec. Implementation
-follow-up: tk-tutb46, which blocks on this bead. Engine telemetry request:
-gc-vz6v0, gascity store.
-
-The 2026-09-20 constraint that the oracle is locked before iterating was amended
-by operator ruling 2026-09-28 (sitting tk-eywd7n): integrity is recorded and
-tamper-evident, matching the Factory.ai prior art where committing the failing
-tests makes tampering visible in the diff rather than preventing it. v1 scope is
-deterministic oracles only; rubric-lane judging is deferred to tk-h2s7hj.1.
+Design record for tk-yaor8a. The model was ruled at the tk-tutb46 sitting (visit
+tk-fw8w1w), 2026-09-29: a goal carried at epic altitude with an embedded
+contract, judged by hand at checkpoints, with machinery deferred until manual
+cycles show what is mechanical. The running instance is goal-one (tk-y0abyu)
+under the goals experiment (tk-h2s7hj.4). Distilling a vision into an
+epic-shaped contract is the separate design tk-h2s7hj.1.
