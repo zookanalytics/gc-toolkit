@@ -332,8 +332,8 @@ anchor_meta() { # <k=v>... — stamp the anchor before the run
   done
 }
 # A rework child of tk-anc as store JSON, and the blocks edge that hangs it on
-# the anchor. The idempotency guard reads this walk to find an open child that
-# already answers a review.
+# the anchor. The idempotency guard finds an open child by the source_review_bead
+# it carries; the edge holds the merge and is what the work-order verify checks.
 kid() { printf ',{"id":"c%s","status":"%s","assignee":"","metadata":{%s},"notes":""}' "$1" "$2" "$3"; }
 seed_cap_deps() { for c in "$@"; do printf 'tk-anc|%s|blocks\n' "$c" >> "$STUB_DEPS"; done; }
 
@@ -776,8 +776,10 @@ eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
 # --- request-changes is idempotent on source_review_bead ------------------------
 # One review owns one rework child. The verdict path is re-runnable — close is
 # its last write, and the exits above it leave the review OPEN with a child
-# already filed and its edge already hung — so a re-pool must adopt that child,
-# never mint a twin the landing sibling's close cannot cancel.
+# already filed — so a re-pool must adopt that child by its source_review_bead,
+# never mint a twin the landing sibling's close cannot cancel. The child is found
+# whether or not its blocks edge landed, since a prior run can die between filing
+# it and hanging that edge.
 
 echo "# the exit-2-then-retry sequence adopts the orphan instead of filing a second child"
 reset "$ANCHOR_PR"
@@ -801,6 +803,33 @@ eq "$(meta fix-1 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the adopted 
 has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat fix-1 --on mol-polecat-work" "…the retry slings the SAME child"
 eq "$(status rv-1)" "closed" "the review closes once the adopted child is dispatched"
 eq "$(grep -c 'tk-anc|fix-1|blocks' "$STUB_DEPS")" "1" "exactly one edge holds the anchor — no duplicate accrued"
+
+echo "# an orphan whose blocks edge never landed is still adopted — dedup keys on source_review_bead, not the anchor edge"
+# The real double-file: a prior pass filed and stamped the child but died before
+# hanging its blocks edge, so no walk of the anchor's edges can see it. Seed no
+# cap dep — the child stands off the anchor's edge graph, exactly the orphan a
+# human later reaped. The metadata query still finds it, so the retry adopts it
+# and repairs the edge rather than minting a twin.
+reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-1","task_kind":"rework","anchor_bead":"tk-anc","branch":"polecat/tk-1","target":"main"')"
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "0" "NO second child is filed — the edge-less orphan is found by source_review_bead"
+has "$out" "adopting existing open rework child c9" "…it adopts the edge-less orphan by name"
+eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the adopted orphan is dispatched"
+eq "$(status rv-1)" "closed" "the review closes once the adopted child is dispatched"
+eq "$(grep -c 'tk-anc|c9|blocks' "$STUB_DEPS")" "1" "adoption repairs the missing blocks edge — exactly one now holds the anchor"
+
+echo "# the dedup query failing closed leaves the review open rather than risking a second child"
+# An unreadable ledger cannot be told from "no prior child"; creating on that
+# ambiguity is the double-file. So the guard fails closed: no child, review open.
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$(STUB_LIST_FAIL=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "an unreadable dedup query exits 2"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "0" "no child is filed while the ledger cannot be read"
+has "$out" "dedup query failed" "the refusal names the failed dedup read"
+eq "$(status rv-1)" "in_progress" "the review is left open for a retry"
 
 echo "# an open child for a DIFFERENT review is not adopted — a genuine next round files its own"
 reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-OLD","branch":"polecat/tk-1","target":"main"')"
