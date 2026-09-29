@@ -11,6 +11,14 @@
 # nothing) on any divergence or conflicting dirty file. So this ships enabled —
 # it cannot clobber work.
 #
+# The rig root must also stay ON the default branch: it is a deploy mirror, and a
+# HEAD parked elsewhere (detached, or a feature/integration branch an agent
+# checked out and left) never fast-forwards and serves an off-default build to
+# directory-imported packs. ff-only cannot see that — a checkout ahead of the
+# default reports "Already up to date" and looks advanced — so this checks the
+# local branch first and surfaces a parked checkout through the same subject bead
+# and escalation, mutating nothing.
+#
 # When --ff-only refuses, the divergence is almost always SHA churn from an
 # upstream rebase/squash/force-push: the live rigs/* checkout is a pure
 # deployment mirror (commits are authored in worktrees and the refinery clone,
@@ -93,8 +101,21 @@ while IFS=$'\t' read -r name path; do
     [ -n "${name:-}" ] && [ -d "$path/.git" ] || continue
     git -C "$path" fetch origin --quiet 2>/dev/null || continue
     remote=$(git -C "$path" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+    default_branch="${remote#origin/}"
 
-    if git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
+    # The rig root is a deploy mirror: it sits ON the default branch and only
+    # fast-forwards. A HEAD parked elsewhere — detached, or a feature/integration
+    # branch an agent checked out and left — never advances, and its working tree
+    # serves an off-default build a directory-imported pack then compiles. ff-only
+    # cannot see this: a checkout ahead of the default reports "Already up to
+    # date" and counts as advanced. Detect the parked state before the ff attempt
+    # and route it through the same subject bead; skip the ff and the auto-heal,
+    # which would act on the wrong branch.
+    local_branch=$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null || true)
+    parked=""
+    [ "$local_branch" = "$default_branch" ] || parked="HEAD is on ${local_branch:-<detached HEAD>}, not $default_branch"
+
+    if [ -z "$parked" ] && git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
         # Advanced or already up to date — clear any lingering escalation.
         advanced=$((advanced + 1))
         bead=$(open_bead "$name")
@@ -115,7 +136,8 @@ while IFS=$'\t' read -r name path; do
     # never touched by reset --hard. Anything the guard cannot prove — a real
     # divergence, an unreadable status, a local merge — falls through to the
     # escalation path unchanged. RECONCILE_NO_AUTOHEAL=1 disables the heal.
-    if [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
+    if [ -z "$parked" ] \
+       && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
        && cherry_out=$(git -C "$path" cherry "$remote" HEAD 2>/dev/null) \
        && [ -z "$(printf '%s' "$cherry_out" | grep '^+' || true)" ] \
        && merges=$(git -C "$path" rev-list --merges "$remote"..HEAD 2>/dev/null) \
@@ -148,13 +170,22 @@ while IFS=$'\t' read -r name path; do
         fi
     fi
 
-    # ff-only refused and the divergence is genuine (or auto-heal is disabled):
-    # do NOT touch the checkout — escalate.
+    # Reached two ways: the HEAD is parked off the default branch, or ff-only
+    # refused on a genuine divergence. Either way do NOT touch the checkout —
+    # file the subject bead and escalate.
     blocked=$((blocked + 1))
-    body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): already-upstream -> git -C %s reset --hard %s; machine-local\nconfig -> leave it; real work -> handle it.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
-        "$name" "$remote" "$path" "$path" "$remote" \
-        "$(git -C "$path" status --porcelain 2>/dev/null)" \
-        "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
+    if [ -n "$parked" ]; then
+        body=$(printf 'rigs/%s is parked off %s — its live checkout HEAD is on %s.\nPath: %s\n\nThe rig root is a deploy mirror: reconcile fast-forwards it to %s and\ndirectory-imported packs build from its working tree, so nothing checks out a\nbranch or commits there. Restore it once any local work is saved elsewhere:\n  git -C %s checkout %s\nIt auto-closes when the rig next fast-forwards cleanly.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+            "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$path" \
+            "$default_branch" "$path" "$default_branch" \
+            "$(git -C "$path" status --porcelain 2>/dev/null)" \
+            "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
+    else
+        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): already-upstream -> git -C %s reset --hard %s; machine-local\nconfig -> leave it; real work -> handle it.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+            "$name" "$remote" "$path" "$path" "$remote" \
+            "$(git -C "$path" status --porcelain 2>/dev/null)" \
+            "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
+    fi
 
     bead=$(open_bead "$name")
     if [ -n "$bead" ]; then
@@ -168,8 +199,13 @@ while IFS=$'\t' read -r name path; do
 
     # Make someone hear about it. A failure here is reported, never swallowed —
     # an unescalated divergence is the exact silent rot this script prevents.
-    msg=$(printf 'rigs/%s cannot fast-forward to %s — its live checkout diverged and its deploy is stalled.\nPath: %s\nSubject bead %s carries the full git status and divergence log, and clears when rigs/%s next ff-s cleanly.\nalready-upstream -> git -C %s reset --hard %s; machine-local config -> leave it; real work -> handle it.' \
-        "$name" "$remote" "$path" "$bead" "$name" "$path" "$remote")
+    if [ -n "$parked" ]; then
+        msg=$(printf 'rigs/%s is parked off its deploy branch %s — HEAD is on %s, so reconcile cannot advance it and its working tree serves an off-%s build to every directory-imported pack.\nPath: %s\nSubject bead %s carries the full git status and log, and clears when rigs/%s next fast-forwards cleanly.\nRestore it: save any local work elsewhere, then git -C %s checkout %s.' \
+            "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$default_branch" "$path" "$bead" "$name" "$path" "$default_branch")
+    else
+        msg=$(printf 'rigs/%s cannot fast-forward to %s — its live checkout diverged and its deploy is stalled.\nPath: %s\nSubject bead %s carries the full git status and divergence log, and clears when rigs/%s next ff-s cleanly.\nalready-upstream -> git -C %s reset --hard %s; machine-local config -> leave it; real work -> handle it.' \
+            "$name" "$remote" "$path" "$bead" "$name" "$path" "$remote")
+    fi
     if ! escalate_divergence "$bead" "reconcile-diverged-$name" "$msg"; then
         warn "rigs/$name divergence could NOT be escalated (escalate.sh failed) — subject bead $bead"
     fi

@@ -28,7 +28,7 @@ agents/mechanik/PROVENANCE.md
 agents/mechanik/agent.toml
 dfc288929ab8afc50b01275a7b7a9b1a2f00804043fbdab010cb7f841bb54901
 agents/mechanik/prompt.template.md
-8135ace77750ab815665afd8e43611c8de49c17b576304829bf7eb5a4d45893e
+5f6401e9d51f860466f3fe5f1699609fae9ef26ea03845f1260847b40f1686e2
 agents/polecat-codex/agent.toml
 232a9b3bd2c4322bfcfcf3b562608354a4b0049c6bde2d0d635a256ba4bf9933
 agents/polecat-codex/prompt.template.md

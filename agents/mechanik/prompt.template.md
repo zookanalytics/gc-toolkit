@@ -93,11 +93,16 @@ default branch — seed it on the convoy's integration branch:
 CONVOY=$(gc convoy create "<initiative>" --owned \
     --target "integration/<convoy-id>" --json | jq -r .convoy_id)
 
-# 2. Push the integration branch with the shared artifact (in the rig).
+# 2. Seed the integration branch with the shared artifact from a DISPOSABLE
+#    worktree — never the rig root. reconcile keeps the rig root fast-forwarded
+#    to main and directory-imported packs build from its working tree, so a
+#    branch checkout or commit there parks the deploy off main.
 git -C <rig-root> fetch --prune origin
-git -C <rig-root> checkout -b "integration/<convoy-id>" origin/main
-# add + commit the shared artifact, then:
-git -C <rig-root> push -u origin "integration/<convoy-id>"
+SEED=$(mktemp -d)/wt
+git -C <rig-root> worktree add "$SEED" -b "integration/<convoy-id>" origin/main
+# add + commit the shared artifact in "$SEED", then:
+git -C "$SEED" push -u origin "integration/<convoy-id>"
+git -C <rig-root> worktree remove "$SEED"
 
 # 3. File child work beads, link to convoy, sling normally.
 WORK=$(gc bd create "<task>" -t task --json | jq -r .id)

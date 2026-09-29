@@ -224,8 +224,11 @@ while IFS= read -r row; do
   # Dedup on branch+head via the child's own metadata, in the shape pr-facts.sh
   # reads: a child of ANY status whose rejection_reason names this head means
   # this head was already routed, and a LIVE child on the branch means a rewrite
-  # is already owned. Anchors are excluded by their own merge_result, so the
-  # pull_request anchor this bead becomes never dedups against itself.
+  # is already owned. The current anchor is excluded by its id and a foreign
+  # anchor by its own merge_result; a rework child of THIS anchor still counts
+  # when it carries one, because a child parked for a person sits in the `held`
+  # lifecycle state (merge_result=held) yet still owns the branch — dropping it on
+  # the merge_result test alone re-mints a merge-current twin every pass.
   kids=$(bd_list --metadata-field branch="$branch" --status="$ALL_STATUSES") || {
     echo "$PROG: $id — '$branch' conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
@@ -249,7 +252,9 @@ while IFS= read -r row; do
   dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg s "$stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
     ($live | split(",")) as $ls
     | [ .[] | select(.id != $id) | select(.id != $s)
-        | select(((.metadata.merge_result // "") | tostring) == "")
+        | select(((.metadata.merge_result // "") | tostring) == ""
+                 or (((.metadata.task_kind // "") == "rework")
+                     and (((.metadata.anchor_bead // "") | tostring) == $id)))
         | ((.status // "open") | ascii_downcase) as $st
         | ((.metadata.rejection_reason // "") | tostring) as $rr
         | select((($rr | contains("head " + $h)) and ($h != ""))

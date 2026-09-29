@@ -158,6 +158,16 @@ has "$OUT" "already covers this branch" "and the arm says which child covers it"
 eq "$(meta K1 task_kind)" "<absent>" "a claimed covering child is NOT re-stamped: a metadata write bypasses the claim guard, so backfilling the marker under a live holder is the stomp this refuses"
 hasnt "$OUT" "re-stamped role marker on covering rework K1" "and no restamp is attempted on it"
 
+echo "# a covering rework child parked for a person still covers the branch"
+# converse-hold transitions an unanchored child to the `held` lifecycle state,
+# which stamps merge_result=held; the child still owns the branch, so the
+# merge_result test must not drop it and mint a merge-current twin every pass.
+reset "$(pre AK polecat/tk-c1)" '{"id":"H1","status":"blocked","assignee":"","title":"held rework","metadata":{"branch":"polecat/tk-c1","task_kind":"rework","anchor_bead":"AK","merge_result":"held"}}'
+OUT=$(run --fix-pool "$POOL")
+eq "$(newcount)" "0" "a rework child of this anchor parked in the held lifecycle state (merge_result=held) still owns the branch; no twin is filed"
+has "$OUT" "already covers this branch" "and the held child is reported as the cover"
+hasnt "$OUT" "re-stamped role marker on covering rework H1" "the held child already carries the marker; no restamp is attempted"
+
 echo "# an unclaimed covering child that predates the role marker is backfilled in place"
 # Routed (so past the stranded arm) but unclaimed and unmarked at this head: a
 # child on the anchor's own branch a metadata read cannot tell from the anchor,
