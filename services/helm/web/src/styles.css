@@ -84,8 +84,9 @@ th {
 /*
  * Dependency families. Each family is a titled block — its
  * root anchor, then the members that hang off it — bracketed with a left rule so
- * it reads as one thing. The attention band rides a per-row column; a ● marks
- * the rows whose next move is the operator's.
+ * it reads as one thing. The attention band rides a per-row column; a leading
+ * marker flags the rows whose next move is a person's (●), that an open visit
+ * holds (○), or both (◉).
  */
 .board-family {
   border-left: 2px solid rgb(128 128 128 / 35%);
@@ -110,6 +111,16 @@ th {
 
 .wants-person {
   color: #8a6100;
+}
+
+/*
+ * The visit marker: an open converse sitting holds this row. A different hue from
+ * the amber wants-person ● because it is a different fact — a conversation is on
+ * the bead — and the two can co-occur (◉). Teal reads as informational against
+ * the red/amber/green the rest of the board already spends.
+ */
+.held-marker {
+  color: #0e7490;
 }
 
 /*

@@ -30,6 +30,15 @@ const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done']
 // side, which is the side that shows a row rather than hides one.
 const isRunning = (s: Sitting): boolean => s.status !== 'closed';
 
+// What a sitting CONCLUDED, or failing that what it is ABOUT: the takeaway wins,
+// then the outcome reason (why a decision-close closed), then the subject's title
+// (the topic), and the visit bead's own title only as a last resort. Mirrors the
+// board service's Sitting.Headline so the sittings table and the per-row visit
+// hover read one rule.
+function sittingHeadline(s: Sitting): string {
+  return s.takeaway || s.outcome_reason || s.subject_title || s.title;
+}
+
 // How long ago a stamp was, in the coarsest unit that still says something. An
 // absent stamp is unknown, never "just now": the sitting whose timestamp the
 // source could not read must not read as the freshest one.
@@ -287,16 +296,52 @@ function progressCell(tile: Tile): string {
   return `${tile.n_closed}/${tile.m_total}`;
 }
 
-// One dependency family, rendered as a block: a header naming its root — with a
-// ● when the root's own next move is the operator's — and a table of its members
-// beneath, each in the band that says the move it wants, a ● marking the rows
-// that want a person. Dependency structure is the top-level axis; the attention
-// band orders and highlights within a family.
+// The leading marker on a family row: a filled ● when the row's next move is a
+// person's (review or gate), a hollow ○ when an open visit holds it, and a ◉ when
+// both — the same vocabulary the CLI overview prints (cmd/helm-svc/board.go,
+// familyGlyph). wants-person is already spelled by the band word, so its ● stays
+// decorative; a visit has no other cue on the row, so the held marker carries an
+// accessible label and a hover listing this bead's sittings — each one's
+// headline, its outcome (or "running"), and the session to attach to.
+function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
+  const wp = wantsPerson(tile);
+  if (!tile.held) {
+    return wp ? (
+      <span className="wants-person" aria-hidden="true">
+        ●{' '}
+      </span>
+    ) : null;
+  }
+  const hover =
+    sittings
+      .map(
+        (s) =>
+          `${sittingHeadline(s)} · ${s.outcome || (isRunning(s) ? 'running' : 'closed')}${
+            s.session ? ` · ${s.session}` : ''
+          }`,
+      )
+      .join('\n') ||
+    (wp ? 'an open visit holds this row, and it wants you' : 'an open visit holds this row');
+  const label = wp ? 'held by an open visit; wants you' : 'held by an open visit';
+  return (
+    <span className="held-marker" title={hover} aria-label={label}>
+      {wp ? '◉' : '○'}
+      {' '}
+    </span>
+  );
+}
+
+// One dependency family, rendered as a block: a header naming its root and a
+// table of its members beneath, each in the band that says the move it wants. A
+// leading [RowMarker] flags the rows that want a person, that an open visit
+// holds, or both. Dependency structure is the top-level axis; the attention band
+// orders and highlights within a family.
 function FamilyBlock({
   family,
   drillTarget,
   onOpen,
   onActuated,
+  sittingsBySubject,
 }: {
   family: Family;
   drillTarget: string | null;
@@ -304,13 +349,15 @@ function FamilyBlock({
   // Called after a board write lands, so the acted-on row re-gathers rather than
   // waiting out the poll interval. App passes its refresh.
   onActuated: () => void;
+  // The sittings on each bead, keyed by subject id, for the per-row visit hover.
+  sittingsBySubject: Map<string, Sitting[]>;
 }) {
   const { root, members } = family;
   const headingId = `family-${root.id}`;
   return (
     <section className="board-family" aria-labelledby={headingId}>
       <h2 id={headingId}>
-        {wantsPerson(root) && <span aria-hidden="true">● </span>}
+        <RowMarker tile={root} sittings={sittingsBySubject.get(root.id) ?? []} />
         <DrillOpen id={root.id} onOpen={onOpen} />
       </h2>
       <p className="sub">
@@ -369,11 +416,7 @@ function FamilyBlock({
             {members.map((m) => (
               <tr key={m.id} className={m.id === drillTarget ? 'drilled' : undefined}>
                 <td>
-                  {wantsPerson(m) && (
-                    <span className="wants-person" aria-hidden="true">
-                      ●{' '}
-                    </span>
-                  )}
+                  <RowMarker tile={m} sittings={sittingsBySubject.get(m.id) ?? []} />
                   <span className="band">{m.section}</span>
                 </td>
                 <td>
@@ -470,7 +513,7 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                     dedup close shows its outcome reason (why it closed), then
                     the subject's title (the topic) rather than the visit bead's
                     own generic title, which says nothing. */}
-                <td>{s.takeaway || s.outcome_reason || s.subject_title || s.title}</td>
+                <td>{sittingHeadline(s)}</td>
               </tr>
             );
           })}
@@ -560,6 +603,19 @@ export function App() {
   // oldest first) is preserved, so the oldest-owed family leads; within a family
   // the members read in SECTION_ORDER.
   const families = useMemo(() => groupByFamily(visibleTiles), [visibleTiles]);
+
+  // Sittings keyed by the bead they are about, so each family row shows the
+  // visit(s) holding it without re-scanning the list per row. Keyed off the full
+  // sittings list, not the rig-filtered one, so a shown row always finds its own.
+  const sittingsBySubject = useMemo(() => {
+    const bySubject = new Map<string, Sitting[]>();
+    for (const s of sittings) {
+      const list = bySubject.get(s.subject);
+      if (list) list.push(s);
+      else bySubject.set(s.subject, [s]);
+    }
+    return bySubject;
+  }, [sittings]);
 
   const owed = visibleTiles.filter((t) => t.owed);
   const coverage = prCoverage(visibleTiles);
@@ -668,6 +724,7 @@ export function App() {
           drillTarget={drillTarget}
           onOpen={setDrillTarget}
           onActuated={refresh}
+          sittingsBySubject={sittingsBySubject}
         />
       ))}
 

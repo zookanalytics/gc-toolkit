@@ -229,6 +229,63 @@ func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 	}
 }
 
+// The overview's leading glyph shows a visit too, not just a person's move: ○ a
+// row an open visit holds, ◉ a row that is both held and wants a person, ● a
+// plain person's move. Before this the family view spent ● on wants-person alone
+// and a visit was invisible there (tk-jlzsdz).
+func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
+	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
+	tiles := []board.Tile{
+		{ID: "tk-fam", Rig: "gc-toolkit", Kind: "epic", Title: "family root", Severity: board.SevHigh,
+			Section: board.SectionStalled, MTotal: 3, Open: 3, Frontier: "3 open",
+			Needs: "decomposed, idle", GroupRoot: "tk-fam", RankScore: 3_000_000},
+		{ID: "tk-held", Rig: "gc-toolkit", Kind: "task", Title: "held only", Severity: board.SevNormal,
+			Section: board.SectionActive, Held: true, Frontier: "in flight",
+			Needs: "working", GroupRoot: "tk-fam", RankScore: 2_500_000},
+		{ID: "tk-both", Rig: "gc-toolkit", Kind: "review", Title: "held and gated", Severity: board.SevElevated,
+			Section: board.SectionGate, Held: true, Frontier: "PR #7",
+			Needs: "answer", GroupRoot: "tk-fam", RankScore: 2_400_000},
+		{ID: "tk-wants", Rig: "gc-toolkit", Kind: "review", Title: "wants a person", Severity: board.SevElevated,
+			Section: board.SectionReview, Frontier: "PR #8",
+			Needs: "review", GroupRoot: "tk-fam", RankScore: 2_300_000},
+	}
+	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
+	var out strings.Builder
+	renderTable(&out, b, tiles, now, 1)
+	got := out.String()
+
+	// Each member row leads with its glyph; find the line by id and read its first
+	// rune. The IDs are distinct and none is a substring of another, so the match
+	// is unambiguous.
+	glyphFor := func(id string) string {
+		for _, line := range strings.Split(got, "\n") {
+			if strings.Contains(line, id) {
+				r := []rune(line)
+				if len(r) == 0 {
+					return ""
+				}
+				return string(r[0])
+			}
+		}
+		return "«no row for " + id + "»"
+	}
+	for _, c := range []struct{ id, glyph, why string }{
+		{"tk-held", "○", "a held row no one owes leads with ○"},
+		{"tk-both", "◉", "a held row that also wants a person leads with ◉"},
+		{"tk-wants", "●", "a plain person's move still leads with ●"},
+	} {
+		if g := glyphFor(c.id); g != c.glyph {
+			t.Errorf("%s: want %q, got %q\n%s", c.why, c.glyph, g, got)
+		}
+	}
+	// The legend teaches all three glyphs, not just ●.
+	for _, want := range []string{"○ an open visit holds the row", "◉ both"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("family legend must explain %q; got:\n%s", want, got)
+		}
+	}
+}
+
 // A run of rows sharing one deterministic template folds to a count line, then
 // ONE line per member carrying its id and its own title — per-bead context, not
 // a bare id soup. Clustering lives in the flat owed queue; the
