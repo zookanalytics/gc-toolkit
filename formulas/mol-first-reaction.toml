@@ -278,6 +278,37 @@ reaction's own workflow so the closer is the bead's sole dispatch surface. Each
 block below resolves it and re-derives the bead in its own shell, because that is
 the only thing a block can rely on.
 
+**A landed reaction disposes once — check before you run an exit.** A completed
+reaction carries `gc.proactive_reaction=1`, stamped by the release the dispose
+performs. When a first session disposed and drained before closing this step,
+the graph re-offers this step to a second session on a bead whose reaction has
+already landed. Running an exit again is wrong on all four, and on `ruling` it
+files a DUPLICATE: the gate-visit block files a visit before
+`first-reaction-dispose.sh` is reached, so the re-run leaves a second visit that
+is only then retracted, and the board carries the husk.
+`first-reaction-dispose.sh` refuses the re-dispose on every exit, but that
+refusal lands after the visit is filed. So check first, ahead of the four exit
+blocks: if the reaction has landed, run no exit and file no visit — close this
+step and drain.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
+REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r '((.[0].metadata // {})["gc.proactive_reaction"] // "") == "1"' 2>/dev/null || printf 'false')
+if [ "$REACTED" = "true" ]; then
+  echo "ALREADY REACTED: $WORK_BEAD_ID carries gc.proactive_reaction=1 — the reaction has landed. Running no exit and filing no visit; closing this step and draining."
+  SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+  done
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --outcome pass
+  gc runtime drain-ack
+  exit 0
+fi
+```
+
+If it prints ALREADY REACTED, you are done: do not run any exit block below.
+
 The **takeaway** in every exit below is your card's one-line headline, derived
 from **## Decision needed**, ≤140 chars on ONE line — the wrapper rejects a
 longer one rather than truncating it. The **reason** is why this disposition

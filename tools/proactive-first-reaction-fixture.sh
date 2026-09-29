@@ -649,6 +649,26 @@ absent "no exit closes the work bead"              "bd close"                 "$
 has "the formula reads the exit code before it closes" "exited zero"          "$F"
 has "…naming the two ways a disposition fails to land" "never became a"     "$F"
 
+echo "── the terminal step drains a re-offered LANDED reaction before any exit ──"
+# A reaction that has landed carries gc.proactive_reaction=1. When advance-and-drain
+# is re-offered after that (a first session disposed, then drained before closing
+# this step), running an exit again is wrong on all four — and on the ruling exit
+# the gate-visit block files a SECOND visit before first-reaction-dispose.sh can
+# refuse the re-dispose, leaving a duplicate the board carries. So a reacted-guard
+# sits AHEAD of the four exit blocks and drains instead of running one. Extract the
+# last step and assert the guard is there, keyed on the landed marker, and that its
+# drain precedes the first exit block (1a) — so a re-offer never reaches the
+# gate-visit create.
+AD_STEP="$(awk '/^id = "advance-and-drain"/{f=1} f' "$FORMULA_TOML")"
+has "advance-and-drain guards on the landed reaction marker" "gc.proactive_reaction" "$AD_STEP"
+DRAINS="$(printf '%s\n' "$AD_STEP" | grep -c 'gc runtime drain-ack')"
+eq  "advance-and-drain has two drain paths (the reacted-guard and the terminal close)" "2" "$DRAINS"
+GUARD_DRAIN_LINE="$(printf '%s\n' "$AD_STEP" | grep -n 'gc runtime drain-ack' | head -1 | cut -d: -f1)"
+EXIT1A_LINE="$(printf '%s\n' "$AD_STEP" | grep -n '1a. ACTIONABLE' | head -1 | cut -d: -f1)"
+{ [ -n "$GUARD_DRAIN_LINE" ] && [ -n "$EXIT1A_LINE" ] && [ "$GUARD_DRAIN_LINE" -lt "$EXIT1A_LINE" ]; } \
+  && ok "the reacted-guard drains before the first exit block (no gate-visit on a re-offer)" \
+  || bad "the reacted-guard drains before the first exit block" "guard_drain < exit1a" "guard_drain=$GUARD_DRAIN_LINE exit1a=$EXIT1A_LINE"
+
 echo "── the pool budget (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"
 MAX="$(printf '%s\n' "$A" | sed -n 's/^max_active_sessions *= *\([0-9][0-9]*\).*/\1/p' | head -n1)"
