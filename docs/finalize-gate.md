@@ -35,10 +35,21 @@ machine in `docs/state-machine.md`.
 
 An open visit whose subject is this bead refuses the bead's finalization. A visit
 is a subject-scoped conversation a person owes an answer to (the mol-visit
-formula). The gate reads the subject's incoming `tracks` edges —
-`gc bd dep list <bead> --direction=up -t tracks` returns exactly the beads whose
-tracks edge points at it — and holds finalization while any of them is an open
-`task_kind=visit`.
+formula). A visit covers its subject by the shared visit identity
+(`assets/scripts/visit-identity.sh`): its outgoing `tracks` edge, or — the
+fallback for a visit whose edge has not landed — its `gc.continuation_group`
+stamp. The gate reads both from the subject's end and holds finalization while
+any open `task_kind=visit` covers the bead:
+
+- the subject's incoming `tracks` edges —
+  `gc bd dep list <bead> --direction=up -t tracks` returns exactly the beads
+  whose tracks edge points at it;
+- the visits stamped with this subject —
+  `gc bd list --metadata-field gc.continuation_group=<bead>` returns the ones
+  covering it by the fallback. `escalate.sh` stamps a visit at creation and adds
+  its tracks edge in a later write, so a stamped visit with no edge yet is open
+  and owed here; one that already carries a tracks edge is covered by the edge,
+  not the fallback, and is not counted twice.
 
 A `tracks` edge is non-blocking. So the gate holds only this bead's finalization:
 it never consults the bead's readiness, and it never reaches the bead's children.

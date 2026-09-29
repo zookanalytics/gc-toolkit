@@ -11,14 +11,24 @@
 #
 # Clause no-open-visit: an OPEN visit whose SUBJECT is this bead refuses the
 # bead's finalization. A visit is a subject-scoped conversation a person owes an
-# answer to (formulas/mol-visit.toml). A visit's coverage is its outgoing
-# `tracks` edge to the subject, so the trackers are read here by the subject's
-# INCOMING tracks edges: bd's own `-t tracks --direction=up` returns exactly the
-# beads whose tracks edge points at this bead, which is the coverage relation
-# visit-identity.sh reads from the other end. Among those, an OPEN task_kind=visit
-# holds finalization. A `tracks` edge is non-blocking, so the gate holds only THIS
-# bead's finalization and touches neither the bead's readiness nor its children
-# (docs/finalize-gate.md).
+# answer to (formulas/mol-visit.toml). Its coverage of a subject is the shared
+# visit identity (assets/scripts/visit-identity.sh): the visit's outgoing `tracks`
+# edge, or — the fallback for a visit whose edge has not landed — its
+# `gc.continuation_group` stamp. This clause reads both from the subject's end, so
+# it agrees with the board, converse, and the sweeps on which visits stand open,
+# and each read stays local to this one bead rather than scanning every open bead:
+#   - the subject's INCOMING tracks edges (`-t tracks --direction=up`) name the
+#     visits whose edge points here;
+#   - the visits STAMPED with this subject (`--metadata-field
+#     gc.continuation_group=<bead>`) name the ones covering it by the fallback.
+#     escalate.sh leaves that state reachable: it stamps the visit at creation,
+#     then adds the tracks edge in a separate write it does not read back, so a
+#     stamped-but-not-yet-edged visit is open and owed here while its edge is
+#     absent. A stamped visit that already carries a tracks edge is covered by the
+#     edge, not the fallback, so it is not counted a second time.
+# Among either, an OPEN task_kind=visit holds finalization. A `tracks` edge is
+# non-blocking, so the gate holds only THIS bead's finalization and touches
+# neither the bead's readiness nor its children (docs/finalize-gate.md).
 #
 # FAIL CLOSED. A tracker list that does not read, or does not answer with a JSON
 # array, refuses the finalization: an unreadable probe is never an all-clear,
@@ -46,15 +56,14 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # clause_no_open_visit <bead-id> — prints a one-line refusal reason and returns 1
-# when an OPEN visit tracks the bead, or when the probe fails closed; prints
-# nothing and returns 0 when no open visit tracks it.
-#
-# The trackers are read by the bead's incoming `tracks` edges, not by scanning
-# every open bead: the reverse edge names exactly the visits (and tracking
-# convoys) pointing here, so the probe is local to this one bead. Among the
-# returned rows, an OPEN task_kind=visit is a held finalization.
+# when an OPEN visit covers the bead, or when a probe fails closed; prints nothing
+# and returns 0 when no open visit covers it. Coverage is the shared visit
+# identity: PROBE 1 reads the incoming tracks edge, PROBE 2 the
+# gc.continuation_group fallback (see the block comment above).
 clause_no_open_visit() {
     _fgv_bead="$1"
+
+    # PROBE 1 — the subject's incoming tracks edges.
     _fgv_raw=$(gc bd dep list "$_fgv_bead" --direction=up -t tracks --json 2>/dev/null) || {
         echo "open-visit probe unreadable ('gc bd dep list' failed) — refusing finalize on $_fgv_bead (fail-closed)"
         return 1
@@ -76,6 +85,40 @@ clause_no_open_visit() {
         echo "held by open visit $_fgv_hit — its subject $_fgv_bead owes a conversation before finalize"
         return 1
     fi
+
+    # PROBE 2 — the gc.continuation_group fallback: open visits stamped with this
+    # subject whose tracks edge has not landed. A truncated page could hide one, so
+    # the whole set is read (--limit 0) and the stamp re-checked in jq rather than
+    # trusted from the server-side filter.
+    _fgv_stamped=$(gc bd list --status open,in_progress \
+        --metadata-field "gc.continuation_group=$_fgv_bead" --limit 0 --json 2>/dev/null) || {
+        echo "open-visit probe unreadable ('gc bd list' failed) — refusing finalize on $_fgv_bead (fail-closed)"
+        return 1
+    }
+    _fgv_cands=$(printf '%s' "$_fgv_stamped" | scrub \
+        | jq -r --arg s "$_fgv_bead" '
+            if type != "array" then error("not an array")
+            else ( .[]?
+                     | select((.metadata.task_kind // "") == "visit")
+                     | select((.metadata["gc.continuation_group"] // "") == $s)
+                     | select(((.status // "open") | tostring) as $st
+                              | ($st == "open" or $st == "in_progress"))
+                     | .id ) end' 2>/dev/null) || {
+        echo "open-visit probe unreadable (stamp filter failed) — refusing finalize on $_fgv_bead (fail-closed)"
+        return 1
+    }
+    for _fgv_v in $_fgv_cands; do
+        # The stamp is the fallback only for a visit with no tracks edge; a stamped
+        # visit that has one is covered by that edge (PROBE 1's domain). An
+        # unreadable edge probe is treated as no edge — holding, fail-closed.
+        _fgv_edge=$(gc bd dep list "$_fgv_v" --direction=down -t tracks --json 2>/dev/null \
+            | scrub \
+            | jq -r 'if type != "array" then "unreadable" elif length > 0 then "yes" else "no" end' 2>/dev/null)
+        if [ "$_fgv_edge" != "yes" ]; then
+            echo "held by open visit $_fgv_v — its subject $_fgv_bead owes a conversation before finalize (covered by gc.continuation_group; tracks edge not yet written)"
+            return 1
+        fi
+    done
     return 0
 }
 

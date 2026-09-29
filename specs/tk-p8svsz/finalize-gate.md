@@ -33,29 +33,38 @@ its children. `docs/finalize-gate.md` is the present-tense description.
 
 ## Decisions
 
-### The signal is the subject's incoming `tracks` edge
+### The signal is the shared visit identity: tracks edge, then continuation_group
 
-A visit's coverage is its outgoing `tracks` edge to the subject (mol-visit files
-it; `assets/scripts/visit-identity.sh` is the one matcher). The gate reads the
-reverse: `gc bd dep list <bead> --direction=up -t tracks --json` returns exactly
-the beads whose tracks edge points at the subject, and the clause keeps the open
-`task_kind=visit` rows.
+A visit's coverage is the shared visit identity (`assets/scripts/visit-identity.sh`
+is the one matcher; mol-visit files it): its outgoing `tracks` edge, or — the
+fallback for a visit whose edge has not landed — its `gc.continuation_group`
+stamp. The gate reads both from the subject's end:
 
-This is targeted, not a scan. `gc bd list --status=open,in_progress` returns the
-whole open population (~1180 beads live), and the merge arm would run the probe
-twice per anchor every cadence pass; the reverse-dep query is local to the one
-bead, matching merge.sh's existing per-anchor `gc bd dep list` probes. The
-reverse-dep row does not carry a `.dependencies[]` array (it carries the edge's
-`dependency_type` at top level), so `visit_covers()` from visit-identity.sh does
-not apply to it — but the `-t tracks --direction=up` query has already
-established coverage by the edge itself, so the clause only needs to keep the
-open visits among the returned trackers.
+- The subject's incoming tracks edges: `gc bd dep list <bead> --direction=up
+  -t tracks --json` returns exactly the beads whose tracks edge points at the
+  subject; the clause keeps the open `task_kind=visit` rows.
+- The visits stamped with the subject: `gc bd list --metadata-field
+  gc.continuation_group=<bead>` returns the ones covering it by the fallback; the
+  clause holds for any open `task_kind=visit` among them whose tracks edge has not
+  landed. A stamped visit that already carries a tracks edge is covered by the
+  edge, above, and is not counted twice.
 
-The `gc.continuation_group` stamp — visit-identity.sh's recovery fallback for a
-tracks edge that landed empty — is deliberately not consulted here: the operator's
-model names the tracks edge as the signal, and a visit whose tracks edge failed
-to land is a degenerate case. If it proves to matter, it is one more targeted
-query, not a population scan.
+Both reads are targeted, not a population scan. `gc bd list --status=open,in_progress`
+alone returns the whole open population (~1180 beads live), and the merge arm runs
+the gate twice per anchor every cadence pass; the reverse-dep query and the
+metadata-field query are each local to the one bead, matching merge.sh's existing
+per-anchor `gc bd dep list` probes. The reverse-dep row does not carry a
+`.dependencies[]` array (it carries the edge's `dependency_type` at top level), so
+the `-t tracks --direction=up` query establishes coverage by the edge itself; the
+fallback is confirmed by a `--direction=down -t tracks` probe on each stamped
+candidate, empty exactly when the edge has not landed.
+
+The continuation_group fallback is consulted because its state is reachable, not
+degenerate: `escalate.sh` creates a visit already stamped with the subject, then
+adds the tracks edge in a separate write it does not read back, so a stamped visit
+with no edge yet is an open visit the board and converse already honor. A gate that
+read only the edge would allow the subject's merge or close while that visit stands
+— the fail-open this targeted query closes.
 
 ### Fail closed
 

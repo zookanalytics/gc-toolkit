@@ -20,6 +20,12 @@ mkbead() { # <id> <status> <issue_type> <task_kind>
 work()  { mkbead "$1" "$2" task ""; }       # a plain work bead
 visit() { mkbead "$1" "$2" task visit; }    # a visit bead
 convoy() { mkbead "$1" "$2" convoy ""; }    # a tracking convoy
+# A visit that names its subject by the gc.continuation_group stamp (the shared
+# identity fallback) — its tracks edge, if any, is seeded separately in STUB_DEPS.
+visit_cg() { # <id> <status> <continuation_group-subject>
+  printf '{"id":"%s","status":"%s","assignee":"","title":"%s","description":"","notes":"","issue_type":"task","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
+    "$1" "$2" "$1" "$3"
+}
 
 # 1. No tracker at all -> may finalize.
 store "[$(work A1 open)]"; : > "$STUB_DEPS"
@@ -71,7 +77,31 @@ out=$(STUB_DEP_GARBAGE=1 "$SUT" check A8 2>/dev/null); rc=$?
 eq "$rc" 1 "unreadable probe: exit 1 (fail-closed)"
 has "$out" "fail-closed" "unreadable probe: names fail-closed"
 
-# 9. Usage.
+# 9. gc.continuation_group fallback: a visit stamped with the subject but whose
+# tracks edge has not landed still holds — the reachable escalate.sh partial write.
+store "[$(work A9 open), $(visit_cg V9 open A9)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A9 2>/dev/null); rc=$?
+eq "$rc" 1 "stamp-only visit (no tracks edge): exit 1"
+has "$out" "V9" "stamp-only visit: names the visit"
+has "$out" "A9" "stamp-only visit: names the subject"
+
+# 10. A stamped visit that DID land its tracks edge is held by the edge (probe 1),
+# not double-counted by the fallback.
+store "[$(work A10 open), $(visit_cg V10 open A10)]"
+printf 'V10|tracks|A10\n' > "$STUB_DEPS"
+out=$("$SUT" check A10 2>/dev/null); rc=$?
+eq "$rc" 1 "stamped visit with tracks edge: exit 1"
+has "$out" "V10" "stamped visit with tracks edge: names the visit"
+
+# 11. The stamp is the fallback ONLY for an empty edge: a visit stamped with this
+# subject but whose tracks edge points at ANOTHER bead covers that other bead, so
+# it does not hold this one (matches visit-identity.sh, no over-hold).
+store "[$(work A11 open), $(work OTHER11 open), $(visit_cg V11 open A11)]"
+printf 'V11|tracks|OTHER11\n' > "$STUB_DEPS"
+out=$("$SUT" check A11 2>/dev/null); rc=$?
+eq "$rc" 0 "stamp here but tracks edge elsewhere: exit 0"
+
+# 12. Usage.
 "$SUT" check >/dev/null 2>&1; eq "$?" 2 "check without a bead id: exit 2"
 "$SUT" >/dev/null 2>&1; eq "$?" 2 "no subcommand: exit 2"
 "$SUT" bogus >/dev/null 2>&1; eq "$?" 2 "unknown subcommand: exit 2"
