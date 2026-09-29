@@ -114,9 +114,9 @@ if [ -z "$REASON" ]; then
   exit 2
 fi
 
-bd_json() {
-  gc bd "$@" --json 2>/dev/null | scrub
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # bd_json swallows gc's exit status through the pipe, and the quiesce reads
 # below assign its output without checking the status or the shape — so a failed

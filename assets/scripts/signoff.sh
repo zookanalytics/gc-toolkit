@@ -117,20 +117,12 @@ if [ -n "$FINDINGS_FILE" ] && [ ! -r "$FINDINGS_FILE" ]; then
   warn "--findings-file '$FINDINGS_FILE' is not readable; nothing written"; exit 1
 fi
 
-# bd JSON with the C0 set stripped: a raw control byte in notes breaks jq.
-bd_json()   { gc bd "$@" --json 2>/dev/null | scrub; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
-# Guarded array read: --limit=0 so a client-side filter sees every row, and a
-# non-array (or an errored ledger) returns non-zero so a caller reads "could not
-# tell", never "none". A metadata-field query defaults to open-only, so the live
-# set is named explicitly.
-bd_list()   { local raw rc; raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"; }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # Read the reviewer's structured findings — a JSON array of {locus, message} —

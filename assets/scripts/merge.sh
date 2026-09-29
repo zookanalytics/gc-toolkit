@@ -170,14 +170,9 @@ record_machine() { # <anchor-id> <value> <head-oid> <current-route>
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-bd_list() { # guarded array read; non-zero = "could not tell"
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 anchor_row() { # live {status, meta}; empty = unreadable, never an all-default row
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -c '.[0] | select(. != null) | select(.metadata != null)
