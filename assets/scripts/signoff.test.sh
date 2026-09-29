@@ -854,6 +854,26 @@ has "$out" "already dispatched" "…the notice says the child was already dispat
 eq "$(status rv-1)" "closed" "the review is closed"
 eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | length' "$STUB_STORE")" "1" "the lane's validation pass is opened even on the already-dispatched exit"
 
+echo "# with an older inert orphan AND a later dispatched child, the dispatched one wins (no double-dispatch)"
+# A prior pass filed an edge-less orphan and died before dispatch, then a retry
+# filed and dispatched a second child for the same review. Ordered by creation
+# the inert orphan comes first, so a selector that takes the oldest match adopts
+# and re-slings it while the dispatched child is still in flight — the very
+# double-dispatch this guard exists to stop. The routed child must win over the
+# inert one regardless of creation order.
+reset "$ANCHOR_PR" "$(kid 1 open '"source_review_bead":"rv-1","task_kind":"rework","anchor_bead":"tk-anc","branch":"polecat/tk-1","target":"main"')$(kid 9 open '"source_review_bead":"rv-1","task_kind":"rework","anchor_bead":"tk-anc","branch":"polecat/tk-1","target":"main","gc.execution_routed_to":"rig/gc-toolkit.polecat"')"
+seed_cap_deps c9
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "exits 0 — the dispatched child means only the review close was owed"
+eq "$(meta c1 gc.execution_routed_to)" "<absent>" "the older inert orphan is NOT re-slung"
+eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the in-flight dispatched child is left untouched"
+hasnt "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat c1" "the inert orphan is never slung"
+has "$out" "rework child c9" "…it defers to the dispatched child c9, not the older orphan"
+has "$out" "already dispatched" "…the notice names the already-dispatched arm"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "0" "no second rework child is filed"
+eq "$(status rv-1)" "closed" "the review is closed"
+
 echo "# the orphan's recorded reason survives adoption — it is not overwritten"
 reset "$ANCHOR_PR" "$(kid 9 open '"source_review_bead":"rv-1","branch":"polecat/tk-1","target":"main","rejection_reason":"signoff requested changes: first pass"')"
 seed_cap_deps c9

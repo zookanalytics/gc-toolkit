@@ -682,13 +682,21 @@ fi
 # second child. source_review_bead is the exact key: it is this review bead's own
 # id, unique to one review of one anchor, and the only bead type stamped with it
 # is a rework child — so a match needs no wider scope, and a genuine next round is
-# a new review bead the key does not match. Fail closed: an unreadable query
-# cannot be told from "no prior child", and a create on that ambiguity is the
-# double-file this guard prevents, so leave the review open for a retry instead.
+# a new review bead the key does not match. When more than one live child carries
+# the key, a prior pass filed one and died before dispatch while a retry filed and
+# dispatched another; a child stamped gc.execution_routed_to is in flight on the
+# branch, so prefer it over any inert sibling. Selecting the inert one by creation
+# order re-slings it and double-dispatches the molecule the routed child already
+# owns. Fail closed: an unreadable query cannot be told from "no prior child", and
+# a create on that ambiguity is the double-file this guard prevents, so leave the
+# review open for a retry instead.
 if PRIOR_CHILDREN=$(bd_list --metadata-field "source_review_bead=$REVIEW_BEAD" --status="$LIVE_STATUSES"); then
   FIX_BEAD=$(printf '%s' "$PRIOR_CHILDREN" | jq -r --arg r "$REVIEW_BEAD" '
       [ .[]? | select((.metadata.source_review_bead // "") == $r) ]
-      | sort_by(.created_at // .id) | (.[0].id // empty)' 2>/dev/null)
+      | sort_by(.created_at // .id) as $all
+      | ( ( [ $all[] | select((.metadata["gc.execution_routed_to"] // "") != "") ][0] )
+          // $all[0] )
+      | (.id // empty)' 2>/dev/null)
 else
   warn "could not read prior rework children for review $REVIEW_BEAD (dedup query failed); review left open for a retry rather than risk a second child"
   exit 2
