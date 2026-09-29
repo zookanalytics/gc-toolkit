@@ -640,6 +640,19 @@ eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind 
 eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
 
+echo "# …atomic birth: a stamp that keeps the branch but drops rejection_reason is UNMADE, never a husk"
+# The defect this bead fixes: a child left able to veto (branch + open) but not
+# rescued (the stranded re-route keys on rejection_reason). Such a child must
+# never exist — form it fully or unmake it.
+store "[$(anchor AB1 70)]"
+printf '%s' "$(prview 70 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_70.json"
+out=$(STUB_DROP_KEYS="new-2:rejection_reason" run)
+has "$out" "could not form the rework child for PR#70" "the arm refuses to route a child it could not fully form"
+eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unmade"
+eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN rework child survives able to veto but missing rejection_reason"
+hasnt "$out" "filed merge-mode rework new-2 routed" "the husk is never reported as dispatched"
+
 echo "# …a SHARED head branch is classified merge, never rebase"
 store "[$(anchor SB 28 '' 'integration/refinery-fixes')]"
 printf '%s' "$(prview 28 OPEN DIRTY CONFLICTING '' 'integration/refinery-fixes')" > "$GH_DIR/pr_view_28.json"
@@ -666,7 +679,7 @@ store "[$(anchor DM 31)]"
 printf '%s' "$(prview 31 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_31.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
-has "$out" "did not record prepare_mode=merge; left unrouted" "the lost stamp is caught by the read-back"
+has "$out" "could not form the rework child for PR#31" "the lost stamp is caught by the full-identity read-back"
 eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "an unstamped child is inert, never routed with incomplete metadata"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
@@ -677,7 +690,7 @@ printf '%s' "$(prview 32 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_32.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "the route stamp really was dropped"
-has "$out" "did not record gc.routed_to=$FIX; left unrouted" "the lost route stamp is caught by a read-back"
+has "$out" "formed but not routed to $FIX; left unrouted" "the lost route stamp is caught by a read-back"
 hasnt "$out" "filed merge-mode rework new-2 routed to" "an unreachable rework is never reported as dispatched"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 
@@ -700,7 +713,7 @@ store "[$(anchor RM 35)]"
 printf '%s' "$(prview 35 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_35.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:task_kind,anchor_bead" run)
-has "$out" "did not record task_kind=rework/anchor_bead=RM; left unrouted" "a dropped role marker is caught by the read-back, before the route"
+has "$out" "could not form the rework child for PR#35" "a dropped role marker is caught by the full-identity read-back, before the route"
 eq "$(meta new-2 task_kind)" "<absent>" "the marker stamp really was dropped"
 eq "$(meta new-2 anchor_bead)" "<absent>" "…both halves of it"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the unmarked child is never routed"
@@ -2543,6 +2556,104 @@ out=$(run)
 has "$out" "required check(s) failing (test); filed" "a BLOCKED PR whose block is a red required check is routed, not left to idle"
 eq "$(meta new-2 anchor_bead)" "RC8" "…as a rework child of the blocked anchor"
 rm -f "$GH_DIR/rules_main.json"
+
+echo "# …atomic birth: a red-check child that keeps its branch but drops rejection_reason is UNMADE"
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
+store "[$(anchor AB2 71)]"
+printf '%s' "$(prview 71 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_71.json"
+out=$(STUB_DROP_KEYS="new-2:rejection_reason" run)
+has "$out" "could not form the red-check rework for PR#71" "the red-check arm refuses to route a child it could not fully form"
+eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unmade"
+eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN red-check rework child survives able to veto but missing rejection_reason"
+rm -f "$GH_DIR/rules_main.json"
+
+# ---- self-heal reap: a rework child the branch has outrun, now green, is moot ----
+# The merge-lane analogue of the self-heal the reconcile lane already does. Reaps
+# ONLY a provably-dead premise: head moved past the cited head AND the current
+# head is mergeable with every required check green. Heads are full 40-hex,
+# because the reap extracts a git SHA (the harness's sha-<num> is not hex).
+RW_OLDHEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+RW_NEWHEAD=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+rwchild() { # id anchor num citedhead [status] [assignee] [reason-override]
+  local reason="Required check(s) failing on PR#$3 at head $4: test."
+  [ -n "${7:-}" ] && reason="$7"
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","issue_type":"task","title":"Fix failing required check(s) on PR#%s:","metadata":{"task_kind":"rework","anchor_bead":"%s","branch":"polecat/x%s","rejection_reason":"%s","prepare_mode":"merge","merge_strategy":"mr","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","gc.routed_to":"%s"}}' \
+    "$1" "${5:-open}" "${6:-}" "$3" "$2" "$3" "$reason" "$3" "$3" "$FIX"
+}
+reapview() { # num — an OPEN, MERGEABLE PR, required check green, current head = RW_NEWHEAD
+  printf '%s' "$(prview "$1" OPEN CLEAN MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]')" \
+    | jq -c --arg h "$RW_NEWHEAD" '.headRefOid = $h' > "$GH_DIR/pr_view_$1.json"
+}
+reap_req() { printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"; }
+
+echo "# self-heal: a rework child whose cited head the branch has outrun, now green + mergeable, is reaped as moot"
+reap_req
+store "[$(anchor RP1 60),$(rwchild RW1 RP1 60 "$RW_OLDHEAD")]"
+reapview 60
+out=$(run)
+has "$out" "reaped moot rework child RW1" "the moot child is reaped"
+eq "$(bstatus RW1)" "closed" "the reaped child is closed"
+eq "$(meta RW1 gc.outcome)" "moot" "the reaped child is marked moot"
+has "$out" "1 moot reworks reaped" "the run tally counts the reap"
+echo "# …and a second pass is a no-op — a closed child is never re-reaped (idempotent)"
+out=$(run)
+hasnt "$out" "reaped moot rework child RW1" "a closed child is not re-reaped"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a child is NOT reaped while the required check is still red at the current head (fail closed)"
+reap_req
+store "[$(anchor RP2 61),$(rwchild RW2 RP2 61 "$RW_OLDHEAD")]"
+printf '%s' "$(prview 61 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" \
+  | jq -c --arg h "$RW_NEWHEAD" '.headRefOid = $h' > "$GH_DIR/pr_view_61.json"
+out=$(run)
+hasnt "$out" "reaped moot rework child RW2" "a red check at the current head is not a dead premise"
+eq "$(bstatus RW2)" "open" "the child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a child still citing the LIVE head is left OPEN (premise not falsified)"
+reap_req
+store "[$(anchor RP3 62),$(rwchild RW3 RP3 62 "$RW_NEWHEAD")]"
+reapview 62
+out=$(run)
+hasnt "$out" "reaped moot rework child RW3" "a child at the live head is not moot"
+eq "$(bstatus RW3)" "open" "the child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: an in_progress (worker-held) rework child is never auto-reaped (open-only)"
+reap_req
+store "[$(anchor RP4 63),$(rwchild RW4 RP4 63 "$RW_OLDHEAD" in_progress worker-sess)]"
+reapview 63
+out=$(run)
+hasnt "$out" "reaped moot rework child RW4" "an in_progress child is left for its holder"
+eq "$(bstatus RW4)" "in_progress" "the held child is untouched"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a child whose reason names no head is ambiguous -> left OPEN (fail closed)"
+reap_req
+store "[$(anchor RP5 64),$(rwchild RW5 RP5 64 "$RW_OLDHEAD" open "" "the base was rewritten and PR#64 conflicts with main but no head is recorded here")]"
+reapview 64
+out=$(run)
+hasnt "$out" "reaped moot rework child RW5" "no cited head -> mootness unprovable -> left open"
+eq "$(bstatus RW5)" "open" "the child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a comment-rework child is never reaped on head-moved+green (its premise is unanswered feedback, not the head)"
+reap_req
+store "[$(anchor RP7 66),$(rwchild RW7 RP7 66 "$RW_OLDHEAD" open "" "Review feedback on PR#66 is unanswered at head $RW_OLDHEAD. Answer every item.")]"
+reapview 66
+out=$(run)
+hasnt "$out" "reaped moot rework child RW7" "a comment-rework premise is not settled by a green check"
+eq "$(bstatus RW7)" "open" "the comment-rework child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a moved-past child is NOT reaped when no required contexts are configured (green unprovable -> fail closed)"
+rm -f "$GH_DIR/rules_main.json"
+store "[$(anchor RP6 65),$(rwchild RW6 RP6 65 "$RW_OLDHEAD")]"
+reapview 65
+out=$(run)
+hasnt "$out" "reaped moot rework child RW6" "no required contexts -> green cannot be proven -> left open"
+eq "$(bstatus RW6)" "open" "the child is left open"
 
 # ---- per-review dismissal + re-request once a human review's findings clear ----
 # The peer-model write-back above answers each finding; this closes the loop at
