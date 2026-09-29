@@ -263,6 +263,17 @@ export interface Tile {
    * so the board and the label read one vocabulary. `''` on a non-merge row.
    */
   pr_phase: string;
+  /**
+   * This bead's liveness in the same tri-state vocabulary — `'working'`,
+   * `'needs-review'`, or `'needs-attention'` — but on EVERY live row, where
+   * `pr_phase` is set on merge anchors alone. A merge anchor reads the same value
+   * as `pr_phase`; any other bead reads its own live-work signal through the
+   * identical core, so a row cannot carry two disagreeing tri-states. `''` only
+   * on a closed (`DONE`) row, where the live vocabulary has no answer — the same
+   * not-applicable empty `pr_phase` uses off a non-merge row. The `frontier`
+   * string leads with this word on every live row.
+   */
+  phase: string;
 }
 
 /**

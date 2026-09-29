@@ -438,6 +438,23 @@ type Tile struct {
 	// pr-status-label.sh projects to the GitHub PR list, so the board and the
 	// label read one vocabulary rather than two. Empty on a non-merge row.
 	PRPhase string `json:"pr_phase"`
+
+	// Phase is this bead's liveness in the shared tri-state vocabulary —
+	// `working`, `needs-review`, or `needs-attention` — derived through
+	// [prstatus.Derive], the one core the GitHub `status:` label also reads. It
+	// is the board's per-bead liveness on EVERY live row, where PRPhase is set
+	// on merge anchors alone: a merge anchor reads the same value PRPhase does
+	// (its holds and posture and its open rework/review children), and any other
+	// bead reads its own live-work signal — a graph.v2 workflow standing over it
+	// — through the identical rule, so one bead cannot carry two disagreeing
+	// tri-states.
+	//
+	// Empty on a terminal (closed) row, where the live vocabulary has no answer
+	// — the same not-applicable empty PRPhase leaves off a non-merge row. The
+	// in-flight input a merge anchor and a plain bead each feed the core is still
+	// the narrower per-anchor signal; folding a bead's whole child set into it is
+	// a later slice of the derivation model (specs/tk-ikpyzn.1).
+	Phase string `json:"phase"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

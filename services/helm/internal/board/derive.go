@@ -1793,10 +1793,11 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// wrapper neither sources a rig's repository nor waits for one.
 	linkPRBranches(folded)
 
-	// Stamp who must act next, the same taxonomy pr-status-label.sh projects to
-	// the GitHub status: label, reading the anchors' holds and posture and the
-	// open rework children they carry.
-	classifyPRPhases(folded, anchors)
+	// Stamp who must act next — PRPhase on a merge anchor, Phase on every live
+	// row — from the shared prstatus core, the same taxonomy pr-status-label.sh
+	// projects to the GitHub status: label; then let the frontier lead with that
+	// state so the board's primary vocabulary is the liveness.
+	classifyPhases(folded, anchors, facts)
 
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 
@@ -1866,12 +1867,20 @@ const (
 	PhaseNeedsAttention = string(prstatus.NeedsAttention)
 )
 
-// classifyPRPhases stamps each merge anchor's phase — who must act on it next.
-// It reads the holds and posture off the anchor and counts the open rework
-// children the board already gathers (a child names its anchor in
-// [mdAnchorBead]), so a non-merge row leaves the field empty. Counting is deduped
-// by child id, because one gather can list a bead twice.
-func classifyPRPhases(tiles []Tile, anchors []Anchor) {
+// classifyPhases stamps a row's tri-state — who must act on it next — from the
+// shared prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
+// round-trip axis, empty elsewhere), and Phase on every live row (the per-bead
+// liveness, empty only on a closed row). Both read the holds and posture off the
+// anchor and count the open rework children the board already gathers (a child
+// names its anchor in [mdAnchorBead]); a non-merge bead's Phase reads its own
+// live-workflow signal from facts instead. Counting is deduped by child id,
+// because one gather can list a bead twice.
+//
+// The frontier then SPEAKS that tri-state: on a live row the liveness word leads
+// the one-line summary, so the board's primary vocabulary is the state rather
+// than the roll-up. A closed row keeps its age phrase — the tri-state has no live
+// answer for it, so beadPhase left it empty and the prefix is skipped.
+func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	reworkKids := make(map[string]int)
 	seenKid := make(map[string]bool)
@@ -1891,7 +1900,13 @@ func classifyPRPhases(tiles []Tile, anchors []Anchor) {
 		if !ok {
 			continue
 		}
-		tiles[i].PRPhase = prPhase(a, reworkKids[tiles[i].ID])
+		kids := reworkKids[tiles[i].ID]
+		tiles[i].PRPhase = prPhase(a, kids)
+		phase := beadPhase(a, f, kids)
+		tiles[i].Phase = phase
+		if phase != "" {
+			tiles[i].Frontier = phase + " · " + tiles[i].Frontier
+		}
 	}
 }
 
@@ -1900,25 +1915,47 @@ func classifyPRPhases(tiles []Tile, anchors []Anchor) {
 // through `gctk pr-status derive` to write the GitHub PR list's status: label.
 // The board and the label derive the state from one code path, so a bead's board
 // liveness and its PR label cannot disagree. Empty on a non-merge row.
-//
-// The facts are read straight off the anchor: prstatus splits the dated
-// posture/merge-state on '@' and applies the hold truthiness itself, so the raw
-// metadata values pass through as stored. openReworkKids is the board's count of
-// the anchor's open review/rework children (each names it in anchor_bead); the
-// label counts the anchor's whole in-flight set, and closing that input gap is a
-// separate story.
 func prPhase(a Anchor, openReworkKids int) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	return string(prstatus.Derive(prstatus.Facts{
+	return string(prstatus.Derive(phaseFacts(a, Facts{}, openReworkKids)))
+}
+
+// beadPhase is the per-bead liveness for every LIVE row — the generalization of
+// prPhase, applied to any bead through the same prstatus core so a merge anchor
+// and a plain bead name their state from one rule. A closed row is terminal and
+// carries no live tri-state, so it reads empty, the way prPhase reads empty off a
+// non-merge row.
+func beadPhase(a Anchor, f Facts, openReworkKids int) string {
+	if !a.ClosedAt.IsZero() {
+		return ""
+	}
+	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
+}
+
+// phaseFacts gathers the prstatus.Facts a row projects. The holds and the dated
+// posture/merge-state are read straight off the anchor — prstatus splits the '@'
+// and applies the hold truthiness itself, so the stored values pass through as
+// they are. The in-flight count is the one input that differs by row shape: a
+// merge anchor counts its open review/rework children (each names it in
+// [mdAnchorBead]), the set prPhase has always fed; any other bead reads the
+// live-workflow signal standing over its own bead ([Facts.anchorInFlight]).
+// Folding a bead's whole child set into that count instead is a later slice of
+// the derivation model (specs/tk-ikpyzn.1).
+func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
+	inFlight := openReworkKids
+	if !isMergeAnchor(a) {
+		inFlight = f.anchorInFlight(a)
+	}
+	return prstatus.Facts{
 		MergeHold:     a.Metadata[mdMergeHold],
 		SignoffCap:    a.Metadata[mdSignoffCap],
 		RebaseHold:    a.Metadata[mdRebaseHold],
 		PRPosture:     a.Metadata[mdPRPosture],
 		PRMergeState:  a.Metadata[mdPRMergeState],
-		InFlightCount: openReworkKids,
-	}))
+		InFlightCount: inFlight,
+	}
 }
 
 // clusterThreshold is how many rows must share one section-and-needs before the
