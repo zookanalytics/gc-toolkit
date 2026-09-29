@@ -249,10 +249,17 @@ STUB
 
 cat > "$BIN/git" <<'STUB'
 #!/usr/bin/env bash
-# resolve_index reads the check index at the reviewed commit with
-# `git [-C <root>] show <oid>:review-checks.toml`. When STUB_INDEX names a file,
-# serve it; otherwise fall through (exit 0, empty) so the SUT sees no index.
+# resolve_index resolves the repo root with `git rev-parse --show-toplevel`,
+# then reads the check index at the reviewed commit with
+# `git -C <root> show <oid>:review-checks.toml`. Serve a non-empty root
+# (STUB_TOPLEVEL) so the SUT resolves it inside the sandbox the way production
+# resolves it inside the worktree, instead of falling back to an ambient
+# GC_RIG_ROOT the CI runner never sets. When STUB_INDEX names a file, serve it
+# as the index; otherwise fall through (exit 0, empty) so the SUT sees no index.
 _g=("$@"); [ "${_g[0]:-}" = "-C" ] && _g=("${_g[@]:2}")
+if [ "${_g[0]:-}" = "rev-parse" ] && [ "${_g[1]:-}" = "--show-toplevel" ]; then
+  printf '%s\n' "${STUB_TOPLEVEL:-$PWD}"; exit 0
+fi
 if [ "${_g[0]:-}" = "show" ] && [ -n "${STUB_INDEX:-}" ]; then
   case "${_g[1]:-}" in *:review-checks.toml) cat "$STUB_INDEX"; exit 0 ;; esac
 fi
@@ -287,6 +294,9 @@ exit 0
 STUB
 chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/finding"
 export PATH="$BIN:$PATH"
+# The git stub serves this as `rev-parse --show-toplevel`, giving resolve_index a
+# repo root without leaning on an ambient GC_RIG_ROOT (unset on the CI runner).
+export STUB_TOPLEVEL="$TMP"
 # request-changes files findings and approve closes them through finding.sh;
 # point signoff at the stub so the real primitive never runs here.
 export GC_FINDING_TOOL="$BIN/finding" STUB_FINDING_LOG="$TMP/finding.log"
