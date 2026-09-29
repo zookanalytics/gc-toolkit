@@ -102,6 +102,12 @@
 #                 SOURCE_REV spans every local replace-dep, not just services/helm
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
+#   (BEHINDMAIN)  a checkout behind origin/main under the helm sources records
+#                 the gap (behind_main) and is NEVER rebuilt for it — report-only
+#   (ONMAIN)      a checkout level with origin/main records no drift
+#   (FETCHFAIL)   a failed origin fetch still advances the fetch cadence marker,
+#                 so an unreachable origin costs one attempt per TTL, not one per
+#                 tick, and the gap is still reported off the last origin ref
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -1033,6 +1039,92 @@ fi
 grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
     && ok "(STATUSTMP) the record is published by rename, never written in place" \
     || bad "(STATUSTMP) the record is no longer published by rename"
+
+# --- case: a checkout behind origin/main is REPORTED, never rebuilt for it ----
+# The board read "helm: ok" while the served binary was three PRs behind main:
+# every staleness axis above keys on the LOCAL checkout, so a checkout parked
+# off-main keeps its binary current with THAT branch and reports a clean row.
+# behind_main is the axis that sees the gap against main — and it must NOT feed
+# the rebuild decision, because a checkout may be off-main on purpose and the
+# SOURCE_REV subtree-hash identity is what decides a build.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+# One more helm-source commit, parked on origin/main only; HEAD stays at A, so
+# HEAD is one helm-source commit behind origin/main.
+printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+git -C "$ROOT" add -A >/dev/null 2>&1
+git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
+# reconcile-rig-checkouts keeps origin fresh; pin the fetch marker so the case
+# reuses it (the common path) and never reaches the network.
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(BEHINDMAIN) the first build exits 0"
+BEHIND1="$(status_field behind_main)"
+[ "${BEHIND1:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(BEHINDMAIN) the record counts the checkout as behind origin/main" \
+    || bad "(BEHINDMAIN) behind_main is '$BEHIND1', want >= 1"
+# Now current with its own sources: being behind main must not force a rebuild.
+rm -f "$RECORD" "$RECORD.out"
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(BEHINDMAIN) the next tick exits 0"
+absent "$RECORD" "(BEHINDMAIN) behind-main alone never rebuilds — the subtree-hash identity still decides"
+has "$OUT" "up to date" "(BEHINDMAIN) the binary is current with its own sources"
+BEHIND2="$(status_field behind_main)"
+[ "${BEHIND2:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(BEHINDMAIN) the drift is still recorded on the no-op tick" \
+    || bad "(BEHINDMAIN) behind_main is '$BEHIND2' on the no-op tick, want >= 1"
+
+# --- case: a checkout level with origin/main records no drift -----------------
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(ONMAIN) exits 0"
+eq "$(status_field behind_main)" "0" "(ONMAIN) a checkout level with origin/main records no drift"
+
+# --- case: a FAILED origin fetch still advances the fetch cadence -------------
+# The behind_main fetch is bounded to one attempt per GC_HELM_ORIGIN_FETCH_TTL so
+# a 5-minute build tick does not fetch every time. The marker that bounds it used
+# to advance only after a SUCCESSFUL fetch, so an unreachable or unauthenticated
+# origin left it absent and every later tick re-attempted the fetch — the
+# report-only check spending network on every tick instead of degrading quietly
+# until the TTL expired. The marker must advance on the ATTEMPT.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+# Behind main under the helm sources, so the block runs and reaches the fetch.
+A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+git -C "$ROOT" add -A >/dev/null 2>&1
+git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
+# The fixture configures no `origin` remote, so the fetch this tick attempts
+# FAILS. Clear the marker so the cadence gate is open and the tick attempts it.
+rm -f "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(FETCHFAIL) a failed origin fetch does not fail the build"
+present "$STATE/origin-fetch-at" \
+    "(FETCHFAIL) a failed fetch still records the attempt, so the cadence advances"
+BEHIND_FF="$(status_field behind_main)"
+[ "${BEHIND_FF:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(FETCHFAIL) the drift is still reported off the last origin ref despite the failed fetch" \
+    || bad "(FETCHFAIL) behind_main is '$BEHIND_FF' after a failed fetch, want >= 1"
+# The next tick within the TTL must SKIP the fetch. Hold the marker fresh but a
+# few seconds in the past: a re-fetch would restamp it to the current second, so
+# an unchanged value proves the tick did not re-attempt before the TTL expired.
+SENTINEL="$(( $(date +%s) - 5 ))"
+printf '%s\n' "$SENTINEL" > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(FETCHFAIL) the next tick exits 0"
+eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
+    "(FETCHFAIL) a fresh marker keeps the next tick from re-fetching before the TTL"
 
 # ==============================================================================
 # STATIC GUARDS
