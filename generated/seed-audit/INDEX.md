@@ -7,7 +7,7 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- `gc` version: `1.4.1`
+- `gc` version: `1.4.3`
 - agents: 17 · formulas: 25
 - input manifest: `SOURCES.txt`
 
@@ -33,7 +33,7 @@ covers that dimension.
 |---|---:|---:|
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
-| [`control-dispatcher`](agents/control-dispatcher.md) | 5,326 | 1,331 |
+| [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
 | [`converse`](agents/converse.md) | 32,589 | 8,147 |
 | [`converse-codex`](agents/converse-codex.md) | 32,589 | 8,147 |
 | [`converse-fable`](agents/converse-fable.md) | 32,589 | 8,147 |
