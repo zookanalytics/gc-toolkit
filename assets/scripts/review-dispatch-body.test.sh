@@ -92,6 +92,7 @@ hasF "$TMP/arch.out" '## Check: `arch`' "(CHECK) --check-name arch names the arc
 hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
 hasF "$TMP/arch.out" 'docs/architecture.md' "(CHECK) arch reads the architecture reference docs before judging"
 hasF "$TMP/arch.out" 'never edit' "(CHECK) arch enforces and never edits"
+hasF "$TMP/arch.out" 'skills/review-arch/SKILL.md' "(CHECK) arch points at its method skill, the way demo and triage do"
 notF "$TMP/arch.out" 'No generic method is declared' "(CHECK) a declared check gets its method, not the no-method note"
 bash "$SCRIPT" --check-name nonesuch > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" 'No generic method is declared' "(CHECK) an undeclared check gets the no-method note, never a guess"
