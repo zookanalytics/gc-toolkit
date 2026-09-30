@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.3`
-- agents: 17 · formulas: 25
+- agents: 17 · formulas: 26
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -60,6 +60,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,104 | 776 |
+| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 2,691 | 672 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
