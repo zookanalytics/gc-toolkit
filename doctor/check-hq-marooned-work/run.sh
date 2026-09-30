@@ -9,9 +9,9 @@
 # store and flags each rig-workable bead that no worker is positioned to claim.
 #
 # Rig-workable = an OPEN, UNASSIGNED bead whose issue_type is not an infra type
-# (session/message/molecule/chore/rig/agent/role/gate/merge-request), which is
-# neither city machinery nor held-by-design, and which is unrouted or routed to a
-# rig pool that cannot see it. The exclusions carve out the legitimate HQ
+# (the INFRA_TYPES set defined below), which is neither city machinery nor
+# held-by-design, and which is unrouted or routed to a rig pool that cannot see
+# it. The exclusions carve out the legitimate HQ
 # residents: a bead routed to a city-scoped agent (resolved from `gc agent list`)
 # is reachable there; a `warrant` label marks city machinery a rig never works; a
 # standing subject (task_kind=triage-subject or feedback-pattern) is a
