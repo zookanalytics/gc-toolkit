@@ -15,7 +15,7 @@
 #   (RC)        exits 0: a dispatch is never blocked on prose.
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
 #   (CHECK)     --check-name emits a per-check section (correctness default,
-#               triage, demo, and a no-method note for an undeclared check).
+#               triage, demo, arch, and a no-method note for an undeclared check).
 #   (BOTH)      the formula and check axes coexist in one note.
 #   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
 #               appended; absent (or no --reviewed-oid) degrades silently.
@@ -88,8 +88,14 @@ bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
 hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
 hasF "$TMP/demo.out" 'skills/demo-capture/SKILL.md' "(CHECK) demo names its method skills"
 bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
-hasF "$TMP/arch.out" 'No generic method is declared' "(CHECK) an undeclared check gets the no-method note, never a guess"
-RCC=0; bash "$SCRIPT" --check-name arch >/dev/null 2>&1 || RCC=$?
+hasF "$TMP/arch.out" '## Check: `arch`' "(CHECK) --check-name arch names the arch check"
+hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
+hasF "$TMP/arch.out" 'docs/architecture.md' "(CHECK) arch reads the architecture reference docs before judging"
+hasF "$TMP/arch.out" 'never edit' "(CHECK) arch enforces and never edits"
+notF "$TMP/arch.out" 'No generic method is declared' "(CHECK) a declared check gets its method, not the no-method note"
+bash "$SCRIPT" --check-name nonesuch > "$TMP/undeclared.out" 2>/dev/null
+hasF "$TMP/undeclared.out" 'No generic method is declared' "(CHECK) an undeclared check gets the no-method note, never a guess"
+RCC=0; bash "$SCRIPT" --check-name nonesuch >/dev/null 2>&1 || RCC=$?
 eq "$RCC" "0" "(RC) an undeclared check still exits 0"
 
 echo "# both axes coexist: a quorum formula plus a named check emits both sections"
