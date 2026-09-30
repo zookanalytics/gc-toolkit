@@ -326,9 +326,9 @@ function flattenFamilies(families: Family[]): BoardRow[] {
 // pre-order walk of the containment tree. Each member climbs to the parent named
 // by its `group_parent`; a member whose parent is empty, is itself, or names no
 // tile in this family attaches directly under the family root, so a board that
-// has not stamped `group_parent` degrades to the flat one-level list #878
-// shipped, and a malformed edge never drops a row. A cycle among members (only a
-// malformed graph forms one) never reaches the root through the walk, so those
+// has not stamped `group_parent` degrades to a flat one-level list, and a
+// malformed edge never drops a row. A cycle among members (only a malformed
+// graph forms one) never reaches the root through the walk, so those
 // members are appended under the root afterward.
 function appendFamilyTree(rows: BoardRow[], { root, members }: Family): void {
   if (members.length === 0) {
