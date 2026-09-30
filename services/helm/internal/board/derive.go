@@ -857,7 +857,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, prPosture, ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -872,7 +872,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, prPosture, ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -918,6 +918,12 @@ const (
 	MachineProgressing     = "progressing"
 	MachineSettled         = "settled"
 	MachineWedgedException = "wedged-exception"
+	// MachineBlocked is a hold no review verdict clears: an unresolved required
+	// review thread, a base gone BEHIND, or an unrouted blocker no automated
+	// actor will reap. It is owed by the operator and distinct from settled, so
+	// an approved PR held this way surfaces as needs-attention rather than
+	// awaiting-review. The specific cause rides mdPRMachineReason.
+	MachineBlocked = "blocked"
 
 	// AxisUnknown is a RENDERED value on both axes, never a fallback to the
 	// quiet end. An unreadable axis and a clear one are not interchangeable,
@@ -938,17 +944,20 @@ const (
 
 // The anchor metadata the axes are read from.
 const (
-	mdMergeResult  = "merge_result"
-	mdCheckSet     = "check_set"
-	mdPRMachine    = "pr.machine"
-	mdPRPosture    = "pr_posture"
-	mdPRNumber     = "pr_number"
-	mdPRURL        = "pr_url"
-	mdBranch       = "branch"
-	mdMergeHold    = "merge_hold"
-	mdSignoffCap   = "signoff_cap"
-	mdRebaseHold   = "rebase_hold"
-	mdPRMergeState = "pr_merge_state"
+	mdMergeResult = "merge_result"
+	mdCheckSet    = "check_set"
+	mdPRMachine   = "pr.machine"
+	// mdPRMachineReason names why a `blocked` machine verdict cannot merge. It is
+	// plain, not dated, and read only while pr.machine is MachineBlocked.
+	mdPRMachineReason = "pr.machine_reason"
+	mdPRPosture       = "pr_posture"
+	mdPRNumber        = "pr_number"
+	mdPRURL           = "pr_url"
+	mdBranch          = "branch"
+	mdMergeHold       = "merge_hold"
+	mdSignoffCap      = "signoff_cap"
+	mdRebaseHold      = "rebase_hold"
+	mdPRMergeState    = "pr_merge_state"
 
 	// The posture vocabulary pr-facts.sh records, mirroring
 	// lifecycle/lifecycle.toml [posture].postures.
@@ -985,8 +994,12 @@ func isWedge(v string) bool {
 	return v == MachineWedgedException
 }
 
+func isBlocked(v string) bool {
+	return v == MachineBlocked
+}
+
 func knownMachine(v string) bool {
-	return v == MachineProgressing || v == MachineSettled || isWedge(v)
+	return v == MachineProgressing || v == MachineSettled || isWedge(v) || isBlocked(v)
 }
 
 // poolRouted reports whether an open blocker has an automated actor behind it.
@@ -1116,9 +1129,11 @@ func askingDemand(blockers []Blocker) *Blocker {
 
 // prOwed applies the owed rule to a merge anchor, and dates it.
 //
-// A row is owed by the operator when the machine axis is wedged, when the city
-// is asking and waiting on an answer, or when the cadence is done and GitHub is
-// holding the merge for a human review — one never given, or a standing
+// A row is owed by the operator when the machine axis is wedged, when it is
+// blocked (a hold no automated actor will clear — an unresolved required review
+// thread, a base gone BEHIND, or an unrouted blocker), when the city is asking
+// and waiting on an answer, or when the cadence is done and GitHub is holding
+// the merge for a human review — one never given, or a standing
 // `changes_requested` the city has reworked as far as it can. GitHub keeps a
 // CHANGES_REQUESTED standing across pushes and the city never dismisses it, so
 // once no fix unit, review, or finding is in flight — the settled tail merge.sh
@@ -1149,10 +1164,11 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 	}
 	owed := false
 
-	if isWedge(machine) {
+	if isWedge(machine) || isBlocked(machine) {
 		owed = true
-		// A head move is what releases a wedge, so the instant rides the
-		// head-pinned key that records it.
+		// A head move — or, for a blocked verdict, the block clearing — is what
+		// releases it, and merge.sh records the new verdict then, so the instant
+		// rides the head-pinned key that records it.
 		if _, _, at, ok := splitDated(a.Metadata[mdPRMachine]); ok {
 			note(at)
 		}
@@ -1326,7 +1342,7 @@ func humanSince(t, now time.Time) string {
 // or the re-review a standing changes_requested is waiting on — and a row
 // nothing is owed on says who has it. `unknown` says the cadence has not
 // recorded a position, which is a fact about the city rather than an all-clear.
-func prNeeds(machine, approval, posture string, ask *Blocker) string {
+func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
 	switch {
 	case machine == MachineWedgedException:
 		return "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not"
@@ -1335,6 +1351,13 @@ func prNeeds(machine, approval, posture string, ask *Blocker) string {
 			return "asking: " + t
 		}
 		return "asking — waiting on an answer"
+	case isBlocked(machine):
+		// The specific cause merge.sh recorded beside the verdict; a person must
+		// clear it, and it is not the review a settled row waits on.
+		if r := collapseWS(reason); r != "" {
+			return "blocked: " + r
+		}
+		return "blocked — a person must clear it before the merge can proceed"
 	case machine == MachineSettled && approval == ApprovalRequired:
 		if posture == postureChangesRequested {
 			return "changes requested — reviewer re-review needed"
@@ -1901,8 +1924,25 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 			continue
 		}
 		kids := reworkKids[tiles[i].ID]
-		tiles[i].PRPhase = prPhase(a, kids)
+		prP := prPhase(a, kids)
 		phase := beadPhase(a, f, kids)
+		// prstatus.Derive names the phase from posture, merge-state, holds and an
+		// in-flight count. A blocked machine verdict is a hold it cannot see from
+		// those alone — an unrouted blocker carries no count it reads, and a base
+		// gone BEHIND is not its BLOCKED case — so the board lifts a blocked row to
+		// needs-attention off the machine axis it already reads. The lift touches
+		// both tri-states a live merge anchor carries — the PR-axis PRPhase behind
+		// the chip and the per-bead Phase the frontier speaks — so a row the machine
+		// calls blocked cannot read needs-attention on one and awaiting-review on the
+		// other. A closed row has no live Phase to lift, so its frontier keeps its
+		// age phrase.
+		if isBlocked(tiles[i].PRMachine) {
+			prP = PhaseNeedsAttention
+			if phase != "" {
+				phase = PhaseNeedsAttention
+			}
+		}
+		tiles[i].PRPhase = prP
 		tiles[i].Phase = phase
 		if phase != "" {
 			tiles[i].Frontier = phase + " · " + tiles[i].Frontier

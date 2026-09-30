@@ -166,7 +166,13 @@ export interface Tile {
   pr_branch: string;
   /**
    * What the merge cadence can do next: `'progressing'`, `'settled'`,
-   * `'wedged-exception'`, or `'unknown'`.
+   * `'wedged-exception'`, `'blocked'`, or `'unknown'`.
+   *
+   * `'blocked'` is a hold no automated actor will clear and no review verdict is
+   * owed on — an unresolved required review thread, a base gone BEHIND, or an
+   * unrouted blocker. It is owed by the operator (needs-attention), distinct from
+   * `'settled'`, which waits on a review or the merge pass. Its specific cause is
+   * spelled out in `needs`.
    *
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
    * same choice `waiting_unknown` makes on the gather side. A missing key means

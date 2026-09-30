@@ -236,7 +236,9 @@ function DrillOpen({
 type Family = { root: Tile; members: Tile[] };
 
 // wantsPerson reports whether a row's next move is the operator's — the review
-// and gate bands. Model C highlights these within a family with a ● glyph.
+// and gate bands. The table marks these in place, with a ● in the band cell and
+// a row highlight where the row already sits; it never reorders the board by
+// them.
 function wantsPerson(tile: Tile): boolean {
   return tile.section === 'review' || tile.section === 'gate';
 }
@@ -287,127 +289,164 @@ function progressCell(tile: Tile): string {
   return `${tile.n_closed}/${tile.m_total}`;
 }
 
-// One dependency family, rendered as a block: a header naming its root — with a
-// ● when the root's own next move is the operator's — and a table of its members
-// beneath, each in the band that says the move it wants, a ● marking the rows
-// that want a person. Dependency structure is the top-level axis; the attention
-// band orders and highlights within a family.
-function FamilyBlock({
-  family,
-  drillTarget,
+// The whole board is ONE table. Dependency structure is its top-level axis: a
+// family whose root has members renders that root as a group row with its
+// members indented one level beneath it; a single-item family renders as one
+// plain row. `kind` carries which of the three a row is.
+type RowKind = 'group' | 'member' | 'loose';
+type BoardRow = { tile: Tile; kind: RowKind };
+
+// flattenFamilies lays the grouped families out as the table's rows: a root with
+// members leads its family as a `group` row and its members follow as `member`
+// rows; a root with none stands alone as a `loose` row. The order is preserved
+// from groupByFamily, which preserved it from the wire — owed families first,
+// oldest first, members in SECTION_ORDER — so the board is never reordered by
+// which rows want a person.
+function flattenFamilies(families: Family[]): BoardRow[] {
+  const rows: BoardRow[] = [];
+  for (const { root, members } of families) {
+    if (members.length > 0) {
+      rows.push({ tile: root, kind: 'group' });
+      for (const m of members) rows.push({ tile: m, kind: 'member' });
+    } else {
+      rows.push({ tile: root, kind: 'loose' });
+    }
+  }
+  return rows;
+}
+
+// One row of the unified table. Every row carries the same columns; `kind` sets
+// the grouping treatment (a group row's title reads as a header; a member's is
+// indented one level) and the attention highlight rides the row in place: a ●
+// and a tint where a row's next move is the operator's (wantsPerson), a tint on
+// a row an open visit is holding (held).
+function AnchorRow({
+  row,
+  drilled,
   onOpen,
   onActuated,
 }: {
-  family: Family;
-  drillTarget: string | null;
+  row: BoardRow;
+  drilled: boolean;
   onOpen: (id: string) => void;
   // Called after a board write lands, so the acted-on row re-gathers rather than
   // waiting out the poll interval. App passes its refresh.
   onActuated: () => void;
 }) {
-  const { root, members } = family;
-  const headingId = `family-${root.id}`;
+  const { tile, kind } = row;
+  const person = wantsPerson(tile);
+  const className =
+    [
+      `row-${kind}`,
+      person ? 'row-wants-person' : '',
+      tile.held ? 'row-held' : '',
+      tile.section === 'done' ? 'row-done' : '',
+      drilled ? 'drilled' : '',
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined;
   return (
-    <section className="board-family" aria-labelledby={headingId}>
-      <h2 id={headingId}>
-        {wantsPerson(root) && <span aria-hidden="true">● </span>}
-        <DrillOpen id={root.id} onOpen={onOpen} />
-      </h2>
-      <p className="sub">
-        <span className="family-title">{root.title}</span> · {root.kind} · {root.section} ·{' '}
-        {progressCell(root)} · {root.frontier}
-        {isPRRow(root) && (
-          <>
-            {' · '}
-            <PRLink tile={root} />
-          </>
+    <tr className={className}>
+      <td>
+        {person && (
+          <span className="wants-person" aria-hidden="true">
+            ●{' '}
+          </span>
         )}
-        {root.needs && <> · {root.needs}</>}
+        <span className="band">{tile.section}</span>
+      </td>
+      <td>
+        <DrillOpen id={tile.id} onOpen={onOpen} />
+      </td>
+      <td>{tile.rig}</td>
+      <td>{tile.kind}</td>
+      <td>
+        <PRPhaseChip tile={tile} />
+        <PRLink tile={tile} />
+      </td>
+      <td className="title-cell">
+        {kind === 'group' ? <span className="family-title">{tile.title}</span> : tile.title}
+      </td>
+      <td>{progressCell(tile)}</td>
+      <td>{tile.frontier}</td>
+      <td>
+        {tile.needs}
         {/* Accept is the one board-row actuation, mirroring the CLI board's
             "accept ▸" marker (cmd/helm-svc/board.go). It shows only when the wire
             says the row is acceptable — a recommendation whose visit is un-engaged
             — and dispatches accept_formula at the subject then dismisses the visit.
             Discuss and Dismiss live in the drill panel, the way the CLI keeps them
             as separate verbs off the marked row. */}
-        {root.acceptable && (
+        {tile.acceptable && (
           <>
-            {' · '}
+            {' '}
             <ActuateButton
               verb="accept"
-              beadId={root.id}
-              formula={root.accept_formula}
+              beadId={tile.id}
+              formula={tile.accept_formula}
               compact
               onDone={onActuated}
             />
           </>
         )}
-        {root.section === 'done' && (
-          <>
-            . A closed family sits below every live one; a row leaves only by ageing out on a
-            clock, once it has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d,{' '}
-            <code>0</code> off).
-          </>
-        )}
-      </p>
-      {members.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>band</th>
-              <th>id</th>
-              <th>rig</th>
-              <th>kind</th>
-              <th>pr</th>
-              <th>title</th>
-              <th>progress</th>
-              <th>frontier</th>
-              <th>needs</th>
-              <th>owed since</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => (
-              <tr key={m.id} className={m.id === drillTarget ? 'drilled' : undefined}>
-                <td>
-                  {wantsPerson(m) && (
-                    <span className="wants-person" aria-hidden="true">
-                      ●{' '}
-                    </span>
-                  )}
-                  <span className="band">{m.section}</span>
-                </td>
-                <td>
-                  <DrillOpen id={m.id} onOpen={onOpen} />
-                </td>
-                <td>{m.rig}</td>
-                <td>{m.kind}</td>
-                <td>
-                  <PRPhaseChip tile={m} />
-                  <PRLink tile={m} />
-                </td>
-                <td>{m.title}</td>
-                <td>{progressCell(m)}</td>
-                <td>{m.frontier}</td>
-                <td>
-                  {m.needs}
-                  {m.acceptable && (
-                    <>
-                      {' '}
-                      <ActuateButton
-                        verb="accept"
-                        beadId={m.id}
-                        formula={m.accept_formula}
-                        compact
-                        onDone={onActuated}
-                      />
-                    </>
-                  )}
-                </td>
-                <td>{m.section === 'done' ? '' : owedSince(m)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      </td>
+      <td>{tile.section === 'done' ? '' : owedSince(tile)}</td>
+    </tr>
+  );
+}
+
+// The board as one table. A closed row keeps its place below the live ones and
+// leaves only by ageing out on the window clock, so the note under the table
+// states that bound once for every DONE row rather than repeating it per family.
+function AnchorsTable({
+  rows,
+  drillTarget,
+  onOpen,
+  onActuated,
+}: {
+  rows: BoardRow[];
+  drillTarget: string | null;
+  onOpen: (id: string) => void;
+  onActuated: () => void;
+}) {
+  if (rows.length === 0) return null;
+  const hasDone = rows.some((r) => r.tile.section === 'done');
+  return (
+    <section className="anchors" aria-labelledby="anchors-heading">
+      <h2 id="anchors-heading">anchors</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>band</th>
+            <th>id</th>
+            <th>rig</th>
+            <th>kind</th>
+            <th>pr</th>
+            <th>title</th>
+            <th>progress</th>
+            <th>frontier</th>
+            <th>needs</th>
+            <th>owed since</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <AnchorRow
+              key={row.tile.id}
+              row={row}
+              drilled={row.tile.id === drillTarget}
+              onOpen={onOpen}
+              onActuated={onActuated}
+            />
+          ))}
+        </tbody>
+      </table>
+      {hasDone && (
+        <p className="sub anchors-note">
+          A closed row keeps its place below the live ones and leaves only by ageing out, once it
+          has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d, <code>0</code>{' '}
+          off).
+        </p>
       )}
     </section>
   );
@@ -560,6 +599,10 @@ export function App() {
   // oldest first) is preserved, so the oldest-owed family leads; within a family
   // the members read in SECTION_ORDER.
   const families = useMemo(() => groupByFamily(visibleTiles), [visibleTiles]);
+  // The one table's rows: each family flattened to a group row plus indented
+  // members, or a single loose row. The grouping split is groupByFamily's; this
+  // only shapes it for the table.
+  const boardRows = useMemo(() => flattenFamilies(families), [families]);
 
   const owed = visibleTiles.filter((t) => t.owed);
   const coverage = prCoverage(visibleTiles);
@@ -661,15 +704,12 @@ export function App() {
         <p>{owed.length > 0 ? 'No other anchors need attention.' : 'No anchors need attention.'}</p>
       )}
 
-      {families.map((family) => (
-        <FamilyBlock
-          key={family.root.id}
-          family={family}
-          drillTarget={drillTarget}
-          onOpen={setDrillTarget}
-          onActuated={refresh}
-        />
-      ))}
+      <AnchorsTable
+        rows={boardRows}
+        drillTarget={drillTarget}
+        onOpen={setDrillTarget}
+        onActuated={refresh}
+      />
 
       <Sittings sittings={visibleSittings} now={renderedAt} onOpen={setDrillTarget} />
 

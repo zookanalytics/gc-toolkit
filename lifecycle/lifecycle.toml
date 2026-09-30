@@ -306,7 +306,14 @@ machine_key = "pr.machine"
 #   wedged-exception  merge_hold stands with signoff_cap beside it: the cap
 #                     parked the anchor and routed it to a person, and no
 #                     automated actor will lift it
-machines = ["progressing", "settled", "wedged-exception"]
+#   blocked           the merge cannot proceed without a person, and no review
+#                     verdict is what it waits on: a required review thread is
+#                     unresolved, the base has gone BEHIND, or an unrouted
+#                     blocker no automated actor will clear holds it. Distinct
+#                     from settled — which waits on a review or the merge pass —
+#                     so the board can show it as needs-attention rather than
+#                     awaiting-review. The specific cause rides pr.machine_reason.
+machines = ["progressing", "settled", "wedged-exception", "blocked"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
 writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
@@ -657,7 +664,11 @@ keys = [
 ]
 
 [metadata.pr_round_trip]
-keys = ["pr.machine"]
+# pr.machine_reason is the human sentence naming why a `blocked` machine verdict
+# cannot merge (which thread, which base, which blocker). It is plain, not dated:
+# it is read only while pr.machine is `blocked`, and merge.sh writes the two
+# together and clears the reason whenever it records any other verdict.
+keys = ["pr.machine", "pr.machine_reason"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the
