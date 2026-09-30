@@ -41,6 +41,10 @@ if [ -z "$RIG" ]; then
   exit 2
 fi
 RIG_ROOT="${GC_RIG_ROOT:-$PWD}"
+# The head a dropped-tail finding names: the base its anchors would have landed
+# on, captured once. A checkout that is not a git tree reads "unknown".
+RIG_HEAD="$(git -C "$RIG_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+[ -n "$RIG_HEAD" ] || RIG_HEAD=unknown
 # Siblings resolve from $0: the pack lives under the owning rig, so an importer
 # rig's own root has no assets/scripts at all.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -120,6 +124,19 @@ TICK="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 FAILED=""
 NOTED=""
 
+# Per-pass merge-decision marker: the durable record of whether a pass reached
+# and completed its merge decision. A pass the controller kills at its budget
+# runs no at-exit code, but the phase it wrote here before the kill survives, and
+# the NEXT pass reads it (merge-tail-report.sh below) to see a dropped merge tail
+# — a pass that stopped before deciding its approved-clean candidates and left
+# them unmerged with no reason on the board. Written atomically so a reader never
+# sees a torn line; single-flight means only the live pass writes it.
+MERGE_MARK="$STATE_DIR/merge-decision"
+mark_merge() { # <phase>
+  printf '%s\t%s\t%s\n' "$1" "$TICK" "$RIG_HEAD" > "$MERGE_MARK.tmp" 2>/dev/null \
+    && mv -f "$MERGE_MARK.tmp" "$MERGE_MARK" 2>/dev/null || true
+}
+
 # Two merge.sh writers against one rig's anchors is the failure this cadence
 # must never produce, and the controller's open-tracking gate does not prevent
 # it: the watchdog closes tracking beads at 2m, well inside the order's timeout,
@@ -184,11 +201,26 @@ fi
 # header with no END under it is a pass that was killed.
 [ -n "$LOG_SINK" ] && printf '=== %s rig=%s refinery=%s\n' "$TICK" "$RIG" "$AGENT" >> "$LOG_SINK"
 
+# Before this pass overwrites the marker, judge the PRIOR pass by it. We hold the
+# pass lock, so the pass that wrote the marker is already dead: a marker that never
+# reached `decided`/`held` while gating anchors are still open is a dropped merge
+# tail, and this files the board-visible finding naming it. BEADS_ACTOR projected
+# so the finding and the reaction it dispatches are attributed to the refinery,
+# like every other bead-writing arm. The report never fails the pass — it only
+# records — so its rc is discarded.
+if [ -x "$SCRIPTS_DIR/merge-tail-report.sh" ]; then
+  ( export BEADS_ACTOR="$AGENT"
+    "$SCRIPTS_DIR/merge-tail-report.sh" --marker "$MERGE_MARK" --rig "$RIG" ) \
+    >> "${LOG_SINK:-/dev/null}" 2>&1 || true
+fi
+mark_merge started
+
 # >>> heal-gates-merge
 # Extracted and EXECUTED by refinery-reconcile.test.sh against stub arms: an
 # unsafe gate-ensure must HOLD merge.sh in the same pass. Keep it executable
 # with only a prologue supplying SCRIPTS_DIR, LOG_SINK, NOTED, FAILED, AGENT,
-# CHECK_SET_DEFAULT, REVIEW_POOL, FIX_POOL and VALIDATE_POOL.
+# CHECK_SET_DEFAULT, REVIEW_POOL, FIX_POOL, VALIDATE_POOL and the mark_merge
+# helper (the merge-decision marker writer).
 note() { NOTED="${NOTED}$*"$'\n'; }
 log()  { [ -n "$LOG_SINK" ] && printf '%s\n' "$*" >> "$LOG_SINK"; return 0; }
 run_pass() { # <label> <script> [args...]
@@ -266,9 +298,15 @@ fi
 # bd close, so the projection is attribution, not permission.
 if [ "$MERGE_HELD" = 1 ]; then
   log "-- (4) merge: HELD this pass ($MERGE_HELD_WHY)"
+  # A hold is a recorded decision (MERGE_HELD_WHY names it), not a dropped tail.
+  mark_merge held
 else
+  # `reached` before merge, `decided` after: a pass killed between them leaves
+  # `reached`, which the next pass reads as a merge arm that never finished.
+  mark_merge reached
   ( export BEADS_ACTOR="$AGENT"
     run_pass "(4) merge" merge.sh ) || FAILED="${FAILED}merge rc=$?; "
+  mark_merge decided
 fi
 # <<< heal-gates-merge
 
