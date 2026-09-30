@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -116,6 +118,101 @@ func TestCacheServesWithinTTL(t *testing.T) {
 	if got := f.calls.Load(); got != 2 {
 		t.Errorf("past TTL: gather called %d times, want 2 (recompute)", got)
 	}
+}
+
+// blockingSource holds each Gather open until released, so a burst of
+// concurrent misses can be observed piling up against the single-flight.
+type blockingSource struct {
+	calls   atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+	result  *source.Result
+}
+
+func (b *blockingSource) Gather(context.Context) (*source.Result, error) {
+	b.calls.Add(1)
+	b.entered <- struct{}{}
+	<-b.release
+	return b.result, nil
+}
+
+// TestConcurrentMissesCoalesceIntoOneGather is the anti-stampede guard that
+// replaced holding the cache lock across the gather: a burst of concurrent
+// misses must drive ONE gather, not one per request.
+func TestConcurrentMissesCoalesceIntoOneGather(t *testing.T) {
+	const n = 8
+	src := &blockingSource{
+		entered: make(chan struct{}, n), // never blocks, even if coalescing regresses
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range [n]struct{}{} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b, err := s.Board(context.Background())
+			switch {
+			case err != nil:
+				errs <- err
+			case b == nil || b.Total != 2:
+				errs <- fmt.Errorf("board total = %v, want 2", b)
+			}
+		}()
+	}
+
+	// A gather is in flight; let the rest of the herd coalesce onto it before
+	// releasing, so a per-request gather would have to fire here to be counted.
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(src.release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	if got := src.calls.Load(); got != 1 {
+		t.Errorf("gather ran %d times for %d concurrent misses, want 1 (single-flight coalescing)", got, n)
+	}
+}
+
+// TestCacheLockNotHeldDuringGather is the discriminating guard for building the
+// board OUTSIDE the cache lock. While a gather is in flight, another lock-taker
+// — here invalidateBoard, the write-verb path — must not block on it. Against
+// the old design, which held the lock across the whole gather, invalidateBoard
+// blocked until the gather returned, and this fails on the deadline.
+func TestCacheLockNotHeldDuringGather(t *testing.T) {
+	src := &blockingSource{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	go func() { _, _ = s.Board(context.Background()) }()
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+
+	// The gather is in flight. A lock-taker must return without waiting for it.
+	done := make(chan struct{})
+	go func() { s.invalidateBoard(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("invalidateBoard blocked while a gather was in flight — the cache lock is held across the build")
+	}
+
+	close(src.release) // let the in-flight gather finish so its goroutine exits
 }
 
 func TestBoardErrorIs502(t *testing.T) {

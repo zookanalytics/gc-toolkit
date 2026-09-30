@@ -17,6 +17,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
+	"golang.org/x/sync/singleflight"
 )
 
 // Server computes and serves the Helm board, caching the computed board for
@@ -39,9 +40,16 @@ type Server struct {
 	actuator Actuator
 	gate     *actuationGate
 
+	// mu guards cached/expiry only. It is never held across a gather: the
+	// gather builds a board outside the lock and swaps it in under it, so a slow
+	// build cannot block a request a fresh cache could answer.
 	mu     sync.Mutex
 	cached *board.Board
 	expiry time.Time
+
+	// flight coalesces concurrent cache misses into one gather, the anti-
+	// stampede role the cross-gather lock used to play.
+	flight singleflight.Group
 }
 
 // An Option configures a Server at construction.
@@ -203,17 +211,57 @@ func (s *Server) invalidateBoard() {
 	s.expiry = time.Time{}
 }
 
-// Board returns the cached board when fresh, otherwise gathers and computes a new
-// one. The lock is held across the gather so concurrent misses do not stampede
-// the supervisor; a follow-up can add stale-while-revalidate.
+// gatherTimeout bounds one gather. A healthy gather is a few seconds; this is
+// generous slack that still cuts off a supervisor that has begun timing out
+// every call, so a coalesced flight cannot run unbounded. The gather runs on a
+// context detached from the caller's (below) precisely so that one client
+// disconnecting mid-build does not cancel the shared gather the cache and the
+// other coalesced waiters depend on.
+const gatherTimeout = 30 * time.Second
+
+// Board returns the cached board when fresh, otherwise gathers and computes a
+// new one. The gather runs OUTSIDE the cache lock — the lock is taken only to
+// read the cache and to swap the finished board in — so a slow gather never
+// blocks a request a fresh cache could answer. Concurrent misses are coalesced
+// by a single-flight group, so a burst of board requests drives one gather
+// rather than one per request; the old design held the lock across the gather
+// for that same anti-stampede reason, at the cost of serializing every request,
+// even cached ones, behind the build.
 func (s *Server) Board(ctx context.Context) (*board.Board, error) {
+	if b, ok := s.cachedFresh(); ok {
+		return b, nil
+	}
+	v, err, _ := s.flight.Do("board", func() (any, error) {
+		// A flight that queued behind another leader may find the cache already
+		// refilled; serve it rather than gathering a second time.
+		if b, ok := s.cachedFresh(); ok {
+			return b, nil
+		}
+		gctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gatherTimeout)
+		defer cancel()
+		return s.gather(gctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*board.Board), nil
+}
+
+// cachedFresh returns the cached board when it exists and is within the TTL
+// window. It holds the lock only for the read.
+func (s *Server) cachedFresh() (*board.Board, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	if s.cached != nil && s.ttl > 0 && s.now().Before(s.expiry) {
-		return s.cached, nil
+		return s.cached, true
 	}
+	return nil, false
+}
 
+// gather drives one supervisor gather, builds the board, and swaps it into the
+// cache under the lock — which it takes only for the swap, never across
+// s.src.Gather.
+func (s *Server) gather(ctx context.Context) (*board.Board, error) {
 	res, err := s.src.Gather(ctx)
 	if err != nil {
 		return nil, err
@@ -226,7 +274,9 @@ func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 	// root is the one resolved at startup (WithCityPath), never re-discovered
 	// here — discovery is a gc subprocess and this runs on every cache refresh.
 	b.PackHealth = source.GatherPackHealth(s.cityPath, now)
+	s.mu.Lock()
 	s.cached = &b
 	s.expiry = now.Add(s.ttl)
+	s.mu.Unlock()
 	return &b, nil
 }

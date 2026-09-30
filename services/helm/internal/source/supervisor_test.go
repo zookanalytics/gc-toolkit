@@ -3,12 +3,16 @@ package source
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
@@ -629,5 +633,92 @@ func TestOpenBeadsCarriesTheSupervisorsOwnPartial(t *testing.T) {
 	}
 	if !named {
 		t.Errorf("the rig that did not answer must be named: %v", res.PartialErrors)
+	}
+}
+
+// TestGatherFetchesConvoyChildrenConcurrently is the regression guard for the
+// N+1 fan-out fix. Each per-convoy child fetch blocks in the mock until enough
+// of them are in flight at once, so a concurrent gather sails through and a
+// serialized one — which never gets a second request in flight — falls out on
+// the barrier timeout with a max concurrency of 1 and fails the assertion.
+func TestGatherFetchesConvoyChildrenConcurrently(t *testing.T) {
+	const nConvoys = 6
+	const wantConcurrent = 3 // < nConvoys and <= maxGatherFanout, so it is reachable
+
+	var (
+		mu          sync.Mutex
+		inFlight    int
+		maxInFlight int
+	)
+	release := make(chan struct{})
+	var once sync.Once
+
+	const base = "/v0/city/testcity"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == base+"/rigs":
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "epic":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "decision":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "gate":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("status") == "open":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/convoys":
+			items := make([]string, nConvoys)
+			for i := range items {
+				items[i] = fmt.Sprintf(`{"id":"tk-cv%d","title":"convoy %d","status":"open","issue_type":"convoy","parent":""}`, i, i)
+			}
+			writeJSON(w, `{"items":[`+strings.Join(items, ",")+`],"total":`+strconv.Itoa(nConvoys)+`}`)
+		case strings.HasPrefix(r.URL.Path, base+"/convoy/"):
+			mu.Lock()
+			inFlight++
+			if inFlight > maxInFlight {
+				maxInFlight = inFlight
+			}
+			if inFlight >= wantConcurrent {
+				once.Do(func() { close(release) })
+			}
+			mu.Unlock()
+			// Proceed once enough fetches are concurrent; the timeout keeps a
+			// serialized gather from hanging the test — it fails on maxInFlight.
+			select {
+			case <-release:
+			case <-time.After(2 * time.Second):
+			}
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			id := strings.TrimPrefix(r.URL.Path, base+"/convoy/")
+			writeJSON(w, `{"convoy":{"id":"`+id+`","status":"open"},"children":[{"id":"`+id+`-c","status":"open"}]}`)
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	res, err := newTestSource(t, srv).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	mu.Lock()
+	got := maxInFlight
+	mu.Unlock()
+	if got < wantConcurrent {
+		t.Fatalf("max concurrent convoy fetches = %d, want >= %d (the per-convoy fan-out is serialized)", got, wantConcurrent)
+	}
+
+	var convoys int
+	for _, a := range res.Anchors {
+		if a.Kind == "convoy" {
+			convoys++
+		}
+	}
+	if convoys != nConvoys {
+		t.Errorf("gathered %d convoy anchors, want %d — concurrency must not drop any", convoys, nConvoys)
 	}
 }
