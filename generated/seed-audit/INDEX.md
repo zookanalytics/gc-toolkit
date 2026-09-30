@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.3`
-- agents: 17 · formulas: 25
+- agents: 18 · formulas: 25
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -39,6 +39,7 @@ covers that dimension.
 | [`converse-fable`](agents/converse-fable.md) | 32,589 | 8,147 |
 | [`converse-opus`](agents/converse-opus.md) | 32,589 | 8,147 |
 | [`deacon`](agents/deacon.md) | 13,017 | 3,254 |
+| [`demo`](agents/demo.md) | 1,554 | 388 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
 | [`keeper`](agents/keeper.md) | 23,053 | 5,763 |
@@ -109,6 +110,7 @@ runs to re-prime after compaction.
 | converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
 | deacon | `city` | 1 | _none_ |
+| demo | `gascity`, `gc-toolkit` | 1 | _none_ |
 | dog | `city` | 1 | _none_ |
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | keeper | `gascity` | 1 | _none_ |

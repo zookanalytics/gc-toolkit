@@ -1,0 +1,23 @@
+# demo — a hand-opened session that captures a narrated video demo of the rig's
+# app with the demo:capture skill (the SprintShow engine). It carries the
+# `playwright` MCP so the session can drive a browser itself; that browser-driving
+# MCP is scoped to this agent's own mcp/ dir, so ordinary polecats never load it.
+# Open one with `gc session new demo <...>`: an origin=manual session, not
+# pool_managed, so no pool backstop governs it and a pane held open for a capture
+# is not reaped by a no-nudge drain.
+scope = "rig"
+provider = "claude"
+# A rig worktree so the capture drives the rig it serves and gh/git resolve to
+# that rig, not the city repo the .gc tree sits in — the same wiring converse,
+# proactive, and the pools use.
+work_dir = ".gc/worktrees/{{.Rig}}/demo/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+# resume carries the session across suspend and wake; the operator attaches to
+# watch the capture.
+wake_mode = "resume"
+attach = true
+# Opened by hand, never spawned by demand: min 0 starts nothing, and max only
+# caps how many captures run at once. Paired with the per-instance
+# {{.AgentBase}} work_dir so each capture gets its own tree.
+min_active_sessions = 0
+max_active_sessions = 2
