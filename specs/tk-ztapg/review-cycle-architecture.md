@@ -293,7 +293,8 @@ resolve without a fix unit landing — an out-of-band artifact attached to the P
 or the operator re-approving it — and a close that reads only the landing leaves
 that objection open, holding the merge. So `gate-ensure.sh` also closes an
 anchor's human-source objection beads (its human findings and the human-batch fix
-unit) once the recorded `pr_posture` reads `approved`, because a human's
+unit) once the recorded `pr_posture` reads `approved` at the branch's current head
+(a stale approval pinned to a superseded head closes nothing), because a human's
 re-approval validates that the objections that human raised are resolved. The
 close is scoped to human-source beads, so a human approval never clears a machine
 finding the human did not address.

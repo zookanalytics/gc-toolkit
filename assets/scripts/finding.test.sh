@@ -251,10 +251,30 @@ gc bd dep unrel --blocks "$HF" >/dev/null
 eq "$(bstatus "$HF")" "open" "close-resolved leaves the human finding open while the posture is changes_requested"
 eq "$(bstatus hfu)" "open" "…and leaves the human fix unit open"
 
-# The human re-approves: pr-facts records pr_posture=approved on the anchor.
-store "$(jq -c 'map(if .id=="tk-ancR" then .metadata.pr_posture="approved@2026-09-30T13:00:00Z" else . end)' "$STUB_STORE")"
-"$SUT" close-resolved --anchor tk-ancR
-eq "$(bstatus "$HF")" "closed" "close-resolved closes the human must-fix finding on re-approval"
+# The human re-approves, and pr-facts records the dated, head-pinned posture:
+# pr_posture is <value>@<head>@<instant>. The close is current only when that
+# pinned head is the branch's live head, passed as --expected-head.
+HEAD_LIVE=1111111111111111111111111111111111111111
+HEAD_STALE=2222222222222222222222222222222222222222
+
+# A stale approval — pinned to an earlier head than the branch now carries, the
+# shape a push leaves behind because pr-facts refreshes the posture only on its
+# own later arm — closes nothing: closing it would validate an unapproved head.
+store "$(jq -c --arg p "approved@${HEAD_STALE}@2026-09-30T13:00:00Z" 'map(if .id=="tk-ancR" then .metadata.pr_posture=$p else . end)' "$STUB_STORE")"
+"$SUT" close-resolved --anchor tk-ancR --expected-head "$HEAD_LIVE"
+eq "$(bstatus "$HF")" "open" "close-resolved leaves the finding open when the approved posture is pinned to a stale head"
+eq "$(bstatus hfu)" "open" "…and leaves the fix unit open — a stale approval is not a current one"
+
+# An unreadable live head (empty --expected-head) fails the close closed: an
+# unread head cannot prove the approval is current.
+store "$(jq -c --arg p "approved@${HEAD_LIVE}@2026-09-30T13:00:00Z" 'map(if .id=="tk-ancR" then .metadata.pr_posture=$p else . end)' "$STUB_STORE")"
+"$SUT" close-resolved --anchor tk-ancR --expected-head ""
+eq "$(bstatus "$HF")" "open" "close-resolved fails closed when the live head is unreadable"
+
+# The approval is current — its pinned head is the branch's live head — so the
+# objection closes.
+"$SUT" close-resolved --anchor tk-ancR --expected-head "$HEAD_LIVE"
+eq "$(bstatus "$HF")" "closed" "close-resolved closes the human must-fix finding on a current re-approval"
 eq "$(bstatus hfu)" "closed" "…and closes the human-batch fix unit that answered it"
 has "$(notes "$HF")" "re-approved" "the close records the re-approval as the resolution"
 # The strip: the close did not wait on the unrelated blocker, and only its EDGE
@@ -272,7 +292,7 @@ unset STUB_ENFORCE_BLOCKS
 # re-approval does not close it, and an already-declined one is closed already.
 FD=$("$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "docs/readme.md" --message "expand this section later")
 "$SUT" set-disposition --finding "$FD" --anchor tk-ancR --disposition deferred --reason "own PR"
-"$SUT" close-resolved --anchor tk-ancR
+"$SUT" close-resolved --anchor tk-ancR --expected-head "$HEAD_LIVE"
 eq "$(bstatus "$FD")" "open" "close-resolved leaves a deferred human finding open (a post-merge tracker, not a merge hold)"
 
 # An anchor with no recorded posture — a pre-open gate with no PR — has no

@@ -55,7 +55,7 @@
 #   finding.sh open-must-fix --anchor A [--lane L]
 #   finding.sh close-unvalidated --anchor A --lane L [--reason R]
 #   finding.sh close-answered --anchor A [--reason R]
-#   finding.sh close-resolved --anchor A [--reason R]
+#   finding.sh close-resolved --anchor A --expected-head H [--reason R]
 #
 # Callers: signoff.sh (upsert on request-changes, close-unvalidated on
 # approve), the validator through set-disposition — which hangs the fix unit's
@@ -91,7 +91,7 @@ usage:
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
   finding.sh close-unvalidated --anchor <id> --lane <lane> [--reason <r>]
   finding.sh close-answered --anchor <id> [--reason <r>]
-  finding.sh close-resolved --anchor <id> [--reason <r>]
+  finding.sh close-resolved --anchor <id> --expected-head <sha> [--reason <r>]
 USAGE
 }
 
@@ -495,6 +495,16 @@ cmd_close_answered() {
 # any other value (or an absent one, as on a pre-open anchor with no PR) closes
 # nothing — the raiser has not re-approved, so there is no resolution to validate.
 #
+# The approval is pinned to the head it was recorded at, and the close is gated on
+# that pin matching the branch's current head, passed as --expected-head. pr-facts.sh
+# refreshes pr_posture AFTER gate-ensure in the cadence, so a push landing after an
+# earlier approval leaves approved@<old-head> on the anchor for the next gate pass;
+# closing on that stale value would validate an unapproved head and drop the very
+# blockers this verb preserves. So it closes only when the posture's pinned head
+# equals --expected-head, and closes nothing when either head is unreadable (an
+# absent --expected-head, or a posture carrying no head) — an unread head cannot
+# prove the approval is current, so the merge holds one more pass, the safe way.
+#
 # The scope is human-source beads, and that is load-bearing. reviewDecision
 # speaks the human authority alone — a machine finding is a bead invisible to it —
 # so a human approval closes the human's own objections and must not clear a
@@ -513,10 +523,11 @@ cmd_close_answered() {
 # per bead, like close-answered; an unreadable store closes nothing and the merge
 # stays held.
 cmd_close_resolved() {
-  local anchor="" reason=""
+  local anchor="" reason="" expected_head=""
   while [ $# -gt 0 ]; do case "$1" in
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --expected-head) expected_head="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] || { warn "close-resolved needs --anchor"; exit 1; }
@@ -526,6 +537,14 @@ cmd_close_resolved() {
     approved|approved@*) ;;
     *) return 0 ;;
   esac
+  # The approval is current only if its pinned head is the branch's live head.
+  # pr_posture is <value>@<head>@<instant>, so the head is the second field; a
+  # bare `approved` carries none. Close nothing when the pinned head is absent,
+  # the live head is unreadable (empty --expected-head), or the two differ — a
+  # stale approved@<old-head> left by a post-approval push must not close.
+  local posture_head=""
+  case "$posture" in *@*) posture_head="${posture#*@}"; posture_head="${posture_head%%@*}" ;; esac
+  [ -n "$expected_head" ] && [ -n "$posture_head" ] && [ "$posture_head" = "$expected_head" ] || return 0
   local rows note
   rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES" --limit=0 --json 2>/dev/null | scrub)
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || { warn "could not read beads on $anchor"; return 2; }

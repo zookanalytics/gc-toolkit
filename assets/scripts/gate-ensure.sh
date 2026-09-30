@@ -679,9 +679,13 @@ STRAY
   # the merge cannot disagree. Read from the row already in hand — a non-approved
   # anchor pays nothing — and best-effort like close-answered. The posture is last
   # pass's (pr-facts records it in arm 2, this is arm 1), a sub-minute lag against
-  # the wedge it removes.
+  # the wedge it removes. Pass the live head computed above: the posture is pinned
+  # to the head it was approved at, and close-resolved closes nothing unless that
+  # pin still matches, so a push after an approval cannot close against the
+  # unapproved head it left approved@<old-head> for. An unreadable head is empty
+  # here and fails the close closed.
   case "$(meta_of "$row" pr_posture)" in
-    approved|approved@*) "$FINDING" close-resolved --anchor "$id" >/dev/null 2>&1 || true ;;
+    approved|approved@*) "$FINDING" close-resolved --anchor "$id" --expected-head "$head" >/dev/null 2>&1 || true ;;
   esac
 
   gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')

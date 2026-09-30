@@ -101,6 +101,16 @@ verb. The lag is at most one pass (`pr-facts.sh` records the posture in arm 2,
 `gate-ensure.sh` reads last pass's value in arm 1), which is immaterial against
 the thirteen-hour wedge it removes.
 
+That one-pass lag is also why the close is gated on the head. `pr_posture` is
+pinned to the head it was approved at, and `pr-facts.sh` refreshes it in arm 2,
+after `gate-ensure.sh`'s arm 1 has already read it — so a push landing after an
+approval leaves `approved@<old-head>` on the anchor for the next pass.
+`gate-ensure.sh` passes the branch's live head to `close-resolved`, which closes
+only when the posture's pinned head matches it and closes nothing when either
+head is unreadable. Without that check a stale approval would validate a head no
+reviewer approved and drop the blockers this step exists to preserve; with it, an
+unread or moved head holds the merge one more pass, the safe direction.
+
 The close is scoped to human-source beads, and that scope is load-bearing. A PR
 carries two authorities: the machine lanes and the human. `reviewDecision` is a
 statement of the human authority alone — a machine finding is a bead invisible to
@@ -112,7 +122,8 @@ edge still holds the merge until its own fix lands.
 
 ### What closes, and in what order
 
-On `pr_posture=approved`, `finding.sh close-resolved --anchor <id>` closes:
+On an approved posture whose pinned head is the live head,
+`finding.sh close-resolved --anchor <id> --expected-head <head>` closes:
 
 - **Human findings** on the anchor — `finding.source` beginning `human:` — whose
   disposition is `unvalidated` or `must-fix`. A `deferred` finding holds nothing
@@ -156,10 +167,14 @@ single event, which is what act 3 lacked.
   self-clearing state, not the wedge: the validator runs and finalizes within the
   cadence. `close-resolved` does not close a running workflow bead from outside
   it.
-- **A premature approval over a live fix closes that rework.** If a human
-  approves while a fix unit is mid-flight, the rework closes and its worker drains
-  on finding its bead closed — the ordinary "work already resolved elsewhere"
-  path. The human's approval is the authority that the objection is resolved.
+- **Only an open fix unit closes on re-approval; a live or held one is left.**
+  The fix unit closes only when its status is `open` — routed but unclaimed, the
+  shape left after an out-of-band fix, where closing it also spares a polecat a
+  claim on work the approval mooted. An `in_progress` rework has a live worker
+  whose hand-off closes it the normal way, and a `blocked` one is held for a
+  reason; closing either from outside would strand live or intentionally-held
+  work, so re-approval leaves both. The findings close regardless — their inbound
+  blocks are stripped first — so the objection never stays open holding the merge.
 
 ## Alternatives considered
 

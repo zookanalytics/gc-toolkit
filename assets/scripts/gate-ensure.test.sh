@@ -341,7 +341,7 @@ echo "# close-resolved: a human re-approval (recorded pr_posture=approved) close
 # open. A machine finding on the same anchor is left alone (finding.sh scopes the
 # close to human-source beads).
 : > "$STUB_DEPS"
-store "[$(anchor RA1 pull_request correctness "" polecat/ra1 ',"pr_posture":"approved@2026-09-30T13:00:00Z"'), $(backed rev-ra1 RA1 correctness),
+store "[$(anchor RA1 pull_request correctness "" polecat/ra1 ",\"pr_posture\":\"approved@$(oid ra1)@2026-09-30T13:00:00Z\""), $(backed rev-ra1 RA1 correctness),
         $(mustfix mf-ra1 RA1 correctness),
         {\"id\":\"hf-ra1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"finding\",\"anchor_bead\":\"RA1\",\"finding.lane\":\"human\",\"finding.source\":\"human:johnzook\",\"finding.disposition\":\"must-fix\"}},
         {\"id\":\"hfu-ra1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"RA1\",\"source_review\":\"701\"}}]"
@@ -362,6 +362,22 @@ gc bd dep hf-ra2 --blocks RA2 >/dev/null
 oid ra2 > "$GH_DIR/head_polecat_ra2"
 out=$(run)
 eq "$(bstatus hf-ra2)" "open" "a changes_requested posture leaves the human finding open (no re-approval to validate)"
+
+echo "# control: an approved posture pinned to a stale head closes nothing — a post-approval push must not close against an unapproved head"
+# The reviewed defect: pr-facts refreshes pr_posture on its own later arm, so a
+# push landing after an approval leaves approved@<old-head> for the next gate
+# pass; gate-ensure passes the live head and the close is gated on the pin.
+: > "$STUB_DEPS"
+store "[$(anchor RA3 pull_request correctness "" polecat/ra3 ",\"pr_posture\":\"approved@$(oid ra3-old)@2026-09-30T13:00:00Z\""), $(backed rev-ra3 RA3 correctness),
+        {\"id\":\"hf-ra3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"finding\",\"anchor_bead\":\"RA3\",\"finding.lane\":\"human\",\"finding.source\":\"human:johnzook\",\"finding.disposition\":\"must-fix\"}},
+        {\"id\":\"hfu-ra3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"RA3\",\"source_review\":\"703\"}}]"
+gc bd dep hfu-ra3 --blocks RA3 >/dev/null
+gc bd dep hf-ra3 --blocks RA3 >/dev/null
+gc bd dep hfu-ra3 --blocks hf-ra3 >/dev/null
+oid ra3 > "$GH_DIR/head_polecat_ra3"     # live head, distinct from the pinned approved@ra3-old
+out=$(run)
+eq "$(bstatus hf-ra3)" "open" "an approved posture pinned to a stale head leaves the human finding open"
+eq "$(bstatus hfu-ra3)" "open" "…and leaves the human fix unit open — the approval is not for the current head"
 
 echo "# per-head bar: a closed request-changes review at the live head bars a second whole-diff review"
 # The measured defect (PRs 793/803/824/843: two request-changes codex reviews at
