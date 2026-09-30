@@ -375,14 +375,9 @@ review_gates_for() { # <branch>
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 ALL_STATUSES="$LIVE_STATUSES,closed"
 
-bd_list() { # guarded array read; non-zero = "could not tell"
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -824,6 +819,22 @@ CHILDREN_EOF
             echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
           fi
         fi
+        # Retire any stale rework-or-close visit BEFORE the anchor's close, not
+        # after: an earlier pass may have filed it before the disposition marker
+        # was set, and it tracks the anchor — so bead-rehome's finalize gate would
+        # otherwise hold the close on the very question this pre-recorded
+        # disposition already answers. The marker on the anchor, not the visit, is
+        # what drives a retry, so retiring it here is safe even if the close below
+        # does not land this pass.
+        vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
+        if [ -n "$vid" ]; then
+          if gc bd update "$vid" --status=closed --set-metadata gc.outcome=moot \
+               --append-notes "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null 2>&1; then
+            echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
+          else
+            echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
+          fi
+        fi
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
                    ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
@@ -833,17 +844,6 @@ CHILDREN_EOF
         fi
         if [ "$rrc" -eq 0 ]; then
           disposed_n=$((disposed_n + 1))
-          # If an earlier pass abandoned + filed the rework-or-close visit before
-          # the marker was set, retire it: the decision it asks for is recorded.
-          vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
-          if [ -n "$vid" ]; then
-            if gc bd update "$vid" --status=closed --set-metadata gc.outcome=moot \
-                 --append-notes "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null 2>&1; then
-              echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
-            else
-              echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
-            fi
-          fi
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
           continue
         elif [ "$rrc" -eq 4 ]; then

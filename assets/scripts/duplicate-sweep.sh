@@ -55,14 +55,9 @@ scrub() { tr -d '\000-\037'; }
 LIVE_STATUSES="open,blocked,deferred,hooked,pinned"
 
 # Guarded reads: non-zero means "could not tell", never "nothing there".
-bd_list() {
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # </dev/null on every call inside the candidate loop: that loop is fed by a
 # heredoc, and a child inheriting its stdin would consume the rows behind it.
 bd_show() {

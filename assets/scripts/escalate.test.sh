@@ -650,6 +650,9 @@ cp "$SUT" "$LSUT/escalate.sh"; chmod +x "$LSUT/escalate.sh"
 # copy needs it beside escalate.sh too, or every filing here exits 1 before the
 # ledger is reached.
 cp "$HERE/pool-route.sh" "$LSUT/pool-route.sh"; chmod +x "$LSUT/pool-route.sh"
+# and its bead-store reads come from the sibling bd-lib.sh, sourced the same way,
+# so the private copy needs it beside escalate.sh too.
+cp "$HERE/bd-lib.sh" "$LSUT/bd-lib.sh"
 cat > "$LSUT/gc-deacon-ledger.sh" <<'LSTUB'
 #!/usr/bin/env bash
 set -u
