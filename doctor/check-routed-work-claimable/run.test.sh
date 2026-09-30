@@ -97,6 +97,7 @@ blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/s
 # Args: id route step_id root_id blocker root_rig.
 routed_step() { printf '{"id":"%s","status":"open","issue_type":"task","dependencies":[{"depends_on_id":"%s","type":"blocks"}],"metadata":{"gc.routed_to":"%s","gc.step_id":"%s","gc.root_bead_id":"%s","gc.root_store_ref":"rig:%s"}}' "$1" "$5" "$2" "$3" "$4" "$6"; }
 open_bead()   { printf '{"id":"%s","status":"open"}' "$1"; }
+inprogress_bead() { printf '{"id":"%s","status":"in_progress"}' "$1"; }
 closed_bead() { printf '{"id":"%s","status":"closed"}' "$1"; }
 show_store()  { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.show.json"; }
 
@@ -303,7 +304,7 @@ ready_store alpha; blocked_store alpha
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a live graph.v2 molecule step (root still open) is not a strand"
 has "$OUT" "sm-1" "the live step is still reported"
-has "$OUT" "which is still open" "the note names the molecule as live"
+has "$OUT" "which is open" "the note names the molecule as live"
 hasnt "$OUT" "check the edge direction" "the step's ordering edge is not read as an inverted strand edge"
 clear_stores
 
@@ -318,6 +319,46 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a graph.v2 step whose molecule is CLOSED is a genuine orphan strand"
 has "$OUT" "sm-2" "the orphan step is named"
 has "$OUT" "orphaned step" "the error names it an orphan of a done molecule"
+clear_stores
+
+# --- 11c2. a live molecule step whose root is IN_PROGRESS is not a strand ------
+# A graph.v2 root spends most of its life in_progress, not open (a review or work
+# root runs in_progress while its steps execute). The exemption must treat
+# in_progress as live too, or every in-flight step re-earns the blocking false
+# positive this check was filed to stop.
+store alpha "$(routed_step sm-4 alpha/pack.polecat mol-w.advance sm-root4 sm-blk4 alpha)" "$(inprogress_bead sm-root4)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a live graph.v2 molecule step (root in_progress) is not a strand"
+has "$OUT" "sm-4" "the in_progress-root step is reported"
+has "$OUT" "which is in_progress" "the note names the in_progress molecule as live"
+hasnt "$OUT" "orphaned step" "an in_progress root is not read as a done molecule"
+clear_stores
+
+# --- 11c3. a step whose molecule root is UNREADABLE warns, never passes --------
+# The candidate re-reads fine and is a graph.v2 step, but its root lives in a
+# store whose `bd show` fails. Liveness is unknown, so the run warns — never a
+# silent pass, never a manufactured orphan-strand error. root_store_ref points
+# the root read at the beta store, and only that store's `bd show` is failed, so
+# the candidate re-read in alpha still succeeds.
+store alpha "$(routed_step sm-5 alpha/pack.polecat mol-z.advance sm-root5 sm-blk5 beta)"
+ready_store alpha; blocked_store alpha
+OUT=$(BD_FAIL_SHOW=beta run_check); RC=$?
+eq "$RC" "1" "a graph.v2 step whose molecule root is UNREADABLE warns instead of passing"
+has "$OUT" "liveness could not be read" "the warning names the unreadable root probe"
+hasnt "$OUT" "orphaned step" "an unreadable root is not flagged as an orphan strand"
+clear_stores
+
+# --- 11c4. a step whose molecule root does NOT resolve warns, not a strand -----
+# The root read succeeds (rc=0) but names no such bead, so it yields no status.
+# The molecule cannot be proven dead (an unresolvable or cross-store root reads
+# the same way), so this warns rather than manufacturing an orphan-strand error.
+store alpha "$(routed_step sm-6 alpha/pack.polecat mol-v.advance sm-gone sm-blk6 alpha)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a graph.v2 step whose molecule root does not resolve warns, never passes"
+has "$OUT" "liveness is undetermined" "the warning names the unresolvable root"
+hasnt "$OUT" "orphaned step" "an unresolvable root is not flagged as an orphan strand"
 clear_stores
 
 # --- 11d. a candidate that closed since the listing is dropped, not flagged ---
