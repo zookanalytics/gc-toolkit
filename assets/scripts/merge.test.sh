@@ -885,6 +885,7 @@ export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
 # whether an anchor is moving without re-implementing these predicates.
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
+reason()  { printf '%s' "$(meta "$1" pr.machine_reason)"; }
 
 echo "# machine axis: a standing veto in the settled tail is settled — the operator re-reviews"
 # Gates green at the live head, a non-city CHANGES_REQUESTED standing, and every
@@ -988,6 +989,52 @@ eq "$(pinned V6)" "progressing@sha-85" "a pool-routed rework child is an actor t
 # The demand bead that makes an anchor `asking` blocks it the same way and has
 # no automated actor behind it, so it must not read as the machine working.
 eq "$(machine V7)" "<absent>" "a demand bead blocking the anchor is not the machine progressing"
+
+# A hold no automated actor will clear, and no review verdict is owed on, records
+# `blocked` with its cause — distinct from settled, so the board shows it as
+# needs-attention rather than folding it into the awaiting-review tail.
+echo "# an UNROUTED blocker no pool will claim records blocked, naming the holder"
+# An unrouted rework husk vetoes the merge, but no pool will claim it (unlike V6)
+# and no human route makes it an `asking` demand (unlike V7). It is neither
+# progressing nor silence — record blocked so the board stops reading it as
+# awaiting-review.
+store "[$(anchor BK1 92), $(rev BK1),
+        {\"id\":\"rw-bk1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'rw-bk1|blocks|BK1\n' > "$STUB_DEPS"
+printf '%s' "$(prview 92 OPEN CLEAN)" > "$GH_DIR/pr_view_92.json"
+echo '[]' > "$GH_DIR/reviews_92.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned BK1)" "blocked@sha-92" "an unrouted blocker no automated actor will clear records blocked, not silence"
+has "$(reason BK1)" "rw-bk1" "…and the reason names the blocking bead"
+
+echo "# a BLOCKED PR held by an unresolved review thread records blocked with the cause"
+store "[$(anchor BK2 93), $(rev BK2)]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 93 OPEN BLOCKED)" > "$GH_DIR/pr_view_93.json"
+echo '[]' > "$GH_DIR/reviews_93.json"
+echo '{"threads":[{"id":"t1","isResolved":false}]}' > "$GH_DIR/threads_93.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned BK2)" "blocked@sha-93" "an unresolved required review thread is a blocked hold, not settled"
+has "$(reason BK2)" "unresolved review thread" "…and the reason names the thread"
+
+echo "# a BLOCKED PR merely awaiting an approving review stays settled (awaiting-review)"
+store "[$(anchor BK3 94), $(rev BK3)]"
+printf '%s' "$(prview 94 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_94.json"
+echo '[]' > "$GH_DIR/reviews_94.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned BK3)" "settled@sha-94" "awaiting an approving review is the review wait, not a block"
+eq "$(reason BK3)" "<absent>" "…and no blocked reason lingers on a settled row"
+
+echo "# a base gone BEHIND records blocked; the branch must be brought current"
+store "[$(anchor BK4 95), $(rev BK4)]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 95 OPEN BEHIND)" > "$GH_DIR/pr_view_95.json"
+echo '[]' > "$GH_DIR/reviews_95.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned BK4)" "blocked@sha-95" "a base gone BEHIND is a blocked hold, not settled"
+has "$(reason BK4)" "moved ahead" "…and the reason says to bring the branch current"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
