@@ -53,6 +53,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_branch: '',
     pr_branch_url: '',
     pr_phase: '',
+    phase: '',
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
