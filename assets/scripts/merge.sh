@@ -47,6 +47,10 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
+# The composable "may this anchor be finalized?" precondition set. An open visit
+# tracking the anchor holds its merge — subject-scoped via the anchor's incoming
+# tracks edge, never a cascading blocks edge (docs/finalize-gate.md).
+FINALIZE_GATE="$SCRIPTS_DIR/finalize-gate.sh"
 
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # The merged-record retry cap. Both record arms below retry every pass with no
@@ -161,23 +165,35 @@ review_gates_for() { # <branch>
 # --route carries the anchor's own route back: recording a verdict is an
 # observation, not a routing decision, and an omitted --route would let a
 # detached state's default clear a route this pass never looked at.
+#
+# Every non-blocked verdict clears pr.machine_reason: the reason belongs only
+# beside a `blocked` verdict (record_blocked writes the pair), so a stale one
+# never lingers under a settled or progressing row, where the board would not
+# read it anyway.
 record_machine() { # <anchor-id> <value> <head-oid> <current-route>
   [ -n "${3:-}" ] || return 0
   "$LIFECYCLE" transition "$1" --to pull_request --expect pull_request \
-    --route "${4:-}" --set-dated "pr.machine=$2@$3" >/dev/null 2>&1 && return 0
+    --route "${4:-}" --set-dated "pr.machine=$2@$3" --unset pr.machine_reason >/dev/null 2>&1 && return 0
   echo "$PROG: WARN $1 machine axis '$2@$3' did not record; the board reads it as unknown until the next pass" >&2
+}
+
+# Record a `blocked` verdict AND the sentence naming its cause, in one write. A
+# blocked anchor cannot merge without a person and is not waiting on a review, so
+# the board owes it to the operator as needs-attention rather than folding it
+# into the settled tail. The reason is plain, not dated: the board reads it only
+# while the verdict is `blocked`, and record_machine clears it on any other one.
+record_blocked() { # <anchor-id> <head-oid> <current-route> <reason>
+  [ -n "${2:-}" ] || return 0
+  "$LIFECYCLE" transition "$1" --to pull_request --expect pull_request \
+    --route "${3:-}" --set-dated "pr.machine=blocked@$2" --set "pr.machine_reason=$4" >/dev/null 2>&1 && return 0
+  echo "$PROG: WARN $1 machine axis 'blocked@$2' did not record; the board reads it as unknown until the next pass" >&2
 }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-bd_list() { # guarded array read; non-zero = "could not tell"
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 anchor_row() { # live {status, meta}; empty = unreadable, never an all-default row
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -c '.[0] | select(. != null) | select(.metadata != null)
@@ -523,8 +539,34 @@ while IFS= read -r row; do
           | ((.metadata["gc.routed_to"] // "") | tostring) as $r
           | select($r != "" and $r != "human")
           | .id ] | .[0] // empty' 2>/dev/null)
-    [ -n "$pool_holder" ] && record_machine "$id" "progressing" "$head_oid" "$aroute"
+    if [ -n "$pool_holder" ]; then
+      record_machine "$id" "progressing" "$head_oid" "$aroute"
+    else
+      # No pool is behind it. A human-routed blocker is the demand the board
+      # already surfaces as `asking` from the edge itself, so leave the axis alone
+      # there. An UNROUTED open blocker is the gap: no automated actor will claim
+      # it and no `asking` edge names it, so the merge is stuck until a person
+      # clears it. Record `blocked` naming the holder, so the board stops reading
+      # it as awaiting-review.
+      stuck_holder=$(printf '%s' "$blockers" | jq -r --arg live "$LIVE_STATUSES" '
+        ($live | split(",")) as $ls
+        | [ .[] | select(type == "object")
+            | select((((.status // "open") | ascii_downcase) as $st | ($ls | index($st)) != null))
+            | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+            | .id ] | .[0] // empty' 2>/dev/null)
+      [ -n "$stuck_holder" ] && record_blocked "$id" "$head_oid" "$aroute" \
+        "held by $inflight — an unrouted blocker no automated actor will clear"
+    fi
     echo "$PROG: PR#$num held by $inflight; merge held (anchor $id)"
+    held=$((held + 1)); continue
+  fi
+
+  # --- open visit on this anchor: a person owes a conversation before finalize ---
+  # Subject-scoped via the anchor's incoming tracks edge; a visit is non-blocking,
+  # so this holds THIS anchor's merge without touching its children or readiness.
+  # Fail-closed: an unreadable probe holds, like every probe above.
+  if ! fg_reason=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+    echo "$PROG: PR#$num ${fg_reason:-finalize gate refused (fail-closed)}; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
 
@@ -632,11 +674,14 @@ while IFS= read -r row; do
       # required (required_review_thread_resolution), otherwise a missing
       # approval is. reviewDecision cannot name it alone — it reads EMPTY while
       # threads are unresolved and resolves only once they clear. The merge stays
-      # held whatever the cause; only the log names it.
+      # held whatever the cause; the log names it, and the machine axis records
+      # `blocked` for the causes a person must clear — an unresolved required
+      # thread, a rule that could not be named — so the board shows needs-attention,
+      # while the ordinary approval wait stays `settled` (the review tail).
       review_decision=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
-      record_machine "$id" "settled" "$head_oid" "$aroute"
       review_gates_for "$base"
       if [ "$PROT_STATE" != "known" ]; then
+        record_blocked "$id" "$head_oid" "$aroute" "BLOCKED by branch protection; the rules for '$base' could not be read to name the cause"
         echo "$PROG: PR#$num is BLOCKED by branch protection but the rules for '$base' could not be read to name the cause (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
       else
         bcause=""; bu=0
@@ -652,19 +697,34 @@ while IFS= read -r row; do
         fi
         case "$bcause" in
           threads)
+            record_blocked "$id" "$head_oid" "$aroute" "$bu unresolved review thread(s) must be resolved before this PR can merge"
             echo "$PROG: PR#$num is BLOCKED by branch protection: $bu unresolved review thread(s) hold required_review_thread_resolution (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
           threads-unreadable)
+            record_blocked "$id" "$head_oid" "$aroute" "a required review thread's resolution state could not be read"
             echo "$PROG: PR#$num is BLOCKED by branch protection: review-thread resolution is required but its reviewThreads could not be read to count them (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
           approval)
+            # The ordinary review wait, not a block: the settled tail's owed rule
+            # already puts it on the operator's queue as awaiting-review.
+            record_machine "$id" "settled" "$head_oid" "$aroute"
             echo "$PROG: PR#$num is BLOCKED by branch protection: waiting on an approving review ($PROT_APPROVALS required, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
           other)
+            record_blocked "$id" "$head_oid" "$aroute" "branch protection holds it by a rule other than an unresolved required thread or a missing approval"
             echo "$PROG: PR#$num is BLOCKED by branch protection by a rule other than an unresolved required thread or a missing approval (thread-resolution required=$PROT_THREAD_REQ, approvals required=$PROT_APPROVALS, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
         esac
       fi
       held=$((held + 1)); continue ;;
     *)
-      # The cadence has nothing left to do; GitHub is not ready. Still `settled`.
-      record_machine "$id" "settled" "$head_oid" "$aroute"
+      # The cadence has nothing left to do; GitHub is not ready. BEHIND is the one
+      # unready state a person must clear: peers merged ahead and the base moved
+      # under this PR, so its branch needs bringing current before it can land, and
+      # no review verdict does that — record `blocked` so the board shows
+      # needs-attention. Every other unready state (GitHub still computing
+      # mergeability, say) owes a person nothing and stays `settled`.
+      if [ "$merge_state" = "BEHIND" ]; then
+        record_blocked "$id" "$head_oid" "$aroute" "the base branch '$base' moved ahead; bring '$head_ref' current with '$base' before it can merge"
+      else
+        record_machine "$id" "settled" "$head_oid" "$aroute"
+      fi
       echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'); merge held (anchor $id)"
       held=$((held + 1)); continue ;;
   esac
@@ -773,6 +833,12 @@ $sa_out" >/dev/null 2>&1 || true
   # non-zero jq means the comparison itself failed — hold, never merge blind.
   if [ "$frc" -ne 0 ] || [ -z "$freason" ]; then
     freason="terminal re-read comparison unreadable"
+  fi
+  # A visit is a subject-local bead filed without moving the PR head, so
+  # --match-head-commit does not catch one raised between validation and here.
+  # Re-assert the finalize gate in the terminal window, same fail-closed terms.
+  if [ "$freason" = "OK" ] && ! fg_final=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+    freason="${fg_final:-open visit or unreadable visit probe (fail-closed)}"
   fi
   if [ "$freason" != "OK" ]; then
     echo "$PROG: PR#$num anchor $id changed between validation and the merge — $freason; merge held"

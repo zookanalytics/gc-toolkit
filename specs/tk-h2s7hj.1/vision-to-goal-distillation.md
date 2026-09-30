@@ -1,39 +1,39 @@
 ---
 name: Vision-to-Goal Distillation
-description: How an epic's vision becomes crisp, armable goal contracts — the Senior-PM perspective, the document-goal rubric oracle, the refinement sitting, the sizing invariants, the change discipline, and the circulation contract between the vision and goal layers. The rubric-lane design the goal primitive spec defers here.
+description: How an epic's vision becomes crisp, epic-shaped goal contracts: the Senior-PM perspective, the document-goal rubric oracle, the refinement sitting, the sizing invariants, the change discipline, and the circulation contract between the vision and goal layers. The rubric-lane design the goal primitive spec defers here.
 ---
 
 # Vision-to-Goal Distillation
 
-A vision is a direction stated in prose. A goal is a measurable contract a
-worker iterates against until something other than the worker measures it met
+A vision is a direction stated in prose. A goal is a measurable contract carried
+by an epic, advanced until something other than the worker measures it met
 (specs/tk-yaor8a/goal-primitive-spec.md). Distillation is the work between the
-two: turning a vision into the crisp, armable goal contracts the goal layer can
-run.
+two: turning a vision into the crisp, epic-shaped goal contracts the goal layer
+carries.
 
 Distillation is itself a goal loop. Its end state is a crisp contract. Its
 oracle grades a candidate contract for readiness rather than measuring the
 world. Its human lane is a refinement sitting, and its budget is the operator's
 attention, spent in cheap rounds. Epic decomposition and goal convergence are
 the same loop at two oracle hardnesses: the vision layer runs the soft, rubric
-end, the goal layer runs the hard, deterministic end, and a verdict trail
+end, the goal layer runs the hard, measured end, and a verdict trail
 circulates between them. Naming that symmetry is the whole of this design: a PM
 refining an epic is running a goal loop whose oracle is a graded reading of a
 document, and everything below makes that loop concrete.
 
 ## Scope
 
-**Mandate.** How a vision becomes armable goal contracts: the perspective that
+**Mandate.** How a vision becomes epic-shaped goal contracts: the perspective that
 judges a candidate, the rubric oracle that grades its readiness, the sitting
 that refines it, the invariants that size the work it spawns, the discipline
 that changes it, and the contract that circulates goals down and verdicts up.
 
-**Boundaries.** The goal contract's fields, the deterministic judge, the
-verdict taxonomy, and the loop mechanics belong to the goal primitive
+**Boundaries.** The goal contract's shape, the independent judge, and the
+verdict taxonomy belong to the goal primitive
 (specs/tk-yaor8a/goal-primitive-spec.md); this design produces that contract
-and consumes those verdicts, it does not redefine them. Arming a goal, spawning
-iterations, and running oracles belong to goal-keeper v1 (tk-tutb46). Building
-the perspective skill, the oracle formula, and the sitting procedure is
+and consumes those verdicts, it does not redefine them. Carrying a goal in an
+epic, advancing it in batches, and judging it at checkpoints belong there too.
+Building the perspective skill, the oracle formula, and the sitting procedure is
 follow-up named in Section 9, not done here.
 
 ## 1. Two oracles, two layers
@@ -41,20 +41,23 @@ follow-up named in Section 9, not done here.
 A goal has two different questions asked of it, and each has its own oracle.
 
 - The **execution oracle** asks whether the world now meets the goal. It is the
-  goal primitive's judge: deterministic in v1, a command or a metric threshold,
-  run by the keeper against reality (goal-primitive-spec.md Section 3).
-- The **readiness oracle** asks whether the contract is crisp enough to arm. It
+  goal primitive's checkpoint judgment: the measured criteria re-run against
+  reality and the graded criteria read by a party other than the worker
+  (goal-primitive-spec.md Section 3).
+- The **readiness oracle** asks whether the contract is crisp enough to carry. It
   is a graded reading of the candidate contract: is the end state measurable, is
   the check judgeable by a non-worker, is the scope a slice. This is the rubric
-  oracle the goal primitive spec defers here (goal-primitive-spec.md Section 1).
+  oracle. Distilling a candidate into a crisp contract is what the goal
+  primitive spec defers to this design (goal-primitive-spec.md Boundaries).
 
-The two never merge. A goal whose execution oracle is deterministic still passes
+The two never merge. A goal whose measures are well-defined still passes
 through the readiness oracle first, because "the metric is well-defined" and
 "this is the right metric, bounded and traceable to the vision" are different
 claims. The readiness oracle is soft by nature: whether a contract is crisp is a
 judgment, not a measurement, so it carries a human lane and a slop detector. The
-execution oracle is hard by mandate: once armed, a number decides, and no model
-talks it out of its verdict.
+execution side is harder-edged: its measured criteria are numbers read from
+reality, and its graded criteria are judged at a checkpoint by a party other
+than the worker rather than argued out of a verdict.
 
 Distillation is the readiness oracle's loop. Its output, a contract that grades
 ready, is the execution oracle's input.
@@ -73,14 +76,14 @@ rules the perspective applies, present tense.
 - **Ruthless MVP scope.** The smallest goal that moves the outcome. Anything
   that does not change the measured condition is cut, not deferred.
 - **Root-cause the why.** A goal traces to the value the vision seeks. A goal
-  that cannot name the vision outcome it serves is decoration and does not arm.
+  that cannot name the vision outcome it serves is decoration and is not carried.
 - **Champion the user.** The operator and the city are the users. A goal serves
   their leverage, not the worker's convenience.
 - **Measurable, or say not-yet.** If the end state cannot be judged by something
   other than the worker, the contract is not crisp yet. The perspective says so
   plainly rather than dressing prose as a metric.
 - **Kill criteria first.** Every candidate states what would make it impossible
-  or not worth continuing before any iteration runs, so a bound trips into a
+  or not worth continuing before any batch runs, so a bound trips into a
   reason rather than a silent stop.
 - **Spend attention in cheap rounds.** The operator's attention is the scarce
   resource. The perspective asks for it in numbered, terminating rounds, never
@@ -108,20 +111,20 @@ rest score, so the reader checks them first.
 | # | Item | Grade asks |
 |---|---|---|
 | B1 | Measurable end state (blocker) | Does the statement name a world condition with a baseline and a target, as numbers wherever reality has numbers? |
-| B2 | Non-worker oracle (blocker) | Is the check a command or a metric threshold a party other than the worker can run? |
-| R1 | Three-way budget | Are iterations, tokens, and wall-clock bounded, whether stated or left to the keeper default? |
+| B2 | Non-worker oracle (blocker) | Can a party other than the worker check the goal, by a re-runnable measure or a grading rubric a non-worker applies? |
+| R1 | Bounded cadence | Does the contract state its cadence and met condition: batch size, checkpoints, and when the goal is done? |
 | R2 | Kill criteria | Is what makes the goal impossible or stalled stated, so a bound trips into a reason? |
 | R3 | Vision traceability | Does the goal name the vision outcome it serves? |
-| R4 | Slice discipline | Is the goal a vertical slice with no forward dependency, so each iteration moves the measured value? |
+| R4 | Slice discipline | Is the goal a vertical slice with no forward dependency, so each unit of work moves a contract criterion, measured or graded? |
 | R5 | MVP scope | Is this the smallest goal that moves the outcome, with nothing added that does not change the measured condition? |
-| R6 | Invariants | Where a regression is possible, is what must hold each iteration stated? |
+| R6 | Invariants | Where a regression is possible, is what must hold throughout stated? |
 | R7 | Provenance | Is who set the goal, and why, recorded? |
 
 Binary-per-item grading beats a single score: it says which part is not ready,
 and that is the reason the refinement round carries forward. The blockers-first
-order is the goal primitive's minimal contract (measurable end state, a check,
-a budget) restated as a gate: without B1 and B2 there is no goal to arm, only a
-wish.
+order is the goal primitive's minimal contract (a measurable end state and a
+check a non-worker can run) restated as a gate: without B1 and B2 there is no
+goal to carry, only a wish.
 
 ### Cross-model divergence as the slop detector
 
@@ -140,7 +143,7 @@ primitive's taxonomy.
 
 | Verdict | Trigger | Action |
 |---|---|---|
-| `ready` | both blockers PASS and no readiness item FAILs | the contract flows down to the keeper to arm |
+| `ready` | both blockers PASS and no readiness item FAILs | the contract flows down to be carried as an epic contract |
 | `not-yet` | a blocker FAILs, the lanes diverge, or a readiness item FAILs | the failing items are the refinement reason, fed into the next sitting round |
 | `impossible` | the candidate is not a goal at all, or the vision states two mutually exclusive outcomes | routes to the operator; the vision reshapes |
 
@@ -181,45 +184,44 @@ A menu for a candidate missing its metric and its bound reads:
 
 ```
 The candidate: "Reviews take too many rounds; cut the count."
-Readiness: not-yet (B1 fail: no baseline or target; R1 fail: no budget).
+Readiness: not-yet (B1 fail: no baseline or target; R1 fail: no cadence).
 
   1. Name the metric: second-review rate, measured from the bead store.
   2. Set a baseline and target: from 51% (audit) to a target you set now.
-  3. Add the three-way budget: iterations, tokens, wall-clock.
+  3. Set the cadence: batch size, checkpoints, and the met condition.
   4. State kill criteria: what makes this impossible or not worth continuing.
   5. Split: separate "fewer rounds" from "no quality regression."
-  0. Accept as crisp and arm.
+  0. Accept as crisp and carry.
   9. Park: this is a vision, not yet a goal.
 ```
 
 The operator picks one number. The pick is the round's oracle: a transform
-re-drafts and re-grades, a `0` arms, a `9` returns the candidate to the vision.
+re-drafts and re-grades, a `0` accepts it, a `9` returns the candidate to the vision.
 One pick per round keeps the human cost to a number, not a paragraph.
 
 **Right-sizing past the process.** The menu fires only when the oracle signals
 `not-yet` or the lanes diverge. A candidate that grades `ready` on the first
-reading arms with no elicitation at all. Small, already-crisp work skips the
+reading is carried with no elicitation at all. Small, already-crisp work skips the
 ceremony. Gating on the oracle's signal rather than on a fixed per-item schedule
 is what keeps the rounds cheap and is the deliberate departure from fixed human
 gating (Section 8).
 
 ## 5. Decomposition sizing invariants
 
-These size the work an armed goal spawns. A goal spans many iterations; each
-iteration is one unit of work, and these invariants are binary-checkable against
-that unit, in the goal primitive's one-task-per-iteration model
-(goal-primitive-spec.md Section 5).
+These size the work a goal spawns. A goal spans many units of work, advanced
+in batches; each unit is one focused change, and these invariants are
+binary-checkable against it (goal-primitive-spec.md Section 5).
 
 | Invariant | Binary check |
 |---|---|
-| Vertical slice | Closing this iteration changes the oracle's measured value, rather than adding a layer that pays off only later. |
-| No forward dependency | No open `blocks` blocker on the iteration's work bead cites unstated prerequisite work. |
-| One focused session | The `not-yet` reason names one task, not a program, so the iteration fits a fresh pool session's context. |
-| Observable increment | The iteration writes an evidence reference (a commit, a measured value) to the verdict trail. |
+| Vertical slice | Closing this unit moves a contract criterion, measured or graded, rather than adding a layer that pays off only later. |
+| No forward dependency | No open `blocks` blocker on the unit's work bead cites unstated prerequisite work. |
+| One focused change | The `not-yet` reason names one task, not a program, so the unit fits a fresh session's context. |
+| Observable increment | The unit writes an evidence reference (a commit, a measured value) to the verdict trail. |
 
 A candidate whose slice cannot satisfy these is a candidate whose R4 grades
 FAIL: it is not yet a goal, it is a program that must be split first. The sizing
-invariants are therefore both a decomposition rule at arming and the concrete
+invariants are therefore both a decomposition rule at distillation and the concrete
 content of the R4 checklist item.
 
 ## 6. Change discipline
@@ -229,21 +231,20 @@ operator approves, never by silent drift.
 
 The proposal states the current contract and the proposed contract side by side,
 with the reason for the change. The operator approves it. The change is then
-made by editing the goal bead. The keeper's snapshot-mismatch mechanism detects
-the edit at the next verdict, re-arms the goal against the new contract, and
-records the change in the verdict trail (goal-primitive-spec.md Section 2).
-Integrity is tamper-evident, not tamper-proof: a change is made visible and
-re-arms the goal, it is not walled off behind a reference the worker cannot
-reach.
+made by editing the epic body. Because the contract lives in the epic, the edit
+is visible in its history, and the next checkpoint judges against the current
+contract (goal-primitive-spec.md Section 6). Integrity is tamper-evident, not
+tamper-proof: a change is made visible, it is not walled off behind a reference
+the worker cannot reach.
 
 The two halves compose. The before-and-after proposal is the deliberate,
 human-facing half, so the operator sees exactly what moved and why before
-approving. The snapshot mismatch is the backstop: a change that skips the
-proposal still cannot be silent, because the mismatch surfaces it in the trail
-and forces a re-arm rather than a verdict against moved goalposts. This is the
-document-level counterpart of the goal primitive's tamper-evident contract. The
-vision and its goals change by an approved, recorded edit; a re-arm records the
-change, and no immutable lock stands between a goal and its correction.
+approving. The epic body is the backstop: a change that skips the proposal still
+cannot be silent, because it is an edit in the epic's history, and the next
+checkpoint reads the current contract rather than judging against moved
+goalposts. This is the document-level counterpart of the goal primitive's
+tamper-evident contract. The vision and its goals change by an approved,
+recorded edit, and no immutable lock stands between a goal and its correction.
 
 ## 7. The circulation contract
 
@@ -252,17 +253,17 @@ them.
 
 **Down: crisp goal contracts.** The vision layer hands the goal layer contracts
 that grade `ready` and passed the one-liner gate. Nothing softer flows down; a
-candidate still in refinement stays in the vision layer. The keeper arms what it
-receives.
+candidate still in refinement stays in the vision layer. The epic carries what
+it receives, as its embedded contract.
 
 **Up: verdict trails.** The goal layer's verdict trail flows back, and two of
 its verdicts are elicitation input, not only terminal handoffs to a human. An
 `impossible` verdict means the vision named a goal reality cannot meet as
 stated; its reason becomes a menu item in the next refinement round. A `stalled`
 verdict means the approach wedged; the vision may re-slice the goal into a
-different attempt. A goal that keeps returning `not-yet` across many iterations
+different attempt. A goal that keeps returning `not-yet` across many checkpoints
 is a signal it was mis-distilled, and it returns to refinement rather than
-burning the rest of its budget quietly.
+spending more batches quietly.
 
 **The legal vision-layer verdict.** "No crisp goal yet, keep refining" is a
 first-class verdict, not a failure. A vision that has produced no crisp goal is
@@ -273,14 +274,10 @@ not an exclusion" made into a verdict the distillation loop renders and records.
 ## 8. What runs when, and what this learns from BMAD
 
 **No new standing watcher.** Nothing polls a vision. Refinement runs in a
-sitting, on operator initiative or when a verdict trail flows an `impossible` or
+sitting, on operator initiative or when a checkpoint flows an `impossible` or
 `stalled` up from a goal this vision distilled. The oracle grades on demand,
-when a candidate is drafted or edited. The up-circulation is event-driven on the
-same substrate the goal loop uses: a control bead re-arms the refinement when a
-distilled goal routes `impossible` or `stalled`, on the close event, not on a
-clock (goal-primitive-spec.md Section 5). This honors the binding constraint
-that the vision loop runs in sittings and event-driven machinery, with no
-daemon.
+when a candidate is drafted or edited. This honors the binding constraint that
+the vision loop runs in sittings, with no standing watcher.
 
 **BMAD is input, not boundary.** The senior-PM persona plus a graded checklist,
 the numbered elicitation menu, the one-liner-list gate before expansion, the
@@ -290,7 +287,7 @@ quorum lane shape, and the goal contract. The one failure BMAD measured in
 itself is fixed per-item human gating, which fatigues, and which its own later
 version cut by right-sizing small work past the process. This design avoids that
 failure by gating the human round on the oracle's signal rather than on a fixed
-schedule: a crisp candidate arms with no round at all, and the operator lane
+schedule: a crisp candidate is carried with no round at all, and the operator lane
 thins as the rubric earns trust. The point of copying BMAD's shapes is to inherit
 its evidence, including the evidence for what to leave out.
 
@@ -306,21 +303,19 @@ this design and blocked on it. That bead owns three pieces:
   lanes' rubric and a synthesizer that renders the readiness verdict, plus the
   operator lane and its weight-scaling calibration.
 - **The refinement sitting and up-circulation.** The converse procedure of
-  Section 4 (one-liner gate, numbered menu) and the control bead that re-arms
+  Section 4 (one-liner gate, numbered menu) and the up-circulation that re-opens
   refinement on an `impossible` or `stalled` verdict from a distilled goal.
 
-**The cost of waiting.** Until this is built, no rubric-shaped goal can be
-armed: goal-keeper v1 runs deterministic goals only, and the vision layer's
-refinement is entirely manual, run by the operator in a sitting with no oracle
-assist and no slop detection. A deterministic goal can still be distilled by
-hand and armed, as the dogfood goal was (dogfood-exercise.md), but its contract
-is graded by a person rather than by two lanes that disagree. The cost is
-operator time per vision and no automated catch on a vague hand-written
-contract.
+**The cost of waiting.** Until this is built, the vision layer's refinement is
+entirely manual, run by the operator in a sitting with no oracle assist and no
+slop detection. A goal can still be distilled by hand and carried as an epic
+contract, as goal-one is (tk-y0abyu), but its contract is graded by a person
+rather than by two lanes that disagree. The cost is operator time per vision and
+no automated catch on a vague hand-written contract.
 
 ## Provenance
 
-Design bead tk-h2s7hj.1, child of the vision epic tk-h2s7hj, armed behind the
+Design bead tk-h2s7hj.1, child of the vision epic tk-h2s7hj, developed behind the
 goal primitive spec (tk-yaor8a) and worked on operator ruling `go`, sitting
 tk-eywd7n (subject tk-yaor8a), 2026-09-22. Primary inputs: the goal primitive
 spec as landed (specs/tk-yaor8a/goal-primitive-spec.md), the BMAD PM-role

@@ -338,7 +338,12 @@ type Tile struct {
 	PRBranch string `json:"pr_branch"`
 
 	// PRMachine is what the merge cadence can do with this anchor on its next
-	// pass: progressing, settled, wedged-exception, or unknown.
+	// pass: progressing, settled, wedged-exception, blocked, or unknown.
+	//
+	// `blocked` is a hold no automated actor will clear and no review verdict is
+	// owed on — an unresolved required review thread, a base gone BEHIND, or an
+	// unrouted blocker. The operator is owed it, distinct from `settled`, and its
+	// cause rides `pr.machine_reason`, surfaced in the row's `needs`.
 	//
 	// `unknown` is a rendered value, not a fallback to the quiet end — the same
 	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An

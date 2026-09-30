@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic tests for first-reaction-dispose.sh — the four exits
+# Hermetic tests for first-reaction-dispose.sh — the five exits
 # mol-first-reaction's terminal step chooses between. Runs the REAL script
 # with a stubbed `gc`, a stubbed gc-helm.sh and a stubbed deferred-dispatch.sh
 # (both reached through the tool-override env vars), so no live city, Dolt or
@@ -394,31 +394,45 @@ hasnt "--no-wait" "$LOG" "(RUL) …and never claims nothing is waiting"
 run tk-sub --disposition ruling --reason "r" --takeaway "t"
 eq "$RC" "2" "(RUL) a ruling with no visit is refused"
 
-# ── ruling + a recommendation: the visit offers Accept ───────────────────────
-# A ruling that names a determinable action (converse/operator authority) passes
-# --recommended-formula, and the exit stamps gc.recommended_formula on the
-# subject. That stamp is the whole difference between a plain Discuss-only visit
-# and a recommendation visit the operator can Accept, and it rides the record
-# write — before the act — so a half-written recommendation is still visible.
+# ── recommend: the visit offers Accept ───────────────────────────────────────
+# recommend names a determinable action (converse/operator authority) and stamps
+# gc.recommended_formula on the subject. That stamp is the whole difference
+# between a plain Discuss-only ruling visit and a recommendation visit the
+# operator can Accept, and it rides the record write — before the act — so a
+# half-written recommendation is still visible. recommend files and holds on the
+# same visit shape ruling does.
 export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
-run tk-sub --disposition ruling --reason "retire the PR, supersede its anchor — operator authority" \
+run tk-sub --disposition recommend --reason "retire the PR, supersede its anchor — operator authority" \
     --takeaway "recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" \
     --visit tk-visit1 --recommended-formula mol-x
-eq "$RC" "0" "(RECO) a ruling that carries a recommendation succeeds"
+eq "$RC" "0" "(RECO) a recommend disposition succeeds"
 has "gc.recommended_formula=mol-x" "$LOG" "(RECO) the recommended formula is stamped on the subject"
-has "gc.first_reaction=ruling" "$LOG" "(RECO) …alongside the disposition record"
+has "gc.first_reaction=recommend" "$LOG" "(RECO) …alongside the disposition record"
+has "--waiting-on tk-visit1" "$LOG" "(RECO) …and the visit holds the subject, the ruling visit shape"
 RECO_UL=$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1); RECO_HL=$(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1)
 { [ -n "$RECO_UL" ] && [ -n "$RECO_HL" ] && [ "$RECO_UL" -lt "$RECO_HL" ]; } \
    && ok "(RECO) …in the record write, before the act" \
    || bad "(RECO) …in the record write, before the act (UPDATE=$RECO_UL HELM=$RECO_HL)"
-has "--waiting-on tk-visit1" "$LOG" "(RECO) …and the visit still holds the subject"
+
+# recommend REQUIRES the flag it exists to carry: no --recommended-formula is a
+# usage error naming ruling as the flagless alternative.
+run tk-sub --disposition recommend --reason "operator authority" \
+    --takeaway "recommend: execute via <mol> — Accept or Discuss" --visit tk-visit1
+eq "$RC" "2" "(RECO) recommend with no --recommended-formula is refused"
+eq "$LOG" "" "(RECO) …and writes nothing"
+has "is --disposition ruling" "$ERR" "(RECO) …naming ruling as the flagless alternative"
+
+# recommend needs a visit like ruling — the operator lands on it.
+run tk-sub --disposition recommend --reason "operator authority" \
+    --takeaway "recommend: execute via mol-x — Accept or Discuss" --recommended-formula mol-x
+eq "$RC" "2" "(RECO) recommend with no --visit is refused"
 
 # A recommended formula that does not resolve is a usage error, refused before the
 # record: Accept slings this exact name, so a typo would stamp a live
 # gc.recommended_formula and render an 'accept ▸' that fails at gc sling on every
 # click. Validated the way --route/--then-route are against the roster.
 export FAKE_FORMULA_MISSING="mol-typo"
-run tk-sub --disposition ruling --reason "operator authority" \
+run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-typo — Accept or Discuss" \
     --visit tk-visit1 --recommended-formula mol-typo
 eq "$RC" "2" "(RECO) a --recommended-formula that does not resolve is refused (usage error)"
@@ -427,34 +441,43 @@ hasnt "HELM" "$LOG" "(RECO) …and the act does not run"
 has "does not resolve to a formula" "$ERR" "(RECO) …the message names the unresolved formula"
 unset FAKE_FORMULA_MISSING
 
-# Discuss-only ruling: no --recommended-formula, nothing is stamped, the visit
-# stays plain (no Accept). This is the path the change leaves untouched.
+# ── ruling rejects a recommendation: it is Discuss-only ───────────────────────
+# A ruling is the operator's judgment with no worker-runnable action, so it takes
+# no --recommended-formula; the refusal names recommend as the disposition that
+# carries one.
+run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
+    --takeaway "needs a ruling: which default" --visit tk-visit1 --recommended-formula mol-x
+eq "$RC" "2" "(RECO) ruling refuses --recommended-formula"
+eq "$LOG" "" "(RECO) …and writes nothing"
+has "use --disposition recommend" "$ERR" "(RECO) …pointing at the disposition that carries a recommendation"
+
+# A plain ruling stamps nothing, so the visit stays Discuss-only (no Accept).
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
     --takeaway "needs a ruling: which default" --visit tk-visit1
 eq "$RC" "0" "(RECO) a Discuss-only ruling succeeds"
 hasnt "gc.recommended_formula" "$LOG" "(RECO) …and stamps no recommendation, so the visit offers no Accept"
 
-# A partial record can already carry a recommendation a prior ruling stamped: the
-# record was written, the act did not land (no gc.proactive_reaction=1), and this
-# retry resumes it. A retry that names no recommendation clears that stale stamp
-# in the record write, so the visit never offers Accept for a formula the current
-# ruling did not recommend.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"ruling","gc.recommended_formula":"mol-old"}}]'
+# A partial record can already carry a recommendation a prior recommend stamped:
+# the record was written, the act did not land (no gc.proactive_reaction=1), and
+# this retry resumes it. A ruling retry names no recommendation and clears that
+# stale stamp in the record write, so the visit never offers Accept for an action
+# the current disposition did not recommend.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"recommend","gc.recommended_formula":"mol-old"}}]'
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
     --takeaway "needs a ruling: which default" --visit tk-visit1
-eq "$RC" "0" "(RECO) a Discuss-only retry over a partial recommendation succeeds"
-has "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …and clears the stale recommendation the prior ruling left"
-hasnt "gc.recommended_formula=" "$LOG" "(RECO) …stamping no new one, so the record states the current ruling"
+eq "$RC" "0" "(RECO) a ruling retry over a partial recommendation succeeds"
+has "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …and clears the stale recommendation the prior recommend left"
+hasnt "gc.recommended_formula=" "$LOG" "(RECO) …stamping no new one, so the record states the current disposition"
 
-# The same partial record retried with a different recommendation replaces the
-# stale formula rather than clearing it — the record always states the current
-# one, whichever direction it moves.
-run tk-sub --disposition ruling --reason "the newer mol is the right execution" \
+# The same partial record retried as a recommend with a different formula replaces
+# the stale one rather than clearing it — the record always states the current
+# recommendation, whichever direction it moves.
+run tk-sub --disposition recommend --reason "the newer mol is the right execution" \
     --takeaway "recommend: execute via mol-new — Accept or Discuss" \
     --visit tk-visit1 --recommended-formula mol-new
 eq "$RC" "0" "(RECO) a retry that re-recommends succeeds"
 has "gc.recommended_formula=mol-new" "$LOG" "(RECO) …and the record carries the new recommendation"
-hasnt "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …with no stale-clear, because the ruling names one"
+hasnt "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …with no stale-clear, because the recommend names one"
 unset FAKE_SHOW_JSON
 
 # ── The recommendation must land before the act (read-back guard) ─────────────
@@ -468,7 +491,7 @@ export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
 # A set that silently drops and never recovers: the act is withheld, so nothing
 # files a recommendation visit the operator could only Discuss.
 export FAKE_DROP_RECO=1
-run tk-sub --disposition ruling --reason "operator authority" \
+run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-x — Accept or Discuss" \
     --visit tk-visit1 --recommended-formula mol-x
 eq "$RC" "4" "(RECOGUARD) a silently dropped recommendation set refuses the exit"
@@ -478,7 +501,7 @@ unset FAKE_DROP_RECO
 
 # The same drop, but the lone retry lands it: the act proceeds.
 export FAKE_DROP_RECO=once
-run tk-sub --disposition ruling --reason "operator authority" \
+run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-x — Accept or Discuss" \
     --visit tk-visit1 --recommended-formula mol-x
 eq "$RC" "0" "(RECOGUARD) a set that lands on the retry lets the act proceed"
@@ -487,7 +510,7 @@ unset FAKE_DROP_RECO
 
 # A stale-clear that silently drops and never recovers: the act is withheld, so a
 # Discuss-only retry never leaves a superseded Accept executable.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"ruling","gc.recommended_formula":"mol-old"}}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"recommend","gc.recommended_formula":"mol-old"}}]'
 export FAKE_DROP_RECO=1
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
     --takeaway "needs a ruling: which default" --visit tk-visit1
@@ -503,7 +526,7 @@ unset FAKE_DROP_RECO FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests 
 # unreadable read (want empty) would leave a superseded Accept executable. This
 # is distinct from the dropped-write case above: the write is not modelled as
 # dropped, the subject simply cannot be read back to prove it moved.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"ruling","gc.recommended_formula":"mol-old"}}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"recommend","gc.recommended_formula":"mol-old"}}]'
 export FAKE_SHOW_UNREADABLE_AFTER_UPDATE=1
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
     --takeaway "needs a ruling: which default" --visit tk-visit1
@@ -512,8 +535,9 @@ hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so a stale Accept canno
 has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the key it could not prove cleared"
 unset FAKE_SHOW_UNREADABLE_AFTER_UPDATE FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON for later ruling tests
 
-# --recommended-formula belongs to the ruling exit only: the other three route,
-# hold, or close the bead, none gates a visit the operator Accepts.
+# --recommended-formula belongs to the recommend exit only: actionable, blocked,
+# and close route, hold, or close the bead, and none gates a visit the operator
+# Accepts — so each refuses the flag (ruling's refusal is tested above).
 run tk-sub --disposition actionable --reason "r" --takeaway "t" \
     --route gc-toolkit/gc-toolkit.polecat --recommended-formula mol-x
 eq "$RC" "2" "(RECO) actionable refuses --recommended-formula"
@@ -742,5 +766,5 @@ hasnt "disposed as actionable" "$OUT" "(HELMFAIL) …and nothing reports a dispo
 unset FAKE_HELM_FAILS
 
 echo ""
-echo "first-reaction-dispose (four exits, one record): $PASS passed, $FAIL failed"
+echo "first-reaction-dispose (five exits, one record): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

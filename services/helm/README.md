@@ -488,7 +488,7 @@ field would be lying on a normal day.
 
 | field | values | read from |
 |---|---|---|
-| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `unknown` | `pr.machine` on the anchor |
+| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `unknown` (see below) | — |
 | `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
@@ -525,6 +525,13 @@ it, so once no fix unit, review, or finding is in flight the merge pass records
 `settled` and the row is the operator's to clear by re-reviewing (`pr_approval`
 reads `required`, and `needs` names the re-review). A veto with a fix unit still
 in flight reads `progressing` and stays the city's move.
+
+**Blocked, not settled.** `blocked` is a hold no automated actor will clear and
+no review verdict is owed on — an unresolved required review thread, a base gone
+BEHIND, or an unrouted blocker no pool will reap. The operator is owed the row,
+and its specific cause is spelled out in `needs` as `blocked: <reason>`, read
+from `pr.machine_reason`. It is distinct from `settled`, which is the merge
+cadence's ordinary wait on a review or the merge pass.
 
 **Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
 for the `codex` gate is owed once it has held past three days

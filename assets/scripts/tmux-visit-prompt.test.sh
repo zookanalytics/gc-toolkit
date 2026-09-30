@@ -345,6 +345,10 @@ run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     # Drafts are durable by design now, so the test must own the directory or
     # a run would write into the operator's real XDG state.
     export GC_VISIT_DRAFT_DIR="${DRAFT_DIR_OVERRIDE:-$TMP/drafts}"
+    # The rig cache is OFF by default so each case fetches the FAKE_RIGS_JSON it
+    # set — a shared cache would serve one case's rigs to the next. The dedicated
+    # CACHE case sets RIG_CACHE_TTL_OVERRIDE to exercise the cache path.
+    export GC_VISIT_RIG_CACHE_TTL="${RIG_CACHE_TTL_OVERRIDE:-0}"
     : > "$CALLS"; : > "$TMUX_CALLS"; : > "$GUM_CALLS"
     # The stubs are prepended for THIS call only: the live half below needs the
     # real tmux and the real gum, and a global override would hand it the stubs.
@@ -401,9 +405,9 @@ eq "$(grep -c '=== call ===' < "$TMP/calls.log")" "1" "MULTILINE: it arrives as 
 CHOOSER_RIGS='[{"name":"gc-toolkit","prefix":"tk","suspended":false,"running":true},
                {"name":"gascity","prefix":"gc","suspended":true,"running":true},
                {"name":"signal-loom","prefix":"sl","suspended":false,"running":true}]'
-# The cancel case below keeps a draft on purpose; isolate these cases in their
-# own draft dir so that kept draft does not inflate the DRAFTOK/CANCEL counts of
-# the shared $TMP/drafts further down.
+# Isolate the chooser cases in their own draft dir so their draft bookkeeping
+# cannot inflate the DRAFTOK/CANCEL counts of the shared $TMP/drafts further
+# down.
 export DRAFT_DIR_OVERRIDE="$TMP/chooser-drafts"
 
 # Default: the board-context rig (from the <rig>__<agent> session) leads the
@@ -454,13 +458,19 @@ has "$ccalls" "argv=[gascity]" "CHOOSERSUSP: the intake receives the bare rig na
 hasnt "$ccalls" "argv=[gascity (suspended)]" "CHOOSERSUSP: the display tag never reaches the intake"
 unset FAKE_CHOSEN_RIG
 
-# Cancel at the picker keeps the draft (the message is already typed) and files
-# nothing — the same contract as a cancel at the message popup.
+# Cancel at the picker — now the FIRST popup — cancels the whole press: nothing
+# is typed yet, so nothing is filed, no draft is left, and the message popup
+# never opens. (Cancelling the message popup after a rig is picked keeps a draft;
+# that is the message-popup cancel contract, covered by CANCEL/CANCELPTY below.)
 export FAKE_CHOOSE_RC=1
 run_handler "$CFG_OK" "a report abandoned at rig selection"
-ccalls=$(cat "$TMP/calls.log"); ctmux=$(cat "$TMP/tmux.log")
+ccalls=$(cat "$TMP/calls.log"); ctmux=$(cat "$TMP/tmux.log"); cgum=$(cat "$TMP/gum.log")
 eq "$ccalls" "" "CHOOSER: a cancelled picker files nothing"
-has "$ctmux" "DRAFT KEPT" "CHOOSER: ...and the typed message is kept as a draft"
+has "$ctmux" "cancelled at rig selection" "CHOOSER: ...and says the press was cancelled"
+hasnt "$ctmux" "DRAFT KEPT" "CHOOSER: ...with no draft kept, because nothing was typed yet"
+hasnt "$cgum" "gum write" "CHOOSER: ...and the message popup never opens"
+eq "$(find "$TMP/chooser-drafts" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
+   "CHOOSER: ...and no draft file is left behind"
 unset FAKE_CHOOSE_RC
 unset FAKE_RIGS_JSON FAKE_FORMAT
 
@@ -474,10 +484,11 @@ hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...and forwards no --rig, leaving the i
 has "$ccalls" "argv=[a report with no chooser]" "CHOOSER: the report is still filed"
 
 # A WEDGED `gc rig list` must degrade to that same no-chooser path, not hang. The
-# enumeration runs in the foreground before the message is filed and outside the
-# intake timeout, so an unbounded hang strands the operator at a chooser-less
-# prompt with the report already typed. FAKE_RIGS_JSON is set, so a picker WOULD
-# appear if the call returned — the bound is the only reason it does not.
+# enumeration runs in the foreground and outside the intake timeout, and now runs
+# before the message popup even opens, so an unbounded hang would strand the
+# operator with nothing on screen at all. FAKE_RIGS_JSON is set, so a picker
+# WOULD appear if the call returned — the bound is the only reason it does not,
+# and the press falls through to the message popup and the intake default.
 if command -v timeout >/dev/null 2>&1; then
     export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1" FAKE_RIG_LIST_SLEEP=60
     GC_VISIT_INTAKE_TIMEOUT=1 run_handler "$CFG_OK" "a report while rig list is wedged"
@@ -492,26 +503,28 @@ fi
 
 # A bead id typed at prefix+a is an existing-bead request, not a new report.
 # gc-visit-open.sh resolves it against the bead's own rig and REFUSES --rig for
-# it (exit 2), so the chooser must be WITHHELD — otherwise a bead id filed
-# through this key fails whenever the city has live rigs. `tk` is gc-toolkit's
-# prefix in CHOOSER_RIGS; `gc` is suspended gascity's, and a suspended rig's ids
-# are still beads — the gate reads every rig, not just the live ones offered.
-# argv is the right assertion: `${CHOSEN_RIG:+--rig …}` passes neither the flag
-# nor a value when the chooser is withheld, which is exactly what the intake
-# accepts for a bead id.
+# it (exit 2), so a rig must not reach the intake for one — otherwise a bead id
+# filed through this key fails whenever the city has live rigs. With the rig
+# chosen BEFORE the message, the picker cannot know the text is a bead id, so it
+# is shown; but once the bead id is typed, the chosen rig is DROPPED, and the
+# intake receives the id with no --rig, which is exactly what it accepts. `tk` is
+# gc-toolkit's prefix in CHOOSER_RIGS; `gc` is suspended gascity's, and a
+# suspended rig's ids are still beads — the gate reads every rig, not just the
+# live ones offered. argv is the right assertion: `${CHOSEN_RIG:+--rig …}` passes
+# neither the flag nor a value once the chosen rig is dropped.
 export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
 for beadid in tk-abc12 gc-9f8e7; do
     run_handler "$CFG_OK" "$beadid"
     ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
-    hasnt "$cgum" "gum choose" "CHOOSER: a bead id ($beadid) shows no rig picker"
-    hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...and forwards no --rig, so the intake resolves the bead's own rig"
+    has "$cgum" "gum choose" "CHOOSER: the picker is shown ($beadid is not yet known to be a bead id when the rig is chosen)"
+    hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...but a bead id drops the chosen rig, so the intake resolves the bead's own rig"
     has "$ccalls" "argv=[$beadid]" "CHOOSER: ...and the bead id still reaches the intake behind --"
 done
 
 # An id-SHAPED topic whose prefix names no rig is a new topic, not a bead: the
-# picker still runs and --rig is still forwarded, so a terse hyphenated report
-# ("ci-flaky") keeps rig selection — the picker is withheld for beads, not for
-# every hyphenated string.
+# chosen rig is FORWARDED, not dropped, so a terse hyphenated report ("ci-flaky")
+# keeps its rig selection — the rig is dropped for bead ids, not for every
+# hyphenated string.
 run_handler "$CFG_OK" "ci-flaky-again"
 ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
 has "$cgum" "gum choose" "CHOOSER: an id-shaped topic with no matching rig prefix still shows the picker"
@@ -533,14 +546,36 @@ has "$cgum" "gum choose" "CHOOSERHQ: the picker is shown for a topic"
 hasnt "$cgum" "loomington" "CHOOSERHQ: the hq/city-workspace rig is withheld from the picker"
 has "$cgum" "gc-toolkit" "CHOOSERHQ: ...while non-hq rigs are still offered"
 has "$ccalls" "argv=[--rig]" "CHOOSERHQ: ...and a non-hq rig is forwarded"
-# An hq-store bead id is still a bead ref: the chooser is withheld (the bead's
-# own rig is authoritative) and the id reaches the intake, so excluding the hq
-# store from the picker never strands an existing hq-store subject.
+# An hq-store bead id is still a bead ref: its prefix (lx) names the hq rig, and
+# the gate reads every rig including hq, so the chosen rig is dropped (the bead's
+# own rig is authoritative) and the id reaches the intake. Excluding the hq store
+# from the PICKER never strands an existing hq-store subject.
 run_handler "$CFG_OK" "lx-abc12"
 cgum=$(cat "$TMP/gum.log"); ccalls=$(cat "$TMP/calls.log")
-hasnt "$cgum" "gum choose" "CHOOSERHQ: an hq-store bead id shows no picker"
+hasnt "$ccalls" "argv=[--rig]" "CHOOSERHQ: an hq-store bead id drops the chosen rig (its own rig is authoritative)"
 has "$ccalls" "argv=[lx-abc12]" "CHOOSERHQ: ...and the hq-store bead id still reaches the intake"
 unset FAKE_RIGS_JSON FAKE_FORMAT
+
+# (CACHE) The rig set is cached so a burst of presses opens the picker without
+# re-paying the per-rig liveness probe `gc rig list --json` costs — the whole
+# point of picking the rig first without a wait each time. Prime the cache with a
+# live list, then press again with the live list now EMPTY: a cache hit still
+# offers the primed rigs, which an un-cached press (which would see the empty
+# list) could not. Its own draft dir isolates the cache file from every other
+# case, which run with the cache OFF.
+export RIG_CACHE_TTL_OVERRIDE=3600
+export DRAFT_DIR_OVERRIDE="$TMP/cache-drafts"
+export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
+run_handler "$CFG_OK" "prime the rig cache"
+has "$(cat "$TMP/gum.log")" "gum choose" "CACHE: the first press fetches the rig set and shows the picker"
+export FAKE_RIGS_JSON=""
+run_handler "$CFG_OK" "served from the rig cache"
+ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
+has "$cgum" "gum choose" "CACHE: a second press within the TTL shows the picker from cache, though the live list is now empty"
+has "$ccalls" "argv=[--rig]" "CACHE: ...and still forwards a rig from the cached set"
+unset FAKE_RIGS_JSON FAKE_FORMAT RIG_CACHE_TTL_OVERRIDE
+rm -rf "$TMP/cache-drafts"
+export DRAFT_DIR_OVERRIDE="$TMP/chooser-drafts"
 
 unset DRAFT_DIR_OVERRIDE
 
