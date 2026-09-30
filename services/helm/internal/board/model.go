@@ -231,6 +231,18 @@ type Tile struct {
 	// never stranded — the conversation IS the attention it would be flagged
 	// for lacking.
 	Held bool `json:"held"`
+	// VisitState refines Held into the visit's engagement: VisitEngaged when a
+	// live sitting is in the conversation right now, VisitParked when the visit
+	// stands open and un-engaged — filed and waiting for a person to pick it up.
+	// Empty on a row no open visit holds (Held is false), the same
+	// not-applicable empty a closed row's Phase carries.
+	//
+	// It reads the same [unengagedVisit] rule Acceptable does, so the two never
+	// disagree: a parked visit is the one Accept is offered on, an engaged one
+	// suppresses it. It is derived here rather than in the browser because the
+	// rule reads the visit's assignee — the pending-engagement window — which
+	// [Sitting.Assignee] deliberately keeps off the wire.
+	VisitState string `json:"visit_state"`
 
 	NClosed int `json:"n_closed"`
 	MTotal  int `json:"m_total"`
