@@ -73,8 +73,7 @@ The resolution is to keep the second and remove its blind spot by **pinning the
 city-level scenario inside the renderer**: the throwaway city declares the same
 `[agent_defaults]`, the same providers, and two rig shapes matching the two that
 exist in loomington. The scenario is repo content, so it is reviewed and diffed
-like anything else, and the artifact stays a pure function of the repo plus the
-`gc` version.
+like anything else, and the artifact stays a pure function of the repo.
 
 Three mechanical requirements follow, and all are load-bearing:
 
@@ -272,10 +271,12 @@ sha256 over every input file, and the check recomputes it by hashing (~0.5 s)
 rather than rendering (~15-25 s), which is what makes it affordable on every
 `gc doctor`. `--check` remains the authoritative full re-render.
 
-The `gc` version is recorded on its own `INDEX.md` line rather than folded into
-the digest. Prompt composition lives in the binary, so an upgrade can move the
-artifact with no commit here — an error there would be the tier-2 trap. Version
-drift is a warning that says re-render; content drift is an error.
+The `gc` version is deliberately not recorded: it is not a function of the repo,
+so stamping it into the per-branch artifact drifts with the host binary and drags
+host state into unrelated commits. Prompt composition lives in the binary, so an
+upgrade can still move the artifact with no commit here to explain it; the commit
+that renders the artifact is the record of which `gc` built it. Content drift is
+the error the check catches.
 
 ## Cost — measured
 
