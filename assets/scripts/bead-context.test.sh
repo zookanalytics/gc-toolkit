@@ -106,6 +106,18 @@ bead "$R_TK" tk-hg <<'J'
 {"id":"tk-hg","title":"human-gated blocker","status":"open","issue_type":"task",
  "metadata":{"gc.routed_to":"human"}}
 J
+# tk-inreview: held by a review bead the review cadence dispatched. The review
+# bead's live route is CLEARED by the pour (gc.routed_to="") and its status is not
+# in_progress, so it looks like an unrouted stuck blocker — but it is machine work
+# the pool owns, so its advance is advancing, not stuck (tk-ikpyzn.5).
+bead "$R_TK" tk-inreview <<'J'
+{"id":"tk-inreview","title":"held by a review in flight","status":"open","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-rev","dependency_type":"blocks","status":"open","title":"review branch -> main"}]}
+J
+bead "$R_TK" tk-rev <<'J'
+{"id":"tk-rev","title":"review branch -> main","status":"open","issue_type":"task",
+ "metadata":{"task_kind":"review","anchor_bead":"tk-inreview","gc.routed_to":"","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex"}}
+J
 # tk-failclosed: a blocks dep whose store no rig carries and which bd could not
 # embed a status for — unknown must fail closed to stuck, never read as landed.
 bead "$R_TK" tk-failclosed <<'J'
@@ -115,9 +127,12 @@ J
 
 # tk-epic: the horizon fixture. Its direct children (found by the reverse
 # parent-child listing, never its own edges) cover every advance state: an open
-# pool-routed and an in-progress child advance; an open unrouted (tk-anchor) and
-# an open human-gated child are stuck; one done child is counted, never listed.
-# The epic's own blocks are none, so its frontier verdict is ready.
+# pool-routed and an in-progress child advance, as does tk-anchor — a rework bead
+# whose pour cleared its route, machine work rather than a human gate (tk-ikpyzn.5);
+# an open human-gated child is stuck; one done child is counted, never listed.
+# The epic's own blocks are none, so its frontier verdict is ready. The plain
+# unrouted-stuck case is covered by tk-stuck in the frontier section above, off the
+# same shared enum.
 bead "$R_TK" tk-epic <<'J'
 {"id":"tk-epic","title":"the epic","status":"open","issue_type":"epic","priority":2,
  "metadata":{},
@@ -322,6 +337,9 @@ JQF='.frontier.open[0].advance'  runj tk-adv --frontier; eq "$JQ" advancing "  .
 JQF='.frontier.verdict'          runj tk-humangate --frontier; eq "$JQ" stuck "a blocker routed to the human gate is stuck, not advancing"
 JQF='.frontier.open[0].advance'  runj tk-humangate --frontier; eq "$JQ" stuck "  ... advance=stuck for a human-routed blocker"
 
+JQF='.frontier.open[0].advance'  runj tk-inreview --frontier; eq "$JQ" advancing "a review bead with a pour-cleared route is machine work, so advancing not stuck"
+JQF='.frontier.verdict'          runj tk-inreview --frontier; eq "$JQ" advancing "  ... so a subject held only by a review in flight is advancing, not stuck"
+
 JQF='.frontier.open[0].advance'  runj tk-failclosed --frontier; eq "$JQ" stuck "an unplaceable blocker is unknown, so stuck (fail closed)"
 JQF='.frontier.blockers.open'    runj tk-failclosed --frontier; eq "$JQ" 1     "  ... counted as an open blocker"
 JQF='.frontier.verdict'          runj tk-failclosed --frontier; eq "$JQ" stuck "  ... so the verdict fails closed"
@@ -331,8 +349,8 @@ JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "ho
 JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 5 "every direct child is counted, closed included"
 JQF='.horizon.children.open'         runj tk-epic --horizon;  eq "$JQ" 4 "  ... four are open"
 JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the tool asked for closed explicitly)"
-JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 2 "  ... pool-routed and in-progress children advance"
-JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 2 "  ... unrouted and human-gated children are stuck"
+JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 3 "  ... pool-routed, in-progress, and a pour-cleared rework child advance"
+JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 1 "  ... the human-gated child is stuck"
 JQF='.horizon.open | length'         runj tk-epic --horizon;  eq "$JQ" 4 "open children are listed; the done one is not"
 JQF='[.horizon.open[].id] | index("tk-kid-done")' runj tk-epic --horizon; eq "$JQ" null "the done child is never in the open list"
 JQF='[.horizon.open[]|select(.id=="tk-kid-pool")][0].advance' runj tk-epic --horizon; eq "$JQ" advancing "a pool-routed open child advances"

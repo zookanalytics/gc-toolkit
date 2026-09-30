@@ -3068,3 +3068,124 @@ func TestCappedAnchorBlockerIsADemandToday(t *testing.T) {
 		t.Error("a pool-routed blocker of the same shape is the city's move, not the operator's")
 	}
 }
+
+// TestHumanGatedWithLiveMoleculeIsActive covers tk-ikpyzn.5's core: a human-gated
+// row — a bead routed to the operator, or a decision — that the city is actively
+// working reads as in-flight, not an operator gate. Liveness falsifies "no agent
+// will take this until a human moves it": an agent has. It is the un-ruled twin of
+// TestRuledInFlightIsInProgress and mirrors TestParkedWithLiveMoleculeIsActive —
+// one shape wired three ways, so the signal that flips the band is proven to be
+// LIVE execution over the bead itself and nothing else.
+func TestHumanGatedWithLiveMoleculeIsActive(t *testing.T) {
+	human := func(id string) Anchor {
+		return Anchor{ID: id, Title: "routed to the operator", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata: map[string]string{"gc.routed_to": "human"}}
+	}
+	f := Facts{
+		// tk-live: a molecule whose session is up. tk-drained: the same wiring, but
+		// the session has gone — wfLive must stop counting it at once.
+		Inflight: map[string][]string{
+			"tk-live":    {"gc-toolkit__polecat-lx-live"},
+			"tk-drained": {"gc-toolkit__polecat-lx-gone"},
+		},
+		OwnerState: map[string]string{"gc-toolkit__polecat-lx-live": "active"},
+	}
+	b := BuildBoard([]Anchor{human("tk-live"), human("tk-drained"), human("tk-none"),
+		{ID: "tk-dec", Title: "a call to make", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)}},
+		fixtureNow, false, nil, f)
+
+	live := mustTile(t, b, "tk-live")
+	if live.Severity != SevNormal {
+		t.Errorf("a human-gated bead with a live molecule is in-flight work, not an ELEVATED gate: got %s", live.Severity)
+	}
+	if live.Section != SectionActive {
+		t.Errorf("…so it bands active, not gate: got %s", live.Section)
+	}
+	if live.Owed {
+		t.Error("…and an agent holds the next move, so it is not the operator's to answer")
+	}
+	if live.Frontier != "working · human-gated — work in flight" {
+		t.Errorf("frontier: %q", live.Frontier)
+	}
+	if live.Needs != "in flight" {
+		t.Errorf("needs names the live state, not the un-ruled gate: %q", live.Needs)
+	}
+
+	// The discriminator: identical wiring, dead session. The gate stands back up.
+	drained := mustTile(t, b, "tk-drained")
+	if drained.Severity != SevElevated || drained.Section != SectionGate || !drained.Owed {
+		t.Errorf("a drained molecule returns the human gate: %s / %s / owed=%v", drained.Severity, drained.Section, drained.Owed)
+	}
+	if drained.Frontier != "needs-review · routed to the operator — no agent will take it" {
+		t.Errorf("drained frontier: %q", drained.Frontier)
+	}
+
+	// No workflow at all — the ordinary human gate is untouched (TestUnruledHumanGatedRowsAreUnchanged).
+	none := mustTile(t, b, "tk-none")
+	if none.Severity != SevElevated || !none.Owed {
+		t.Errorf("a human gate with no molecule is unchanged: %s / owed=%v", none.Severity, none.Owed)
+	}
+	// And the decision kind is gated the same way when un-worked.
+	dec := mustTile(t, b, "tk-dec")
+	if dec.Severity != SevElevated || dec.Frontier != "needs-review · human-gated decision" || !dec.Owed {
+		t.Errorf("an un-worked decision keeps its gate: %s / %q / owed=%v", dec.Severity, dec.Frontier, dec.Owed)
+	}
+}
+
+// TestDemandFoldYieldsToLiveWork covers the 2026-09-27 epic evidence: a demand
+// folded onto a subject the city is actively working must not mark it owed. The
+// live signal is the subject's own roll-up (a live child), which the demand fold
+// reads to decide whether an agent is on the subject — not child-to-parent state
+// aggregation (tk-ikpyzn.6). The demand's ask re-surfaces on its own when the work
+// drains, because the fold is re-derived every render.
+func TestDemandFoldYieldsToLiveWork(t *testing.T) {
+	anchors := []Anchor{
+		// A subject the city is working: its child is covered by a live molecule.
+		{ID: "tk-live", Title: "worked epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+			Priority: ptr(3), UpdatedAt: fixtureNow, Children: []Child{{ID: "tk-klive", Status: "open"}}},
+		{ID: "tk-dem-live", Title: "demand: coord open", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Priority: ptr(2), UpdatedAt: fixtureNow,
+			Metadata: map[string]string{"gc.demand_for": "tk-live", "gc.routed_to": "human"},
+			Takeaway: "coord open; nothing owed"},
+		// The discriminator: the same shape with an IDLE child. The demand owes.
+		{ID: "tk-idle", Title: "stalled epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+			Priority: ptr(3), UpdatedAt: fixtureNow, Children: []Child{{ID: "tk-kidle", Status: "open"}}},
+		{ID: "tk-dem-idle", Title: "demand: decide", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Priority: ptr(2), UpdatedAt: fixtureNow,
+			Metadata: map[string]string{"gc.demand_for": "tk-idle", "gc.routed_to": "human"},
+			Takeaway: "decide the layout"},
+	}
+	f := Facts{
+		Inflight:   map[string][]string{"tk-klive": {"gc-toolkit__polecat-lx-live"}},
+		OwnerState: map[string]string{"gc-toolkit__polecat-lx-live": "active"},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, f)
+
+	live := mustTile(t, b, "tk-live")
+	if live.Owed {
+		t.Error("a demand whose subject the city is working must not mark it owed")
+	}
+	if live.Section != SectionActive {
+		t.Errorf("…so the subject bands active, not gate: got %s", live.Section)
+	}
+	if live.Needs != "in flight" {
+		t.Errorf("…and it keeps its own in-flight needs, not the demand's ask: %q", live.Needs)
+	}
+	// The wrapper is folded away regardless — one attention item is one row.
+	if _, ok := tileByID(b, "tk-dem-live"); ok {
+		t.Error("the folded demand wrapper is dropped")
+	}
+
+	idle := mustTile(t, b, "tk-idle")
+	if !idle.Owed {
+		t.Error("a demand whose subject has no live work owes the operator")
+	}
+	if idle.Section != SectionGate {
+		t.Errorf("…so the subject bands gate: got %s", idle.Section)
+	}
+	if idle.Needs != "decide the layout" {
+		t.Errorf("the demand's ask becomes the subject's needs: %q", idle.Needs)
+	}
+}
