@@ -2,10 +2,13 @@
 # Hermetic test for doctor/check-hq-marooned-work. Stub gc/bd only; no city,
 # no network. Covers: a marooned bug and a pool-routed task are flagged; every
 # legitimate HQ resident is exempt (infra type, human route, task_kind=visit,
-# deacon-ledger label, debt label, gc-doctor title, an assigned bead); a mix
-# names only the marooned beads; an empty store passes; and the fail-closed
-# arms — no locatable city, an unreadable store (with its stderr surfaced),
-# and the GC_CITY_PATH fallback when `gc agent list` cannot answer.
+# deacon-ledger label, debt label, gc-doctor title, an assigned bead, a bead
+# routed to a city-scoped agent, a warrant label, a standing subject); the
+# city-route exemption keys off the agent's scope not its name; a warrant is
+# still exempt when the agent list is down; a mix names only the marooned beads;
+# an empty store passes; and the fail-closed arms — no locatable city, an
+# unreadable store (with its stderr surfaced), and the GC_CITY_PATH fallback
+# when `gc agent list` cannot answer.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -21,7 +24,7 @@ CITY="$TMP/testcity"
 mkdir -p "$TMP/bin" "$TMP/stores" "$CITY"
 
 cat > "$TMP/agents.json" <<EOF
-{"city_path":"$CITY","agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}
+{"city_path":"$CITY","agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat","scope":"rig"},{"qualified_name":"gc-toolkit.dog","scope":"city"}]}
 EOF
 printf '{"city_path":"","agents":[]}' > "$TMP/agents-nocity.json"
 
@@ -66,6 +69,12 @@ B_LEDGER='{"id":"ok-ledger","status":"open","issue_type":"task","title":"deacon 
 B_DEBT='{"id":"ok-debt","status":"open","issue_type":"task","title":"gc doctor: 2 new findings (dolt-drift)","labels":["debt"]}'
 B_DOCTOR='{"id":"ok-doctor","status":"open","issue_type":"task","title":"gc doctor: agent-token-telemetry"}'
 B_ASSIGNED='{"id":"ok-assigned","status":"open","issue_type":"bug","title":"already being worked","assignee":"gc-toolkit/gc-toolkit.polecat"}'
+B_WARRANT='{"id":"ok-warrant","status":"open","issue_type":"task","title":"warrant: shut down lx-x","labels":["warrant"],"metadata":{"gc.routed_to":"gc-toolkit.dog"}}'
+B_DOGROUTE='{"id":"ok-dogroute","status":"open","issue_type":"task","title":"city task the dog claims","metadata":{"gc.routed_to":"gc-toolkit.dog"}}'
+B_DOGQUAL='{"id":"ok-dogqual","status":"open","issue_type":"task","title":"city task routed at the qualified form","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.dog"}}'
+B_WARRANT_UNROUTED='{"id":"ok-warrant-unrouted","status":"open","issue_type":"task","title":"warrant with its route cleared","labels":["warrant"]}'
+B_TRIAGE='{"id":"ok-triage","status":"open","issue_type":"task","title":"triage: escalations raised from an ephemeral subject (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"ephemeral-subject-findings"}}'
+B_FEEDBACK='{"id":"ok-feedback","status":"open","issue_type":"task","title":"feedback pattern host","metadata":{"task_kind":"feedback-pattern"}}'
 
 # --- 1. a marooned bug is flagged -------------------------------------------
 store "$B_BUG"
@@ -133,6 +142,39 @@ has "$OUT" "NOT checked" "the warning says the store was skipped, not clean"
 OUT=$(BD_FAIL_STORE=testcity BD_ERR="dolt: relation \"issues\" does not exist" run_check); RC=$?
 eq "$RC" "1" "an unreadable HQ store still warns"
 has "$OUT" "does not exist" "the store-skip warning carries \`gc bd list\` stderr"
+
+# --- 9. city machinery and standing subjects are exempt; a real marooned bead
+#        among them is still caught -----------------------------------------
+store "$B_WARRANT" "$B_DOGROUTE" "$B_DOGQUAL" "$B_WARRANT_UNROUTED" "$B_TRIAGE" "$B_FEEDBACK" "$B_BUG"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a real marooned bug among city machinery is still an ERROR"
+has "$OUT" "1 finding" "only the marooned bug is a finding"
+has "$OUT" "m-bug" "the marooned bug is named"
+hasnt "$OUT" "ok-warrant" "a warrant routed to the city dog is not flagged"
+hasnt "$OUT" "ok-dogroute" "a task routed to the city dog (bare identity) is not flagged"
+hasnt "$OUT" "ok-dogqual" "a task routed to the dog at the qualified form is not flagged"
+hasnt "$OUT" "ok-warrant-unrouted" "a warrant with no route is exempt by its label"
+hasnt "$OUT" "ok-triage" "a standing triage-subject is not flagged"
+hasnt "$OUT" "ok-feedback" "a standing feedback-pattern is not flagged"
+
+# --- 10. the city-route exemption keys off scope, not the name 'dog' ---------
+# With the dog marked rig-scoped, its pool cannot read the HQ store, so a bead
+# routed to it and sitting here IS unreachable and must still be flagged.
+cat > "$TMP/agents-dogrig.json" <<EOF
+{"city_path":"$CITY","agents":[{"qualified_name":"gc-toolkit.dog","scope":"rig"}]}
+EOF
+store "$B_DOGROUTE"
+OUT=$(AGENTS_JSON="$TMP/agents-dogrig.json" run_check); RC=$?
+eq "$RC" "2" "a task routed to a NON-city-scoped dog is still marooned"
+has "$OUT" "ok-dogroute" "the exemption is scope-driven, not a hardcoded 'dog' name"
+
+# --- 11. with the agent list down, the warrant label still exempts -----------
+# CITY_ROUTES cannot resolve without the roster, but a warrant is city machinery
+# a rig never works regardless of route resolution.
+store "$B_WARRANT_UNROUTED"
+OUT=$(AGENTS_RC=1 WANT_CITY_PATH="$CITY" run_check); RC=$?
+eq "$RC" "0" "a warrant is exempt by label even when the agent list is unreadable"
+has "$OUT" "OK:" "the roster-down warrant store reports the OK line"
 
 echo
 echo "check-hq-marooned-work: $PASS passed, $FAIL failed"

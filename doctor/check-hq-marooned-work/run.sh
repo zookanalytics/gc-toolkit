@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # doctor/check-hq-marooned-work — no rig-workable bead sits unclaimed in the HQ
-# (city / lx) store. A city-scoped role (deacon, mechanik, mayor, dog) runs with
-# GC_RIG unset, so a bare `bd create` resolves to the HQ store instead of a rig
-# store. No pool reads the HQ store, so a work bead filed there is marooned by
-# construction — unclaimable, invisible to every rig queue, and surfaced by
-# nothing. This check reads the HQ store and flags each rig-workable bead in it.
+# (city / lx) store where no worker will reach it. A city-scoped role (deacon,
+# mechanik, dog) runs with GC_RIG unset, so a bare `bd create` resolves to the
+# HQ store instead of a rig store. Rig pools never read the HQ store, so rig work
+# filed there is marooned by construction: invisible to every rig queue, surfaced
+# by nothing. A city-scoped pool DOES read the HQ store, so a bead routed to one
+# (a warrant to the dog) is reachable and belongs there. This check reads the HQ
+# store and flags each rig-workable bead that no worker is positioned to claim.
 #
 # Rig-workable = an OPEN, UNASSIGNED bead whose issue_type is not an infra type
-# (session/message/molecule/chore/rig/agent/role/gate/merge-request) and which is
-# either unrouted or routed to a pool. The exclusions carve out the legitimate
-# HQ residents: a bead routed to `human` or carrying task_kind=visit is an
-# operator-queue decision; a `deacon-ledger` label is a daily digest; a `debt`
-# label or a `gc doctor:` title is a doctor/tech-debt advisory record. An
-# assigned bead is already claimed, not marooned. What remains is work no rig
-# worker can reach.
+# (session/message/molecule/chore/rig/agent/role/gate/merge-request), which is
+# neither city machinery nor held-by-design, and which is unrouted or routed to a
+# rig pool that cannot see it. The exclusions carve out the legitimate HQ
+# residents: a bead routed to a city-scoped agent (resolved from `gc agent list`)
+# is reachable there; a `warrant` label marks city machinery a rig never works; a
+# standing subject (task_kind=triage-subject or feedback-pattern) is a
+# held-by-design escalation host, not work; a `human` route or a task_kind=visit
+# is an operator-queue decision; a `deacon-ledger` label is a daily digest; a
+# `debt` label or a `gc doctor:` title is a doctor/tech-debt advisory record. An
+# assigned bead is already claimed. What remains is rig work no worker can reach.
 #
 # The HQ store is $city_path/.beads, where city_path is `gc agent list`'s
 # resolution (GC_CITY_PATH is the fallback). Read-only. Exit 0=OK 1=Warning
@@ -28,6 +33,11 @@ city="${GC_CITY_PATH:-${GC_CITY:-}}"
 # machinery rather than rig work. Mirrors beads' ready-work exclusions plus the
 # session type, which `bd list` also surfaces.
 INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate","merge-request"]'
+
+# Standing-subject task_kinds: a held-by-design host for escalation or feedback
+# state, not work anyone claims. Mirrors standing_kinds in
+# assets/scripts/liveness-sweep.sh.
+STANDING_KINDS='["triage-subject","feedback-pattern"]'
 
 findings=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -94,6 +104,13 @@ agents_raw=$(run_bounded gc agent list --json 2>"$PROBE_ERR"); agents_rc=$?; age
 city_path=""
 [ "$agents_rc" -eq 0 ] && city_path=$(printf '%s' "$agents_raw" | scrub | jq -r '.city_path // ""' 2>/dev/null)
 [ -n "$city_path" ] || city_path="$city"
+# City-scoped agents read the HQ store, so a bead routed to one is reachable, not
+# marooned. Resolve their identities from the same agent list (bare, the form a
+# route carries — resolve-route.sh). When the list cannot answer the set is
+# empty, and only the `warrant` label still exempts city machinery.
+CITY_ROUTES='[]'
+[ "$agents_rc" -eq 0 ] && CITY_ROUTES=$(printf '%s' "$agents_raw" | scrub | jq -c '[.agents[]? | select(.scope == "city") | .qualified_name // empty] | unique' 2>/dev/null)
+[ -n "$CITY_ROUTES" ] || CITY_ROUTES='[]'
 if [ -z "$city_path" ]; then
     echo "cannot determine whether the HQ store holds marooned work"
     detail "\`gc agent list --json\` reported no city_path (rc=$agents_rc) and neither GC_CITY_PATH nor GC_CITY is set, so the HQ store cannot be located."
@@ -109,7 +126,7 @@ if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
     detail "could not list open beads in $STORE (rc=$rc) — the HQ store was NOT checked; an unreadable store is not proof it is clean.${list_err:+ \`gc bd list\` stderr: $list_err}"
     exit 1
 fi
-rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" '
+rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" --argjson standing "$STANDING_KINDS" --argjson city_routes "$CITY_ROUTES" '
     .[]? | . as $b
     | (($b.issue_type // "") | tostring) as $t
     | (($b.metadata // {})) as $m
@@ -118,8 +135,12 @@ rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" '
     | (($b.labels // []) | map(tostring)) as $labels
     | (($b.title // "") | tostring) as $title
     | (($b.assignee // "") | tostring) as $as
+    | ($rt | sub("^.*/"; "")) as $rtb                 # bare identity a city route carries (resolve-route.sh)
     | select(($infra | index($t)) == null)            # not HQ machinery (infra type)
     | select($as == "")                               # unassigned — not already claimed
+    | select(($city_routes | index($rtb)) == null)    # not routed to a city-scoped agent that reads the HQ store
+    | select(($labels | index("warrant")) == null)    # not a warrant (city machinery a rig never works)
+    | select(($standing | index($tk)) == null)        # not a held-by-design standing subject
     | select($tk != "visit")                          # not an operator-queue converse visit
     | select($rt != "human")                          # not an operator-queue decision routed to a person
     | select(($labels | index("deacon-ledger")) == null)  # not a daily digest
