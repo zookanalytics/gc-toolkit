@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for doctor/check-demo-toolchain/run.sh. The check probes the
-# host toolchain, so the test controls the host: a restricted PATH
-# ($STUBS:/usr/bin:/bin) excludes the real node, gc, ffmpeg, and jq, and each
+# host toolchain, so the test controls the host: the check runs with a PATH of
+# only a stub dir plus a minimal symlink farm of the coreutils it calls, never
+# /usr/bin, so no host node, gc, ffmpeg, jq, or Chromium is reachable and each
 # case stubs back exactly what it means to be present. env -i keeps an ambient
 # OPENAI_API_KEY or FFMPEG_BIN from leaking in.
 
@@ -22,7 +23,17 @@ STUBS="$TMP/bin"; mkdir -p "$STUBS"
 # jq is a linuxbrew binary, off the minimal PATH; the check needs it only on the
 # ffmpeg-static branch (alongside gc), so symlink the real one in.
 if command -v jq >/dev/null 2>&1; then ln -s "$(command -v jq)" "$STUBS/jq"; fi
-TPATH="$STUBS:/usr/bin:/bin"
+# The check's PATH carries only the stub dir and a symlink farm of the coreutils
+# it calls — never /usr/bin. A host Chromium (google-chrome / chromium-browser)
+# lives in /usr/bin on CI runners, so leaving it on PATH would satisfy the
+# browser probe in the cases that mean "no browser present" and the warning
+# would never fire.
+COREUTILS="$TMP/coreutils"; mkdir -p "$COREUTILS"
+for c in bash sed ls grep head; do
+  p="$(command -v "$c")" || { echo "test setup: required coreutil '$c' not found" >&2; exit 2; }
+  ln -s "$p" "$COREUTILS/$c"
+done
+TPATH="$STUBS:$COREUTILS"
 
 clear_stubs() { rm -f "$STUBS/node" "$STUBS/ffmpeg" "$STUBS/gc" "$STUBS/chromium"; }
 stub_node() { printf '#!/bin/sh\necho v%s\n' "$1" > "$STUBS/node"; chmod +x "$STUBS/node"; }
