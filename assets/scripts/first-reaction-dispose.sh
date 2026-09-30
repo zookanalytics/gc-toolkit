@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # first-reaction-dispose.sh — the disposition a first reaction ends in.
-# mol-first-reaction's terminal step chooses one of four exits from the card
+# mol-first-reaction's terminal step chooses one of five exits from the card
 # it just wrote, and this script performs it. Each exit advances the subject
 # and records what was chosen and why; none of them closes it.
 #
 #   actionable  the bead is work -> release it TO a pool, which is the whole
 #               of "schedule an action for a bead": a routed, unassigned,
 #               open bead is what a pool's find-work offers.
+#   recommend   the action is known but warrants the operator's trigger -> file
+#               a human visit (as ruling does) AND stamp gc.recommended_formula
+#               on the subject, so the board offers Accept — which runs that mol
+#               at the subject — beside Discuss. The bridge between actionable
+#               and ruling: the action is determinable, but authority-gated or
+#               consequential enough to confirm before it runs.
 #   blocked     the bead is waiting -> the wait becomes a `blocks` edge on a
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts.
@@ -16,11 +22,9 @@
 #               from inside a live reaction (--after-workflow), the closer is
 #               deferred until that workflow closes, so it is the bead's sole
 #               dispatch surface rather than a second one stacked on the reaction.
-#   ruling      only the operator can answer -> the visit its caller filed. A
-#               ruling that names a determinable action also passes
-#               --recommended-formula, which stamps gc.recommended_formula on
-#               the subject so the operator can Accept the recommendation from
-#               the visit; a Discuss-only ruling omits it.
+#   ruling      only the operator can answer, and the reaction has no action to
+#               recommend -> the visit its caller filed, Discuss-only. A visit
+#               that carries a determinable action is the recommend exit.
 #
 # The route/edge/visit is the act; gc.first_reaction* is the record of it, and
 # is written FIRST so a disposition that dies half-way is still auditable.
@@ -52,13 +56,15 @@ usage() {
 Usage:
   first-reaction-dispose.sh <bead> --disposition actionable --reason "<why>" --takeaway "<headline>"
                             [--route <rig>/<agent>]
+  first-reaction-dispose.sh <bead> --disposition recommend --reason "<why>" --takeaway "<recommendation; why discuss>"
+                            --visit <visit-bead-id> --recommended-formula <mol>
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
                             [--then-route <rig>/<agent>]
   first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
                             [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
-                            --visit <visit-bead-id> [--recommended-formula <mol>]
+                            --visit <visit-bead-id>
   common: [--by <who>] [--db <path>] [--dry-run]
 
   --reason is required on every exit: a disposition nobody can second-guess is
@@ -79,10 +85,10 @@ Usage:
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (assets/scripts/deferred-dispatch.sh).
-  --recommended-formula (ruling only) names the execution mol a
-  determinable-action ruling recommends; it stamps gc.recommended_formula on
-  the subject, which is what offers the operator Accept on the visit. Omit it
-  for a Discuss-only ruling.
+  --recommended-formula (recommend only, required) names the execution mol the
+  recommendation runs; it stamps gc.recommended_formula on the subject, which
+  is what offers the operator Accept on the visit. A ruling carries no
+  recommended action and rejects it.
 EOF
 }
 
@@ -129,9 +135,9 @@ done
 # ── Validation: refuse before writing anything ───────────────────────
 [ -n "$BEAD" ] || usage_die "needs <bead-id>"
 case "$DISPOSITION" in
-    actionable|blocked|close|ruling) : ;;
-    "") usage_die "needs --disposition actionable|blocked|close|ruling" ;;
-    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|blocked|close|ruling)" ;;
+    actionable|recommend|blocked|close|ruling) : ;;
+    "") usage_die "needs --disposition actionable|recommend|blocked|close|ruling" ;;
+    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|recommend|blocked|close|ruling)" ;;
 esac
 [ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
 [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
@@ -191,20 +197,31 @@ case "$DISPOSITION" in
             case "$THEN_ROUTE" in */*) : ;; *) usage_die "--then-route '$THEN_ROUTE' is not rig-qualified (<rig>/<agent>)" ;; esac
         fi
         ;;
-    ruling)
-        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$AFTER_WORKFLOW" ] || usage_die "ruling takes --visit, and optionally --recommended-formula"
-        [ -n "$VISIT" ] || usage_die "ruling needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
+    recommend|ruling)
+        # Both file a human visit and hold the subject on it as a blocks edge;
+        # they differ only in whether a recommended action rides along. recommend
+        # REQUIRES --recommended-formula (it is the disposition that stamps the
+        # key the board's Accept reads); ruling REJECTS it (the operator's
+        # judgment names no worker-runnable action, so the visit is Discuss-only).
+        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$AFTER_WORKFLOW" ] \
+            || usage_die "$DISPOSITION takes --visit (and --recommended-formula on recommend); --route/--waiting-on/--blocker/--then-route/--after-workflow belong to the other exits"
+        [ -n "$VISIT" ] || usage_die "$DISPOSITION needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
         [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
         same_store "$VISIT" "$BEAD" \
             || usage_die "--visit $VISIT is in another store than $BEAD; a blocks edge onto it reports success and holds nothing (component-model I1). File the visit in ${BEAD%%-*}'s store, then record it here."
-        # Accept slings this exact mol name, so validate it resolves before the
-        # record is written — the roster discipline --route/--then-route already
-        # take. Unvalidated, a typo stamps a live gc.recommended_formula, the board
-        # renders 'accept ▸', and every click fails at gc sling. A usage error here
-        # refuses it at the source instead.
-        if [ -n "$RECOMMENDED_FORMULA" ]; then
+        if [ "$DISPOSITION" = recommend ]; then
+            [ -n "$RECOMMENDED_FORMULA" ] \
+                || usage_die "recommend needs --recommended-formula <mol>: it is the action the operator Accepts from the visit. A visit with no recommended action is --disposition ruling."
+            # Accept slings this exact mol name, so validate it resolves before the
+            # record is written — the roster discipline --route/--then-route already
+            # take. Unvalidated, a typo stamps a live gc.recommended_formula, the board
+            # renders 'accept ▸', and every click fails at gc sling. A usage error here
+            # refuses it at the source instead.
             gc formula show "$RECOMMENDED_FORMULA" >/dev/null 2>&1 \
                 || usage_die "--recommended-formula '$RECOMMENDED_FORMULA' does not resolve to a formula (gc formula show found none). Accept slings this exact name; fix the typo, or run 'gc formula list' for the roster."
+        else
+            [ -z "$RECOMMENDED_FORMULA" ] \
+                || usage_die "ruling does not take --recommended-formula: a ruling is the operator's judgment with no worker-runnable action (Discuss-only). To recommend an action the operator can Accept, use --disposition recommend."
         fi
         ;;
 esac
@@ -274,7 +291,7 @@ fi
 # finding — so a probe that cannot run leaves the disposition alone.
 if { [ "$DISPOSITION" = "actionable" ] || [ "$DISPOSITION" = "close" ]; } && [ -x "$PROACTIVE" ]; then
     DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$ROUTE" 2>/dev/null)" || {
-        usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. File the visit instead (--disposition ruling)."
+        usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. File the visit instead (--disposition recommend or ruling)."
     }
 fi
 # --then-route names the pool the deferred dispatch slings the bead to once its
@@ -303,13 +320,14 @@ if [ -n "$DRY" ]; then
     printf 'disposition=%s bead=%s reason=%s\n' "$DISPOSITION" "$BEAD" "$REASON"
     case "$DISPOSITION" in
         actionable) printf 'would release %s to %s\n' "$BEAD" "$ROUTE" ;;
+        recommend)  printf 'would record visit %s on %s recommending %s\n' "$VISIT" "$BEAD" "$RECOMMENDED_FORMULA" ;;
         blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" ;;
         close)      if [ -n "$AFTER_WORKFLOW" ]; then
                         printf 'would hold %s on %s, then arm a deferred dispatch to validating closer %s (mol-validate-close) for when %s closes\n' "$BEAD" "$AFTER_WORKFLOW" "$ROUTE" "$AFTER_WORKFLOW"
                     else
                         printf 'would sling %s to validating closer %s (mol-validate-close)\n' "$BEAD" "$ROUTE"
                     fi ;;
-        ruling)     printf 'would record visit %s on %s%s\n' "$VISIT" "$BEAD" "${RECOMMENDED_FORMULA:+ recommending $RECOMMENDED_FORMULA}" ;;
+        ruling)     printf 'would record visit %s on %s\n' "$VISIT" "$BEAD" ;;
     esac
     exit 0
 fi
@@ -349,16 +367,17 @@ fi
 # ── The record, before the act ───────────────────────────────────────
 # What was chosen, why, and what it names. Written first so a run that dies
 # part-way leaves the classification visible instead of an unexplained bead. A
-# ruling that recommends an execution stamps gc.recommended_formula in the same
-# write: it is the field that turns a plain visit into a recommendation visit
-# (the operator's Accept reads it), so a half-written recommendation stays
-# visible rather than leaving a bare visit that lost its recommendation. Any
-# disposition that names no recommendation clears a stale one a prior ruling
-# left, so the record states the current recommendation and never a superseded
-# one the operator could still Accept.
+# recommend disposition stamps gc.recommended_formula in the same write: it is
+# the field that turns a plain visit into a recommendation visit (the operator's
+# Accept reads it), so a half-written recommendation stays visible rather than
+# leaving a bare visit that lost its recommendation. Any disposition that names
+# no recommendation clears a stale one a prior recommend left, so the record
+# states the current recommendation and never a superseded one the operator
+# could still Accept.
 TARGET=""
 case "$DISPOSITION" in
     actionable) TARGET="$ROUTE" ;;
+    recommend)  TARGET="$VISIT" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
     close)      TARGET="$ROUTE" ;;
     ruling)     TARGET="$VISIT" ;;
@@ -368,7 +387,7 @@ set -- --set-metadata "gc.first_reaction=$DISPOSITION" \
        --set-metadata "gc.first_reaction_target=$TARGET" \
        --set-metadata "gc.first_reaction_at=$(now_utc)"
 # RECO_WANT is what gc.recommended_formula must read back as after this write:
-# the named mol on a recommending ruling, empty (absent) when a disposition
+# the named mol on a recommend disposition, empty (absent) when a disposition
 # names none and clears a stale one. RECO_TOUCHED marks that this write changed
 # the key, so the read-back below runs only when it did.
 RECO_WANT=""; RECO_TOUCHED=""
@@ -422,7 +441,7 @@ if [ -n "$RECO_TOUCHED" ]; then
         if [ -n "$RECO_WANT" ]; then
             die "the recommendation did not land on $BEAD: gc.recommended_formula read back as '$RECO_GOT' (want 'v:$RECO_WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The operator's Accept reads this key, so the act is withheld rather than leave the operator a recommendation visit that offers only Discuss. The record stands — clear the cause and re-run this command."
         else
-            die "the stale recommendation did not clear on $BEAD: gc.recommended_formula read back as '$RECO_GOT' (want 'v:' for a proven-absent key; a 'u:' means the subject could not be read, which is not proof it cleared). A Discuss-only ruling must not leave a superseded Accept executable, so the act is withheld. The record stands — clear the cause and re-run this command."
+            die "the stale recommendation did not clear on $BEAD: gc.recommended_formula read back as '$RECO_GOT' (want 'v:' for a proven-absent key; a 'u:' means the subject could not be read, which is not proof it cleared). A disposition that recommends nothing must not leave a superseded Accept executable, so the act is withheld. The record stands — clear the cause and re-run this command."
         fi
     fi
 fi
@@ -486,29 +505,31 @@ fi
 # Each disposition also answers the headline's own question — is anything still
 # waiting on this bead? An actionable one is not: it is moving, and the pool its
 # route names will claim it, so --no-wait says so. A blocked one names its wait
-# as an edge. A ruling names the visit as its wait: the subject is waiting on a
-# person, and the visit bead is what carries that wait, so --waiting-on stamps
-# the blocks edge onto it. The release parks the subject and the edge holds it,
-# so it is not offered again until the visit closes, and the wait is a graph
-# state doctor/check-wait-is-an-edge reads rather than prose it reports.
+# as an edge. A recommend or a ruling names the visit as its wait: the subject
+# is waiting on a person, and the visit bead is what carries that wait, so
+# --waiting-on stamps the blocks edge onto it. The release parks the subject and
+# the edge holds it, so it is not offered again until the visit closes, and the
+# wait is a graph state doctor/check-wait-is-an-edge reads rather than prose it
+# reports.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
-    actionable) set -- "$@" --route "$ROUTE" --no-wait ;;
-    blocked)    for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
-    ruling)     set -- "$@" --waiting-on "$VISIT" ;;
+    actionable)       set -- "$@" --route "$ROUTE" --no-wait ;;
+    blocked)          for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
+    recommend|ruling) set -- "$@" --waiting-on "$VISIT" ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. The disposition record stands — clear the cause and re-run this command."
 
 # The edge is the hold. gc-helm.sh warns on a rejected edge and keeps going,
 # which is right for a headline but not for the exits that hold on one: a
-# blocked disposition waits on its blocker, a ruling waits on its visit, and
-# either whose edge never landed leaves the bead unheld with nothing to say so.
+# blocked disposition waits on its blocker, a recommend or a ruling on its
+# visit, and any whose edge never landed leaves the bead unheld with nothing to
+# say so.
 # A missing edge fails the whole exit, so the terminal step stops rather than
 # closing over a bead that is recorded as waiting and is not held.
 HOLD_WAITS=""
 case "$DISPOSITION" in
-    blocked) HOLD_WAITS="$WAITING" ;;
-    ruling)  HOLD_WAITS="$VISIT" ;;
+    blocked)          HOLD_WAITS="$WAITING" ;;
+    recommend|ruling) HOLD_WAITS="$VISIT" ;;
 esac
 if [ -n "$HOLD_WAITS" ]; then
     HELD=$(gc_bd dep list "$BEAD" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[]?.id // empty) else empty end' 2>/dev/null || printf '')
