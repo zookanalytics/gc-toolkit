@@ -2265,8 +2265,11 @@ func GroupBySection(tiles []Tile) []SectionGroup {
 // key is derived once here, shared by both renderers, so the CLI table and the
 // dashboard cannot each invent their own split — exactly as [Section] is.
 
-// assignGroupRoots stamps [Tile.GroupRoot] on every tile: the id of the
-// top-most tile its edges climb to, or its own id when it climbs to nothing.
+// assignGroupRoots stamps [Tile.GroupRoot] and [Tile.GroupParent] on every tile.
+// GroupRoot is the id of the top-most tile its edges climb to, or its own id when
+// it climbs to nothing; GroupParent is the id one step up that same climb, empty
+// at a root — the immediate-parent edge a surface builds the nested family tree
+// from.
 //
 // Two edges climb: the parent-child edge (the anchor that rolls this tile up)
 // and the blocked edge (the anchor this tile `blocks`, read off that anchor's
@@ -2401,6 +2404,7 @@ func assignGroupRoots(tiles []Tile, anchors []Anchor) {
 	}
 	for i := range tiles {
 		tiles[i].GroupRoot = resolve(tiles[i].ID)
+		tiles[i].GroupParent = parentFor(tiles[i].ID)
 	}
 }
 

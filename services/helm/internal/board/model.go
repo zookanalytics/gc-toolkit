@@ -415,6 +415,16 @@ type Tile struct {
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
 
+	// GroupParent is the id of this row's IMMEDIATE parent — the one anchor its
+	// edges climb to a single level up, empty when it climbs to nothing. GroupRoot
+	// names the top of the family tree; GroupParent names the next step toward it,
+	// so a surface renders the family as the nested containment tree it is — a
+	// sub-epic beneath its parent, that sub-epic's own children beneath it —
+	// instead of one flat member list under the top root. Both come from the same
+	// per-tile parent walk in [assignGroupRoots]: GroupRoot follows it to the top,
+	// GroupParent reports its first step.
+	GroupParent string `json:"group_parent"`
+
 	// Acceptable marks a recommendation row: the subject carries a
 	// gc.recommended_formula AND its visit is un-engaged, so a person can Accept
 	// it — dispatch that formula at the subject and dismiss the visit in one

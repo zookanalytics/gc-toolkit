@@ -4,14 +4,17 @@ import { App, resolveDrillTarget } from './App';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board arrives as one ranked list; every row carries its dependency FAMILY
-// in `tile.group_root` and the band it wants within that family in
-// `tile.section`. The app groups by reading those fields — it never re-derives
-// the split — so these fixtures set them the way the derive layer would, and the
-// tests address a family by its root's heading. group_root defaults to the
-// tile's own id (its own family root); a member sets it to its root's id.
+// in `tile.group_root`, its immediate parent in that family in `tile.group_parent`,
+// and the band it wants within the family in `tile.section`. The app groups by
+// reading those fields — it never re-derives the split — so these fixtures set
+// them the way the derive layer would, and the tests address a family by its
+// root's heading. group_root defaults to the tile's own id (its own family root)
+// and group_parent to empty (no parent); a member sets group_root to its root's
+// id, and a nested member also sets group_parent to its immediate parent.
 function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severity'>): Tile {
   return {
     group_root: over.id,
+    group_parent: '',
     rig: 'gc-toolkit',
     owed: false,
     weight: 0,
@@ -441,6 +444,97 @@ it('orders members within a family by the move they want', async () => {
   // The epic leads, then its members in SECTION_ORDER: review before gate.
   expect(precedes(epic, review)).toBe(true);
   expect(precedes(review, gate)).toBe(true);
+});
+
+// A family nests as a tree: a member that is itself a parent (a sub-epic) renders
+// as a sub-group above its own children, each row indented by its depth, rather
+// than as a flat sibling beside them. The wire's group_parent draws the edges;
+// group_root still names the top of the tree for every row.
+it('nests a family as a tree, indenting each row by its depth', async () => {
+  const board: Board = {
+    generated_at: '2026-09-30T08:00:00Z',
+    total: 3,
+    sittings: [],
+    tiles: [
+      tile({
+        id: 'tk-top',
+        kind: 'epic',
+        title: 'top epic',
+        severity: 'HIGH',
+        section: 'stalled',
+        m_total: 1,
+        open: 1,
+        group_root: 'tk-top',
+        rank_score: 3_000_000,
+      }),
+      tile({
+        id: 'tk-sub',
+        kind: 'epic',
+        title: 'sub epic',
+        severity: 'ELEVATED',
+        section: 'active',
+        m_total: 1,
+        open: 1,
+        group_root: 'tk-top',
+        group_parent: 'tk-top',
+        rank_score: 2_500_000,
+      }),
+      tile({
+        id: 'tk-leaf',
+        kind: 'task',
+        title: 'leaf task',
+        severity: 'NORMAL',
+        section: 'active',
+        group_root: 'tk-top',
+        group_parent: 'tk-sub',
+        rank_score: 2_000_000,
+      }),
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(url, 'http://localhost/').pathname.endsWith('/helm')) {
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('top epic')).toBeTruthy());
+
+  const top = rowFor('top epic') as HTMLElement;
+  const sub = rowFor('sub epic') as HTMLElement;
+  const leaf = rowFor('leaf task') as HTMLElement;
+
+  // Tree pre-order: the top epic, then its sub-epic, then the sub-epic's leaf —
+  // the leaf sits under its own parent, not flat beside it.
+  expect(precedes(top, sub)).toBe(true);
+  expect(precedes(sub, leaf)).toBe(true);
+
+  // The top root leads its family as a group row; the sub-epic and leaf nest as
+  // members.
+  expect(top.className).toContain('row-group');
+  expect(sub.className).toContain('row-member');
+  expect(leaf.className).toContain('row-member');
+
+  // Depth rides the title cell as --depth: the root at 0, the sub-epic one step
+  // in, the leaf one step deeper.
+  const depthOf = (row: HTMLElement): string =>
+    (row.querySelector('.title-cell') as HTMLElement).style.getPropertyValue('--depth');
+  expect(depthOf(top)).toBe('0');
+  expect(depthOf(sub)).toBe('1');
+  expect(depthOf(leaf)).toBe('2');
+
+  // A member that heads a sub-group reads as a header (family-title); a leaf does
+  // not.
+  expect(sub.querySelector('.family-title')?.textContent).toBe('sub epic');
+  expect(leaf.querySelector('.family-title')).toBeNull();
 });
 
 // The board renders as ONE table, not a mini-table per family.
