@@ -348,6 +348,20 @@ rig_running_for_bead() {
         '.[] | select(.prefix==$p) | if (.running == null) then "" else (.running|tostring) end' 2>/dev/null | head -n1
 }
 
+# rig_carries_converse <rig-path> — 0 iff the rig at this path carries at least
+# one converse-<model> agent template. The converse templates are rig-scoped:
+# `gc session new converse-<model>` resolves the template from the rig's own
+# agents/ dir under GC_DIR=<rig-path>, so a rig whose checkout holds none — an
+# HQ / city-store root carries none — can host no converse sitting. Globbed the
+# way engage_list_models globs its own dir; a glob matching nothing stays the
+# literal pattern, which `[ -d ]` rejects.
+rig_carries_converse() {
+    for _rcc_d in "$1"/agents/converse-*; do
+        [ -d "$_rcc_d" ] && return 0
+    done
+    return 1
+}
+
 # rig_db_for_session — the .beads dir of THIS session's rig, or empty when it
 # cannot be resolved. Where the resolvers above key off a bead id, this one
 # keys off the session itself: a converse sitting's visit is filed in its
@@ -2728,8 +2742,18 @@ cmd_engage() {
         echo "$PROG: engage: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list', so there is no rig to resolve the converse template in. Nothing spawned." >&2
         exit 4
     fi
-    [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     rig=$(rig_name_for_bead "$bead")
+    # A rig that carries no converse template can host no converse sitting, so an
+    # engage there can only half-act: file a visit and export GC_RIG, then fail at
+    # the spawn, leaving an un-openable visit behind and a GC_RIG that gc bd
+    # rejects. An HQ / city-store bead resolves to the city root, which carries
+    # none. Refuse up front, before any visit is filed or GC_RIG/BEADS_DIR is
+    # exported, so the engage is a clean no-op.
+    if ! rig_carries_converse "$path"; then
+        echo "$PROG: engage: converse is not available for '$bead': its rig '${rig:-?}' ($path) carries no converse template. HQ/city-store beads are not converse-engageable. Nothing filed, nothing spawned." >&2
+        exit 4
+    fi
+    [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     [ -n "$rig" ] && export GC_RIG="$rig"
 
     # A spawned converse sitting is sustained by the RECONCILER — a converse slot
