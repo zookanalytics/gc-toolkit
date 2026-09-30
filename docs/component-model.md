@@ -275,14 +275,11 @@ or is a declared shared primitive. Below is that assignment for the tree as it
 stands: every order, formula, service, and `assets/scripts` entry a running
 city executes, with nothing unplaced and no row carrying any other value.
 
-**What the index does not place.** Four exclusions, each mechanical:
+**What the index does not place.** Three exclusions, each mechanical:
 
 - `*.test.sh` and the fixture library they source,
   `assets/scripts/test-harness.sh`. Test code is run by a developer, never by
   a city: no order, formula, or `test_command` invokes it.
-- `assets/scripts/cutover-2026-08.sh`. One-shot tooling that carries its own
-  deletion condition in its header: it goes when
-  `specs/2026-08-rewrite/cutover-runbook.md` goes.
 - `doctor/check-*`. §3 places each check against the invariant it asserts.
 - `tools/`. The command surface a human drives, including the
   `gc-proactive.sh` entry point that `gc-helm.sh` and `gc-visit-open.sh` shell
