@@ -24,6 +24,12 @@ const REFRESH_MS = 30_000;
 // family is the derive layer's SectionOrder, mirrored here.
 const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done'] as const;
 
+// The one Tile.visit_state value the marker branches on (board.VisitEngaged).
+// A held row carries 'engaged' or 'parked'; anything that is not 'engaged' —
+// 'parked', or the '' a re-derivation slip could leave — reads as parked, the
+// state that invites the operator to look rather than telling them it is handled.
+const VISIT_ENGAGED = 'engaged';
+
 // A sitting is finished when its visit bead closed; anything else is a
 // conversation someone is still in. Reading the status rather than the presence
 // of closed_at keeps a sitting whose stamp could not be read on the running
@@ -324,38 +330,74 @@ function flattenFamilies(families: Family[]): BoardRow[] {
   return rows;
 }
 
-// The leading marker on a row: a filled ● when the row's next move is a person's
-// (review or gate), a hollow ○ when an open visit holds it, and a ◉ when both —
-// the same vocabulary the CLI overview prints (cmd/helm-svc/board.go,
-// familyGlyph). wants-person is already spelled by the band word, so its ● stays
-// decorative; a visit has no other cue on the row, so the held marker carries an
-// accessible label and a hover listing this bead's sittings — each one's
-// headline, its outcome (or "running"), and the session to attach to.
-function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
-  const wp = wantsPerson(tile);
-  if (!tile.held) {
-    return wp ? (
-      <span className="wants-person" aria-hidden="true">
-        ●{' '}
-      </span>
-    ) : null;
-  }
-  const hover =
-    sittings
-      .map(
-        (s) =>
-          `${sittingHeadline(s)} · ${s.outcome || (isRunning(s) ? 'running' : 'closed')}${
-            s.session ? ` · ${s.session}` : ''
-          }`,
-      )
-      .join('\n') ||
-    (wp ? 'an open visit holds this row, and it wants you' : 'an open visit holds this row');
-  const label = wp ? 'held by an open visit; wants you' : 'held by an open visit';
+// The visit marker: a visible, self-evident chip on a row an open visit holds. It
+// says at a glance which of the two states the visit is in — PARKED (filed and
+// waiting for the operator) or ENGAGED (a live sitting is in it right now) — in a
+// word, a colour and an icon, read straight off tile.visit_state (derived once in
+// the Go layer, never re-derived here). The chip is a real button so it is
+// keyboard-reachable and announced as interactive; hovering or focusing it
+// reveals a details card naming the sittings on the bead — each one's headline,
+// its outcome or state, and the session to attach to. That replaces the native
+// `title` tooltip #880 shipped, which has no affordance and stays invisible until
+// an exact hover lands on a one-character glyph. The card is non-interactive
+// text, so it needs no click to open or dismiss.
+function VisitMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
+  const engaged = tile.visit_state === VISIT_ENGAGED;
+  const word = engaged ? 'in session' : 'waiting';
+  const heading = engaged ? 'In session — being worked right now' : 'Parked — waiting for you';
+  const label = engaged
+    ? 'visit in session — a live conversation is on this row now; hover or focus for details'
+    : 'visit parked — waiting for you; hover or focus for details';
+  const cardId = `visit-card-${tile.id}`;
   return (
-    <span className="held-marker" title={hover} aria-label={label}>
-      {wp ? '◉' : '○'}
-      {' '}
+    <span className={`visit-marker visit-marker--${engaged ? 'engaged' : 'parked'}`}>
+      <button type="button" className="visit-chip" aria-label={label} aria-describedby={cardId}>
+        <span className="visit-chip__icon" aria-hidden="true">
+          {engaged ? '◉' : '○'}
+        </span>
+        <span className="visit-chip__text">visit · {word}</span>
+      </button>
+      {/* Non-interactive detail, revealed on hover or focus of the chip (CSS).
+          role=tooltip + aria-describedby hands the same text to a screen reader
+          as the button's description, so the details are reachable without a
+          pointer. */}
+      <span role="tooltip" id={cardId} className="visit-card">
+        <span className="visit-card__heading">{heading}</span>
+        {sittings.length > 0 ? (
+          sittings.map((s) => (
+            <span key={s.id} className="visit-card__sitting">
+              {sittingHeadline(s)}
+              <span className="visit-card__meta">
+                {' · '}
+                {s.outcome || (isRunning(s) ? 'running' : 'closed')}
+                {s.session ? ` · ${s.session}` : ''}
+              </span>
+            </span>
+          ))
+        ) : (
+          <span className="visit-card__meta">an open visit holds this row</span>
+        )}
+      </span>
     </span>
+  );
+}
+
+// The leading markers on a row. wants-person is a person's next move (review or
+// gate); it is already spelled by the band word and the row tint, so its ● stays
+// a decorative echo. A visit is the other signal, and the two co-occur — a review
+// row a conversation is holding — so they render side by side rather than
+// collapsing into one glyph: the ● first, then the visit chip that carries the
+// state and the details.
+function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
+  return (
+    <>
+      {wantsPerson(tile) && (
+        <span className="wants-person" aria-hidden="true">
+          ●{' '}
+        </span>
+      )}
+      {tile.held && <VisitMarker tile={tile} sittings={sittings} />}
+    </>
   );
 }
 
@@ -438,6 +480,43 @@ function AnchorRow({
   );
 }
 
+// A compact, always-visible key for the row markers and the state tints, so the
+// glyphs and colours the table spends are legible without hunting for what they
+// mean. It states what each mark MEANS and reuses the classes the rows use, so a
+// sample cannot drift from the thing it explains.
+function Legend() {
+  return (
+    <p className="legend" aria-label="key to the row markers and tints">
+      <span className="legend__title">key</span>
+      <span className="legend__item">
+        <span className="wants-person" aria-hidden="true">
+          ●
+        </span>{' '}
+        needs you
+      </span>
+      <span className="legend__item">
+        <span className="visit-marker--parked" aria-hidden="true">
+          ○
+        </span>{' '}
+        visit waiting for you
+      </span>
+      <span className="legend__item">
+        <span className="visit-marker--engaged" aria-hidden="true">
+          ◉
+        </span>{' '}
+        visit in session
+      </span>
+      <span className="legend__item">
+        <span className="legend__swatch legend__swatch--wants" aria-hidden="true" /> row needs you
+      </span>
+      <span className="legend__item">
+        <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a visit holds it
+      </span>
+      <span className="legend__item legend__item--done">closed rows dimmed</span>
+    </p>
+  );
+}
+
 // The board as one table. A closed row keeps its place below the live ones and
 // leaves only by ageing out on the window clock, so the note under the table
 // states that bound once for every DONE row rather than repeating it per family.
@@ -459,6 +538,7 @@ function AnchorsTable({
   return (
     <section className="anchors" aria-labelledby="anchors-heading">
       <h2 id="anchors-heading">anchors</h2>
+      <Legend />
       <table>
         <thead>
           <tr>
