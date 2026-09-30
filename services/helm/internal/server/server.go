@@ -215,6 +215,15 @@ func (s *Server) invalidateBoard() {
 	s.cached = nil
 	s.expiry = time.Time{}
 	s.gen++
+	// Forget the in-flight gather's single-flight key, so a board request that
+	// arrives after this invalidate drives its own gather rather than joining a
+	// gather that began before it. A joined waiter is handed the leader's
+	// pre-write board; the generation guard on publish keeps that board out of
+	// the cache but not out of a joined waiter's hands, so forgetting the key is
+	// what makes the post-write read re-gather. Safe under s.mu: singleflight
+	// releases its own lock before running a flight's function, so its Forget
+	// and Do never hold that lock while a gather takes s.mu.
+	s.flight.Forget("board")
 }
 
 // gatherTimeout bounds one gather. A healthy gather is a few seconds; this is

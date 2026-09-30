@@ -723,3 +723,92 @@ func TestGatherFetchesConvoyChildrenConcurrently(t *testing.T) {
 		t.Errorf("gathered %d convoy anchors, want %d — concurrency must not drop any", convoys, nConvoys)
 	}
 }
+
+// TestGatherFetchesEpicChildrenConcurrently is the epic half of the same
+// guard TestGatherFetchesConvoyChildrenConcurrently gives the convoy half: the
+// per-epic child graph fetches (the other half of the N+1 fan-out) must run
+// concurrently. Each graph fetch blocks in the mock until enough are in flight
+// at once, so a concurrent gather sails through and a serial one — which never
+// gets a second request in flight — falls out on the barrier timeout at a max
+// concurrency of 1 and fails the assertion.
+func TestGatherFetchesEpicChildrenConcurrently(t *testing.T) {
+	const nEpics = 6
+	const wantConcurrent = 3 // < nEpics and <= maxGatherFanout, so it is reachable
+
+	var (
+		mu          sync.Mutex
+		inFlight    int
+		maxInFlight int
+	)
+	release := make(chan struct{})
+	var once sync.Once
+
+	const base = "/v0/city/testcity"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == base+"/rigs":
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "epic":
+			items := make([]string, nEpics)
+			for i := range items {
+				items[i] = fmt.Sprintf(`{"id":"tk-ep%d","title":"epic %d","status":"open","issue_type":"epic","parent":""}`, i, i)
+			}
+			writeJSON(w, `{"items":[`+strings.Join(items, ",")+`],"total":`+strconv.Itoa(nEpics)+`}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "decision":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "gate":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("status") == "open":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/convoys":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case strings.HasPrefix(r.URL.Path, base+"/beads/graph/"):
+			mu.Lock()
+			inFlight++
+			if inFlight > maxInFlight {
+				maxInFlight = inFlight
+			}
+			if inFlight >= wantConcurrent {
+				once.Do(func() { close(release) })
+			}
+			mu.Unlock()
+			// Proceed once enough fetches are concurrent; the timeout keeps a
+			// serialized gather from hanging the test — it fails on maxInFlight.
+			select {
+			case <-release:
+			case <-time.After(2 * time.Second):
+			}
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			id := strings.TrimPrefix(r.URL.Path, base+"/beads/graph/")
+			writeJSON(w, `{"root":{"id":"`+id+`","status":"open"},"beads":[{"id":"`+id+`-c","status":"open"}],"deps":[{"from":"`+id+`","to":"`+id+`-c","kind":"parent-child"}]}`)
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	res, err := newTestSource(t, srv).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	mu.Lock()
+	got := maxInFlight
+	mu.Unlock()
+	if got < wantConcurrent {
+		t.Fatalf("max concurrent epic graph fetches = %d, want >= %d (the per-epic fan-out is serialized)", got, wantConcurrent)
+	}
+
+	var epics int
+	for _, a := range res.Anchors {
+		if a.Kind == "epic" {
+			epics++
+		}
+	}
+	if epics != nEpics {
+		t.Errorf("gathered %d epic anchors, want %d — concurrency must not drop any", epics, nEpics)
+	}
+}

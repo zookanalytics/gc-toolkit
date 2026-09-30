@@ -249,6 +249,58 @@ func TestInvalidateDuringGatherIsNotRepublished(t *testing.T) {
 	}
 }
 
+// TestInvalidateBreaksTheInFlightGather pins that an invalidate forgets the
+// in-flight gather's single-flight key, so a board request arriving after the
+// invalidate drives its OWN gather instead of joining the pre-invalidate one
+// and being handed its stale board. It mirrors GET /helm starting a slow
+// gather, POST /helm/open completing and invalidating, then a second GET /helm
+// arriving before the first gather returns. Without the forget, the second
+// request coalesces onto the first flight, no second gather runs, and the
+// post-write refresh is served the pre-write board — the stale-action feedback
+// the invalidate exists to prevent. The generation guard alone does not close
+// this: it keeps the pre-write board out of the cache, not out of a joined
+// waiter's hands.
+func TestInvalidateBreaksTheInFlightGather(t *testing.T) {
+	src := &blockingSource{
+		entered: make(chan struct{}, 2), // both gathers can signal without blocking
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	done1 := make(chan struct{})
+	go func() { _, _ = s.Board(context.Background()); close(done1) }()
+
+	// The first gather is in flight and blocked.
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+
+	// A write verb completes and invalidates while that gather is still in flight.
+	s.invalidateBoard()
+
+	// A board request arriving after the invalidate must drive its own gather,
+	// not join the pre-invalidate one still in flight.
+	done2 := make(chan struct{})
+	go func() { _, _ = s.Board(context.Background()); close(done2) }()
+
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Board after invalidate joined the pre-invalidate gather instead of starting its own (invalidate did not forget the flight key)")
+	}
+
+	close(src.release)
+	<-done1
+	<-done2
+
+	if got := src.calls.Load(); got != 2 {
+		t.Errorf("gather ran %d times, want 2 (the post-invalidate request must drive its own gather)", got)
+	}
+}
+
 func TestBoardErrorIs502(t *testing.T) {
 	f := &fakeSource{err: context.DeadlineExceeded}
 	s := New(f, time.Minute)
