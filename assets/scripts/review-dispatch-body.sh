@@ -145,6 +145,20 @@ claims. If no demo can be recorded, that is a finding against the change, not a
 reason to approve it. Correctness belongs to `correctness` on this same commit.
 M
     ;;
+  pm)
+    cat <<'M'
+`skills/review-pm/SKILL.md`. The product lens: read what the operator watches
+(`docs/product-goals.md`) first, then judge the change against the problem its
+anchor bead states. Three questions: does it solve that user problem or a proxy
+of it; does the PR (summary, evidence, demo) let the operator decide without
+reconstructing the case; does an operator-watched surface change warrant a demo
+it does not carry. ENFORCE, never edit — a warranted-but-missing demo or a
+presentation the operator cannot evaluate is a finding, and drift you find in
+the product-goal docs is maintenance you FILE, not a commit you make. Whether the
+change is correct is `correctness`'s on this same commit, and whether a recorded
+demo proves its claim is `demo`'s.
+M
+    ;;
   *)
     cat <<M
 No generic method is declared for the \`$CHECK_NAME\` check in the dispatching
