@@ -357,6 +357,29 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the current region is left alone"
 has "$(body 210)" 'signed off pre-open' "…and its opened-green handoff line is not churned"
 eq "$(body 210)" "$before_x" "the body is byte-identical"
 
+echo "# a rework moved the head but left the summary unchanged; the stale handoff line is refreshed"
+# The region's summary already matches the anchor, so the text comparison alone
+# reads current — but its handoff bullet still names the pre-rework head with the
+# pre-open sign-off claim. A head-only rework must still refresh, so the bullet
+# names the current head and drops the false 'signed off pre-open' claim.
+store "[$(anchor_sum H polecat/H 260 'correctness' 'STABLE: the summary a head-only rework did not touch.')]"
+STALE_H=$(opened_region H polecat/H 'correctness' 'STABLE: the summary a head-only rework did not touch.' '11112222')
+pr 260 OPEN polecat/H "$STALE_H" 3333444400000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#260 summary region refreshed" "a head-only rework refreshes the region"
+b=$(body 260)
+hasnt "$b" 'signed off pre-open' "the false pre-open sign-off claim at the old head is gone"
+has "$b" '- Head `33334444`; gates `correctness`; see the PR checks for current status.' \
+    "the handoff bullet names the current head"
+has "$b" 'STABLE: the summary a head-only rework did not touch.' "the unchanged summary is preserved"
+
+echo "# that head-only refresh is idempotent: a second pass over the now-current region writes nothing"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
+hasnt "$out" "summary region refreshed" "…and reports no refresh"
+
 echo "# a reworked summary and a newly stacked bead land in one edit"
 store "[$(anchor_sum Y polecat/Y 220 'correctness' 'NEW: the reworked Y summary.'),
         $(printf '{"id":"Y2","status":"closed","title":"Stacked impl","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Y2","merged_target":"polecat/Y","merge_result":"merged"}}')]"

@@ -109,11 +109,11 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
 # The `## Summary` body carried inside the region already: the lines a compose put
 # under `## Summary`, up to the dispatch `<details>` or the `## Refinery handoff`
 # heading that follows. A post-open refresh compares this against the anchor's
-# current pr_summary to tell a stale region (rework) from a current one, so it
-# rewrites the region only when the published summary is actually behind — never
-# on a PR that was merely opened, whose region still reads accurate. The compose
-# writes one blank between the summary body and the next section; command
-# substitution trims trailing newlines on both sides, so the comparison is exact.
+# current pr_summary as one of its two staleness signals — the other is the head the
+# region names (prs_region_names_head) — so a region whose summary matches is not
+# rewritten on that account alone. The compose writes one blank between the summary
+# body and the next section; command substitution trims trailing newlines on both
+# sides, so the comparison is exact.
 prs_region_summary() { # <body-file>
   awk -v o="$PRS_MARK_OPEN" -v c="$PRS_MARK_CLOSE" '
     $0 == o { inreg = 1; next }
@@ -137,6 +137,28 @@ prs_current_section() { # <body-file>
     $0 == c { f = 0; next }
     f { print }
   ' "$1"
+}
+
+# 0 = the managed region already names <head_oid> in its handoff bullet, which
+# compose renders as the head's 8-char prefix in backticks in either mode; 1 = it
+# names a different head or none. A post-open refresh pairs this with the summary
+# comparison: a rework that moves the head without changing the summary leaves the
+# handoff bullet pinned to the pre-rework head, and only the head comparison catches
+# it — the summary text alone still reads current. A head is a commit hash, so its
+# backticked 8-char prefix does not collide with the other backticked tokens (issue,
+# branch, target, gates) the region carries.
+# Substring-match a captured string rather than piping into `grep -q`: this
+# library is sourced by callers that may run under `set -o pipefail`, where a
+# writer SIGPIPEd by grep's early exit turns a match into a pipeline failure.
+prs_region_names_head() { # <body-file> <head_oid>
+  local head8 needle
+  head8=$(printf '%.8s' "${2:-}")
+  [ -n "$head8" ] || return 1
+  needle='`'"$head8"'`'
+  case "$(prs_current_section "$1")" in
+    *"$needle"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # 0 = exactly one well-formed pair (replace in place); 1 = neither marker (a body a

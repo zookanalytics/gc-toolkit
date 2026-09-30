@@ -14,12 +14,13 @@
 # re-renders the `gc:branch-beads` section, and lands both in one body edit.
 #
 # The summary refresh acts only on a well-formed `gc:pr-summary` marker pair whose
-# published summary is behind the anchor's current `pr_summary`: a PR merely
-# opened, whose region still reads accurate, is a no-op, and a legacy markerless or
-# malformed body is left for pr-open's adoption path to establish rather than
-# rewritten here. Its handoff bullet is composed in `refresh` mode — the reworked
-# head has not re-signed-off, so it names the head and points to the PR checks
-# rather than repeating pr-open's pre-open sign-off claim.
+# published region is behind the anchor: either its summary text lags the current
+# `pr_summary`, or its handoff bullet still names a pre-rework head. A PR merely
+# opened, whose summary matches and whose region already names the current head, is a
+# no-op, and a legacy markerless or malformed body is left for pr-open's adoption
+# path to establish rather than rewritten here. Its handoff bullet is composed in
+# `refresh` mode — the reworked head has not re-signed-off, so it names the head and
+# points to the PR checks rather than repeating pr-open's pre-open sign-off claim.
 # For each open anchor (a bead carrying merge_result) that records a pr_number:
 # read the branch's bead ledger, three code-written facts unioned —
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
@@ -198,15 +199,17 @@ append_section() { # <body-file> <section-file> <out-file>
   { cat "$1"; printf '\n%s\n' "$MARK_OPEN"; cat "$2"; printf '%s\n' "$MARK_CLOSE"; } > "$3"
 }
 
-# Bring the gc:pr-summary region current with the anchor's pr_summary. 0 = the
-# region was behind and <out-file> now carries the body with it refreshed; 1 = no
-# change (no summary to publish, no well-formed region, or the region already
-# carries this summary). Only a well-formed marker pair (prs_marker_state 0) is
-# rewritten in place: a legacy markerless or malformed body is pr-open's adoption
-# path to establish, not this arm's to reshape. The region is recomposed in
-# `refresh` mode — the anchor summary moved because a rework did, and the reworked
-# head has not re-signed-off, so the handoff bullet names the head and defers the
-# check state to the PR rather than repeating the pre-open sign-off claim.
+# Bring the gc:pr-summary region current with the anchor. 0 = the region was behind
+# and <out-file> now carries it refreshed; 1 = no change (no summary to publish, no
+# well-formed region, or the region already carries this summary at this head). The
+# region is behind when its summary text lags the anchor OR its handoff bullet names
+# a head other than the current one — a rework that moves the head without touching
+# the summary still restamps the "at <head>" claim. Only a well-formed marker pair
+# (prs_marker_state 0) is rewritten in place: a legacy markerless or malformed body
+# is pr-open's adoption path to establish, not this arm's to reshape. The region is
+# recomposed in `refresh` mode — the reworked head has not re-signed-off, so the
+# handoff bullet names the head and defers the check state to the PR rather than
+# repeating the pre-open sign-off claim.
 refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
   local summary want cur desc checkset branch target SECTION
@@ -215,7 +218,11 @@ refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   prs_marker_state "$bin" || return 1
   want=$(strip_summary_heading "$summary")
   cur=$(prs_region_summary "$bin")
-  [ "$cur" = "$want" ] && return 1
+  # Current only when the summary matches AND the region already names this head:
+  # a head-only rework leaves the summary current but the handoff bullet stale.
+  if [ "$cur" = "$want" ] && prs_region_names_head "$bin" "$head_oid"; then
+    return 1
+  fi
   desc=$(printf '%s' "$row" | jq -r '.description // empty' 2>/dev/null)
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""' 2>/dev/null)
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty' 2>/dev/null)
