@@ -2199,6 +2199,17 @@ WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
         pageInfo{hasNextPage endCursor}
         nodes{id databaseId state body author{login}
           reactionGroups{content viewerHasReacted}}}}}}'
+# The Conversation tab is a third top-level connection, the same single-cursor
+# shape as the reviews read. Its comments carry no thread to resolve, so the
+# write-back only ever reacts to them — a routed one earns the same pickup EYES
+# an inline comment does, having been read into the work-order all the same.
+WB_ISSUE_COMMENTS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$num){
+      comments(first:100,after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{id databaseId author{login}
+          reactionGroups{content viewerHasReacted}}}}}}'
 # A thread's own comments stay nested: one read covers every thread short enough
 # to fit, which is nearly all of them. Truncation is read off the COUNT rather
 # than a nested pageInfo — a thread with more than a page returns exactly a full
@@ -2248,8 +2259,10 @@ while IFS= read -r wrow; do
   case "$wnum" in ''|*[!0-9]*) continue ;; esac
   wcwm=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_comment_watermark // "0") | tostring')
   wrwm=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_review_watermark // "0") | tostring')
+  wiwm=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_issue_comment_watermark // "0") | tostring')
   case "$wcwm" in ''|*[!0-9]*) wcwm=0 ;; esac
   case "$wrwm" in ''|*[!0-9]*) wrwm=0 ;; esac
+  case "$wiwm" in ''|*[!0-9]*) wiwm=0 ;; esac
 
   # The watermark is cumulative and pr_comment_disposition holds one batch at a
   # time, so a thread an earlier batch left unresolved still sits at or below the
@@ -2359,14 +2372,19 @@ WB_RECORDS
     -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wrraw=""
   wtraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$WB_THREADS_QUERY" \
     -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wtraw=""
-  if [ -z "$wrraw" ] || [ -z "$wtraw" ]; then
+  wiraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$WB_ISSUE_COMMENTS_QUERY" \
+    -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wiraw=""
+  if [ -z "$wrraw" ] || [ -z "$wtraw" ] || [ -z "$wiraw" ]; then
     echo "$PROG: $wid — PR#$wnum review threads unreadable; nothing written back (retry next pass)" >&2
     continue
   fi
-  # --paginate emits one document per page; slurp both reads back into one view.
-  wview=$(printf '%s\n%s' "$wrraw" "$wtraw" | scrub | jq -sc '{
+  # --paginate emits one document per page; slurp all three reads into one view.
+  # An empty connection is still a document, so an absent read is a failure, not
+  # an empty Conversation, and the guard above holds the pass for it.
+  wview=$(printf '%s\n%s\n%s' "$wrraw" "$wtraw" "$wiraw" | scrub | jq -sc '{
       reviews: [ .[].data.repository.pullRequest.reviews.nodes[]? ],
-      threads: [ .[].data.repository.pullRequest.reviewThreads.nodes[]? ]
+      threads: [ .[].data.repository.pullRequest.reviewThreads.nodes[]? ],
+      issue_comments: [ .[].data.repository.pullRequest.comments.nodes[]? ]
     }' 2>/dev/null) || wview=""
   if [ -z "$wview" ] || [ "$wview" = "null" ]; then
     echo "$PROG: $wid — PR#$wnum review threads unreadable; nothing written back (retry next pass)" >&2
@@ -2418,7 +2436,7 @@ WB_LONG_THREADS
   # the reason reported for leaving it open.
   wplan=$(printf '%s' "$wview" | jq -r \
     --arg self "$SELF_LOGIN" --arg reaction "$WB_REACTION" --arg marker "$WB_MARKER" \
-    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson recs "$wbrecs" '
+    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" --argjson recs "$wbrecs" '
     def reacted($rg): [ ($rg // [])[] | select(.content == $reaction and .viewerHasReacted) ] | length > 0;
     def foreign: (.author.login // "") != $self;
     ( [ .reviews[]
@@ -2433,6 +2451,11 @@ WB_LONG_THREADS
     + [ .threads[] | (.comments.nodes // [])[]
         | select(foreign)
         | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $cwm)
+        | select(reacted(.reactionGroups) | not)
+        | "R\t" + .id ]
+    + [ .issue_comments[]
+        | select(foreign)
+        | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $iwm)
         | select(reacted(.reactionGroups) | not)
         | "R\t" + .id ]
     + [ .threads[]

@@ -1878,7 +1878,7 @@ threads() {
 }
 tfile()   { cat "$GH_DIR/threads_$1.json"; }
 reacted() { # num node-id -> true/false
-  jq -r --arg id "$2" '[ (.reviews[]?, (.threads[]? | .comments.nodes[]?))
+  jq -r --arg id "$2" '[ (.reviews[]?, (.threads[]? | .comments.nodes[]?), .issue_comments[]?)
     | select(.id == $id) | (.reactionGroups // [])[]
     | select(.content == "EYES" and .viewerHasReacted) ] | length > 0' "$GH_DIR/threads_$1.json"
 }
@@ -1893,6 +1893,8 @@ one_thread() {
 wb_meta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"%s","pr_review_watermark":"0"' "$1" "${2:-100}"; }
 wb_batch() { printf ',"pr_comment_batch":"%s"' "$1"; }
 wb_rmeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","pr_review_watermark":"%s"' "$1" "$2"; }
+# the Conversation-tab variant: dispositioned, with only the issue-comment watermark raised
+wb_imeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","pr_review_watermark":"0","pr_issue_comment_watermark":"%s"' "$1" "${2:-50}"; }
 child()   { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{}}' "$1" "$2"; }
 gh_since() { tail -n +"$1" "$STUB_GH_LOG"; }
 # advance one bead between passes, the way a later pass of the city would
@@ -1910,6 +1912,27 @@ eq "$(reacted 40 NC-40)" "true" "the routed comment got its EYES reaction"
 has "$out" "1 comments acknowledged" "the pass reports the acknowledgement"
 eq "$(treply 40 T-40)" "" "no reply while the rework bead is still open"
 eq "$(tresolved 40 T-40)" "false" "…and the thread is NOT resolved on filing"
+
+echo "# a routed top-level (Conversation) comment gets the same EYES acknowledgement"
+# Issue comments are their own id space, watermarked by pr_issue_comment_watermark;
+# the write-back reads that mark, not the inline-comment one. They carry no thread,
+# so a routed one earns the pickup reaction and nothing else.
+store "[$(anchor WI 88 "$(wb_imeta rework:KI)"), $(child KI open)]"
+printf '%s' "$(prview 88 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_88.json"
+threads 88 '{"reviews":[],"threads":[],"issue_comments":[
+  {"id":"IC-88","databaseId":50,"author":{"login":"johnzook"},"reactionGroups":[]},
+  {"id":"IC-88-hi","databaseId":80,"author":{"login":"johnzook"},"reactionGroups":[]},
+  {"id":"IC-88-self","databaseId":40,"author":{"login":"gc-city-bot"},"reactionGroups":[]}]}'
+out=$(run)
+eq "$(reacted 88 IC-88)" "true" "the routed Conversation comment got its EYES reaction"
+eq "$(reacted 88 IC-88-hi)" "false" "a Conversation comment above the mark earns none"
+eq "$(reacted 88 IC-88-self)" "false" "our own Conversation comment earns none"
+has "$out" "1 comments acknowledged" "the pass reports the one acknowledgement"
+
+echo "# …and running it again writes no second reaction (idempotent off viewerHasReacted)"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "REACT" "no second reaction to the Conversation comment"
 
 echo "# a landed fix replies once naming the commit, then resolves the thread"
 store "[$(anchor W2 41 "$(wb_meta rework:K2)"), $(child K2 closed)]"

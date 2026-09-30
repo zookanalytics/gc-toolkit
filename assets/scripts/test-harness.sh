@@ -485,7 +485,7 @@ case "$sub" in
       locate() { # <node-id> <node|thread>
         local cand filt
         if [ "$2" = "thread" ]; then filt='[ .threads[]? | select(.id == $i) ] | length > 0'
-        else filt='[ (.reviews[]?, (.threads[]? | .comments.nodes[]?)) | select(.id == $i) ] | length > 0'; fi
+        else filt='[ (.reviews[]?, (.threads[]? | .comments.nodes[]?), .issue_comments[]?) | select(.id == $i) ] | length > 0'; fi
         for cand in "$G"/threads_*.json; do
           [ -s "$cand" ] || continue
           jq -e --arg i "$1" "$filt" "$cand" >/dev/null 2>&1 && { printf '%s' "$cand"; return 0; }
@@ -505,6 +505,7 @@ case "$sub" in
               else . end;
             .reviews = ((.reviews // []) | map(mark))
             | .threads = ((.threads // []) | map(.comments.nodes = ((.comments.nodes // []) | map(mark))))
+            | .issue_comments = ((.issue_comments // []) | map(mark))
           ' "$f" > "$t" && mv "$t" "$f"
           printf 'REACT %s %s\n' "$sid" "$c" >> "${STUB_GH_LOG:?}"
           echo '{"data":{"addReaction":{"clientMutationId":null}}}'; exit 0 ;;
@@ -555,6 +556,17 @@ case "$sub" in
           jq -c --arg t "$tid" '{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
               nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+          exit 0 ;;
+        *comments\(first:100,after:*)
+          # The Conversation-tab (issue comments) read. WB_THREAD_COMMENTS_QUERY
+          # carries the same token but is caught above by *PullRequestReviewThread*;
+          # the reviews and reviewThreads reads never carry it. Issue comments live
+          # in the same PR fixture, under .issue_comments beside .reviews/.threads.
+          [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
+          [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
+          jq -c '{data: {repository: {pullRequest: {
+              comments: {pageInfo: {hasNextPage: false, endCursor: null},
+                nodes: (.issue_comments // [])}}}}}' "$f"
           exit 0 ;;
         *reviews*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
