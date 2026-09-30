@@ -636,11 +636,12 @@ func TestOpenBeadsCarriesTheSupervisorsOwnPartial(t *testing.T) {
 	}
 }
 
-// TestGatherFetchesConvoyChildrenConcurrently is the regression guard for the
-// N+1 fan-out fix. Each per-convoy child fetch blocks in the mock until enough
-// of them are in flight at once, so a concurrent gather sails through and a
-// serialized one — which never gets a second request in flight — falls out on
-// the barrier timeout with a max concurrency of 1 and fails the assertion.
+// TestGatherFetchesConvoyChildrenConcurrently asserts the per-convoy child
+// fetches (the N+1 fan-out) run concurrently. Each fetch blocks in the mock
+// until enough of them are in flight at once, so a concurrent gather sails
+// through and a serial one — which never gets a second request in flight —
+// falls out on the barrier timeout at a max concurrency of 1 and fails the
+// assertion.
 func TestGatherFetchesConvoyChildrenConcurrently(t *testing.T) {
 	const nConvoys = 6
 	const wantConcurrent = 3 // < nConvoys and <= maxGatherFanout, so it is reachable

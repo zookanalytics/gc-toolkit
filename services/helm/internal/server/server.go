@@ -40,15 +40,20 @@ type Server struct {
 	actuator Actuator
 	gate     *actuationGate
 
-	// mu guards cached/expiry only. It is never held across a gather: the
+	// mu guards cached, expiry, and gen. It is never held across a gather: the
 	// gather builds a board outside the lock and swaps it in under it, so a slow
 	// build cannot block a request a fresh cache could answer.
 	mu     sync.Mutex
 	cached *board.Board
 	expiry time.Time
+	// gen counts cache invalidations. A gather snapshots it before it reads and
+	// publishes its board only if the count still matches, so an invalidate that
+	// lands mid-gather — a write verb busting the cache after it mutates — is
+	// not undone by the in-flight gather re-caching the pre-invalidate board.
+	gen uint64
 
-	// flight coalesces concurrent cache misses into one gather, the anti-
-	// stampede role the cross-gather lock used to play.
+	// flight coalesces concurrent cache misses into one gather, so a burst of
+	// board requests drives a single gather rather than one per request.
 	flight singleflight.Group
 }
 
@@ -209,6 +214,7 @@ func (s *Server) invalidateBoard() {
 	defer s.mu.Unlock()
 	s.cached = nil
 	s.expiry = time.Time{}
+	s.gen++
 }
 
 // gatherTimeout bounds one gather. A healthy gather is a few seconds; this is
@@ -224,9 +230,7 @@ const gatherTimeout = 30 * time.Second
 // read the cache and to swap the finished board in — so a slow gather never
 // blocks a request a fresh cache could answer. Concurrent misses are coalesced
 // by a single-flight group, so a burst of board requests drives one gather
-// rather than one per request; the old design held the lock across the gather
-// for that same anti-stampede reason, at the cost of serializing every request,
-// even cached ones, behind the build.
+// rather than one per request.
 func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 	if b, ok := s.cachedFresh(); ok {
 		return b, nil
@@ -262,6 +266,10 @@ func (s *Server) cachedFresh() (*board.Board, bool) {
 // cache under the lock — which it takes only for the swap, never across
 // s.src.Gather.
 func (s *Server) gather(ctx context.Context) (*board.Board, error) {
+	s.mu.Lock()
+	startGen := s.gen
+	s.mu.Unlock()
+
 	res, err := s.src.Gather(ctx)
 	if err != nil {
 		return nil, err
@@ -275,8 +283,16 @@ func (s *Server) gather(ctx context.Context) (*board.Board, error) {
 	// here — discovery is a gc subprocess and this runs on every cache refresh.
 	b.PackHealth = source.GatherPackHealth(s.cityPath, now)
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Publish only if no invalidate landed while the gather was in flight. A
+	// write verb busts the cache after it mutates, so a gather that started
+	// before that write holds pre-write state, and caching it would serve the
+	// stale board for the whole TTL. On a bump, hand the build to this caller
+	// but leave the cache empty so the next read re-gathers.
+	if s.gen != startGen {
+		return &b, nil
+	}
 	s.cached = &b
 	s.expiry = now.Add(s.ttl)
-	s.mu.Unlock()
 	return &b, nil
 }

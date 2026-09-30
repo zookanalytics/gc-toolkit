@@ -136,9 +136,8 @@ func (b *blockingSource) Gather(context.Context) (*source.Result, error) {
 	return b.result, nil
 }
 
-// TestConcurrentMissesCoalesceIntoOneGather is the anti-stampede guard that
-// replaced holding the cache lock across the gather: a burst of concurrent
-// misses must drive ONE gather, not one per request.
+// TestConcurrentMissesCoalesceIntoOneGather is the anti-stampede guard: a burst
+// of concurrent cache misses must drive ONE gather, not one per request.
 func TestConcurrentMissesCoalesceIntoOneGather(t *testing.T) {
 	const n = 8
 	src := &blockingSource{
@@ -185,9 +184,9 @@ func TestConcurrentMissesCoalesceIntoOneGather(t *testing.T) {
 
 // TestCacheLockNotHeldDuringGather is the discriminating guard for building the
 // board OUTSIDE the cache lock. While a gather is in flight, another lock-taker
-// — here invalidateBoard, the write-verb path — must not block on it. Against
-// the old design, which held the lock across the whole gather, invalidateBoard
-// blocked until the gather returned, and this fails on the deadline.
+// — here invalidateBoard, the write-verb path — must not block on it; a build
+// that held the lock across the whole gather would block it until the gather
+// returned, and this test fails on the deadline.
 func TestCacheLockNotHeldDuringGather(t *testing.T) {
 	src := &blockingSource{
 		entered: make(chan struct{}, 1),
@@ -213,6 +212,41 @@ func TestCacheLockNotHeldDuringGather(t *testing.T) {
 	}
 
 	close(src.release) // let the in-flight gather finish so its goroutine exits
+}
+
+// TestInvalidateDuringGatherIsNotRepublished pins the invalidation-generation
+// guard: an invalidate that lands while a gather is in flight must win, so the
+// in-flight gather may not publish its pre-invalidate board into the cache.
+// This mirrors a GET /helm gather racing a POST /helm/open — the write busts
+// the cache after it mutates, and a gather that started earlier holds pre-write
+// state. Without the guard the gather re-caches that stale board with a fresh
+// TTL and the next read serves pre-write state for the whole window; with it,
+// the cache stays empty so the next read re-gathers.
+func TestInvalidateDuringGatherIsNotRepublished(t *testing.T) {
+	src := &blockingSource{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	done := make(chan struct{})
+	go func() { _, _ = s.Board(context.Background()); close(done) }()
+
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+
+	// A write verb completes and invalidates while the gather is still in flight.
+	s.invalidateBoard()
+	close(src.release)
+	<-done
+
+	if b, ok := s.cachedFresh(); ok {
+		t.Fatalf("stale board republished after an invalidate during the gather: %+v", b)
+	}
 }
 
 func TestBoardErrorIs502(t *testing.T) {

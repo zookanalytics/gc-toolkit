@@ -22,11 +22,11 @@ import (
 const defaultSupervisorPort = 8372
 
 // maxGatherFanout bounds how many per-epic and per-convoy child roll-ups the
-// gather fetches at once. Each roll-up is an independent GET, and doing them in
-// series was the N+1 that made a gather take tens of seconds on a wide store;
-// fetching them concurrently is the fix. The bound keeps a store with hundreds
-// of convoys from opening an unbounded number of connections to the supervisor
-// in a single burst.
+// gather fetches at once. Each roll-up is an independent GET, and fetching them
+// concurrently keeps the fan-out from serializing into an N+1 that costs tens
+// of seconds on a wide store. The bound keeps a store with hundreds of convoys
+// from opening an unbounded number of connections to the supervisor in a single
+// burst.
 const maxGatherFanout = 8
 
 // SupervisorSource reads bead state from the supervisor loopback HTTP
