@@ -305,7 +305,9 @@ if [ "$(eval "set -- $PASTE"; sig "$@")" != "$(sig "${CMD[@]}")" ]; then
   exit 1
 fi
 
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # One bead per situation, whatever its status. An open one is the same ask
 # still waiting; a closed one is an ask a human already answered, and re-filing

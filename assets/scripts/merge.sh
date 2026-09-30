@@ -47,6 +47,10 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
+# The composable "may this anchor be finalized?" precondition set. An open visit
+# tracking the anchor holds its merge — subject-scoped via the anchor's incoming
+# tracks edge, never a cascading blocks edge (docs/finalize-gate.md).
+FINALIZE_GATE="$SCRIPTS_DIR/finalize-gate.sh"
 
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # The merged-record retry cap. Both record arms below retry every pass with no
@@ -170,14 +174,9 @@ record_machine() { # <anchor-id> <value> <head-oid> <current-route>
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-bd_list() { # guarded array read; non-zero = "could not tell"
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 anchor_row() { # live {status, meta}; empty = unreadable, never an all-default row
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -c '.[0] | select(. != null) | select(.metadata != null)
@@ -528,6 +527,15 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
 
+  # --- open visit on this anchor: a person owes a conversation before finalize ---
+  # Subject-scoped via the anchor's incoming tracks edge; a visit is non-blocking,
+  # so this holds THIS anchor's merge without touching its children or readiness.
+  # Fail-closed: an unreadable probe holds, like every probe above.
+  if ! fg_reason=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+    echo "$PROG: PR#$num ${fg_reason:-finalize gate refused (fail-closed)}; merge held (anchor $id)"
+    held=$((held + 1)); continue
+  fi
+
   # --- approval ------------------------------------------------------------------
   reviews=$(gh_api_origin --paginate "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100" \
     --jq '.[]' 2>/dev/null); rrc=$?
@@ -773,6 +781,12 @@ $sa_out" >/dev/null 2>&1 || true
   # non-zero jq means the comparison itself failed — hold, never merge blind.
   if [ "$frc" -ne 0 ] || [ -z "$freason" ]; then
     freason="terminal re-read comparison unreadable"
+  fi
+  # A visit is a subject-local bead filed without moving the PR head, so
+  # --match-head-commit does not catch one raised between validation and here.
+  # Re-assert the finalize gate in the terminal window, same fail-closed terms.
+  if [ "$freason" = "OK" ] && ! fg_final=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+    freason="${fg_final:-open visit or unreadable visit probe (fail-closed)}"
   fi
   if [ "$freason" != "OK" ]; then
     echo "$PROG: PR#$num anchor $id changed between validation and the merge — $freason; merge held"

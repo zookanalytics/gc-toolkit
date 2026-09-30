@@ -22,7 +22,7 @@ harness_init
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
-  "$HERE/lane-state.sh" "$HERE/finding.sh"
+  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
@@ -51,6 +51,12 @@ finding() { # id anchor [disposition] [lane]
 prview() { # num state mergeState extra-json
   printf '{"state":"%s","isDraft":false,"baseRefName":"main","headRefName":"polecat/x%s","headRefOid":"sha-%s","headRepository":{"name":"gc-toolkit"},"headRepositoryOwner":{"login":"zook"},"isCrossRepository":false,"mergeStateStatus":"%s","mergeable":"MERGEABLE","reviewDecision":"","url":"https://github.com/zook/gc-toolkit/pull/%s","mergeCommit":{"oid":"merged-sha-%s"}%s}' \
     "$2" "$1" "$1" "$3" "$1" "$1" "${4:-}"
+}
+# A visit on <anchor>, tracking it via a tracks edge (wired in STUB_DEPS by the
+# caller). Its OPEN existence is the whole signal the finalize gate reads.
+visit() { # id anchor [status]
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"visit: %s","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
+    "$1" "${3:-open}" "$2" "$2"
 }
 
 echo "# happy path"
@@ -279,6 +285,58 @@ store "[$(anchor MF1 46), $(rev MF1), $(printf '%s' "$(finding fnd-mf1 MF1)" | j
 printf 'fnd-mf1|blocks|MF1\n' > "$STUB_DEPS"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded MF1" "every lane green and no open must-fix: the merge lands"
+: > "$STUB_DEPS"
+
+echo "# an OPEN visit on the anchor holds the merge (finalize gate), and the hold names it"
+# The visit tracks the anchor (non-blocking), so no earlier blocker probe sees it;
+# the finalize gate reads its open existence and holds THIS anchor's merge.
+store "[$(anchor MV1 47), $(rev MV1), $(visit vis-mv1 MV1)]"
+printf 'vis-mv1|tracks|MV1\n' > "$STUB_DEPS"
+printf '%s' "$(prview 47 OPEN CLEAN)" > "$GH_DIR/pr_view_47.json"
+echo '[]' > "$GH_DIR/reviews_47.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "held by open visit vis-mv1" "an open visit holds the merge, naming the visit"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 47" "…and nothing merged under the open visit"
+eq "$(bstatus MV1)" "open" "…and the anchor stays open"
+
+echo "# a CLOSED visit on the anchor does not hold the merge"
+store "[$(anchor MV2 48), $(rev MV2), $(visit vis-mv2 MV2 closed)]"
+printf 'vis-mv2|tracks|MV2\n' > "$STUB_DEPS"
+printf '%s' "$(prview 48 OPEN CLEAN)" > "$GH_DIR/pr_view_48.json"
+echo '[]' > "$GH_DIR/reviews_48.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded MV2" "a closed visit is no hold: the merge lands"
+: > "$STUB_DEPS"
+
+echo "# a visit filed mid-pass is caught by the terminal re-read (a visit does not move the head)"
+# The anchor validates clean, then an open visit is filed before the merge. It is
+# subject-local — no head move — so --match-head-commit cannot catch it; only the
+# terminal finalize-gate re-assert can. The store gains the visit on MV3's SECOND
+# read (the terminal re-read), via the same STUB_SHOW_HOOK seam the other
+# terminal-re-read cases use.
+store "[$(anchor MV3 49), $(rev MV3)]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 49 OPEN CLEAN)" > "$GH_DIR/pr_view_49.json"
+echo '[]' > "$GH_DIR/reviews_49.json"
+MV3_HOOK_COUNT="$TMP/hookcount_mv3"; : > "$MV3_HOOK_COUNT"
+cat > "$TMP/hook_mv3.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "MV3" ] || exit 0
+n=\$(cat "$MV3_HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$MV3_HOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
+  jq -c '. + [{"id":"vis-mv3","status":"open","assignee":"","notes":"","title":"visit: MV3","issue_type":"task","metadata":{"task_kind":"visit","gc.continuation_group":"MV3"}}]' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+  printf 'vis-mv3|tracks|MV3\n' >> "\$STUB_DEPS"
+fi
+HOOK
+chmod +x "$TMP/hook_mv3.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/hook_mv3.sh" "$SUT" 2>&1)
+has "$out" "changed between validation and the merge" "the terminal re-read holds on a mid-pass visit"
+has "$out" "held by open visit vis-mv3" "…and names the mid-pass visit"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 49" "…and nothing merged"
 : > "$STUB_DEPS"
 
 echo "# approval arms"
