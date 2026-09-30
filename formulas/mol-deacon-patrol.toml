@@ -397,23 +397,27 @@ Also run every cycle, whatever the sweep is doing:
   healthy park — never a warrant. A session it reports `escalated=1`
   (nudging exhausted), or a live infrastructure session whose patrol wisp
   is stale past the freshness you already treat as wedged, is
-  live-but-wedged: file ONE warrant for the dog pool — never kill directly,
-  and skip if an open warrant already names the target:
+  live-but-wedged: file ONE warrant for the dog pool via `file-warrant.sh` —
+  never kill directly. It resolves the session to the id dance-probe.sh
+  requires, dedups on it, and refuses if nothing live matches:
   ```bash
-  OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
-  if [ -z "$OPEN_WARRANT" ]; then
-    gc bd create --type=task --title="Stuck: <rig>/<role>" --metadata '{"warrant.target":"<session>","warrant.reason":"<what is stale and for how long>","warrant.requester":"deacon","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
-    # Ledger the filing, not the skip: a warrant that already stood was
-    # recorded on the pass that opened it. Re-read the id rather than
-    # capturing the create, which can answer with an empty id although the
-    # bead landed; an id that still does not resolve leaves the ref empty and
-    # the entry defaults it to "-".
-    LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-    done
-    FILED=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
-    "$LEDGER" append warrant "<session> filed for the dog: <what is stale and for how long>" "${FILED:+bead:$FILED}"
-  fi
+  # >>> warrant-file
+  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/file-warrant.sh" ] && [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  # file-warrant.sh resolves the owner to a live session id, validates it against
+  # dance-probe.sh's charset, dedups on that id, and files the warrant: exit 0
+  # filed a new one, 3 found one already open, 1 refused (no live session). Ledger
+  # the filing, not the skip — a warrant that already stood was recorded when it
+  # opened — so ledger only on 0. The filer's stdout is the warrant id (empty only
+  # when its re-read failed, which the entry then defaults to "-").
+  FILED=$("$SCRIPTS/file-warrant.sh" --owner "<session>" --role "<rig>/<role>" --reason "<what is stale and for how long>" --requester deacon --dog "{{binding_prefix}}dog")
+  case $? in
+    0) "$SCRIPTS/gc-deacon-ledger.sh" append warrant "<session> filed for the dog: <what is stale and for how long>" "${FILED:+bead:$FILED}" ;;
+    3) : ;;  # a warrant already stood; it was ledgered when it opened
+    *) echo "file-warrant.sh refused to file for <session> (it resolved to no live session id); escalate this wedged session instead." >&2 ;;
+  esac
+  # <<< warrant-file
   ```
   The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
   pardon-or-execute, DOG_DONE notice back); its probe re-checks the

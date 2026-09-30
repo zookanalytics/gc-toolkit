@@ -61,7 +61,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 |---|---|---:|---:|
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,104 | 776 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
-| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
+| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,247 | 811 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
