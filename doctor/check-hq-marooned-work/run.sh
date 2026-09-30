@@ -9,9 +9,9 @@
 # store and flags each rig-workable bead that no worker is positioned to claim.
 #
 # Rig-workable = an OPEN, UNASSIGNED bead whose issue_type is not an infra type
-# (session/message/molecule/chore/rig/agent/role/gate/merge-request), which is
-# neither city machinery nor held-by-design, and which is unrouted or routed to a
-# rig pool that cannot see it. The exclusions carve out the legitimate HQ
+# (the INFRA_TYPES set defined below), which is neither city machinery nor
+# held-by-design, and which is unrouted or routed to a rig pool that cannot see
+# it. The exclusions carve out the legitimate HQ
 # residents: a bead routed to a city-scoped agent (resolved from `gc agent list`)
 # is reachable there; a `warrant` label marks city machinery a rig never works; a
 # standing subject (task_kind=triage-subject or feedback-pattern) is a
@@ -29,10 +29,16 @@ set -u
 
 city="${GC_CITY_PATH:-${GC_CITY:-}}"
 
-# Infra issue_types a pool never works — the shape that marks a bead as HQ
-# machinery rather than rig work. Mirrors beads' ready-work exclusions plus the
-# session type, which `bd list` also surfaces.
-INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate","merge-request"]'
+# Infra issue_types a pool never works: the shape that marks a bead as HQ
+# machinery rather than rig work. These mirror gascity's Ready() type exclusions
+# (readyExcludeTypes in internal/beads/beads.go), the set the bd CLI's
+# GetReadyWork query also excludes. No CLI surface dumps that map, so this list
+# is a hand-kept copy; re-sync it when gascity adds a machinery type. Two local
+# choices sit on top of the mirror: chore is added, because gascity files its
+# nudge queue as chore beads and one in the HQ store is city machinery, not rig
+# work; spec is left off, because a spec is real rig work and one marooned in the
+# HQ store must still be caught.
+INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate","merge-request","step","convoy","startup-health-episode"]'
 
 # Standing-subject task_kinds: a held-by-design host for escalation or feedback
 # state, not work anyone claims. Mirrors standing_kinds in

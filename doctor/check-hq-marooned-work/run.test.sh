@@ -4,6 +4,8 @@
 # legitimate HQ resident is exempt (infra type, human route, task_kind=visit,
 # deacon-ledger label, debt label, gc-doctor title, an assigned bead, a bead
 # routed to a city-scoped agent, a warrant label, a standing subject); the
+# machinery types bd's ready-work query excludes (step, convoy,
+# startup-health-episode) are exempt while a marooned spec is still flagged; the
 # city-route exemption keys off the agent's scope not its name; a warrant is
 # still exempt when the agent list is down; a mix names only the marooned beads;
 # an empty store passes; and the fail-closed arms — no locatable city, an
@@ -75,6 +77,10 @@ B_DOGQUAL='{"id":"ok-dogqual","status":"open","issue_type":"task","title":"city 
 B_WARRANT_UNROUTED='{"id":"ok-warrant-unrouted","status":"open","issue_type":"task","title":"warrant with its route cleared","labels":["warrant"]}'
 B_TRIAGE='{"id":"ok-triage","status":"open","issue_type":"task","title":"triage: escalations raised from an ephemeral subject (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"ephemeral-subject-findings"}}'
 B_FEEDBACK='{"id":"ok-feedback","status":"open","issue_type":"task","title":"feedback pattern host","metadata":{"task_kind":"feedback-pattern"}}'
+B_STARTUP='{"id":"ok-startup","status":"open","issue_type":"startup-health-episode","title":"Startup health: gc-toolkit__ripley-pool"}'
+B_STEP='{"id":"ok-step","status":"open","issue_type":"step","title":"mol-polecat-work.implement"}'
+B_CONVOY='{"id":"ok-convoy","status":"open","issue_type":"convoy","title":"convoy: an epic"}'
+B_SPEC='{"id":"m-spec","status":"open","issue_type":"spec","title":"spec for a real feature marooned in HQ"}'
 
 # --- 1. a marooned bug is flagged -------------------------------------------
 store "$B_BUG"
@@ -175,6 +181,20 @@ store "$B_WARRANT_UNROUTED"
 OUT=$(AGENTS_RC=1 WANT_CITY_PATH="$CITY" run_check); RC=$?
 eq "$RC" "0" "a warrant is exempt by label even when the agent list is unreadable"
 has "$OUT" "OK:" "the roster-down warrant store reports the OK line"
+
+# --- 12. machinery types mirrored from bd's ready-work exclusions are exempt,
+#         but spec (real rig work) is still caught --------------------------
+# step/convoy/startup-health-episode are in gascity's readyExcludeTypes, so the
+# check must exempt them. spec is deliberately NOT excluded, so a spec marooned
+# in the HQ store is still work no rig can reach and must be reported.
+store "$B_STARTUP" "$B_STEP" "$B_CONVOY" "$B_SPEC"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a marooned spec among machinery types is still an ERROR"
+has "$OUT" "1 finding" "only the spec is a finding"
+has "$OUT" "m-spec" "the marooned spec is named"
+hasnt "$OUT" "ok-startup" "a startup-health-episode host is not flagged"
+hasnt "$OUT" "ok-step" "a formula step bead is not flagged"
+hasnt "$OUT" "ok-convoy" "a convoy container is not flagged"
 
 echo
 echo "check-hq-marooned-work: $PASS passed, $FAIL failed"
