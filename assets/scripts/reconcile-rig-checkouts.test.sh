@@ -6,7 +6,9 @@
 # the live city, Dolt, an agent, or the network. Covers: (a) a clean-behind rig
 # advances; (b) a diverged rig is NOT mutated and files exactly one reconcile
 # bead; (c) a re-run does not duplicate that bead; (d) the bead auto-closes once
-# the rig ff-s cleanly; (e) the HQ root is excluded; (f) a divergence is raised
+# the rig ff-s cleanly, and its board-visible tracking visit is retracted as moot
+# through escalate.sh --retract in the same pass (a still-diverged rig retracts
+# nothing); (e) the HQ root is excluded; (f) a divergence is raised
 # through escalate.sh, an advanced/HQ rig is not, and a recovered rig is not
 # re-escalated; (g) a configured pool that does not route falls back to the
 # human board; (h) an already-upstream divergence (SHA churn) auto-heals via
@@ -42,6 +44,9 @@ bead_for()   { awk -F'|' -v k="$1" '$2==k && $3=="open"{print $1; exit}' "$TMP/l
 esc_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/escalations" 2>/dev/null | wc -l | tr -d ' '; }
 esc_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/escalations" 2>/dev/null; }
 esc_last_pool() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{p=$3} END{print p}' "$TMP/escalations" 2>/dev/null; }
+# escalate.sh --retract calls recorded for a rig key, and the subject of the first.
+retract_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/retractions" 2>/dev/null | wc -l | tr -d ' '; }
+retract_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/retractions" 2>/dev/null; }
 
 # --- Build a remote with two commits, then derive three checkouts. ----------
 SRC="$TMP/src"; git init -q -b main "$SRC"; commit "$SRC" c1; commit "$SRC" c2
@@ -101,9 +106,10 @@ chmod +x "$TMP/bin/gc"
 # live agent claims.
 cat > "$TMP/bin/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
-subject=""; key=""; pool=""
+subject=""; key=""; pool=""; retract=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --retract) retract=1; shift;;
     --subject) subject="${2:-}"; shift 2;;
     --key)     key="${2:-}";     shift 2;;
     --message) shift 2;;
@@ -111,6 +117,16 @@ while [ $# -gt 0 ]; do
     *) shift;;
   esac
 done
+# The moot-retract counterpart records apart from filings so the file counts
+# stay exact; the real one closes the tracked visit through visit-close.sh
+# (proven in escalate.test.sh), and is a no-op success when none is open. It
+# exits non-zero under FAKE_RETRACT_FAIL, as the real one does on an unreadable
+# lookup or a close that did not land, so the caller's skip-close gate is testable.
+if [ "$retract" = 1 ]; then
+  printf '%s|%s\n' "$key" "$subject" >> "$FAKE_RETRACTIONS"
+  [ -n "${FAKE_RETRACT_FAIL:-}" ] && exit 1
+  exit 0
+fi
 printf '%s|%s|%s\n' "$key" "$subject" "$pool" >> "$FAKE_ESCALATIONS"
 [ -n "$pool" ] && [ "$pool" = "${FAKE_BAD_POOL:-}" ] && exit 1
 exit 0
@@ -119,7 +135,8 @@ chmod +x "$TMP/bin/escalate.sh"
 
 export PATH="$TMP/bin:$PATH" FAKE_RIGS_JSON="$TMP/rigs.json" FAKE_LEDGER="$TMP/ledger"
 export GC_RECONCILE_ESCALATE_TOOL="$TMP/bin/escalate.sh" FAKE_ESCALATIONS="$TMP/escalations"
-: > "$TMP/escalations"
+export FAKE_RETRACTIONS="$TMP/retractions"
+: > "$TMP/escalations"; : > "$TMP/retractions"
 
 # --- Run 1: alpha advances, beta escalates, hq is skipped. -------------------
 bash "$SCRIPT" >/dev/null
@@ -137,6 +154,9 @@ eq "$(esc_subject beta)" "$(bead_for beta)" "escalation subject is the reconcile
 eq "$(esc_last_pool beta)" "" "default escalation names no pool (human helm board)"
 eq "$(esc_count alpha)" "0" "advanced rig is not escalated"
 eq "$(esc_count loomington)" "0" "HQ root is not escalated"
+# A still-diverged rig's visit must stay claimable: nothing is retracted while
+# the subject is unresolved.
+eq "$(retract_count beta)" "0" "a still-diverged rig retracts no visit"
 
 # --- Run 2: idempotent — no duplicate reconcile bead. ------------------------
 # escalate.sh is called again (it dedups the visit on its own side, proven in
@@ -144,12 +164,17 @@ eq "$(esc_count loomington)" "0" "HQ root is not escalated"
 bash "$SCRIPT" >/dev/null
 eq "$(open_count beta)" "1" "re-run does not duplicate the reconcile bead"
 
-# --- Run 3: rig resolved -> bead auto-closes, no fresh escalation. -----------
+# --- Run 3: rig resolved -> bead auto-closes, its moot tracking visit is
+# retracted, and no fresh escalation is raised. ------------------------------
 BETA_ESC_BEFORE="$(esc_count beta)"
+BETA_BEAD="$(bead_for beta)"
+: > "$TMP/retractions"
 git -C "$TMP/beta" reset --hard -q origin/main
 bash "$SCRIPT" >/dev/null
 eq "$(open_count beta)" "0" "reconcile bead auto-closes after a clean fast-forward"
 eq "$(esc_count beta)" "$BETA_ESC_BEFORE" "a recovered rig is not re-escalated"
+eq "$(retract_count beta)" "1" "the recovered rig's tracking visit is retracted as moot"
+eq "$(retract_subject beta)" "$BETA_BEAD" "the retract names the reconcile bead as its subject"
 
 # --- Run 4: a configured pool that does not route falls back to human. -------
 git -C "$TMP/beta" reset --hard -q "$BETA_DIVERGED"    # re-diverge beta
@@ -209,11 +234,16 @@ eq "$(open_count gamma)" "1" "RECONCILE_NO_AUTOHEAL files a reconcile bead"
 # untracked file, closes the bead the escape-hatch run filed, and is not
 # re-escalated; delta's genuine divergence still escalates and is not mutated.
 GAMMA_ESC_BEFORE="$(esc_count gamma)"
+GAMMA_BEAD="$(bead_for gamma)"
+: > "$TMP/retractions"
 OUT="$(bash "$SCRIPT")"
 eq "$(git -C "$TMP/gamma" rev-parse HEAD)" "$GAMMA_REMOTE" "already-upstream rig is reset --hard to origin"
 [ -f "$TMP/gamma/untracked.txt" ] && ok "auto-heal preserves untracked files" || bad "auto-heal preserves untracked files"
 eq "$(open_count gamma)" "0" "auto-heal closes the open reconcile bead"
 eq "$(esc_count gamma)" "$GAMMA_ESC_BEFORE" "auto-healed rig is not re-escalated"
+eq "$(retract_count gamma)" "1" "the auto-healed rig's tracking visit is retracted as moot"
+eq "$(retract_subject gamma)" "$GAMMA_BEAD" "the auto-heal retract names the reconcile bead as its subject"
+eq "$(retract_count delta)" "0" "a still-diverged rig alongside retracts nothing"
 grep -q '1 auto-healed' <<< "$OUT" && ok "summary line reports the auto-heal count" || bad "summary line reports the auto-heal count (got '$OUT')"
 eq "$(git -C "$TMP/delta" rev-parse HEAD)" "$DELTA_DIVERGED" "a genuine unique-commit divergence is not mutated"
 eq "$(open_count delta)" "1" "a genuine unique-commit divergence keeps its reconcile bead"
@@ -379,6 +409,46 @@ eq "$(git -C "$TMP/kappa" symbolic-ref --short HEAD)" "integration/seed" "a park
 eq "$(esc_count kappa)" "1" "a rig parked off the default branch is escalated"
 eq "$(open_count kappa)" "1" "a rig parked off the default branch files a reconcile bead"
 grep -q '0 advanced' <<< "$KAPPA_OUT" && ok "a parked rig is not counted as advanced" || bad "a parked rig is not counted as advanced (got '$KAPPA_OUT')"
+
+# lambda: a recovered rig whose visit retract FAILS must keep its reconcile
+# subject OPEN. open_bead lists open beads only (no --all), so the subject is the
+# only handle the next patrol has to retry the retract; closing it after a failed
+# retract would strand the human-routed visit unretractable — the phantom demand
+# this change exists to clear. A later pass whose retract succeeds closes it.
+git init -q -b main "$TMP/lambda.src"; commit "$TMP/lambda.src" l1; commit "$TMP/lambda.src" l2
+git clone -q --bare "$TMP/lambda.src" "$TMP/lambda.git"
+git clone -q "$TMP/lambda.git" "$TMP/lambda"                     # HEAD = l2 (pre-rewrite SHA)
+git -C "$TMP/lambda.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # same tree, new SHA
+git -C "$TMP/lambda.src" push -qf "$TMP/lambda.git" main
+LAMBDA_REMOTE="$(git -C "$TMP/lambda.git" rev-parse main)"
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"lambda","path":"$TMP/lambda"}
+]}
+JSON
+
+# File lambda's reconcile bead first (auto-heal disabled: escalate, don't heal).
+: > "$TMP/escalations"; : > "$TMP/retractions"
+RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
+eq "$(open_count lambda)" "1" "lambda files a reconcile bead while diverged"
+LAMBDA_BEAD="$(bead_for lambda)"
+
+# Auto-heal enabled but the retract fails: lambda heals, the retract is attempted,
+# and because it did not land the subject is NOT closed.
+: > "$TMP/retractions"
+FAKE_RETRACT_FAIL=1 bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/lambda" rev-parse HEAD)" "$LAMBDA_REMOTE" "lambda still heals to origin even when the retract fails"
+eq "$(retract_count lambda)" "1" "a retract is attempted on the healed rig"
+eq "$(open_count lambda)" "1" "a FAILED retract leaves the reconcile subject OPEN as the retry handle"
+eq "$(bead_for lambda)" "$LAMBDA_BEAD" "the same subject stays open — no fresh bead is filed"
+
+# Next patrol, the retract succeeds: the still-open subject is re-found and closed.
+: > "$TMP/retractions"
+bash "$SCRIPT" >/dev/null
+eq "$(retract_count lambda)" "1" "the next patrol retries the retract on the still-open subject"
+eq "$(open_count lambda)" "0" "a successful retract finally closes the subject"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

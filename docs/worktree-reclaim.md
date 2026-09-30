@@ -59,7 +59,7 @@ pass is the exception — it has no `work_dir` and keys on the ref's bead id, as
 Both branch questions are asked, for the same reason. The branch the checkout
 is on and the branch its beads recorded are not always the same ref, and
 either being live holds the tree. Asking the ledger for live beads on the
-branch is what covers a branch in the pre-open codex gate, which is live work
+branch is what covers a branch in the pre-open codex check, which is live work
 carrying no pull request at all.
 
 ## Dropping the branch

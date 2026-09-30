@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-open — arm 2 of the merge cadence: pre_open_gate -> pull_request.
+# pr-open — arm 6 of the merge cadence: pre_open_gate -> pull_request.
 # For each pre_open_gate anchor: adopt an existing OPEN or MERGED PR for the
 # branch (never open a twin) — an OPEN PR's body is first refreshed from the
 # anchor's current pr_summary, so a rework's restamp reaches the published merge

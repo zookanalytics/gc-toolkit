@@ -2,7 +2,10 @@ module github.com/zookanalytics/gc-toolkit/services/helm
 
 go 1.26.5
 
-require github.com/steveyegge/beads v1.2.2-0.20260825072917-62d211937bd3
+require (
+	github.com/steveyegge/beads v1.2.2-0.20260825072917-62d211937bd3
+	golang.org/x/sync v0.22.0
+)
 
 // prstatus is the shared tri-state core; the helm board and the PR label writer
 // derive the status: taxonomy from it. Same repo, separate module, so a local
@@ -165,7 +168,6 @@ require (
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
 	golang.org/x/term v0.45.0 // indirect

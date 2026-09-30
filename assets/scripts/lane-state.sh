@@ -15,7 +15,7 @@
 #
 #   backing   a closed task_kind=review bead whose anchor_bead is this anchor,
 #             carrying a reviewed_oid, and whose check_name is this lane (absent
-#             check_name resolves to codex): it carries signoff_verdict=approve
+#             check_name resolves to correctness): it carries signoff_verdict=approve
 #             and is not superseded (gc.outcome is not superseded); OR, for a
 #             legacy bead written before the verdict stamp, carries no
 #             signoff_verdict with gc.outcome=recorded; OR the anchor's pr_number
@@ -50,7 +50,9 @@ set -uo pipefail
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 warn() { echo "lane-state: $*" >&2; }
 
 ALL_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
@@ -101,7 +103,7 @@ cmd_green() {
   local inflight
   inflight=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "review")
-          | select((((.metadata.check_name // "") | tostring) | if . == "" then "codex" else . end) == $lane)
+          | select((((.metadata.check_name // "") | tostring) | if . == "" then "correctness" else . end) == $lane)
           | select(((.status // "") | tostring | ascii_downcase) != "closed") ]
     | length > 0' 2>/dev/null)
   [ "$inflight" = "true" ] && return 1
@@ -110,7 +112,7 @@ cmd_green() {
   backed=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | (.metadata // {}) as $m
           | select(((($m.task_kind // "") | tostring)) == "review")
-          | select(((($m.check_name // "") | tostring) | if . == "" then "codex" else . end) == $lane)
+          | select(((($m.check_name // "") | tostring) | if . == "" then "correctness" else . end) == $lane)
           | select(((.status // "") | tostring | ascii_downcase) == "closed")
           | select(((($m.reviewed_oid // "") | tostring)) != "")
           | (($m.signoff_verdict // "") | tostring) as $sv

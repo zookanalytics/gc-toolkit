@@ -210,6 +210,15 @@ export FAKE_ACTOR_LOG="$TMP/actors.log"
 : > "$FAKE_ACTOR_LOG"
 export BEADS_ACTOR="test__rehome-lx-0000"
 
+# The finalize gate is a sibling bead-rehome forks before the close. Stub it so
+# this suite tests the WIRING (a refusal holds the close, leaving an open pointed
+# bead) without a live tracks-edge probe — the gate's own logic is covered by
+# finalize-gate.test.sh. Default: allow; FG_VERDICT=hold makes it refuse.
+FG_STUB="$TMP/bin/finalize-gate-stub.sh"
+printf '#!/usr/bin/env bash\ncase "${FG_VERDICT:-pass}" in\n  hold) echo "held by open visit vis-x — its subject ${2:-?} owes a conversation before finalize"; exit 1 ;;\n  *) exit 0 ;;\nesac\n' > "$FG_STUB"
+chmod +x "$FG_STUB"
+export GC_FINALIZE_GATE_TOOL="$FG_STUB"
+
 run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
 
 # --- (a) happy path: pointer + populated reason + back-pointer --------------
@@ -227,6 +236,19 @@ eq "$(field beta m.gc.supersedes bt-succ1)" al-origin1 "back-pointer names the o
 eq "$(field beta m.gc.supersedes_store bt-succ1)" rig:alpha "back-pointer names the origin's store"
 has "$(cat "$TMP/out")" "events" "output points at the events table for attribution"
 has "$(cat "$FAKE_ACTOR_LOG")" "test__rehome-lx-0000" "the actor is passed through for the audit trail"
+
+# --- (x) an OPEN visit on the origin holds the close (finalize gate) ---------
+# The gate refuses while a visit tracks the origin. bead-rehome stamps the
+# successor pointer, then leaves the bead OPEN — the same shape a refused close
+# leaves — so the disposition stays legible and the visit can be concluded first.
+mkbead alpha open al-vhold
+mkbead beta  open bt-vsucc
+rc=0; FG_VERDICT=hold run --origin al-vhold --successor bt-vsucc --kind re-homed --note "ruling" || rc=$?
+eq "$rc" 5 "an open visit holds the close (exit 5)"
+eq "$(field alpha status al-vhold)" open "…the origin stays OPEN under the hold"
+eq "$(field alpha m.gc.superseded_by al-vhold)" bt-vsucc "…the pointer is still stamped, so the disposition is findable"
+has "$(cat "$TMP/err")" "the close is held" "…stderr says the close is held"
+has "$(cat "$TMP/err")" "held by open visit" "…and carries the gate's reason"
 
 # --- (b) missing successor: nothing written at all --------------------------
 mkbead alpha open al-origin2

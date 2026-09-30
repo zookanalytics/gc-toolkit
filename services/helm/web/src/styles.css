@@ -82,20 +82,53 @@ th {
 }
 
 /*
- * Dependency families. Each family is a titled block — its
- * root anchor, then the members that hang off it — bracketed with a left rule so
- * it reads as one thing. The attention band rides a per-row column; a ● marks
- * the rows whose next move is the operator's.
+ * The board is one table. Dependency structure is the grouping axis: a family's
+ * root with members leads as a group row and its members indent one level
+ * beneath it; a single-item family is a plain row. The attention band rides a
+ * per-row column; a ● and a row tint mark the rows whose next move is the
+ * operator's, in place — the table is never reordered by attention.
  */
-.board-family {
-  border-left: 2px solid rgb(128 128 128 / 35%);
+.anchors {
   margin-top: 1.5rem;
-  padding-left: 0.75rem;
 }
 
-.board-family h2 {
+.anchors h2 {
   font-size: 0.9375rem;
-  margin: 0;
+  margin: 0 0 0.25rem;
+}
+
+/* A new family opens with a stronger top rule; its members carry none, so a
+   group and the rows indented under it read as one block within the table. */
+.row-group td,
+.row-loose td {
+  border-top: 2px solid rgb(128 128 128 / 45%);
+}
+
+/* Members sit one level in, indented on the title cell so the ● in the band
+   column still lines up down every row. */
+.row-member .title-cell {
+  padding-left: 1.75rem;
+}
+
+/* The attention highlight, in place: a row whose next move is the operator's, or
+   one an open visit is holding, is tinted where it already sits. wants-person is
+   the stronger signal, so its rule follows and wins when a row is both. */
+.row-held {
+  background: rgb(128 128 128 / 10%);
+}
+
+.row-wants-person {
+  background: rgb(138 97 0 / 12%);
+}
+
+/* A closed row is dimmed so it reads as finished at a glance without leaving the
+   table. */
+.row-done {
+  opacity: 0.6;
+}
+
+.anchors-note {
+  margin-top: 0.5rem;
 }
 
 .family-title {
@@ -110,6 +143,16 @@ th {
 
 .wants-person {
   color: #8a6100;
+}
+
+/*
+ * The visit marker: an open converse sitting holds this row. A different hue from
+ * the amber wants-person ● because it is a different fact — a conversation is on
+ * the bead — and the two can co-occur (◉). Teal reads as informational against
+ * the red/amber/green the rest of the board already spends.
+ */
+.held-marker {
+  color: #0e7490;
 }
 
 /*

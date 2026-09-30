@@ -9,7 +9,13 @@
 # strands an unclaimable workflow root in the city store every fire). Arm 4:
 # an open, unassigned, routed bead appears in `bd ready` or in `bd blocked` —
 # an address arms 1-2 accept still names nobody who can be OFFERED the bead,
-# and a bead in neither list waits where no queue reports it.
+# and a bead in neither list waits where no queue reports it. A live graph.v2
+# molecule step (gc.step_id with a LIVE gc.root_bead_id — open or in_progress)
+# is exempt: its molecule schedules it through session affinity, so it is in
+# neither list by design, not stranded — an orphan step of a CLOSED molecule
+# stays a finding, and a root whose liveness cannot be read warns, never passes.
+# Each candidate is re-read at report time, so one that closed between the
+# listing and the report is dropped, not flagged from a stale snapshot.
 # Values are compared AS STORED; normalization is a diagnostic, never a pass.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
@@ -102,6 +108,11 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
     exit 1
 fi
+# Rig name -> store path, so arm 4 can reach a molecule root's store from its
+# gc.root_store_ref ("rig:<name>") when the root lives outside the store being
+# scanned. Built once from the same rig list the scan iterates.
+declare -A STORE_PATH=()
+while IFS=$'\037' read -r _sn _sp; do [ -n "$_sp" ] && STORE_PATH["$_sn"]="$_sp"; done <<< "$scopes"
 
 while IFS=$'\037' read -r rig_name rig_path; do
     [ -n "$rig_path" ] || continue
@@ -194,6 +205,67 @@ while IFS=$'\037' read -r rig_name rig_path; do
                 notes+=("$label bead $id: gc.routed_to=\"$route\" is set on a $btype, a type \`bd ready\` never returns — in neither list by that type's design rather than by a stranded route; reported, not judged")
                 continue ;;
         esac
+        # >>> arm4-live-molecule-and-recheck
+        # A strand verdict rests on the candidate being open NOW and not being a
+        # live graph.v2 molecule step. The open-bead list above is a snapshot: a
+        # bead that closed since is flagged from a ghost. And a molecule step
+        # (gc.step_id + gc.root_bead_id) is routed, unassigned, and in neither
+        # `bd ready` nor `bd blocked` BY DESIGN — its molecule schedules it
+        # through session affinity, not the pool queues. Re-read the candidate
+        # once: drop it if it is no longer open, exempt it if its molecule is
+        # still live (root open or in_progress), and keep it as the genuine
+        # strand it is — an orphan step of a CLOSED molecule stays an error. An
+        # unreadable CANDIDATE re-read falls through to the snapshot verdict
+        # (fail-closed to visibility, never a silent drop); an unreadable or
+        # otherwise undetermined ROOT liveness warns, so the step neither passes
+        # nor is flagged as a strand the check cannot prove.
+        cur_raw=$(run_bounded gc bd show "$id" --db "$rig_path/.beads" --json 2>"$PROBE_ERR"); cur_rc=$?
+        cur_row=$(printf '%s' "$cur_raw" | scrub | jq -c 'if type == "array" then .[0] else . end' 2>/dev/null)
+        if [ "$cur_rc" -eq 0 ] && [ -n "$cur_row" ] && [ "$cur_row" != "null" ]; then
+            cur_status=$(printf '%s' "$cur_row" | jq -r '.status // ""' 2>/dev/null)
+            if [ -n "$cur_status" ] && [ "$cur_status" != "open" ]; then
+                notes+=("$label bead $id: gc.routed_to=\"$route\" was open when the store was listed but is $cur_status now — it closed between the listing and this report, so it is not stranded; reported, not judged")
+                continue
+            fi
+            step_id=$(printf '%s' "$cur_row" | jq -r '(.metadata // {})["gc.step_id"] // ""' 2>/dev/null)
+            root_id=$(printf '%s' "$cur_row" | jq -r '(.metadata // {})["gc.root_bead_id"] // ""' 2>/dev/null)
+            if [ -n "$step_id" ] && [ -n "$root_id" ]; then
+                root_ref=$(printf '%s' "$cur_row" | jq -r '(.metadata // {})["gc.root_store_ref"] // ""' 2>/dev/null)
+                root_db="$rig_path/.beads"
+                case "$root_ref" in
+                    rig:*) rn="${root_ref#rig:}"; [ -n "${STORE_PATH[$rn]:-}" ] && root_db="${STORE_PATH[$rn]}/.beads" ;;
+                esac
+                root_raw=$(run_bounded gc bd show "$root_id" --db "$root_db" --json 2>"$PROBE_ERR"); root_rc=$?; root_err=$(probe_err)
+                root_status=$(printf '%s' "$root_raw" | scrub | jq -r 'if type == "array" then .[0] else . end | .status // ""' 2>/dev/null)
+                if [ "$root_rc" -ne 0 ]; then
+                    # The root probe failed, so the molecule's liveness is unknown.
+                    # An unreadable probe warns and never passes: exempting would let
+                    # a real orphan through, and erroring would manufacture the very
+                    # strand false positive this carve-out exists to prevent.
+                    warnings+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, whose liveness could not be read (\`gc bd show $root_id\` rc=$root_rc) — this step's reachability was NOT determined${root_err:+; stderr: $root_err}")
+                    continue
+                fi
+                case "$root_status" in
+                    open|in_progress)
+                        # A live molecule root (poured or running) schedules its steps
+                        # through session affinity, so an in-flight step is absent
+                        # from `bd ready` and `bd blocked` by design, not stranded.
+                        notes+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, which is $root_status — the molecule schedules its steps through session affinity, so an in-flight step is absent from \`bd ready\` and \`bd blocked\` by design, not stranded; reported, not judged")
+                        continue ;;
+                    closed)
+                        errors+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, which is closed — the molecule is done but this step is still open and routed, an orphaned step no session will resume; close it or re-pour the molecule")
+                        continue ;;
+                    *)
+                        # rc=0 but the root resolved to no status (a missing or
+                        # cross-store-unresolvable root) or to a status that is
+                        # neither live nor closed: liveness is undetermined. Warn —
+                        # never silently pass, and never flag a strand we cannot prove.
+                        warnings+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, whose molecule liveness is undetermined (root status=\"$root_status\") — this step's reachability was NOT determined")
+                        continue ;;
+                esac
+            fi
+        fi
+        # <<< arm4-live-molecule-and-recheck
         stranded="$label bead $id: gc.routed_to=\"$route\" is set, but the bead is in neither \`bd ready\` nor \`bd blocked\` — no pool offers it and no queue shows it waiting"
         if [ -n "$parent" ]; then
             errors+=("$stranded; it has parent $parent, and a parent-child child inherits its ancestor's blocked flag and drops out of ready — a routed bead must be parentless, or slung so a parentless workflow root carries the demand")

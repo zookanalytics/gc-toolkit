@@ -53,6 +53,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_branch: '',
     pr_branch_url: '',
     pr_phase: '',
+    phase: '',
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
@@ -262,48 +263,227 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Address a family by its root's heading, a fixed region by its own; never by
-// position.
+// A fixed region by its accessible name — the owed cover-sheet, the sittings
+// record, the pack strip, or the anchors table; never by position.
 const region = (name: string): HTMLElement => screen.getByRole('region', { name });
 const queryRegion = (name: string): HTMLElement | null => screen.queryByRole('region', { name });
 const owedCover = (): HTMLElement => screen.getByRole('region', { name: 'owed by you' });
+const anchors = (): HTMLElement => screen.getByRole('region', { name: 'anchors' });
 
-// The member row a family renders for a tile, or null.
-function memberRow(rootId: string, text: RegExp | string): HTMLElement | null {
-  const cell = within(region(rootId)).queryByText(text);
+// The board is ONE table, so a row is addressed by unique text it carries (its
+// title, id, or needs sentence), found within the anchors region.
+function rowFor(text: RegExp | string): HTMLElement | null {
+  const cell = within(anchors()).queryByText(text);
   return cell ? (cell.closest('tr') as HTMLElement) : null;
+}
+
+// True when row `a` renders before row `b` — the table's order, read positionally.
+function precedes(a: HTMLElement, b: HTMLElement): boolean {
+  return Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
 // A bead a person owes reaches the board (before tk-2v08m a gather keyed on
 // issue type could not see `gc.routed_to=human` on a task), and it surfaces as a
 // GATE member of the family it hangs off — one of the two bands a ● marks as the
 // operator's move — not as a family of its own.
-it('surfaces the operator-owned bead as a gate member of its family', async () => {
+it('surfaces the operator-owned bead as a gate row indented under its family', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/anchorless open PR/)).toBeTruthy());
 
-  const row = memberRow('tk-epic', /anchorless open PR/);
+  const row = rowFor(/anchorless open PR/);
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText('gate')).toBeTruthy();
   expect(within(row as HTMLElement).getByText('routed to you — no question recorded')).toBeTruthy();
   expect(within(row as HTMLElement).getByText('2026-07-04')).toBeTruthy();
   // A ● marks the person's move on this row.
   expect((row as HTMLElement).textContent).toContain('●');
-  // It is a MEMBER of tk-epic, not a family of its own.
-  expect(queryRegion('tk-jgq6s')).toBeNull();
+  // It is a MEMBER row indented under tk-epic, not a group or loose row of its own.
+  expect((row as HTMLElement).className).toContain('row-member');
+});
+
+// The board marks a visit on a row, the same vocabulary the CLI prints
+// (cmd/helm-svc/board.go, familyGlyph): ○ a row an open visit holds, ◉ a row that
+// both is held and wants a person, ● a plain person's move. The held marker is
+// announced rather than decorative (aria-label), and its hover names the sittings
+// on the bead — each one's headline, its outcome or "running", and the session to
+// attach to.
+it('marks the beads a visit holds and names the sitting in the hover', async () => {
+  const board: Board = {
+    generated_at: '2026-08-26T08:00:00Z',
+    total: 4,
+    sittings: [
+      {
+        id: 'tk-vsit-held',
+        rig: 'gc-toolkit',
+        subject: 'tk-held',
+        title: 'visit: tk-held',
+        status: 'in_progress',
+        outcome: '',
+        outcome_reason: '',
+        session: 'gc-toolkit__converse-9',
+        opened_at: '2026-08-26T07:00:00Z',
+        takeaway: '',
+        subject_title: 'what the held row is about',
+      },
+      {
+        id: 'tk-vsit-both',
+        rig: 'gc-toolkit',
+        subject: 'tk-both',
+        title: 'visit: tk-both',
+        status: 'in_progress',
+        outcome: '',
+        outcome_reason: '',
+        session: 'gc-toolkit__converse-10',
+        opened_at: '2026-08-26T07:10:00Z',
+        takeaway: '',
+        subject_title: 'the gated topic',
+      },
+    ],
+    tiles: [
+      tile({
+        id: 'tk-fam',
+        kind: 'epic',
+        title: 'family root',
+        severity: 'HIGH',
+        section: 'stalled',
+        m_total: 3,
+        open: 3,
+        group_root: 'tk-fam',
+        frontier: '3 open',
+        rank_score: 3_000_000,
+      }),
+      tile({
+        id: 'tk-held',
+        kind: 'task',
+        title: 'held only',
+        severity: 'NORMAL',
+        section: 'active',
+        held: true,
+        group_root: 'tk-fam',
+        frontier: 'in flight',
+        rank_score: 2_500_000,
+      }),
+      tile({
+        id: 'tk-both',
+        kind: 'review',
+        title: 'held and gated',
+        severity: 'ELEVATED',
+        section: 'gate',
+        held: true,
+        group_root: 'tk-fam',
+        frontier: 'PR #7',
+        rank_score: 2_400_000,
+      }),
+      tile({
+        id: 'tk-wants',
+        kind: 'review',
+        title: 'wants a person',
+        severity: 'ELEVATED',
+        section: 'review',
+        group_root: 'tk-fam',
+        frontier: 'PR #8',
+        rank_score: 2_300_000,
+      }),
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(url, 'http://localhost/').pathname.endsWith('/helm')) {
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('held only')).toBeTruthy());
+
+  // ○ a held row no one owes; the marker is announced and hovers its one sitting.
+  const held = rowFor('held only') as HTMLElement;
+  expect(held.textContent).toContain('○');
+  expect(held.textContent).not.toContain('●');
+  const heldMarker = within(held).getByTitle(/what the held row is about/);
+  expect(heldMarker.getAttribute('aria-label')).toBe('held by an open visit');
+  expect(heldMarker.getAttribute('title')).toBe(
+    'what the held row is about · running · gc-toolkit__converse-9',
+  );
+
+  // ◉ a held row that also wants a person; the label says both.
+  const both = rowFor('held and gated') as HTMLElement;
+  expect(both.textContent).toContain('◉');
+  const bothMarker = within(both).getByTitle(/the gated topic/);
+  expect(bothMarker.getAttribute('aria-label')).toBe('held by an open visit; wants you');
+
+  // ● a plain person's move, unheld, still leads as it did before.
+  const wants = rowFor('wants a person') as HTMLElement;
+  expect(wants.textContent).toContain('●');
+  expect(wants.textContent).not.toContain('○');
 });
 
 // Within a family the members read in SECTION_ORDER — the most-pressing move
-// first — so review leads gate leads the rest. Dependency structure is the
-// top-level axis; the band orders WITHIN a family.
+// first — so review leads gate. Dependency structure is the top-level axis (the
+// epic leads its members); the band orders WITHIN a family.
 it('orders members within a family by the move they want', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
 
-  const bands = within(region('tk-epic'))
-    .getAllByText(/^(review|gate|stalled|active|cleanup|done)$/)
-    .map((e) => e.textContent);
-  expect(bands).toEqual(['review', 'gate']);
+  const epic = rowFor('Attention Canvas') as HTMLElement;
+  const review = rowFor(/the canvas PR waiting on your review/) as HTMLElement;
+  const gate = rowFor(/anchorless open PR/) as HTMLElement;
+  expect(epic.className).toContain('row-group');
+  expect(within(review).getByText('review')).toBeTruthy();
+  expect(within(gate).getByText('gate')).toBeTruthy();
+  // The epic leads, then its members in SECTION_ORDER: review before gate.
+  expect(precedes(epic, review)).toBe(true);
+  expect(precedes(review, gate)).toBe(true);
+});
+
+// The board renders as ONE table, not a mini-table per family.
+it('renders the whole board as one table', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(within(anchors()).getAllByRole('table')).toHaveLength(1);
+});
+
+// The needs-you highlight rides the row in place; the board keeps wire order and
+// does not float the operator's rows to the top. The stranded epic leads because
+// it leads the wire, even though its own next move is not the operator's.
+it('highlights needs-you rows in place without reordering the board', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  const epic = rowFor('Attention Canvas') as HTMLElement;
+  const review = rowFor(/the canvas PR waiting on your review/) as HTMLElement;
+  expect(epic.className).not.toContain('row-wants-person');
+  expect(review.className).toContain('row-wants-person');
+  // The needs-you review row sits BELOW the non-needs-you epic — no float-to-top.
+  expect(precedes(epic, review)).toBe(true);
+});
+
+// A held row — an open visit names the anchor — carries the row tint too, the
+// second of the two signals the highlight speaks.
+it('highlights a held row in place', async () => {
+  serve([
+    tile({
+      id: 'tk-held',
+      kind: 'human',
+      title: 'an anchor a conversation is holding',
+      severity: 'NORMAL',
+      section: 'active',
+      held: true,
+      needs: 'a sitting has this open',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a conversation is holding/)).toBeTruthy());
+
+  const row = rowFor(/a conversation is holding/) as HTMLElement;
+  expect(row.className).toContain('row-held');
 });
 
 // The Accept affordance is the board's one row-level actuation: it renders only
@@ -338,16 +518,16 @@ it('renders Accept on an acceptable member row and not on a discuss-only one', a
   render(<App />);
   await waitFor(() => expect(screen.getByText(/a recommendation to accept/)).toBeTruthy());
 
-  const rec = memberRow('tk-root', /a recommendation to accept/);
+  const rec = rowFor(/a recommendation to accept/);
   expect(within(rec as HTMLElement).getByRole('button', { name: /accept ▸ mol-dispose-pr/i })).toBeTruthy();
 
-  const plain = memberRow('tk-root', /a discuss-only gate/);
+  const plain = rowFor(/a discuss-only gate/);
   expect(within(plain as HTMLElement).queryByRole('button', { name: /accept/i })).toBeNull();
 });
 
-// The root's own recommendation shows in the family banner — the same place the
-// root's "needs" sentence and PR link render — not a member row.
-it('renders Accept in the family banner when the root is acceptable', async () => {
+// A single-item family that is itself a recommendation renders as a plain loose
+// row, with Accept in its needs cell — the same column a member row carries it.
+it('renders Accept on an acceptable root that stands as a loose row', async () => {
   serve([
     tile({
       id: 'tk-recroot',
@@ -363,10 +543,9 @@ it('renders Accept in the family banner when the root is acceptable', async () =
   render(<App />);
   await waitFor(() => expect(screen.getByText(/a root that is itself a recommendation/)).toBeTruthy());
 
-  const accept = within(region('tk-recroot')).getByRole('button', { name: /accept ▸ mol-supersede/i });
-  expect(accept).toBeTruthy();
-  // In the banner, not a member table row.
-  expect(accept.closest('tr')).toBeNull();
+  const row = rowFor(/a root that is itself a recommendation/) as HTMLElement;
+  expect(row.className).toContain('row-loose');
+  expect(within(row).getByRole('button', { name: /accept ▸ mol-supersede/i })).toBeTruthy();
 });
 
 // The never-blank contract. "Nothing is owed by you" is this page's most
@@ -398,16 +577,16 @@ it('refuses to call a partial gather an all-clear', async () => {
 });
 
 // A quiet parked conversation is FINDABLE without competing for rank with
-// stranded epics: it gets the cleanup band, its own family, and carries its ask.
-it('lists a quiet parked conversation as a cleanup family', async () => {
+// stranded epics: it gets the cleanup band, carries its ask, and — as a family
+// of one — stands as a plain loose row rather than being swept under the epic.
+it('lists a quiet parked conversation as a cleanup loose row', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/helm returns the raw script path/)).toBeTruthy());
 
-  const fam = region('tk-yps55');
-  expect(within(fam).getByText(/cleanup/)).toBeTruthy();
-  expect(within(fam).getByText(/parked for you — no question recorded/)).toBeTruthy();
-  // Not swept into the stranded epic's family.
-  expect(within(region('tk-epic')).queryByText(/helm returns the raw script path/)).toBeNull();
+  const row = rowFor(/helm returns the raw script path/) as HTMLElement;
+  expect(row.className).toContain('row-loose');
+  expect(within(row).getByText(/cleanup/)).toBeTruthy();
+  expect(within(row).getByText(/parked for you — no question recorded/)).toBeTruthy();
 });
 
 it('counts owed, live, and closed separately in the header', async () => {
@@ -416,19 +595,19 @@ it('counts owed, live, and closed separately in the header', async () => {
 });
 
 // The layout-stability rule: a row the operator was looking at does not leave
-// because it was answered. It sinks into its own closed family and ages out on
-// the window clock, with no manual clear.
-it('keeps a closed anchor in its own done family that names the window', async () => {
+// because it was answered. It stays a dimmed done row and ages out on the window
+// clock, with no manual clear; the table states that bound once, below it.
+it('keeps a closed anchor on the board as a dimmed done row that names the window', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
 
-  const fam = region('tk-9tbbk');
-  expect(within(fam).getByText(/closed 1d ago/)).toBeTruthy();
-  expect(within(fam).getByText(/done/)).toBeTruthy();
-  // The band's copy is the operator's only statement of what it promises, and it
-  // names the bound rather than promising an unbounded band.
-  expect(within(fam).getByText(/GC_HELM_DONE_WINDOW/)).toBeTruthy();
-  expect(fam.textContent).not.toMatch(/leaves it on its own/);
+  const row = rowFor(/takeaway cap conversation/) as HTMLElement;
+  expect(within(row).getByText(/closed 1d ago/)).toBeTruthy();
+  expect(within(row).getByText('done')).toBeTruthy();
+  expect(row.className).toContain('row-done');
+  // The window bound is stated once under the table, for every DONE row — the
+  // operator's only statement of what the band promises.
+  expect(within(anchors()).getByText(/GC_HELM_DONE_WINDOW/)).toBeTruthy();
 });
 
 // The defect this split exists to prevent (tk-2plde): a subject that routed work
@@ -439,10 +618,10 @@ it('bands a parked row whose blocker landed as a gate, not cleanup', async () =>
   render(<App />);
   await waitFor(() => expect(screen.getByText(/fix\+guard ruled/)).toBeTruthy());
 
-  const fam = region('tk-dispo');
-  expect(within(fam).getByText(/gate/)).toBeTruthy();
-  expect(fam.textContent).not.toMatch(/cleanup/);
-  expect(within(fam).getByText(/blocker landed — dispose or resume/)).toBeTruthy();
+  const row = rowFor(/fix\+guard ruled/) as HTMLElement;
+  expect(within(row).getByText('gate')).toBeTruthy();
+  expect(row.textContent).not.toMatch(/cleanup/);
+  expect(within(row).getByText(/blocker landed — dispose or resume/)).toBeTruthy();
 });
 
 // The defect tk-a9k0l is about. A parked subject that decomposed keeps its
@@ -452,18 +631,19 @@ it('bands a parked row with open children as stalled, not cleanup', async () => 
   render(<App />);
   await waitFor(() => expect(screen.getByText(/composition-seam doc/)).toBeTruthy());
 
-  const fam = region('tk-z9nln');
-  expect(within(fam).getByText(/stalled/)).toBeTruthy();
-  expect(fam.textContent).not.toMatch(/cleanup/);
-  expect(fam.textContent).toMatch(/1\/2/);
-  expect(within(fam).getByText(/1 open · 0 in flight \(stranded\)/)).toBeTruthy();
+  const row = rowFor(/composition-seam doc/) as HTMLElement;
+  expect(within(row).getByText('stalled')).toBeTruthy();
+  expect(row.textContent).not.toMatch(/cleanup/);
+  expect(row.textContent).toMatch(/1\/2/);
+  expect(within(row).getByText(/1 open · 0 in flight \(stranded\)/)).toBeTruthy();
 });
 
-it('drills into a family root like any other tile', async () => {
+it('drills into a row by its id like any other tile', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/helm returns the raw script path/)).toBeTruthy());
 
-  fireEvent.click(within(region('tk-yps55')).getByRole('button', { name: 'tk-yps55' }));
+  const row = rowFor(/helm returns the raw script path/) as HTMLElement;
+  fireEvent.click(within(row).getByRole('button', { name: 'tk-yps55' }));
   expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy();
 });
 
@@ -490,9 +670,9 @@ it('opens the drill panel for a ?drill= deep link on load', async () => {
   }
 });
 
-// A board renders exactly the families it holds — never an empty one for a band
-// with nothing in it.
-it('renders only the families present', async () => {
+// A board renders exactly the rows it holds — never one for a tile that is not
+// on the wire.
+it('renders only the rows present', async () => {
   const stalledOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![1]], sittings: null };
   vi.stubGlobal(
     'fetch',
@@ -501,19 +681,19 @@ it('renders only the families present', async () => {
 
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
-  expect(region('tk-epic')).toBeTruthy();
-  expect(queryRegion('tk-yps55')).toBeNull();
+  expect(rowFor('Attention Canvas')).not.toBeNull();
+  expect(rowFor(/helm returns the raw script path/)).toBeNull();
   expect(screen.getByText(/1 anchors · generated/)).toBeTruthy();
 });
 
-// The record is not an attention list: a sitting must not appear as a family or a
-// member row, where it would compete with work that needs doing.
-it('keeps sittings out of the family blocks', async () => {
+// The record is not an attention list: a sitting must not appear as a row in the
+// anchors table, where it would compete with work that needs doing.
+it('keeps sittings out of the anchors table', async () => {
   render(<App />);
   await waitFor(() => expect(region('converse sittings')).toBeTruthy());
 
-  expect(queryRegion('tk-vst01')).toBeNull();
-  expect(within(region('tk-epic')).queryByText(/what the canvas owes the operator/)).toBeNull();
+  expect(rowFor('tk-vst01')).toBeNull();
+  expect(within(anchors()).queryByText(/what the canvas owes the operator/)).toBeNull();
 });
 
 it('shows running sittings and recently closed ones with their outcome', async () => {
@@ -685,7 +865,8 @@ function serve(tiles: Tile[]) {
 }
 
 // Serve one family: a bare root and the given merge-anchor member beneath it, so
-// the PR row renders in the member table with its link, needs and owed-since.
+// the PR row renders as a member row indented under it, with its link, needs and
+// owed-since.
 function servePRUnder(rootId: string, pr: Tile) {
   serve([
     tile({ id: rootId, kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
@@ -708,7 +889,7 @@ it('names the wedge and links the pull request', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/a pull request the review cap parked/)).toBeTruthy());
 
-  const row = memberRow('tk-root', /a pull request the review cap parked/);
+  const row = rowFor(/a pull request the review cap parked/);
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText(/wedged: the review cap parked/)).toBeTruthy();
 
@@ -724,7 +905,7 @@ it('identifies a pre-open row without inventing a link', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/wedged before the PR opened/)).toBeTruthy());
 
-  const row = memberRow('tk-root', /wedged before the PR opened/);
+  const row = rowFor(/wedged before the PR opened/);
   expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
   expect(within(row as HTMLElement).getByText('polecat/tk-pre')).toBeTruthy();
 });
@@ -742,7 +923,7 @@ it('links a pre-open branch to GitHub when the repo is known', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/a pre-open branch with a known repo/)).toBeTruthy());
 
-  const row = memberRow('tk-root', /a pre-open branch with a known repo/);
+  const row = rowFor(/a pre-open branch with a known repo/);
   const link = within(row as HTMLElement).getByRole('link', { name: 'polecat/tk-link' });
   expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/tree/polecat/tk-link');
 });
@@ -758,7 +939,7 @@ it('shows the PR phase beside the row', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/a row that needs a review/)).toBeTruthy());
 
-  const row = memberRow('tk-root', /a row that needs a review/);
+  const row = rowFor(/a row that needs a review/);
   expect(within(row as HTMLElement).getByText('needs-review')).toBeTruthy();
 });
 
@@ -770,7 +951,7 @@ it('says so on a row that records neither number nor branch', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/no branch recorded/)).toBeTruthy());
 
-  const row = memberRow('tk-root', /no branch recorded/);
+  const row = rowFor(/no branch recorded/);
   expect(within(row as HTMLElement).getByText('not open yet')).toBeTruthy();
 });
 
@@ -786,7 +967,7 @@ it('dates an owed PR row by its turn, not by the last pass that touched it', asy
   render(<App />);
   await waitFor(() => expect(screen.getByText(/wedged for three days/)).toBeTruthy());
 
-  const row = memberRow('tk-root', /wedged for three days/);
+  const row = rowFor(/wedged for three days/);
   expect(within(row as HTMLElement).getByText('2026-08-08')).toBeTruthy();
   expect(within(row as HTMLElement).queryByText('2026-08-11')).toBeNull();
 });
@@ -986,7 +1167,7 @@ it('offers a rig filter listing each rig, defaulting to all rigs', async () => {
   expect(options).toEqual(['all rigs', 'gascity', 'gc-toolkit']);
 });
 
-it('narrows the families and the header count to the selected rig', async () => {
+it('narrows the rows and the header count to the selected rig', async () => {
   serveBoard(MULTI_RIG);
   render(<App />);
   await waitFor(() => expect(screen.getByText('the gascity family')).toBeTruthy());
@@ -994,8 +1175,8 @@ it('narrows the families and the header count to the selected rig', async () => 
 
   fireEvent.change(rigCombo(), { target: { value: 'gascity' } });
 
-  expect(region('tk-gcy')).toBeTruthy();
-  expect(queryRegion('tk-gct')).toBeNull();
+  expect(rowFor('the gascity family')).not.toBeNull();
+  expect(rowFor('the gc-toolkit family')).toBeNull();
   expect(screen.getByText(/1 anchors · generated/)).toBeTruthy();
 });
 

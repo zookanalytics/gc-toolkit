@@ -504,9 +504,14 @@ func fixtureBoard() board.Board {
 				TakeawayBy: &takeawayBy,
 
 				UpdatedAt: time.Date(2026, 8, 7, 9, 30, 0, 0, time.UTC),
-				Frontier:  "7 open · 1 in flight · 1 stuck (dead owner) · 1 parked for the operator",
+				Frontier:  "needs-review · 7 open · 1 in flight · 1 stuck (dead owner) · 1 parked for the operator",
 				Needs:     takeaway,
 				RankScore: 3014004,
+				// The per-bead liveness, set on every LIVE row and led by the
+				// frontier. This epic reads its OWN anchor-level state — nothing is
+				// working the epic bead itself, so needs-review — not an aggregate
+				// over its children.
+				Phase: board.PhaseNeedsReview,
 				// A dead owner under it, so classifySection bands it stalled.
 				Section: board.SectionStalled,
 				// A top-level epic with no in-fixture parent or blocker: its own
@@ -556,9 +561,12 @@ func fixtureBoard() board.Board {
 				TakeawayAt: nil,
 				TakeawayBy: nil,
 
-				Frontier:  "all 2 closed · 0 open",
+				Frontier:  "needs-review · all 2 closed · 0 open",
 				Needs:     "all 2 closed — graduate",
 				RankScore: 3000,
+				// Settled at the head with nothing in flight — awaiting a human's
+				// graduate decision — so the shared core reads it needs-review.
+				Phase: board.PhaseNeedsReview,
 				// A LOW row with nothing asking bands cleanup. ClusterKey is pinned
 				// here — the fixture's one clustered row — to carry the field into
 				// the TypeScript check, the way the DONE tile carries closed_at; on
@@ -615,9 +623,14 @@ func fixtureBoard() board.Board {
 				TakeawayBy: nil,
 
 				UpdatedAt: time.Date(2026, 8, 11, 14, 55, 0, 0, time.UTC),
-				Frontier:  "polecat/tk-01n5cc · owed 3d",
+				Frontier:  "needs-attention · polecat/tk-01n5cc · owed 3d",
 				Needs:     "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not",
 				RankScore: 2003003,
+				// A wedged live merge anchor: a human must unstick it. On a merge
+				// anchor the per-bead Phase equals PRPhase — one bead, one tri-state
+				// — because both read the same shared core off the same facts.
+				PRPhase: board.PhaseNeedsAttention,
+				Phase:   board.PhaseNeedsAttention,
 
 				// No PR number: the branch is pushed and gated, and nothing has
 				// opened a pull request for it, so the branch is what names the

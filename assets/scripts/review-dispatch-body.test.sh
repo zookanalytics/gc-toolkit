@@ -14,6 +14,11 @@
 #   (GATE)      one signoff.sh call; never gh pr review --approve.
 #   (RC)        exits 0: a dispatch is never blocked on prose.
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
+#   (CHECK)     --check-name emits a per-check section (correctness default,
+#               triage, demo, and a no-method note for an undeclared check).
+#   (BOTH)      the formula and check axes coexist in one note.
+#   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
+#               appended; absent (or no --reviewed-oid) degrades silently.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,6 +76,41 @@ notF "$QOUT" 'signoff.sh --review-bead' "(DEFER) does not tell a lane to call si
 notF "$QOUT" '__FORMULA__' "(DEFER) the formula placeholder is substituted, not left raw"
 RCQ=0; bash "$SCRIPT" --formula mol-review-quorum-signoff >/dev/null 2>&1 || RCQ=$?
 eq "$RCQ" "0" "(RC) a non-default formula still exits 0"
+
+echo "# the check-name axis: a check section names the concern, orthogonal to the formula"
+hasF "$OUT" '## Check: `correctness`' "(CHECK) the default check is correctness"
+notF "$OUT" '## Check: `codex`' "(CHECK) the standing check is named correctness, not codex"
+bash "$SCRIPT" --check-name triage > "$TMP/tri.out" 2>/dev/null
+hasF "$TMP/tri.out" '## Check: `triage`' "(CHECK) --check-name triage names the triage check"
+hasF "$TMP/tri.out" '--add-gates' "(CHECK) triage names the widening verdict call"
+hasF "$TMP/tri.out" 'Adding nothing is the expected common case' "(CHECK) triage states the common no-op case"
+bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
+hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
+hasF "$TMP/demo.out" 'skills/demo-capture/SKILL.md' "(CHECK) demo names its method skills"
+bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
+hasF "$TMP/arch.out" 'No generic method is declared' "(CHECK) an undeclared check gets the no-method note, never a guess"
+RCC=0; bash "$SCRIPT" --check-name arch >/dev/null 2>&1 || RCC=$?
+eq "$RCC" "0" "(RC) an undeclared check still exits 0"
+
+echo "# both axes coexist: a quorum formula plus a named check emits both sections"
+bash "$SCRIPT" --formula mol-review-quorum-signoff --check-name triage > "$TMP/both.out" 2>/dev/null
+hasF "$TMP/both.out" 'formulas/mol-review-quorum-signoff.toml' "(BOTH) the formula frame is the quorum's"
+hasF "$TMP/both.out" '## Check: `triage`' "(BOTH) the check section is triage's"
+
+echo "# composition: a rig extension read from the reviewed commit is appended; absent degrades"
+REPO="$TMP/repo"; mkdir -p "$REPO/docs"
+git -C "$REPO" init -q
+git -C "$REPO" config user.email t@t; git -C "$REPO" config user.name t
+printf 'RIG-EXT-MARK: the Architect reads architecture.md first.\n' > "$REPO/docs/review-arch.md"
+git -C "$REPO" add docs/review-arch.md
+git -C "$REPO" commit -qm ext
+SHA=$(git -C "$REPO" rev-parse HEAD)
+( cd "$REPO" && bash "$SCRIPT" --check-name arch --reviewed-oid "$SHA" ) > "$TMP/ext.out" 2>/dev/null
+hasF "$TMP/ext.out" 'Rig extension' "(EXT) an extension present at the reviewed commit is appended"
+hasF "$TMP/ext.out" 'RIG-EXT-MARK: the Architect reads architecture.md first.' "(EXT) the extension content reaches the note"
+( cd "$REPO" && bash "$SCRIPT" --check-name demo --reviewed-oid "$SHA" ) > "$TMP/noext.out" 2>/dev/null
+notF "$TMP/noext.out" 'Rig extension' "(EXT) a check with no extension file degrades — no extension section"
+notF "$OUT" 'Rig extension' "(EXT) no --reviewed-oid means no extension read at all"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
