@@ -488,7 +488,7 @@ field would be lying on a normal day.
 
 | field | values | read from |
 |---|---|---|
-| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `unknown` | `pr.machine` on the anchor |
+| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `unknown` (see below) | — |
 | `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
@@ -525,6 +525,13 @@ it, so once no fix unit, review, or finding is in flight the merge pass records
 `settled` and the row is the operator's to clear by re-reviewing (`pr_approval`
 reads `required`, and `needs` names the re-review). A veto with a fix unit still
 in flight reads `progressing` and stays the city's move.
+
+**Blocked, not settled.** `blocked` is a hold no automated actor will clear and
+no review verdict is owed on — an unresolved required review thread, a base gone
+BEHIND, or an unrouted blocker no pool will reap. The operator is owed the row,
+and its specific cause is spelled out in `needs` as `blocked: <reason>`, read
+from `pr.machine_reason`. It is distinct from `settled`, which is the merge
+cadence's ordinary wait on a review or the merge pass.
 
 **Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
 for the `codex` gate is owed once it has held past three days
@@ -918,6 +925,7 @@ atomic rename:
 | `last_build_rc` | exit status of the last build ATTEMPT; 0 for success |
 | `restart_pending` | a published binary nothing is running yet |
 | `checked_at` | when the build order last ran at all |
+| `behind_main` | how many commits `origin/<default>` carries under the helm source paths that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
 
 `source_rev` and `binary_rev` diverge exactly when a build failed and the last
 good binary kept serving, which is the gap worth showing. A tick that finds the
@@ -925,6 +933,19 @@ two unequal rebuilds for that reason alone. That is the test that makes a
 deletion-only commit visible, since the mtime test by itself would leave one
 recorded as current. `checked_at` is the only field a quiet tick moves, so it
 is the only one that can say the build order itself has stopped.
+
+`behind_main` is the one axis that looks past the local checkout. Every field
+above keys on HEAD, so a checkout parked off-main keeps `source_rev ==
+binary_rev` and reads "current" while the board it serves is behind main. A
+nonzero `behind_main` bands the PACK row ELEVATED — naming the serving revision
+and how far behind main it is — and yields to every louder signal: a failed
+build, an unreadable binary, a pending restart, a stopped build order, a local
+source/binary gap. It never feeds the rebuild decision: a checkout may be
+off-main on purpose, so the drift is REPORTED, not built away. The comparison
+needs a current `origin/<default>`, so the build order fetches it at most once
+per `GC_HELM_ORIGIN_FETCH_TTL` (default 1800s; `0` leans entirely on
+reconcile-rig-checkouts' own fetch), and a fetch it cannot reach degrades to a
+stale gap rather than a failed build.
 
 `internal/source.GatherPackHealth` reads every
 `<city>/.gc/services/*/build-status.json` — helm's own, gctk's, anything else

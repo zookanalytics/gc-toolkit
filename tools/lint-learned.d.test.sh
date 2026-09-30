@@ -8,7 +8,7 @@
 # every executable in lint-learned.d/ as a detector, so a test file in that
 # directory would be run as one.
 #
-# Covered: raw-bd-invocation, mktemp-untemplated.
+# Covered: raw-bd-invocation, mktemp-untemplated, bd-helper-in-scope.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -659,6 +659,129 @@ runm "$TMP/continued.md"
 eq "$RC" 1 "a continued bare call in a marker-fenced snippet is scanned as one call"
 has "$OUT" "continued.md:2:" "and reported where it opened"
 
+
+echo "── bd-helper-in-scope: what is a finding ──"
+
+# This detector's own subject is spelled with placeholders so the file that
+# tests it is not itself a finding when the runner scans the whole tree:
+# @J@ -> bd_json, @L@ -> bd_list, @LIB@ -> bd-lib.sh.
+DET_BD="$HERE/lint-learned.d/bd-helper-in-scope.sh"
+[ -x "$DET_BD" ] || { echo "no detector at $DET_BD"; exit 1; }
+runbd() { OUT="$("$DET_BD" "$@" 2>&1)"; RC=$?; }
+plantbd() { sed -e 's/@J@/bd_json/g' -e 's/@L@/bd_list/g' -e 's/@LIB@/bd-lib.sh/g' > "$1"; }
+
+# A call to either helper with no definition and no library source dies at
+# runtime.
+plantbd "$TMP/dangling.sh" <<'FIX'
+#!/usr/bin/env bash
+out=$(@J@ show "$1")
+@L@ --status open || true
+FIX
+runbd "$TMP/dangling.sh"
+eq "$RC" 1 "a call with neither a def nor a source exits 1"
+has "$OUT" "dangling.sh:2:" "the bd_json call is reported"
+has "$OUT" "dangling.sh:3:" "the bd_list call is reported"
+has "$OUT" "bd-helper-in-scope" "the finding names the rule"
+
+# A call inside a double-quoted command substitution is a real runtime call —
+# the surrounding quotes do not make it inert. Blanking the whole quoted span
+# would miss it and leave the guard fail-open for the ordinary rows="$(...)"
+# style.
+plantbd "$TMP/quoted-cmdsub.sh" <<'FIX'
+#!/usr/bin/env bash
+rows="$(@L@ --status open)"
+meta="$(@J@ show "$1")"
+echo "$rows $meta"
+FIX
+runbd "$TMP/quoted-cmdsub.sh"
+eq "$RC" 1 "a call inside a double-quoted command substitution is still a finding"
+has "$OUT" "quoted-cmdsub.sh:2:" "the bd_list call in \"\$(...)\" is reported"
+has "$OUT" "quoted-cmdsub.sh:3:" "the bd_json call in \"\$(...)\" is reported"
+
+echo "── bd-helper-in-scope: what is not ──"
+
+# Sourcing the library puts both helpers in scope.
+plantbd "$TMP/sourced.sh" <<'FIX'
+#!/usr/bin/env bash
+_d="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=@LIB@
+. "${GC_BD_LIB:-$_d/@LIB@}" || exit 1
+out=$(@J@ show "$1")
+rows=$(@L@ --status open) || true
+FIX
+runbd "$TMP/sourced.sh"
+eq "$RC" 0 "a file that sources the library is clean"
+eq "$OUT" "" "and prints nothing"
+
+# A local definition puts that helper in scope — a purpose-built variant is not
+# a finding.
+plantbd "$TMP/defines.sh" <<'FIX'
+#!/usr/bin/env bash
+@L@() { run_bounded gc bd list "$@" --db "$RIG_DB" --json --limit 0; }
+rows=$(@L@ --status open) || true
+FIX
+runbd "$TMP/defines.sh"
+eq "$RC" 0 "a file that defines its own variant is clean"
+
+# The name in a whole-line comment or a quoted string is prose, not a call.
+plantbd "$TMP/prose.sh" <<'FIX'
+#!/usr/bin/env bash
+# @J@ swallows gc's exit through the pipe — a note, not a call
+echo "use @L@ to read rows"
+FIX
+runbd "$TMP/prose.sh"
+eq "$RC" 0 "a name in a comment or a string is not a call"
+
+# A helper name passed as an argument inside a command substitution is not a
+# call in command position — scanning the substitution's code must not
+# over-report it.
+plantbd "$TMP/cmdsub-arg.sh" <<'FIX'
+#!/usr/bin/env bash
+out="$(echo @L@ @J@)"
+echo "$out"
+FIX
+runbd "$TMP/cmdsub-arg.sh"
+eq "$RC" 0 "a helper name passed as an argument inside \$(...) is not a call"
+
+# A definition line is not itself a call, even though the name is on it.
+plantbd "$TMP/defonly.sh" <<'FIX'
+#!/usr/bin/env bash
+@J@() { gc bd "$@" --json; }
+FIX
+runbd "$TMP/defonly.sh"
+eq "$RC" 0 "a definition is not read as a call to itself"
+
+# Scope is per helper: a file that defines one but calls the other unscoped is
+# flagged for exactly the dangling one.
+plantbd "$TMP/mixed.sh" <<'FIX'
+#!/usr/bin/env bash
+@L@() { gc bd list "$@" --json; }
+rows=$(@L@ --status open)
+meta=$(@J@ show "$1")
+FIX
+runbd "$TMP/mixed.sh"
+eq "$RC" 1 "one helper in scope, the other dangling, still fails"
+has "$OUT" "bd_json" "the dangling helper is named"
+hasnt "$OUT" "bd_list" "the in-scope helper is not"
+
+# A shellcheck source directive is a comment, not a runtime source — it does not
+# put the helper in scope.
+plantbd "$TMP/directive-only.sh" <<'FIX'
+#!/usr/bin/env bash
+# shellcheck source=@LIB@
+out=$(@J@ show "$1")
+FIX
+runbd "$TMP/directive-only.sh"
+eq "$RC" 1 "a shellcheck source directive alone does not put the helper in scope"
+
+# The detector ignores its own directory: the shapes are stated there.
+mkdir -p "$TMP/lint-learned.d"
+plantbd "$TMP/lint-learned.d/other-detector.sh" <<'FIX'
+#!/usr/bin/env bash
+out=$(@J@ show "$1")
+FIX
+runbd "$TMP/lint-learned.d/other-detector.sh"
+eq "$RC" 0 "a file under lint-learned.d/ is skipped"
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"

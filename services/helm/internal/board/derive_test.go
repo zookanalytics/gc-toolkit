@@ -2517,6 +2517,91 @@ func TestProgressingIsNotOwed(t *testing.T) {
 	}
 }
 
+// TestBlockedAnchorIsOwedAndNamed. A green, APPROVED PR that merge.sh cannot land
+// without a person — an unresolved required review thread, a base gone BEHIND, or
+// an unrouted blocker no automated actor will reap — records `blocked` with the
+// cause in pr.machine_reason. The board owes it to the operator, phases it
+// needs-attention, and names the cause, so it stops reading as awaiting-review
+// even though the review verdict is `approved`. That approved-and-held shape is
+// the silent-hold class this fixes: approval `met` used to leave a settled row
+// not owed, so nothing surfaced it.
+func TestBlockedAnchorIsOwedAndNamed(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	reason := "2 unresolved review thread(s) must be resolved before this PR can merge"
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-blk", map[string]string{
+			"pr.machine":        dated(MachineBlocked, headLive, at),
+			"pr.machine_reason": reason,
+			"pr_number":         "878",
+			"pr_url":            "https://github.com/zook/gc-toolkit/pull/878",
+			// Approved at the live head: the state that read settled+met (not
+			// owed) before, so an approved-but-held PR sat invisible.
+			"pr_posture": dated(postureApproved, headLive, at),
+		}),
+	}, fixtureNow, false, nil, Facts{})
+
+	blk := mustTile(t, b, "tk-blk")
+	if blk.PRMachine != MachineBlocked {
+		t.Errorf("pr_machine = %q, want %q", blk.PRMachine, MachineBlocked)
+	}
+	if blk.PRApproval != ApprovalMet {
+		t.Errorf("the PR is approved: pr_approval = %q, want %q", blk.PRApproval, ApprovalMet)
+	}
+	if !blk.Owed {
+		t.Error("an approved PR blocked by a hold no automated actor clears is owed by the operator, not settled")
+	}
+	if blk.PRPhase != PhaseNeedsAttention {
+		t.Errorf("pr_phase = %q, want %q — a blocked PR surfaces as needs-attention, not awaiting-review", blk.PRPhase, PhaseNeedsAttention)
+	}
+	if !strings.Contains(blk.Needs, "blocked:") || !strings.Contains(blk.Needs, "unresolved review thread") {
+		t.Errorf("needs must name the block and its cause, got %q", blk.Needs)
+	}
+	if !blk.PROwedSince.Equal(at) {
+		t.Errorf("pr_owed_since = %v, want the blocked stamp %v", blk.PROwedSince, at)
+	}
+}
+
+// TestBlockedReasonlessStillNeedsAttention. A blocked verdict whose reason write
+// dropped still owes the row and phases it needs-attention, falling back to a
+// generic sentence rather than reading as settled.
+func TestBlockedReasonlessStillNeedsAttention(t *testing.T) {
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-blk0", map[string]string{
+			"pr.machine": dated(MachineBlocked, headLive, fixtureNow),
+			"pr_number":  "876",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/876",
+		}),
+	}, fixtureNow, false, nil, Facts{})
+	blk := mustTile(t, b, "tk-blk0")
+	if !blk.Owed || blk.PRPhase != PhaseNeedsAttention {
+		t.Errorf("a blocked verdict is owed and needs-attention even with no reason: owed=%v phase=%q", blk.Owed, blk.PRPhase)
+	}
+	if !strings.Contains(blk.Needs, "blocked") {
+		t.Errorf("needs still names the block, got %q", blk.Needs)
+	}
+}
+
+// TestSettledApprovedIsNotBlocked is the benign control the acceptance names: an
+// approved PR merely waiting on the merge pass (settled, not blocked) is the
+// city's move — not owed and not needs-attention.
+func TestSettledApprovedIsNotBlocked(t *testing.T) {
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-ok", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_number":  "900",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/900",
+			"pr_posture": dated(postureApproved, headLive, fixtureNow),
+		}),
+	}, fixtureNow, false, nil, Facts{})
+	ok := mustTile(t, b, "tk-ok")
+	if ok.Owed {
+		t.Error("an approved PR waiting on the merge pass is not owed by the operator")
+	}
+	if ok.PRPhase == PhaseNeedsAttention {
+		t.Errorf("a settled+approved PR is not needs-attention, got phase %q", ok.PRPhase)
+	}
+}
+
 // TestAskingIsOwedAndCarriesTheDemand: the city formed a question and is waiting
 // on the answer. The hold is an open `blocks` edge to a demand bead with
 // nothing added, and closing the bead is what ends it.

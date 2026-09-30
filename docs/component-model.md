@@ -154,7 +154,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I12** | A bead's kind is `metadata.task_kind`, and no reader decides a kind from a label ([what kind of bead this is](#what-kind-of-bead-this-is)). Where a reader narrows a listing with `-l <kind>` it re-filters on `task_kind`, and every writer of that kind sets the label — a narrowing on a label some writer omits returns a quietly short answer. | **UNCHECKED** (tk-0i90x5). The reader half is held by construction and by test: every kind branch in the pack reads `task_kind`, and `learning-recurrence.test.sh` pins the one script that narrows by label against a bead carrying the label without the kind. The writer half — for each kind a reader narrows on, no live bead carries the `task_kind` without the label — is the check that does not exist; only `observation` is narrowed on by a reader today, and it is clean at filing, so the check would ship as a forward regression detector. |
 | **I13** | Every started workflow root is still advancing or reachable: an in_progress `gc.kind=workflow` root whose owning session is gone and whose work has not landed does not sit behind an executable frontier that is unclaimable — unrouted AND unowned — which no pool can be offered and no orphan recovery reaches. | `doctor/check-root-advancing` (tk-d12vam): a graph.v2 molecule runs its continuation-group steps inline in one pool session, and those steps carry no owner and no route by construction, so a drain landing mid-molecule strands them past both recovery paths — the witness's orphan recovery keys on an assignee, and no route means no pool is offered them. Reported STRANDED (error) only when all four hold, each a distinct healthy shape it must not report: SILENT (root or any member, a close included, untouched past the bound — default 120m, `GC_DOCTOR_ROOT_STALL_MINUTES`); UNHELD (no live session behind the root's `gc.session_name` or any member's assignee, `gc.session_id` or `gc.session_name` — the affinity slot a restart reuses counts, so a live slot exempts); STARTED (at least one step has closed, so it moved then stopped, AND its input convoy is still open, since a convoy closes when its one work bead lands); UNCLAIMABLE (a non-empty executable frontier — the `bd ready` members minus the inert `workflow`/`scope`/`spec` topology kinds poured alongside steps — every member unassigned AND carrying neither `gc.routed_to` nor `gc.execution_routed_to`, so the execution route a recovery fix stamps reads as reachable). A non-empty `gc.takeaway` or `hold_reason` on the root or a member is a note. It is the root-level complement to I8 (closed roots) and I11 (claimed or routed steps), neither of which fires here. Fails toward silence: an unread roster declines the run, and an unread store, convoy or closed-step listing leaves that unit unjudged rather than flagged. |
 
-Nine further checks guard structure that is not an anchor invariant:
+Ten further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent),
@@ -193,8 +193,14 @@ a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture
 `commented`/`changes_requested` with no `pr_comment_disposition` past the owed
 window is operator feedback that reads as consumed while nothing has routed it; a
 `pr_unengaged_threads` marker at the same head is a tracked hold and exempt;
-warn-only).
-That is the whole set: **21 checks,
+warn-only), and `doctor/check-hq-marooned-work` (no rig-workable bead sits
+unclaimed in the HQ (city / lx) store: a city-scoped role running with GC_RIG
+unset files a bare `bd create` into the HQ store, which no pool reads, so an
+open unassigned task/bug/defect there — unrouted or routed to a pool — is
+marooned by construction; the operator-queue decisions routed to human, daily
+digests, and doctor and tech-debt advisories that legitimately live there are
+exempt).
+That is the whole set: **22 checks,
 each asserting a live structural property** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
@@ -275,14 +281,11 @@ or is a declared shared primitive. Below is that assignment for the tree as it
 stands: every order, formula, service, and `assets/scripts` entry a running
 city executes, with nothing unplaced and no row carrying any other value.
 
-**What the index does not place.** Four exclusions, each mechanical:
+**What the index does not place.** Three exclusions, each mechanical:
 
 - `*.test.sh` and the fixture library they source,
   `assets/scripts/test-harness.sh`. Test code is run by a developer, never by
   a city: no order, formula, or `test_command` invokes it.
-- `assets/scripts/cutover-2026-08.sh`. One-shot tooling that carries its own
-  deletion condition in its header: it goes when
-  `specs/2026-08-rewrite/cutover-runbook.md` goes.
 - `doctor/check-*`. §3 places each check against the invariant it asserts.
 - `tools/`. The command surface a human drives, including the
   `gc-proactive.sh` entry point that `gc-helm.sh` and `gc-visit-open.sh` shell
@@ -331,7 +334,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 7: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
-| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of four dispositions: route the bead to a pool, hold it on an edge, route it to a validating closer, or file a visit. It sits in visit because its product is a bead the human no longer has to triage. |
+| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of five dispositions: route the bead to a pool, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or file a visit for the operator's judgment. It sits in visit because its product is a bead the human no longer has to triage. |
 | `assets/scripts/first-reaction-dispose.sh` | visit | Performs that disposition and records which one and why. The only writer of `gc.first_reaction*`. It never closes a bead: the close disposition slings the bead to a validating closer. |
 | `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds, or files a visit when it does not. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
@@ -365,6 +368,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
+| `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
 | `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
@@ -377,6 +381,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
+| `assets/scripts/notification-wisp-reap.sh` | patrol | Closes a city-store "Human gate awaiting you" notice once its gate is no longer open, and collapses duplicate "ESCALATION" copies to one open notice — the notification wisps core mails and never retires. |
 | `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key — the door to a human, for what only a human can answer. The window is one OPEN visit, so a recurring observation belongs in `patrol-finding.sh` instead. |
 | `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key`. A proactive first reaction disposes it: routed to a pool, held on an edge, or put to the operator as a visit. |
 | `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |

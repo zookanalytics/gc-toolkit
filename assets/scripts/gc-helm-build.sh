@@ -24,11 +24,15 @@
 # build-status: `ok <ts>` built/current AND probed readable · `unreadable <ts>
 # <why>` · `unprobed <ts>` no city to probe against · `failed <ts>`.
 # build-status.json: the record the board's PACK rows read — source_rev against
-# binary_rev, built_at, last_build_rc, restart_pending, checked_at.
+# binary_rev, built_at, last_build_rc, restart_pending, probe_status,
+# behind_main (commits behind origin/<default> under the helm sources,
+# report-only), checked_at.
 # Env: GC_SERVICE_STATE_ROOT / GC_CITY_ROOT / GC_CITY (state root), GC_GO_BIN,
 # GC_HELM_GOTMP, GC_HELM_SERVICE_NAME, GC_HELM_GC_BIN,
 # GC_HELM_CITY_PATH / GC_CITY_PATH / GC_CITY (the city to probe, else the one
-# `gc service list` reports), GC_HELM_BUILD_PROBE_TIMEOUT (seconds, default 60).
+# `gc service list` reports), GC_HELM_BUILD_PROBE_TIMEOUT (seconds, default 60),
+# GC_HELM_ORIGIN_FETCH_TTL (seconds between origin fetches for the behind_main
+# comparison, default 1800; 0 leans on reconcile-rig-checkouts' fetch).
 # Caller: orders/helm-build.
 set -euo pipefail
 
@@ -175,6 +179,65 @@ if [ -n "$SOURCE_REV" ]; then
     done
 fi
 
+# >>> behind-main-drift
+# behind_main — how far this checkout is behind origin/<default> under the helm
+# source paths, REPORT-ONLY. Everything above keys on the LOCAL checkout:
+# SOURCE_REV is HEAD's subtree, newer_than_binary scans HEAD's files. So a
+# checkout parked off-main (another branch, or one not fast-forwarded) keeps its
+# binary current with THAT branch — source_rev == binary_rev, a clean probe —
+# while the board it serves is behind main. Nothing above can see that, so the
+# board reads a false "ok". This counts the commits origin/<default> carries
+# under the helm sources that HEAD lacks, and the board bands a nonzero count as
+# drift.
+#
+# It NEVER feeds need_build. A checkout may be off-main on purpose, and a rebuild
+# on every unrelated main merge is exactly what the SOURCE_REV subtree-hash
+# identity exists to avoid — the requirement is to REPORT drift, not to rebuild
+# on it. The comparison wants a fresh origin ref: reconcile-rig-checkouts fetches
+# origin on its own cadence, so it is usually already current, and this fetch is
+# bounded to at most one ATTEMPT per GC_HELM_ORIGIN_FETCH_TTL (default 1800s; 0
+# disables it and leans on reconcile) so a 5-minute tick does not fetch every
+# time, and a failing origin costs one attempt per TTL rather than one per tick.
+# Every step degrades to "gap unknown" (0), never to a failed build.
+BEHIND_MAIN=0
+REPO_ROOT="$(git -C "$MOD" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$REPO_ROOT" ]; then
+    HELM_PATHS=()
+    for _p in "$MOD" ${LOCAL_DEP_MODS[@]+"${LOCAL_DEP_MODS[@]}"}; do
+        # A pathspec has to be inside this repo, and "behind origin/main" is this
+        # repo's question; a replace-dep resolved to another checkout is dropped.
+        case "$_p/" in
+            "$REPO_ROOT/"*) HELM_PATHS+=("${_p#"$REPO_ROOT"/}") ;;
+        esac
+    done
+    if [ "${#HELM_PATHS[@]}" -gt 0 ]; then
+        DEFAULT_REF="$(git -C "$REPO_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
+        FETCH_TTL="${GC_HELM_ORIGIN_FETCH_TTL:-1800}"
+        case "$FETCH_TTL" in ''|*[!0-9]*) FETCH_TTL=1800 ;; esac
+        FETCH_MARK="$STATE_ROOT/origin-fetch-at"
+        NOW_S="$(date +%s 2>/dev/null || echo 0)"
+        LAST_S=0
+        [ -f "$FETCH_MARK" ] && LAST_S="$(cat "$FETCH_MARK" 2>/dev/null || echo 0)"
+        case "$LAST_S" in ''|*[!0-9]*) LAST_S=0 ;; esac
+        # Record the attempt BEFORE fetching, not only on success. The cost the
+        # cadence bounds is the fetch ATTEMPT, so a marker advanced only after a
+        # successful fetch leaves an unreachable or unauthenticated origin
+        # re-attempting on every later tick. Advancing it here holds a failing
+        # origin to one attempt per TTL; the gap below still reads off the last
+        # origin ref, so a lost fetch degrades to a stale count, never a failure.
+        if [ "$FETCH_TTL" -gt 0 ] && [ "$((NOW_S - LAST_S))" -ge "$FETCH_TTL" ]; then
+            printf '%s\n' "$NOW_S" > "$FETCH_MARK" 2>/dev/null || true
+            git -C "$REPO_ROOT" fetch --quiet --no-tags origin "${DEFAULT_REF#origin/}" 2>/dev/null || true
+        fi
+        # Commits the default branch carries under the helm sources that HEAD
+        # lacks: 0 when on main and current, when ahead, or when the ref is absent.
+        _behind="$(git -C "$REPO_ROOT" rev-list --count "HEAD..$DEFAULT_REF" -- "${HELM_PATHS[@]}" 2>/dev/null || true)"
+        case "$_behind" in ''|*[!0-9]*) _behind=0 ;; esac
+        BEHIND_MAIN="$_behind"
+    fi
+fi
+# <<< behind-main-drift
+
 # A field of the previous record, or empty. A build that failed keeps the last
 # good binary serving, so its built_at and binary_rev must survive the failure
 # that did not replace them.
@@ -194,11 +257,13 @@ write_record() { # <last_build_rc> <binary_rev> <built_at>
         --arg source_rev "$SOURCE_REV" --arg binary_rev "$brev" \
         --argjson last_build_rc "$rc" --argjson restart_pending "$pending" \
         --arg probe_status "$PROBE_KIND" --arg probe_detail "$PROBE_DETAIL" \
+        --argjson behind_main "$BEHIND_MAIN" \
         --arg checked_at "$(date -u +%FT%TZ)" \
         '{component: $component, built_at: $built_at, source_rev: $source_rev,
           binary_rev: $binary_rev, last_build_rc: $last_build_rc,
           restart_pending: $restart_pending, probe_status: $probe_status,
-          probe_detail: $probe_detail, checked_at: $checked_at}' \
+          probe_detail: $probe_detail, behind_main: $behind_main,
+          checked_at: $checked_at}' \
         > "$tmp" 2>/dev/null; then
         mv -f "$tmp" "$STATUS" 2>/dev/null || rm -f -- "$tmp" 2>/dev/null
     else

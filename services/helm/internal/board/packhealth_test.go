@@ -210,3 +210,52 @@ func TestProbedOkAndUnprobedBandAsBefore(t *testing.T) {
 		}
 	}
 }
+
+func TestBehindMainIsElevatedEvenWhenLocallyCurrent(t *testing.T) {
+	// The failure this field was added for: the checkout is current with its own
+	// sources (source_rev == binary_rev) and probes ok, so every other check reads
+	// "current" — while it is parked behind main and serving code main moved past.
+	got := one(t, PackBuild{Component: "helm", SourceRev: "cafe0123456789ab", BinaryRev: "cafe0123456789ab",
+		ProbeStatus: "ok", BehindMain: 3})
+	if got.Severity != SevElevated {
+		t.Errorf("severity = %s, want ELEVATED", got.Severity)
+	}
+	if !strings.Contains(got.Detail, "3") || !strings.Contains(got.Detail, "off-main") {
+		t.Errorf("detail %q must say how far behind main it is and that the checkout is off-main", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "cafe01234567") {
+		t.Errorf("detail %q must name the serving revision", got.Detail)
+	}
+}
+
+func TestBehindMainZeroLeavesTheRowCurrent(t *testing.T) {
+	// A checkout on main and current: behind_main is 0 and the row reads exactly
+	// as it did before the field existed.
+	got := one(t, PackBuild{Component: "helm", SourceRev: "cafe0123456789ab", BinaryRev: "cafe0123456789ab", BehindMain: 0})
+	if got.Severity != SevNormal {
+		t.Errorf("severity = %s, want NORMAL for a checkout on main", got.Severity)
+	}
+	if !strings.Contains(got.Detail, "current at") {
+		t.Errorf("detail %q must read as current", got.Detail)
+	}
+}
+
+func TestBehindMainYieldsToLouderSignals(t *testing.T) {
+	// behind_main is staleness, so a build failure (HIGH), a stopped builder, and
+	// a local source/binary gap all speak before it — each is either more urgent
+	// or a report about a moment that has passed.
+	failed := one(t, PackBuild{Component: "helm", SourceRev: "aaaa111122223333", BinaryRev: "bbbb444455556666",
+		LastBuildRC: 1, BehindMain: 5})
+	if failed.Severity != SevHigh || !strings.Contains(failed.Detail, "FAILED") {
+		t.Errorf("got %s %q, want the build failure to speak over behind-main", failed.Severity, failed.Detail)
+	}
+	unchecked := one(t, PackBuild{Component: "helm", SourceRev: "aaaa", BinaryRev: "aaaa", BehindMain: 5,
+		CheckedAt: packNow.Add(-3 * time.Hour)})
+	if unchecked.Severity != SevElevated || !strings.Contains(unchecked.Detail, "has not run") {
+		t.Errorf("got %s %q, want the stopped builder to speak over behind-main", unchecked.Severity, unchecked.Detail)
+	}
+	localGap := one(t, PackBuild{Component: "helm", SourceRev: "newnewnewnew1111", BinaryRev: "oldoldoldold2222", BehindMain: 5})
+	if localGap.Severity != SevElevated || !strings.Contains(localGap.Detail, "sources are at") {
+		t.Errorf("got %s %q, want the local source/binary gap to speak over behind-main", localGap.Severity, localGap.Detail)
+	}
+}
