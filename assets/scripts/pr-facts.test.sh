@@ -32,7 +32,7 @@
 # pinned to the head, blocking the anchor so an already-green PR cannot merge
 # until the validator closes it, left unrouted for gate-ensure to dispatch,
 # deduped by the live human-lane pass so a later batch reuses the open one rather
-# than opening another (a codex pass on the anchor does not stand in for it) and
+# than opening another (a correctness pass on the anchor does not stand in for it) and
 # adopted by title when a prior stamp dropped. Opening it
 # fails closed: a pass that did not record the shape the validator consumes
 # (anchor_bead, check_name=human, the head pin) or an unattachable blocks edge
@@ -152,7 +152,7 @@ FIX="rig/gc-toolkit.polecat"; REV="rig/gc-toolkit.polecat-codex"
 run() { "$SUT" --fix-pool "$FIX" --review-pool "$REV" 2>&1; }
 
 anchor() { # id num extra [branch]
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"codex","check.codex":"green"%s}}' \
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"correctness","check.correctness":"green"%s}}' \
     "$1" "$2" "$2" "${4:-polecat/x$2}" "${3:-}"
 }
 prview() { # num state mergeState mergeable extra [headRefName]
@@ -453,7 +453,7 @@ out=$(run)
 has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
 eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
-eq "$(meta F3 'check.codex')" "<absent>" "the pre-retarget gate marker is cleared"
+eq "$(meta F3 'check.correctness')" "<absent>" "the pre-retarget gate marker is cleared"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
 
 echo "# CONFLICTING -> one rework child per head"
@@ -640,6 +640,19 @@ eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind 
 eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
 
+echo "# …atomic birth: a stamp that keeps the branch but drops rejection_reason is UNMADE, never a husk"
+# The defect this bead fixes: a child left able to veto (branch + open) but not
+# rescued (the stranded re-route keys on rejection_reason). Such a child must
+# never exist — form it fully or unmake it.
+store "[$(anchor AB1 70)]"
+printf '%s' "$(prview 70 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_70.json"
+out=$(STUB_DROP_KEYS="new-2:rejection_reason" run)
+has "$out" "could not form the rework child for PR#70" "the arm refuses to route a child it could not fully form"
+eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unmade"
+eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN rework child survives able to veto but missing rejection_reason"
+hasnt "$out" "filed merge-mode rework new-2 routed" "the husk is never reported as dispatched"
+
 echo "# …a SHARED head branch is classified merge, never rebase"
 store "[$(anchor SB 28 '' 'integration/refinery-fixes')]"
 printf '%s' "$(prview 28 OPEN DIRTY CONFLICTING '' 'integration/refinery-fixes')" > "$GH_DIR/pr_view_28.json"
@@ -666,7 +679,7 @@ store "[$(anchor DM 31)]"
 printf '%s' "$(prview 31 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_31.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
-has "$out" "did not record prepare_mode=merge; left unrouted" "the lost stamp is caught by the read-back"
+has "$out" "could not form the rework child for PR#31" "the lost stamp is caught by the full-identity read-back"
 eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "an unstamped child is inert, never routed with incomplete metadata"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
@@ -677,7 +690,7 @@ printf '%s' "$(prview 32 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_32.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "the route stamp really was dropped"
-has "$out" "did not record gc.routed_to=$FIX; left unrouted" "the lost route stamp is caught by a read-back"
+has "$out" "formed but not routed to $FIX; left unrouted" "the lost route stamp is caught by a read-back"
 hasnt "$out" "filed merge-mode rework new-2 routed to" "an unreachable rework is never reported as dispatched"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 
@@ -700,7 +713,7 @@ store "[$(anchor RM 35)]"
 printf '%s' "$(prview 35 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_35.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:task_kind,anchor_bead" run)
-has "$out" "did not record task_kind=rework/anchor_bead=RM; left unrouted" "a dropped role marker is caught by the read-back, before the route"
+has "$out" "could not form the rework child for PR#35" "a dropped role marker is caught by the full-identity read-back, before the route"
 eq "$(meta new-2 task_kind)" "<absent>" "the marker stamp really was dropped"
 eq "$(meta new-2 anchor_bead)" "<absent>" "…both halves of it"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the unmarked child is never routed"
@@ -714,6 +727,51 @@ eq "$(meta new-2 task_kind)" "rework" "…which re-stamps the role marker"
 eq "$(meta new-2 anchor_bead)" "RM" "…and the anchor it belongs to"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…with no twin minted"
+
+echo "# …a merge_strategy stamp that does not persist leaves the child UNROUTED"
+# merge_strategy=mr is part of the child's full identity; the read-back verifies it
+# so a write that reports success but drops it never routes a child carrying no
+# declared strategy. (existing_pr would still force mr on its own here — the
+# read-back holds the whole identity, it does not lean on that recovery.)
+store "[$(anchor MS 101)]"
+printf '%s' "$(prview 101 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_101.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:merge_strategy" run)
+has "$out" "could not form the rework child for PR#101" "a dropped merge_strategy is caught by the full-identity read-back, before the route"
+eq "$(meta new-2 merge_strategy)" "<absent>" "the merge_strategy stamp really was dropped"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so a child carrying no declared strategy is never routed"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+hasnt "$out" "filed merge-mode rework new-2 routed to" "…nor is it reported as dispatched"
+
+echo "# …and the NEXT pass re-stamps merge_strategy through the stranded arm, then routes"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the unrouted child is adopted by the stranded arm, not buried"
+eq "$(meta new-2 merge_strategy)" "mr" "…which re-stamps the handoff-critical merge_strategy"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
+
+echo "# …the PR identity (existing_pr/pr_url/pr_number) is verified too, or a rework of a PR routes as a PR-less direct candidate"
+# With the PR identity dropped AND merge_strategy absent, mol-refinery-patrol
+# resolves an unset merge_strategy to direct and forces mr back only when
+# existing_pr is present — so a child that loses both is pushed straight to the
+# target branch instead of held as an mr-mode hand-back. The read-back verifies
+# the whole PR identity so that shape is never routed.
+store "[$(anchor PI 102)]"
+printf '%s' "$(prview 102 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_102.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:existing_pr,pr_url,pr_number" run)
+has "$out" "could not form the rework child for PR#102" "a dropped PR identity is caught by the full-identity read-back, before the route"
+eq "$(meta new-2 existing_pr)" "<absent>" "the existing_pr stamp really was dropped"
+eq "$(meta new-2 pr_number)" "<absent>" "…and the pr_number with it"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so a rework of an existing PR is never routed as a PR-less direct candidate"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …and the NEXT pass re-stamps the PR identity through the stranded arm, then routes"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the unrouted child is adopted by the stranded arm"
+eq "$(meta new-2 pr_number)" "102" "…which re-stamps the PR identity"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
 
 echo "# …a covering rework that lacks the role marker is re-stamped, never left as its anchor's twin"
 # A routed-but-unclaimed child from a pass before this marker existed (or one
@@ -1352,7 +1410,7 @@ eq "$(meta "$VP" reviewed_oid)" "sha-70" "…pinned to the head the batch was pr
 eq "$(meta "$VP" 'gc.routed_to')" "<absent>" "…and unrouted: gate-ensure dispatches mol-validate onto a validating lane"
 grep -qxF "$VP|blocks|V1" "$STUB_DEPS" && ok "…and blocks the anchor: merge.sh holds the merge until the validator closes the pass" || bad "validation-pass blocks edge missing"
 eq "$(meta V1 signoff_rounds_reset)" "<absent>" "the batch writes no signoff_rounds_reset"
-eq "$(meta V1 'check.codex')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
+eq "$(meta V1 'check.correctness')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
 eq "$(meta V1 pr_comment_disposition)" "rework:new-2" "the comments still route to work (the pass is opened after, as new-3)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 # …and the comment becomes a finding the validator rules, the shape a machine
@@ -1382,19 +1440,19 @@ hasnt "$FIDW" "<none>" "the comment is filed as a finding"
 grep -qxF "new-2|blocks|$FIDW" "$STUB_DEPS" && bad "the rework child must not block the unvalidated finding" || ok "…which the rework child does not block at dispatch"
 eq "$(meta Vw pr_comment_disposition)" "rework:new-2" "…and the batch watermarks its rework disposition"
 
-echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic codex,arch lane"
+echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic correctness,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
 # finding.lane == check_name and a human batch's findings are finding.lane=human,
 # so the pass names human whatever the anchor's lanes are. The whole check_set
-# (codex,arch) is one synthetic lane no finding carries — the multi-lane bug.
-store "[$(anchor Vm 75 ',"check_set":"codex,arch","check.arch":"green"')]"
+# (correctness,arch) is one synthetic lane no finding carries — the multi-lane bug.
+store "[$(anchor Vm 75 ',"check_set":"correctness,arch","check.arch":"green"')]"
 printf '%s' "$(prview 75 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_75.json"
 echo '[]' > "$GH_DIR/reviews_75.json"
 printf '[{"id":8750,"user":{"login":"human1"},"body":"this misreads the arch lane"}]' > "$GH_DIR/comments_75.json"
 out=$(run)
 VPM=$(vpass_id Vm)
 hasnt "$VPM" "<none>" "the multi-lane anchor opens a validation pass"
-eq "$(meta "$VPM" check_name)" "human" "…named human, never the synthetic codex,arch that matches no finding and backs no real lane"
+eq "$(meta "$VPM" check_name)" "human" "…named human, never the synthetic correctness,arch that matches no finding and backs no real lane"
 grep -qxF "$VPM|blocks|Vm" "$STUB_DEPS" && ok "…and it blocks the multi-lane anchor, both lanes green or not" || bad "validation-pass blocks edge missing"
 
 echo "# a validation-pass blocks edge that will not attach warns, holds the batch, and does not watermark"
@@ -1424,23 +1482,23 @@ out=$(run)
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Ve")] | length' "$STUB_STORE")" "1" "the human-lane pass already open rules the batch, so no second one opens"
 has "$out" "already carries a human-lane validation pass vp-71" "…and the pass names the one already open"
 
-echo "# a codex validation pass on the anchor does NOT stand in for the human batch"
-# gate-ensure's quiescence reads any validation pass, so a codex pass holds the
-# merge — but mol-validate rules a pass by check_name, and a codex pass never rules
+echo "# a correctness validation pass on the anchor does NOT stand in for the human batch"
+# gate-ensure's quiescence reads any validation pass, so a correctness pass holds the
+# merge — but mol-validate rules a pass by check_name, and a correctness pass never rules
 # the human findings (finding.lane=human). The dedup is the human LANE, so the
-# batch opens its own human-lane pass beside the codex one rather than watermarking
+# batch opens its own human-lane pass beside the correctness one rather than watermarking
 # behind a pass that leaves its findings unruled.
-CODEX_VP='{"id":"cvp-77","status":"open","assignee":"","title":"Validate codex lane on Vx","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Vx","check_name":"codex","reviewed_oid":"sha-77"}}'
+CODEX_VP='{"id":"cvp-77","status":"open","assignee":"","title":"Validate correctness lane on Vx","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Vx","check_name":"correctness","reviewed_oid":"sha-77"}}'
 store "[$(anchor Vx 77),$CODEX_VP]"
 printf '%s' "$(prview 77 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_77.json"
 echo '[]' > "$GH_DIR/reviews_77.json"
-printf '[{"id":8770,"user":{"login":"human1"},"body":"the codex pass never sees this"}]' > "$GH_DIR/comments_77.json"
+printf '[{"id":8770,"user":{"login":"human1"},"body":"the correctness pass never sees this"}]' > "$GH_DIR/comments_77.json"
 out=$(run)
 HP=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Vx") | select((.metadata.check_name // "") == "human") | .id ] | .[0] // "<none>"' "$STUB_STORE")
-hasnt "$HP" "<none>" "the human batch opens its own human-lane pass, not reusing the codex one"
+hasnt "$HP" "<none>" "the human batch opens its own human-lane pass, not reusing the correctness one"
 eq "$(meta "$HP" check_name)" "human" "…named human, the lane the validator rules the batch by"
 eq "$(meta "$HP" reviewed_oid)" "sha-77" "…pinned to the head the batch was produced at"
-grep -qxF "$HP|blocks|Vx" "$STUB_DEPS" && ok "…and it blocks the anchor, beside the codex pass" || bad "human-lane validation-pass blocks edge missing"
+grep -qxF "$HP|blocks|Vx" "$STUB_DEPS" && ok "…and it blocks the anchor, beside the correctness pass" || bad "human-lane validation-pass blocks edge missing"
 
 echo "# an unstamped validation-pass orphan from a dropped stamp is adopted, not twinned"
 # A prior pass created the bead but its stamp dropped, so it carries no
@@ -1516,8 +1574,8 @@ eq "$(meta Vf pr_comment_disposition)" "<absent>" "…the batch is not watermark
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
 
 echo "# a pass whose check_name write half-lands warns, holds the batch, does not watermark"
-# The validator selects findings by check_name and defaults a missing one to codex,
-# so a pass carrying anchor_bead but no check_name would rule codex findings and
+# The validator selects findings by check_name and defaults a missing one to correctness,
+# so a pass carrying anchor_bead but no check_name would rule correctness findings and
 # leave the human batch unruled. Reading only anchor_bead back would pass it; the
 # read-back checks the lane the validator consumes and skips the watermark.
 store "[$(anchor Vk 78)]"
@@ -1651,7 +1709,7 @@ out=$(run)
 eq "$(meta_pinned P5 pr_posture)" "commented@sha-49" "one reviewer's approval does not answer another's question"
 
 echo "# a human CHANGES_REQUESTED is a veto AND a batch to answer"
-# The tk-zina89/PR#496 fixture: objections that converged to codex-green
+# The tk-zina89/PR#496 fixture: objections that converged to correctness-green
 # untouched, because nothing read the feedback under a standing
 # CHANGES_REQUESTED. The veto is the posture; what sits under it routes like
 # any other feedback. The review body is empty on purpose — an operator whose
@@ -2543,6 +2601,104 @@ out=$(run)
 has "$out" "required check(s) failing (test); filed" "a BLOCKED PR whose block is a red required check is routed, not left to idle"
 eq "$(meta new-2 anchor_bead)" "RC8" "…as a rework child of the blocked anchor"
 rm -f "$GH_DIR/rules_main.json"
+
+echo "# …atomic birth: a red-check child that keeps its branch but drops rejection_reason is UNMADE"
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
+store "[$(anchor AB2 71)]"
+printf '%s' "$(prview 71 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_71.json"
+out=$(STUB_DROP_KEYS="new-2:rejection_reason" run)
+has "$out" "could not form the red-check rework for PR#71" "the red-check arm refuses to route a child it could not fully form"
+eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unmade"
+eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN red-check rework child survives able to veto but missing rejection_reason"
+rm -f "$GH_DIR/rules_main.json"
+
+# ---- self-heal reap: a rework child the branch has outrun, now green, is moot ----
+# The merge-lane analogue of the self-heal the reconcile lane already does. Reaps
+# ONLY a provably-dead premise: head moved past the cited head AND the current
+# head is mergeable with every required check green. Heads are full 40-hex,
+# because the reap extracts a git SHA (the harness's sha-<num> is not hex).
+RW_OLDHEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+RW_NEWHEAD=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+rwchild() { # id anchor num citedhead [status] [assignee] [reason-override]
+  local reason="Required check(s) failing on PR#$3 at head $4: test."
+  [ -n "${7:-}" ] && reason="$7"
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","issue_type":"task","title":"Fix failing required check(s) on PR#%s:","metadata":{"task_kind":"rework","anchor_bead":"%s","branch":"polecat/x%s","rejection_reason":"%s","prepare_mode":"merge","merge_strategy":"mr","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","gc.routed_to":"%s"}}' \
+    "$1" "${5:-open}" "${6:-}" "$3" "$2" "$3" "$reason" "$3" "$3" "$FIX"
+}
+reapview() { # num — an OPEN, MERGEABLE PR, required check green, current head = RW_NEWHEAD
+  printf '%s' "$(prview "$1" OPEN CLEAN MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]')" \
+    | jq -c --arg h "$RW_NEWHEAD" '.headRefOid = $h' > "$GH_DIR/pr_view_$1.json"
+}
+reap_req() { printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"; }
+
+echo "# self-heal: a rework child whose cited head the branch has outrun, now green + mergeable, is reaped as moot"
+reap_req
+store "[$(anchor RP1 60),$(rwchild RW1 RP1 60 "$RW_OLDHEAD")]"
+reapview 60
+out=$(run)
+has "$out" "reaped moot rework child RW1" "the moot child is reaped"
+eq "$(bstatus RW1)" "closed" "the reaped child is closed"
+eq "$(meta RW1 gc.outcome)" "moot" "the reaped child is marked moot"
+has "$out" "1 moot reworks reaped" "the run tally counts the reap"
+echo "# …and a second pass is a no-op — a closed child is never re-reaped (idempotent)"
+out=$(run)
+hasnt "$out" "reaped moot rework child RW1" "a closed child is not re-reaped"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a child is NOT reaped while the required check is still red at the current head (fail closed)"
+reap_req
+store "[$(anchor RP2 61),$(rwchild RW2 RP2 61 "$RW_OLDHEAD")]"
+printf '%s' "$(prview 61 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" \
+  | jq -c --arg h "$RW_NEWHEAD" '.headRefOid = $h' > "$GH_DIR/pr_view_61.json"
+out=$(run)
+hasnt "$out" "reaped moot rework child RW2" "a red check at the current head is not a dead premise"
+eq "$(bstatus RW2)" "open" "the child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a child still citing the LIVE head is left OPEN (premise not falsified)"
+reap_req
+store "[$(anchor RP3 62),$(rwchild RW3 RP3 62 "$RW_NEWHEAD")]"
+reapview 62
+out=$(run)
+hasnt "$out" "reaped moot rework child RW3" "a child at the live head is not moot"
+eq "$(bstatus RW3)" "open" "the child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: an in_progress (worker-held) rework child is never auto-reaped (open-only)"
+reap_req
+store "[$(anchor RP4 63),$(rwchild RW4 RP4 63 "$RW_OLDHEAD" in_progress worker-sess)]"
+reapview 63
+out=$(run)
+hasnt "$out" "reaped moot rework child RW4" "an in_progress child is left for its holder"
+eq "$(bstatus RW4)" "in_progress" "the held child is untouched"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a child whose reason names no head is ambiguous -> left OPEN (fail closed)"
+reap_req
+store "[$(anchor RP5 64),$(rwchild RW5 RP5 64 "$RW_OLDHEAD" open "" "the base was rewritten and PR#64 conflicts with main but no head is recorded here")]"
+reapview 64
+out=$(run)
+hasnt "$out" "reaped moot rework child RW5" "no cited head -> mootness unprovable -> left open"
+eq "$(bstatus RW5)" "open" "the child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a comment-rework child is never reaped on head-moved+green (its premise is unanswered feedback, not the head)"
+reap_req
+store "[$(anchor RP7 66),$(rwchild RW7 RP7 66 "$RW_OLDHEAD" open "" "Review feedback on PR#66 is unanswered at head $RW_OLDHEAD. Answer every item.")]"
+reapview 66
+out=$(run)
+hasnt "$out" "reaped moot rework child RW7" "a comment-rework premise is not settled by a green check"
+eq "$(bstatus RW7)" "open" "the comment-rework child is left open"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# self-heal: a moved-past child is NOT reaped when no required contexts are configured (green unprovable -> fail closed)"
+rm -f "$GH_DIR/rules_main.json"
+store "[$(anchor RP6 65),$(rwchild RW6 RP6 65 "$RW_OLDHEAD")]"
+reapview 65
+out=$(run)
+hasnt "$out" "reaped moot rework child RW6" "no required contexts -> green cannot be proven -> left open"
+eq "$(bstatus RW6)" "open" "the child is left open"
 
 # ---- per-review dismissal + re-request once a human review's findings clear ----
 # The peer-model write-back above answers each finding; this closes the loop at

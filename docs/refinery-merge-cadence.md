@@ -41,9 +41,9 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 ## The arms
 
-1. **gate-ensure.sh** — gate satisfiability. Every gating anchor declares a
+1. **gate-ensure.sh** — check satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
-   sentinel is respected), and every declared gate is *raisable*: the lane
+   sentinel is respected), and every declared check is *raisable*: the lane
    reads `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
    back). A lane that reads `green` ends the arm's interest however far the
@@ -70,9 +70,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
    filed with its edge reversed, a landed fix whose finding that release missed
    — stop the PR moving and are caught by `liveness-sweep.sh`'s stale-gate pass,
-   not a count on the gate.
+   not a count on the check.
    **rc=3 is the designed interlock**: it holds `merge.sh` for this
-   pass — an anchor whose gates are not yet satisfiable must not be mergeable
+   pass — an anchor whose checks are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
 
 2. **pr-facts.sh --posture-only** — the posture record, and nothing else.
@@ -116,7 +116,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
-   validate holds/posture/gates/children/open-visit/approval/base/CLEAN, check
+   validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
    that the merge result keeps `generated/seed-audit` current, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record via one
@@ -199,7 +199,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    opened PR is never mergeable on the same tick, and deferring it past merge
    costs a PR its open-pass landing only in the ungated lane-only case and never
    starves merge. For each anchor whose
-   every marker-bearing `check_set` gate reads `green` (the same
+   every marker-bearing check in `check_set` reads `green` (the same
    predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
    set is held, never read as ungated): adopt an existing PR for the branch or
    `gh pr create` non-draft, re-read the created PR by number, refuse a moved

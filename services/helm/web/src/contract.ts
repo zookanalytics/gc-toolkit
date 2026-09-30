@@ -166,7 +166,13 @@ export interface Tile {
   pr_branch: string;
   /**
    * What the merge cadence can do next: `'progressing'`, `'settled'`,
-   * `'wedged-exception'`, or `'unknown'`.
+   * `'wedged-exception'`, `'blocked'`, or `'unknown'`.
+   *
+   * `'blocked'` is a hold no automated actor will clear and no review verdict is
+   * owed on — an unresolved required review thread, a base gone BEHIND, or an
+   * unrouted blocker. It is owed by the operator (needs-attention), distinct from
+   * `'settled'`, which waits on a review or the merge pass. Its specific cause is
+   * spelled out in `needs`.
    *
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
    * same choice `waiting_unknown` makes on the gather side. A missing key means
@@ -263,6 +269,17 @@ export interface Tile {
    * so the board and the label read one vocabulary. `''` on a non-merge row.
    */
   pr_phase: string;
+  /**
+   * This bead's liveness in the same tri-state vocabulary — `'working'`,
+   * `'needs-review'`, or `'needs-attention'` — but on EVERY live row, where
+   * `pr_phase` is set on merge anchors alone. A merge anchor reads the same value
+   * as `pr_phase`; any other bead reads its own live-work signal through the
+   * identical core, so a row cannot carry two disagreeing tri-states. `''` only
+   * on a closed (`DONE`) row, where the live vocabulary has no answer — the same
+   * not-applicable empty `pr_phase` uses off a non-merge row. The `frontier`
+   * string leads with this word on every live row.
+   */
+  phase: string;
 }
 
 /**

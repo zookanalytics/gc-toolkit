@@ -939,8 +939,11 @@ exit 0
 PROACTIVE
 chmod +x "$TMP/rebin/gc-proactive.sh"
 # A real .beads store for the rig, so the resolver can pin --db for the PR search
-# react/engage run; without it the resolver fails closed before resolving.
-mkdir -p "$TMP/rebinrig/.beads"
+# react/engage run; without it the resolver fails closed before resolving. engage
+# also refuses up front a rig whose checkout carries no converse template
+# (agents/converse-*), so the fixture carries one; without it engage exits 4
+# before it resolves and binds.
+mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-opus"
 export REBINRIG="$TMP/rebinrig"
 export FAKE_SLING="$TMP/slung" VISIT_STATE="$TMP/visit_state"
 
