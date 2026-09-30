@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pre-open-rebase — arm 1a of the merge cadence: the conflict observer for
+# pre-open-rebase — arm 5 of the merge cadence: the conflict observer for
 # pre_open_gate anchors. Caller: refinery-reconcile.sh.
 #
 # A pre-open anchor has no PR, so GitHub can answer nothing about it. Every

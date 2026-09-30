@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-facts — arm 4 of the merge cadence: record EXTERNAL facts about each open
+# pr-facts — arm 7 of the merge cadence: record EXTERNAL facts about each open
 # pull_request anchor. No merge authority. Same enumeration and pinned identity
 # read as merge.sh; per anchor, in order: PR MERGED (out-of-band, or a record
 # that died after merge.sh landed it) -> lifecycle transition to merged, with
@@ -608,7 +608,7 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # <<< unanswered-feedback-body
 
 # >>> unengaged-threads-body
-# The gap the login filter above leaves open. arm 4 counts only comments
+# The gap the login filter above leaves open. arm 7 counts only comments
 # authored by a login other than ours (unanswered-feedback-body), so a review
 # posted UNDER our own login — an outside review agent, an operator-run review, a
 # reviewer using the automation's credential — sets no `unanswered` and routes
@@ -617,7 +617,7 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # review THREADS instead of the comment authors. A thread counts as an unengaged
 # finding when it is unresolved, carries a comment that is not one of our own
 # write-back replies, and holds no write-back reply of ours: a thread we replied
-# into is arm 4's or the write-back's to finish, and a resolved one is done.
+# into is arm 7's or the write-back's to finish, and a resolved one is done.
 # `comments(first:100)` caps a thread at a page, so a thread longer than that
 # whose only write-back reply sits past the cap reads as unengaged — a
 # dismissable visit, never a dropped finding.
@@ -656,7 +656,7 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
   local id="$1" num="$2" head="$3" row="$4" cmts="$5" sf g m grn=1 stamp inflight utc
   [ -n "$head" ] && [ -n "$num" ] && [ -n "$SELF_LOGIN" ] && [ -n "$cmts" ] || return 1
   # Cheap pre-gate off the comments already fetched: the gap is a review under OUR
-  # OWN login (arm 4 counts only other logins), so a self-login comment that is
+  # OWN login (arm 7 counts only other logins), so a self-login comment that is
   # not one of our write-back replies is one it filtered and left unrouted. Absent
   # any, no thread here is a finding we own the miss on.
   sf=$(printf '%s' "$cmts" | jq --arg self "$SELF_LOGIN" --arg marker "$WB_MARKER" \
@@ -1065,7 +1065,7 @@ CHILDREN_EOF
       case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
       case "$max_i" in ''|*[!0-9]*) max_i=0 ;; esac
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
-      # A review posted under OUR OWN login leaves unresolved finding threads arm 4
+      # A review posted under OUR OWN login leaves unresolved finding threads arm 7
       # never counts — it reads other logins — so `unanswered` stays 0 while the
       # gate stays green, and the posture would read review_required/none. merge.sh
       # reads posture off the bead and never reads threads, and the full pass that
@@ -2000,7 +2000,7 @@ GATES
   # ONE visit and watermark the head. The hold then stands off that open visit
   # until it closes; the watermark keeps a closed visit from re-raising until a
   # new commit. It files a visit, not rework — telling a finding from our own
-  # answer well enough to drive an auto-fix loop is arm 4's watermark machinery,
+  # answer well enough to drive an auto-fix loop is arm 7's watermark machinery,
   # and running that off a raw thread read would loop on our own replies.
   if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
     UTKEY="pr-unengaged-threads.$num.$head_oid"
