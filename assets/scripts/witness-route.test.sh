@@ -53,8 +53,8 @@ done
 # The rig root the blocks probe first, holding a copy of the real resolver so
 # $SCRIPTS resolution is exercised without reaching the live tree.
 RIGROOT="$TMP/rig"; mkdir -p "$RIGROOT/assets/scripts"
-cp "$ROOT/assets/scripts/resolve-route.sh" "$RIGROOT/assets/scripts/"
-chmod +x "$RIGROOT/assets/scripts/resolve-route.sh"
+cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/file-warrant.sh" "$RIGROOT/assets/scripts/"
+chmod +x "$RIGROOT/assets/scripts/resolve-route.sh" "$RIGROOT/assets/scripts/file-warrant.sh"
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/gc" <<'STUB'
@@ -65,6 +65,9 @@ case "${1:-} ${2:-}" in
   "agent list")
     [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_AGENTS:-}" ;;
+  "session list")
+    [ -n "${STUB_SESSIONS_FAIL:-}" ] && { echo "gc: session list unavailable" >&2; exit 1; }
+    printf '%s\n' "${STUB_SESSIONS:-{\"sessions\":[]}}" ;;
   "bd list")   printf '%s\n' "${STUB_OPEN:-[]}" ;;
   "bd create")
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: bd create failed" >&2; exit 1; }
@@ -81,6 +84,12 @@ chmod +x "$BIN/gc" "$BIN/git"
 export PATH="$BIN:$PATH"
 export GC_RIG_ROOT="$RIGROOT" GC_RIG=gc-toolkit
 export STUB_GC_LOG="$TMP/gc.log"
+# The roster file-warrant.sh resolves the wedged OWNER against. The witness owner
+# is a /-bearing agent address (an assignee); its session id is what the warrant
+# must carry, since dance-probe.sh refuses the slash form.
+export STUB_SESSIONS='{"sessions":[
+  {"id":"lx-wisp-conv2","alias":"gc-toolkit/gc-toolkit.converse-2","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","state":"active"},
+  {"id":"sess-1","alias":"gc-toolkit/gc-toolkit.thing","session_name":"s-sess-1","state":"active"}]}'
 
 # run <rendered-block-file> <prelude> -> transcript in OUT, gc calls in LOG
 run() {
@@ -93,17 +102,19 @@ render "$BUG" > "$TMP/bug.sh"
 bash -n "$TMP/warrant.sh" && ok "rendered warrant-file is valid bash" || bad "warrant-file failed bash -n"
 bash -n "$TMP/bug.sh" && ok "rendered bug-dispatch is valid bash" || bad "bug-dispatch failed bash -n"
 
-WARRANT_PRELUDE='TARGET=gc-toolkit--gc-toolkit__converse-2-pool; REASON="No progress on tk-a for 6h"'
+WARRANT_PRELUDE='OWNER=gc-toolkit/gc-toolkit.converse-2; REASON="No progress on tk-a for 6h"'
 BUG_PRELUDE='TITLE="submit-and-exit strands pushed work"; BODY="the branch-shape gate re-runs against a detached HEAD"'
 
-echo "# the dog is city-scoped here: the bare identity the template renders is the live one"
+echo "# the dog is city-scoped here (the bare rendered identity is live), and the"
+echo "# owner is a /-bearing agent address that must resolve to a session id"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"},
   {"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
 export STUB_OPEN='[]'
 run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" 'bd create' "a wedged session with no open warrant files one"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "routed at the city-scoped dog, unqualified"
-has "$LOG" '"warrant.target":"gc-toolkit--gc-toolkit__converse-2-pool"' "carrying the dedup key"
+has "$LOG" '"warrant.target":"lx-wisp-conv2"' "the /-bearing owner is resolved to its session id"
+hasnt "$LOG" '"warrant.target":"gc-toolkit/gc-toolkit.converse-2"' "the agent address never lands as a target dance-probe.sh would refuse"
 has "$LOG" '"warrant.reason":"No progress on tk-a for 6h"' "and the reason as given"
 
 echo "# the same block, a city whose dog is rig-scoped: the rendered form is now wrong"
@@ -113,7 +124,7 @@ has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.dog"' "the warrant is routed a
 hasnt "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "not at the one the template rendered"
 
 echo "# a reason carrying a double quote cannot break the metadata payload"
-run "$TMP/warrant.sh" 'TARGET=sess-1; REASON="bead \"tk-a\" stale 6h"'
+run "$TMP/warrant.sh" 'OWNER=sess-1; REASON="bead \"tk-a\" stale 6h"'
 has "$LOG" 'bd create' "the warrant is still filed"
 printf '%s\n' "$LOG" | grep -F 'bd create' | sed 's/^.*--metadata //' | jq -e . >/dev/null 2>&1 \
   && ok "and its metadata is still parseable JSON" || bad "the metadata payload did not survive the quote"

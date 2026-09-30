@@ -364,23 +364,23 @@ park: defer, file nothing this cycle. Otherwise file ONE warrant for the
 dog pool, dedup'd on the target like an escalation key — never kill
 directly. The dog is city-scoped, so its identity carries no rig segment and
 the rig-qualified form the refinery queue-nudge uses matches nothing here.
-Set TARGET to the wedged session and REASON to what is stale and for how
-long:
+Set REASON to what is stale and for how long. `file-warrant.sh` resolves the
+loop's OWNER to a live session id — the target dance-probe.sh and `gc session
+kill` require — and refuses to file a warrant no dog can execute:
 ```bash
 # >>> warrant-file
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/file-warrant.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 DOG=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}dog") || true
 if [ -z "$DOG" ]; then
   echo "no live dog identity resolves from '{{binding_prefix}}dog'; a warrant nothing claims leaves the session wedged and still reports success, so escalate instead of filing." >&2
 else
-  OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=$TARGET" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
-  if [ -n "$OPEN_WARRANT" ]; then
-    echo "warrant $OPEN_WARRANT already open for $TARGET; not filing another"
-  else
-    gc bd create --type=task --title="Stuck: $TARGET" --label=warrant --metadata "$(jq -nc --arg t "$TARGET" --arg r "$REASON" --arg d "$DOG" '{"warrant.target":$t,"warrant.reason":$r,"warrant.requester":"witness","gc.routed_to":$d}')"
-  fi
+  "$SCRIPTS/file-warrant.sh" --owner "$OWNER" --reason "$REASON" --requester witness --dog "$DOG"
+  case $? in
+    0|3) : ;;  # a warrant was filed, or one was already open for this session
+    *) echo "file-warrant.sh refused to file for owner '$OWNER' (it resolved to no live session id); escalate this wedged session instead of leaving it silently un-warranted." >&2 ;;
+  esac
 fi
 # <<< warrant-file
 ```
