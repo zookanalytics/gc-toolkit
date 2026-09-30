@@ -426,6 +426,34 @@ gc order history refinery-reconcile --since 30m --limit 0
 Prefer `gc doctor` (`check-cadence-live`) over hand-rolled queries: it asserts
 per rig that the order is registered and firing within its interval.
 
+### When a pass drops its merge tail
+
+The log shows how a pass ended, but a killed pass leaves no record of the
+approved-clean anchors its merge arm never reached — on the board they look
+identical to a healthy "awaiting review". So each pass also stamps a
+merge-decision marker, `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/merge-decision`,
+one line `<phase> <tick> <head>`, as it runs:
+
+| Phase | Written | Meaning |
+|---|---|---|
+| `started` | before the arms | the pass began; dying here means it never reached the merge arm |
+| `reached` | just before the merge arm | the merge arm is about to decide its candidates |
+| `held` | when a same-pass interlock holds merge | merge was deliberately not run — a recorded decision, not a drop |
+| `decided` | after the merge arm returns | the merge decision completed |
+
+The controller kills a pass with SIGKILL, so one that overruns its budget runs
+no at-exit code — but the phase it wrote before the kill survives. At each pass's
+start, holding the pass lock so the pass that wrote the marker is already dead,
+`merge-tail-report.sh` reads it: a marker left at `started` or `reached` while
+open anchors still carry `merge_result=pull_request` is a dropped merge tail. It
+files one `patrol-finding` naming those anchors, with the head and timestamp of
+the pass that dropped them, keyed per rig (`reconcile-merge-tail-dropped-<rig>`)
+so a recurrence updates one bead rather than filing another. It names only
+anchors still open, so a tail the next pass lands leaves nothing to report, and
+it keys on the pass failing to finish its merge decision, never on how long an
+anchor has waited — slow-but-legitimate CI never trips it, and a real drop is
+never invisible.
+
 ## Adjacent order: rig-checkout sync
 
 The live `rigs/*` checkouts are what the runtime executes, and `merge.sh`

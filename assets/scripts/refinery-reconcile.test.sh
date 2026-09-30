@@ -193,16 +193,20 @@ has "$out" "no refinery agent bound" "…and says so"
 printf '{"agents":[{"qualified_name":"myrig/gc-toolkit.refinery"}]}' > "$STUB_AGENTS"
 
 PASSLOG="$TMP/state/myrig/pass.log"
+MARK="$TMP/state/myrig/merge-decision"
 # A gate-ensure that blocks until released, so a pass can be caught in flight.
-# The wait is BOUNDED: a driver that let a second pass in would otherwise sit
-# on its own release sentinel and hang the suite instead of failing it.
+# The wait is bounded only as an anti-hang backstop — run-tests.sh's per-file
+# timeout is the real one — so it is set far above the test's own detect-and-
+# kill latency. A tighter bound could expire first under parallel load, letting
+# the driver run on past the phase the kill means to freeze; that is how a kill
+# misses the pass. `await` caps at 400 polls, so 6000 leaves ample headroom.
 mkblocking_gate() {
   cat > "$SD/gate-ensure.sh" <<'ARM'
 #!/usr/bin/env bash
 printf '%s|%s|%s|%s\n' "gate-ensure.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
 : > "${GATE_STARTED:?}"
 i=0
-while [ ! -f "${GATE_RELEASE:?}" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
+while [ ! -f "${GATE_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
 ARM
   chmod +x "$SD/gate-ensure.sh"
 }
@@ -214,7 +218,7 @@ mkblocking_preopen() {
 printf '%s|%s|%s|%s\n' "pre-open-rebase.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
 : > "${PREOPEN_STARTED:?}"
 i=0
-while [ ! -f "${PREOPEN_RELEASE:?}" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
+while [ ! -f "${PREOPEN_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
 ARM
   chmod +x "$SD/pre-open-rebase.sh"
 }
@@ -289,9 +293,14 @@ else
 fi
 
 echo "# a pass killed mid-run leaves its partial output behind"
-rm -f "$PASSLOG" "$GATE_STARTED" "$GATE_RELEASE"
+rm -f "$PASSLOG" "$MARK" "$GATE_STARTED" "$GATE_RELEASE"
 : > "$ARM_LOG"
-drive > /dev/null 2>&1 &
+# Launch the driver directly, not through the drive() function. Backgrounding a
+# function forks a wrapper subshell, so $! names the wrapper and `kill` below
+# would leave the real driver orphaned — and the GATE_RELEASE written right after
+# the kill would then let that orphan run on to `decided`, defeating this very
+# check. A backgrounded simple command makes $! the driver, so the kill lands.
+GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" > /dev/null 2>&1 &
 d2=$!
 if await "$GATE_STARTED"; then
   kill -9 "$d2" 2>/dev/null
@@ -306,10 +315,46 @@ if await "$GATE_STARTED"; then
   grep -q '^END ' "$PASSLOG" \
     && bad "the killed pass wrote an END line — a kill is indistinguishable from a clean exit" \
     || ok "no END line, so the kill is legible as an unfinished pass"
+  # A pass killed before it decides its merge tail rests at a pre-decision phase:
+  # `started` if killed before the merge arm, `reached` if killed inside it.
+  # merge-tail-report.sh reads both as a dropped tail; only `decided`/`held` (or
+  # an empty marker) would mean the pass was not caught before deciding.
+  read -r kph _ < "$MARK" 2>/dev/null || kph=""
+  case "$kph" in
+    started|reached) ok "the killed pass left its merge-decision marker at a pre-decision phase ('$kph')" ;;
+    *) bad "the killed pass left its marker at '${kph:-<empty>}', not a pre-decision phase — it was not caught before deciding its tail" ;;
+  esac
 else
   bad "the pass to be killed never reached its gate-ensure arm (fixture wedged)"
   : > "$GATE_RELEASE"; wait "$d2" 2>/dev/null
 fi
+
+echo "# the merge-decision marker tracks a clean pass to 'decided', and the report runs at pass start"
+# The killed pass above orphaned its gate-ensure arm, which holds the pass lock
+# until it exits. Wait for the lock to free first, or this pass reads it as
+# already in flight and skips — running no arms, no marker, and no report.
+await_lock_free || bad "the killed pass's arm never released the lock before the clean pass"
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+# A report stub records how the driver invoked it. It is created only for this
+# case and removed after, so the surrounding cases run with the report absent
+# (the driver's [ -x ] guard skips it) exactly as they did before.
+cat > "$SD/merge-tail-report.sh" <<'RPT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${REPORT_LOG:?}"
+exit 0
+RPT
+chmod +x "$SD/merge-tail-report.sh"
+export REPORT_LOG="$TMP/report.log"; : > "$REPORT_LOG"
+rm -f "$MARK"
+out=$(drive); rc=$?
+eq "$rc" 0 "a clean pass exits 0 with the marker wired in"
+read -r cph _ < "$MARK" 2>/dev/null || cph=""
+eq "$cph" "decided" "a clean pass leaves the merge-decision marker at 'decided'"
+has "$(cat "$REPORT_LOG")" "--marker $MARK --rig myrig" "the drop-tail report is invoked at pass start with the marker path and rig"
+# The report runs BEFORE this pass overwrites the marker: it must see the prior
+# value, so it is called before the header's own arms advance the phase.
+rm -f "$SD/merge-tail-report.sh"
+unset REPORT_LOG
 
 echo "# a lock held past the stall bound is reported, not skipped over"
 await_lock_free || bad "the killed pass's arm never released the lock"
@@ -404,27 +449,34 @@ printf '#!/usr/bin/env bash\necho ran >> "${MERGE_SENTINEL:?}"\necho merge >> "$
 chmod +x "$GSD"/*.sh
 export MERGE_SENTINEL="$TMP/merge-ran"; : > "$MERGE_SENTINEL"
 export BLOCK_SENTINEL="$TMP/block-order"; : > "$BLOCK_SENTINEL"
+# The block writes the merge-decision marker through mark_merge; the prologue
+# supplies it (a real one appending each phase, so the marks are assertable).
+export MARK_LOG="$TMP/mark-log"; : > "$MARK_LOG"
 {
   printf 'set -u\nSCRIPTS_DIR=%q\nLOG_SINK=""\nNOTED=""\nFAILED=""\n' "$GSD"
   printf 'AGENT=%q\nCHECK_SET_DEFAULT=%q\nREVIEW_POOL=%q\nFIX_POOL=%q\nVALIDATE_POOL=%q\n' \
     'myrig/gc-toolkit.refinery' correctness 'myrig/p-correctness' 'myrig/p' 'myrig/p'
+  printf 'MARK_LOG=%q\nmark_merge() { printf "%%s\\n" "$1" >> "$MARK_LOG"; }\n' "$MARK_LOG"
   printf '%s\n' "$GATE"
   printf 'echo "MERGE_HELD=$MERGE_HELD"\n'
 } > "$TMP/gaterun.sh"
+: > "$MARK_LOG"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite rc=3" || ok "(block) rc=3 held merge.sh"
 has "$gout" "MERGE_HELD=1" "(block) the hold flag is set"
+eq "$(paste -sd, - < "$MARK_LOG")" "held" "(block) a held merge marks the decision 'held', not a drop"
 # Recording a fact is not a dispatch: a held merge still gets a fresh posture,
 # so the pass that finally merges is not reading a stale one. The feedback arm
 # runs under the hold too — routing operator feedback does not wait on merge.
 has "$(cat "$BLOCK_SENTINEL")" "posture" "(block) the posture arm runs even when merge is HELD"
 has "$(cat "$BLOCK_SENTINEL")" "feedback" "(block) the feedback arm runs even when merge is HELD"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/gate-ensure.sh"
-: > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"
+: > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"; : > "$MARK_LOG"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && ok "(block) a clean gate-ensure lets merge.sh run" || bad "(block) merge.sh did not run after a clean gate-ensure"
 has "$gout" "MERGE_HELD=0" "(block) the hold flag is clear"
 eq "$(paste -sd, - < "$BLOCK_SENTINEL")" "posture,feedback,merge" "(block) posture and feedback both run, in that order, before merge reads posture"
+eq "$(paste -sd, - < "$MARK_LOG")" "reached,decided" "(block) a run marks 'reached' before merge and 'decided' after"
 
 # The posture arm's rc is the second half of the same interlock: merge.sh
 # validates the posture this arm records, so an arm that could not record one
@@ -438,10 +490,11 @@ case "$*" in
   *)                echo other   >> "${BLOCK_SENTINEL:?}"; exit 0 ;;
 esac
 PF
-: > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"
+: > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"; : > "$MARK_LOG"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite an unrecordable posture" || ok "(block) a non-zero posture arm held merge.sh"
 has "$gout" "MERGE_HELD=1" "(block) the hold flag is set by the posture arm"
+eq "$(paste -sd, - < "$MARK_LOG")" "held" "(block) a posture-held merge marks 'held', not a drop"
 
 echo "# the shipped order stays wired to this runner"
 ORDER="$(cd "$HERE/../.." && pwd)/orders/refinery-reconcile.toml"
