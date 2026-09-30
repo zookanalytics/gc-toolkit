@@ -146,6 +146,16 @@ th {
 }
 
 /*
+ * The visit marker: an open converse sitting holds this row. A different hue from
+ * the amber wants-person ● because it is a different fact — a conversation is on
+ * the bead — and the two can co-occur (◉). Teal reads as informational against
+ * the red/amber/green the rest of the board already spends.
+ */
+.held-marker {
+  color: #0e7490;
+}
+
+/*
  * The PR phase chip: who must act on a merge anchor next, in the three status:
  * values the GitHub PR list carries. One shared shape, colored by value so the
  * answer reads at a glance — needs-attention loudest, working quietest.

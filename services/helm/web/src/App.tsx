@@ -30,6 +30,15 @@ const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done']
 // side, which is the side that shows a row rather than hides one.
 const isRunning = (s: Sitting): boolean => s.status !== 'closed';
 
+// What a sitting CONCLUDED, or failing that what it is ABOUT: the takeaway wins,
+// then the outcome reason (why a decision-close closed), then the subject's title
+// (the topic), and the visit bead's own title only as a last resort. Mirrors the
+// board service's Sitting.Headline so the sittings table and the per-row visit
+// hover read one rule.
+function sittingHeadline(s: Sitting): string {
+  return s.takeaway || s.outcome_reason || s.subject_title || s.title;
+}
+
 // How long ago a stamp was, in the coarsest unit that still says something. An
 // absent stamp is unknown, never "just now": the sitting whose timestamp the
 // source could not read must not read as the freshest one.
@@ -315,6 +324,41 @@ function flattenFamilies(families: Family[]): BoardRow[] {
   return rows;
 }
 
+// The leading marker on a row: a filled ● when the row's next move is a person's
+// (review or gate), a hollow ○ when an open visit holds it, and a ◉ when both —
+// the same vocabulary the CLI overview prints (cmd/helm-svc/board.go,
+// familyGlyph). wants-person is already spelled by the band word, so its ● stays
+// decorative; a visit has no other cue on the row, so the held marker carries an
+// accessible label and a hover listing this bead's sittings — each one's
+// headline, its outcome (or "running"), and the session to attach to.
+function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
+  const wp = wantsPerson(tile);
+  if (!tile.held) {
+    return wp ? (
+      <span className="wants-person" aria-hidden="true">
+        ●{' '}
+      </span>
+    ) : null;
+  }
+  const hover =
+    sittings
+      .map(
+        (s) =>
+          `${sittingHeadline(s)} · ${s.outcome || (isRunning(s) ? 'running' : 'closed')}${
+            s.session ? ` · ${s.session}` : ''
+          }`,
+      )
+      .join('\n') ||
+    (wp ? 'an open visit holds this row, and it wants you' : 'an open visit holds this row');
+  const label = wp ? 'held by an open visit; wants you' : 'held by an open visit';
+  return (
+    <span className="held-marker" title={hover} aria-label={label}>
+      {wp ? '◉' : '○'}
+      {' '}
+    </span>
+  );
+}
+
 // One row of the unified table. Every row carries the same columns; `kind` sets
 // the grouping treatment (a group row's title reads as a header; a member's is
 // indented one level) and the attention highlight rides the row in place: a ●
@@ -325,6 +369,7 @@ function AnchorRow({
   drilled,
   onOpen,
   onActuated,
+  sittingsBySubject,
 }: {
   row: BoardRow;
   drilled: boolean;
@@ -332,6 +377,8 @@ function AnchorRow({
   // Called after a board write lands, so the acted-on row re-gathers rather than
   // waiting out the poll interval. App passes its refresh.
   onActuated: () => void;
+  // The sittings on each bead, keyed by subject id, for the per-row visit hover.
+  sittingsBySubject: Map<string, Sitting[]>;
 }) {
   const { tile, kind } = row;
   const person = wantsPerson(tile);
@@ -348,11 +395,7 @@ function AnchorRow({
   return (
     <tr className={className}>
       <td>
-        {person && (
-          <span className="wants-person" aria-hidden="true">
-            ●{' '}
-          </span>
-        )}
+        <RowMarker tile={tile} sittings={sittingsBySubject.get(tile.id) ?? []} />
         <span className="band">{tile.section}</span>
       </td>
       <td>
@@ -403,11 +446,13 @@ function AnchorsTable({
   drillTarget,
   onOpen,
   onActuated,
+  sittingsBySubject,
 }: {
   rows: BoardRow[];
   drillTarget: string | null;
   onOpen: (id: string) => void;
   onActuated: () => void;
+  sittingsBySubject: Map<string, Sitting[]>;
 }) {
   if (rows.length === 0) return null;
   const hasDone = rows.some((r) => r.tile.section === 'done');
@@ -437,6 +482,7 @@ function AnchorsTable({
               drilled={row.tile.id === drillTarget}
               onOpen={onOpen}
               onActuated={onActuated}
+              sittingsBySubject={sittingsBySubject}
             />
           ))}
         </tbody>
@@ -509,7 +555,7 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                     dedup close shows its outcome reason (why it closed), then
                     the subject's title (the topic) rather than the visit bead's
                     own generic title, which says nothing. */}
-                <td>{s.takeaway || s.outcome_reason || s.subject_title || s.title}</td>
+                <td>{sittingHeadline(s)}</td>
               </tr>
             );
           })}
@@ -603,6 +649,19 @@ export function App() {
   // members, or a single loose row. The grouping split is groupByFamily's; this
   // only shapes it for the table.
   const boardRows = useMemo(() => flattenFamilies(families), [families]);
+
+  // Sittings keyed by the bead they are about, so each row shows the visit(s)
+  // holding it without re-scanning the list per row. Keyed off the full sittings
+  // list, not the rig-filtered one, so a shown row always finds its own.
+  const sittingsBySubject = useMemo(() => {
+    const bySubject = new Map<string, Sitting[]>();
+    for (const s of sittings) {
+      const list = bySubject.get(s.subject);
+      if (list) list.push(s);
+      else bySubject.set(s.subject, [s]);
+    }
+    return bySubject;
+  }, [sittings]);
 
   const owed = visibleTiles.filter((t) => t.owed);
   const coverage = prCoverage(visibleTiles);
@@ -709,6 +768,7 @@ export function App() {
         drillTarget={drillTarget}
         onOpen={setDrillTarget}
         onActuated={refresh}
+        sittingsBySubject={sittingsBySubject}
       />
 
       <Sittings sittings={visibleSittings} now={renderedAt} onOpen={setDrillTarget} />

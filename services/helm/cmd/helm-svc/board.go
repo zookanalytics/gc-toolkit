@@ -557,6 +557,24 @@ func wantsPerson(t board.Tile) bool {
 	return t.Section == board.SectionReview || t.Section == board.SectionGate
 }
 
+// familyGlyph is the overview's leading marker: ● a row whose next move is a
+// person's (review or gate), ○ a row an open visit holds, ◉ both. The overview's
+// ● is the wants-you highlight, so a visit takes its own glyph here rather than
+// colliding with it. The default queue view has no wants-you axis, so there ●
+// stays free to mean held on its own (renderTileLine).
+func familyGlyph(t board.Tile) string {
+	switch {
+	case wantsPerson(t) && t.Held:
+		return "◉"
+	case wantsPerson(t):
+		return "●"
+	case t.Held:
+		return "○"
+	default:
+		return " "
+	}
+}
+
 // renderFamilyRows writes the city overview as dependency-family blocks: each
 // family is a header naming its root, then the members beneath it ordered by the
 // move they want (board.SectionOrder), with a ● on the rows that want a person.
@@ -581,39 +599,32 @@ func renderFamilyRows(w io.Writer, shown []board.Tile) {
 }
 
 // familyBanner is the labelled divider that opens a family block: the root's id,
-// kind, roll-up, frontier and needs, with a ● when the root itself wants a
-// person. The root is the family header rather than a member row, so its own ask
-// rides here.
+// kind, roll-up, frontier and needs, with the [familyGlyph] marking when the root
+// itself wants a person, is held by an open visit, or both. The root is the
+// family header rather than a member row, so its own ask rides here.
 func familyBanner(root board.Tile) string {
-	glyph := " "
-	if wantsPerson(root) {
-		glyph = "●"
-	}
-	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", glyph, root.ID, root.Kind, nmCell(root), root.Frontier)
+	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", familyGlyph(root), root.ID, root.Kind, nmCell(root), root.Frontier)
 	if n := acceptCell(root); n != "" {
 		line += " · " + n
 	}
 	return clip(line, colHeld+2+colNeedsMax)
 }
 
-// renderMemberLine writes one family member: its within-family band, the ● that
-// marks a person's move, and the same columns as an anchor row.
+// renderMemberLine writes one family member: its within-family band, the
+// [familyGlyph] marking a person's move and/or an open visit holding it, and the
+// same columns as an anchor row.
 func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
-	glyph := " "
-	if wantsPerson(t) {
-		glyph = "●"
-	}
-	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(t.Section, colSeverity)+
+	fmt.Fprint(w, rpad(familyGlyph(t), colHeld)+rpad(t.Section, colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
 		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(acceptCell(t), colNeedsMax)+"\n")
 }
 
 // renderFamilyLegend is the overview's trailer: what a family is, and what the
-// within-family band column and the ● glyph mean.
+// within-family band column and the marker glyphs mean.
 func renderFamilyLegend(w io.Writer) {
 	fmt.Fprint(w, "\nFamilies (▌) group by dependency structure: a top-level anchor and the children, blockers, reviews and rework that hang off it, so a family reads as one thing\n")
 	fmt.Fprint(w, "BAND orders each family by the move a member wants: review=a pull request · gate=a person must answer · stalled=nothing moving · active=in-flight · cleanup=finished/empty · done=closed\n")
-	fmt.Fprint(w, "● marks the rows that want YOU (review, gate). A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
+	fmt.Fprint(w, "● wants YOU (review, gate) · ○ an open visit holds the row · ◉ both. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway · review/rework=a gate child in flight (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")

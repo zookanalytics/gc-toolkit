@@ -300,6 +300,130 @@ it('surfaces the operator-owned bead as a gate row indented under its family', a
   expect((row as HTMLElement).className).toContain('row-member');
 });
 
+// The board marks a visit on a row, the same vocabulary the CLI prints
+// (cmd/helm-svc/board.go, familyGlyph): ○ a row an open visit holds, ◉ a row that
+// both is held and wants a person, ● a plain person's move. The held marker is
+// announced rather than decorative (aria-label), and its hover names the sittings
+// on the bead — each one's headline, its outcome or "running", and the session to
+// attach to.
+it('marks the beads a visit holds and names the sitting in the hover', async () => {
+  const board: Board = {
+    generated_at: '2026-08-26T08:00:00Z',
+    total: 4,
+    sittings: [
+      {
+        id: 'tk-vsit-held',
+        rig: 'gc-toolkit',
+        subject: 'tk-held',
+        title: 'visit: tk-held',
+        status: 'in_progress',
+        outcome: '',
+        outcome_reason: '',
+        session: 'gc-toolkit__converse-9',
+        opened_at: '2026-08-26T07:00:00Z',
+        takeaway: '',
+        subject_title: 'what the held row is about',
+      },
+      {
+        id: 'tk-vsit-both',
+        rig: 'gc-toolkit',
+        subject: 'tk-both',
+        title: 'visit: tk-both',
+        status: 'in_progress',
+        outcome: '',
+        outcome_reason: '',
+        session: 'gc-toolkit__converse-10',
+        opened_at: '2026-08-26T07:10:00Z',
+        takeaway: '',
+        subject_title: 'the gated topic',
+      },
+    ],
+    tiles: [
+      tile({
+        id: 'tk-fam',
+        kind: 'epic',
+        title: 'family root',
+        severity: 'HIGH',
+        section: 'stalled',
+        m_total: 3,
+        open: 3,
+        group_root: 'tk-fam',
+        frontier: '3 open',
+        rank_score: 3_000_000,
+      }),
+      tile({
+        id: 'tk-held',
+        kind: 'task',
+        title: 'held only',
+        severity: 'NORMAL',
+        section: 'active',
+        held: true,
+        group_root: 'tk-fam',
+        frontier: 'in flight',
+        rank_score: 2_500_000,
+      }),
+      tile({
+        id: 'tk-both',
+        kind: 'review',
+        title: 'held and gated',
+        severity: 'ELEVATED',
+        section: 'gate',
+        held: true,
+        group_root: 'tk-fam',
+        frontier: 'PR #7',
+        rank_score: 2_400_000,
+      }),
+      tile({
+        id: 'tk-wants',
+        kind: 'review',
+        title: 'wants a person',
+        severity: 'ELEVATED',
+        section: 'review',
+        group_root: 'tk-fam',
+        frontier: 'PR #8',
+        rank_score: 2_300_000,
+      }),
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(url, 'http://localhost/').pathname.endsWith('/helm')) {
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('held only')).toBeTruthy());
+
+  // ○ a held row no one owes; the marker is announced and hovers its one sitting.
+  const held = rowFor('held only') as HTMLElement;
+  expect(held.textContent).toContain('○');
+  expect(held.textContent).not.toContain('●');
+  const heldMarker = within(held).getByTitle(/what the held row is about/);
+  expect(heldMarker.getAttribute('aria-label')).toBe('held by an open visit');
+  expect(heldMarker.getAttribute('title')).toBe(
+    'what the held row is about · running · gc-toolkit__converse-9',
+  );
+
+  // ◉ a held row that also wants a person; the label says both.
+  const both = rowFor('held and gated') as HTMLElement;
+  expect(both.textContent).toContain('◉');
+  const bothMarker = within(both).getByTitle(/the gated topic/);
+  expect(bothMarker.getAttribute('aria-label')).toBe('held by an open visit; wants you');
+
+  // ● a plain person's move, unheld, still leads as it did before.
+  const wants = rowFor('wants a person') as HTMLElement;
+  expect(wants.textContent).toContain('●');
+  expect(wants.textContent).not.toContain('○');
+});
+
 // Within a family the members read in SECTION_ORDER — the most-pressing move
 // first — so review leads gate. Dependency structure is the top-level axis (the
 // epic leads its members); the band orders WITHIN a family.
