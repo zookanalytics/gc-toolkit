@@ -728,6 +728,51 @@ eq "$(meta new-2 anchor_bead)" "RM" "…and the anchor it belongs to"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…with no twin minted"
 
+echo "# …a merge_strategy stamp that does not persist leaves the child UNROUTED"
+# merge_strategy=mr is part of the child's full identity; the read-back verifies it
+# so a write that reports success but drops it never routes a child carrying no
+# declared strategy. (existing_pr would still force mr on its own here — the
+# read-back holds the whole identity, it does not lean on that recovery.)
+store "[$(anchor MS 101)]"
+printf '%s' "$(prview 101 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_101.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:merge_strategy" run)
+has "$out" "could not form the rework child for PR#101" "a dropped merge_strategy is caught by the full-identity read-back, before the route"
+eq "$(meta new-2 merge_strategy)" "<absent>" "the merge_strategy stamp really was dropped"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so a child carrying no declared strategy is never routed"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+hasnt "$out" "filed merge-mode rework new-2 routed to" "…nor is it reported as dispatched"
+
+echo "# …and the NEXT pass re-stamps merge_strategy through the stranded arm, then routes"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the unrouted child is adopted by the stranded arm, not buried"
+eq "$(meta new-2 merge_strategy)" "mr" "…which re-stamps the handoff-critical merge_strategy"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
+
+echo "# …the PR identity (existing_pr/pr_url/pr_number) is verified too, or a rework of a PR routes as a PR-less direct candidate"
+# With the PR identity dropped AND merge_strategy absent, mol-refinery-patrol
+# resolves an unset merge_strategy to direct and forces mr back only when
+# existing_pr is present — so a child that loses both is pushed straight to the
+# target branch instead of held as an mr-mode hand-back. The read-back verifies
+# the whole PR identity so that shape is never routed.
+store "[$(anchor PI 102)]"
+printf '%s' "$(prview 102 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_102.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:existing_pr,pr_url,pr_number" run)
+has "$out" "could not form the rework child for PR#102" "a dropped PR identity is caught by the full-identity read-back, before the route"
+eq "$(meta new-2 existing_pr)" "<absent>" "the existing_pr stamp really was dropped"
+eq "$(meta new-2 pr_number)" "<absent>" "…and the pr_number with it"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so a rework of an existing PR is never routed as a PR-less direct candidate"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …and the NEXT pass re-stamps the PR identity through the stranded arm, then routes"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the unrouted child is adopted by the stranded arm"
+eq "$(meta new-2 pr_number)" "102" "…which re-stamps the PR identity"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
+
 echo "# …a covering rework that lacks the role marker is re-stamped, never left as its anchor's twin"
 # A routed-but-unclaimed child from a pass before this marker existed (or one
 # whose stamp half-landed) is treated as already covering the conflict, so it

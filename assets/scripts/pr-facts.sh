@@ -402,9 +402,11 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
   # rejection_reason naming the head), adopt (needs an empty branch/anchor_bead),
   # or reap — the silent wedge this guards against. `gc bd create --metadata`
   # writes the whole payload in one insert; a reused strand/orphan takes one
-  # all-or-nothing --set-metadata. The write is read back IN FULL — role marker
-  # AND rejection_reason, the key a partial re-stamp used to drop — and a newborn
-  # that will not verify is closed rather than left half-stamped. Prints the
+  # all-or-nothing --set-metadata. mint_rework_verify reads the write back IN FULL
+  # — the role marker, rejection_reason (the rescue key), and the handoff-critical
+  # merge_strategy and PR identity (existing_pr/pr_url/pr_number) that keep the
+  # refinery on an mr-mode hand-back instead of a direct push to target — and a
+  # newborn that will not verify is closed rather than left half-stamped. Prints the
   # fully-formed, dep-attached, UNROUTED child id and returns 0; the caller stamps
   # gc.routed_to last, so only a complete child becomes claimable. Prints nothing
   # and returns 1 when the caller should retry next pass.
@@ -425,7 +427,7 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
     fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
   fi
   [ -n "$fix" ] || return 1
-  ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode")
+  ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode" "$prurl" "$prnum")
   if [ "$ok" != "true" ]; then
     # One retry: the write is all-or-nothing, so re-applying the whole payload
     # either lands it or leaves the prior state untouched — it cannot add a key.
@@ -434,7 +436,7 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
       --set-metadata rejection_reason="$reason" --set-metadata prepare_mode="$mode" \
       --set-metadata merge_strategy=mr --set-metadata existing_pr="$prurl" \
       --set-metadata pr_url="$prurl" --set-metadata pr_number="$prnum" >/dev/null 2>&1 || true
-    ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode")
+    ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode" "$prurl" "$prnum")
   fi
   if [ "$ok" != "true" ]; then
     # The write did not fully land. Close the child ONLY if what did land makes
@@ -460,15 +462,24 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
   return 0
 }
 
-mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> — echoes "true" iff the full identity read back
+mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number> — echoes "true" iff the full identity read back
   # rejection_reason is verified alongside the role marker: a child carrying the
   # marker but not the reason is the husk a role-marker-only re-stamp produced.
+  # merge_strategy and the PR identity (existing_pr/pr_url/pr_number) are handoff-
+  # critical too: a child that keeps its rescue keys but drops these hands the
+  # refinery a rework of no PR, which it resolves to merge_strategy=direct and a
+  # push straight to the target branch — the same partial-write wedge one field
+  # over. merge_strategy is always minted "mr"; the PR keys must read back the
+  # values this child was minted with.
   gc bd show "$1" --json 2>/dev/null | scrub | jq -r \
-    --arg ab "$2" --arg br "$3" --arg tg "$4" --arg rr "$5" --arg pm "$6" '
+    --arg ab "$2" --arg br "$3" --arg tg "$4" --arg rr "$5" --arg pm "$6" --arg ep "$7" --arg pn "$8" '
     (.[0].metadata // {}) as $m
     | (($m.task_kind // "") == "rework" and ($m.anchor_bead // "") == $ab
        and ($m.branch // "") == $br and ($m.target // "") == $tg
-       and ($m.rejection_reason // "") == $rr and ($m.prepare_mode // "") == $pm) | tostring' 2>/dev/null
+       and ($m.rejection_reason // "") == $rr and ($m.prepare_mode // "") == $pm
+       and ($m.merge_strategy // "") == "mr"
+       and ($m.existing_pr // "") == $ep and ($m.pr_url // "") == $ep
+       and ($m.pr_number // "") == $pn) | tostring' 2>/dev/null
 }
 
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
