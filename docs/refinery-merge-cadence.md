@@ -221,7 +221,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    as it stands; a MERGED PR is a landed record, flipped untouched. A refresh
    this arm cannot verify — an unreadable or unparseable body, a missing head,
    or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
-   rather than flip a managed body that may be stale.
+   rather than flip a managed body that may be stale. This adopt-time re-splice
+   covers only the `pre_open_gate` window; once the anchor is `pull_request`,
+   republishing a rework's restamp is arm 11's job (`pr-stack.sh`), the anchor
+   never returning to the state this arm scans (no `pull_request → pre_open_gate`
+   lifecycle edge).
 7. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head), `BLOCKED`
@@ -311,19 +315,35 @@ the cadence — the arms run whether or not any refinery session is awake.
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 4 merged or arm 7 recorded on this pass is
    disposable on the same tick.
-11. **pr-stack.sh** — the beads-on-this-branch section of an open PR's body. No
-   merge authority, and the only arm that writes no bead. A body is composed
-   once, by arm 6, out of one anchor; commits keep arriving on the branch after
-   that and none of them touch it, so a reviewer approves a scope the body does
-   not describe. For each open anchor recording a `pr_number`, this arm reads
-   the branch's bead ledger — `branch` (committed onto the branch: the anchor,
-   plus every rework hand-back), `fold_target` (folded onto it by a
-   polecat), and `merged_target` with `merge_result=merged` (landed its own PR
-   into it) — and splices the list into a delimited section at the end of the
-   body. The title is left alone: it names the anchor, and the body is where a
-   reviewer reads scope. A branch carrying one bead publishes nothing, because
-   arm 6 already named it. Idempotence is the rendered section compared against
-   the one between the markers, never the whole body, and the body is read
+11. **pr-stack.sh** — keeps an open PR's body current with its anchor in both
+   managed regions. No merge authority, and the only arm that writes no bead. A
+   body is composed once, by arm 6, out of one anchor; then two things drift it,
+   and this arm lands both fixes in one body edit.
+
+   The `gc:branch-beads` section: commits keep arriving on the branch after open
+   — a fold, a rework or rebase hand-back, a stacked bead's own PR — and none of
+   them touch the body, so a reviewer approves a scope it does not describe. For
+   each open anchor recording a `pr_number`, this arm reads the branch's bead
+   ledger — `branch` (committed onto the branch: the anchor, plus every rework
+   hand-back), `fold_target` (folded onto it by a polecat), and `merged_target`
+   with `merge_result=merged` (landed its own PR into it) — and splices the list
+   into a delimited section. A branch carrying one bead publishes nothing here,
+   because arm 6 already named it.
+
+   The `gc:pr-summary` region: a rework restamps the anchor's `pr_summary`, but
+   arm 6 composes that region only at `pre_open_gate` and an open anchor never
+   returns there, so the published `## Summary` — the merge surface, and the
+   squash commit message — would otherwise keep describing superseded work. When
+   the region is a well-formed marker pair whose summary is behind the anchor's
+   current `pr_summary`, this arm recomposes and re-splices it; a region already
+   current, a legacy markerless body (arm 6's adoption path establishes that), or
+   a malformed shape is left alone. The recompose uses `refresh` mode: the
+   reworked head has not re-signed-off, so the handoff bullet names the head and
+   defers to the PR's checks rather than repeating arm 6's pre-open sign-off line.
+
+   The title is left alone: it names the anchor, and the body is where a reviewer
+   reads scope. Idempotence for each region is its rendered content compared
+   against what the body carries, never the whole body, and the body is read
    `\r`-stripped: GitHub stores a body it re-wrapped with CRLF, and a marker
    line carrying a trailing CR would match nothing and append a second section
    every pass. Any read that fails leaves that PR as it stands — a truncated
