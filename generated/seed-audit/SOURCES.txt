@@ -56,7 +56,7 @@ assets/scripts/render-seed-audit.sh
 formulas/mol-deacon-patrol.toml
 bfe9d978328b5739acd768afbc3145da2602ad90376ca5142b40af9db7ddfe2d
 formulas/mol-design-convoy.toml
-b4128582c6cf2f3ee1b48da59554b57984e4b66711a03671728f87a6464f9cef
+84168e985620924e74cd3e70e7fe0bbe94ed9f5481f6734736c070790bc0ba2b
 formulas/mol-dog-shutdown-dance.toml
 54d2480953be08261f3b34b0c15f1cca35400703b7bc5f14fd3d737c88f0ea9a
 formulas/mol-feedback-distiller.toml

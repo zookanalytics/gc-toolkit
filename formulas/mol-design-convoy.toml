@@ -135,8 +135,11 @@ the refinery opens the checkpoint PR onto that branch. For `design_gated=true`,
 stamp the approval lane so `merge.sh` holds that PR until the operator approves.
 
 **Idempotent on resume** via two markers on the subject: `gc.design_child` (the
-child was filed) and `gc.design_armed` (it was slung). Each guards its action, so
-a re-run neither files a second child nor pours a second workflow.
+child was filed) and `gc.design_armed` (it was linked, gated, and slung).
+`gc.design_child` guards the non-idempotent create alone; the convoy link and the
+approval lane are idempotent sling preconditions and live under `gc.design_armed`.
+So a re-run neither files a second child nor pours a second workflow, and never
+slings a child that is unlinked from the convoy or missing its gate.
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -173,20 +176,23 @@ defines the implementation child's breakdown. Use the filing-documentation
 skill for placement." --json | tr -d '[:cntrl:]' | jq -r '.id // .[0].id // empty')
   [ -n "$DESIGN_CHILD" ] || { echo "bd create returned no design child id" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.design_child=$DESIGN_CHILD"
-  gc bd dep add "$DESIGN_CHILD" "$CONVOY_ID" --type=parent-child
-  # Gate 1: the approval lane makes merge.sh hold the checkpoint PR for an
-  # operator APPROVED review; pr-open.sh drops approval pre-open so the PR still
-  # opens. All-in-one leaves the default codex lane and lands on codex-green.
-  if [ "$DESIGN_GATED" = "true" ]; then
-    gc bd update "$DESIGN_CHILD" --set-metadata "check_set=codex,approval"
-  fi
 fi
 ```
 
-**Sling it to the pool (only if not already armed):**
+**Link, gate, and sling (only if not already armed).** The convoy link resolves
+`metadata.target=integration/<convoy-id>` for the child at sling time, and the
+approval lane (when gated) makes `merge.sh` hold the checkpoint PR for an operator
+APPROVED review — `pr-open.sh` drops approval pre-open so the PR still opens.
+All-in-one leaves the default codex lane and lands on codex-green. Both are
+idempotent preconditions of the sling, so they run here, before every sling
+including a resumed one:
 ```bash
 ARMED=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.design_armed"] // empty')
 if [ -z "$ARMED" ]; then
+  gc bd dep add "$DESIGN_CHILD" "$CONVOY_ID" --type=parent-child
+  if [ "$DESIGN_GATED" = "true" ]; then
+    gc bd update "$DESIGN_CHILD" --set-metadata "check_set=codex,approval"
+  fi
   gc sling "$POOL" "$DESIGN_CHILD" --on mol-polecat-work || { echo "sling of design child failed" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.design_armed=1"
 fi
@@ -220,8 +226,11 @@ implementation child carries "split into multiple beads if the approved design
 calls for it" and splits itself when it runs — the design does not exist yet to
 enumerate the pieces here.
 
-**Idempotent on resume** via `gc.impl_child` (filed) and `gc.impl_armed` (slung
-or armed) on the subject.
+**Idempotent on resume** via `gc.impl_child` (the child was filed) and
+`gc.impl_armed` (it was linked, then slung or armed) on the subject.
+`gc.impl_child` guards the non-idempotent create alone; the convoy link is an
+idempotent dispatch precondition and lives under `gc.impl_armed`. So a re-run
+neither files a second child nor dispatches one that is unlinked from the convoy.
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -260,14 +269,17 @@ calls for it. Do not begin until the design child has landed and this bead has
 been routed — it is armed behind the design's approval." --json | tr -d '[:cntrl:]' | jq -r '.id // .[0].id // empty')
   [ -n "$IMPL_CHILD" ] || { echo "bd create returned no implementation child id" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.impl_child=$IMPL_CHILD"
-  gc bd dep add "$IMPL_CHILD" "$CONVOY_ID" --type=parent-child
 fi
 ```
 
-**Arm or sling, by shape (only if not already armed):**
+**Link, then arm or sling, by shape (only if not already armed).** The convoy link
+resolves `metadata.target=integration/<convoy-id>` for the child; it is an
+idempotent precondition of the dispatch, so it runs here, before every dispatch
+including a resumed one:
 ```bash
 ARMED=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.impl_armed"] // empty')
 if [ -z "$ARMED" ]; then
+  gc bd dep add "$IMPL_CHILD" "$CONVOY_ID" --type=parent-child
   if [ "$DESIGN_GATED" = "true" ]; then
     # Hold behind the design child and arm the deferred dispatch: the design's
     # closure (on its approved-and-merged checkpoint PR) fires the sling.
