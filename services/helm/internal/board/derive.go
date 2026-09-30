@@ -368,6 +368,15 @@ const (
 	sittingClosed     = "closed"
 )
 
+// The two engagement states a held row's visit can be in, carried on
+// [Tile.VisitState]. VisitEngaged is a live sitting in the conversation now;
+// VisitParked is an open, un-engaged visit waiting for a person. A row no open
+// visit holds carries the empty string, never one of these.
+const (
+	VisitParked  = "parked"
+	VisitEngaged = "engaged"
+)
+
 // unengagedVisit reports whether subject has a visit no one has engaged: a
 // non-closed sitting standing OPEN on it that carries neither a claim
 // (in_progress), a bound session, nor a bound assignee. engage binds the visit
@@ -379,24 +388,62 @@ const (
 // Accept/Discuss invalidation rule: a live sitting suppresses Accept, and
 // leaving the sitting without a ruling (the visit reverts to open) restores it.
 func unengagedVisit(subject string, sittings []Sitting) bool {
-	parked := false
+	if engagedVisit(subject, sittings) {
+		return false
+	}
+	// Not engaged, so un-engaged exactly when a visit still stands OPEN on it.
+	// The absence of any open sitting is not un-engagement — there is nothing to
+	// accept-and-dismiss — so it does not restore Accept.
+	for _, s := range sittings {
+		if s.Subject == subject && s.Status == sittingOpen {
+			return true
+		}
+	}
+	return false
+}
+
+// engagedVisit reports whether a live sitting is holding subject's visit right
+// now: a sitting in_progress, or a non-closed one a session or an assignee is
+// bound to. The assignee arm covers the pending-engagement window — engage binds
+// the visit by assignee while it is still open, before the hook claim promotes
+// it to in_progress and stamps the session. It is the engagement half both
+// [unengagedVisit] and [classifyVisits] read, so the Accept affordance and the
+// [Tile.VisitState] a row shows are decided by one predicate and cannot drift.
+func engagedVisit(subject string, sittings []Sitting) bool {
 	for _, s := range sittings {
 		if s.Subject != subject {
 			continue
 		}
-		// A claimed sitting, or a non-closed one a session or an assignee is
-		// bound to, is a live conversation the operator is holding: it
-		// suppresses Accept whatever else is on the subject. The assignee arm
-		// covers the pending-engagement window — engage binds the visit by
-		// assignee while it is still open, before the claim stamps the session.
 		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
-			return false
-		}
-		if s.Status == sittingOpen {
-			parked = true
+			return true
 		}
 	}
-	return parked
+	return false
+}
+
+// classifyVisits stamps [Tile.VisitState] on every held row, splitting Held into
+// its two engagement states: VisitEngaged when a live sitting is holding the
+// conversation, VisitParked otherwise. A row no visit holds keeps the empty
+// string.
+//
+// It runs after the wrapper fold, where Held is final — [applyFold] flips a
+// subject to Held when a visit wrapper folds onto it — so it reads the settled
+// flag rather than the per-anchor value [deriveTile] computed. Engagement is the
+// same [engagedVisit] test Acceptable reads, so a row reads "engaged" exactly
+// when a live sitting suppresses Accept. Parked is the fallback, including the
+// case a held row's sitting has aged out of the window: an open visit no session
+// is on reads as waiting for the operator, never as being worked.
+func classifyVisits(tiles []Tile, facts Facts) {
+	for i := range tiles {
+		if !tiles[i].Held {
+			continue
+		}
+		if engagedVisit(tiles[i].ID, facts.Sittings) {
+			tiles[i].VisitState = VisitEngaged
+		} else {
+			tiles[i].VisitState = VisitParked
+		}
+	}
 }
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
@@ -1821,6 +1868,11 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// projects to the GitHub status: label; then let the frontier lead with that
 	// state so the board's primary vocabulary is the liveness.
 	classifyPhases(folded, anchors, facts)
+
+	// Split Held into parked vs engaged on each held row, from the same sittings
+	// the fold read. After the fold so it sees the final Held, beside
+	// classifyPhases because both stamp a per-row derived state the renderers read.
+	classifyVisits(folded, facts)
 
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 

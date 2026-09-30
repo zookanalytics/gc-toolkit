@@ -16,6 +16,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     owed: false,
     weight: 0,
     held: false,
+    visit_state: '',
     n_closed: 0,
     m_total: 0,
     open: 0,
