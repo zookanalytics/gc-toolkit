@@ -2,11 +2,13 @@
 # doctor/check-demo-toolchain — the demo:capture toolchain is resolvable.
 # A narrated demo needs four things at capture time: Node to run the SprintShow
 # engine, a Chromium build to drive, ffmpeg to assemble, and OPENAI_API_KEY to
-# voice the steps. Each is fetched on demand rather than assumed, so this check
-# reports which are in place — it is a readiness heads-up, not an invariant.
-# Every gap is a WARNING: a missing browser or ffmpeg fails the capture until
-# provisioned, and a missing key downgrades it to the documented silent+captioned
-# result, but none is a structural defect. It goes green once all four resolve.
+# voice the steps; delivering the clip inline to its PR needs a fifth, gh >= 2.99.0
+# for 'gh pr comment --attach'. Each is fetched on demand rather than assumed, so
+# this check reports which are in place — it is a readiness heads-up, not an
+# invariant. Every gap is a WARNING: a missing browser or ffmpeg fails the capture
+# until provisioned, a missing key downgrades it to the documented silent+captioned
+# result, and a missing or too-old gh means a produced clip cannot be delivered
+# inline — but none is a structural defect. It goes green once all five resolve.
 # Read-only, probes the host only. Exit 0=OK 1=Warning 2=Error. stdout: a
 # message line, then "  - detail" lines. Never prints the key's value.
 
@@ -67,10 +69,30 @@ elif [ -f "$HOME/.gc/secrets.env" ] && grep -q '^OPENAI_API_KEY=..*' "$HOME/.gc/
 fi
 [ -n "$key_ok" ] || warnings+=("OPENAI_API_KEY is not set (checked the environment and ~/.gc/secrets.env) — narration falls back to a SILENT, captioned clip, which is the documented degradation, not a failure. Place the key to voice the steps.")
 
+# --- gh >= 2.99.0: the floor for inline PR delivery ('gh pr comment --attach') ---
+# 'gh pr comment --attach' (gh 2.99.0) uploads a clip to GitHub's user-attachments
+# CDN and renders it inline, which is how a produced demo is delivered to its PR
+# without committing it. Compare major.minor numerically: 2.101 is NOT below 2.99.
+gh_ok=""
+if command -v gh >/dev/null 2>&1; then
+    ghver=$(gh --version 2>/dev/null | sed -n 's/^gh version \([0-9][0-9.]*\).*/\1/p' | head -1)
+    ghmajor=${ghver%%.*}
+    ghrest=${ghver#*.}; ghminor=${ghrest%%.*}
+    case "$ghmajor" in ''|*[!0-9]*) ghmajor=0 ;; esac
+    case "$ghminor" in ''|*[!0-9]*) ghminor=0 ;; esac
+    if [ "$ghmajor" -gt 2 ] || { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -ge 99 ]; }; then
+        gh_ok="$ghver"
+    else
+        warnings+=("gh ${ghver:-unknown} is below 2.99.0 — 'gh pr comment --attach' (inline demo delivery to a PR) is unavailable; upgrade gh.")
+    fi
+else
+    warnings+=("gh not found — 'gh pr comment --attach' delivers a produced demo inline to its PR; install gh >= 2.99.0.")
+fi
+
 if [ "${#warnings[@]}" -ne 0 ]; then
-    echo "demo:capture toolchain incomplete — ${#warnings[@]} item(s) to provision before a narrated capture"
+    echo "demo:capture toolchain incomplete — ${#warnings[@]} item(s) to provision before a narrated capture and inline delivery"
     detail "${warnings[@]}"
     exit 1
 fi
-echo "OK: demo:capture toolchain ready — Node $node_ok, Chromium ($browser_ok), ffmpeg ($ffmpeg_ok), OPENAI_API_KEY ($key_ok)"
+echo "OK: demo:capture toolchain ready — Node $node_ok, Chromium ($browser_ok), ffmpeg ($ffmpeg_ok), OPENAI_API_KEY ($key_ok), gh $gh_ok"
 exit 0

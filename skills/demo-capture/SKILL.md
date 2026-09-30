@@ -95,6 +95,26 @@ sprintshow assemble .captures/agent-run -o demos/board.mp4
 the manifest shape and the MCP wiring; `examples/seed-test/` shows the
 seed-test bootstrap for a demo that first needs a login or seeded data.
 
+## Deliver to the PR
+
+When the demo is for a PR, producing the MP4 is not the end — a clip left in a
+scratch path is gone by review time. Attach it to the PR inline and uncommitted:
+
+```bash
+assets/scripts/demo-deliver.sh --file demos/board.mp4 --pr <number>
+# or resolve the PR from the work bead that owns it:
+assets/scripts/demo-deliver.sh --file demos/board.mp4 --subject <bead-id>
+```
+
+`demo-deliver.sh` runs `gh pr comment <pr> --attach <file>`, which uploads the
+clip to GitHub's user-attachments CDN and renders it as an inline player with no
+browser step. A user-attachments URL is the only inline-playable path — a
+committed file, a release asset, or an external URL renders as a link — so the
+clip stays out of the repo tree and still plays on the PR. It pins the write to
+the rig's own origin and fails closed: a missing or too-old gh (the floor is
+2.99.0, which `doctor/check-demo-toolchain` probes), a foreign PR, or a gh error
+all exit non-zero rather than leaving the clip undelivered.
+
 ## Demo-script format
 
 A demo script is markdown that reads as a walkthrough and carries

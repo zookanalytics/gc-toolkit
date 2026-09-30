@@ -35,10 +35,11 @@ for c in bash sed ls grep head; do
 done
 TPATH="$STUBS:$COREUTILS"
 
-clear_stubs() { rm -f "$STUBS/node" "$STUBS/ffmpeg" "$STUBS/gc" "$STUBS/chromium"; }
+clear_stubs() { rm -f "$STUBS/node" "$STUBS/ffmpeg" "$STUBS/gc" "$STUBS/chromium" "$STUBS/gh"; }
 stub_node() { printf '#!/bin/sh\necho v%s\n' "$1" > "$STUBS/node"; chmod +x "$STUBS/node"; }
 stub_ffmpeg() { printf '#!/bin/sh\nexit 0\n' > "$STUBS/ffmpeg"; chmod +x "$STUBS/ffmpeg"; }
 stub_chromium() { printf '#!/bin/sh\nexit 0\n' > "$STUBS/chromium"; chmod +x "$STUBS/chromium"; }
+stub_gh() { printf '#!/bin/sh\necho "gh version %s (2026-01-01)"\n' "$1" > "$STUBS/gh"; chmod +x "$STUBS/gh"; }
 stub_gc_ss() { # stub_gc_ss <sprintshow-path>
   printf '#!/bin/sh\nif [ "$1" = rig ]; then printf %s\x27{"rigs":[{"name":"sprintshow","path":"%s"}]}\x27; fi\n' '' "$1" > "$STUBS/gc"
   chmod +x "$STUBS/gc"
@@ -64,13 +65,15 @@ run_check() { # run_check <home> <browsers-path> [KEY]
 }
 
 # --- Case 1: everything present → OK -------------------------------------
-clear_stubs; stub_node 22.18.0; stub_ffmpeg
+# gh 2.101.0 also proves the version compare is numeric: 2.101 is not below 2.99.
+clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.101.0
 OUT="$(run_check "$HOME_KEY" "$BROWSERS_YES" sk-env-value)"; RC=$?
 eq "$RC" 0 "case1: all present exits OK"
 has "$OUT" "OK: demo:capture toolchain ready" "case1: reports ready"
 has "$OUT" "OPENAI_API_KEY (environment)" "case1: key from environment wins"
+has "$OUT" "gh 2.101.0" "case1: names the gh version (2.101 >= 2.99, numeric compare)"
 
-# --- Case 2: nothing present → Warning naming all four -------------------
+# --- Case 2: nothing present → Warning naming all five -------------------
 clear_stubs
 OUT="$(run_check "$HOME_BARE" "$BROWSERS_NO")"; RC=$?
 eq "$RC" 1 "case2: all absent exits Warning"
@@ -78,31 +81,39 @@ has "$OUT" "Node not found" "case2: warns on Node"
 has "$OUT" "No Chromium build found" "case2: warns on Chromium"
 has "$OUT" "No ffmpeg resolvable" "case2: warns on ffmpeg"
 has "$OUT" "OPENAI_API_KEY is not set" "case2: warns on key"
+has "$OUT" "gh not found" "case2: warns on gh"
 
 # --- Case 3: ffmpeg only via the engine's ffmpeg-static → OK -------------
-clear_stubs; stub_node 24.18.0; stub_gc_ss "$SS_FIX"
+clear_stubs; stub_node 24.18.0; stub_gc_ss "$SS_FIX"; stub_gh 2.99.0
 OUT="$(run_check "$HOME_KEY" "$BROWSERS_YES" sk-env-value)"; RC=$?
 eq "$RC" 0 "case3: ffmpeg-static fallback satisfies ffmpeg"
 has "$OUT" "ffmpeg-static (sprintshow engine)" "case3: names the engine fallback"
 
 # --- Case 4: key only in ~/.gc/secrets.env → OK, sourced from the file ---
-clear_stubs; stub_node 22.18.0; stub_ffmpeg
+clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.99.0
 OUT="$(run_check "$HOME_KEY" "$BROWSERS_YES")"; RC=$?   # no OPENAI_API_KEY in env
 eq "$RC" 0 "case4: key from secrets.env satisfies the probe"
 has "$OUT" "OPENAI_API_KEY (~/.gc/secrets.env)" "case4: names the secrets file"
 hasnt "$OUT" "sk-fixture-value" "case4: never prints the key value"
 
 # --- Case 5: node present but below the floor → Warning ------------------
-clear_stubs; stub_node 20.5.0; stub_ffmpeg
+clear_stubs; stub_node 20.5.0; stub_ffmpeg; stub_gh 2.99.0
 OUT="$(run_check "$HOME_KEY" "$BROWSERS_YES" sk-env-value)"; RC=$?
 eq "$RC" 1 "case5: old node exits Warning"
 has "$OUT" "below the engine's floor" "case5: names the version floor"
 
 # --- Case 6: no browser cache, but a host Chromium on PATH → OK ----------
-clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_chromium
+clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_chromium; stub_gh 2.99.0
 OUT="$(run_check "$HOME_KEY" "$BROWSERS_NO" sk-env-value)"; RC=$?
 eq "$RC" 0 "case6: host Chromium on PATH satisfies the browser probe"
 has "$OUT" "Chromium (host Chromium)" "case6: names the host browser source"
+
+# --- Case 7: gh below the delivery floor → Warning naming it -------------
+clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.98.0
+OUT="$(run_check "$HOME_KEY" "$BROWSERS_YES" sk-env-value)"; RC=$?
+eq "$RC" 1 "case7: old gh exits Warning"
+has "$OUT" "gh 2.98.0 is below 2.99.0" "case7: names the gh floor with the version"
+has "$OUT" "gh pr comment --attach" "case7: names the unavailable capability"
 
 echo "check-demo-toolchain: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

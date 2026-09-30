@@ -24,7 +24,7 @@ agents/demo/agent.toml
 agents/demo/mcp/playwright.toml
 4583c0d139402dae22161b16b5ffa41b7ebaad81caea2f53d5a1cb8393b9615e
 agents/demo/prompt.template.md
-b4391316e21c501690596dc975ca485a723828b32ab053935f94e6699b2c466c
+d48b194cb0be1439e4796fb6180f8b26005cdb03fe671f0c7b91ad0db5070873
 agents/dog/agent.toml
 461bf99dede1bb2bd93362209c27f2a214ea081faf2e5a886ec2d2284cb95c7f
 agents/dog/prompt.template.md
