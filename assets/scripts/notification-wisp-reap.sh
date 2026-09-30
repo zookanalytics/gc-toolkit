@@ -7,19 +7,14 @@
 # you: <gate>" message, and each time a monitored condition re-fires it mails a
 # fresh "ESCALATION: <headline>" copy. Nothing closes a gate notice when its
 # gate resolves, and each escalation cycle files a new copy rather than
-# refreshing the standing one, so both grow without bound — a census on
-# 2026-09-29 found 110 gate notices (only 7 backed by an open gate) and 32
-# copies of a single escalation. The reach those notices once carried is
-# gate-visit-sweep's job now; the durable residue on the operator's board is
-# what never clears.
+# refreshing the standing one, so both accumulate without bound on the
+# operator's board.
 #
 # This is the notification counterpart to the HQ-store marooned-work backstop:
 # a periodic sweep of the city store that (1) closes a gate notice once the gate
 # named in its title is no longer open, and (2) collapses the copies of one
 # escalation headline to a single open notice. It does not change how core
-# creates the notices — that is upstream — so it is a backstop, and its first
-# pass clears the standing residue as a side effect of the same rule that keeps
-# it clear afterward.
+# creates the notices — that is upstream — so it is a backstop.
 #
 # City scope: the notices live in the one city store but name gates in every
 # rig, and `gc bd show` resolves a gate across ledgers on its own, so one pass
@@ -49,7 +44,7 @@ while [ $# -gt 0 ]; do
         --dry-run) DRY_RUN=1 ;;
         --db) [ $# -ge 2 ] || { echo "$PROG: --db needs a path" >&2; exit 2; }; CITY_DB="$2"; shift ;;
         --db=*) CITY_DB="${1#--db=}" ;;
-        -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "$PROG: unknown argument: $1" >&2; exit 2 ;;
     esac
     shift
