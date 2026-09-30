@@ -2295,9 +2295,9 @@ out=$(run)
 has "$out" "identity did not certify for the write-back" "the foreign PR is refused"
 eq "$(reacted 51 NC-51)" "false" "…and NOTHING was written back"
 
-echo "# a review posted under our OWN login leaves unresolved threads arm 4 never routes"
+echo "# a review posted under our OWN login leaves unresolved threads arm 7 never routes"
 # The gap: an outside review agent (or an operator-run review) posts findings on a
-# green PR under the automation's own login. arm 4 counts only other logins, so it
+# green PR under the automation's own login. arm 7 counts only other logins, so it
 # routes nothing; the gate stays green, and until this backstop nothing flagged it.
 store "[$(anchor UT1 60)]"
 printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
@@ -2306,7 +2306,7 @@ echo '[]' > "$GH_DIR/reviews_60.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-60","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-60","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_60.json"
 out=$(run)
 has "$out" "unengaged review-thread finding" "the backstop flags the otherwise-clear PR"
-hasnt "$out" "routed to rework:" "arm 4 routed nothing — the finding is under our own login"
+hasnt "$out" "routed to rework:" "arm 7 routed nothing — the finding is under our own login"
 UTVID=$(jq -r '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) | .id ] | .[0] // empty' "$STUB_STORE")
 [ -n "$UTVID" ] && ok "a visit was filed" || bad "no visit filed"
 eq "$(meta "$UTVID" pr_number)" "60" "…stamped with the PR so merge.sh holds the merge"
@@ -2323,7 +2323,7 @@ out=$(run)
 hasnt "$out" "unengaged review-thread finding" "a resolved thread raises nothing"
 eq "$(meta UT2 pr_unengaged_threads)" "<absent>" "…and no head watermark is written"
 
-echo "# a thread we already replied into is arm 4's or the write-back's to finish, not ours"
+echo "# a thread we already replied into is arm 7's or the write-back's to finish, not ours"
 store "[$(anchor UT3 62)]"
 printf '%s' "$(prview 62 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
 printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_62.json"

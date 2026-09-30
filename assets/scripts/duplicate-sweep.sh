@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# duplicate-sweep — arm 7 of the merge cadence; caller: refinery-reconcile.sh.
+# duplicate-sweep — arm 10 of the merge cadence; caller: refinery-reconcile.sh.
 # Gives `duplicate_of` a reader. A polecat that diagnoses a duplicate dispatch
 # stamps the marker and parks the bead, because polecats never close work
 # beads; without a reader the bead sits open until a human rules on it, one at

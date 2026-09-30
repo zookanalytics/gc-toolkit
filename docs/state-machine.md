@@ -134,9 +134,9 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | gates armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` reads `green` |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 6) | every marker-bearing gate in `check_set` reads `green` |
 | pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
-| pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
+| pull_request → merged | `pr-facts.sh` (cadence arm 7) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
@@ -152,7 +152,7 @@ anchor stays `pull_request` (or `pre_open_gate`) and the cleared marker holds
 the merge until the child lands and the gate re-evaluates.
 
 Convoy graduation is a separate transition on the convoy bead:
-`convoy-graduate.sh` (cadence arm 6) moves a convoy to refinery-assigned with
+`convoy-graduate.sh` (cadence arm 8) moves a convoy to refinery-assigned with
 `branch=integration/<id>` when all members are closed, at least one merge is
 recorded onto the integration branch, and no hold or branch vetoes.
 
@@ -573,13 +573,13 @@ review's result set.
   branch current is routinely one horn of what such a demand asks, so a child
   filed under one answers the question by performing it. Closing the demand is
   what releases the dispatch.
-- **Disposal** (`review-sweep.sh`, cadence arm 7): a review outlives its own
+- **Disposal** (`review-sweep.sh`, cadence arm 9): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
-- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 8): a duplicate
+- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 10): a duplicate
   dispatch a polecat diagnosed and parked has no other way out, since polecats
   never close work beads. The arm closes it through `bead-rehome.sh --kind
   duplicate` only when the named successor resolves and is closed or shipped

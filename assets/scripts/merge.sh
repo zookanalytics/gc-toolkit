@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge — arm 3 of the merge cadence: the single writer of merged truth.
+# merge — arm 4 of the merge cadence: the single writer of merged truth.
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
 # repo, not a fork), live anchor re-read (still open, still gating on
 # pull_request, still naming this PR by number, url and head branch), then

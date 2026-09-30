@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-sweep — arm 6 of the merge cadence; caller: refinery-reconcile.sh.
+# review-sweep — arm 9 of the merge cadence; caller: refinery-reconcile.sh.
 # Closes a dispatched review that has no reviewable surface left: its anchor is
 # closed AND its review_branch is absent from origin. Both conditions are
 # required. An anchor still gating means the review is owed, and a branch that

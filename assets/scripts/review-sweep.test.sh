@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/review-sweep.sh — arm 6 of the merge cadence.
+# Hermetic test for assets/scripts/review-sweep.sh — arm 9 of the merge cadence.
 # Covers: the sweep condition (anchor closed AND review_branch absent from
 # origin) and every way it fails to hold (anchor still open, branch still on
 # origin, no review_branch, no anchor_bead, an anchor that does not resolve);
