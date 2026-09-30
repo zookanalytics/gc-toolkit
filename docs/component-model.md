@@ -200,8 +200,13 @@ open unassigned task/bug/defect there — unrouted or routed to a pool — is
 marooned by construction; the operator-queue decisions routed to human, daily
 digests, and doctor and tech-debt advisories that legitimately live there are
 exempt).
-That is the whole set: **22 checks,
-each asserting a live structural property** — none greps the source for a past fix.
+An eleventh non-invariant check, `doctor/check-demo-toolchain`, reports readiness
+rather than structure: whether the demo:capture toolchain — Node, a Chromium
+build, ffmpeg, and `OPENAI_API_KEY` — is resolvable, warn-only, so a demo
+session learns before it captures whether the clip will narrate or degrade to a
+silent, captioned one.
+That is the whole set: **23 checks — 22 asserting a live structural property
+and one reporting toolchain readiness** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
 

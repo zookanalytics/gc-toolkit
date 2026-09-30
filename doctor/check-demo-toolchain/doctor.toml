@@ -1,0 +1,1 @@
+description = "The demo:capture toolchain is resolvable — Node, a Chromium build, ffmpeg, and OPENAI_API_KEY — so a session knows before it captures whether the clip will be narrated or degrade to silent, and whether the browser and ffmpeg are in place. Warn-only; goes green once all four resolve."
