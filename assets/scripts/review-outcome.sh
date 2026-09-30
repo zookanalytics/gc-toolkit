@@ -10,7 +10,7 @@
 #
 #   task_kind        review
 #   anchor_bead      the gating anchor
-#   check_name       the lane it backs (absent resolves to codex, as elsewhere)
+#   check_name       the lane it backs (absent resolves to correctness, as elsewhere)
 #   reviewed_oid     the head the validator ruled converged (a dispatch pin, read
 #                    by no gate as a claim about a commit)
 #   signoff_verdict  approve
@@ -84,7 +84,7 @@ backing_ids() { # <anchor> <lane>
   printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | (.metadata // {}) as $m
           | select((($m.task_kind // "") | tostring) == "review")
-          | select(((($m.check_name // "") | tostring) | if . == "" then "codex" else . end) == $lane)
+          | select(((($m.check_name // "") | tostring) | if . == "" then "correctness" else . end) == $lane)
           | select(((.status // "") | tostring | ascii_downcase) == "closed")
           | select((($m.reviewed_oid // "") | tostring) != "")
           | (($m.signoff_verdict // "") | tostring) as $sv

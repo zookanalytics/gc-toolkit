@@ -1,6 +1,6 @@
 ---
 name: The anchor state machine
-description: The declared lifecycle of a unit of work — every state in lifecycle/lifecycle.toml, every transition with the one writer that performs it, the gate vocabulary, the merge condition, and the handoff and rework loops. Read it before touching anything that writes bead state.
+description: The declared lifecycle of a unit of work — every state in lifecycle/lifecycle.toml, every transition with the one writer that performs it, the check vocabulary, the merge condition, and the handoff and rework loops. Read it before touching anything that writes bead state.
 ---
 
 # The anchor state machine
@@ -27,7 +27,7 @@ fallback does.
 
 ## Scope
 
-**Mandate.** The anchor lifecycle: states, transitions, writers, the gate
+**Mandate.** The anchor lifecycle: states, transitions, writers, the check
 vocabulary, and the merge condition.
 
 **Boundaries.** The cadence that drives the merge-side writers is
@@ -131,10 +131,10 @@ route, one carrying an assignee, and one that has left `status=open`.
 | routed → claimed | `gc hook --claim` (runtime) | pool demand spawns a session |
 | claimed → routed | witness patrol (`mol-witness-patrol`) | session died with the claim held |
 | claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |
-| handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | gates armed, branch accepted |
+| handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | checks armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` reads `green` |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing check in `check_set` reads `green` |
 | pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
@@ -147,21 +147,21 @@ route, one carrying an assignee, and one that has left `status=open`.
 | held → unanchored | `agents/converse` sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` clears
-the gate marker and files one routed rework child that blocks the anchor — the
+the check marker and files one routed rework child that blocks the anchor — the
 anchor stays `pull_request` (or `pre_open_gate`) and the cleared marker holds
-the merge until the child lands and the gate re-evaluates.
+the merge until the child lands and the check re-evaluates.
 
 Convoy graduation is a separate transition on the convoy bead:
 `convoy-graduate.sh` (cadence arm 6) moves a convoy to refinery-assigned with
 `branch=integration/<id>` when all members are closed, at least one merge is
 recorded onto the integration branch, and no hold or branch vetoes.
 
-## Gates
+## Checks
 
-**Vocabulary.** The anchor declares its gates in `check_set`, a comma list of
-gate names. Three of those names are not review gates, and every reader of
+**Vocabulary.** The anchor declares its checks in `check_set`, a comma list of
+check names. Three of those names are not review checks, and every reader of
 `check_set` knows them by name. `none` and `off` are sentinels that declare no
-gate at all. `none` is the spelling the rest of this pack uses. `approval` is
+check at all. `none` is the spelling the rest of this pack uses. `approval` is
 satisfied by GitHub's own review state. `gate-ensure.sh` and `pr-facts.sh`
 skip all three instead of dispatching a review, and `merge.sh` drops them
 before it looks for markers.
@@ -177,17 +177,17 @@ The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
 [authority-map.md](authority-map.md).
 
-`codex` is one such review gate, opaque like the rest. Both transitions read
-the same declared list: `pr-open.sh` publishes once every marker-bearing gate
+`codex` is one such review check, opaque like the rest. Both transitions read
+the same declared list: `pr-open.sh` publishes once every marker-bearing check
 in `check_set` reads `green`, and `merge.sh` merges under the same
 condition. `none`/`off` and `approval` are dropped from both — the first is
-the gateless-by-choice sentinel, and the second is evidenced by an external
+the checkless-by-choice sentinel, and the second is evidenced by an external
 GitHub review, which cannot exist before the PR does and which `merge.sh`
 enforces at the merge. An empty `check_set` is not the opt-out at either
 transition: it means never normalized, and gate-ensure stamps the default
 earlier in the same pass.
 
-Each gate is a **lane**, and its marker carries one bare state word — a state
+Each check is a **lane**, and its marker carries one bare state word — a state
 of the lane, never a claim about a commit:
 
 | Marker | Meaning | Merge effect |
@@ -212,14 +212,14 @@ left behind, migrated. The full lane state machine is
 `approval` takes no marker of its own. `merge.sh` satisfies it from an
 external APPROVED review at the live head, never from the city's own account
 and never from a `check.approval` marker. `lifecycle/lifecycle.toml` records
-that rule. What the *reviewer* did short of a verdict is posture, not a gate:
-see [Posture](#posture) below. **`signoff.sh` is the single writer of gate
+that rule. What the *reviewer* did short of a verdict is posture, not a check:
+see [Posture](#posture) below. **`signoff.sh` is the single writer of check
 verdicts** (component-model I7). A verdict binds to no commit: the reviewed oid
 is recorded on the review bead and named in the posted artifact, and nothing
 compares it to a head.
 
 One shape no cadence pass can rewrite. `merge.sh` and gate-ensure both read
-only the gates named in `check_set`, so a `check.<g>` outside it is dispatched
+only the checks named in `check_set`, so a `check.<g>` outside it is dispatched
 against by nothing and overwritten by nothing. When such a marker also carries
 a word outside the lane vocabulary, it is a state no reader knows and nothing
 could retire, and gate-ensure clears it. A well-formed one stays as history —
@@ -295,7 +295,7 @@ than silently releasing a park a human is relying on.
 
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
-an unnormalized anchor holds); every gate named in `check_set` reads `green`; no
+an unnormalized anchor holds); every check named in `check_set` reads `green`; no
 unclosed rework or review child; PR base equals `merged_target`; GitHub reports
 CLEAN; no holds (`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
 pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
@@ -305,7 +305,7 @@ sight as fail-closed defense.
 
 ## Posture
 
-Gates record what the machine decided. **Posture** records what the pull request
+Checks record what the machine decided. **Posture** records what the pull request
 is doing, head-pinned the same way, written by `pr-facts.sh` on every open
 non-draft anchor and read off the bead by everything downstream. Declared in
 `lifecycle/lifecycle.toml` `[posture]`.
@@ -400,7 +400,7 @@ is extensible: one value is set at a time, and setting one removes any other
 | Label | Who acts next | When |
 |---|---|---|
 | `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
-| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened gate-green, reworked and handed back, or a non-blocking review left comments |
+| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green, reworked and handed back, or a non-blocking review left comments |
 | `status: needs-attention` | a human weighs in | a hold stands — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
 
 Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
@@ -415,7 +415,7 @@ posture directly and not a lane marker. The `working`->`needs-review` flip rests
 the rework child, which is scoped to the reviewed commit and closes when the fix
 lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
 rework hands back, and a `check.<g>=green` that outlives a rewritten reviewed
-commit ([Green survives new commits](#gates), the bug tk-4zsj1p) cannot read the
+commit ([Green survives new commits](#checks), the bug tk-4zsj1p) cannot read the
 label settled.
 
 The label is workflow state and never says a PR may merge: machine readiness
@@ -474,7 +474,7 @@ summary, and lists `base: integration` beside `status:` in its own colour.
 
 ## The machine axis
 
-Gates say whether one review passed. **`pr.machine`** says what the merge cadence
+Checks say whether one review passed. **`pr.machine`** says what the merge cadence
 can do with the anchor as a whole on its next pass, so a reader learns whether an
 anchor is moving without re-implementing two scripts' predicates. Declared in
 `lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh` and
@@ -485,7 +485,7 @@ so a key written only for open pull requests would miss the majority of them.
 | Value | Meaning |
 |---|---|
 | `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
-| `settled` | every declared gate reads `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
+| `settled` | every declared check reads `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `wedged-exception` | `merge_hold` stands with `signoff_cap` beside it: the convergence cap parked the anchor and routed it to a person, and no automated actor will lift it |
 
 `wedged-exception` names the anchor's wedge in the value itself: no automated
@@ -523,9 +523,9 @@ sequenceDiagram
   Note over P: push unverified ⇒ abort, keep the bead
   P->>L: handoff — branch, target,<br/>assignee=RIG/refinery, in ONE atomic gc bd update
   P->>P: step-close + drain
-  C->>L: gate-ensure — check_set present, every gate raisable
+  C->>L: gate-ensure — check_set present, every check raisable
   C->>L: merge-push → pre_open_gate (lifecycle.sh)
-  C->>G: pr-open.sh — gh pr create when every check_set gate reads green
+  C->>G: pr-open.sh — gh pr create when every check in check_set reads green
   C->>G: merge.sh — validate, merge --match-head-commit
   C->>L: close + merged_sha, one lifecycle.sh call
 ```
@@ -546,7 +546,7 @@ review's result set.
   the polecat pool. Back to `routed`; the next claimant starts from the
   recorded reason.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
-  and slings exactly one rework child and clears the gate marker, returning the
+  and slings exactly one rework child and clears the check marker, returning the
   lane to `unreviewed`, so gate-ensure re-arms the dispatch when the child
   lands. Convergence is judged by the validator, not counted in rounds
   (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
@@ -565,7 +565,7 @@ review's result set.
   would have bounded, and the runaway shapes it used to catch — a reviewer that
   dies after claim, a rework child filed with its dependency edge reversed —
   stop the PR moving rather than spin the dispatcher, so `liveness-sweep.sh`'s
-  stale-gate pass catches them, not a count on the gate.
+  stale-gate pass catches them, not a count on the check.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head. Idempotent per head — re-runs never duplicate children. A
   hold (`merge_hold`, `rebase_hold`) or a live demand bead
@@ -587,7 +587,7 @@ review's result set.
   or by carrying no work-product key at all. It writes nothing to the
   successor's branch or PR, and holds on anything it cannot establish.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
-  dispatches on the lane — a declared gate that is neither `green` nor in
+  dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement

@@ -223,7 +223,7 @@ release (`takeaway … --release`) — one Dolt write, not a separate stamp here
 
 **mr-invariant (only if this reaction produced code).** A first reaction is
 notes-only by default. If — and only if — you wrote code, it takes the
-codex-gated `mr` path, NEVER `direct`:
+correctness-gated `mr` path, NEVER `direct`:
 ```bash
 # code case ONLY: commit on a polecat branch, hand to the refinery with mr.
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)

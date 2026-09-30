@@ -67,7 +67,7 @@ usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
-                  [--reviewed-oid <oid>]
+                  [--reviewed-oid <oid>] [--add-gates <checks>]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
@@ -88,12 +88,17 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  longer carries (rewritten out from under it) is refused, not
                  recorded. Whichever source wins is written back to the review
                  bead as the commit this verdict judged.
+  --add-gates    checks to union into the anchor's check_set (triage only, with
+                 --verdict approve). A set union with read-back that can never
+                 remove a declared check, validated against the check index at
+                 the reviewed commit; each check added is recorded on the anchor
+                 as a `triage-add:` note.
 U
 }
 
 warn() { echo "signoff: $*" >&2; }
 
-REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""
+REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
@@ -101,6 +106,7 @@ while [ $# -gt 0 ]; do
     --notes-file)   NOTES_FILE="${2:-}";      shift 2 || { usage; exit 1; } ;;
     --findings-file) FINDINGS_FILE="${2:-}";  shift 2 || { usage; exit 1; } ;;
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
+    --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
     -h|--help)      usage; exit 0 ;;
     *) warn "unknown argument '$1'"; usage; exit 1 ;;
   esac
@@ -123,6 +129,18 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
+
+# The check whose method owns the checks-needed decision; no other check widens.
+TRIAGE_GATE=triage
+INDEX_PARSER="$SCRIPT_DIR/review-checks.sh"
+# A check_set as one lowercase token per line. The comma split comes first and
+# the whitespace strip is a per-line sed: a stream-wide `tr -d` would take the
+# newlines the split just made and fuse "correctness,triage" into one name
+# nothing declares.
+gate_tokens() {
+  printf '%s' "${1:-}" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[[:space:]]//g; /^$/d'
+}
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # Read the reviewer's structured findings — a JSON array of {locus, message} —
@@ -175,7 +193,14 @@ if [ "$REVIEW_STATUS" = "closed" ]; then
   exit 1
 fi
 CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
-[ -n "$CHECK_NAME" ] || CHECK_NAME=codex
+[ -n "$CHECK_NAME" ] || CHECK_NAME=correctness
+
+# --add-gates carries triage's classification, so it is recorded only by a triage
+# approve. Refuse anything else before a marker is touched.
+if [ -n "$ADD_GATES" ]; then
+  [ "$VERDICT" = "approve" ] || { warn "--add-gates carries a classification, which only an approve verdict records; nothing written"; exit 1; }
+  [ "$CHECK_NAME" = "$TRIAGE_GATE" ] || { warn "only the '$TRIAGE_GATE' check may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1; }
+fi
 
 # The anchor the gate lands on: the durable anchor_bead stamp first, the
 # blocks edge second. Unresolvable is a refusal — a verdict with nowhere to
@@ -321,7 +346,7 @@ fi
 # The artifact body. It always names the anchor and the exact commit judged,
 # so the posted comment is traceable back to the gate it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
-trap 'rm -f "$BODY_FILE"' EXIT
+trap 'rm -f "$BODY_FILE" "${INDEX_FILE:-}"' EXIT
 if [ -n "$NOTES_FILE" ]; then
   cat "$NOTES_FILE" > "$BODY_FILE"
 else
@@ -567,6 +592,90 @@ if [ -n "$DISPOSED" ]; then
   exit 0
 fi
 
+# The check index at the reviewed commit — materialized once, removed on exit.
+# A branch is judged against the index it carries, never the working tree's.
+INDEX_FILE=""; INDEX_READ=""
+resolve_index() {
+  [ -z "$INDEX_READ" ] || return 0
+  INDEX_READ=1
+  [ -n "$REVIEWED_OID" ] || return 0
+  local root blob
+  blob=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-index.XXXXXX") || return 0
+  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+    [ -n "$root" ] || continue
+    if git -C "$root" show "$REVIEWED_OID:review-checks.toml" >"$blob" 2>/dev/null && [ -s "$blob" ]; then
+      INDEX_FILE="$blob"; return 0
+    fi
+  done
+  rm -f "$blob"
+}
+# rc: 0 declared · 1 index readable but check undeclared · 2 no index at the reviewed commit
+index_has_check() { # <check>
+  resolve_index
+  [ -n "$INDEX_FILE" ] && [ -x "$INDEX_PARSER" ] || return 2
+  "$INDEX_PARSER" --file "$INDEX_FILE" --check "$1" >/dev/null 2>&1
+}
+
+# Triage's classification: union the added checks into check_set and record one
+# triage-add note per check added, in ONE write with read-back. Runs BEFORE the
+# artifact and the green stamp, so a refused or unpersisted widening leaves
+# check.triage absent and the check still owed — the opposite order would read
+# green over a narrower set than triage decided on.
+WIDEN_SUMMARY=""
+apply_triage_decision() {
+  [ -n "$ADD_GATES" ] || return 0
+  local fresh cur canon union tok rc added newset got missing lines first
+  fresh=$(bd_json show "$ANCHOR")
+  is_rows "$fresh" || { warn "anchor $ANCHOR did not resolve for the widening read; nothing written"; exit 2; }
+  cur=$(row_meta "$fresh" check_set)
+  canon=$(printf '%s' "$cur" | tr -d '[:space:],' | tr '[:upper:]' '[:lower:]')
+  case "$canon" in
+    none|off)
+      warn "anchor $ANCHOR declares the '$cur' opt-out, which is human-only; recording the verdict without widening"
+      return 0 ;;
+  esac
+  union=$(gate_tokens "$cur"); added=""; lines=""
+  for tok in $(gate_tokens "$ADD_GATES"); do
+    index_has_check "$tok"; rc=$?
+    if [ "$rc" -eq 1 ]; then
+      warn "check '$tok' is not on the index at $REVIEWED_OID; the index is closed and triage classifies over it — nothing written"; exit 1
+    fi
+    if [ "$rc" -eq 2 ]; then
+      # No index at the reviewed commit: triage has no declared menu to classify
+      # over, so it widens nothing and the standing correctness review carries the
+      # change (the index gap is triage's finding). A check added here would name a
+      # method the repo does not declare, so skip it rather than accept it blind.
+      warn "no check index is readable at $REVIEWED_OID; triage widens nothing without an index — '$tok' not added, correctness carries the change"
+      continue
+    fi
+    grep -qx -- "$tok" <<< "$union" && continue
+    union="$union
+$tok"
+    added="${added:+$added,}$tok"
+    lines="${lines}triage-add: $tok @$REVIEWED_OID
+"
+  done
+  [ -n "$lines" ] || { WIDEN_SUMMARY=" (no check added)"; return 0; }
+  newset=$(printf '%s\n' "$union" | sed '/^$/d' | tr '\n' ',' | sed 's/,$//')
+  gc bd update "$ANCHOR" --set-metadata "check_set=$newset" --append-notes "$lines" >/dev/null 2>&1 || true
+  fresh=$(bd_json show "$ANCHOR")
+  got=$(gate_tokens "$(row_meta "$fresh" check_set)")
+  missing=""
+  for tok in $(printf '%s\n' "$union" | sed '/^$/d'); do
+    grep -qx -- "$tok" <<< "$got" || missing="${missing:+$missing,}$tok"
+  done
+  if [ -n "$missing" ]; then
+    warn "check_set on $ANCHOR did not read back with '$missing' (have '$(row_meta "$fresh" check_set)', want '$newset'); review left OPEN so the check stays owed"
+    exit 2
+  fi
+  first="${lines%%$'\n'*}"
+  case "$(printf '%s' "$fresh" | jq -r '.[0].notes // ""' 2>/dev/null)" in
+    *"$first"*) : ;;
+    *) warn "the triage-add note did not read back on $ANCHOR; a widening its add-note did not record is not auditable, so the review is left OPEN"; exit 2 ;;
+  esac
+  WIDEN_SUMMARY=" (check_set now $newset${added:+; added $added})"
+}
+
 if [ "$VERDICT" = "approve" ]; then
   # A legacy `exception@<oid>` marker is an operator-granted gate exception that
   # predates this cadence's park shape. migrate-lane-states.sh is what rewrites
@@ -584,6 +693,7 @@ if [ "$VERDICT" = "approve" ]; then
       exit 2
       ;;
   esac
+  apply_triage_decision
   post_artifact
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
@@ -599,7 +709,7 @@ if [ "$VERDICT" = "approve" ]; then
   # and any a fix unit still blocks are left alone. Best-effort — this is
   # cleanup, never a gate the verdict depends on.
   "$FINDING" close-unvalidated --anchor "$ANCHOR" --lane "$CHECK_NAME" --reason "lane green at $REVIEWED_OID" >/dev/null 2>&1 || true
-  echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID; review $REVIEW_BEAD closed"
+  echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID$WIDEN_SUMMARY; review $REVIEW_BEAD closed"
   exit 0
 fi
 

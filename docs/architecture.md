@@ -18,7 +18,7 @@ foundation: the system boundary, how work moves end to end, how humans engage,
 how lessons compound, and the test that keeps new work grounded.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
-and gate mechanics are owned by [state-machine.md](state-machine.md); the merge
+and check mechanics are owned by [state-machine.md](state-machine.md); the merge
 cadence's runtime semantics by
 [refinery-merge-cadence.md](refinery-merge-cadence.md); the primitive list and
 the invariant→check binding by [component-model.md](component-model.md); the
@@ -57,7 +57,7 @@ flowchart LR
   FORM -->|push| BR
   FORM -->|via lifecycle.sh| LIFE
   LIFE -->|one atomic bd update| LEDGER
-  SIGN -->|gate markers| LEDGER
+  SIGN -->|check markers| LEDGER
   ORD -->|every 60s| CAD
   CAD -->|reads + writes via lifecycle.sh| LEDGER
   CAD -->|opens / merges| PR
@@ -69,7 +69,7 @@ flowchart LR
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Three write
 paths matter: `lifecycle.sh` is the only writer of lifecycle transitions,
-`signoff.sh` is the only writer of gate verdicts, and the merge cadence is the
+`signoff.sh` is the only writer of check verdicts, and the merge cadence is the
 only thing that opens or merges a PR. Everything else reads.
 
 ## How work moves
@@ -92,11 +92,11 @@ performer; the full transition table with writers is
    leaves either the pre-handoff state (witness orphan recovery re-routes it)
    or the complete post-handoff state, never a half. The anchor is still
    unanchored here; its first lifecycle transition is the refinery's.
-6. **Gate.** The merge cadence's gate-ensure arm makes every declared gate
+6. **Gate.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` writes the verdict marker or files one rework
    child.
-7. **PR.** With every declared gate green at the live head, `pr-open.sh` opens
+7. **PR.** With every declared check green at the live head, `pr-open.sh` opens
    (or adopts) the pull request.
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one

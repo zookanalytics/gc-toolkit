@@ -32,7 +32,7 @@
 # pinned to the head, blocking the anchor so an already-green PR cannot merge
 # until the validator closes it, left unrouted for gate-ensure to dispatch,
 # deduped by the live human-lane pass so a later batch reuses the open one rather
-# than opening another (a codex pass on the anchor does not stand in for it) and
+# than opening another (a correctness pass on the anchor does not stand in for it) and
 # adopted by title when a prior stamp dropped. Opening it
 # fails closed: a pass that did not record the shape the validator consumes
 # (anchor_bead, check_name=human, the head pin) or an unattachable blocks edge
@@ -152,7 +152,7 @@ FIX="rig/gc-toolkit.polecat"; REV="rig/gc-toolkit.polecat-codex"
 run() { "$SUT" --fix-pool "$FIX" --review-pool "$REV" 2>&1; }
 
 anchor() { # id num extra [branch]
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"codex","check.codex":"green"%s}}' \
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"correctness","check.correctness":"green"%s}}' \
     "$1" "$2" "$2" "${4:-polecat/x$2}" "${3:-}"
 }
 prview() { # num state mergeState mergeable extra [headRefName]
@@ -453,7 +453,7 @@ out=$(run)
 has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
 eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
-eq "$(meta F3 'check.codex')" "<absent>" "the pre-retarget gate marker is cleared"
+eq "$(meta F3 'check.correctness')" "<absent>" "the pre-retarget gate marker is cleared"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
 
 echo "# CONFLICTING -> one rework child per head"
@@ -1410,7 +1410,7 @@ eq "$(meta "$VP" reviewed_oid)" "sha-70" "…pinned to the head the batch was pr
 eq "$(meta "$VP" 'gc.routed_to')" "<absent>" "…and unrouted: gate-ensure dispatches mol-validate onto a validating lane"
 grep -qxF "$VP|blocks|V1" "$STUB_DEPS" && ok "…and blocks the anchor: merge.sh holds the merge until the validator closes the pass" || bad "validation-pass blocks edge missing"
 eq "$(meta V1 signoff_rounds_reset)" "<absent>" "the batch writes no signoff_rounds_reset"
-eq "$(meta V1 'check.codex')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
+eq "$(meta V1 'check.correctness')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
 eq "$(meta V1 pr_comment_disposition)" "rework:new-2" "the comments still route to work (the pass is opened after, as new-3)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 # …and the comment becomes a finding the validator rules, the shape a machine
@@ -1440,19 +1440,19 @@ hasnt "$FIDW" "<none>" "the comment is filed as a finding"
 grep -qxF "new-2|blocks|$FIDW" "$STUB_DEPS" && bad "the rework child must not block the unvalidated finding" || ok "…which the rework child does not block at dispatch"
 eq "$(meta Vw pr_comment_disposition)" "rework:new-2" "…and the batch watermarks its rework disposition"
 
-echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic codex,arch lane"
+echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic correctness,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
 # finding.lane == check_name and a human batch's findings are finding.lane=human,
 # so the pass names human whatever the anchor's lanes are. The whole check_set
-# (codex,arch) is one synthetic lane no finding carries — the multi-lane bug.
-store "[$(anchor Vm 75 ',"check_set":"codex,arch","check.arch":"green"')]"
+# (correctness,arch) is one synthetic lane no finding carries — the multi-lane bug.
+store "[$(anchor Vm 75 ',"check_set":"correctness,arch","check.arch":"green"')]"
 printf '%s' "$(prview 75 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_75.json"
 echo '[]' > "$GH_DIR/reviews_75.json"
 printf '[{"id":8750,"user":{"login":"human1"},"body":"this misreads the arch lane"}]' > "$GH_DIR/comments_75.json"
 out=$(run)
 VPM=$(vpass_id Vm)
 hasnt "$VPM" "<none>" "the multi-lane anchor opens a validation pass"
-eq "$(meta "$VPM" check_name)" "human" "…named human, never the synthetic codex,arch that matches no finding and backs no real lane"
+eq "$(meta "$VPM" check_name)" "human" "…named human, never the synthetic correctness,arch that matches no finding and backs no real lane"
 grep -qxF "$VPM|blocks|Vm" "$STUB_DEPS" && ok "…and it blocks the multi-lane anchor, both lanes green or not" || bad "validation-pass blocks edge missing"
 
 echo "# a validation-pass blocks edge that will not attach warns, holds the batch, and does not watermark"
@@ -1482,23 +1482,23 @@ out=$(run)
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Ve")] | length' "$STUB_STORE")" "1" "the human-lane pass already open rules the batch, so no second one opens"
 has "$out" "already carries a human-lane validation pass vp-71" "…and the pass names the one already open"
 
-echo "# a codex validation pass on the anchor does NOT stand in for the human batch"
-# gate-ensure's quiescence reads any validation pass, so a codex pass holds the
-# merge — but mol-validate rules a pass by check_name, and a codex pass never rules
+echo "# a correctness validation pass on the anchor does NOT stand in for the human batch"
+# gate-ensure's quiescence reads any validation pass, so a correctness pass holds the
+# merge — but mol-validate rules a pass by check_name, and a correctness pass never rules
 # the human findings (finding.lane=human). The dedup is the human LANE, so the
-# batch opens its own human-lane pass beside the codex one rather than watermarking
+# batch opens its own human-lane pass beside the correctness one rather than watermarking
 # behind a pass that leaves its findings unruled.
-CODEX_VP='{"id":"cvp-77","status":"open","assignee":"","title":"Validate codex lane on Vx","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Vx","check_name":"codex","reviewed_oid":"sha-77"}}'
+CODEX_VP='{"id":"cvp-77","status":"open","assignee":"","title":"Validate correctness lane on Vx","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Vx","check_name":"correctness","reviewed_oid":"sha-77"}}'
 store "[$(anchor Vx 77),$CODEX_VP]"
 printf '%s' "$(prview 77 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_77.json"
 echo '[]' > "$GH_DIR/reviews_77.json"
-printf '[{"id":8770,"user":{"login":"human1"},"body":"the codex pass never sees this"}]' > "$GH_DIR/comments_77.json"
+printf '[{"id":8770,"user":{"login":"human1"},"body":"the correctness pass never sees this"}]' > "$GH_DIR/comments_77.json"
 out=$(run)
 HP=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Vx") | select((.metadata.check_name // "") == "human") | .id ] | .[0] // "<none>"' "$STUB_STORE")
-hasnt "$HP" "<none>" "the human batch opens its own human-lane pass, not reusing the codex one"
+hasnt "$HP" "<none>" "the human batch opens its own human-lane pass, not reusing the correctness one"
 eq "$(meta "$HP" check_name)" "human" "…named human, the lane the validator rules the batch by"
 eq "$(meta "$HP" reviewed_oid)" "sha-77" "…pinned to the head the batch was produced at"
-grep -qxF "$HP|blocks|Vx" "$STUB_DEPS" && ok "…and it blocks the anchor, beside the codex pass" || bad "human-lane validation-pass blocks edge missing"
+grep -qxF "$HP|blocks|Vx" "$STUB_DEPS" && ok "…and it blocks the anchor, beside the correctness pass" || bad "human-lane validation-pass blocks edge missing"
 
 echo "# an unstamped validation-pass orphan from a dropped stamp is adopted, not twinned"
 # A prior pass created the bead but its stamp dropped, so it carries no
@@ -1574,8 +1574,8 @@ eq "$(meta Vf pr_comment_disposition)" "<absent>" "…the batch is not watermark
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
 
 echo "# a pass whose check_name write half-lands warns, holds the batch, does not watermark"
-# The validator selects findings by check_name and defaults a missing one to codex,
-# so a pass carrying anchor_bead but no check_name would rule codex findings and
+# The validator selects findings by check_name and defaults a missing one to correctness,
+# so a pass carrying anchor_bead but no check_name would rule correctness findings and
 # leave the human batch unruled. Reading only anchor_bead back would pass it; the
 # read-back checks the lane the validator consumes and skips the watermark.
 store "[$(anchor Vk 78)]"
@@ -1709,7 +1709,7 @@ out=$(run)
 eq "$(meta_pinned P5 pr_posture)" "commented@sha-49" "one reviewer's approval does not answer another's question"
 
 echo "# a human CHANGES_REQUESTED is a veto AND a batch to answer"
-# The tk-zina89/PR#496 fixture: objections that converged to codex-green
+# The tk-zina89/PR#496 fixture: objections that converged to correctness-green
 # untouched, because nothing read the feedback under a standing
 # CHANGES_REQUESTED. The veto is the posture; what sits under it routes like
 # any other feedback. The review body is empty on purpose — an operator whose

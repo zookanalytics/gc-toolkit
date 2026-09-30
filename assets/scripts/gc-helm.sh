@@ -1780,7 +1780,7 @@ cmd_open() {
 
 # ── Verb: react ──────────────────────────────────────────────────────
 # Thin wrapper over tools/gc-proactive.sh `sling` (which owns the
-# budget/cap clamp and the codex-gated mr merge path): slings
+# budget/cap clamp and the correctness-gated mr merge path): slings
 # mol-first-reaction at the bead so a worker writes a first-reaction card
 # and stamps gc.takeaway.
 cmd_react() {

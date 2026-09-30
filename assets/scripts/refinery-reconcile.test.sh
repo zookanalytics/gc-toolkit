@@ -67,7 +67,7 @@ has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTO
 # identity it does not need is authority it must not be able to spend.
 stack_line=$(grep '^pr-stack' "$ARM_LOG")
 eq "$stack_line" "pr-stack.sh|||" "pr-stack ran last, unprojected and with no args"
-has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat --validate-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review, fix AND validate pools"
+has "$(grep '^gate-ensure' "$ARM_LOG")" "--default correctness,triage --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat --validate-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review, fix AND validate pools"
 hasnt "$(grep '^gate-ensure' "$ARM_LOG")" "--review-formula" "gate-ensure gets no --review-formula by default (the two-lane quorum pilot is opt-in)"
 has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--fix-pool myrig/gc-toolkit.polecat" "pre-open-rebase got the derived fix pool"
 case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
@@ -350,7 +350,7 @@ export BLOCK_SENTINEL="$TMP/block-order"; : > "$BLOCK_SENTINEL"
 {
   printf 'set -u\nSCRIPTS_DIR=%q\nLOG_SINK=""\nNOTED=""\nFAILED=""\n' "$GSD"
   printf 'AGENT=%q\nCHECK_SET_DEFAULT=%q\nREVIEW_POOL=%q\nFIX_POOL=%q\nVALIDATE_POOL=%q\n' \
-    'myrig/gc-toolkit.refinery' codex 'myrig/p-codex' 'myrig/p' 'myrig/p'
+    'myrig/gc-toolkit.refinery' correctness 'myrig/p-correctness' 'myrig/p' 'myrig/p'
   printf '%s\n' "$GATE"
   printf 'echo "MERGE_HELD=$MERGE_HELD"\n'
 } > "$TMP/gaterun.sh"
@@ -438,7 +438,7 @@ for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convo
 : > "$ARM_LOG"
 GC_RIG=myrig GC_RIG_ROOT="$TMP" REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff "$SD/refinery-reconcile.sh" >/dev/null 2>&1
 gate_pilot=$(grep '^gate-ensure' "$ARM_LOG")
-has "$gate_pilot" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "the base gate-ensure args are unchanged under the pilot"
+has "$gate_pilot" "--default correctness,triage --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "the base gate-ensure args are unchanged under the pilot"
 has "$gate_pilot" "--review-formula mol-review-quorum-signoff" "gate-ensure gets the pilot formula from the env"
 has "$gate_pilot" "--sling-var lane_one_provider=codex" "lane one runs on the codex provider"
 has "$gate_pilot" "--sling-var lane_one_target=myrig/gc-toolkit.polecat-codex" "lane one targets the codex pool"

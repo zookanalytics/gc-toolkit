@@ -8,7 +8,7 @@ review-quorum.lane.v1 durable schema), wired to this rig's signoff seam.
 
 Attached at dispatch to a review bead exactly as mol-review is
 (gc sling <pool> <review-bead> --on mol-review-quorum-signoff), and reads the
-same dispatch metadata: task_kind=review, check_name (the gate the verdict
+same dispatch metadata: task_kind=review, check_name (the check the verdict
 satisfies), anchor_bead, review_branch / review_base pre-open or
 pr_url / pr_number post-open, and the dispatch-pinned reviewed_oid.
 
@@ -16,7 +16,7 @@ The mol-review hard contract is preserved intact: ONE verdict per claim — the
 synthesis makes the single signoff.sh call and the lanes never call it; the
 verdict is posted as a COMMENT, never a GitHub approval (signoff.sh owns
 that). The lanes add reviewer breadth on a second
-provider; the merge gate, the finding beads, and the rework child are the same
+provider; the check, the finding beads, and the rework child are the same
 machinery mol-review hands to.
 
 Lane routing is per-step: each lane carries gc.run_target / gc.provider, so
