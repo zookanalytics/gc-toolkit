@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # converse-hold.test.sh — the step-5 hold mechanism (assets/scripts/converse-hold.sh):
-# the takeaway on the item, the demand gate, the gc.hold_demand stamp-and-readback
-# gate, and the held lifecycle transition. The two gates fail CLOSED: unless the
-# demand lands and the stamp reads back off the visit, the script exits non-zero
-# and the caller must not post the framing. This suite drives the shipped script
-# against stubs whose demand and stamp outcomes are dialed independently, and
+# the takeaway on the item, the gc.hold_demand stamp-and-readback gate, and the
+# held lifecycle transition. The hold files NO demand bead and places NO `blocks`
+# edge — the finalize gate holds the subject through the open visit's `tracks`
+# edge — so this suite also proves the demand verb is never reached. The stamp
+# gate fails CLOSED: unless the began-trace reads back off the visit, the script
+# exits non-zero and the caller must not post the framing. This suite drives the
+# shipped script against stubs whose stamp outcome is dialed independently, and
 # carries a positive control proving the read-back closes a real regression
 # rather than pinning a line the old shape already caught.
 #
@@ -43,7 +45,7 @@ bash -n "$SUT" && ok "converse-hold.sh: valid bash" \
 
 # A stub gc serving the two reads/one write the script makes: `bd show` returns
 # the visit with its stall_root and whatever the stamp has persisted; `bd update`
-# persists the stamped id unless STAMP_PERSIST=0, overridable by STAMP_VALUE for
+# persists the stamped value unless STAMP_PERSIST=0, overridable by STAMP_VALUE for
 # the landed-wrong case, and exits STAMP_RC. Anything else exits 2 so a script
 # that grows a third call fails here rather than reaching the live store.
 cat >"$BIN/gc" <<'STUB'
@@ -73,18 +75,14 @@ chmod +x "$BIN/gc"
 # stub_helm <root> — a gc-helm.sh under <root> that logs each call (with the
 # root, so resolution is observable) and dials its verbs from the environment:
 #   takeaway -> exit $STUB_TAKEAWAY_RC (default 0)
-#   demand   -> print $STUB_DEMAND_OUT if set, else "demand $STUB_DEMAND_ID filed"
-#               (default id d-x); exit $STUB_DEMAND_RC (default 0)
+# The hold no longer files a demand, so any `demand` call is a regression: it
+# falls to the `*)` arm and exits 2, and the log makes the stray call visible.
 stub_helm() {
     cat >"$1/assets/scripts/gc-helm.sh" <<HELM
 #!/usr/bin/env bash
 printf 'helm[$2] %s\n' "\$*" >>"\$HLOG"
 case "\${1:-}" in
     takeaway) exit "\${STUB_TAKEAWAY_RC:-0}" ;;
-    demand)
-        if [ -n "\${STUB_DEMAND_OUT+x}" ]; then printf '%s\n' "\$STUB_DEMAND_OUT"
-        else printf 'demand %s filed\n' "\${STUB_DEMAND_ID:-d-x}"; fi
-        exit "\${STUB_DEMAND_RC:-0}" ;;
     *) exit 2 ;;
 esac
 HELM
@@ -120,12 +118,12 @@ run() {
 calls() { cat "$HLOG" 2>/dev/null; }
 verdict() { [ "$RC" = 0 ] && echo held || echo refused; }
 
-echo "── the happy path: demand lands, stamp persists, the hold proceeds ──"
+echo "── the happy path: no demand filed, stamp persists, the hold proceeds ──"
 run
-is "a landed demand and a persisted stamp let the hold proceed" "$(verdict)" "held"
+is "a persisted stamp lets the hold proceed" "$(verdict)" "held"
 has "the takeaway headline is 'holding — <need>' on the item" "helm[RIG] takeaway item-x holding — need X --by converse" "$(calls)"
-has "the demand is filed on the item with the bare need text" "helm[RIG] demand item-x need X --by converse" "$(calls)"
-is "the stamp persisted the demand id on the visit" "$(cat "$PERSIST" 2>/dev/null)" "d-x"
+hasnt "no demand bead is filed on the item" "demand item-x" "$(calls)"
+has "the began-trace persisted on the visit (a held@ marker, not a bead id)" "held@" "$(cat "$PERSIST" 2>/dev/null)"
 has "an unanchored item is transitioned to held, routed to a person" "lc transition item-x --to held --route human" "$(calls)"
 
 echo "── the item is the visit's stall_root, and falls back to the subject ──"
@@ -134,20 +132,14 @@ has "a named stall_root is the item the hold writes to" "takeaway item-y holding
 run STUB_STALL=
 has "an absent stall_root falls back to the subject" "takeaway sub holding" "$(calls)"
 
-echo "── the demand gate fails closed unless a demand id lands ──"
-run STUB_DEMAND_RC=4
-is "a demand that exits non-zero refuses the hold" "$(verdict)" "refused"
-has "…and says why" "NO DEMAND FILED" "$OUT"
-run STUB_DEMAND_RC=4 STUB_DEMAND_ID=d-x
-is "a non-zero demand that still printed an id refuses (the exit is the signal)" "$(verdict)" "refused"
-run STUB_DEMAND_OUT="oops no id here"
-is "a zero-exit demand whose output names no id refuses" "$(verdict)" "refused"
-run STUB_DEMAND_OUT="" STUB_DEMAND_RC=0
-is "a zero-exit demand with empty output refuses" "$(verdict)" "refused"
-# The gate fires before the stamp: a refused demand leaves nothing stamped.
-run STUB_DEMAND_RC=4
-is "a refused demand never reaches the stamp" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
-hasnt "…and never reaches the lifecycle transition" "lc transition" "$(calls)"
+echo "── no demand filed, no blocks edge placed — on any item, leaf or container ──"
+run
+is "the hold proceeds with no demand" "$(verdict)" "held"
+hasnt "the demand verb is never called" "demand" "$(calls)"
+# There is no container-or-not branch: the script reaches for no demand at all,
+# so the cascade the demand's blocks edge caused cannot arise (tk-g6xcwi).
+hasnt "converse-hold.sh places no blocks edge" "dep add" "$(cat "$SUT")"
+hasnt "converse-hold.sh creates no gate" "gate create" "$(cat "$SUT")"
 
 echo "── the stamp gate fails closed unless the trace reads back off the visit ──"
 run STAMP_PERSIST=1
@@ -158,7 +150,7 @@ has "…and says the trace did not persist" "DID NOT PERSIST" "$OUT"
 run STAMP_RC=0 STAMP_PERSIST=0
 is "an update that reports success but does not persist still refuses" "$(verdict)" "refused"
 run STAMP_VALUE=d-other
-is "a stamp that landed the WRONG id refuses the framing" "$(verdict)" "refused"
+is "a stamp that landed the WRONG value refuses the framing" "$(verdict)" "refused"
 
 echo "── positive control: the pre-fix update-or-echo framed on a phantom stamp ──"
 # The shipped step 5 once wrote `gc bd update ... || echo` with no read-back, so
@@ -168,8 +160,8 @@ echo "── positive control: the pre-fix update-or-echo framed on a phantom st
 legacy() {
     rm -f "$PERSIST"
     ( cd "$BARE" && env PATH="$BIN:$PATH" PERSIST="$PERSIST" \
-        STAMP_RC="$1" STAMP_PERSIST="$2" VISIT=v-x DEMAND=d-x \
-        bash -c 'gc bd update "$VISIT" --set-metadata "gc.hold_demand=$DEMAND" || echo stamp-failed' >/dev/null 2>&1 )
+        STAMP_RC="$1" STAMP_PERSIST="$2" VISIT=v-x MARK="held@x" \
+        bash -c 'gc bd update "$VISIT" --set-metadata "gc.hold_demand=$MARK" || echo stamp-failed' >/dev/null 2>&1 )
     [ "$?" = 0 ] && echo held || echo refused
 }
 is "the pre-fix update-or-echo framed on a success-no-persist stamp" "$(legacy 0 0)" "held"
@@ -186,8 +178,11 @@ has "the owning rig's gc-helm.sh wins when present" "helm[RIG]" "$(calls)"
 run GC_RIG_ROOT="$FOREIGN"
 has "a rig with no assets/ falls through to the city pack" "helm[CITY]" "$(calls)"
 run GC_RIG_ROOT="$FOREIGN" GC_CITY_PATH="$TMPD/no-such-city"
-has "no writer on any candidate root is LOUD" "NO TAKEAWAY WRITER" "$OUT"
-is "…and with no writer the hold cannot land, so it refuses" "$(verdict)" "refused"
+has "no takeaway writer on any candidate root is LOUD" "NO TAKEAWAY WRITER" "$OUT"
+# The takeaway headline is best-effort: the hold's enforcement is the finalize
+# gate on the open visit and its resume trace is the stamp, and the stamp still
+# lands, so the hold proceeds even where the board headline cannot be written.
+is "…and the hold still lands on the visit + stamp, warned" "$(verdict)" "held"
 
 echo
 echo "converse-hold: $PASS passed, $FAIL failed"

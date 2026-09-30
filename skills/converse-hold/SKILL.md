@@ -1,6 +1,6 @@
 ---
 name: converse-hold
-description: Converse's demand-gate hold (safety-critical).
+description: Converse's step-5 hold, held by the open visit (safety-critical).
 ---
 
 # Step 5 — Hold
@@ -21,32 +21,32 @@ else
   exit 1
 fi
 ```
-**A hold IS a demand.** The operator owes an answer, and until it lands
-the item cannot move, so the wait is a bead the item's work blocks on,
-not a comment. A ruling files unassigned and routes to the operator's
-partition; pass `--assignee <who>` to the writer only when the demand is
-work a named person must perform, and that one is theirs
-to close, never yours. One open demand per item: a resumed hold refreshes
-the existing bead.
+**The hold IS the open visit.** The operator owes an answer, and until it
+lands the subject must not finalize. That hold is the visit itself: while it
+stands open, the finalize gate refuses the subject's merge and close through
+the visit's non-blocking `tracks` edge, so the hold reaches no `blocks` edge
+and cascades onto no child. `converse-hold.sh` files no demand and places no
+blocks edge — it stamps the board headline and the resume trace, and where
+`$ITEM` is still unanchored transitions it to `held`.
 
-**Stamp BEFORE you wait, not after.** The hold IS a demand: until the
-item carries it nothing gates the work behind it or re-asks the question,
-so the stamp lands before you hand control to the operator. Write the
-takeaway to state the decision needed when read cold off the board. The
-same write sets `gc.hold_demand`, the trace step 1's `action=hold` arm
-reads off this visit to tell a real hold from a claim that died before
-step 2.
+**Stamp BEFORE you wait, not after.** `converse-hold.sh` writes the takeaway
+headline on the item and the `gc.hold_demand` trace on the visit before you
+hand control to the operator. Write the takeaway to state the decision needed
+when read cold off the board. The `gc.hold_demand` stamp is the trace step 1's
+`action=hold` arm reads off this visit to tell a real hold from a claim that
+died before step 2 — a began-marker, not a bead id; step 1 tests only that it
+is present.
 
 **The takeaway is the sentence; `held` is the state.** Where `$ITEM`
 already carries an anchor state the transition is skipped, and refused
 if attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh` enumerate
 anchors by that state, and `held` drops it from all three.
 
-A framing that asks for no decision still files one. What the
-operator owes then is the close-out itself, and the demand is what
-brings the item back if the thread is lost before they take it. The
-gate is not about there being a question; it is about the item not
-moving until a person acts.
+A framing that asks for no decision still leaves a hold. What the
+operator owes then is the close-out itself, and the open visit is what holds
+the subject and brings the sitting back if the thread is lost before they
+take it. The hold is not about there being a question; it is about the
+subject not finalizing until a person acts.
 
 **One sentence, ≤140 characters — the writer refuses a longer one.**
 It is the board's NEEDS cell; what will not fit goes in the notes.

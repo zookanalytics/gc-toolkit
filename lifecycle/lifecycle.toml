@@ -792,9 +792,11 @@ keys = [
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
 # and lifecycle.sh write the takeaway (gc.takeaway_by records which), and
 # gc.takeaway_settled is `1` when nothing waits and empty for a live wait.
-# gc.hold_demand — on a converse hold's VISIT, the demand bead the hold filed;
-#   converse-hold.sh trusts it as the SOLE proof of a real hold and reads it back
-#   before posting the framing. Not cleared here. A bead id.
+# gc.hold_demand — on a converse hold's VISIT, a began-marker (a `held@<instant>`
+#   value, not a bead id) proving the sitting reached its hold; converse-hold.sh
+#   trusts it as the SOLE proof of a real hold and reads it back before posting the
+#   framing. The hold itself is the open visit, held by the finalize gate through
+#   the tracks edge; this trace only records that it began. Not cleared here.
 # gc.gate_visit — on a gate bead, the visit gate-visit-sweep.sh filed for it (a
 #   bead id, or `filed`); its presence is how the sweep skips a gate already
 #   escalated, and `--unset` re-offers the visit.

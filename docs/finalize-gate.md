@@ -16,9 +16,11 @@ names why.
 **Mandate.** The finalize-gate precondition set: the clauses it checks, how a
 caller invokes it, its fail-closed contract, and the finalize paths that call it.
 
-**Boundaries.** The demand bead and its `blocks` edge — the separate record of
-what a person owes a converse sitting — belong to `docs/gascity-human-engagement.md`
-and `assets/scripts/gc-helm.sh`. What subject a visit covers is defined once in
+**Boundaries.** The demand bead and its `blocks` edge — an operator's or the
+triage sweep's record of what a person owes — belong to
+`docs/gascity-human-engagement.md` and `assets/scripts/gc-helm.sh`. A converse
+hold no longer files one; it holds its subject's finalization through this gate,
+by leaving its visit open. What subject a visit covers is defined once in
 `assets/scripts/visit-identity.sh` and the mol-visit formula. The merge cadence's
 other arms live in `docs/refinery-merge-cadence.md`, and the lifecycle state
 machine in `docs/state-machine.md`.

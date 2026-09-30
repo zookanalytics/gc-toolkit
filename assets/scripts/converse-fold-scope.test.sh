@@ -443,10 +443,10 @@ esac
 # existing_assignment (→ action=hold) for ANY bead already assigned to this
 # session identity, including a claim that died BEFORE step 2 ever ran. The gate
 # tells a real hold from a dead claim by a trace only a sitting past step 5
-# leaves: step 5 stamps the demand's id on the VISIT bead as gc.hold_demand
+# leaves: step 5 stamps a began-marker on the VISIT bead as gc.hold_demand
 # before it waits. The key is on the visit, so it is attributable — a sibling
-# sitting on the same item stamps the shared item's demand and takeaway, never
-# this visit's gc.hold_demand, so it cannot forge the trace.
+# sitting on the same item stamps the shared item's takeaway, never this
+# visit's gc.hold_demand, so it cannot forge the trace.
 #
 # A missing key is not one answer but three, because absence is not proof a
 # sitting never began. A visit bead that will not read is UNKNOWN: it fails
@@ -506,9 +506,9 @@ hv_visit v-held d-held
 is "gc.hold_demand resolves BEGAN=yes (re-open at step 4)" "$(began v-held sub)" "yes"
 
 echo "── no key but an open demand on the item: a legacy hold or a sibling's ──"
-# A hold filed before this trace existed carries no gc.hold_demand on its visit,
-# only the demand on the item, and every hold the shipped prompt filed is that
-# shape; a sibling's hold on a shared item is too. Absent the key the two are
+# A hold filed before the gc.hold_demand trace existed carries no key on its
+# visit, only the demand on the item; an operator's or the triage sweep's demand
+# on a shared item is the same shape. Absent the key the two are
 # one shape, and the gate must not close on the missing key: it re-checks the
 # premise (recheck), which closes only a moot premise and re-opens a live one,
 # re-stamping the key so the next restart reads it clean. Keyed on the visit it
@@ -553,7 +553,7 @@ have "the arm keeps the fold check skipped on every branch" \
 have "the gate reads gc.hold_demand off the visit (unique to this block)" \
     'gc.hold_demand' "$PROMPT"
 have "step 5 stamps gc.hold_demand on the visit before it waits" \
-    'set-metadata "gc.hold_demand=$DEMAND"' "$REPO/assets/scripts/converse-hold.sh"
+    'set-metadata "gc.hold_demand=$HOLD_MARK"' "$REPO/assets/scripts/converse-hold.sh"
 
 echo
 echo "converse-fold-scope: $PASS passed, $FAIL failed"

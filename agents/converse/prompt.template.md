@@ -48,8 +48,8 @@ Definitions:
   subject: a visit that names its own target carries it as `stall_root`,
   and with no target named the item is the subject. A standing scope
   (`task_kind=triage-subject`) carries one visit per distinct item, so
-  its group is a bucket. Step 5 stamps the takeaway and files the demand
-  on `$ITEM`, never on that bucket.
+  its group is a bucket. Step 5 stamps the takeaway on `$ITEM`, never on
+  that bucket.
 - **Topic** — what makes two visits the same sitting, which is not always
   a bead: `stall_root` when the visit names a target, `escalation_key`
   when `escalate.sh` filed it for one situation, the subject otherwise.
@@ -59,28 +59,37 @@ Definitions:
   only a person can perform is assigned to them, and the assignment is what
   tells the two apart. Whatever waits on it carries a `blocks`
   edge to it, so that work is not `bd ready` until the gate resolves, and
-  resolving the gate is what releases it. `gc-helm.sh demand` files one
-  (step 5); the sitting that settles the question resolves it (step 7).
+  resolving the gate is what releases it. An operator or the triage sweep
+  files one with `gc-helm.sh demand`; a sitting that settles such a question
+  resolves it (step 7). A converse hold no longer files a demand — its hold
+  is the open visit (below).
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The visit stays `in_progress`
   throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
   sitting ends only when its VISIT closes (**How this thread ends**). The
-  hold IS a demand, so the hold-time stamp (step 5) is mandatory: it files
-  the gate the item blocks on and re-surfaces under, and a hold that files
-  none parks a bead nothing re-asks.
+  hold IS the open visit — the finalize gate holds the subject's merge and
+  close while the visit stands, through the visit's non-blocking `tracks`
+  edge, so the hold reaches no `blocks` edge and cascades onto no child. The
+  hold-time stamp (step 5) is mandatory: it leaves the `gc.hold_demand` trace
+  step 1 reads to resume a real hold, and a hold that stamps none is
+  re-checked as a dead premise on restart.
 
-**A wait is an edge onto a bead, and a bead is either ready or blocked.**
-There is no parked state: what a person owes is a demand bead, what a
-pool owes is a work bead, and either way the thing waiting carries a
-`blocks` edge to it. Never write `triage.hold`, and never leave a
-stamped, still subject as the record of a wait.
+**A wait is an edge onto a bead.** What a pool owes is a work bead, and the
+thing waiting on it carries a `blocks` edge to it. What a person owes a
+sitting is answered through the open visit itself: the finalize gate holds
+the subject's finalization while the visit stands, through the visit's
+`tracks` edge — a wait that is an edge but does not block and does not
+cascade onto the subject's children. Never write `triage.hold`, and never
+leave a stamped, still subject as the record of a wait that carries no edge
+at all.
 
 **So everything a sitting files is a SIBLING of the subject, never a
 child.** beads REFUSES a `blocks` edge from a parent to its own
-descendant, so anything filed under the subject could never gate it.
-`gc-helm.sh demand` gives the demand the subject's OWN parent; file work
-you route the same way (`--parent <the subject's parent>`, or no parent
-when the subject has none). Read that parent with `converse-parent.sh`
+descendant, so anything filed under the subject could never gate it. File
+the work you route with the subject's OWN parent (`--parent <the subject's
+parent>`, or no parent when the subject has none); `gc-helm.sh demand`,
+where an operator files one, sibling-files the same way. Read that parent
+with `converse-parent.sh`
 (it takes `$SUBJECT` in its environment or as its one argument and prints
 the subject's own parent, or an empty line when the subject has none),
 since a `parent-child` edge is stored on the child. Work already filed as
@@ -193,7 +202,7 @@ The loop, every visit:
    from it:
 
    **`BEGAN=yes`** — the visit carries `gc.hold_demand`, which step 5 stamps
-   only once the demand is filed, so the hold is real and attributable to
+   once the sitting reaches its hold, so the hold is real and attributable to
    THIS visit. Re-open it at step 4 and then step 5, and skip steps 2 and 3:
    the premise was tested and the fold check ran when the sitting began, and
    running the fold again can fold a sitting the operator is engaged with
@@ -207,14 +216,14 @@ The loop, every visit:
 
    **`BEGAN=recheck`** — no key, but the item still carries an open demand.
    That demand is a hold's own trace. It belongs to a sitting that held
-   before this key existed, or to a sibling on the shared item, and neither
-   can be closed on the strength of a missing key. Fall through to step 2 and
-   re-check the premise, but treat the demand as the hold it is, not as a
-   benign wait to hand back: close here ONLY if the premise is moot, the
-   frontier routed or the bead closed or the sitting settled elsewhere. A
-   premise that still holds is a live hold. Re-open it at step 4 and step 5,
-   which re-files the demand and stamps `gc.hold_demand`, so the next restart
-   reads it as `yes`.
+   before this key existed, or to an operator's or the triage sweep's demand
+   on the shared item, and neither can be closed on the strength of a missing
+   key. Fall through to step 2 and re-check the premise, but treat the demand
+   as the hold it is, not a benign wait to hand back. The close bar is high:
+   close here ONLY if the premise is moot, the frontier routed or the bead
+   closed or the sitting settled elsewhere. A premise that still holds is a
+   live hold. Re-open it at step 4 and step 5, which stamps `gc.hold_demand`,
+   so the next restart reads it as `yes`.
 
    **`BEGAN=no`** — the visit read cleanly, carries no key, and its item
    holds no open demand, so nothing here earned a hold: fall through to step 2
@@ -256,9 +265,10 @@ you reach its step, and run the step from the skill rather than from memory.
 **This table is the authoritative route — load by the name here, never by
 guessing from a skill's description.** A skill that does not get loaded is a
 step that does not get run, and two of these steps fail silently when
-skipped: step 5's demand gate (a hold that files no demand parks a bead
-nothing re-asks) and step 7's stamp-then-close (a visit closed without its
-verified `gc.outcome` stamp is invisible to everything that reads outcomes).
+skipped: step 5's stamp gate (a hold that stamps no `gc.hold_demand` is
+re-checked as a dead premise on restart) and step 7's stamp-then-close (a
+visit closed without its verified `gc.outcome` stamp is invisible to
+everything that reads outcomes).
 Load their skills by the explicit name below every time you reach the step,
 even when you think you remember the procedure.
 
@@ -295,10 +305,11 @@ Rules:
   argument reaches the wrong answer.
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then step
   7 with `--ruled no` and `gc.outcome=cut-short` — sign-off included — and
-  drain. The decision is still open, so `--ruled no` keeps the item
-  `held`, re-states its demand rather than closing it, and the refreshed
-  stamp earns the next visit. This is the ONLY path to `cut-short`, and a
-  sitting the operator has not ruled on is never ended to unblock
+  drain. The decision is still open, so `--ruled no` keeps the item `held`
+  and leaves the visit open — the finalize gate holds the subject while it
+  stands, and the `gc.hold_demand` already on the visit earns the next
+  visit's resume — rather than closing it. This is the ONLY path to `cut-short`,
+  and a sitting the operator has not ruled on is never ended to unblock
   something else. Step 1's `action=hold` re-opens a sitting that did end,
   but only from the trace a genuine hold leaves on its own visit bead: the
   `gc.hold_demand` it stamps there before it waits. A sitting dropped
@@ -324,8 +335,8 @@ Rules:
   closed-visit sitting you are still attached to waits until it is no
   longer attended. The per-model sittings run `wake_mode = "resume"`
   (`agents/converse-opus/agent.toml`), so a health restart replays the
-  thread and the sitting continues; the durable demand and the step-1
-  re-claim guard cover the rare respawn that comes up without it. The
+  thread and the sitting continues; the durable `gc.hold_demand` trace and
+  the step-1 re-claim guard cover the rare respawn that comes up without it. The
   record never lives only in the thread, and the discipline is unchanged:
   the sign-off has to land before you close, not after; stamp the takeaway
   when the hold BEGINS (step 5); and append the outcome as soon as a

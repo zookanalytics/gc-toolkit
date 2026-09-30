@@ -439,10 +439,14 @@ canonical shape and the edge mandatory rather than optional.
 ## How a sitting ends: a demand bead and an edge
 
 A bead is either ready, and therefore moving, or blocked on a named bead
-by an edge. There is no third state. A sitting that reaches an open
-question no longer parks its subject on a sentence and waits for someone
-to come back and read it; it files what the person owes as its own bead
-and blocks the waiting work on that bead.
+by an edge. What a person owes is filed as its own bead, a demand, and the
+waiting work blocks on it, rather than parked on a sentence someone must come
+back and read. An operator files one by hand, and the triage sweep files one
+for an unnamed wait it finds. A converse sitting no longer files a demand for
+its own hold: that hold is the open visit, which the finalize gate reads to
+hold the subject's merge and close without a `blocks` edge
+(`docs/finalize-gate.md`). A sitting still discharges a demand it finds on the
+subject when it rules.
 
 What a person owes is a native human gate — `issue_type=gate`,
 `await_type=human` — that blocks the waiting work. A ruling files
@@ -689,13 +693,15 @@ that field:
   respawn reads instead.
 
 *Seam:* **nothing pack-owned runs at kill time**, so there is no
-warn-before-reap. The converse contract stamps the subject's takeaway when
-the hold *begins* (not only at close) because that stamp IS the demand —
-the gate the board reads and dependent work blocks on — so it has to land
-before the wait, not because a pane might be lost; a fresh respawn or a
-failed resume then still finds a dated record of what the sitting was
-waiting for. Every deliberate close of a **held** sitting ends with a
-sign-off block naming the outcome and the subject to look at next.
+warn-before-reap. The converse contract stamps the subject's takeaway and the
+visit's `gc.hold_demand` trace when the hold *begins* (not only at close), so a
+resume has a durable record before the wait, not because a pane might be lost; a
+fresh respawn or a failed resume then still finds a dated record of what the
+sitting was waiting for. The hold itself is the open visit, which the finalize
+gate reads to hold the subject's merge and close while it stands, so the stamp
+records the wait rather than enforcing it. Every deliberate close of a **held**
+sitting ends with a sign-off block naming the outcome and the subject to look
+at next.
 
 *Longevity is not the remedy, and taking the clock off is not longevity.*
 Raising `idle_timeout` only widens the window in which a dead thread looks
@@ -799,17 +805,17 @@ conversation, so the hold names them on its output line and keeps them rather
 than putting them back.
 
 The prompt's arm makes that choice from a trace on the visit's own bead:
-`gc.hold_demand`, the id of the demand a sitting files on its way into a hold,
-stamped on the visit before it waits. It lives on the visit, not the shared
-item, so a sibling holding the same item cannot forge it. Present, the hold is
-real and the arm re-opens it and skips the premise re-check. Absent, the arm
-does not close on the missing key. A visit whose bead will not read is held,
-not closed, because absence of a trace on an unreadable bead is not evidence
-of a dead premise. An item that still carries an open demand re-checks the
-premise and closes only a moot one, which re-opens and re-stamps a live legacy
-hold rather than abandoning it. A clean read with no key and no such demand is
-a claim that never began, and re-checks the premise at step 2 where it can
-close. Which of two shapes a readable visit is, a thread still carrying its
+`gc.hold_demand`, a began-marker a sitting stamps on the visit on its way into a
+hold. It lives on the visit, not the shared item, so a sibling holding the same
+item cannot forge it. Present, the hold is real and the arm re-opens it and skips
+the premise re-check. Absent, the arm does not close on the missing key. A visit
+whose bead will not read is held, not closed, because absence of a trace on an
+unreadable bead is not evidence of a dead premise. An item that still carries an
+open demand — a hold from before this trace, or an operator's or the sweep's —
+re-checks the premise and closes only a moot one, which re-opens and re-stamps a
+live legacy hold rather than abandoning it. A clean read with no key and no such
+demand is a claim that never began, and re-checks the premise at step 2 where it
+can close. Which of two shapes a readable visit is, a thread still carrying its
 own framing or a fresh session respawned onto a hold whose scrollback a restart
 took, is a question about this session's scrollback that no script can read, so
 the claimer states the fact and the prompt makes the choice.

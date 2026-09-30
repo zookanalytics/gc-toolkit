@@ -99,18 +99,18 @@ for f in "$PROMPT" "$ATOML" "$HELM" "$ENGAGE" \
     }
 done
 
-echo "── the hold stamps the takeaway BEFORE waiting (the stamp files the demand) ──"
-# The stamp written at hold time IS the demand: it files the gate the board
-# reads and dependent work blocks on, so a hold that writes none parks a bead
-# nothing re-asks. The same write leaves the gc.hold_demand trace that step 1's
-# action=hold arm reads back to tell a real hold from a claim that died before
-# step 2. Under wake_mode=resume the thread replays across a restart, so the
-# stamp does not rest on surviving a kill; a fresh respawn or a failed resume is
-# the one case that comes back without the thread, and there the durable trace
-# is what a reader finds instead. The takeaway on the item, the demand gate and
-# the gc.hold_demand read-back ship as converse-hold.sh (run against stubs in
-# converse-hold.test.sh, which also pins the stamp to the item and the writer
-# search); here the prompt is pinned to CALL it before it waits.
+echo "── the hold stamps the takeaway and the resume trace BEFORE waiting ──"
+# At hold time the sitting stamps the takeaway headline on the item and the
+# gc.hold_demand trace on the visit; the hold itself is the open visit, which the
+# finalize gate reads to hold the subject's merge and close. The stamp leaves the
+# gc.hold_demand trace that step 1's action=hold arm reads back to tell a real
+# hold from a claim that died before step 2. Under wake_mode=resume the thread
+# replays across a restart, so the stamp does not rest on surviving a kill; a
+# fresh respawn or a failed resume is the one case that comes back without the
+# thread, and there the durable trace is what a reader finds instead. The takeaway
+# on the item and the gc.hold_demand read-back ship as converse-hold.sh (run
+# against stubs in converse-hold.test.sh, which also pins the stamp to the item
+# and the writer search); here the prompt is pinned to CALL it before it waits.
 have "the hold runs converse-hold.sh before it waits" 'converse-hold.sh' "$SK_HOLD"
 have "the hold skill keeps the stamp-before-wait invariant" 'Stamp BEFORE you wait' "$SK_HOLD"
 
@@ -346,12 +346,12 @@ have "ending rule names the operator lever" 'gc-helm dismiss' "$PROMPT"
 # The Hold definition is page one, and a definition outranks a rule
 # further down: it is where the session reads what a hold is first, so
 # correcting the ending rule alone is not enough — the reason the stamp is
-# mandatory has to be right here too. That reason is the demand: the hold
-# files a gate the board reads and dependent work blocks on, and a hold
-# that files none parks a bead nothing re-asks. The idle clock being off
-# does not make the session immortal — DecideMaxSessionAge can still
-# restart it, and the running templates resume the thread — but the stamp
-# does not rest on that; it rests on the demand.
+# mandatory has to be right here too. That reason is the resume trace: step 1
+# reads gc.hold_demand off the visit to resume a real hold, and a hold that
+# stamps none is re-checked as a dead premise on restart. The idle clock being
+# off does not make the session immortal — DecideMaxSessionAge can still
+# restart it, and the running templates resume the thread — but the stamp does
+# not rest on that; it rests on the trace it leaves.
 lacks "no 'a hold has no timeout' claim in the definition" \
     'A hold has no timeout' "$PROMPT" \
     "no idle clock is not no ending: a held sitting still ends when its visit closes (sign-off or dismiss)"
@@ -362,11 +362,11 @@ else
     bad "the Hold definition states what does and does not end a hold" \
         "the definition itself must say the clock is off and the visit close is the ending, not only the rule further down"
 fi
-if printf '%s\n' "$HOLD_DEF" | grep -q 'demand'; then
-    ok "the Hold definition ties the mandatory stamp to the demand it files"
+if printf '%s\n' "$HOLD_DEF" | grep -q 'gc.hold_demand'; then
+    ok "the Hold definition ties the mandatory stamp to the gc.hold_demand resume trace"
 else
-    bad "the Hold definition ties the mandatory stamp to the demand it files" \
-        "the stamp is mandatory because the hold IS a demand — the gate the item blocks on and re-surfaces under; that reason, not restart-fear, is what a tidy edit must not drop"
+    bad "the Hold definition ties the mandatory stamp to the gc.hold_demand resume trace" \
+        "the stamp is mandatory because step 1 reads gc.hold_demand off the visit to resume a real hold; that reason, not restart-fear, is what a tidy edit must not drop"
 fi
 if printf '%s\n' "$HOLD_DEF" | grep -q 'mandatory'; then
     ok "the Hold definition makes the hold-time stamp mandatory"
@@ -1405,19 +1405,19 @@ else
         "a read-back that checks only the gated bead passes an --also-blocks target that never got its edge"
 fi
 
-# converse-hold.sh files the demand and converse-signoff.sh discharges it; the
-# prompt states which and calls them. Matched on the CAPTURE, not the call: the
-# sign-off re-states a demand with the same tokens, so a looser pattern passes
-# on a hold that files nothing.
-have "the hold files a demand, not only a stamp" 'DEMAND_OUT=$("$HELM" demand "$ITEM"' "$REPO/assets/scripts/converse-hold.sh"
-have "…and reads the demand id back off stdout" "awk '/^demand /{print \$2; exit}'" "$REPO/assets/scripts/converse-hold.sh"
-lacks "…and never authorizes a prose-only wait in its place" \
-      'the takeaway is then the only record' "$REPO/assets/scripts/converse-hold.sh" \
-      "that arm sends the sitting on to post framing for a hold with no demand bead behind it"
+# converse-hold.sh files NO demand and places NO blocks edge — the finalize gate
+# holds the subject through the open visit's tracks edge — and converse-signoff.sh
+# discharges only a demand another writer left, re-filing nothing of its own.
+lacks "the hold files no demand bead" '"$HELM" demand "$ITEM"' "$REPO/assets/scripts/converse-hold.sh" \
+      "a converse hold that files a demand re-introduces the cascading blocks edge (tk-g6xcwi)"
+have "…and stamps the began-trace on the visit as the resume proof" \
+     'set-metadata "gc.hold_demand=$HOLD_MARK"' "$REPO/assets/scripts/converse-hold.sh"
 
-have "the sitting resolves the demand gate when it settles the question" \
+have "the sitting resolves an open demand when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
-have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
+lacks "…and re-files nothing when it does not (the open visit is the hold)" \
+      '"$HELM" demand "$ITEM" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh" \
+      "re-filing a demand on cut-short re-introduces the cascading blocks edge"
 have "the prompt states the sibling rule for everything a sitting files" \
      'SIBLING of the subject, never a' "$PROMPT"
 
@@ -1657,11 +1657,11 @@ if grep -q 'gc.takeaway_settled' "$SOGC"; then bad "…and never hand-stamps the
 have "…and releases the held item back to the pool it named" \
      'lc transition item-x --to unanchored --route gc-toolkit/gc-toolkit.polecat' "$SOLOG"
 
-echo "── --ruled no: re-state the demand, leave the item held ──"
+echo "── --ruled no: re-file nothing, leave the item held ──"
 SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
 run_so
 eq "$SO_RC" "0" "the cut-short discharge exits 0"
-have "an unruled sitting re-states the demand on the item" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+if grep -q 'helm\[RIG\] demand' "$SOLOG"; then bad "an unruled sitting re-files no demand (the open visit is the hold)" "found a demand re-file on --ruled no"; else ok "an unruled sitting re-files no demand (the open visit is the hold)"; fi
 if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled sitting" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled sitting"; fi
 if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unruled sitting" "found a release on --ruled no"; else ok "…and releases nothing on an unruled sitting"; fi
 
