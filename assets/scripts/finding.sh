@@ -72,7 +72,9 @@ set -uo pipefail
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 warn() { echo "finding: $*" >&2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"

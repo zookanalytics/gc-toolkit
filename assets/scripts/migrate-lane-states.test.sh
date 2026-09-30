@@ -15,8 +15,8 @@
 # as attention; and a city-scope (no rig name) park is refused rather than
 # guessed at, since no rig-qualified pool exists to route its visit through.
 # No live city, Dolt, network, gc, bd, gh or escalate.sh — stubs from
-# test-harness.sh plus a thin `gc rig list` / `gc bd list` shim (the
-# cutover-2026-08.test.sh pattern) and a recording escalate.sh stub.
+# test-harness.sh plus a thin `gc rig list` / `gc bd list` shim and a
+# recording escalate.sh stub.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,0 +1,21 @@
+# notification-wisp-reap — retire the city-store notification wisps that core
+# mails and never closes: a "Human gate awaiting you: <gate>" notice once its
+# gate is no longer open, and the surplus copies of a repeated "ESCALATION:
+# <headline>" collapsed to one open notice. core creates these; nothing on the
+# creating side ties their lifecycle to the gate or dedupes the escalation, so
+# they accumulate on the operator's board. This is the backstop those missing
+# endings assume.
+#
+# City scope: the notices live in the one city store but name gates in every
+# rig, and `gc bd show` resolves a gate across ledgers, so one pass reads the
+# whole city. The sweep is idempotent; a pass skipped or cut short by its budget
+# costs only the reap the next pass takes instead. The budget is generous
+# because each pass reads one gate per open gate notice.
+[order]
+description = "Close stale 'Human gate awaiting you' notices whose gate has resolved, and collapse duplicate 'ESCALATION' copies to one open notice, in the city store"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/notification-wisp-reap.sh"
+timeout = "900s"
+scope = "city"
+idempotent = true
