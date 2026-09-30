@@ -337,10 +337,11 @@ function flattenFamilies(families: Family[]): BoardRow[] {
 // the Go layer, never re-derived here). The chip is a real button so it is
 // keyboard-reachable and announced as interactive; hovering or focusing it
 // reveals a details card naming the sittings on the bead — each one's headline,
-// its outcome or state, and the session to attach to. That replaces the native
-// `title` tooltip #880 shipped, which has no affordance and stays invisible until
-// an exact hover lands on a one-character glyph. The card is non-interactive
-// text, so it needs no click to open or dismiss.
+// its outcome or state, and the session to attach to. The details live in this
+// card rather than a native `title` tooltip because a native tooltip has no
+// visible affordance and stays invisible until an exact hover lands on a
+// one-character glyph. The card is non-interactive text, so it needs no click
+// to open or dismiss.
 function VisitMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
   const engaged = tile.visit_state === VISIT_ENGAGED;
   const word = engaged ? 'in session' : 'waiting';
