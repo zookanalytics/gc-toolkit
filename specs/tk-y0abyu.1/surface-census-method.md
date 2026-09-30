@@ -19,8 +19,9 @@ known method rather than re-deriving one.
   entry-point class, assigned by the widest surface that references it:
   - **outside-startable** — referenced by filename from the execution surface
     outside `assets/scripts`: `formulas`, `doctor`, `services`, `tools`,
-    `orders`, `agents`, `template-fragments`, `packs`, `lifecycle`, `overlays`,
-    `.github`. Something outside the layer can start it.
+    `orders`, `agents`, `skills`, `template-fragments`, `packs`, `lifecycle`,
+    `overlays`, `.github`. Something outside the layer can start it, including a
+    skill whose instructions name a script by filename.
   - **called-by-other-scripts** — not outside-startable, but named by another
     source script. Live internal call surface.
   - **docs-only** — not startable and not called by a script, but named in
@@ -62,9 +63,9 @@ oracle at this checkout reads:
 | measure | manual baseline | oracle (this checkout) |
 |---|---|---|
 | source scripts | 88 (~32.4k lines) | 89 / 33000 — the +1 is the oracle itself |
-| outside-startable | 72 of 88 | 71 |
-| — called-by-other-scripts | — | 12 |
-| — docs-only | — | 6 |
+| outside-startable | 72 of 88 | 75 |
+| — called-by-other-scripts | — | 9 |
+| — docs-only | — | 5 |
 | — unreferenced | — | 0 |
 | metadata keys | ~176 | 151 |
 | — un-namespaced (bare) | 74 | 65 |
@@ -72,10 +73,13 @@ oracle at this checkout reads:
 | duplicated helpers | 25 | 24 |
 | — drifted (bodies differ) | — | 16 |
 
-Source scripts, bare keys, outside-startable, and duplicated helpers agree
-within a script or two — the manual eyeball was close. The remaining rows are
-method, not error:
+Source scripts, bare keys, and duplicated helpers agree within a script or two
+— the manual eyeball was close. The remaining rows are method, not error:
 
+- **outside-startable (75 vs 72)** — the oracle counts a script named by
+  filename in a `skills/` instruction as outside-startable, because a skill
+  starts it the same way a formula does. That is execution surface, not a docs
+  mention, so those scripts count as startable rather than internal-only.
 - **metadata total (151 vs ~176)** — the manual `~176` counted test fixtures and
   prose mentions; the oracle holds both out, counting only the live contract the
   operating surface reads or writes.
@@ -85,7 +89,7 @@ method, not error:
 - **drifted vs duplicated (16 of 24)** — the manual count stopped at duplicate
   names; the oracle separates the copies that have actually diverged from the
   ones kept in sync, so the consolidation work aims at the 16 that differ.
-- **called-by-other-scripts, docs-only, unreferenced (12 / 6 / 0)** — the manual
+- **called-by-other-scripts, docs-only, unreferenced (9 / 5 / 0)** — the manual
   baseline did not split the non-startable scripts. The oracle does, so a
   checkpoint reads internal call surface apart from dead surface; here nothing is
   wholly unreferenced.

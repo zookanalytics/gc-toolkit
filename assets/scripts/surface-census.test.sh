@@ -3,6 +3,10 @@
 # emits the documented fields, and the entry-point breakdown partitions the
 # source scripts exactly. The numbers themselves are not asserted — they move
 # as the surface shrinks; the shape and the invariants do not.
+#
+# A final regression runs the oracle against a throwaway repo to pin one
+# classification rule that this repo's moving numbers cannot: a source script
+# named only from a skill is outside-startable, not a docs-only mention.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
@@ -76,6 +80,28 @@ drift_ok=$(printf '%s' "$JSON" | jq -r '(.drifted_helpers <= .duplicated_helpers
 
 bash "$CENSUS" "$ROOT" >/dev/null 2>&1 \
   && ok "human-readable mode exits 0" || bad "human-readable mode failed"
+
+# Regression: a source script named only from a skill is outside-startable.
+# Skills carry runnable instructions that start scripts by filename
+# ("$CONV/foo.sh"), so a script reachable only through skills/ is startable from
+# outside assets/scripts — not a docs-only mention. Census a throwaway repo whose
+# one script is referenced nowhere but a SKILL.md and confirm its class. Without
+# skills/ in the oracle's execution surface this lands in docs-only instead.
+SKFIX=$(mktemp -d "${TMPDIR:-/tmp}/gctk-census-skills.XXXXXX")
+(
+  cd "$SKFIX" || exit 1
+  git init -q
+  mkdir -p assets/scripts skills/demo
+  printf '#!/usr/bin/env bash\necho started\n' > assets/scripts/skill-started.sh
+  printf '# Demo skill\n\nRun it:\n\n    "$CONV/skill-started.sh" --go\n' > skills/demo/SKILL.md
+  git add -A
+)
+SKJSON=$(bash "$CENSUS" --json "$SKFIX" 2>/dev/null)
+sk_ok=$(printf '%s' "$SKJSON" | jq -r '.source_scripts==1 and .outside_startable==1 and .docs_only==0 and .called_by_other_scripts==0 and .unreferenced==0' 2>/dev/null)
+[ "$sk_ok" = true ] \
+  && ok "a script referenced only from skills/ is counted outside-startable" \
+  || bad "skills-only script not outside-startable (got $(printf '%s' "$SKJSON" | jq -c '{source_scripts,outside_startable,called_by_other_scripts,docs_only,unreferenced}' 2>/dev/null))"
+rm -rf "$SKFIX"
 
 echo
 echo "surface-census: $PASS passed, $FAIL failed"

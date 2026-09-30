@@ -24,9 +24,9 @@
 #       outside_startable        referenced by filename from the EXECUTION
 #                                surface outside assets/scripts (formulas,
 #                                doctor, services, tools, orders, agents,
-#                                template-fragments, packs, lifecycle, overlays,
-#                                .github) — something outside the layer starts
-#                                it.
+#                                skills, template-fragments, packs, lifecycle,
+#                                overlays, .github) — something outside the
+#                                layer starts it.
 #       called_by_other_scripts  not outside-startable, but referenced by
 #                                another source script — live internal call
 #                                surface.
@@ -94,7 +94,7 @@ fi
 # priority order: an external entry point, else another source script, else a
 # docs mention, else nothing. The four classes partition the source scripts
 # exactly, so the epic can tell live internal surface from dead surface.
-EXEC_DIRS="formulas doctor services tools orders agents template-fragments packs lifecycle overlays .github"
+EXEC_DIRS="formulas doctor services tools orders agents skills template-fragments packs lifecycle overlays .github"
 git grep -hoE '[A-Za-z0-9_.-]+\.sh' -- $EXEC_DIRS 2>/dev/null \
   | sed 's#.*/##' | sort -u | grep -Fxf "$TMP/src_names" > "$TMP/ref_exec" || true
 git grep -hoE '[A-Za-z0-9_.-]+\.sh' -- docs specs '*.md' 2>/dev/null \
