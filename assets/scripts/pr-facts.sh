@@ -394,6 +394,94 @@ visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this si
           | select(((.metadata.escalation_key // "") | tostring) == $k)
           | .id ] | .[0] // empty' 2>/dev/null
 }
+mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
+  # Atomic birth for a rework child: every identity key lands together, or the
+  # child is not left behind to be misread. A child stamped with only some of its
+  # keys can still veto a merge (an open bead with a blocks-dep on the anchor is
+  # enough) yet be impossible to rescue (the stranded re-route matches on
+  # rejection_reason naming the head), adopt (needs an empty branch/anchor_bead),
+  # or reap — the silent wedge this guards against. `gc bd create --metadata`
+  # writes the whole payload in one insert; a reused strand/orphan takes one
+  # all-or-nothing --set-metadata. mint_rework_verify reads the write back IN FULL
+  # — the role marker, rejection_reason (the rescue key), and the handoff-critical
+  # merge_strategy and PR identity (existing_pr/pr_url/pr_number) that keep the
+  # refinery on an mr-mode hand-back instead of a direct push to target — and a
+  # newborn that will not verify is closed rather than left half-stamped. Prints the
+  # fully-formed, dep-attached, UNROUTED child id and returns 0; the caller stamps
+  # gc.routed_to last, so only a complete child becomes claimable. Prints nothing
+  # and returns 1 when the caller should retry next pass.
+  local reuse="$1" title="$2" anchor="$3" branch="$4" target="$5" reason="$6" mode="$7" prurl="$8" prnum="$9"
+  local meta fix ok
+  meta=$(jq -nc --arg ab "$anchor" --arg br "$branch" --arg tg "$target" --arg rr "$reason" \
+    --arg pm "$mode" --arg ep "$prurl" --arg pn "$prnum" \
+    '{task_kind:"rework", anchor_bead:$ab, branch:$br, target:$tg, rejection_reason:$rr, prepare_mode:$pm, merge_strategy:"mr", existing_pr:$ep, pr_url:$ep, pr_number:$pn}' 2>/dev/null)
+  [ -n "$meta" ] || return 1
+  if [ -n "$reuse" ]; then
+    fix="$reuse"
+    gc bd update "$fix" --set-metadata task_kind=rework --set-metadata anchor_bead="$anchor" \
+      --set-metadata branch="$branch" --set-metadata target="$target" \
+      --set-metadata rejection_reason="$reason" --set-metadata prepare_mode="$mode" \
+      --set-metadata merge_strategy=mr --set-metadata existing_pr="$prurl" \
+      --set-metadata pr_url="$prurl" --set-metadata pr_number="$prnum" >/dev/null 2>&1 || true
+  else
+    fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+  fi
+  [ -n "$fix" ] || return 1
+  ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode" "$prurl" "$prnum")
+  if [ "$ok" != "true" ]; then
+    # One retry: the write is all-or-nothing, so re-applying the whole payload
+    # either lands it or leaves the prior state untouched — it cannot add a key.
+    gc bd update "$fix" --set-metadata task_kind=rework --set-metadata anchor_bead="$anchor" \
+      --set-metadata branch="$branch" --set-metadata target="$target" \
+      --set-metadata rejection_reason="$reason" --set-metadata prepare_mode="$mode" \
+      --set-metadata merge_strategy=mr --set-metadata existing_pr="$prurl" \
+      --set-metadata pr_url="$prurl" --set-metadata pr_number="$prnum" >/dev/null 2>&1 || true
+    ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode" "$prurl" "$prnum")
+  fi
+  if [ "$ok" != "true" ]; then
+    # The write did not fully land. Close the child ONLY if what did land makes
+    # it a husk: able to veto (a branch, or a pr_number) yet missing its rescue
+    # key (rejection_reason). A child with neither veto vector is an inert orphan
+    # the adoption path reuses next pass, and a strand keeps its own
+    # rejection_reason (a dropped write leaves the prior value in place), so
+    # neither is unmade here — only the veto-without-rescue husk is.
+    local snap rr_now br_now pn_now
+    snap=$(gc bd show "$fix" --json 2>/dev/null | scrub)
+    rr_now=$(printf '%s' "$snap" | jq -r '.[0].metadata.rejection_reason // ""' 2>/dev/null)
+    br_now=$(printf '%s' "$snap" | jq -r '.[0].metadata.branch // ""' 2>/dev/null)
+    pn_now=$(printf '%s' "$snap" | jq -r '.[0].metadata.pr_number // ""' 2>/dev/null)
+    if [ -z "$rr_now" ] && { [ -n "$br_now" ] || [ -n "$pn_now" ]; }; then
+      gc bd update "$fix" --status=closed --set-metadata gc.outcome=abandoned \
+        --append-notes "Unmade by $PROG: a partial stamp left it able to veto (branch/pr_number) but with no rejection_reason to be rescued by, so it is closed rather than left as a half-stamped husk (atomic birth)." >/dev/null 2>&1 || true
+    fi
+    return 1
+  fi
+  gc bd dep "$fix" --blocks "$anchor" >/dev/null 2>&1 \
+    || echo "$PROG: WARN could not attach rework $fix as a blocks-dep of $anchor" >&2
+  printf '%s' "$fix"
+  return 0
+}
+
+mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number> — echoes "true" iff the full identity read back
+  # rejection_reason is verified alongside the role marker: a child carrying the
+  # marker but not the reason is the husk a role-marker-only re-stamp produced.
+  # merge_strategy and the PR identity (existing_pr/pr_url/pr_number) are handoff-
+  # critical too: a child that keeps its rescue keys but drops these hands the
+  # refinery a rework of no PR, which it resolves to merge_strategy=direct and a
+  # push straight to the target branch — the same partial-write wedge one field
+  # over. merge_strategy is always minted "mr"; the PR keys must read back the
+  # values this child was minted with.
+  gc bd show "$1" --json 2>/dev/null | scrub | jq -r \
+    --arg ab "$2" --arg br "$3" --arg tg "$4" --arg rr "$5" --arg pm "$6" --arg ep "$7" --arg pn "$8" '
+    (.[0].metadata // {}) as $m
+    | (($m.task_kind // "") == "rework" and ($m.anchor_bead // "") == $ab
+       and ($m.branch // "") == $br and ($m.target // "") == $tg
+       and ($m.rejection_reason // "") == $rr and ($m.prepare_mode // "") == $pm
+       and ($m.merge_strategy // "") == "mr"
+       and ($m.existing_pr // "") == $ep and ($m.pr_url // "") == $ep
+       and ($m.pr_number // "") == $pn) | tostring' 2>/dev/null
+}
+
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
   # `gh --paginate` emits one array per PAGE; --jq '.[]' flattens the pages and
   # jq -s makes the whole read an array again. Non-zero = "could not tell".
@@ -657,7 +745,7 @@ fi
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
-postured=0; answered=0; unpostured=0
+postured=0; answered=0; unpostured=0; reaped=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -1084,6 +1172,88 @@ GATES
     continue
   fi
 
+  # --- SELF-HEAL: reap a rework child whose premise the branch has outrun -------
+  # A rework child filed against a past head is moot once the branch has moved on
+  # and the current head is clean and green: the fix it asked for is no longer
+  # owed, yet nothing retracts it. It sits open, holding the anchor through its
+  # blocks-dep, until a person clears it — the merge-lane analogue of the
+  # self-heal the reconcile lane already does for its own orphaned visits. Reap
+  # ONLY a provably-dead premise: fire on the CONJUNCTION of head-moved-past-the-cited-head AND a
+  # current head that is mergeable with every required check green; leave anything
+  # unprovable OPEN (fail closed); never touch a child a worker holds
+  # (in_progress). Idempotent: a child still citing the live head, or a head not
+  # provably green, matches nothing.
+  if [ "$state" = "OPEN" ] && [ -n "$head_oid" ]; then
+    reap_kids=$(bd_list --metadata-field anchor_bead="$id" --status=open 2>/dev/null) || reap_kids=""
+    # open, unclaimed rework children of this anchor, as "<id>\t<reason>" rows.
+    # Only a conflict or red-check child has a premise that "mergeable + green"
+    # falsifies (no longer conflicting; the check passed). A comment-rework child's
+    # premise is unanswered feedback, which a moved head and a green check do not
+    # settle, so it is never a reap candidate — its own anchor_bead-keyed dedup
+    # owns its lifecycle.
+    reap_rows=$(printf '%s' "$reap_kids" | jq -r --arg id "$id" '
+      .[]? | select(((.metadata.task_kind // "") | tostring) == "rework")
+      | select(.id != $id)
+      | select(((.status // "open") | ascii_downcase) == "open")
+      | select(((.assignee // "") | tostring) == "")
+      | ((.metadata.rejection_reason // "") | tostring) as $rr
+      | select(($rr | test("conflicts with")) or ($rr | test("Required check")))
+      | [ .id, ($rr | gsub("[\n\t]"; " ")) ] | @tsv' 2>/dev/null)
+    if [ -n "$reap_rows" ]; then
+      # A child whose CITED head — the "head <oid>" both dispatch arms embed in the
+      # reason — the current head has left behind. No cited head is ambiguous, and
+      # a child still at the live head is not moot: both are left OPEN.
+      reap_targets=""
+      head_lc=$(printf '%s' "$head_oid" | tr 'A-Z' 'a-z')
+      while IFS="$(printf '\t')" read -r kid krr; do
+        [ -n "$kid" ] || continue
+        cited=$(printf '%s' "$krr" | grep -oiE 'head [0-9a-f]{7,40}' | head -1 | awk '{print $2}' | tr 'A-Z' 'a-z')
+        [ -n "$cited" ] || continue
+        [ "$cited" != "$head_lc" ] || continue
+        reap_targets="$reap_targets $kid"
+      done <<REAP_EOF
+$reap_rows
+REAP_EOF
+      if [ -n "${reap_targets# }" ]; then
+        # Green-proof the current head once, before closing anything: it must be
+        # mergeable AND every required context must read back a positive SUCCESS.
+        # An empty or unreadable rollup, a pending or missing context, or an
+        # unknown required set is "cannot prove" — which reaps nothing.
+        reap_green=0
+        if [ "$mergeable" = "MERGEABLE" ]; then
+          required_contexts_for "$base"
+          if [ "$REQ_STATE" = "known" ] && [ -n "$REQ_CONTEXTS" ]; then
+            reap_req_json=$(printf '%s\n' "$REQ_CONTEXTS" | jq -Rs 'split("\n") | map(select(length > 0))' 2>/dev/null)
+            reap_rollup=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json statusCheckRollup 2>/dev/null)
+            reap_ok=$(printf '%s' "$reap_rollup" | jq -r --argjson req "${reap_req_json:-[]}" '
+              def name_of: (.name // .context // "");
+              def green:
+                if ((.conclusion // "") | tostring | length) > 0 then ((.conclusion | ascii_upcase) == "SUCCESS")
+                elif ((.state // "") | tostring | length) > 0 then ((.state | ascii_upcase) == "SUCCESS")
+                else false end;
+              (.statusCheckRollup // []) as $r
+              | [ $req[] as $c
+                  | ([ $r[] | select(type == "object") | select(name_of == $c) ]) as $m
+                  | (($m | length) > 0 and ($m | all(green))) ]
+              | (length > 0 and all)' 2>/dev/null)
+            [ "$reap_ok" = "true" ] && reap_green=1
+          fi
+        fi
+        if [ "$reap_green" = "1" ]; then
+          for kid in $reap_targets; do
+            if gc bd update "$kid" --status=closed --set-metadata gc.outcome=moot \
+                 --append-notes "Reaped moot by $PROG: filed against a stale head of PR#$num, but the current head $head_oid is mergeable with required checks green, so the rework it asked for is no longer owed." >/dev/null 2>&1; then
+              echo "$PROG: $id reaped moot rework child $kid (PR#$num advanced past its cited head to a green $head_oid)"
+              reaped=$((reaped + 1))
+            else
+              echo "$PROG: WARN $id could not reap moot rework child $kid (retry next pass)" >&2
+            fi
+          done
+        fi
+      fi
+    fi
+  fi
+
   # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
     # A pre-merge arm defers conflict-rework dispatch to the full pass. A
@@ -1241,82 +1411,42 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
+    reuse=""
     if [ -n "$stranded" ]; then
-      FIX="$stranded"
-      echo "$PROG: $id re-routing stranded rework $FIX for PR#$num (a prior pass's route stamp did not land)"
+      reuse="$stranded"
+      echo "$PROG: $id re-routing stranded rework $reuse for PR#$num (a prior pass's route stamp did not land)"
     else
-      # Orphan adoption BEFORE create: a child this arm created whose stamp then
-      # failed carries the deterministic title but no branch metadata — invisible
+      # Orphan adoption BEFORE create: a child a prior pass created but could not
+      # stamp carries the deterministic title but no branch metadata — invisible
       # to the branch dedup above, so re-creating would mint a twin every pass.
-      # The title is a pure function of the PR number and head branch, so it stays
-      # deterministic for a given head across passes.
-      # An unreadable probe dispatches nothing (retry next pass).
+      # The title is a pure function of the PR number and head branch. An
+      # unreadable probe dispatches nothing (retry next pass).
       if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
         echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
-      FIX=$(printf '%s' "$forphans" | jq -r '
+      reuse=$(printf '%s' "$forphans" | jq -r '
         [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-      if [ -n "$FIX" ]; then
-        echo "$PROG: $id adopting unstamped rework orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
-      else
-        FIX=$(gc bd create "$FIX_TITLE base rewritten, PR conflicts" -t task --json 2>/dev/null \
-          | jq -r '.id // empty' 2>/dev/null)
-      fi
+      [ -n "$reuse" ] && echo "$PROG: $id adopting unstamped rework orphan $reuse for PR#$num (created by a prior pass whose stamp failed)"
     fi
+    # Atomic birth: form the child fully — every identity key plus the blocks-dep
+    # — or not at all, so a child that can veto a merge but cannot be rescued or
+    # reaped is never left behind. mint_rework_child reads the whole identity back
+    # (rejection_reason included) and unmakes a newborn it cannot complete. The
+    # route is stamped LAST, on the id it returns, so only a complete child ever
+    # becomes claimable; a route that does not land leaves a rescuable child the
+    # stranded arm re-routes next pass, never a husk.
+    FIX=$(mint_rework_child "$reuse" "$FIX_TITLE base rewritten, PR conflicts" "$id" "$fix_branch" "$base" \
+      "stale base at head $head_oid: PR#$num conflicts with '$base'. $fix_instruction Do NOT open a new PR — this reworks PR#$num." \
+      "$prepare_mode" "$live_url" "$num")
     if [ -z "$FIX" ]; then
-      echo "$PROG: $id could not file the rework child for PR#$num; retry next pass" >&2
+      echo "$PROG: $id could not form the rework child for PR#$num; retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # The route is stamped separately, after prepare_mode reads back. A dropped
-    # branch or pr_url leaves a child nothing can act on, which is the safe side.
-    # prepare_mode is stamped merge and the resume path also defaults to merge, so a
-    # dropped mode is safe; the read-back still confirms the child carries the
-    # merge-in instruction it was classified with. task_kind and anchor_bead are the
-    # role marker: the child resumes the ANCHOR's own branch, so with no marker a
-    # metadata read cannot tell the child from the anchor.
-    gc bd update "$FIX" \
-      --set-metadata task_kind=rework \
-      --set-metadata anchor_bead="$id" \
-      --set-metadata branch="$fix_branch" \
-      --set-metadata target="$base" \
-      --set-metadata rejection_reason="stale base at head $head_oid: PR#$num conflicts with '$base'. $fix_instruction Do NOT open a new PR — this reworks PR#$num." \
-      --set-metadata prepare_mode="$prepare_mode" \
-      --set-metadata merge_strategy=mr \
-      --set-metadata existing_pr="$live_url" \
-      --set-metadata pr_url="$live_url" \
-      --set-metadata pr_number="$num" >/dev/null 2>&1 \
-      || echo "$PROG: WARN rework $FIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
-    gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
-      || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
-    mgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty')
-    if [ "$mgot" != "$prepare_mode" ]; then
-      echo "$PROG: WARN rework $FIX did not record prepare_mode=$prepare_mode; left unrouted (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    # task_kind=rework and anchor_bead are the role marker, set in the same write
-    # as prepare_mode above. That write can half-land — the exit code does not
-    # prove it — and a child dropped to no marker on the anchor's OWN branch is
-    # the misread this stamp exists to stop, yet the route below would still
-    # dispatch it. Read both back before routing. Re-stamp once; if they still
-    # will not take, leave the child unrouted (the stranded arm re-stamps it next
-    # pass) rather than route a rework a metadata read cannot tell from its anchor.
-    kgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
-    if [ "$kgot" != "rework|$id" ]; then
-      gc bd update "$FIX" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
-      kgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
-    fi
-    if [ "$kgot" != "rework|$id" ]; then
-      echo "$PROG: WARN rework $FIX did not record task_kind=rework/anchor_bead=$id; left unrouted (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    # `gc bd update` returns 0 without having written (the claim guard is one
-    # such path), so the exit code does not establish the route, and an unrouted
-    # child reported as dispatched is a rework nothing can reach.
     gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
     rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
     if [ "$rgot" != "$FIX_POOL" ]; then
-      echo "$PROG: WARN rework $FIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2
+      echo "$PROG: WARN rework $FIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
     gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
@@ -2000,9 +2130,10 @@ GATES
             rc_prepare=merge
             RC_REASON="Required check(s) failing on PR#$num at head $head_oid: $rc_names.${rc_urls:+ Run log(s): $rc_urls.} Fix the failing check(s) and push to '$rc_fix_branch'. Do NOT open a new PR: this reworks PR#$num."
             RC_TITLE="Fix failing required check(s) on PR#$num:"
+            reuse=""
             if [ -n "$rc_stranded" ]; then
-              RCFIX="$rc_stranded"
-              echo "$PROG: $id re-routing stranded red-check rework $RCFIX for PR#$num (a prior pass's route stamp did not land)"
+              reuse="$rc_stranded"
+              echo "$PROG: $id re-routing stranded red-check rework $reuse for PR#$num (a prior pass's route stamp did not land)"
             else
               # Adopt a created-but-unstamped orphan (title set, anchor_bead never
               # landed) before minting, or a prior pass twins one per cycle.
@@ -2010,51 +2141,23 @@ GATES
                 echo "$PROG: $id — PR#$num has a red required check but the orphan probe failed; nothing dispatched (retry next pass)" >&2
                 skipped=$((skipped + 1)); continue
               fi
-              RCFIX=$(printf '%s' "$rc_orphans" | jq -r '
+              reuse=$(printf '%s' "$rc_orphans" | jq -r '
                 [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-              if [ -n "$RCFIX" ]; then
-                echo "$PROG: $id adopting unstamped red-check rework orphan $RCFIX for PR#$num (created by a prior pass whose stamp failed)"
-              else
-                RCFIX=$(gc bd create "$RC_TITLE required check red at head $head_oid" -t task --json 2>/dev/null \
-                  | jq -r '.id // empty' 2>/dev/null)
-              fi
+              [ -n "$reuse" ] && echo "$PROG: $id adopting unstamped red-check rework orphan $reuse for PR#$num (created by a prior pass whose stamp failed)"
             fi
+            # Atomic birth (see the conflict arm): form the child fully or not at
+            # all, verifying rejection_reason as well as the role marker, and route
+            # last so only a complete child becomes claimable.
+            RCFIX=$(mint_rework_child "$reuse" "$RC_TITLE required check red at head $head_oid" "$id" "$rc_fix_branch" "$base" \
+              "$RC_REASON" "$rc_prepare" "$live_url" "$num")
             if [ -z "$RCFIX" ]; then
-              echo "$PROG: $id could not file the red-check rework for PR#$num; retry next pass" >&2
-              skipped=$((skipped + 1)); continue
-            fi
-            gc bd update "$RCFIX" \
-              --set-metadata task_kind=rework \
-              --set-metadata anchor_bead="$id" \
-              --set-metadata branch="$rc_fix_branch" \
-              --set-metadata target="$base" \
-              --set-metadata rejection_reason="$RC_REASON" \
-              --set-metadata prepare_mode="$rc_prepare" \
-              --set-metadata merge_strategy=mr \
-              --set-metadata existing_pr="$live_url" \
-              --set-metadata pr_url="$live_url" \
-              --set-metadata pr_number="$num" >/dev/null 2>&1 \
-              || echo "$PROG: WARN red-check rework $RCFIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
-            gc bd dep "$RCFIX" --blocks "$id" >/dev/null 2>&1 \
-              || echo "$PROG: WARN could not attach red-check rework $RCFIX as a blocks-dep of $id" >&2
-            # Read the role marker + mode back before routing, as the conflict arm
-            # does: `gc bd update` returns 0 without writing (the claim guard is one
-            # such path), a child routed without anchor_bead is one the next pass's
-            # dedup cannot see; prepare_mode is stamped merge and the resume path
-            # defaults to merge, so an absent mode still merges rather than rewrites.
-            rc_got=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // "") + "|" + (.prepare_mode // ""))')
-            if [ "$rc_got" != "rework|$id|$rc_prepare" ]; then
-              gc bd update "$RCFIX" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" --set-metadata prepare_mode="$rc_prepare" >/dev/null 2>&1 || true
-              rc_got=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // "") + "|" + (.prepare_mode // ""))')
-            fi
-            if [ "$rc_got" != "rework|$id|$rc_prepare" ]; then
-              echo "$PROG: WARN red-check rework $RCFIX did not record task_kind/anchor_bead/prepare_mode; left unrouted (retry next pass)" >&2
+              echo "$PROG: $id could not form the red-check rework for PR#$num; retry next pass" >&2
               skipped=$((skipped + 1)); continue
             fi
             gc bd update "$RCFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
             rc_rgot=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
             if [ "$rc_rgot" != "$FIX_POOL" ]; then
-              echo "$PROG: WARN red-check rework $RCFIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2
+              echo "$PROG: WARN red-check rework $RCFIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2
               skipped=$((skipped + 1)); continue
             fi
             gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
@@ -2636,6 +2739,6 @@ elif [ "$ROUTE_ONLY" = 1 ]; then
   # reports a non-zero but never holds merge on it.
   echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
 else
-  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
+  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
 fi
 exit 0
