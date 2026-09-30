@@ -36,6 +36,9 @@
 #         filed (a caller that ledgers a filing keys on 0 and skips 3; a caller
 #         that only needs the session covered treats 0 and 3 alike)
 #     · 1 owner did not resolve to a live, safe session id — nothing filed
+#     · 4 the create failed and no open warrant could be re-read — nothing filed
+#         (distinct from 1: the owner resolved, but the store write did not land,
+#         so a caller must not read it as covered)
 #     · 2 usage error
 set -uo pipefail
 
@@ -131,11 +134,26 @@ fi
 gc bd create --type=task --title="Stuck: $ROLE" --label=warrant \
   --metadata "$(jq -nc --arg t "$SID" --arg r "$REASON" --arg who "$REQUESTER" --arg d "$DOG" \
     '{"warrant.target":$t,"warrant.reason":$r,"warrant.requester":$who,"gc.routed_to":$d}')" >&2
+CREATE_RC=$?
 
 # Re-read the id rather than trusting create's stdout, which can answer with an
-# empty id although the bead landed. An id that still does not resolve leaves
-# stdout empty; the warrant is filed either way, and the caller's ledger entry
-# defaults a missing ref rather than losing the filing.
+# empty id although the bead landed. A resolved id proves the warrant stands
+# whatever the create's exit, so print it and report a filing.
 FILED="$(open_warrant_for "$SID")"
-[ -n "$FILED" ] && printf '%s\n' "$FILED"
+if [ -n "$FILED" ]; then
+  printf '%s\n' "$FILED"
+  exit 0
+fi
+
+# Nothing re-reads. A failed create with no warrant is the silent gap this filer
+# exists to close: the owner resolved, but the store write did not land, so a
+# caller must not read the session as covered. Refuse instead of exiting 0.
+if [ "$CREATE_RC" -ne 0 ]; then
+  echo "file-warrant: gc bd create failed (rc=$CREATE_RC) and no open warrant for $SID could be re-read; nothing filed." >&2
+  exit 4
+fi
+
+# The create succeeded though its id has not re-read yet (store lag): the bead
+# landed, so report the filing with the empty stdout the caller defaults rather
+# than lose it.
 exit 0

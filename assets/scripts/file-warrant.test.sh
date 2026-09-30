@@ -42,6 +42,7 @@ case "$sub $verb" in
     [ -n "${STUB_SESSIONS_FAIL:-}" ] && { echo "gc: session list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_SESSIONS:-{\"sessions\":[]}}" ;;
   "bd list")
+    [ -n "${STUB_LIST_EMPTY:-}" ] && { echo '[]'; exit 0; }
     shift 2 || true
     tv=""
     while [ $# -gt 0 ]; do
@@ -180,6 +181,23 @@ eq "$RC" 2 "a missing --reason is a usage error"
 hasnt "$LOG" 'bd create' "and nothing is filed"
 run --reason r --requester witness --dog d
 eq "$RC" 2 "a missing --owner is a usage error"
+
+echo "# a create that fails with no warrant to re-read refuses — never a false coverage"
+reset; export STUB_SESSIONS="$ROSTER"; export STUB_CREATE_FAIL=1
+run --owner "gc-toolkit/gc-toolkit.polecat-3" --reason "store write is down" --requester witness --dog "gc-toolkit.dog"
+has "$LOG" 'bd create' "the create is attempted for a resolved owner"
+eq "$RC" 4 "a failed create with nothing re-read exits 4, not a false 0"
+eq "$OUT" "" "and prints no warrant id, so no caller reads the session as covered"
+has "$ERR" "no open warrant" "and says the filing did not land on stderr"
+unset STUB_CREATE_FAIL
+
+echo "# a create that lands but is not yet re-readable still reports a filing, not a refusal"
+reset; export STUB_SESSIONS="$ROSTER"; export STUB_LIST_EMPTY=1
+run --owner "gc-toolkit/gc-toolkit.polecat-3" --reason "store lag after a good create" --requester witness --dog "gc-toolkit.dog"
+has "$LOG" 'bd create' "the create is attempted"
+eq "$RC" 0 "a successful create whose id has not re-read yet is still exit 0"
+eq "$OUT" "" "with an empty stdout the caller defaults rather than losing the filing"
+unset STUB_LIST_EMPTY
 
 echo
 echo "passed: $PASS   failed: $FAIL"
