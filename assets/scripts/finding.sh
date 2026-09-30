@@ -55,14 +55,16 @@
 #   finding.sh open-must-fix --anchor A [--lane L]
 #   finding.sh close-unvalidated --anchor A --lane L [--reason R]
 #   finding.sh close-answered --anchor A [--reason R]
+#   finding.sh close-resolved --anchor A [--reason R]
 #
 # Callers: signoff.sh (upsert on request-changes, close-unvalidated on
 # approve), the validator through set-disposition — which hangs the fix unit's
 # edge onto a finding only as it rules that finding must-fix, so the fix unit
 # blocks only the findings it must answer — and gate-ensure (open-must-fix
-# computes quiescence; close-answered releases it once a fix unit lands). Exit
-# 0 on success; a read verb exits 1 when its predicate is false, 2 when the
-# store would not read.
+# computes quiescence; close-answered releases it once a fix unit lands;
+# close-resolved releases it once the human re-approves, the signal a fix unit
+# landing cannot carry). Exit 0 on success; a read verb exits 1 when its
+# predicate is false, 2 when the store would not read.
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -89,6 +91,7 @@ usage:
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
   finding.sh close-unvalidated --anchor <id> --lane <lane> [--reason <r>]
   finding.sh close-answered --anchor <id> [--reason <r>]
+  finding.sh close-resolved --anchor <id> [--reason <r>]
 USAGE
 }
 
@@ -477,6 +480,106 @@ cmd_close_answered() {
   done
 }
 
+# A human's re-approval of the PR validates that the objections that human
+# raised are resolved, whatever route the fix took — a fix unit that landed, an
+# out-of-band artifact attached to the PR, or the operator simply satisfied.
+# close-answered reads only a fix unit landing, so an objection resolved any
+# other way stays open holding the merge: the finding through its blocks edge and
+# quiescence clause (a), the fix unit through clause (b). This closes the anchor's
+# HUMAN-source objection beads once the recorded pr_posture reads approved.
+#
+# The posture gate is the signal. pr-facts.sh records the PR's review state as a
+# dated pr_posture on the anchor every pass; `approved` means reviewDecision is
+# APPROVED and no reviewer currently requests changes. It is the value merge.sh
+# reads, so the closer and the merge cannot disagree about the review state, and
+# any other value (or an absent one, as on a pre-open anchor with no PR) closes
+# nothing — the raiser has not re-approved, so there is no resolution to validate.
+#
+# The scope is human-source beads, and that is load-bearing. reviewDecision
+# speaks the human authority alone — a machine finding is a bead invisible to it —
+# so a human approval closes the human's own objections and must not clear a
+# machine correctness finding the human never addressed. merge.sh's blocker probe
+# keeps holding on a machine finding's edge exactly as before.
+#
+# What closes: the human-batch fix unit (a live blocks-child of the anchor
+# carrying no source_review_bead — the shape anchor_fix_unit reads for the human
+# lane; a machine rework carries the bead) FIRST, because it blocks the findings
+# and bd refuses to close a blocked issue; then each open human finding whose
+# disposition is unvalidated or must-fix. A deferred finding holds nothing and is
+# a tracked post-merge follow-up, so re-approval leaves it; a declined one is
+# already closed. Each finding's inbound blocks edges are stripped before its
+# close, so the close does not wait on a blocker the objection does not own — the
+# finding wired to block behind an unrelated fix unit closes cleanly. Best-effort
+# per bead, like close-answered; an unreadable store closes nothing and the merge
+# stays held.
+cmd_close_resolved() {
+  local anchor="" reason=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    *) warn "unknown arg '$1'"; usage; exit 1 ;;
+  esac; done
+  [ -n "$anchor" ] || { warn "close-resolved needs --anchor"; exit 1; }
+  local posture
+  posture=$(bd_json show "$anchor" | jq -r '(.[0].metadata.pr_posture // "") | tostring' 2>/dev/null)
+  case "$posture" in
+    approved|approved@*) ;;
+    *) return 0 ;;
+  esac
+  local rows note
+  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES" --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || { warn "could not read beads on $anchor"; return 2; }
+  note="resolved: raiser re-approved the PR (pr_posture=approved); the objection is validated resolved whatever route the fix took"
+  [ -n "$reason" ] && note="$note ($reason)"
+  # The human-batch fix unit(s): a blocks-child of the anchor carrying
+  # task_kind=rework and no source_review_bead, the shape anchor_fix_unit reads
+  # for the human lane (a machine rework carries the bead). Only an OPEN one is
+  # closed: an open rework is routed-but-unclaimed, the wedge shape after an
+  # out-of-band fix, and closing it also stops a polecat wasting a claim on work
+  # the re-approval mooted. An in_progress rework has a live worker whose hand-off
+  # will close it the normal way, and a blocked one is held for a reason; yanking
+  # either would strand live or intentionally-held work, so both are left. A
+  # non-array read leaves everything open rather than closing a finding whose fix
+  # unit could not be enumerated.
+  local blk fixids fu
+  blk=$(bd_json dep list "$anchor" --direction=down -t blocks)
+  if printf '%s' "$blk" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    fixids=$(printf '%s' "$blk" | jq -r '
+      [ .[]
+          | select(((.status // "open") | ascii_downcase) == "open")
+          | select(((.metadata.task_kind // "") | tostring) == "rework")
+          | select(((.metadata.source_review_bead // "") | tostring) == "")
+          | .id ] | .[]' 2>/dev/null)
+    for fu in $fixids; do
+      [ -n "$fu" ] || continue
+      gc bd update "$fu" --status=closed --append-notes "$note" >/dev/null 2>&1 \
+        || warn "could not close human fix unit $fu on re-approval"
+    done
+  else
+    warn "could not read $anchor's blockers; leaving the human fix unit open"
+  fi
+  # The human findings. Strip each one's inbound blocks before the close so it
+  # does not wait on a blocker the objection does not own, and drop its own
+  # blocks-anchor hold.
+  local fids fid
+  fids=$(printf '%s' "$rows" | jq -r '
+    [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+          | select(((.metadata["finding.source"] // "") | tostring) | startswith("human:"))
+          | ((.metadata["finding.disposition"] // "") | tostring) as $d
+          | select($d == "unvalidated" or $d == "must-fix") ]
+    | .[].id' 2>/dev/null)
+  for fid in $fids; do
+    [ -n "$fid" ] || continue
+    if edge_exists "$fid" "$anchor"; then
+      gc bd dep remove "$anchor" "$fid" >/dev/null 2>&1 \
+        || gc bd dep remove "$fid" "$anchor" >/dev/null 2>&1 || true
+    fi
+    strip_inbound_blocks "$fid"
+    gc bd update "$fid" --status=closed --append-notes "$note" >/dev/null 2>&1 \
+      || warn "could not close re-approved human finding $fid"
+  done
+}
+
 [ $# -ge 1 ] || { usage; exit 1; }
 VERB="$1"; shift
 case "$VERB" in
@@ -487,5 +590,6 @@ case "$VERB" in
   open-must-fix)     cmd_open_must_fix "$@" ;;
   close-unvalidated) cmd_close_unvalidated "$@" ;;
   close-answered)    cmd_close_answered "$@" ;;
+  close-resolved)    cmd_close_resolved "$@" ;;
   *) warn "unknown verb '$VERB'"; usage; exit 1 ;;
 esac

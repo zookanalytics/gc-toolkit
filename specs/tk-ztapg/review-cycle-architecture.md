@@ -288,6 +288,18 @@ blocked become unblocked, and `gate-ensure.sh`, which already owns lane state
 and computes quiescence, closes each finding whose blockers have all closed.
 The lane leaves `fixing` when no must-fix finding on this lane is open.
 
+A fix unit landing is one resolution signal, not the only one. An objection can
+resolve without a fix unit landing — an out-of-band artifact attached to the PR,
+or the operator re-approving it — and a close that reads only the landing leaves
+that objection open, holding the merge. So `gate-ensure.sh` also closes an
+anchor's human-source objection beads (its human findings and the human-batch fix
+unit) once the recorded `pr_posture` reads `approved`, because a human's
+re-approval validates that the objections that human raised are resolved. The
+close is scoped to human-source beads, so a human approval never clears a machine
+finding the human did not address.
+[`specs/tk-umkk4d/objection-resolution-validation.md`](../tk-umkk4d/objection-resolution-validation.md)
+carries that design.
+
 Today's rework child is already a fix unit in this shape. `signoff.sh` writes
 it a `blocks` edge onto the anchor and routes it to the fix-target pool, while
 the `pr_number` and `existing_pr` it also stamps name which PR to resume rather

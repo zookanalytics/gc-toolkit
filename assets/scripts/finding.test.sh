@@ -223,5 +223,65 @@ gc bd update cfuh --status=closed >/dev/null
 eq "$(bstatus "$FHM")" "closed" "close-answered closes the human finding once its batch child lands"
 has "$(notes "$FHM")" "fix unit landed" "the close records why the human finding was resolved"
 
+# ---------------------------------------------------------------------------
+# close-resolved: a human's re-approval (recorded pr_posture=approved) closes the
+# anchor's HUMAN objection beads whatever route the fix took — the signal
+# close-answered cannot see. Scoped to human-source beads, so a machine finding
+# and its machine fix unit are untouched; and it strips a finding's inbound blocks
+# so the close never waits on an unrelated blocker (the PR#887 mis-wiring).
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+export STUB_ENFORCE_BLOCKS=1   # prove the fix-unit-first order and the strip are real
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"anchorR","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex","pr_posture":"changes_requested@2026-09-30T00:00:00Z"}},
+        {"id":"hfu","status":"open","assignee":"","title":"Address review comments on PR#9","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR","source_review":"501"}},
+        {"id":"mfu","status":"open","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR","source_review_bead":"revR"}},
+        {"id":"unrel","status":"open","assignee":"","title":"Unrelated check-fix","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-other","source_review_bead":"revX"}}]'
+gc bd dep hfu --blocks tk-ancR >/dev/null
+gc bd dep mfu --blocks tk-ancR >/dev/null
+HF=$("$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "assets/scripts/demo.sh:clip()" --message "attach the demo clip")
+"$SUT" set-disposition --finding "$HF" --anchor tk-ancR --disposition must-fix
+MF=$("$SUT" upsert --anchor tk-ancR --lane codex --locus "assets/scripts/x.sh:f()" --message "guard the write")
+"$SUT" set-disposition --finding "$MF" --anchor tk-ancR --disposition must-fix
+# The human finding is also wired to block behind an unrelated fix unit — the
+# tk-kljbvk shape — so its close must not depend on that bead.
+gc bd dep unrel --blocks "$HF" >/dev/null
+
+# Not approved yet: the objection stands and nothing closes.
+"$SUT" close-resolved --anchor tk-ancR
+eq "$(bstatus "$HF")" "open" "close-resolved leaves the human finding open while the posture is changes_requested"
+eq "$(bstatus hfu)" "open" "…and leaves the human fix unit open"
+
+# The human re-approves: pr-facts records pr_posture=approved on the anchor.
+store "$(jq -c 'map(if .id=="tk-ancR" then .metadata.pr_posture="approved@2026-09-30T13:00:00Z" else . end)' "$STUB_STORE")"
+"$SUT" close-resolved --anchor tk-ancR
+eq "$(bstatus "$HF")" "closed" "close-resolved closes the human must-fix finding on re-approval"
+eq "$(bstatus hfu)" "closed" "…and closes the human-batch fix unit that answered it"
+has "$(notes "$HF")" "re-approved" "the close records the re-approval as the resolution"
+# The strip: the close did not wait on the unrelated blocker, and only its EDGE
+# is dropped — the unrelated bead itself is another lane's and is left alone.
+hasnt "$(deps)" "unrel|blocks|$HF" "close-resolved strips the finding's inbound blocks so an unrelated blocker cannot wedge it"
+eq "$(bstatus unrel)" "open" "…and closes only the objection, never the unrelated bead"
+# Scope: the machine objection is the machine lane's, and a human approval is not
+# a machine validation, so the machine finding and its fix unit still hold.
+eq "$(bstatus "$MF")" "open" "close-resolved leaves the machine must-fix finding — a human approval is not a machine validation"
+eq "$(bstatus mfu)" "open" "…and leaves the machine fix unit open, still holding the merge"
+has " $(probe_blockers tk-ancR) " " mfu " "the machine fix unit still blocks the anchor"
+unset STUB_ENFORCE_BLOCKS
+
+# A deferred human finding is a tracked post-merge follow-up that holds nothing;
+# re-approval does not close it, and an already-declined one is closed already.
+FD=$("$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "docs/readme.md" --message "expand this section later")
+"$SUT" set-disposition --finding "$FD" --anchor tk-ancR --disposition deferred --reason "own PR"
+"$SUT" close-resolved --anchor tk-ancR
+eq "$(bstatus "$FD")" "open" "close-resolved leaves a deferred human finding open (a post-merge tracker, not a merge hold)"
+
+# An anchor with no recorded posture — a pre-open gate with no PR — has no
+# re-approval to read, so close-resolved is a no-op.
+store '[{"id":"tk-preR","status":"open","assignee":"","title":"pre-open","notes":"","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}}]'
+FP=$("$SUT" upsert --anchor tk-preR --lane human --source "human:johnzook" --locus "a.sh:f()" --message "fix it")
+"$SUT" set-disposition --finding "$FP" --anchor tk-preR --disposition must-fix
+"$SUT" close-resolved --anchor tk-preR
+eq "$(bstatus "$FP")" "open" "close-resolved no-ops on an anchor with no recorded posture (no PR to re-approve)"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

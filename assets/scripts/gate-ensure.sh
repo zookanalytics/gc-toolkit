@@ -668,6 +668,22 @@ STRAY
   # below (which reads the same findings) fails the dispatch closed.
   "$FINDING" close-answered --anchor "$id" >/dev/null 2>&1 || true
 
+  # The second resolution signal, beside the fix-unit one above: a human's
+  # re-approval of the PR validates that the objections that human raised are
+  # resolved, whatever route the fix took — and close-answered reads only a fix
+  # unit landing, so an objection resolved out of band (an inline artifact, a
+  # bare re-approval) otherwise holds the re-gate forever. When the recorded
+  # posture reads approved, close the anchor's HUMAN objection beads. finding.sh
+  # scopes the close to human-source beads and reads the same posture merge.sh
+  # does, so a human approval never clears a machine finding and the closer and
+  # the merge cannot disagree. Read from the row already in hand — a non-approved
+  # anchor pays nothing — and best-effort like close-answered. The posture is last
+  # pass's (pr-facts records it in arm 2, this is arm 1), a sub-minute lag against
+  # the wedge it removes.
+  case "$(meta_of "$row" pr_posture)" in
+    approved|approved@*) "$FINDING" close-resolved --anchor "$id" >/dev/null 2>&1 || true ;;
+  esac
+
   gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue

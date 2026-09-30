@@ -333,6 +333,36 @@ oid q4 > "$GH_DIR/head_polecat_q4"
 out=$(run)
 has "$out" "1 reviews dispatched" "a closed validation pass holds nothing, so the unreviewed lane dispatches"
 
+echo "# close-resolved: a human re-approval (recorded pr_posture=approved) closes the anchor's human objection beads"
+# The PR#887 wedge: the human re-approved and the fix landed out of band, so
+# close-answered (fix-unit landing) never fired and the human finding + its rework
+# sat open holding the merge. gate-ensure now closes them from the recorded
+# approved posture, beside close-answered, so a re-approved objection cannot stay
+# open. A machine finding on the same anchor is left alone (finding.sh scopes the
+# close to human-source beads).
+: > "$STUB_DEPS"
+store "[$(anchor RA1 pull_request correctness "" polecat/ra1 ',"pr_posture":"approved@2026-09-30T13:00:00Z"'), $(backed rev-ra1 RA1 correctness),
+        $(mustfix mf-ra1 RA1 correctness),
+        {\"id\":\"hf-ra1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"finding\",\"anchor_bead\":\"RA1\",\"finding.lane\":\"human\",\"finding.source\":\"human:johnzook\",\"finding.disposition\":\"must-fix\"}},
+        {\"id\":\"hfu-ra1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"RA1\",\"source_review\":\"701\"}}]"
+gc bd dep hfu-ra1 --blocks RA1 >/dev/null
+gc bd dep hf-ra1 --blocks RA1 >/dev/null
+gc bd dep hfu-ra1 --blocks hf-ra1 >/dev/null
+oid ra1 > "$GH_DIR/head_polecat_ra1"
+out=$(run)
+eq "$(bstatus hf-ra1)" "closed" "gate-ensure closes the human finding once the recorded posture reads approved"
+eq "$(bstatus hfu-ra1)" "closed" "…and closes the human-batch fix unit that answered it"
+eq "$(bstatus mf-ra1)" "open" "…and leaves the machine finding — a human approval is not a machine validation"
+
+echo "# control: a changes_requested posture closes nothing — there is no re-approval to validate"
+: > "$STUB_DEPS"
+store "[$(anchor RA2 pull_request correctness "" polecat/ra2 ',"pr_posture":"changes_requested@2026-09-30T00:00:00Z"'), $(backed rev-ra2 RA2 correctness),
+        {\"id\":\"hf-ra2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"finding\",\"anchor_bead\":\"RA2\",\"finding.lane\":\"human\",\"finding.source\":\"human:johnzook\",\"finding.disposition\":\"must-fix\"}}]"
+gc bd dep hf-ra2 --blocks RA2 >/dev/null
+oid ra2 > "$GH_DIR/head_polecat_ra2"
+out=$(run)
+eq "$(bstatus hf-ra2)" "open" "a changes_requested posture leaves the human finding open (no re-approval to validate)"
+
 echo "# per-head bar: a closed request-changes review at the live head bars a second whole-diff review"
 # The measured defect (PRs 793/803/824/843: two request-changes codex reviews at
 # one commit, minutes apart). The first review is CLOSED with a recorded verdict
