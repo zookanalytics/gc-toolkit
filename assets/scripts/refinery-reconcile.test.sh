@@ -195,15 +195,18 @@ printf '{"agents":[{"qualified_name":"myrig/gc-toolkit.refinery"}]}' > "$STUB_AG
 PASSLOG="$TMP/state/myrig/pass.log"
 MARK="$TMP/state/myrig/merge-decision"
 # A gate-ensure that blocks until released, so a pass can be caught in flight.
-# The wait is BOUNDED: a driver that let a second pass in would otherwise sit
-# on its own release sentinel and hang the suite instead of failing it.
+# The wait is bounded only as an anti-hang backstop — run-tests.sh's per-file
+# timeout is the real one — so it is set far above the test's own detect-and-
+# kill latency. A tighter bound could expire first under parallel load, letting
+# the driver run on past the phase the kill means to freeze; that is how a kill
+# misses the pass. `await` caps at 400 polls, so 6000 leaves ample headroom.
 mkblocking_gate() {
   cat > "$SD/gate-ensure.sh" <<'ARM'
 #!/usr/bin/env bash
 printf '%s|%s|%s|%s\n' "gate-ensure.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
 : > "${GATE_STARTED:?}"
 i=0
-while [ ! -f "${GATE_RELEASE:?}" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
+while [ ! -f "${GATE_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
 ARM
   chmod +x "$SD/gate-ensure.sh"
 }
@@ -215,7 +218,7 @@ mkblocking_preopen() {
 printf '%s|%s|%s|%s\n' "pre-open-rebase.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
 : > "${PREOPEN_STARTED:?}"
 i=0
-while [ ! -f "${PREOPEN_RELEASE:?}" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
+while [ ! -f "${PREOPEN_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
 ARM
   chmod +x "$SD/pre-open-rebase.sh"
 }
@@ -292,7 +295,12 @@ fi
 echo "# a pass killed mid-run leaves its partial output behind"
 rm -f "$PASSLOG" "$MARK" "$GATE_STARTED" "$GATE_RELEASE"
 : > "$ARM_LOG"
-drive > /dev/null 2>&1 &
+# Launch the driver directly, not through the drive() function. Backgrounding a
+# function forks a wrapper subshell, so $! names the wrapper and `kill` below
+# would leave the real driver orphaned — and the GATE_RELEASE written right after
+# the kill would then let that orphan run on to `decided`, defeating this very
+# check. A backgrounded simple command makes $! the driver, so the kill lands.
+GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" > /dev/null 2>&1 &
 d2=$!
 if await "$GATE_STARTED"; then
   kill -9 "$d2" 2>/dev/null
@@ -307,16 +315,25 @@ if await "$GATE_STARTED"; then
   grep -q '^END ' "$PASSLOG" \
     && bad "the killed pass wrote an END line — a kill is indistinguishable from a clean exit" \
     || ok "no END line, so the kill is legible as an unfinished pass"
-  # The pass died before the merge arm, so its marker rests at `started`: the
-  # next pass reads that as a merge decision the pass never reached.
+  # A pass killed before it decides its merge tail rests at a pre-decision phase:
+  # `started` if killed before the merge arm, `reached` if killed inside it.
+  # merge-tail-report.sh reads both as a dropped tail; only `decided`/`held` (or
+  # an empty marker) would mean the pass was not caught before deciding.
   read -r kph _ < "$MARK" 2>/dev/null || kph=""
-  eq "$kph" "started" "the killed pass left its merge-decision marker at 'started'"
+  case "$kph" in
+    started|reached) ok "the killed pass left its merge-decision marker at a pre-decision phase ('$kph')" ;;
+    *) bad "the killed pass left its marker at '${kph:-<empty>}', not a pre-decision phase — it was not caught before deciding its tail" ;;
+  esac
 else
   bad "the pass to be killed never reached its gate-ensure arm (fixture wedged)"
   : > "$GATE_RELEASE"; wait "$d2" 2>/dev/null
 fi
 
 echo "# the merge-decision marker tracks a clean pass to 'decided', and the report runs at pass start"
+# The killed pass above orphaned its gate-ensure arm, which holds the pass lock
+# until it exits. Wait for the lock to free first, or this pass reads it as
+# already in flight and skips — running no arms, no marker, and no report.
+await_lock_free || bad "the killed pass's arm never released the lock before the clean pass"
 for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 # A report stub records how the driver invoked it. It is created only for this
 # case and removed after, so the surrounding cases run with the report absent
