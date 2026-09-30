@@ -296,12 +296,15 @@ data plane never blocks an intake.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
 `mol-first-reaction` at the new subject. That formula triages the subject and
-takes one of its four dispositions; it files a visit from its `advance-and-drain`
-step only when the disposition is a ruling. So when the reaction judges the
-capture a genuine fork, an irreversible or destructive action, or a policy call,
-the operator arrives at a framed conversation with a first-reaction card already
-written; when it judges the action clear and reversible, it routes the capture,
-holds it, or hands it to a validating closer, and files no visit. The script
+takes one of its five dispositions; it files a visit from its `advance-and-drain`
+step on the two that put the subject to the operator, a ruling or a recommend. A
+ruling is Discuss-only: the reaction judges the capture a genuine fork, an
+irreversible or destructive action, or a policy call, and the operator arrives at
+a framed conversation with a first-reaction card already written. A recommend
+adds an action the operator can Accept: the reaction names the move and the
+execution mol, and the visit offers Accept beside Discuss. When the reaction
+judges the action clear and reversible, it routes the capture, holds it, or hands
+it to a validating closer, and files no visit. The script
 files nothing on the reaction path; a second visit would split one conversation
 into two sittings of the same subject.
 

@@ -24,9 +24,10 @@
 #   • THE mr-INVARIANT — `sling` bakes in --on mol-first-reaction --merge mr and
 #     HARD-REFUSES --merge direct (the security invariant).
 #   • THE FORMULA CONTRACT — mol-first-reaction writes the fixed card shape,
-#     ends in ONE of four dispositions (route it, hold it, close it via a
-#     validating closer, or ask), records which one and why, flags the bead onto
-#     the board, and NEVER closes the target itself.
+#     ends in ONE of five dispositions (route it, recommend an action for the
+#     operator to trigger, hold it, close it via a validating closer, or ask),
+#     records which one and why, flags the bead onto the board, and NEVER closes
+#     the target itself.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
 #     (max 2-3, the pool's only throttle), it defaults to mr, and one
 #     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
@@ -604,7 +605,7 @@ has "formula attributes the takeaway to proactive"      "--by proactive"        
 has "formula collapses stamp+release into one --release call" "--release"         "$F"
 has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
 
-echo "── the terminal step has FOUR exits, not one hardcoded visit ──"
+echo "── the terminal step has FIVE exits, not one hardcoded visit ──"
 # The defect this replaces: every bead a reaction touched became a request for
 # the operator's attention, whatever the bead actually needed. The exits are
 # named in the formula and performed by one script, so the choice is a branch
@@ -613,6 +614,7 @@ DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
 [ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
 has "exit: actionable — route the bead to a pool"  "--disposition actionable" "$F"
+has "exit: recommend — file a visit that carries an action to Accept" "--disposition recommend" "$F"
 has "exit: blocked — record the wait as an edge"   "--disposition blocked"    "$F"
 has "exit: close — route to a validating closer"   "--disposition close"      "$F"
 has "exit: ruling — file the visit"                "--disposition ruling"     "$F"
@@ -621,8 +623,12 @@ has "the blocked exit names an existing wait"      "--waiting-on"             "$
 has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
 has "the close exit defers behind the reaction's own root" "--after-workflow" "$F"
 has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
+# recommend is the bridge between actionable and ruling: it files a visit like
+# ruling, but names the execution mol the operator Accepts — the flag ruling
+# rejects and recommend requires, so its presence discriminates the two exits.
+has "the recommend exit names the execution mol to Accept" "--recommended-formula" "$F"
 has "every exit records WHY it was chosen"         "--reason"                 "$F"
-# The four exits must be distinguishable to the reader, not one exit with four
+# The five exits must be distinguishable to the reader, not one exit with five
 # labels: the actionable exit routes to the pool that does the work, and the
 # close exit routes to the pool that validates and closes it.
 has "the actionable exit names the pool that works it" "polecat pool"         "$F"
@@ -652,10 +658,11 @@ has "…naming the two ways a disposition fails to land" "never became a"     "$
 echo "── the terminal step drains a re-offered LANDED reaction before any exit ──"
 # A reaction that has landed carries gc.proactive_reaction=1. When advance-and-drain
 # is re-offered after that (a first session disposed, then drained before closing
-# this step), running an exit again is wrong on all four — and on the ruling exit
-# the gate-visit block files a SECOND visit before first-reaction-dispose.sh can
-# refuse the re-dispose, leaving a duplicate the board carries. So a reacted-guard
-# sits AHEAD of the four exit blocks and drains instead of running one. Extract the
+# this step), running an exit again is wrong on all five — and on the ruling and
+# recommend exits the gate-visit block files a SECOND visit before
+# first-reaction-dispose.sh can refuse the re-dispose, leaving a duplicate the
+# board carries. So a reacted-guard sits AHEAD of the exit blocks and drains
+# instead of running one. Extract the
 # last step and assert the guard is there, keyed on the landed marker, and that its
 # drain precedes the first exit block (1a) — so a re-offer never reaches the
 # gate-visit create.
@@ -710,14 +717,22 @@ has "prompt names the formula"                  "mol-first-reaction"     "$PM"
 has "prompt forbids closing the target"         "Close the target"       "$PM"
 has "prompt keeps code on the mr path"          "mr path only"           "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
-# Doctrine, not mechanics: the prompt NAMES the four exits and defers the dispose
+# Doctrine, not mechanics: the prompt NAMES the five exits and defers the dispose
 # commands (--disposition/--takeaway/--by proactive/--release) to the formula,
 # which the formula-contract assertions above already lock. Asserting the command
 # strings against the prompt too is what made the two surfaces duplicate.
 has "prompt names the actionable exit"                 "**actionable**"           "$PM"
+has "prompt names the recommend exit"                  "**recommend**"            "$PM"
 has "prompt names the blocked exit"                    "**blocked**"              "$PM"
 has "prompt names the close exit"                      "**close**"                "$PM"
 has "prompt names the ruling exit"                     "**ruling**"               "$PM"
+# The defect this branch fixes was that the prompt never taught the recommendation
+# path, so a render that names recommend but drops the action-to-mol menu leaves it
+# unusable. Pin the menu itself: the framing line and both of its action→mol rows,
+# so a future render that drops the menu fails here rather than passing silently.
+has "prompt teaches the recommend action-to-mol menu"  "name the mol that runs it" "$PM"
+has "…mapping a bead's own work to mol-polecat-work"   "do the work a bead describes" "$PM"
+has "…and an operator-authority action to its roster mol" "operator-authority action" "$PM"
 has "prompt says a visit is the minority case"         "minority case"            "$PM"
 has "prompt triages origin on its merits, not a gate"  "triaged on its merits"    "$PM"
 absent "prompt has no separate --status=open release update" "--status=open"     "$PM"
