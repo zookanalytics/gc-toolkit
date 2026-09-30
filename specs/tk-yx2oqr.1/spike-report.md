@@ -1,6 +1,6 @@
 ---
 name: Phase model for review checks — spike report
-description: Design proposal for modeling each review check's phase as a first-class fact, so the pre-open / draft-to-ready / merge transitions read a check's phase from the check index instead of the six hardcoded none/off/approval drops. Decision-grade; to be ratified in an operator conversation before any implementation.
+description: Design proposal for modeling each review check's phase as a first-class fact, so the pre-open / draft-to-ready / merge transitions read a check's phase from the check index instead of the seven hardcoded none/off/approval drops. Decision-grade; to be ratified in an operator conversation before any implementation.
 ---
 
 # Phase model for review checks — spike report
@@ -8,7 +8,7 @@ description: Design proposal for modeling each review check's phase as a first-c
 This spike answers one question: what would let a stage transition (create the
 PR, mark it ready for review, merge it) decide which checks it must wait on by
 reading a declared fact about each check, rather than by re-deriving the same
-hardcoded rule in six places? The answer is a **phase** on each check — the
+hardcoded rule in seven places? The answer is a **phase** on each check — the
 stage-transition by which the check must be green. This report proposes the
 phase model, resolves the four sub-questions the operator named, and recommends
 a concrete schema and migration. It does not implement any of it.
@@ -33,7 +33,7 @@ a concrete schema and migration. It does not implement any of it.
    removes `approval` from every drop list at a stroke.
 4. **Centralize the sentinel and phase logic in the one parser.** Give
    `review-checks.sh` a resolver that takes an anchor's `check_set` and a
-   target transition and returns the checks that gate it. The six copies of the
+   target transition and returns the checks that gate it. The seven copies of the
    `none|off|approval` drop collapse into that one resolver, which is the only
    thing that knows `none`/`off` are sentinels.
 5. **Introduce the draft-first flow only where an `open-as-draft` check
@@ -90,7 +90,7 @@ gateless sentinel, and `approval` is met by an external GitHub review
 the same three: `pr-open.sh` publishes once every surviving check reads green,
 and `merge.sh` merges under the same condition (`docs/state-machine.md:180-188`).
 
-The drop is one rule — `none|off|approval` — copied six times across the five
+The drop is one rule — `none|off|approval` — copied seven times across the six
 scripts in three syntactic shapes:
 
 | Script | Site | Shape | Transition it serves |
@@ -100,6 +100,8 @@ scripts in three syntactic shapes:
 | `review-outcome.sh` | `:245-251` (inline) | `grep -Eiv '^(none\|off\|approval)$'` | supersede lane backing on a failed feedback batch |
 | `gate-ensure.sh` | `:671-676` (inline) | `case … none\|off\|approval) continue` | dispatch reviews (both transitions) |
 | `liveness-sweep.sh` | `:317-323` (`pre_open_all_green`) | jq `map(select(≠ none, off, approval))` | census: classify a pre-open anchor as gated |
+| `pr-facts.sh` | `:670` (`unengaged_holds`) | `case … none\|off\|approval) continue` | facts: every gate green (a green gate hides findings) |
+| `pr-facts.sh` | `:1954` (dismiss arm) | `case … none\|off\|approval) continue` | facts: dismiss our own stale CHANGES_REQUESTED when green |
 
 `gate-ensure.sh` also collapses `none`/`off` to the sentinel in two more places
 (`:92-97`, `:622`). The stage difference between pre-open and merge is not in the
@@ -109,14 +111,14 @@ drop list — it is a second hardcoded fact: a pre-open lane read passes
 `pre_open_gate` and `pull_request` are enumerated together at
 `gate-ensure.sh:473`.
 
-Any field that says "this check gates this transition" has to replace all six
+Any field that says "this check gates this transition" has to replace all seven
 drop sites and the `--no-remote` split. That is the surface area of the change.
 
 ### `approval` is already a merge rule wearing a check's clothes
 
 `approval` is not an index entry and not a lane derived through `lane-state.sh`.
 It is a `check_set` token that arms a requirement `merge.sh` enforces on its own
-(`merge.sh:610-632`): an external `APPROVED` review from another account at the
+(`merge.sh:582-632`): an external `APPROVED` review from another account at the
 live head, with a standing `CHANGES_REQUESTED` as a hard veto. The same
 requirement is armed by two other conditions that are already not check_set
 tokens — a `signoff_dismissed` marker and the city's own dismissed review — so
@@ -130,7 +132,7 @@ A separate, related fact: a GitHub `APPROVED` review also backs *any* lane that
 has no local review bead (`lane-state.sh:22-27, 65-82, 127-129`) — "an approval
 names no gate, so it backs every lane." This is why the pre-open read is
 `--no-remote`. This fallback is about lane derivation and is out of scope for the
-phase model; the merge rule (`merge.sh:610-632`) is the part that relocates.
+phase model; the merge rule (`merge.sh:582-632`) is the part that relocates.
 
 ### Triage widens `check_set`, monotonically, over the index
 
@@ -186,12 +188,14 @@ checks running," made structural.
 
 ### The empty-phase collapse preserves today's behavior
 
-When an anchor's `check_set` has no `open-as-draft` check — every check gc-toolkit
-declares today is `pre-open` — the create gate and the ready gate have the same
-predicate, so the PR is created ready immediately. The draft state appears only
-for a repo that has an `open-as-draft` check to wait on. No repo without a demo
-or preview-CI check changes behavior; `pr-open.sh` keeps opening non-draft
-(`pr-open.sh:13, 578`) exactly as it does now.
+When an anchor's `check_set` has no `open-as-draft` check — every check
+gc-toolkit declares today is `pre-open` — the PR is never opened as a draft, so
+there is no draft → ready flip to gate: the create gate opens it ready
+immediately, and GitHub CI stays a merge-time concern (the merge gate's CLEAN
+requirement) exactly as today. The draft state appears only for a repo that has
+an `open-as-draft` check to wait on. No repo without a demo or preview-CI check
+changes behavior; `pr-open.sh` keeps opening non-draft (`pr-open.sh:13, 578`)
+exactly as it does now.
 
 ### Forward gates, with the merge gate as the backstop
 
@@ -274,7 +278,7 @@ Two of the operator's constraints fall out of this without a special case:
 - **Triage cannot put CI pre-open**, because a preview-triggered CI check
   declares `phase_floor = "open-as-draft"` and the resolver refuses a phase
   below the floor — exactly as `signoff.sh` refuses a check the index does not
-  declare (`signoff.sh:613-617`).
+  declare (`signoff.sh:640-641`).
 - **Triage cannot put human approval anywhere**, because approval is not a
   check. It is a merge rule (next section), so it is not in the table triage can
   widen or re-phase at all.
@@ -308,13 +312,14 @@ lane. Both jobs move cleanly off the token:
 2. **Dropping** disappears. With `approval` no longer a `check_set` member,
    nothing has to drop it. Every drop list shrinks to `none|off`, and those are
    the sentinel the resolver owns — so the drop lists disappear entirely from the
-   five scripts.
+   six scripts.
 
 End to end, the surfaces are: the index and `check_set` stop mentioning
 `approval`; `lifecycle.toml` declares the merge rule where `approval_member`
 sits today; `merge.sh`'s approval block reads the rule rather than the token; and
-`pr-open.sh`, `review-outcome.sh`, `gate-ensure.sh`, and `liveness-sweep.sh` stop
-special-casing the name because it is gone from the namespace they read. The
+`pr-open.sh`, `review-outcome.sh`, `gate-ensure.sh`, `liveness-sweep.sh`, and
+`pr-facts.sh` stop special-casing the name because it is gone from the namespace
+they read. The
 migration also needs a one-shot rewrite of live anchors carrying `approval` in
 `check_set` into the new rule, on the pattern of the `migrate-*` scripts
 tk-3h9mzz already ships.
@@ -378,7 +383,7 @@ untouched. Modeling dialogue as a phase is a larger change with no demand behind
 it yet; this spike deliberately leaves it out and flags it as a later question if
 one arises.
 
-## Retiring the six hardcoded drops
+## Retiring the seven hardcoded drops
 
 The centralization that makes the drops go away: one resolver in the one parser.
 
@@ -407,6 +412,10 @@ emits the checks whose phase is at or before `<phase>`. Each transition calls it
   resolver and the transition instead of re-deriving.
 - **`review-outcome.sh`** supersedes the backing of each returned lane; its
   inline drop is deleted.
+- **`pr-facts.sh`** carries two more copies today — the `unengaged_holds`
+  finding-hold (`:670`) and the self-dismissal arm (`:1954`), each computing
+  all-gates-green for merge readiness. Both call `--through merge`, and their
+  inline `none|off|approval` `case`s are deleted.
 - **`liveness-sweep.sh`** classifies a pre-open anchor by asking the resolver for
   its `pre-open` gating set. This also fixes the outlier noted below.
 
