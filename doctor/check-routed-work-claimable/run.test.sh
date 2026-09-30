@@ -63,6 +63,14 @@ case "$sub" in
            f="$STORES/$name.ready.json"; [ -f "$f" ] || f="$STORES/$name.json" ;;
   blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && bd_die
            f="$STORES/$name.blocked.json" ;;
+  # `show <id>` re-reads one bead at report time. Its fixture defaults to the
+  # `list` snapshot, so a case only sets `<store>.show.json` when the two must
+  # differ (a just-closed bead, a closed molecule root the open list omits).
+  show)    [ "$name" = "${BD_FAIL_SHOW:-}" ] && bd_die
+           f="$STORES/$name.show.json"; [ -f "$f" ] || f="$STORES/$name.json"
+           if [ -f "$f" ]; then jq -c --arg id "$2" '[.[] | select((.id // "") == $id)]' "$f" 2>/dev/null || printf '[]'
+           else printf '[]'; fi
+           exit 0 ;;
   *) printf '[]'; exit 0 ;;
 esac
 if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
@@ -83,6 +91,14 @@ routed_typed() { printf '{"id":"%s","status":"open","issue_type":"%s","metadata"
 blocked_row() { printf '{"id":"%s","status":"open","blocked_by":["%s"],"blocked_by_count":1}' "$1" "$2"; }
 ready_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.ready.json"; }
 blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blocked.json"; }
+# A graph.v2 molecule step: routed + unassigned, carrying the step markers arm 4
+# keys its live-molecule carve-out on, with a blocks edge to its ordering
+# predecessor — the shape the arm otherwise reads as an inverted strand edge.
+# Args: id route step_id root_id blocker root_rig.
+routed_step() { printf '{"id":"%s","status":"open","issue_type":"task","dependencies":[{"depends_on_id":"%s","type":"blocks"}],"metadata":{"gc.routed_to":"%s","gc.step_id":"%s","gc.root_bead_id":"%s","gc.root_store_ref":"rig:%s"}}' "$1" "$5" "$2" "$3" "$4" "$6"; }
+open_bead()   { printf '{"id":"%s","status":"open"}' "$1"; }
+closed_bead() { printf '{"id":"%s","status":"closed"}' "$1"; }
+show_store()  { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.show.json"; }
 
 # --- 1. rig-unqualified route: error, repair named ------------------------
 store alpha "$(routed a-1 pack.polecat)"
@@ -276,6 +292,44 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "an id offered in one store does not vouch for the same id stranded in the next"
 has "$OUT" "beta bead n-8" "the stranded store is the one named"
 hasnt "$OUT" "alpha bead n-8" "the store that offers it is not named"
+clear_stores
+
+# --- 11b. a LIVE graph.v2 molecule step is not a strand ----------------------
+# Routed, unassigned, in neither list because its molecule schedules it through
+# session affinity — and its blocks edge to the prior step is the molecule's own
+# ordering, not the inverted strand edge the arm names for a plain routed bead.
+store alpha "$(routed_step sm-1 alpha/pack.polecat mol-x.advance sm-root sm-blk alpha)" "$(open_bead sm-root)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a live graph.v2 molecule step (root still open) is not a strand"
+has "$OUT" "sm-1" "the live step is still reported"
+has "$OUT" "which is still open" "the note names the molecule as live"
+hasnt "$OUT" "check the edge direction" "the step's ordering edge is not read as an inverted strand edge"
+clear_stores
+
+# --- 11c. an ORPHAN step of a CLOSED molecule stays a finding -----------------
+# Same markers, but the root has closed: the molecule is done and no session
+# will resume this step, so it is a genuine strand. The closed root is absent
+# from the open-bead `list` but readable by the report-time `show` re-read.
+store alpha "$(routed_step sm-2 alpha/pack.polecat mol-y.advance sm-root2 sm-blk2 alpha)"
+ready_store alpha; blocked_store alpha
+show_store alpha "$(routed_step sm-2 alpha/pack.polecat mol-y.advance sm-root2 sm-blk2 alpha)" "$(closed_bead sm-root2)"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a graph.v2 step whose molecule is CLOSED is a genuine orphan strand"
+has "$OUT" "sm-2" "the orphan step is named"
+has "$OUT" "orphaned step" "the error names it an orphan of a done molecule"
+clear_stores
+
+# --- 11d. a candidate that closed since the listing is dropped, not flagged ---
+# The open-bead snapshot named it, but the report-time re-read finds it closed:
+# the just-closed race that fired this check on an already-closed bead.
+store alpha "$(routed n-jc alpha/pack.polecat)"
+ready_store alpha; blocked_store alpha
+show_store alpha "$(printf '{"id":"n-jc","status":"closed","metadata":{"gc.routed_to":"alpha/pack.polecat"}}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a candidate that closed between the listing and the report is dropped, not flagged"
+has "$OUT" "closed between the listing and this report" "the note explains the just-closed race"
+hasnt "$OUT" "no pool offers it" "the closed bead is not reported as a live strand"
 clear_stores
 
 # --- 12. the reachability arm fails CLOSED -----------------------------------
