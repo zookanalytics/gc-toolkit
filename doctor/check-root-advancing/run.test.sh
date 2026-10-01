@@ -137,6 +137,23 @@ has "$OUT" "root R1" "names the stranded root"
 has "$OUT" "front1" "names the unreachable frontier step"
 has "$OUT" "STRANDED" "labels it stranded"
 
+echo "== 1b. a strand whose root carries NO gc.session_name is reported, not crashed =="
+# A stranded root commonly has no session_name back-reference: the slot that
+# drove it is gone and nothing restamped the root. The empty value must index
+# nothing in the live-session set and fall through to member liveness, never
+# abort the check on a bad associative-array subscript — the one shape that
+# turned this detector into a no-op on exactly the roots it exists to catch.
+clear_stores
+store alpha "$(root R1b CV1b "" "$OLD")" \
+            "$(step done1b R1b closed "$OLD" lx-dead lx-dead gc-toolkit/gc-toolkit.polecat)" \
+            "$(step front1b R1b open "$OLD")" \
+            "$(convoy CV1b open)"
+ready alpha "$(step front1b R1b open "$OLD")"
+OUT="$(run_check)"; RC=$?
+eq "$RC" "2" "a session-less root strand is reported, not crashed"
+has "$OUT" "root R1b" "names the session-less stranded root"
+hasnt "$OUT" "bad array subscript" "an empty session_name does not abort the check"
+
 echo "== 2. exempt: a live session holds a non-closed member =="
 clear_stores
 sessions "$(live lx-hold gc-toolkit__worker)"

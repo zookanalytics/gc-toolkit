@@ -111,6 +111,51 @@ func TestGroupRootUnownedConvoyGroupsByItsEdges(t *testing.T) {
 	}
 }
 
+func TestGroupParentNamesImmediateParent(t *testing.T) {
+	// A three-level containment tree: tk-top contains tk-sub, tk-sub contains
+	// tk-leaf. GroupParent is the id one level up — empty at the root — while
+	// GroupRoot is the top of the tree for every row, so a surface can nest the
+	// family instead of flattening it under the top root.
+	b := BuildBoard([]Anchor{
+		epicWith("tk-top", "tk-sub"),
+		epicWith("tk-sub", "tk-leaf"),
+		humanKid("tk-leaf"),
+	}, fixtureNow, false, nil, Facts{})
+
+	if got := mustTile(t, b, "tk-top").GroupParent; got != "" {
+		t.Errorf("a family root has no parent: GroupParent=%q want empty", got)
+	}
+	sub := mustTile(t, b, "tk-sub")
+	if sub.GroupParent != "tk-top" || sub.GroupRoot != "tk-top" {
+		t.Errorf("a sub-epic's parent is its container: GroupParent=%q GroupRoot=%q want tk-top,tk-top", sub.GroupParent, sub.GroupRoot)
+	}
+	leaf := mustTile(t, b, "tk-leaf")
+	if leaf.GroupParent != "tk-sub" {
+		t.Errorf("a leaf's parent is its sub-epic, not the top root: GroupParent=%q want tk-sub", leaf.GroupParent)
+	}
+	if leaf.GroupRoot != "tk-top" {
+		t.Errorf("a leaf's family root is the top of the tree: GroupRoot=%q want tk-top", leaf.GroupRoot)
+	}
+}
+
+func TestGroupParentFollowsBlockedEdgeForLeaf(t *testing.T) {
+	// A childless review leaf has no containment parent, so its immediate parent is
+	// the anchor it blocks — the same edge GroupRoot climbs, so the GroupParent
+	// chain always reaches GroupRoot.
+	m := mergeAnchor("tk-pr", nil)
+	m.WaitingOn = []string{"tk-rev"}
+	rev := Anchor{ID: "tk-rev", Title: "Review branch polecat/tk-pr -> main", Kind: "review",
+		Source: "review", Rig: "gc-toolkit", Prefix: "tk",
+		Metadata: map[string]string{"anchor_bead": "tk-pr", "task_kind": "review"}}
+	b := BuildBoard([]Anchor{m, rev}, fixtureNow, false, nil, Facts{})
+	if got := mustTile(t, b, "tk-rev").GroupParent; got != "tk-pr" {
+		t.Errorf("a review leaf's parent is the anchor it blocks: GroupParent=%q want tk-pr", got)
+	}
+	if got := mustTile(t, b, "tk-pr").GroupParent; got != "" {
+		t.Errorf("the anchor it blocks is a root: GroupParent=%q want empty", got)
+	}
+}
+
 func TestReviewReworkLeafBandsInFlight(t *testing.T) {
 	// A childless review/rework leaf bands as in-flight work, not the empty-LOW
 	// arm meant for a decomposed container that lost its children.

@@ -253,6 +253,16 @@ export interface Tile {
    */
   group_root: string;
   /**
+   * The id of this row's IMMEDIATE parent in the dependency family — the one
+   * anchor its edges climb to a single level up, and empty when the row climbs to
+   * nothing (it is a family root). `group_root` names the top of the tree; this
+   * names the next step toward it, so a surface nests the family as a containment
+   * tree — a sub-epic under its parent, its own children under it — instead of one
+   * flat member list under the top root.
+   * Always present.
+   */
+  group_parent: string;
+  /**
    * Set when this row can be ACCEPTED: the subject carries a recommended
    * execution formula (`gc.recommended_formula`) and its visit is un-engaged, so
    * a person can dispatch that formula at the subject and dismiss the visit in
@@ -283,13 +293,18 @@ export interface Tile {
   pr_phase: string;
   /**
    * This bead's liveness in the same tri-state vocabulary — `'working'`,
-   * `'needs-review'`, or `'needs-attention'` — but on EVERY live row, where
-   * `pr_phase` is set on merge anchors alone. A merge anchor reads the same value
-   * as `pr_phase`; any other bead reads its own live-work signal through the
-   * identical core, so a row cannot carry two disagreeing tri-states. `''` only
+   * `'needs-review'`, or `'needs-attention'` — on EVERY live row, and the word
+   * the `frontier` string leads with. It begins as the per-bead value derived
+   * from the same inputs as `pr_phase`, but a row with child tiles then takes its
+   * children's rolled-up state instead: an epic's frontier is its children's.
+   *
+   * So `phase` and `pr_phase` are two independent axes. `pr_phase` is the PR
+   * round-trip value and is never rolled up; `phase` equals it on a merge anchor
+   * with no child tiles (the common case, since a merge anchor's review/rework
+   * children hang off a blocked edge the roll-up does not climb) and diverges
+   * from it on a merge anchor that also has parent-child child tiles. `''` only
    * on a closed (`DONE`) row, where the live vocabulary has no answer — the same
-   * not-applicable empty `pr_phase` uses off a non-merge row. The `frontier`
-   * string leads with this word on every live row.
+   * not-applicable empty `pr_phase` uses off a non-merge row.
    */
   phase: string;
 }

@@ -83,10 +83,11 @@ th {
 
 /*
  * The board is one table. Dependency structure is the grouping axis: a family's
- * root with members leads as a group row and its members indent one level
- * beneath it; a single-item family is a plain row. The attention band rides a
- * per-row column; a ● and a row tint mark the rows whose next move is the
- * operator's, in place — the table is never reordered by attention.
+ * root with members leads as a group row and its members nest beneath it as a
+ * tree, each indented by its depth so a sub-epic sits above its own children; a
+ * single-item family is a plain row. The attention band rides a per-row column; a
+ * ● and a row tint mark the rows whose next move is the operator's, in place —
+ * the table is never reordered by attention.
  */
 .anchors {
   margin-top: 1.5rem;
@@ -104,10 +105,12 @@ th {
   border-top: 2px solid rgb(128 128 128 / 45%);
 }
 
-/* Members sit one level in, indented on the title cell so the ● in the band
-   column still lines up down every row. */
-.row-member .title-cell {
-  padding-left: 1.75rem;
+/* Rows indent by their depth in the family tree, on the title cell so the ● in
+   the band column still lines up down every row. The row sets --depth: a root
+   (depth 0) gets no indent, a direct member one step in, and a nested sub-epic's
+   child one step further. */
+.title-cell {
+  padding-left: calc(0.6rem + var(--depth, 0) * 1.75rem);
 }
 
 /* The attention highlight, in place: a row whose next move is the operator's, or

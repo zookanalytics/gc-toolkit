@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
@@ -305,29 +306,67 @@ function progressCell(tile: Tile): string {
 }
 
 // The whole board is ONE table. Dependency structure is its top-level axis: a
-// family whose root has members renders that root as a group row with its
-// members indented one level beneath it; a single-item family renders as one
-// plain row. `kind` carries which of the three a row is.
+// family whose root has members renders that root as a group row leading a nested
+// tree of its members; a single-item family renders as one plain row. `kind`
+// carries which of the three a row is, `depth` how far it sits in its family tree
+// (the root at 0), and `isParent` whether it heads a sub-group of its own.
 type RowKind = 'group' | 'member' | 'loose';
-type BoardRow = { tile: Tile; kind: RowKind };
+type BoardRow = { tile: Tile; kind: RowKind; depth: number; isParent: boolean };
 
-// flattenFamilies lays the grouped families out as the table's rows: a root with
-// members leads its family as a `group` row and its members follow as `member`
-// rows; a root with none stands alone as a `loose` row. The order is preserved
-// from groupByFamily, which preserved it from the wire — owed families first,
-// oldest first, members in SECTION_ORDER — so the board is never reordered by
-// which rows want a person.
+// flattenFamilies lays the grouped families out as the table's rows. A family
+// with members leads with its root as a `group` row, then walks the containment
+// tree the wire's `group_parent` edges describe — each member nested under its
+// immediate parent and indented by its depth — so a sub-epic renders as a
+// sub-group above its own children rather than as a flat sibling beside them. A
+// root with no members stands alone as a `loose` row. Sibling order and family
+// order are preserved from groupByFamily (owed families first, oldest first,
+// members in SECTION_ORDER), so the board is never reordered by which rows want a
+// person; nesting only regroups a family's rows under their parents.
 function flattenFamilies(families: Family[]): BoardRow[] {
   const rows: BoardRow[] = [];
-  for (const { root, members } of families) {
-    if (members.length > 0) {
-      rows.push({ tile: root, kind: 'group' });
-      for (const m of members) rows.push({ tile: m, kind: 'member' });
-    } else {
-      rows.push({ tile: root, kind: 'loose' });
-    }
-  }
+  for (const fam of families) appendFamilyTree(rows, fam);
   return rows;
+}
+
+// appendFamilyTree emits one family: its root, then its members as a depth-first
+// pre-order walk of the containment tree. Each member climbs to the parent named
+// by its `group_parent`; a member whose parent is empty, is itself, or names no
+// tile in this family attaches directly under the family root, so a board that
+// has not stamped `group_parent` degrades to a flat one-level list, and a
+// malformed edge never drops a row. A cycle among members (only a malformed
+// graph forms one) never reaches the root through the walk, so those
+// members are appended under the root afterward.
+function appendFamilyTree(rows: BoardRow[], { root, members }: Family): void {
+  if (members.length === 0) {
+    rows.push({ tile: root, kind: 'loose', depth: 0, isParent: false });
+    return;
+  }
+  const inFamily = new Set<string>([root.id, ...members.map((m) => m.id)]);
+  const childrenOf = new Map<string, Tile[]>();
+  for (const m of members) {
+    let parent = m.group_parent;
+    if (!parent || parent === m.id || !inFamily.has(parent)) parent = root.id;
+    const kids = childrenOf.get(parent);
+    if (kids) kids.push(m);
+    else childrenOf.set(parent, [m]);
+  }
+  const hasKids = (id: string): boolean => (childrenOf.get(id)?.length ?? 0) > 0;
+  rows.push({ tile: root, kind: 'group', depth: 0, isParent: true });
+  const visited = new Set<string>([root.id]);
+  const walk = (parentId: string, depth: number): void => {
+    for (const kid of childrenOf.get(parentId) ?? []) {
+      if (visited.has(kid.id)) continue;
+      visited.add(kid.id);
+      rows.push({ tile: kid, kind: 'member', depth, isParent: hasKids(kid.id) });
+      walk(kid.id, depth + 1);
+    }
+  };
+  walk(root.id, 1);
+  for (const m of members) {
+    if (visited.has(m.id)) continue;
+    visited.add(m.id);
+    rows.push({ tile: m, kind: 'member', depth: 1, isParent: hasKids(m.id) });
+  }
 }
 
 // The visit marker: a visible, self-evident chip on a row an open visit holds. It
@@ -402,10 +441,11 @@ function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
   );
 }
 
-// One row of the unified table. Every row carries the same columns; `kind` sets
-// the grouping treatment (a group row's title reads as a header; a member's is
-// indented one level) and the attention highlight rides the row in place: a ●
-// and a tint where a row's next move is the operator's (wantsPerson), a tint on
+// One row of the unified table. Every row carries the same columns; the grouping
+// treatment reads from the row shape (a row that heads a group — the family root
+// or a nested sub-epic — has a header title, and every row is indented by its
+// depth in the family tree) and the attention highlight rides the row in place: a
+// ● and a tint where a row's next move is the operator's (wantsPerson), a tint on
 // a row an open visit is holding (held).
 function AnchorRow({
   row,
@@ -423,7 +463,7 @@ function AnchorRow({
   // The sittings on each bead, keyed by subject id, for the per-row visit hover.
   sittingsBySubject: Map<string, Sitting[]>;
 }) {
-  const { tile, kind } = row;
+  const { tile, kind, depth, isParent } = row;
   const person = wantsPerson(tile);
   const className =
     [
@@ -450,8 +490,8 @@ function AnchorRow({
         <PRPhaseChip tile={tile} />
         <PRLink tile={tile} />
       </td>
-      <td className="title-cell">
-        {kind === 'group' ? <span className="family-title">{tile.title}</span> : tile.title}
+      <td className="title-cell" style={{ '--depth': depth } as CSSProperties}>
+        {isParent ? <span className="family-title">{tile.title}</span> : tile.title}
       </td>
       <td>{progressCell(tile)}</td>
       <td>{tile.frontier}</td>

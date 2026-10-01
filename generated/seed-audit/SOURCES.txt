@@ -60,7 +60,7 @@ agents/witness/prompt.template.md
 assets/scripts/render-seed-audit.sh
 e716c2305c3d5ae4cd5239cb46675cc179660842c1d34ad84532395f1e4c79dc
 formulas/mol-deacon-patrol.toml
-fce3bc2337b49afb5e498c0f7279d6f04d17a005d0478f08392de1aead8da85b
+0a7c1b6ab7d6a7c80951dbda9de1c65311492f48ef4964622c33f29342e6c174
 formulas/mol-dog-shutdown-dance.toml
 ef06872c2ec83927dd1854e979d338bba988d53c1285798e47d48ff07639a9b6
 formulas/mol-feedback-distiller.toml
@@ -68,7 +68,7 @@ f58820b28310130d413a0938c88137b2f04a8fcd373adf579f1ea38659caacef
 formulas/mol-feedback-miner.toml
 a1a5d78111439112af1510c61e81268e67b6f74e9b7e9134894380ed2b24e6ba
 formulas/mol-first-reaction.toml
-00c83ae5771aca226faa78afed7d5d6331d47568583c85236a5c4a3ad262aa68
+52709493ee385b642418497af636439a90a04c3e21339d85934e77a876e39a8f
 formulas/mol-polecat-work.toml
 ffe3736b3b00d83047ccde25e7c5486208826c1b4ec30002dfebec63f2272030
 formulas/mol-refinery-patrol.toml
@@ -84,7 +84,7 @@ formulas/mol-validate.toml
 formulas/mol-visit.toml
 6736d5b27b5b6445610bcc5db9ffb094bcd985b40092ed7e7ec6e7a70c43ac01
 formulas/mol-witness-patrol.toml
-b1e932275e9dd909d441ed3455668f84bca2377012f917cc7bb5f71e7e43883a
+c721c4bea2eab2d228bed119739ed97a0cc1b629c550911fb1122a8ef06132f2
 pack.toml
 ad01c07323f6c18840caa35b9bbd9141c7affb6a9e3544df81f020561c31376c
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
