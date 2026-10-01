@@ -40,7 +40,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
-  gc-helm engage [<subject>] [--subject <id>] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior
+  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
@@ -77,6 +77,15 @@ fresh one is filed only when the subject has none. A --reason with an explicit
 visit id is refused, because a new visit needs a subject and the reason would
 otherwise be dropped. The summary and prompts print on stdout; a single [debug]
 line of visit/sitting/routing ids is always printed on stderr.
+--new-subject raises a topic that has no bead yet: it creates a fresh
+operator-origin subject bead (the positional text, or an interactive prompt, is
+its title and — absent --reason/--template — its opener), then files the one
+visit and engages it, all in one gesture. The rig to create it in comes from
+--rig or an interactive prompt over the converse-capable rigs (needed because
+there is no id prefix yet to derive a rig from); --no-input requires --rig. The
+subject is marked gc.interactive_intake=1 so the async first-reaction/proactive
+worker stands down rather than file a second visit; the operator-origin
+force-to-visit invariant is preserved — engage files that one visit itself.
 dismiss ends the sitting. react slings a proactive first reaction via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one
@@ -2666,6 +2675,114 @@ engage_prompt_model() {
     return 0
 }
 
+# engage_prompt_rig — numbered selection over the rigs that carry a converse
+# template (only those can host a sitting). A single such rig is auto-selected;
+# none is an error. Sets ENGAGE_RIG.
+engage_prompt_rig() {
+    enumerate_rigs
+    _epr_i=0; _epr_map=""; _epr_menu=""
+    while IFS="$TAB" read -r _epr_name _epr_path; do
+        [ -n "$_epr_name" ] || continue
+        rig_carries_converse "$_epr_path" || continue
+        _epr_i=$((_epr_i + 1))
+        _epr_map="$_epr_map$_epr_i $_epr_name
+"
+        [ -n "$_epr_menu" ] && _epr_menu="$_epr_menu · "
+        _epr_menu="$_epr_menu[$_epr_i] $_epr_name"
+    done <<EOF
+$(printf '%s' "$RIGS" | jq -r '.[] | [.name, .path] | @tsv' 2>/dev/null)
+EOF
+    if [ "$_epr_i" -eq 0 ]; then
+        echo "$PROG: engage: no rig in this city carries a converse template, so there is nowhere to host a new-subject sitting." >&2
+        return 1
+    fi
+    if [ "$_epr_i" -eq 1 ]; then
+        ENGAGE_RIG=$(printf '%s' "$_epr_map" | awk 'NR==1{print $2}')
+        printf '  Rig: %s (the only converse-capable rig)\n' "$ENGAGE_RIG"
+        return 0
+    fi
+    printf '  Rig — %s › ' "$_epr_menu"
+    IFS= read -r _epr_reply || return 1
+    case "$_epr_reply" in
+        ""|*[!0-9]*) printf '  (not a listed number)\n'; return 1 ;;
+    esac
+    ENGAGE_RIG=$(printf '%s' "$_epr_map" | awk -v n="$_epr_reply" '$1==n{print $2}')
+    [ -n "$ENGAGE_RIG" ] || { printf '  (no such choice)\n'; return 1; }
+    return 0
+}
+
+# engage_create_subject — the --new-subject pre-step. Resolve the target rig,
+# obtain the subject title, and create a fresh operator-origin subject bead in
+# that rig's store. Mutates the caller's engage state the way the engage_prompt_*
+# helpers set ENGAGE_*: on return $bead is the new id and the opener is primed
+# (engage_reason/engage_file_new), so the rest of cmd_engage runs unchanged.
+# Reads new_subject_title, engage_rig, engage_interactive, engage_reason*,
+# engage_template.
+#
+# The subject is created MARKED gc.interactive_intake=1 so the async first-
+# reaction / proactive worker stands down rather than file a SECOND visit (engage
+# files the one visit itself, below): tools/gc-proactive.sh drops a marked bead
+# from its scan, and formulas/mol-first-reaction.toml consumes the marker and
+# files no visit if one is slung anyway. The marker is set in the `gc bd create`
+# write itself (--metadata), so the scan can never observe the bead unmarked.
+# gc.origin=operator is the honest origin; the force-to-visit invariant is
+# preserved, not relaxed — the subject still gets its one operator-filed visit.
+engage_create_subject() {
+    enumerate_rigs
+    # 1. Resolve the rig: a --rig value, else an interactive prompt, else refuse.
+    if [ -z "$engage_rig" ]; then
+        if [ "$engage_interactive" = 1 ]; then
+            engage_prompt_rig || { echo "$PROG: engage: no rig chosen — nothing created" >&2; exit 2; }
+            engage_rig="$ENGAGE_RIG"
+        else
+            echo "$PROG: engage: --new-subject needs a rig to create the subject in; pass --rig <name> (one-shot) or run interactively." >&2
+            exit 2
+        fi
+    fi
+    _ecs_path=$(printf '%s' "$RIGS" | jq -r --arg n "$engage_rig" '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
+    if [ -z "$_ecs_path" ]; then
+        echo "$PROG: engage: --rig '$engage_rig' matches no rig in 'gc rig list' (known: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null)). Nothing created." >&2
+        exit 4
+    fi
+    if ! rig_carries_converse "$_ecs_path"; then
+        echo "$PROG: engage: rig '$engage_rig' ($_ecs_path) carries no converse template, so it can host no converse sitting. Pick a converse-capable rig. Nothing created." >&2
+        exit 4
+    fi
+    if [ ! -d "$_ecs_path/.beads" ]; then
+        echo "$PROG: engage: rig '$engage_rig' has no .beads ledger at $_ecs_path/.beads — nothing created." >&2
+        exit 4
+    fi
+    # 2. The subject title: the positional/pre-filled text, else an interactive
+    #    prompt. It is the new bead's title and, absent a starter, the opener.
+    if [ -z "$new_subject_title" ] && [ "$engage_interactive" = 1 ]; then
+        printf '  New subject — what is it about? › '
+        IFS= read -r new_subject_title || { echo "$PROG: engage: no subject text — nothing created" >&2; exit 2; }
+    fi
+    new_subject_title=$(printf '%s' "$new_subject_title" | sed 's/^ *//; s/ *$//')
+    [ -n "$new_subject_title" ] || { echo "$PROG: engage: --new-subject needs a subject (the new bead's title / what it is about). Nothing created." >&2; exit 2; }
+    # 3. The opener: an explicit --reason/--template wins; otherwise the title
+    #    doubles as it. A new subject always files a fresh visit (engage_file_new),
+    #    so the opener is settled here — mark the starter pre-filled so the
+    #    interactive visit/starter prompt (which lists a subject's EXISTING visits)
+    #    is skipped; a brand-new subject has none.
+    if [ -z "$engage_template" ] && [ "$engage_reason_set" = 0 ]; then
+        engage_reason="$new_subject_title"; engage_reason_set=1
+    fi
+    engage_file_new=1; starter_prefilled=1
+    # 4. Create the subject ATOMICALLY with its markers (see the header note).
+    _ecs_body="Operator-initiated conversation subject (gc-helm engage --new-subject): ${engage_reason:-$new_subject_title}"
+    _ecs_json=$(gc bd create -t task --title "$new_subject_title" -d "$_ecs_body" \
+        --metadata '{"gc.origin":"operator","gc.interactive_intake":"1"}' \
+        --db "$_ecs_path/.beads" --json 2>/dev/null || true)
+    bead=$(printf '%s' "$_ecs_json" | scrub | jq -r 'if type=="array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
+    if [ -z "$bead" ] || [ "$bead" = "null" ]; then
+        _ecs_err=$(printf '%s' "$_ecs_json" | scrub | jq -r 'if type=="object" then (.error // empty) else empty end' 2>/dev/null || true)
+        echo "$PROG: engage: could not create the subject bead in rig '$engage_rig'${_ecs_err:+: $_ecs_err}. Nothing spawned." >&2
+        exit 4
+    fi
+    echo "$PROG: engage: filed subject $bead in rig '$engage_rig' — \"$new_subject_title\"" >&2
+}
+
 # ── Verb: engage ─────────────────────────────────────────────────────
 # The operator's "I want to talk about this now" — the spawn-on-engagement
 # entry point. The converse routed-pool is retired: a filed visit PARKS on the
@@ -2690,6 +2807,10 @@ cmd_engage() {
     engage_no_input=0; engage_model_set=0; engage_reason_set=0; engage_template=""
     # Interactive decisions carried into the visit-resolution and output below.
     engage_body=""; engage_file_new=0; engage_chosen_visit=""; visit_new=0
+    # --new-subject files a FRESH subject bead, then engages it (rig-aware, since
+    # there is no id prefix yet to derive the rig from). --rig names that rig;
+    # --subject names an EXISTING one, so the two are mutually exclusive.
+    engage_new_subject=0; engage_rig=""; engage_subject_flag=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --model=*)   engage_model="${1#--model=}"; engage_model_set=1; shift ;;
@@ -2701,9 +2822,13 @@ cmd_engage() {
             --template=*) engage_template="${1#--template=}"; shift ;;
             --template)  shift; [ $# -gt 0 ] || { echo "$PROG: engage: --template requires a value" >&2; exit 2; }
                          engage_template="$1"; shift ;;
-            --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; shift ;;
+            --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; engage_subject_flag=1; shift ;;
             --subject)   shift; [ $# -gt 0 ] || { echo "$PROG: engage: --subject requires a value" >&2; exit 2; }
-                         [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; shift ;;
+                         [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; engage_subject_flag=1; shift ;;
+            --new-subject) engage_new_subject=1; shift ;;
+            --rig=*)     engage_rig="${1#--rig=}"; shift ;;
+            --rig)       shift; [ $# -gt 0 ] || { echo "$PROG: engage: --rig requires a value" >&2; exit 2; }
+                         engage_rig="$1"; shift ;;
             --no-input)  engage_no_input=1; shift ;;
             --no-attach) engage_attach=0; shift ;;
             -h|--help)   usage; exit 0 ;;
@@ -2729,6 +2854,31 @@ cmd_engage() {
     # opener, so the interactive visit/starter prompts are skipped for it.
     starter_prefilled=0
     if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ]; then starter_prefilled=1; fi
+
+    # --rig names the rig a NEW subject is created in; an existing subject's rig
+    # comes from its id prefix, so --rig is meaningless there. Refuse rather than
+    # silently ignore it.
+    if [ -n "$engage_rig" ] && [ "$engage_new_subject" = 0 ]; then
+        echo "$PROG: engage: --rig applies only with --new-subject; an existing subject's rig is derived from its id. Drop --rig, or add --new-subject to create one." >&2
+        exit 2
+    fi
+
+    # --new-subject: file a FRESH subject bead in a chosen rig, then engage it in
+    # one gesture. The positional argument is the subject TEXT (the new bead's
+    # title), not an id; --subject names an EXISTING bead, so the two conflict.
+    # engage_create_subject resolves the rig, obtains the title, creates the
+    # marked bead, and leaves its id in $bead with the opener primed — after it
+    # the rest of this verb runs unchanged, deriving the rig from the new id's
+    # prefix and filing the ONE visit the marker keeps the async worker from
+    # duplicating.
+    if [ "$engage_new_subject" = 1 ]; then
+        if [ "$engage_subject_flag" = 1 ]; then
+            echo "$PROG: engage: --subject names an existing bead and --new-subject creates one — pass only one." >&2
+            exit 2
+        fi
+        new_subject_title="$bead"; bead=""
+        engage_create_subject
+    fi
 
     # Subject: prompt when absent on a TTY; a flag or positional pre-fills it.
     if [ -z "$bead" ]; then

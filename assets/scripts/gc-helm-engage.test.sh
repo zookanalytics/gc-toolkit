@@ -183,7 +183,16 @@ case "$1 ${2:-}" in
       [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ASSIGNEE" ;;
     esac ;;
   "bd create")
-    printf 'bd create %s\n' "$*" >> "$CALLS"; jq -n '{id:"tk-vis"}' ;;
+    printf 'bd create %s\n' "$*" >> "$CALLS"
+    # --new-subject creates the SUBJECT bead with --metadata (and --db); cmd_open
+    # creates the VISIT with neither. Distinguish so each returns its own id.
+    # $SUBJ_CREATE_FAIL makes the subject create fail (bare error object, no id).
+    case "$*" in
+      *--metadata*)
+        if [ -n "${SUBJ_CREATE_FAIL:-}" ]; then jq -n '{error:"store write refused"}'
+        else jq -n --arg i "${NEW_SUBJECT_ID:-tk-newsubj}" '{id:$i}'; fi ;;
+      *) jq -n '{id:"tk-vis"}' ;;
+    esac ;;
   "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS"
               # engage probes the visit's blockers (dep list --direction=down)
               # before spawning: default none. $VIS_BLOCKERS injects OPEN "blocks"
@@ -216,7 +225,7 @@ export GC_HELM_AGENTS_DIR="$TMP/agents"
 # the refusal case. Distinct from GC_HELM_AGENTS_DIR above (the pack's own
 # model-menu dir).
 mkdir -p "$TMP/rig/agents/converse-opus" "$TMP/rig/agents/converse-fable" \
-         "$TMP/rig/agents/converse-codex" "$TMP/rig-bare"
+         "$TMP/rig/agents/converse-codex" "$TMP/rig/.beads" "$TMP/rig-bare"
 export RIG_PATH="$TMP/rig"
 
 # run_engage <bead> [extra-args...] -> RC/OUT, with per-case env preset by caller.
@@ -886,6 +895,79 @@ run_engage tk-subj --reason x --template discuss-broadly --no-input --no-attach
 eq "$RC" 2 "(IA-REASON-TEMPLATE) --reason and --template together exit 2"
 has "$OUT" "both set the opening message" "(IA-REASON-TEMPLATE) …saying why"
 hasnt "$CALLED" "bd create" "(IA-REASON-TEMPLATE) …and nothing filed"
+
+echo "# --new-subject: file a fresh marked subject in a chosen rig, then engage it"
+# One-shot: --rig names the rig, the positional is the subject title. The subject
+# is created MARKED (gc.interactive_intake=1 + gc.origin=operator) in that rig's
+# .beads store, then the ONE visit is filed and a sitting spawned. The marker is
+# what keeps the async first-reaction/proactive worker from filing a second visit.
+export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage "ship the new intake flow" --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 0 "(NEWSUBJ) --new-subject --rig --no-input exits 0"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+has "$SUBJ_CREATE" "interactive_intake" "(NEWSUBJ) the subject is created with the gc.interactive_intake marker"
+has "$SUBJ_CREATE" "gc.origin" "(NEWSUBJ) …and gc.origin=operator (honest origin; the force-to-visit invariant is preserved)"
+has "$SUBJ_CREATE" "--db $TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
+has "$SUBJ_CREATE" "ship the new intake flow" "(NEWSUBJ) …titled with the subject text"
+has "$OUT" "filed subject tk-newsubj in rig 'gc-toolkit'" "(NEWSUBJ) reports the filed subject"
+has "$CALLED" "session new converse-opus --alias tk-vis --no-attach" "(NEWSUBJ) then engages the one visit it filed"
+# The title doubles as the opener when no --reason/--template is given: the visit
+# cmd_open files carries it (visit title tail is the opener).
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+has "$VISIT_CREATE" "ship the new intake flow" "(NEWSUBJ-OPENER) the title doubles as the visit's opener"
+
+echo "# --new-subject one-shot without --rig is refused (no id prefix to derive a rig)"
+export BEAD_KIND=task
+run_engage "some topic" --new-subject --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-NORIG) --new-subject --no-input without --rig exits 2"
+has "$OUT" "needs a rig" "(NEWSUBJ-NORIG) …naming the fault"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-NORIG) …and no subject was created"
+
+echo "# --new-subject and --subject are mutually exclusive"
+run_engage --new-subject --subject tk-subj --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-CONFLICT) --new-subject with --subject exits 2"
+has "$OUT" "pass only one" "(NEWSUBJ-CONFLICT) …saying why"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-CONFLICT) …and nothing created"
+
+echo "# --rig without --new-subject is refused (an existing subject's rig comes from its id)"
+export BEAD_KIND=task
+run_engage tk-subj --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-RIG-ALONE) --rig without --new-subject exits 2"
+has "$OUT" "applies only with --new-subject" "(NEWSUBJ-RIG-ALONE) …naming the fault"
+
+echo "# --new-subject with an unknown rig is refused before any create"
+run_engage "x" --new-subject --rig nope --no-input --no-attach
+eq "$RC" 4 "(NEWSUBJ-BADRIG) an unknown --rig exits 4"
+has "$OUT" "matches no rig" "(NEWSUBJ-BADRIG) …naming the unknown rig"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-BADRIG) …and nothing created"
+
+echo "# --new-subject one-shot with no subject text is refused"
+run_engage --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-NOTITLE) a missing subject text exits 2"
+has "$OUT" "needs a subject" "(NEWSUBJ-NOTITLE) …naming the fault"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-NOTITLE) …and nothing created"
+
+echo "# --new-subject whose subject create fails aborts without spawning"
+export SUBJ_CREATE_FAIL=1
+run_engage "doomed subject" --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 4 "(NEWSUBJ-CREATEFAIL) a failed subject create exits 4"
+has "$OUT" "could not create the subject" "(NEWSUBJ-CREATEFAIL) …naming the fault"
+hasnt "$CALLED" "session new" "(NEWSUBJ-CREATEFAIL) …and no sitting spawned"
+unset SUBJ_CREATE_FAIL
+
+echo "# --new-subject interactive: a lone converse rig auto-selects; prompts title, then model"
+# One converse-capable rig in the stub, so the rig step auto-selects (reads no
+# input); the answers then feed the title prompt and the model prompt (Enter=Opus).
+export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage_tty 'draft the Q3 plan\n\n' --new-subject --no-attach
+eq "$RC" 0 "(NEWSUBJ-IA) interactive --new-subject exits 0"
+has "$OUT" "the only converse-capable rig" "(NEWSUBJ-IA) the lone converse rig auto-selects"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+has "$SUBJ_CREATE" "draft the Q3 plan" "(NEWSUBJ-IA) the typed title becomes the subject"
+has "$SUBJ_CREATE" "interactive_intake" "(NEWSUBJ-IA) …created with the marker"
+has "$CALLED" "session new converse-opus" "(NEWSUBJ-IA) …then a sitting spawns (Opus, the Enter default)"
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"
