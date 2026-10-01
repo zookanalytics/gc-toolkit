@@ -253,6 +253,16 @@ export interface Tile {
    */
   group_root: string;
   /**
+   * The id of this row's IMMEDIATE parent in the dependency family — the one
+   * anchor its edges climb to a single level up, and empty when the row climbs to
+   * nothing (it is a family root). `group_root` names the top of the tree; this
+   * names the next step toward it, so a surface nests the family as a containment
+   * tree — a sub-epic under its parent, its own children under it — instead of one
+   * flat member list under the top root.
+   * Always present.
+   */
+  group_parent: string;
+  /**
    * Set when this row can be ACCEPTED: the subject carries a recommended
    * execution formula (`gc.recommended_formula`) and its visit is un-engaged, so
    * a person can dispatch that formula at the subject and dismiss the visit in
