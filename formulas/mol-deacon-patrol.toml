@@ -453,12 +453,24 @@ end=$(( $(date +%s) + {{event_timeout}} ))
 until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
 ```
 
-**3. Pour next iteration BEFORE burning — and GUARD the assign** (a poured
-but unassigned wisp reaches no hook and drops the loop; forward every
-declared var, so a value chosen at the startup pour is not silently replaced
-by the formula default from the next cycle on):
+**3. Pour the next iteration, assign it, then burn this one.** GUARD the assign
+(a poured but unassigned wisp reaches no hook and drops the loop), and forward
+every declared var, so a value chosen at the startup pour is not silently
+replaced by the formula default from the next cycle on. Burn the current wisp
+in this block, right after the assign, so the burn is atomic with the pour: no
+turn boundary falls between them, and a context recycle (the
+`overlays/cycle-recycle` Stop hook) can land only before the pour or after the
+burn, never on a half-done cycle whose current wisp the next boot's reconcile
+would burn as a stale orphan. `GC_BEAD_ID` is empty on a fresh session, so the
+fallback that resolves the current wisp has to work: a wisp is an ephemeral
+molecule, which means `--type=molecule --include-infra` plus the title filter,
+and any narrower query reads empty.
 ```bash
 # >>> patrol-wisp-pour
+CURRENT_WISP=${GC_BEAD_ID:-}
+if [ -z "$CURRENT_WISP" ]; then
+  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-deacon-patrol")][0].id // empty')
+fi
 NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next deacon wisp; NOT burning this one."
@@ -469,12 +481,13 @@ if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
   gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile will collect it."
   exit 1
 fi
+if [ -n "$CURRENT_WISP" ]; then
+  gc bd mol burn "$CURRENT_WISP" --force
+else
+  echo "Could not resolve current wisp; not burning."
+  exit 1
+fi
 # <<< patrol-wisp-pour
-```
-
-**4. Burn this wisp — only if step 3 succeeded:**
-```bash
-gc bd mol burn <this-wisp-id> --force
 ```
 
 The new wisp is ready; run `gc hook` and start the next cycle."""
