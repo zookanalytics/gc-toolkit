@@ -203,6 +203,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=visit-identity.sh
 . "${GC_VISIT_IDENTITY_LIB:-$SCRIPT_DIR/visit-identity.sh}" \
     || { echo "$PROG: cannot source visit-identity.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one definition of whether a rig carries converse — read from the
+# import-resolved roster, shared with gc-visit-open.sh so engage and visit intake
+# cannot diverge. Exposes rig_carries_converse.
+# shellcheck source=converse-capability.sh
+. "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
+    || { echo "$PROG: cannot source converse-capability.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
@@ -355,20 +361,6 @@ rig_running_for_bead() {
     enumerate_rigs
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
         '.[] | select(.prefix==$p) | if (.running == null) then "" else (.running|tostring) end' 2>/dev/null | head -n1
-}
-
-# rig_carries_converse <rig-path> — 0 iff the rig at this path carries at least
-# one converse-<model> agent template. The converse templates are rig-scoped:
-# `gc session new converse-<model>` resolves the template from the rig's own
-# agents/ dir under GC_DIR=<rig-path>, so a rig whose checkout holds none — an
-# HQ / city-store root carries none — can host no converse sitting. Globbed the
-# way engage_list_models globs its own dir; a glob matching nothing stays the
-# literal pattern, which `[ -d ]` rejects.
-rig_carries_converse() {
-    for _rcc_d in "$1"/agents/converse-*; do
-        [ -d "$_rcc_d" ] && return 0
-    done
-    return 1
 }
 
 # rig_db_for_session — the .beads dir of THIS session's rig, or empty when it
@@ -2683,7 +2675,7 @@ engage_prompt_rig() {
     _epr_i=0; _epr_map=""; _epr_menu=""
     while IFS="$TAB" read -r _epr_name _epr_path; do
         [ -n "$_epr_name" ] || continue
-        rig_carries_converse "$_epr_path" || continue
+        rig_carries_converse "$_epr_name" || continue
         _epr_i=$((_epr_i + 1))
         _epr_map="$_epr_map$_epr_i $_epr_name
 "
@@ -2745,7 +2737,7 @@ engage_create_subject() {
         echo "$PROG: engage: --rig '$engage_rig' matches no rig in 'gc rig list' (known: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null)). Nothing created." >&2
         exit 4
     fi
-    if ! rig_carries_converse "$_ecs_path"; then
+    if ! rig_carries_converse "$engage_rig"; then
         echo "$PROG: engage: rig '$engage_rig' ($_ecs_path) carries no converse template, so it can host no converse sitting. Pick a converse-capable rig. Nothing created." >&2
         exit 4
     fi
@@ -2957,7 +2949,7 @@ cmd_engage() {
     # rejects. An HQ / city-store bead resolves to the city root, which carries
     # none. Refuse up front, before any visit is filed or GC_RIG/BEADS_DIR is
     # exported, so the engage is a clean no-op.
-    if ! rig_carries_converse "$path"; then
+    if ! rig_carries_converse "$rig"; then
         echo "$PROG: engage: converse is not available for '$bead': its rig '${rig:-?}' ($path) carries no converse template. HQ/city-store beads are not converse-engageable. Nothing filed, nothing spawned." >&2
         exit 4
     fi
