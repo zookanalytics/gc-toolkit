@@ -32,6 +32,8 @@ PROG="pr-open"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The two shared readers of the review graph: lane-state derives a lane's green
 # state (the same helper merge.sh asks, so publishing and merging never
@@ -298,14 +300,10 @@ refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid>
 }
 
 # --- enumerate ------------------------------------------------------------------
-ANCHORS=$(gc bd list --status=open --metadata-field merge_result=pre_open_gate \
-  --limit=0 --json 2>/dev/null); rc=$?
-if [ "$rc" -ne 0 ] || [ -z "$ANCHORS" ] \
-   || ! printf '%s' "$ANCHORS" | scrub | jq -e 'type == "array"' >/dev/null 2>&1; then
-  echo "$PROG: could not enumerate pre-open anchors (rc=$rc); failing loudly rather than reporting a false all-clear" >&2
+ANCHORS=$(bd_list --status=open --metadata-field merge_result=pre_open_gate) || {
+  echo "$PROG: could not enumerate pre-open anchors; failing loudly rather than reporting a false all-clear" >&2
   exit 1
-fi
-ANCHORS=$(printf '%s' "$ANCHORS" | scrub)
+}
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no pre-open anchors"; exit 0; }
 
 opened=0; flipped=0; held=0; skipped=0
@@ -477,8 +475,8 @@ GATES
   fi
 
   # Replay the recorded verdict as a COMMENT — the city never approves (#185).
-  REVIEW_ID=$(gc bd list --metadata-field task_kind=review --metadata-field anchor_bead="$id" \
-    --status=closed,open,in_progress --limit=0 --json 2>/dev/null | scrub \
+  REVIEW_ID=$(bd_list --metadata-field task_kind=review --metadata-field anchor_bead="$id" \
+    --status=closed,open,in_progress \
     | jq -r 'sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
   VERDICT=""
   [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \

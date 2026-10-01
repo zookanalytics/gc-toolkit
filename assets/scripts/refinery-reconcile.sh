@@ -215,6 +215,22 @@ if [ -x "$SCRIPTS_DIR/merge-tail-report.sh" ]; then
 fi
 mark_merge started
 
+# Per-pass bd_list cache (assets/scripts/bd-lib.sh). The arms re-issue the same
+# `gc bd list` many times a pass — the gating anchor, and the
+# pull_request/pre_open enumeration nearly every arm re-reads — and each call is
+# seconds of server wait. GC_RECONCILE_BD_CACHE points bd_list at a directory it
+# serves a repeat from; run_pass clears it before every arm so no arm reads
+# another's rows, and it is removed at END. A killed pass leaves it behind, so
+# setup is rm-then-create. Caching is enabled only when bd-lib sources here, so
+# run_pass can clear the dir between arms through bd_cache_clear; otherwise the
+# pass runs uncached (the cache is an optimization, never a correctness input).
+CACHE_DIR="$STATE_DIR/cache"
+rm -rf "$CACHE_DIR" 2>/dev/null || true
+# shellcheck source=bd-lib.sh
+if . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" 2>/dev/null && mkdir -p "$CACHE_DIR" 2>/dev/null; then
+  export GC_RECONCILE_BD_CACHE="$CACHE_DIR"
+fi
+
 # >>> heal-gates-merge
 # Extracted and EXECUTED by refinery-reconcile.test.sh against stub arms: an
 # unsafe gate-ensure must HOLD merge.sh in the same pass. Keep it executable
@@ -230,6 +246,11 @@ run_pass() { # <label> <script> [args...]
     return 0
   fi
   log "-- $label"
+  # Clear the per-pass bd_list cache so this arm cannot read rows an earlier arm
+  # cached; a repeat within the arm still hits. Guarded by command -v because
+  # this block is extracted and run standalone by refinery-reconcile.test.sh,
+  # where bd-lib is not sourced and bd_cache_clear is undefined.
+  command -v bd_cache_clear >/dev/null 2>&1 && bd_cache_clear
   local rc=0
   if [ -n "$LOG_SINK" ]; then
     "$SCRIPTS_DIR/$script" "$@" >> "$LOG_SINK" 2>&1 || rc=$?
@@ -364,6 +385,11 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # later. It writes only PR bodies — no bead, no merge authority — so it runs
 # unprojected and its failure gates nothing.
 run_pass "(11) pr-stack" pr-stack.sh || FAILED="${FAILED}pr-stack rc=$?; "
+
+# The per-pass bd_list cache is this pass's; drop it so no later pass can read
+# these rows. A killed pass never reaches here and the next pass's rm-then-create
+# setup clears the leftover.
+[ -n "${CACHE_DIR:-}" ] && rm -rf "$CACHE_DIR" 2>/dev/null || true
 
 if [ -n "$LOG_SINK" ]; then
   {

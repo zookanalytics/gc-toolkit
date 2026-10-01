@@ -2987,6 +2987,21 @@ hasnt "$(cat "$STUB_ESC_LOG")" "pr-retargeted.153" "…and files no retarget esc
 out=$(run)
 eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
 
+echo "# with GC_RECONCILE_BD_CACHE set, a rework mint invalidates the dedup so a re-probe files no twin"
+# A CONFLICTING anchor mints one rework child; mint_rework_child drops the
+# per-pass bd_list cache at the create, so a later branch-dedup probe refetches
+# and adopts the child instead of reading a stale "no child" and twinning it.
+# Two runs over one cache (no between-run clear) isolate that one invalidation:
+# the first mints and clears, the second's probe must see the child.
+store "[$(anchor F9 19)]"
+printf '%s' "$(prview 19 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_19.json"
+export GC_RECONCILE_BD_CACHE="$TMP/pf-cache"; mkdir -p "$GC_RECONCILE_BD_CACHE"
+run >/dev/null 2>&1          # mints the child, invalidates the cache at the create
+run >/dev/null 2>&1          # the branch-dedup probe refetches (invalidated) and sees it
+unset GC_RECONCILE_BD_CACHE
+twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
+eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
