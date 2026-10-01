@@ -12,8 +12,10 @@ description: Design record for tk-xgj2ko — what epic membership is (the parent
 > `docs/gascity-human-engagement.md` (the sibling shape).
 
 An epic groups the work that belongs to it on the helm board. A bead belongs
-when a `parent-child` edge makes the epic its group root; a bead with no such
-edge renders on its own, outside the epic. This unit defines that membership
+when a `parent-child` edge makes the epic its group root. The board also groups
+a tile under an anchor that waits on it, which is board visibility, not
+membership; a bead the epic neither parents nor waits on renders on its own,
+outside the epic. This unit defines that membership
 edge, states which beads can carry it and which cannot, and records how
 membership is kept from freezing the work it groups. The create-time, repair,
 and audit mechanics that follow are named here and tracked as their own beads.
@@ -28,15 +30,22 @@ each member work bead is a child.
 The helm board is the reader that makes membership visible.
 `services/helm/internal/board/derive.go` `assignGroupRoots` stamps every tile's
 `group_root` by climbing to the top-most tile along two edge kinds: the
-`parent-child` edge (preferred) and the `blocks` edge (the anchor a tile waits
-on). `services/helm/README.md` states `group_root` is the board's primary
-grouping axis, and `board.GroupByFamily` renders one block per family, the root
-as the header and its members beneath. A work bead whose `parent-child` chain
-climbs to the epic renders under the epic.
+`parent-child` edge (preferred) and the `blocks` edge. The `blocks` edge climbs
+the opposite way from membership: a tile climbs to the anchor that waits on it,
+the anchor whose `WaitingOn` names the tile (`WaitingOn` is the ids a bead
+depends on by a `blocks` edge, `services/helm/internal/board/model.go`). A
+review or rework child, named in its merge anchor's `WaitingOn`, therefore
+renders under that anchor. That is board visibility, not membership: the child
+is not part of the anchor's work. `services/helm/README.md` states `group_root`
+is the board's primary grouping axis, and `board.GroupByFamily` renders one
+block per family, the root as the header and its members beneath. A work bead
+whose `parent-child` chain climbs to the epic renders under the epic as a
+member.
 
-The climb keys on `parent-child` and `blocks` alone: `assignGroupRoots`
-follows a bead's children (`parent-child`) and the anchor it waits on
-(`blocks`), never a `relates-to` link. A unit filed `relates-to` an epic
+The climb keys on `parent-child` and `blocks` alone, read off each anchor:
+`assignGroupRoots` climbs an anchor's `parent-child` children to it, and the
+beads in its `WaitingOn`, the ones that block it, climb to it as well. It
+never reads a `relates-to` link. A unit filed `relates-to` an epic
 therefore climbs no edge the board reads, roots itself, and renders as its
 own one-row family — the scattered-work symptom that opened epic tk-rctkrj.
 `relates-to` is a prose link, not membership.
@@ -126,12 +135,20 @@ work as a `parent-child` child of the subject epic, so it renders as a member
 from the moment it is created. Gates and demands keep the sibling shape, per the
 carve-out.
 
-The change touches the sites that carry the sibling rule:
-`agents/converse/prompt.template.md` (the "everything a sitting files is a
-sibling" rule and the route-a-formula step), `skills/converse-settle/SKILL.md`,
-and `docs/gascity-human-engagement.md`. It is blocked on tk-n18e15: until the
-cascading demand is retired, parenting unstarted work under an epic that still
-carries one would freeze it. Filed as tk-9wojzh.
+The change touches the sites that carry the sibling rule.
+`assets/scripts/converse-parent.sh` is the mechanism: it returns the subject's
+own parent, and `agents/converse/prompt.template.md` (the "everything a sitting
+files is a sibling" rule and the route-a-formula step) and
+`skills/converse-settle/SKILL.md` read it as `$PARENT` to file siblings, while
+`docs/gascity-human-engagement.md` documents the shape. Create-time parenting
+splits work from gates at those call sites: routed work is filed as a
+`parent-child` child of the subject epic rather than under `$PARENT`, while gate
+and demand filing keep `converse-parent.sh` and its test
+`assets/scripts/converse-parent.test.sh`, because gates stay siblings.
+Rewording the prompt alone would leave the helper filing work as a sibling, so
+the work-versus-gate split at the call sites is part of this scope. It is
+blocked on tk-n18e15: until the cascading demand is retired, parenting unstarted
+work under an epic that still carries one would freeze it. Filed as tk-9wojzh.
 
 ## Membership repair (tk-8bzuc2)
 
