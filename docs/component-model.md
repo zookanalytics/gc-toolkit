@@ -337,6 +337,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 10: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
+| `assets/scripts/pr-stack.sh` | merge | Arm 11: keeps each open PR's body current with its anchor in both managed regions — the branch-beads section, and the `pr-summary` region a rework moved past. Writes only PR bodies. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
 | `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of five dispositions: route the bead to a pool, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or file a visit for the operator's judgment. It sits in visit because its product is a bead the human no longer has to triage. |
