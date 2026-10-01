@@ -48,10 +48,18 @@ below write and repair the edge rather than a field.
 
 ## What cannot be a member: the work-vs-gate carve-out
 
-A gate or demand bead structurally cannot be a member of the bead it gates. A
-demand `D` that gates a subject `S` carries the edge "`S` blocked-by `D`": `S`
-cannot finalize until `D` resolves. If `D` were a child of `S`, that edge would
-run from a parent to its own descendant, and beads refuses it:
+Membership is decomposition, so the test for it is semantic: a bead is a member
+when it is part of the epic's work, and a non-member when it is something the
+epic waits on. A gate is the second kind. A demand `D` that gates a subject `S`
+is not a piece of `S`'s work; it is what `S` waits for before it can finalize.
+Filing `D` as a child of `S` would assert a containment that is not true. So a
+gate is a sibling of what it gates, not a child. This is the I1 shape law in
+`docs/component-model.md`: containers do not block, blockers do not parent,
+because `parent-child` means the child is part of the parent's work.
+
+beads enforces the sharpest case of that law directly. A demand carries the edge
+"`S` blocked-by `D`", and were `D` a child of `S` the edge would run from a
+parent to its own descendant, which beads refuses:
 
 ```
 $ gc bd dep add <parent> <descendant> -t blocks
@@ -60,12 +68,17 @@ blocked status cascades to descendants, so <descendant> would inherit
 the block and never close
 ```
 
-So a demand that gates an epic is filed as a sibling of the epic, not a child.
-`gc-helm.sh demand` reads the subject's own parent and files the demand there
-(`docs/gascity-human-engagement.md`). This is the carve-out the "every bead
-lands under an epic" goal needs: work is a member (a child); a gate or demand
-that gates the epic is a non-member (a sibling). It is the shape law in
-`docs/component-model.md` I1 — containers do not block, blockers do not parent.
+That refusal is the enforcement, not the reason. The sibling shape is correct
+even where no `blocks` edge is in play, because a gate is still not part of the
+epic's work. The test holds for every gate kind, not the demand alone: a visit
+(the conversation a person owes), a demand (`gc-helm.sh demand`, which reads the
+subject's own parent and files the gate there,
+`docs/gascity-human-engagement.md`), and an operator decision are all things the
+epic waits on, so all are siblings. Work is the member; whatever gates the work
+is the sibling. The shape misleads only when it is used for the other category —
+routed work filed as a sibling reads as "not part of the epic" when it is, which
+is the scattered-work symptom this epic corrects. That is the carve-out the
+"every bead lands under an epic" goal needs.
 
 ## Why membership was hostile, and the resolution
 
@@ -89,6 +102,13 @@ instead (tk-n18e15, in flight). Once an epic no longer carries a cascading
 `blocks` demand, its members inherit no block, and work is safe to file as a
 child.
 
+Retiring the demand's `blocks` edge does not make the gate a member. The
+finalize-gate reads the `tracks` edge, which is non-blocking and holds only the
+subject's own finalization (`docs/finalize-gate.md`), so a gate needs no
+particular parentage to do its job. The gate stays a sibling on the semantic
+ground of the carve-out: it is not part of the epic's work. The shape is kept
+for that reason, not because an edge forces it.
+
 Membership therefore depends on the readiness fix, exactly as this unit's brief
 states. That fix is owned by tk-n18e15, not built here: this unit defines
 membership and the carve-out, and defers the cascade resolution to the bead
@@ -96,36 +116,46 @@ that owns it.
 
 ## Create-time parenting (tk-9wojzh, blocked on tk-n18e15)
 
-Coordination roles file the work they route, and the convention files it as a
-sibling of the subject (the subject's own parent, wired with a `blocks` edge),
-so a create-time classifier never sees it and the board never groups it.
-Membership requires the opposite for work: file routed work as a `parent-child`
-child of the subject epic. Gates and demands keep the sibling shape, per the
+Today a coordination role files the work it routes as a sibling of the subject:
+it takes the subject's own parent, the same shape a gate takes. That is right
+for a gate and wrong for work. The board groups by the `parent-child` climb, so
+sibling work roots itself and renders scattered, outside the epic.
+
+Create-time parenting changes the default for work alone. A role files routed
+work as a `parent-child` child of the subject epic, so it renders as a member
+from the moment it is created. Gates and demands keep the sibling shape, per the
 carve-out.
 
-The rewrite touches the sites that carry the sibling rule:
+The change touches the sites that carry the sibling rule:
 `agents/converse/prompt.template.md` (the "everything a sitting files is a
-SIBLING" rule and the route-a-formula step), `skills/converse-settle/SKILL.md`,
-and the narrative in `docs/gascity-human-engagement.md`. It is blocked on
-tk-n18e15: parenting work under an epic that still carries a cascading demand
-would freeze it. Filed as tk-9wojzh.
+sibling" rule and the route-a-formula step), `skills/converse-settle/SKILL.md`,
+and `docs/gascity-human-engagement.md`. It is blocked on tk-n18e15: until the
+cascading demand is retired, parenting unstarted work under an epic that still
+carries one would freeze it. Filed as tk-9wojzh.
 
 ## Membership repair (tk-8bzuc2)
 
-Re-homing an already-filed bead under its epic sets the `parent-child` edge,
-but beads keeps one edge type per pair: with a `relates-to` edge already
-between the two beads, it rejects the `--parent` write and says to remove the
-existing edge first. So repair is ordered — remove the `relates-to` edge,
-then set `parent-child`. No tool re-homes by re-parenting today:
-`assets/scripts/bead-rehome.sh` is a close-with-successor disposition, and the
-only `--parent` write in the coordination scripts is the demand-sibling write
-in `gc-helm.sh`.
+Re-homing misfiled work is one declarative call. A caller names the bead and the
+epic and states the outcome it wants: this bead belongs to this epic. The
+primitive reaches that outcome or rejects the request, and the caller touches no
+edges. It validates the request, makes the change, and refuses what it cannot
+honor: the target is not an epic, or the bead already belongs to a different epic
+and no reassignment was asked for.
 
-Re-homing is safe for dispatched or closed work; in-flight work keeps running
-after a re-home. It is cascade-sensitive only for un-started dispatch: parenting
-an unstarted bead under an epic that carries an open cascading demand freezes
-it. The primitive refuses or warns on that case, so it is safe to call before
-tk-n18e15 lands. Filed as tk-8bzuc2.
+The ordered edge change is what the primitive hides. beads keeps one edge type
+per pair, so a bead already linked `relates-to` its epic cannot also carry a
+`parent-child` edge to it: beads rejects the `--parent` write and says to remove
+the existing edge first. So the primitive removes the `relates-to` edge, then
+sets `parent-child`. No tool re-homes by re-parenting today:
+`assets/scripts/bead-rehome.sh` is a close-with-successor disposition, and the
+only `--parent` write in the coordination scripts is the demand-sibling write in
+`gc-helm.sh`. Filed as tk-8bzuc2.
+
+Re-homing is safe for dispatched or closed work, and in-flight work keeps running
+after a re-home. It is cascade-sensitive only for unstarted dispatch: parenting
+an unstarted bead under an epic that carries an open cascading demand freezes it.
+The primitive refuses or warns on that case, so it is safe to call before
+tk-n18e15 lands.
 
 ## The periodic scope-reading audit (tk-isd5sa)
 
