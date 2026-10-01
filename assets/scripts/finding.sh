@@ -490,20 +490,20 @@ cmd_close_answered() {
 #
 # The posture gate is the signal. pr-facts.sh records the PR's review state as a
 # dated pr_posture on the anchor every pass; `approved` means reviewDecision is
-# APPROVED and no reviewer currently requests changes. It is the value merge.sh
-# reads, so the closer and the merge cannot disagree about the review state, and
-# any other value (or an absent one, as on a pre-open anchor with no PR) closes
+# APPROVED and no reviewer currently requests changes, pinned to the head a
+# current review approved — the current-head approval evidence merge.sh's own
+# gate stands on, so the closer and the merge agree on when a head is approved.
+# Any other value (or an absent one, as on a pre-open anchor with no PR) closes
 # nothing — the raiser has not re-approved, so there is no resolution to validate.
 #
-# The approval is pinned to the head it was recorded at, and the close is gated on
-# that pin matching the branch's current head, passed as --expected-head. pr-facts.sh
-# refreshes pr_posture AFTER gate-ensure in the cadence, so a push landing after an
-# earlier approval leaves approved@<old-head> on the anchor for the next gate pass;
-# closing on that stale value would validate an unapproved head and drop the very
-# blockers this verb preserves. So it closes only when the posture's pinned head
-# equals --expected-head, and closes nothing when either head is unreadable (an
-# absent --expected-head, or a posture carrying no head) — an unread head cannot
-# prove the approval is current, so the merge holds one more pass, the safe way.
+# The posture's head is the head the approval COVERS: pr-facts.sh pins an approved
+# posture to the commit a current review approved, not to the live head, so a push
+# after an approval leaves approved@<approved-head> — a head the live branch no
+# longer matches. The close is gated on that pin equalling the branch's current
+# head, passed as --expected-head, so a stale approval validates nothing. It closes
+# nothing when either head is unreadable (an absent --expected-head, or a posture
+# carrying no head) — an unread head cannot prove the approval is current, so the
+# merge holds one more pass, the safe way.
 #
 # The scope is human-source beads, and that is load-bearing. reviewDecision
 # speaks the human authority alone — a machine finding is a bead invisible to it —

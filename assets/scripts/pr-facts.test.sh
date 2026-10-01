@@ -1077,12 +1077,24 @@ out=$(run)
 eq "$(grep -c '^bd update S1' "$STUB_GC_LOG" || true)" "0" "no ledger churn when nothing moved"
 hasnt "$out" "posture review_required" "…and the pass says nothing about it"
 
-echo "# …a moved head re-pins it"
+echo "# …a moved head with a fresh approval re-pins it to the approved head"
 printf '%s' "$(prview 50 OPEN CLEAN MERGEABLE)" \
   | jq -c '.reviewDecision = "APPROVED" | .headRefOid = "sha-NEW"' > "$GH_DIR/pr_view_50.json"
+printf '[{"id":5050,"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-NEW","submitted_at":"2026-09-30T00:00:00Z"}]' > "$GH_DIR/reviews_50.json"
 out=$(run)
-eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture follows the head it was read at"
-eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…so does the merge state"
+eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "an approved posture pins to the head a current review approved"
+eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…and the merge state to the live head"
+
+echo "# …a push PAST an approval is not re-stamped approved onto the new head"
+# The finding tk-v8860m case: GitHub holds reviewDecision=APPROVED across a push
+# until the approval is dismissed. Pinning to the live head would re-stamp
+# approved@<new-head> and let close-resolved validate a head no human approved.
+# The approval still sits at sha-NEW; the branch has moved to sha-NEWER.
+printf '%s' "$(prview 50 OPEN CLEAN MERGEABLE)" \
+  | jq -c '.reviewDecision = "APPROVED" | .headRefOid = "sha-NEWER"' > "$GH_DIR/pr_view_50.json"
+out=$(run)
+eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture stays pinned to the approved head, not the pushed head"
+eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEWER" "…while the merge state tracks the live head"
 
 echo "# COMMENTED is representable, and it routes to work"
 # The tk-9heqfh/PR#477 fixture: inline comments that were neither approval nor
@@ -1757,11 +1769,12 @@ eq "$(meta_pinned P4 pr_posture)" "none@sha-43" "its inline comments are what th
 echo "# the city's own comment is not a human waiting"
 store "[$(anchor P2 41)]"
 printf '%s' "$(prview 41 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_41.json"
-printf '[{"id":6002,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"replayed verdict"}]' > "$GH_DIR/reviews_41.json"
+printf '[{"id":6002,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"replayed verdict"},{"id":6003,"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-41","submitted_at":"2026-09-30T00:00:00Z"}]' > "$GH_DIR/reviews_41.json"
 printf '[{"id":6001,"user":{"login":"gc-city-bot"},"body":"replayed verdict"}]' > "$GH_DIR/comments_41.json"
-# The replayed verdict sits in a RESOLVED thread. The unengaged backstop counts
-# only unresolved self-login threads, so it finds nothing here and the posture is
-# the approval this test asserts.
+# The approval is a human's at the live head; the replayed verdict is our own and
+# sits in a RESOLVED thread. The unengaged backstop counts only unresolved
+# self-login threads, so it finds nothing here and the posture is the approval
+# this test asserts.
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-41","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-41","databaseId":100,"author":{"login":"gc-city-bot"},"body":"replayed verdict","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_41.json"
 out=$(run)
 eq "$(meta_pinned P2 pr_posture)" "approved@sha-41" "our own replayed verdict is not an outstanding comment"

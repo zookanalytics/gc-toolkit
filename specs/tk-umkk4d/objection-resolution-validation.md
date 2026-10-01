@@ -90,10 +90,10 @@ quiescence and lane state: one computer of a fact cannot disagree with itself.
 ### The signal is the recorded approved posture, source-matched
 
 `pr-facts.sh` records each open anchor's PR review state as `pr_posture`, dated
-and pinned to the head, every pass. When `reviewDecision` is `APPROVED` it writes
-`pr_posture=approved` — no reviewer currently requests changes. That is the same
-value `merge.sh` reads, so the closer and the merge agree on what the review
-state is.
+and pinned to a head, every pass. When `reviewDecision` is `APPROVED` it writes
+`pr_posture=approved`, pinned to the head a current review approved — the latest
+approving review per reviewer, the same current-head approval evidence `merge.sh`'s
+gate reads — so the closer and the merge agree on when a head is approved.
 
 `gate-ensure.sh` reads that recorded posture and, when it is `approved`, closes
 the anchor's **human-source** objection beads through a new `finding.sh`
@@ -101,13 +101,14 @@ verb. The lag is at most one pass (`pr-facts.sh` records the posture in arm 2,
 `gate-ensure.sh` reads last pass's value in arm 1), which is immaterial against
 the thirteen-hour wedge it removes.
 
-That one-pass lag is also why the close is gated on the head. `pr_posture` is
-pinned to the head it was approved at, and `pr-facts.sh` refreshes it in arm 2,
-after `gate-ensure.sh`'s arm 1 has already read it — so a push landing after an
-approval leaves `approved@<old-head>` on the anchor for the next pass.
+The close is gated on the head because `pr_posture`'s head is the head the
+approval covers. `pr-facts.sh` pins an `approved` posture to the commit a current
+review approved, not to whatever head is live when it runs, so a push landing
+after an approval leaves `approved@<approved-head>` on the anchor — a head the
+live branch no longer matches — until the raiser re-approves the new head.
 `gate-ensure.sh` passes the branch's live head to `close-resolved`, which closes
 only when the posture's pinned head matches it and closes nothing when either
-head is unreadable. Without that check a stale approval would validate a head no
+head is unreadable. Without that pin a stale approval would validate a head no
 reviewer approved and drop the blockers this step exists to preserve; with it, an
 unread or moved head holds the merge one more pass, the safe direction.
 

@@ -1000,7 +1000,7 @@ CHILDREN_EOF
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
+  posture=""; approved_head=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
   revs_raw=""; cmts_raw=""; cmts_live=""; icmts_raw=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
@@ -1094,7 +1094,29 @@ CHILDREN_EOF
         # be current and let merge.sh through on a fact we do not have; leave the
         # posture uncurrent so --posture-only holds the merge, and retry next pass.
         echo "$PROG: $id — PR#$num unengaged-thread read did not answer; posture not recorded (retry next pass)" >&2
-      elif [ "$rd" = "APPROVED" ]; then posture="approved"
+      elif [ "$rd" = "APPROVED" ]; then
+        # An approved posture pins to the head the approval COVERS, not merely
+        # the live head. GitHub holds reviewDecision at APPROVED across a push
+        # until the approval is dismissed, so pinning to the live head would
+        # re-stamp approved@<new-head> after a post-approval push and let a
+        # head-gated reader (finding.sh close-resolved) validate a head no human
+        # approved. Stand on the evidence merge.sh's approval gate stands on: the
+        # latest review per non-self reviewer, an APPROVED one at the live head
+        # if there is one — else the newest approving commit, the superseded head
+        # the live branch no longer matches. A reviewDecision of APPROVED with no
+        # readable approving review (which it should not produce) records nothing,
+        # the safe direction, like the unreadable-history arm above.
+        approved_head=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" --arg head "$head_oid" '
+          ([ .[] | select(((.user.login // "") | tostring) != $self)
+             | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
+           | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)
+           | [ .[] | select(.state == "APPROVED") ]) as $appr
+          | if ($appr | any((.commit_id // "") == $head)) then $head
+            elif ($appr | length) > 0 then ($appr | sort_by((.submitted_at // ""), (.id // 0)) | last | (.commit_id // ""))
+            else "" end' 2>/dev/null)
+        if [ -n "$approved_head" ]; then posture="approved"
+        else echo "$PROG: $id — PR#$num reviewDecision APPROVED but no approving review readable; posture not recorded (retry next pass)" >&2
+        fi
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi
@@ -1106,7 +1128,7 @@ CHILDREN_EOF
   esac
   have_p=$(printf '%s' "$row" | jq -r '(.metadata.pr_posture // "") | tostring')
   if [ -n "$posture" ]; then
-    want_p="$posture@$head_oid"; want_m="${merge_state:-UNKNOWN}@$head_oid"
+    want_p="$posture@${approved_head:-$head_oid}"; want_m="${merge_state:-UNKNOWN}@$head_oid"
     have_m=$(printf '%s' "$row" | jq -r '(.metadata.pr_merge_state // "") | tostring')
     # pr_posture is a dated key: its review_required value starts an owed clock,
     # so the recorded value carries the instant as a third component and
