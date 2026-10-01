@@ -329,14 +329,15 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
-| `assets/scripts/pre-open-rebase.sh` | merge | Arm 1a: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
-| `assets/scripts/pr-open.sh` | merge | Arm 2: `pre_open_gate` to `pull_request`. |
-| `assets/scripts/merge.sh` | merge | Arm 3: the single writer of merged truth. |
+| `assets/scripts/merge.sh` | merge | Arm 4: the single writer of merged truth. |
 | `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
-| `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
-| `assets/scripts/convoy-graduate.sh` | merge | Arm 5: graduates a complete owned integration convoy. |
-| `assets/scripts/review-sweep.sh` | merge | Arm 6: closes a dispatched review with no reviewable surface left. No merge authority. |
-| `assets/scripts/duplicate-sweep.sh` | merge | Arm 7: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
+| `assets/scripts/pre-open-rebase.sh` | merge | Arm 5: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
+| `assets/scripts/pr-open.sh` | merge | Arm 6: `pre_open_gate` to `pull_request`. |
+| `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
+| `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
+| `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
+| `assets/scripts/duplicate-sweep.sh` | merge | Arm 10: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
+| `assets/scripts/pr-stack.sh` | merge | Arm 11: keeps each open PR's body current with its anchor in both managed regions — the branch-beads section, and the `pr-summary` region a rework moved past. Writes only PR bodies. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
 | `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of five dispositions: route the bead to a pool, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or file a visit for the operator's judgment. It sits in visit because its product is a bead the human no longer has to triage. |

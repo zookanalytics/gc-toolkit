@@ -418,7 +418,7 @@ second merge writer that neither the gate nor the lock can see.
 The controller keeps an exec order's output only on non-zero exit, folding a
 bounded tail into the `order.failed` event. So: an unexpected arm failure makes
 the driver exit 1 (the failing arm names reach `order.failed`); gate-ensure's
-rc=3 hold is reported but does not fail the order. Arm 3 is the one that does
+rc=3 hold is reported but does not fail the order. Arm 2 is the one that does
 both, holding the merge arm and failing the order, because a posture that could
 not be recorded is a fault to see rather than a routine gate. Every pass logs to
 `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`, trimmed to
