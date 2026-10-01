@@ -783,15 +783,27 @@ needs = ["check-refinery"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
-**1. Pour next iteration BEFORE burning — and GUARD the assign.** The pour
-and the assign are separate writes; a wisp poured but not assigned reaches
-no hook and drops the loop, invisibly (the prompt's title-scoped startup
-reconcile is the backstop, not the fix). Forward every declared var — a
---root-only pour materializes no defaults. Keep the pour on ONE line (TOML
-eats a trailing backslash):
+**1. Pour the next iteration and burn this one, both BEFORE the wait — and
+GUARD the assign.** The pour and the assign are separate writes; a wisp poured
+but not assigned reaches no hook and drops the loop, invisibly (the prompt's
+title-scoped startup reconcile is the backstop, not the fix). Burning this
+wisp is folded in right after the assign so it precedes the wait: a session
+reset during that wait has already poured and assigned its successor and
+burned itself, so the next boot adopts the successor instead of orphaning this
+wisp. Forward every declared var — a --root-only pour materializes no
+defaults. Keep each gc command on ONE line (TOML eats a trailing backslash).
+
+`GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
+current wisp has to work: a wisp is an EPHEMERAL molecule, which means
+`--type=molecule --include-infra` plus the title filter. Any narrower query
+reads empty, and an unresolved current wisp is one that never burns.
 
 ```bash
 # >>> patrol-wisp-pour
+CURRENT_WISP=${GC_BEAD_ID:-}
+if [ -z "$CURRENT_WISP" ]; then
+  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-witness-patrol")][0].id // empty')
+fi
 NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
@@ -803,10 +815,19 @@ if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
   gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile will collect it."
   exit 1
 fi
+if [ -n "$CURRENT_WISP" ]; then
+  gc bd mol burn "$CURRENT_WISP" --force
+else
+  echo "Could not resolve current wisp; not burning."
+  exit 1
+fi
 # <<< patrol-wisp-pour
 ```
-If either guard fires, stay on the current wisp and retry next cycle; skip
-steps 2 and 3.
+If the pour or assign guard fires, this wisp is unburned and its successor was
+rolled back or never poured: stay on the current wisp and retry next cycle,
+skipping the wait below. If the pour succeeded but no current wisp resolves,
+the successor is already live, so this exit hands off to it and leaves any
+stray to the title-scoped reconcile.
 
 **2. Wait before the next cycle** — a bounded clock-poll in ONE tool call
 (the harness blocks a standalone sleep, and caps one call at 600s):
@@ -815,13 +836,9 @@ end=$(( $(date +%s) + {{event_timeout}} ))
 until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
 ```
 
-**3. Burn this wisp — only if step 1 succeeded:**
-```bash
-gc bd mol burn <this-wisp-id> --force
-```
-
 Re-read the plain `gc formula show mol-witness-patrol` for step order (not
 the full --json; pull one step's description only as you reach it).
 
-**Exit criteria:** next wisp poured and assigned, this one burned — or the
-guard fired and this wisp survives for the retry."""
+**Exit criteria:** the next wisp poured and assigned, this one burned, and the
+inter-cycle wait elapsed — or a guard fired and this wisp survives for the
+retry."""
