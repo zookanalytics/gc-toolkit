@@ -18,11 +18,14 @@ The check is the product lens on a change, applied by a reviewer who stands in f
 the operator as a peer to the author, not an order-taker. It carries two questions
 and a stance, not a checklist:
 
-- is it the right thing — does the change move the user problem its anchor states
-  (the outcome), or a proxy of it that was easier to ship; and is that the right
-  problem to be solving, even when the anchor named it;
-- can the operator decide — can they accept or reject from the PR's summary,
-  evidence, and any demo, without reconstructing the case.
+- is it the right thing — the question that carries the weight: does the change
+  move the user problem its anchor states (the outcome), or a proxy of it that was
+  easier to ship; and is that the right problem to be solving, even when the anchor
+  named it;
+- can the operator decide — the gating second question: can they accept or reject
+  from the PR, without reconstructing the case, shown in the mode that fits the
+  change — a worked example, a before-and-after narrative, discriminating evidence,
+  or a demo to watch, demo being one strong mode and not the only one.
 
 The stance is the load-bearing part. A change can satisfy its bead's wording and
 still be wrong, so the PM judges the intent the change serves and pushes back when
@@ -32,8 +35,9 @@ built.
 
 ## Grounding
 
-The lens draws on established product-management practice, so the method
-represents the PM perspective rather than one author's first draft of it:
+The lens draws on established product-management practice, named in the method
+(`skills/review-pm/SKILL.md`) so the review applies the discipline's own
+frameworks rather than one author's first draft of them:
 
 - The PM owns **value and viability** — is this worth shipping to the operator —
   while the correctness check owns feasibility, whether it is built right. This is
