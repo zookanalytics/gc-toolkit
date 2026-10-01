@@ -259,13 +259,13 @@ fx() {
 # --- Per-agent contracts. ----------------------------------------------------
 # Fields: agent | scope (rig|city) | happy-path pour result | assign-fails
 # rollback result | does the pour snippet also resolve and burn the CURRENT
-# wisp? The refinery does it in the same block; the witness and deacon burn
-# theirs from a later formula step, so their snippet burns nothing on the happy
+# wisp? The refinery and witness do it in the same block; the deacon burns its
+# own from a later formula step, so its snippet burns nothing on the happy
 # path. The per-rig witness and refinery stamp gc.rig before the assign (two
 # updates); the city-singleton deacon takes no rig scope, so it only assigns
 # (one update).
 AGENTS=(
-  "witness  rig  0||w-new,w-new      1|w-new|w-new,w-new no"
+  "witness  rig  0|w-cur|w-new,w-new 1|w-new|w-new,w-new yes"
   "deacon   city 0||w-new            1|w-new|w-new       no"
   "refinery rig  0|w-cur|w-new,w-new 1|w-new|w-new,w-new yes"
 )
