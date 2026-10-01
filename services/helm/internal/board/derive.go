@@ -1983,10 +1983,12 @@ const (
 // live-workflow signal from facts instead. Counting is deduped by child id,
 // because one gather can list a bead twice.
 //
-// The frontier then SPEAKS that tri-state: on a live row the liveness word leads
-// the one-line summary, so the board's primary vocabulary is the state rather
-// than the roll-up. A closed row keeps its age phrase — the tri-state has no live
-// answer for it, so beadPhase left it empty and the prefix is skipped.
+// A bead WITH children on the board then takes its children's rolled-up state in
+// place of its own ([aggregatePhases]) — a parent's frontier is its children's
+// states — before the frontier SPEAKS that tri-state: on a live row the liveness
+// word leads the one-line summary, so the board's primary vocabulary is the state
+// rather than the roll-up. A closed row keeps its age phrase — the tri-state has
+// no live answer for it, so beadPhase left it empty and the prefix is skipped.
 func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	reworkKids := make(map[string]int)
@@ -2028,9 +2030,130 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		}
 		tiles[i].PRPhase = prP
 		tiles[i].Phase = phase
-		if phase != "" {
-			tiles[i].Frontier = phase + " · " + tiles[i].Frontier
+	}
+
+	// Roll each parent's Phase up from its children before the frontier speaks it,
+	// so a bead with children leads with its children's state rather than its own.
+	aggregatePhases(tiles, anchors)
+
+	// The frontier then SPEAKS the (possibly rolled-up) phase: on a live row the
+	// liveness word leads the one-line summary. A closed row left Phase empty, so
+	// the prefix is skipped and it keeps its age phrase.
+	for i := range tiles {
+		if tiles[i].Phase != "" {
+			tiles[i].Frontier = tiles[i].Phase + " · " + tiles[i].Frontier
 		}
+	}
+}
+
+// aggregatePhases rolls each parent's tri-state up from its children, so a bead
+// WITH children on the board speaks its children's rolled-up state instead of its
+// own: an epic's frontier is the frontier of its child stories, and their states
+// aggregate up the parent chain. A leaf — a tile no board row rolls up — keeps
+// the per-bead phase [classifyPhases] stamped.
+//
+// The roll-up climbs the parent-child CONTAINMENT edge only — the same
+// a.Children edge [assignGroupRoots] reads — not the blocked-dependency fallback
+// that grouping also climbs: a blocker is a prerequisite, not a child, and a
+// merge anchor's review/rework children hang off it by a blocked/anchor_bead
+// edge, so a PR keeps its own PR round-trip phase rather than rolling up its
+// reviews. It is bottom-up and memoized, so a multi-level epic aggregates its
+// sub-epics' already-rolled-up states.
+//
+// The precedence is the roll-up's own, deliberately NOT [prstatus.Derive]'s
+// per-bead needs-attention > working > needs-review: a family is working while
+// ANY live child is (progress is happening somewhere), is unable to move only
+// when EVERY live child needs attention, and otherwise is waiting on a review. A
+// closed child (empty phase) contributes nothing; a parent whose children have
+// all closed reads off its own phase again, as a leaf.
+func aggregatePhases(tiles []Tile, anchors []Anchor) {
+	tileSet := make(map[string]bool, len(tiles))
+	own := make(map[string]string, len(tiles))
+	for i := range tiles {
+		tileSet[tiles[i].ID] = true
+		own[tiles[i].ID] = tiles[i].Phase
+	}
+
+	// childrenOf[parent] is the tiles a parent rolls up by a parent-child edge,
+	// deduped across the (possibly twinned) anchor rows carrying one id.
+	childrenOf := map[string][]string{}
+	seenEdge := map[[2]string]bool{}
+	for i := range anchors {
+		a := anchors[i]
+		if !tileSet[a.ID] {
+			continue
+		}
+		for _, c := range a.Children {
+			if c.ID == a.ID || !tileSet[c.ID] {
+				continue
+			}
+			edge := [2]string{a.ID, c.ID}
+			if seenEdge[edge] {
+				continue
+			}
+			seenEdge[edge] = true
+			childrenOf[a.ID] = append(childrenOf[a.ID], c.ID)
+		}
+	}
+
+	memo := make(map[string]string, len(tiles))
+	var agg func(id string, path map[string]bool) string
+	agg = func(id string, path map[string]bool) string {
+		if r, ok := memo[id]; ok {
+			return r
+		}
+		phase := own[id]
+		// A closed/terminal row carries no live tri-state, so it neither rolls up
+		// nor contributes to a parent's roll-up.
+		if phase == "" {
+			memo[id] = ""
+			return ""
+		}
+		kids := childrenOf[id]
+		if len(kids) == 0 {
+			memo[id] = phase
+			return phase
+		}
+		// A parent-child cycle is malformed graph; break it without recursing
+		// rather than trust the edges never to loop.
+		if path[id] {
+			return phase
+		}
+		path[id] = true
+		anyLive, anyWorking, allAttention := false, false, true
+		for _, k := range kids {
+			ks := agg(k, path)
+			if ks == "" {
+				continue // a closed child does not move the roll-up
+			}
+			anyLive = true
+			switch ks {
+			case PhaseWorking:
+				anyWorking = true
+				allAttention = false
+			case PhaseNeedsAttention:
+				// leaves allAttention as it stands
+			default: // needs-review
+				allAttention = false
+			}
+		}
+		delete(path, id)
+		res := phase
+		switch {
+		case !anyLive:
+			// every child has closed; the parent stands on its own phase again
+		case anyWorking:
+			res = PhaseWorking
+		case allAttention:
+			res = PhaseNeedsAttention
+		default:
+			res = PhaseNeedsReview
+		}
+		memo[id] = res
+		return res
+	}
+	for i := range tiles {
+		tiles[i].Phase = agg(tiles[i].ID, map[string]bool{})
 	}
 }
 
