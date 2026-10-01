@@ -15,10 +15,14 @@
 # carries the branch.
 #
 # Usage:
-#   convoy-seed.sh --name <initiative> [--convoy <id>]
+#   convoy-seed.sh --name <initiative> [--convoy <id>] [--id-file <path>]
 #                  [--artifact <src> [--artifact-dest <repo-rel-path>]
 #                   --artifact-message <msg>]
 #                  [--rig-root <path>] [--json]
+#
+# --id-file <path> receives the convoy id the instant the convoy is created,
+# before the fallible target-set and branch cut. A caller that records it can
+# resume against this convoy after a crash instead of creating a second one.
 #
 # Output (stdout): convoy_id and branch, one per line, or a JSON object with
 # --json:
@@ -39,6 +43,7 @@ scrub() { tr -d '\000-\037'; }
 
 NAME=""
 CONVOY_ID=""
+IDFILE=""
 ARTIFACT=""
 ARTIFACT_DEST=""
 ARTIFACT_MSG=""
@@ -49,6 +54,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --name)             NAME="${2:-}"; shift 2 ;;
     --convoy)           CONVOY_ID="${2:-}"; shift 2 ;;
+    --id-file)          IDFILE="${2:-}"; shift 2 ;;
     --artifact)         ARTIFACT="${2:-}"; shift 2 ;;
     --artifact-dest)    ARTIFACT_DEST="${2:-}"; shift 2 ;;
     --artifact-message) ARTIFACT_MSG="${2:-}"; shift 2 ;;
@@ -77,6 +83,11 @@ if [ -z "$CONVOY_ID" ]; then
   [ -n "$CONVOY_ID" ] || die "gc convoy create returned no convoy id (output: $CREATE_JSON)"
 fi
 
+# Persist the resolved convoy id the instant it exists — before the fallible
+# target-set and branch cut below — so a caller that records it resumes against
+# this convoy after a crash rather than creating a second owned convoy.
+[ -n "$IDFILE" ] && { printf '%s\n' "$CONVOY_ID" > "$IDFILE" || die "could not write --id-file '$IDFILE'"; }
+
 BRANCH="integration/$CONVOY_ID"
 
 # 2. Set the convoy target so children inherit metadata.target through gc sling's
@@ -100,21 +111,22 @@ if ! git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/$BRANCH";
 
   SEED_DIR=$(mktemp -d "${TMPDIR:-/tmp}/convoy-seed.XXXXXX") || die "mktemp failed"
   SEED="$SEED_DIR/wt"
-  # Tear the throwaway worktree down on any exit so a failure leaks nothing, and
-  # drop the local branch ref the cut creates in the shared rig repo — origin is
-  # the source of truth, and a lingering ref would fail a resume's `add -b`.
+  # Tear the throwaway worktree down on any exit so a failure leaks nothing. The
+  # cut below is detached and never creates a local integration branch, so there
+  # is no branch ref to drop here.
   cleanup() {
     git -C "$RIG_ROOT" worktree remove --force "$SEED" >/dev/null 2>&1 || true
-    git -C "$RIG_ROOT" branch -D "$BRANCH" >/dev/null 2>&1 || true
     rm -rf "$SEED_DIR" >/dev/null 2>&1 || true
   }
   trap cleanup EXIT
 
-  # A crash between `add -b` and push can leave a stale local branch; clear it so
-  # this re-cut from origin/<default> is not blocked by the existing ref.
-  git -C "$RIG_ROOT" branch -D "$BRANCH" >/dev/null 2>&1 || true
-  git -C "$RIG_ROOT" worktree add "$SEED" -b "$BRANCH" "origin/$DEFAULT_BRANCH" >/dev/null 2>&1 \
-    || die "worktree add failed for $BRANCH from origin/$DEFAULT_BRANCH"
+  # Cut DETACHED, never `-b <branch>`. A named local branch left checked out in a
+  # worktree a hard crash leaks cannot be deleted (git refuses a checked-out
+  # branch) and then blocks the retry's own re-creation of it. A detached worktree
+  # holds no branch ref, so a leaked one collides with nothing and the push below
+  # writes HEAD straight to refs/heads/<branch>.
+  git -C "$RIG_ROOT" worktree add "$SEED" --detach "origin/$DEFAULT_BRANCH" >/dev/null 2>&1 \
+    || die "worktree add failed from origin/$DEFAULT_BRANCH"
 
   # A shared input artifact starts the branch ahead of default. A design-convoy
   # seeds nothing, so the branch starts equal to the default branch.
@@ -132,7 +144,7 @@ if ! git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/$BRANCH";
       || die "git commit failed for the seed artifact"
   fi
 
-  git -C "$SEED" push -u origin "$BRANCH" >/dev/null 2>&1 \
+  git -C "$SEED" push origin "HEAD:refs/heads/$BRANCH" >/dev/null 2>&1 \
     || die "push failed for $BRANCH"
 
   cleanup

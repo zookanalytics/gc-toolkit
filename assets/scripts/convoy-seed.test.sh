@@ -7,6 +7,10 @@
 #     when nothing is seeded and ahead of it when an artifact is,
 #   - the rig root's working tree is NEVER moved (the disposable-worktree
 #     safety constraint) and no worktree or local branch ref leaks,
+#   - the cut is detached: it creates no local integration branch, so a crashed
+#     run that leaked a checked-out integration branch does not block the retry,
+#   - --id-file receives the convoy id the instant it is created, before the cut,
+#     so a failure after create still lets the caller resume against that convoy,
 #   - resume is idempotent: a supplied convoy id skips creation and an existing
 #     origin branch skips the cut,
 #   - it fails closed on a missing name or a non-git rig root.
@@ -44,7 +48,11 @@ case "${2:-}" in
   create)
     case " $* " in *" --owned "*) ;; *) echo "gc convoy create: --owned required" >&2; exit 2 ;; esac
     printf '{"convoy_id":"%s"}\n' "${STUB_CONVOY_ID:-cv-seed-1}" ;;
-  target) : ;;
+  target)
+    # STUB_TARGET_FAIL forces a failure AFTER convoy create, to prove the id is
+    # persisted to --id-file before the cut can fail.
+    [ -n "${STUB_TARGET_FAIL:-}" ] && { echo "gc convoy target: stub forced failure" >&2; exit 2; }
+    : ;;
   *) echo "gc convoy stub: unsupported convoy subcommand '${2:-}'" >&2; exit 2 ;;
 esac
 GC
@@ -71,8 +79,10 @@ MAIN_TIP=$(git -C "$TMP/origin.git" rev-parse refs/heads/main)
 
 # --- 1. Fresh happy path: no artifact -----------------------------------------
 echo "# fresh seed (design-convoy, no artifact)"
-out=$( "$SUT" --name "Design convoy" --rig-root "$RIG" 2>&1 ); rc=$?
+IDF1="$TMP/idfile-1"
+out=$( "$SUT" --name "Design convoy" --id-file "$IDF1" --rig-root "$RIG" 2>&1 ); rc=$?
 eq "$rc" 0 "fresh seed exits 0"
+eq "$(cat "$IDF1" 2>/dev/null)" "cv-seed-1" "fresh seed writes convoy id to --id-file"
 has "$out" "convoy_id=cv-seed-1"          "prints convoy_id"
 has "$out" "branch=integration/cv-seed-1" "prints branch"
 eq "$(grep -c 'convoy create' "$GC_LOG")" 1 "convoy create called exactly once"
@@ -130,6 +140,40 @@ js=$( "$SUT" --name "JSON convoy" --json --rig-root "$RIG" 2>/dev/null ); rc=$?
 eq "$rc" 0 "json mode exits 0"
 eq "$(printf '%s' "$js" | jq -r '.convoy_id')" "cv-seed-3"            "json convoy_id"
 eq "$(printf '%s' "$js" | jq -r '.branch')"    "integration/cv-seed-3" "json branch"
+unset STUB_CONVOY_ID
+
+# --- 6. Crash-resume: a leaked worktree still holds a local integration branch -
+# A hard crash mid-cut (before the trap or the push) leaves a worktree holding a
+# checked-out integration/<id> branch while origin has no such branch yet. The
+# pre-fix `branch -D` could not delete a checked-out branch and the retry's
+# `worktree add -b` then failed because the branch existed. The detached cut must
+# sail past the leak.
+echo "# crash-resume with a stale checked-out integration branch"
+: > "$GC_LOG"
+export STUB_CONVOY_ID=cv-seed-4
+STALE_WT="$TMP/stale-seed-wt"
+git -C "$RIG" worktree add -q "$STALE_WT" -b integration/cv-seed-4 main
+out=$( "$SUT" --name "Crash convoy" --convoy cv-seed-4 --rig-root "$RIG" 2>&1 ); rc=$?
+eq "$rc" 0 "crash-resume exits 0 despite a leaked checked-out branch"
+git -C "$TMP/origin.git" show-ref --verify --quiet refs/heads/integration/cv-seed-4 \
+  && ok "crash-resume cut pushes the branch to origin" || bad "crash-resume cut pushes the branch to origin"
+# Undo the simulated leak so the worktree-count invariant holds for any later run.
+git -C "$RIG" worktree remove --force "$STALE_WT" >/dev/null 2>&1 || true
+git -C "$RIG" branch -D integration/cv-seed-4 >/dev/null 2>&1 || true
+eq "$(git -C "$RIG" worktree list | wc -l | tr -d ' ')" "1" "crash-resume leaves no extra worktree"
+unset STUB_CONVOY_ID
+
+# --- 7. id-file persisted before a failing cut --------------------------------
+# convoy create succeeds, then the cut step fails. The id must already be in
+# --id-file so the caller can resume against this convoy, not create a second.
+echo "# id-file written before a failing cut"
+: > "$GC_LOG"
+export STUB_CONVOY_ID=cv-seed-5
+IDF5="$TMP/idfile-5"
+out=$( STUB_TARGET_FAIL=1 "$SUT" --name "IdFile convoy" --id-file "$IDF5" --rig-root "$RIG" 2>&1 ); rc=$?
+[ "$rc" -ne 0 ] && ok "seed fails when the cut step fails" || bad "seed fails when the cut step fails"
+eq "$(grep -c 'convoy create' "$GC_LOG")" 1 "convoy created exactly once before the failure"
+eq "$(cat "$IDF5" 2>/dev/null)" "cv-seed-5" "convoy id persisted to --id-file before the cut failed"
 unset STUB_CONVOY_ID
 
 echo

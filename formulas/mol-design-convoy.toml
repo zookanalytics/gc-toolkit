@@ -83,10 +83,12 @@ its target to `integration/<convoy-id>`, and cut+push that branch from a
 disposable worktree. A converse sitting cannot do this — it never pushes — which
 is why the pattern needs this molecule.
 
-**Idempotent on resume.** The convoy id is recorded on the subject once created,
-and `convoy-seed.sh` skips the cut when origin already carries the branch. So a
-re-run reuses the recorded id and never creates a second convoy or re-cuts the
-branch.
+**Idempotent on resume.** `convoy-seed.sh` writes the new convoy id to `--id-file`
+the instant the convoy is created — before the fallible target-set and branch cut —
+and this step records it on the subject right then, on success or failure. A re-run
+therefore passes the recorded id back as `--convoy`, so it reuses the first convoy
+instead of creating a second, and `convoy-seed.sh` skips the cut when origin already
+carries the branch.
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -101,12 +103,21 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 done
 [ -n "$SCRIPTS" ] || { echo "convoy-seed.sh not found in the pack" >&2; exit 1; }
 
-SEED_JSON=$("$SCRIPTS/convoy-seed.sh" --name "$INITIATIVE" ${CONVOY_ID:+--convoy "$CONVOY_ID"} --json) || { echo "convoy-seed failed" >&2; exit 1; }
+IDFILE=$(mktemp "${TMPDIR:-/tmp}/gctk-design-convoy-id.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
+SEED_RC=0
+SEED_JSON=$("$SCRIPTS/convoy-seed.sh" --name "$INITIATIVE" ${CONVOY_ID:+--convoy "$CONVOY_ID"} --id-file "$IDFILE" --json) || SEED_RC=$?
+# convoy-seed.sh writes the created convoy id to --id-file before its fallible
+# target-set and branch cut. Record it now — on success OR failure — so a resume
+# after a mid-cut crash reuses this convoy instead of creating a second one.
+SEEDED_ID=$(tr -d '[:cntrl:]' < "$IDFILE" 2>/dev/null); rm -f "$IDFILE"
+[ -n "$SEEDED_ID" ] && gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$SEEDED_ID"
+[ "$SEED_RC" -eq 0 ] || { echo "convoy-seed failed (rc=$SEED_RC)" >&2; exit 1; }
 CONVOY_ID=$(printf '%s' "$SEED_JSON" | tr -d '[:cntrl:]' | jq -r '.convoy_id // empty')
 BRANCH=$(printf '%s' "$SEED_JSON" | tr -d '[:cntrl:]' | jq -r '.branch // empty')
 [ -n "$CONVOY_ID" ] && [ -n "$BRANCH" ] || { echo "convoy-seed returned no convoy id/branch" >&2; exit 1; }
 
-# Record on the subject so every later step (and any resume) reads one truth.
+# Record the authoritative id+branch now that the cut has succeeded (the id was
+# already persisted above; re-recording it with the branch is idempotent).
 gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$CONVOY_ID" --set-metadata "gc.design_convoy_branch=$BRANCH"
 ```
 
