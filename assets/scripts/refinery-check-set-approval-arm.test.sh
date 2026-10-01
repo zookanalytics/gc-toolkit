@@ -57,14 +57,14 @@ eq "$(resolve "codex" "codex,approval")" "codex,approval" \
 eq "$(resolve "codex" "codex,approval,style")" "codex,approval,style" \
   "a wider approval-bearing anchor check_set is preserved verbatim"
 eq "$(resolve "" "codex,approval")" "codex,approval" \
-  "empty var normalizes to codex, then the approval arm wins"
+  "empty var normalizes to the default, then the approval arm wins"
 eq "$(resolve "none" "codex,approval")" "codex,approval" \
   "a per-anchor approval arm outranks a gateless var"
 
 # No approval arm on the anchor: the var default stands, unchanged.
 eq "$(resolve "codex" "codex")" "codex"   "a codex-only anchor stays codex"
 eq "$(resolve "codex" "")"      "codex"   "an anchor with no check_set stays the var default"
-eq "$(resolve "" "")"           "codex"   "empty var with no anchor arm normalizes to codex"
+eq "$(resolve "" "")"           "correctness,triage" "empty var with no anchor arm normalizes to the default"
 eq "$(resolve "none" "")"       "none"    "gateless var is preserved when no approval arm exists"
 eq "$(resolve "codex" "codex,style")" "codex" \
   "a non-approval multi-lane anchor does not trigger the arm"
