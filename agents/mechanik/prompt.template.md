@@ -85,37 +85,43 @@ convoy, a multi-bead initiative the many-child convoy. The convoy stays open
 until its work merges, so `closed` always means landed.
 
 A **shared input artifact** (a decisions doc, a spec several polecats need
-before any produce mergeable work) is never committed directly to the
-default branch — seed it on the convoy's integration branch:
+before any produce mergeable work) is never committed directly to the default
+branch — it is seeded on the convoy's integration branch.
+`assets/scripts/convoy-seed.sh` is that recipe in one idempotent act: it
+creates the owned convoy, sets `target = integration/<convoy-id>`, and
+cuts+pushes the branch from a disposable worktree. The disposable worktree is
+load-bearing — reconcile keeps the rig root fast-forwarded to the default
+branch and directory-imported packs build from its working tree, so a branch
+checkout or commit there parks the deploy off the default branch.
+`--artifact <file>` starts the branch one commit ahead of the default with
+that artifact on it; without it the branch starts equal to the default.
 
 ```bash
-# 1. Owned convoy with an integration branch as target.
-CONVOY=$(gc convoy create "<initiative>" --owned \
-    --target "integration/<convoy-id>" --json | jq -r .convoy_id)
+# Create the convoy, cut + push its integration branch, seed the artifact onto
+# it. --json emits {convoy_id, branch}.
+CONVOY=$(assets/scripts/convoy-seed.sh --name "<initiative>" \
+    --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
-# 2. Seed the integration branch with the shared artifact from a DISPOSABLE
-#    worktree — never the rig root. reconcile keeps the rig root fast-forwarded
-#    to main and directory-imported packs build from its working tree, so a
-#    branch checkout or commit there parks the deploy off main.
-git -C <rig-root> fetch --prune origin
-SEED=$(mktemp -d)/wt
-git -C <rig-root> worktree add "$SEED" -b "integration/<convoy-id>" origin/main
-# add + commit the shared artifact in "$SEED", then:
-git -C "$SEED" push -u origin "integration/<convoy-id>"
-git -C <rig-root> worktree remove "$SEED"
-
-# 3. File child work beads, link to convoy, sling normally.
+# File child work beads under the convoy and sling normally.
 WORK=$(gc bd create "<task>" -t task --json | jq -r .id)
 gc bd dep add "$WORK" "$CONVOY" --type=parent-child
 gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # inherits metadata.target via convoy walk
 ```
 
+A **design-first initiative** — executable work that needs a design settled
+before or beside the build — rides `mol-design-convoy` instead of a bare seed:
+it runs the same branch cut, then files the design child and, under the
+design-gated default, arms implementation behind the design's approval, so
+design and implementation graduate as one reviewed unit. Recommend it from a
+converse sitting, or sling it directly on the initiative with
+`--on mol-design-convoy --var issue=<initiative>` (`docs/design-convoy.md`).
+
 Children inherit `metadata.target = integration/<convoy-id>` via the
 convoy-ancestor walk in `gc sling`: polecats branch from the integration
-branch and the refinery lands their work back onto it, never onto main.
-When all children close AND the ledger records at least one landing on the
-branch, the cadence graduates the convoy automatically — a human-approved
-`integration/<id>` -> main PR through the same work-bead machine. Children
+branch and the refinery lands their work back onto it, never onto the default
+branch. When all children close AND the ledger records at least one landing on
+the branch, the cadence graduates the convoy automatically — a human-approved
+`integration/<id>` -> default-branch PR through the same work-bead machine. Children
 closed having landed nothing leave "all closed" vacuously true, and the
 pass reports the convoy vacuous rather than graduating it; land a genuinely
 complete but unrecorded convoy deliberately with `gc convoy land`.
@@ -123,10 +129,10 @@ complete but unrecorded convoy deliberately with `gc convoy land`.
 Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
 points one dispatch at any ref; explicit `--var` wins over the auto-compute.
 
-**Anti-pattern:** dispatching a shared input artifact to land on main by
-itself, with no convoy above it. Catching this shape is a dispatch judgment
-here, not a downstream gate, so seed the artifact on the convoy's integration
-branch as above.
+**Anti-pattern:** dispatching a shared input artifact to land on the default
+branch by itself, with no convoy above it. Catching this shape is a dispatch
+judgment here, not a downstream gate, so seed the artifact on the convoy's
+integration branch as above.
 
 ## Scope-miss recovery: amend the open PR
 
