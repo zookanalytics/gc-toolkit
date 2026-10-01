@@ -260,7 +260,12 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         [ $((NOW - lt)) -gt "$STALL" ] || continue
 
         # UNHELD: any live session behind the root or a member exempts it.
-        [ -n "${LIVE[$sname]:-}" ] && continue
+        # An empty $sname is a root carrying no gc.session_name back-reference —
+        # the common shape of a stranded root, and exactly what this check must
+        # judge, not skip. It also cannot index LIVE: an empty subscript on an
+        # associative array is a fatal error, so guard it like $who below before
+        # the lookup and fall through to member liveness.
+        [ -n "$sname" ] && [ -n "${LIVE[$sname]:-}" ] && continue
         alive=0
         for m in ${MEMBERS[$root]:-}; do
             for who in "${MASSIGNEE[$m]:-}" "${MSID[$m]:-}" "${MSNAME[$m]:-}"; do
