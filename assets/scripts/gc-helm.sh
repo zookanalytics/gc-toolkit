@@ -2780,7 +2780,41 @@ engage_create_subject() {
         echo "$PROG: engage: could not create the subject bead in rig '$engage_rig'${_ecs_err:+: $_ecs_err}. Nothing spawned." >&2
         exit 4
     fi
+    # Arm the abort backstop the instant the marked subject exists. Every gate
+    # from here to the visit-filing in cmd_engage can still abort (a suspended or
+    # not-running rig, an unknown --template or --model, a store read that will
+    # not confirm the bead), and until the visit is filed an abort would strand
+    # this operator-origin subject behind its own stand-down marker: gc-proactive
+    # drops a marked bead and mol-first-reaction consumes-and-ignores it, so the
+    # async worker would never file the visit either. engage_new_subject_cleanup
+    # revokes the marker on exit so the force-to-visit invariant is restored;
+    # cmd_engage disarms it once the visit is filed. enumerate_rigs (called at the
+    # top of this function) already set and cleared its own trap and memoizes on
+    # every later call, so it never clobbers this one.
+    _ens_cleanup_bead="$bead"
+    _ens_cleanup_db="$_ecs_path/.beads"
+    trap 'engage_new_subject_cleanup' EXIT
+    trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
     echo "$PROG: engage: filed subject $bead in rig '$engage_rig' — \"$new_subject_title\"" >&2
+}
+
+# engage_new_subject_cleanup — the abort backstop for --new-subject, armed by
+# engage_create_subject the instant the marked subject exists and disarmed by
+# cmd_engage once the visit is filed. While armed, any exit (an abort gate or a
+# signal) means engage never filed the subject's one visit, so the stand-down
+# marker it carries would hide it from the async first reaction forever. Revoke
+# the marker so the force-to-visit invariant takes over: the async first reaction
+# then opens the subject's visit and parks it on the board. A no-op when nothing
+# is armed, and it preserves the process's exit code.
+_ens_cleanup_bead=""
+_ens_cleanup_db=""
+engage_new_subject_cleanup() {
+    _enc_rc=$?
+    [ -n "${_ens_cleanup_bead:-}" ] || return "$_enc_rc"
+    gc bd update "$_ens_cleanup_bead" --db "$_ens_cleanup_db" \
+        --unset-metadata gc.interactive_intake >/dev/null 2>&1 || true
+    echo "$PROG: engage: aborted before filing a visit for new subject $_ens_cleanup_bead; revoked its gc.interactive_intake stand-down marker so the async first reaction opens its visit and parks it on the board." >&2
+    return "$_enc_rc"
 }
 
 # ── Verb: engage ─────────────────────────────────────────────────────
@@ -3097,6 +3131,13 @@ cmd_engage() {
             # stderr and still surface.
             cmd_open "$@" >/dev/null || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
             filed_fresh=1
+            # The visit is filed, so a --new-subject subject is no longer an
+            # orphan — disarm the abort backstop armed in engage_create_subject.
+            # Guarded, so a non-new-subject engage never touches traps.
+            if [ -n "${_ens_cleanup_bead:-}" ]; then
+                _ens_cleanup_bead=""
+                trap - EXIT INT TERM HUP
+            fi
             [ -n "$VISIT" ] && visit_new=1
             [ -n "$VISIT" ] || candidates=$(engage_find_visits "$bead")
         fi

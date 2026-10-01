@@ -300,17 +300,32 @@ WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 
 INTAKE=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.interactive_intake"] // "") else "" end' 2>/dev/null || printf '')
 if [ "$INTAKE" = "1" ]; then
   echo "LIVE INTAKE: $WORK_BEAD_ID carries gc.interactive_intake=1 — gc-helm engage --new-subject created it, filed its one visit, and spawned the sitting. Running no exit and filing no visit; recording the reaction and draining."
-  # Stamp the reaction FIRST (the permanent completion proof the scan and the
-  # sling guard read), so a failed consume below cannot leave the bead with
-  # neither marker and re-react. Then consume the one-shot intake marker
-  # fail-closed: unset it and read it back. A marker that will not clear is left
-  # as-is — the scan's gc.interactive_intake drop and gc.proactive_reaction both
-  # keep a sweep off it, so either way no second visit is filed.
-  gc bd update "$WORK_BEAD_ID" --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 \
-    || echo "warning: could not stamp gc.proactive_reaction=1 on $WORK_BEAD_ID; the gc.interactive_intake drop in scan_precision_filter still keeps a sweep off it" >&2
-  gc bd update "$WORK_BEAD_ID" --unset-metadata gc.interactive_intake >/dev/null 2>&1 || true
-  INTAKE_LEFT=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.interactive_intake"] // "") else "unknown" end' 2>/dev/null || printf 'unknown')
-  [ "$INTAKE_LEFT" = "1" ] && echo "note: gc.interactive_intake did not clear on $WORK_BEAD_ID (still armed) — left as-is; the scan drop and gc.proactive_reaction both keep a sweep off it" >&2
+  # Stamp the permanent completion proof (the scan and the sling guard read it),
+  # then CONFIRM it is on the bead before consuming the one-shot intake marker.
+  # The unset is gated on a read-back-proven gc.proactive_reaction=1, so a failed
+  # or silently-dropped stamp can never combine with a successful unset to leave
+  # the bead carrying NEITHER marker — the state the next proactive scan reads as
+  # unreacted and re-visits, filing the second visit this block exists to prevent.
+  # A marker that will not clear is left armed: the proven gc.proactive_reaction
+  # and the scan's gc.interactive_intake drop each keep a sweep off it, so either
+  # way no second visit is filed.
+# >>> live-intake-consume
+  REACTED=""
+  if gc bd update "$WORK_BEAD_ID" --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1; then
+    REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.proactive_reaction"] // "") else "" end' 2>/dev/null || printf '')
+  fi
+  if [ "$REACTED" = "1" ]; then
+    # Proof is on the bead — consume the one-shot intake marker, reading it back.
+    gc bd update "$WORK_BEAD_ID" --unset-metadata gc.interactive_intake >/dev/null 2>&1 || true
+    INTAKE_LEFT=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.interactive_intake"] // "") else "unknown" end' 2>/dev/null || printf 'unknown')
+    [ "$INTAKE_LEFT" = "1" ] && echo "note: gc.interactive_intake did not clear on $WORK_BEAD_ID (still armed) — left as-is; the scan drop and gc.proactive_reaction both keep a sweep off it" >&2
+  else
+    # The stamp is not proven on the bead, so DO NOT unset the intake marker —
+    # leaving it armed keeps scan_precision_filter's drop over the bead, so no
+    # second visit is filed even without the permanent proof.
+    echo "warning: could not confirm gc.proactive_reaction=1 on $WORK_BEAD_ID; left gc.interactive_intake armed so scan_precision_filter's drop still keeps a sweep off it" >&2
+  fi
+# <<< live-intake-consume
   SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
