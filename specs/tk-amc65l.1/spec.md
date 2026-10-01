@@ -94,6 +94,24 @@ so a standalone `gc.proactive_reaction=1` is not a board row and creates no husk
 If the stamp fails, the consume is skipped and the marker is left in place, so
 either marker keeps a sweep off the bead — no path files a second visit.
 
+### The abort backstop: a created subject always gets its visit
+
+`engage --new-subject` creates the subject before the gates that can still refuse
+the live engage — an unknown `--model` or `--template`, a suspended or not-running
+rig, a store read that will not confirm the bead. A created operator-origin
+subject owes exactly one visit, and nothing downstream supplies it on an abort:
+the scan drops a marked bead, and even unmarked a first reaction does not force a
+visit for `gc.origin=operator` (its actionable/blocked/close exits file none). So
+`engage_create_subject` arms an EXIT backstop the instant the subject exists, and
+on any abort before the visit is filed the backstop files that one parked visit
+itself — through the same `cmd_open` the happy path uses, so it parks on the board
+and dedups. The marker is left set, exactly as a successful engage leaves it, so
+the async worker still stands down. The live engage is best-effort over a durable
+subject-plus-visit: when the spawn cannot proceed, the visit is on the board for
+the operator to engage once the blocker is cleared. Revoking the marker to hand
+the subject to first-reaction recovery is not enough, because that recovery does
+not file the owed visit.
+
 ## Deliberate choices
 
 - **Atomic marker-at-create** (`gc bd create --metadata`) rather than

@@ -961,22 +961,25 @@ hasnt "$CALLED" "session new" "(NEWSUBJ-CREATEFAIL) …and no sitting spawned"
 hasnt "$CALLED" "unset-metadata gc.interactive_intake" "(NEWSUBJ-CREATEFAIL) …and no cleanup runs — nothing was created to clean up"
 unset SUBJ_CREATE_FAIL
 
-echo "# --new-subject whose post-create gate aborts revokes the marker so first reaction recovers it"
-# The subject is created MARKED before the gates that can still refuse the engage
-# (here an unknown --model, like the suspended/not-running rig and unknown
-# --template gates). An abort there would strand an operator-origin subject behind
-# its own stand-down marker with no visit: gc-proactive drops a marked bead and
-# mol-first-reaction consumes-and-ignores it, so the async worker never recovers
-# it either. The abort backstop revokes the marker so the force-to-visit invariant
-# opens the visit asynchronously instead.
+echo "# --new-subject whose post-create gate aborts still files the subject's one visit"
+# The subject is created MARKED before the gates that can still refuse the live
+# engage (here an unknown --model, like the suspended/not-running rig and unknown
+# --template gates). An abort there must not leave the operator-origin subject with
+# no visit: the async worker will not supply one (gc-proactive drops a marked bead,
+# mol-first-reaction consumes-and-ignores it, and even unmarked a first reaction
+# does not force a visit for gc.origin=operator). So the backstop files the one
+# parked visit itself (via cmd_open, carrying the opener) and LEAVES the marker,
+# exactly as a successful engage does, so the async worker still stands down.
 export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
 run_engage "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
 eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
 SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
 has "$SUBJ_CREATE" "interactive_intake" "(NEWSUBJ-ABORT) the subject was already created with the marker (the abort is post-create)"
-has "$CALLED" "bd update tk-newsubj --db $TMP/rig/.beads --unset-metadata gc.interactive_intake" "(NEWSUBJ-ABORT) …so the backstop revokes the marker on the orphaned subject, in its own rig's store"
-has "$OUT" "revoked its gc.interactive_intake" "(NEWSUBJ-ABORT) …and says so, naming the async first reaction as the recovery"
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+has "$VISIT_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one parked visit, carrying its opener"
+hasnt "$CALLED" "unset-metadata gc.interactive_intake" "(NEWSUBJ-ABORT) …and LEAVES the marker, exactly as a successful engage does"
+has "$OUT" "parked on the helm board" "(NEWSUBJ-ABORT) …and tells the operator the visit is parked for them to engage"
 hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
 
 echo "# --new-subject interactive: a lone converse rig auto-selects; prompts title, then model"

@@ -2783,16 +2783,16 @@ engage_create_subject() {
     # Arm the abort backstop the instant the marked subject exists. Every gate
     # from here to the visit-filing in cmd_engage can still abort (a suspended or
     # not-running rig, an unknown --template or --model, a store read that will
-    # not confirm the bead), and until the visit is filed an abort would strand
-    # this operator-origin subject behind its own stand-down marker: gc-proactive
-    # drops a marked bead and mol-first-reaction consumes-and-ignores it, so the
-    # async worker would never file the visit either. engage_new_subject_cleanup
-    # revokes the marker on exit so the force-to-visit invariant is restored;
-    # cmd_engage disarms it once the visit is filed. enumerate_rigs (called at the
-    # top of this function) already set and cleared its own trap and memoizes on
+    # not confirm the bead), and until the visit is filed an abort would leave this
+    # operator-origin subject owing a visit that nothing supplies: its own
+    # stand-down marker hides it from the async worker (gc-proactive drops a marked
+    # bead, mol-first-reaction consumes-and-ignores it), and even unmarked a first
+    # reaction does not force a visit for gc.origin=operator (actionable/blocked/
+    # close file none). So engage_new_subject_cleanup files that one visit itself on
+    # exit; cmd_engage disarms it once the visit is filed. enumerate_rigs (called at
+    # the top of this function) already set and cleared its own trap and memoizes on
     # every later call, so it never clobbers this one.
     _ens_cleanup_bead="$bead"
-    _ens_cleanup_db="$_ecs_path/.beads"
     trap 'engage_new_subject_cleanup' EXIT
     trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
     echo "$PROG: engage: filed subject $bead in rig '$engage_rig' — \"$new_subject_title\"" >&2
@@ -2801,19 +2801,30 @@ engage_create_subject() {
 # engage_new_subject_cleanup — the abort backstop for --new-subject, armed by
 # engage_create_subject the instant the marked subject exists and disarmed by
 # cmd_engage once the visit is filed. While armed, any exit (an abort gate or a
-# signal) means engage never filed the subject's one visit, so the stand-down
-# marker it carries would hide it from the async first reaction forever. Revoke
-# the marker so the force-to-visit invariant takes over: the async first reaction
-# then opens the subject's visit and parks it on the board. A no-op when nothing
-# is armed, and it preserves the process's exit code.
+# signal) means the live engage stopped before cmd_engage filed the subject's one
+# visit. The subject still owes that visit and the async worker will not supply it
+# — the stand-down marker hides it from the scan, and even unmarked a first
+# reaction does not force a visit for an operator-origin bead. So file the one
+# parked visit here with cmd_open, the same path the happy flow uses: it resolves
+# the subject's rig from its id, dedups, and parks the visit on the board. The
+# marker is LEFT set, exactly as a successful engage leaves it, so the async worker
+# still stands down rather than filing a second. Run cmd_open in a subshell so its
+# own exits cannot abort this trap, and disarm first so it cannot re-enter. A no-op
+# when nothing is armed; it preserves the process's exit code.
 _ens_cleanup_bead=""
-_ens_cleanup_db=""
 engage_new_subject_cleanup() {
     _enc_rc=$?
     [ -n "${_ens_cleanup_bead:-}" ] || return "$_enc_rc"
-    gc bd update "$_ens_cleanup_bead" --db "$_ens_cleanup_db" \
-        --unset-metadata gc.interactive_intake >/dev/null 2>&1 || true
-    echo "$PROG: engage: aborted before filing a visit for new subject $_ens_cleanup_bead; revoked its gc.interactive_intake stand-down marker so the async first reaction opens its visit and parks it on the board." >&2
+    _enc_bead="$_ens_cleanup_bead"
+    _ens_cleanup_bead=""
+    trap - EXIT INT TERM HUP
+    set -- "$_enc_bead"
+    [ -n "${engage_reason:-}" ] && set -- "$@" --reason "$engage_reason"
+    if ( cmd_open "$@" >/dev/null 2>&1 ); then
+        echo "$PROG: engage: the live engage aborted, but filed the one visit new subject $_enc_bead owes — parked on the helm board. Engage it when ready: $PROG engage $_enc_bead" >&2
+    else
+        echo "$PROG: engage: new subject $_enc_bead was created but its visit could NOT be filed (store error?); it still carries the gc.interactive_intake marker. File the visit by hand: $PROG open $_enc_bead" >&2
+    fi
     return "$_enc_rc"
 }
 

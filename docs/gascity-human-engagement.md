@@ -390,7 +390,10 @@ race-free gate, so a sweep never slings a first reaction at it),
 `advance-and-drain` consumes it fail-closed and files no visit if a direct pour
 reaches one — stamping `gc.proactive_reaction=1` first, so the engage counts as
 the reaction and no later scan re-reacts. The invariant is preserved, not
-relaxed: the subject gets exactly one operator-filed visit.
+relaxed: the subject gets exactly one operator-filed visit. If a later gate
+refuses the live spawn — a bad model, a suspended rig — the subject's one visit
+is still filed and parked on the board, so the topic is never lost; the operator
+engages it once the blocker is cleared.
 
 ## How a parked conversation comes back (2026-08-22)
 
