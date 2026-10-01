@@ -95,8 +95,7 @@ cmd_green() {
   # lane, and a closed one is the backing — a status filter that skipped either
   # would derive green from an absence.
   local rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 \
+  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES") \
     || { warn "could not read review beads on $anchor"; return 2; }
 
   # An open review for this lane holds it out of green whatever else is true.

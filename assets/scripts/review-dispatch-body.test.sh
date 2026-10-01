@@ -15,7 +15,7 @@
 #   (RC)        exits 0: a dispatch is never blocked on prose.
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
 #   (CHECK)     --check-name emits a per-check section (correctness default,
-#               triage, demo, arch, and a no-method note for an undeclared check).
+#               triage, demo, arch, pm, and a no-method note for an undeclared check).
 #   (BOTH)      the formula and check axes coexist in one note.
 #   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
 #               appended; absent (or no --reviewed-oid) degrades silently.
@@ -87,6 +87,10 @@ hasF "$TMP/tri.out" 'Adding nothing is the expected common case' "(CHECK) triage
 bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
 hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
 hasF "$TMP/demo.out" 'skills/demo-capture/SKILL.md' "(CHECK) demo names its method skills"
+bash "$SCRIPT" --check-name pm > "$TMP/pm.out" 2>/dev/null
+hasF "$TMP/pm.out" '## Check: `pm`' "(CHECK) --check-name pm names the pm check"
+hasF "$TMP/pm.out" 'skills/review-pm/SKILL.md' "(CHECK) pm names its method skill"
+hasF "$TMP/pm.out" 'product lens' "(CHECK) pm carries the product lens"
 bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
 hasF "$TMP/arch.out" '## Check: `arch`' "(CHECK) --check-name arch names the arch check"
 hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"

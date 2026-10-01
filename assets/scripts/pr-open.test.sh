@@ -23,7 +23,7 @@ trap 'rm -rf "$TMP"' EXIT
 harness_init
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh" \
+mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/pr-summary-region.sh" "$HERE/lifecycle.sh" \
   "$HERE/lane-state.sh" "$HERE/finding.sh"
 SUT="$SD/pr-open.sh"
 

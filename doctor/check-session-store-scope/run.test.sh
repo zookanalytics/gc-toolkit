@@ -260,6 +260,51 @@ eq "$RC" "2" "an aliasless pool member takes its rig from the session name"
 has "$OUT" "alpha--city__polecat-1-pool" "the pool session is named"
 has "$OUT" "scoped to rig alpha" "the rig came from the session-name prefix"
 
+# --- 6b. an aliasless same-store pool member: <rig>__<template>, no `--` ------
+# The real shape a same-store pool session actually carries: named
+# <rig>__<template>-<id> with a double underscore and no `--`, GC_RIG=<rig>, and
+# no GC_ALIAS. The `--`-only split judged it city-scoped and reported its own
+# correct GC_RIG as a leak; the rig is the first name segment either separator.
+healthy
+session alpha__polecat-1 310 <<EOF
+GC_AGENT=alpha__polecat-1
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=$CITY/rigs/alpha/.beads
+EOF
+pane 310 <<EOF
+GC_AGENT=alpha__polecat-1
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=$CITY/rigs/alpha/.beads
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "0" "an aliasless <rig>__<template> pool member that agrees with its rig passes"
+has "$OUT" "3 agent session(s)" "the pool member is judged, not skipped"
+hasnt "$OUT" "alpha__polecat-1 is scoped to rig" "a pool member that agrees with its own rig is not a finding"
+
+# --- 6c. the same <rig>__ shape still catches a genuine leak -----------------
+# Deriving the rig from the <rig>__ prefix must not pass the session wholesale:
+# a pane whose GC_RIG names another rig is still an ERROR, and the finding names
+# the scope the name gave it, not "city-scoped".
+healthy
+session alpha__polecat-2 320 <<EOF
+GC_AGENT=alpha__polecat-2
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+EOF
+pane 320 <<EOF
+GC_AGENT=alpha__polecat-2
+GC_CITY_PATH=$CITY
+GC_RIG=beta
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "2" "an aliasless <rig>__<template> pool member whose pane names another rig is an ERROR"
+has "$OUT" "alpha__polecat-2 is scoped to rig alpha" "the rig came from the <rig>__ name prefix"
+has "$OUT" "running process holds GC_RIG=beta" "the leak is named"
+
 # --- 7. warm-respawn exposure: the server holds a key the session leaves open -
 healthy
 printf 'GC_RIG=alpha\n' > "$TMP/global.env"

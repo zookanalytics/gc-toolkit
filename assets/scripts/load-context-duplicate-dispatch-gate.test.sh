@@ -13,16 +13,22 @@
 #      build: unowned (empty assignee, fresh or rework dispatch), owned by this
 #      session, or in_progress under an owner that has since crashed (absent
 #      from `gc session list`, so the work is ours to take over).
-#   2. HANDED-OFF / MERGED — fires when a foreign assignee holds the bead open
-#      or closed (the refinery handoff leaves it open+assigned; a merge closes
-#      it), and when the bead carries a merge_result stamp even with the
-#      assignee cleared (a PR/merge already exists for it). The in-flight
-#      liveness arm covers neither, since an open bead under the refinery is
-#      finished, not in flight.
-#   3. IN-FLIGHT — still fires when a foreign owner is live (the original case).
-#   4. FAIL CLOSED — escalate failure records no release path, so it neither
-#      holds nor drains; a hold that did not land does not drain. The step is
-#      never left silently claimable or silently parked.
+#   2. FINISHED — quiesces WITHOUT escalation when a foreign assignee holds the
+#      bead open or closed (the refinery handoff leaves it open+assigned; a merge
+#      closes it), or when the bead carries a merge_result stamp even with the
+#      assignee cleared (a PR/merge already exists for it). A finished bead is not
+#      a live conflict — the work is with the refinery and no human has a decision
+#      to make — so the arm holds and drains but files no visit. A human gate here
+#      is what stranded finished work: it reaches a polecat both as a redundant
+#      dispatch and as a lease-expiry re-offer of the SAME molecule's own
+#      load-context after its work finished. The in-flight liveness arm covers
+#      neither, since an open bead under the refinery is finished, not in flight.
+#   3. IN-FLIGHT — escalates and holds when a foreign owner is live: two
+#      dispatches building at once is a routing anomaly a human must adjudicate.
+#   4. FAIL CLOSED — on the in-flight arm, escalate failure records no release
+#      path, so it neither holds nor drains. On either arm a hold that did not
+#      land does not drain. The step is never left silently claimable or silently
+#      parked.
 #
 # EXECUTES the real snippet extracted verbatim from the formula against fake
 # `gc` and stub scripts, so the test cannot drift from the shipped instruction.
@@ -170,22 +176,25 @@ eq "$(FAKE_SESSIONS="$SESS_EMPTY" run '[{"status":"in_progress","assignee":"lx-d
 # --- 2. Finished elsewhere: a completed hand-off or a merge. ------------------
 # A refinery handoff leaves the work bead open, assigned to the refinery, route
 # cleared. `open` is neither in_progress nor unknown, so the in-flight liveness
-# arm does not apply; a dedicated arm is what stops it rebuilding finished work.
+# arm does not apply; a dedicated arm stops it rebuilding finished work. The
+# work is with the refinery and no human has a decision to make, so this arm
+# holds and drains but files NO visit — a human gate here is what stranded
+# finished work (the SAME-molecule lease-expiry re-offer this fixes).
 
 eq "$(run "[{\"status\":\"open\",\"assignee\":\"$REFINERY\",\"metadata\":{}}]")" \
-   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
-   "completed handoff (open under the refinery): holds, escalates, drains, exits 1"
+   "1|UPDATE;HOLD;DRAIN;" \
+   "completed handoff (open under the refinery): quiesces silently, drains, exits 1 — no escalation"
 
 eq "$(run "[{\"status\":\"closed\",\"assignee\":\"$REFINERY\",\"metadata\":{}}]")" \
-   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
-   "merged (closed under the refinery): holds, escalates, drains, exits 1"
+   "1|UPDATE;HOLD;DRAIN;" \
+   "merged (closed under the refinery): quiesces silently, drains, exits 1 — no escalation"
 
 # A merge_result stamp outlives a cleared assignee (an anchor whose child rework
 # is in flight reads open + unassigned + merge_result). The unowned arm would
 # otherwise sail its live PR through.
 eq "$(run '[{"status":"open","assignee":"","metadata":{"merge_result":"pull_request"}}]')" \
-   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
-   "merge_result set with assignee cleared: holds — a PR already exists for the bead"
+   "1|UPDATE;HOLD;DRAIN;" \
+   "merge_result set with assignee cleared: quiesces silently — a PR already exists for the bead"
 
 # --- 3. In-flight under a LIVE foreign owner (the original case). -------------
 
@@ -203,33 +212,49 @@ eq "$(FAKE_SESSIONS='' run '[{}]')" \
 
 # --- 4. Messages name the true reason so a reader can act. --------------------
 
+# FINISHED (handoff): the refusal note and the hold reason name the completed
+# hand-off, the note records the silent quiesce, and NO escalation is filed.
 run "[{\"status\":\"open\",\"assignee\":\"$REFINERY\",\"metadata\":{}}]" >/dev/null
 has "$(cat "$TMP/update")" 'handed off or merged' "handoff: note names the completed hand-off"
-has "$(cat "$TMP/esc")"    'handed off or merged' "handoff: escalation names the completed hand-off"
-has "$(cat "$TMP/esc")"    'polecat-duplicate-dispatch' "escalation uses the duplicate-dispatch key"
+has "$(cat "$TMP/update")" 'quiesced without escalation' "handoff: note records the silent quiesce"
 has "$(cat "$TMP/hold")"   'mol-polecat-work.load-context' "hold names THIS step"
 has "$(cat "$TMP/hold")"   'handed off or merged' "hold reason names the completed hand-off"
+eq  "$(cat "$TMP/esc")"    '' "handoff: no escalation filed — a finished bead needs no human"
 
+# FINISHED (merge_result): the hold reason names the stamp; no escalation.
 run '[{"status":"open","assignee":"","metadata":{"merge_result":"pull_request"}}]' >/dev/null
 has "$(cat "$TMP/hold")" 'merge_result=pull_request' "merge_result: hold reason names the stamp"
+eq  "$(cat "$TMP/esc")"  '' "merge_result: no escalation filed"
 
+# LIVE conflict: the escalation names the live owner and uses the
+# duplicate-dispatch key; the hold reason names the live owner.
 FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
   run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]' >/dev/null
+has "$(cat "$TMP/esc")"  'under live lx-other' "in-flight: escalation names the live owner"
+has "$(cat "$TMP/esc")"  'polecat-duplicate-dispatch' "in-flight: escalation uses the duplicate-dispatch key"
 has "$(cat "$TMP/hold")" 'under live lx-other' "in-flight: hold reason names the live owner"
 
 # --- 5. Fail-closed arms. -----------------------------------------------------
 
-# Escalate could not record a release path: NEVER hold or drain — the step stays
-# claimable and the next worker retries the escalation.
-out="$(FAKE_ESC_RC=1 run "[{\"status\":\"open\",\"assignee\":\"$REFINERY\",\"metadata\":{}}]")"
+# LIVE conflict, escalate could not record a release path: NEVER hold or drain —
+# the step stays claimable and the next worker retries the escalation.
+out="$(FAKE_ESC_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
+      run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]')"
 eq "$out" "1|UPDATE;ESCALATE;" \
-   "escalate fails: does not hold, does not drain"
+   "in-flight escalate fails: does not hold, does not drain"
 
-# Release recorded but the hold did not land: do NOT drain — the molecule can
-# still be re-offered.
-out="$(FAKE_HOLD_RC=1 run "[{\"status\":\"open\",\"assignee\":\"$REFINERY\",\"metadata\":{}}]")"
+# LIVE conflict, release recorded but the hold did not land: do NOT drain — the
+# molecule can still be re-offered.
+out="$(FAKE_HOLD_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
+      run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]')"
 eq "$out" "1|UPDATE;ESCALATE;HOLD;" \
-   "hold fails after escalate: does not drain"
+   "in-flight hold fails after escalate: does not drain"
+
+# FINISHED, the silent quiesce did not land: do NOT drain — no escalation is
+# filed on this arm, and the molecule can still be re-offered.
+out="$(FAKE_HOLD_RC=1 run "[{\"status\":\"open\",\"assignee\":\"$REFINERY\",\"metadata\":{}}]")"
+eq "$out" "1|UPDATE;HOLD;" \
+   "finished hold fails: does not drain, files no escalation"
 
 # --- Summary. -----------------------------------------------------------------
 echo "----"

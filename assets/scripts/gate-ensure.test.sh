@@ -1109,6 +1109,27 @@ has "$(cat "$STUB_GC_LOG")" "--var lane_one_provider=codex" "lane one's provider
 has "$(cat "$STUB_GC_LOG")" "--var lane_two_provider=claude" "lane two's provider var is forwarded through the stranded re-sling"
 has "$(cat "$STUB_GC_LOG")" "--var synthesis_target=$FIXP" "the synthesis target var is forwarded through the stranded re-sling"
 
+echo "# with GC_RECONCILE_BD_CACHE set, the arm's repeated anchor_bead reads collapse to the cache"
+# A settled-green anchor dispatches nothing, but gate-ensure and the real
+# finding.sh / lane-state it shells out to each read the same (anchor_bead, LIVE)
+# query a few times per pass. Uncached every read is a server call; with the
+# per-pass cache the repeats are served from disk. close-answered touches
+# nothing on a green anchor, so no mid-arm invalidation reopens the window.
+store "[$(anchor CA pre_open_gate correctness "" polecat/ca), $(backed rev-ca CA)]"
+oid ca > "$GH_DIR/head_polecat_ca"
+unset GC_RECONCILE_BD_CACHE 2>/dev/null || true
+: > "$STUB_GC_LOG"; run >/dev/null 2>&1
+uncached=$(grep -c '^bd list .*anchor_bead=CA' "$STUB_GC_LOG")
+export GC_RECONCILE_BD_CACHE="$TMP/ga-cache"; mkdir -p "$GC_RECONCILE_BD_CACHE"
+: > "$STUB_GC_LOG"; run >/dev/null 2>&1
+cached=$(grep -c '^bd list .*anchor_bead=CA' "$STUB_GC_LOG")
+unset GC_RECONCILE_BD_CACHE
+if [ "$uncached" -gt 1 ] && [ "$cached" -lt "$uncached" ]; then
+  ok "the per-pass cache collapses the arm's repeated anchor_bead reads ($uncached -> $cached)"
+else
+  bad "the cache did not reduce the arm's anchor_bead reads (uncached=$uncached cached=$cached)"
+fi
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

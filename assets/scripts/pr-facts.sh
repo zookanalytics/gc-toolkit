@@ -10,8 +10,9 @@
 # bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
 # + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING -> file ONE merge-in rework child per
-# head to the fix pool that brings the branch current by MERGE (no branch shape is
+# nothing about the new base); CONFLICTING with no feedback owed -> file ONE
+# merge-in rework child per head to the fix pool that brings the branch current
+# by MERGE (no branch shape is
 # rebased or force-pushed), stamped prepare_mode=merge and counted as
 # dispatched only once that stamp AND the route itself read back (dedup: a rework
 # child naming this branch whose rejection_reason names this head; an unstamped
@@ -34,7 +35,10 @@
 # Unanswered review feedback routes to something — a fix-pool rework child
 # carrying the review bodies and inline comments verbatim, or a visit when a
 # human already holds the anchor — with the watermarks advancing only once that
-# routing reads back. It routes under posture `commented` and equally under a
+# routing reads back. This runs even while the anchor still conflicts: the rework
+# child is prepare_mode=merge, so it brings the branch current as it answers, and
+# the CONFLICTING arm above stands down when feedback is owed rather than filing a
+# redundant merge-in child. It routes under posture `commented` and equally under a
 # human `changes_requested`, which holds the merge but answers nothing; a
 # dismissed review is in neither state, so a dismissal takes it and the inline
 # comments under it out of the batch. A review posted under our OWN login leaves
@@ -213,10 +217,8 @@ demand_gate_state() { # <anchor-id>
   local rows
   # --include-gates: the demand is a human gate (issue_type=gate), which
   # `bd list` hides by default; without it a held anchor reads released.
-  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
-  rows=$(printf '%s' "$rows" | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --include-gates --metadata-field "gc.demand_for=${1:-}") || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
     '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
     >/dev/null 2>&1 && return 0
@@ -287,10 +289,8 @@ anchor_foreign_blocker() { # <anchor-id> <own-branch> <own-title>; prints foreig
 anchor_decision_held() { # <anchor-id>
   local kids kid
   takeaway_is_holding "${1:-}" && return 0
-  kids=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "anchor_bead=${1:-}" --limit=0 --json 2>/dev/null) || return 0
-  kids=$(printf '%s' "$kids" | scrub)
-  printf '%s' "$kids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  kids=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "anchor_bead=${1:-}") || return 0
   for kid in $(printf '%s' "$kids" | jq -r '.[] | select(((.metadata.task_kind // "") | tostring) == "rework") | .id' 2>/dev/null); do
     [ -n "$kid" ] || continue
     takeaway_is_holding "$kid" && return 0
@@ -427,6 +427,13 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
     fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
   fi
   [ -n "$fix" ] || return 1
+  # The child now exists in the store (freshly created, or reuse-restamped); drop
+  # the per-pass bd_list cache so a later anchor's "does a child already exist?"
+  # probe refetches and cannot mint a duplicate on a stale "no child". The verify
+  # and husk-close below read with gc bd show, which does not repopulate the
+  # cache, so the next bd_list sees whatever final state they leave. No-op outside
+  # a reconcile pass.
+  bd_cache_clear
   ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode" "$prurl" "$prnum")
   if [ "$ok" != "true" ]; then
     # One retry: the write is all-or-nothing, so re-applying the whole payload
@@ -1254,13 +1261,20 @@ REAP_EOF
     fi
   fi
 
-  # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
+  # --- CONFLICTING: bring the branch current, or route its feedback -------------
+  # A conflicting anchor holds the merge. The operator-gate skip guards below — a
+  # hold, a live demand, an armed re-dispatch, a foreign blocker — defer the whole
+  # anchor, feedback included, because each parks the review by design and lifts
+  # on its own; the next pass routes the feedback then. A missing head branch or
+  # fix pool is not such a gate: it blocks only the merge-in dispatch, so an
+  # anchor owing feedback still falls through to the feedback arm, whose visit
+  # fallback dispositions the unresolved-branch and no-fix-pool cases. Past those
+  # guards the anchor is dispatchable, and what it owes decides how: with
+  # unanswered feedback it falls through to the feedback arm below (whose
+  # prepare_mode=merge child brings the branch current as it answers); otherwise
+  # this arm files the one merge-in child. The gate that splits the two sits just
+  # above the dedup.
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
-    # A pre-merge arm defers conflict-rework dispatch to the full pass. A
-    # conflicting anchor cannot merge this pass, its feedback is not routed while
-    # it conflicts (this arm ends the anchor before the feedback arm), and one
-    # dispatch site per pass keeps the dedup window narrow.
-    [ "$ROUTE_ONLY" != 1 ] || continue
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
@@ -1290,9 +1304,18 @@ REAP_EOF
       skipped=$((skipped + 1)); continue
     fi
     fix_branch="${head_ref:-$branch}"
+    # fix_branch and FIX_POOL are needed only to DISPATCH the merge-in child, so
+    # this guard fires under the same condition as that dispatch (below). An anchor
+    # that owes unanswered feedback — or a --route-comments-only pass — does not
+    # dispatch one here; it falls through to the feedback arm, whose visit fallback
+    # dispositions exactly these cases (an unresolved head branch, no configured
+    # fix pool). Skipping the whole anchor would strand that feedback with no
+    # visit, no finding beads, and no validation pass.
     if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
-      echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
-      skipped=$((skipped + 1)); continue
+      if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+        echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
     fi
     # --- HOW the child is told to bring this branch current. ----------------------
     # >>> stale-base-dispatch-mode
@@ -1322,143 +1345,158 @@ REAP_EOF
       echo "$PROG: $id — PR#$num conflicts but the anchor is held by ${fblockers:-an unreadable blocker} (a merge is held on it); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    # Dedup on branch+head via the child's own metadata (no bookkeeping key on
-    # the anchor): a child of ANY status whose rejection_reason names this head
-    # means this head was already routed; a LIVE child on the branch means a
-    # force-push is already owned — a second one would race it. A rework child of
-    # THIS anchor counts even when it carries a merge_result: a child parked for a
-    # person sits in the `held` lifecycle state (merge_result=held) yet still owns
-    # the branch, so the merge_result test alone would drop it and re-mint a twin.
-    kids=$(bd_list --metadata-field branch="$fix_branch" --status="$ALL_STATUSES") || {
-      echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    }
-    # A child of a prior pass whose route stamp exited 0 without writing. The
-    # route is what makes it reachable — neither `bd ready` nor a pool claim can
-    # see it without one — and the dedup below matches it, so nothing retries it.
-    # Narrow to open/unassigned/unrouted at THIS head: a metadata write ignores
-    # bd's claim guard, so re-stamping a child someone holds stomps live work.
-    stranded=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" '
-      [ .[] | select(.id != $id)
-        | select(((.status // "open") | ascii_downcase) == "open")
-        | select(((.assignee // "") | tostring) == "")
-        | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
-        | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
-        | select(((.metadata.merge_result // "") | tostring) == "")
-        | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
-        | .id ] | .[0] // empty' 2>/dev/null)
-    # A strand is open, so it matches the live arm below and would veto its own
-    # rescue; it is excluded from its own dedup and from nothing else. Any OTHER
-    # match still vetoes — a second routed child would race the force-push the
-    # first one already owns.
-    dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg s "$stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
-      ($live | split(",")) as $ls
-      | [ .[] | select(.id != $id) | select(.id != $s)
-          | select(((.metadata.merge_result // "") | tostring) == ""
-                   or (((.metadata.task_kind // "") == "rework")
-                       and (((.metadata.anchor_bead // "") | tostring) == $id)))
-          | ((.status // "open") | ascii_downcase) as $st
-          | ((.metadata.rejection_reason // "") | tostring) as $rr
-          | select((($rr | contains("head " + $h)) and ($h != ""))
-                   or (($ls | index($st)) != null))
+    # Past the skip guards, the anchor is dispatchable. When it also owes
+    # unanswered feedback, or on a pre-merge routing pass (--route-comments-only),
+    # this arm files no merge-in child: the feedback arm below dispatches a
+    # prepare_mode=merge child that brings this same branch current (a MERGE of
+    # origin/$base on resume) as it answers, so a merge-in child here would only
+    # twin it on the branch. Fall through to route the feedback. Only a full-pass
+    # conflict with no feedback owed dispatches this arm's own merge-in child.
+    if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+      # Dedup on branch+head via the child's own metadata (no bookkeeping key on
+      # the anchor): a child of ANY status whose rejection_reason names this head
+      # means this head was already routed; a LIVE child on the branch means a
+      # force-push is already owned — a second one would race it. A rework child of
+      # THIS anchor counts even when it carries a merge_result: a child parked for a
+      # person sits in the `held` lifecycle state (merge_result=held) yet still owns
+      # the branch, so the merge_result test alone would drop it and re-mint a twin.
+      kids=$(bd_list --metadata-field branch="$fix_branch" --status="$ALL_STATUSES") || {
+        echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      }
+      # A child of a prior pass whose route stamp exited 0 without writing. The
+      # route is what makes it reachable — neither `bd ready` nor a pool claim can
+      # see it without one — and the dedup below matches it, so nothing retries it.
+      # Narrow to open/unassigned/unrouted at THIS head: a metadata write ignores
+      # bd's claim guard, so re-stamping a child someone holds stomps live work.
+      stranded=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" '
+        [ .[] | select(.id != $id)
+          | select(((.status // "open") | ascii_downcase) == "open")
+          | select(((.assignee // "") | tostring) == "")
+          | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+          | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
+          | select(((.metadata.merge_result // "") | tostring) == "")
+          | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
           | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$dup" ]; then
-      # $dup is treated as already dispatched and never flows through the stamp
-      # below, so a covering child minted before this marker existed — or one
-      # whose marker write half-landed — would sit on the anchor's own branch
-      # with no role marker, indistinguishable from the anchor by metadata.
-      # Re-stamp only an UNCLAIMED dup that lacks it. A metadata write ignores
-      # bd's claim guard, so writing under a live holder is what this arm refuses
-      # elsewhere; and the creation path's route read-back now refuses to route an
-      # unmarked child, so a CLAIMED one can only predate this stamp and is
-      # backfilled out of band, never minted unmarked here. A closed dup is
-      # dispositioned and read by no live gate; an unreadable probe re-stamps
-      # nothing.
-      dneed=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r --arg id "$id" '
-        .[0] as $x
-        | if (($x | type) != "object") then "ok"
-          elif ((($x.status // "") | ascii_downcase) == "closed") then "ok"
-          elif ((($x.assignee // "") | tostring) != "") then "ok"
-          elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
-          else "restamp" end' 2>/dev/null)
-      if [ "$dneed" = "restamp" ]; then
-        # `gc bd update` returns 0 without writing (the claim guard is one such
-        # path), so the exit code cannot prove the marker landed — and a covering
-        # child left unmarked on the anchor's own branch is the misread this stamp
-        # exists to stop. Read both keys back and re-stamp once, claiming the
-        # re-stamp only when it persists; the next pass reaches this same block to
-        # try again rather than report an unmarked child as marked.
-        gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
-        dgot=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
-        if [ "$dgot" != "rework|$id" ]; then
+      # A strand is open, so it matches the live arm below and would veto its own
+      # rescue; it is excluded from its own dedup and from nothing else. Any OTHER
+      # match still vetoes — a second routed child would race the force-push the
+      # first one already owns.
+      dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg s "$stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+        ($live | split(",")) as $ls
+        | [ .[] | select(.id != $id) | select(.id != $s)
+            | select(((.metadata.merge_result // "") | tostring) == ""
+                     or (((.metadata.task_kind // "") == "rework")
+                         and (((.metadata.anchor_bead // "") | tostring) == $id)))
+            | ((.status // "open") | ascii_downcase) as $st
+            | ((.metadata.rejection_reason // "") | tostring) as $rr
+            | select((($rr | contains("head " + $h)) and ($h != ""))
+                     or (($ls | index($st)) != null))
+            | .id ] | .[0] // empty' 2>/dev/null)
+      if [ -n "$dup" ]; then
+        # $dup is treated as already dispatched and never flows through the stamp
+        # below, so a covering child minted before this marker existed — or one
+        # whose marker write half-landed — would sit on the anchor's own branch
+        # with no role marker, indistinguishable from the anchor by metadata.
+        # Re-stamp only an UNCLAIMED dup that lacks it. A metadata write ignores
+        # bd's claim guard, so writing under a live holder is what this arm refuses
+        # elsewhere; and the creation path's route read-back now refuses to route an
+        # unmarked child, so a CLAIMED one can only predate this stamp and is
+        # backfilled out of band, never minted unmarked here. A closed dup is
+        # dispositioned and read by no live gate; an unreadable probe re-stamps
+        # nothing.
+        dneed=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r --arg id "$id" '
+          .[0] as $x
+          | if (($x | type) != "object") then "ok"
+            elif ((($x.status // "") | ascii_downcase) == "closed") then "ok"
+            elif ((($x.assignee // "") | tostring) != "") then "ok"
+            elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
+            else "restamp" end' 2>/dev/null)
+        if [ "$dneed" = "restamp" ]; then
+          # `gc bd update` returns 0 without writing (the claim guard is one such
+          # path), so the exit code cannot prove the marker landed — and a covering
+          # child left unmarked on the anchor's own branch is the misread this stamp
+          # exists to stop. Read both keys back and re-stamp once, claiming the
+          # re-stamp only when it persists; the next pass reaches this same block to
+          # try again rather than report an unmarked child as marked.
           gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
           dgot=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+          if [ "$dgot" != "rework|$id" ]; then
+            gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
+            dgot=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+          fi
+          if [ "$dgot" = "rework|$id" ]; then
+            echo "$PROG: $id re-stamped role marker on covering rework $dup (task_kind=rework, anchor_bead=$id)"
+          else
+            echo "$PROG: WARN could not re-stamp role marker on covering rework $dup (retry next pass)" >&2
+          fi
+          # The re-stamp changed $dup's role marker; drop the per-pass bd_list cache
+          # so a later same-branch anchor's dedup reads the new marker. No-op outside
+          # a reconcile pass.
+          bd_cache_clear
         fi
-        if [ "$dgot" = "rework|$id" ]; then
-          echo "$PROG: $id re-stamped role marker on covering rework $dup (task_kind=rework, anchor_bead=$id)"
-        else
-          echo "$PROG: WARN could not re-stamp role marker on covering rework $dup (retry next pass)" >&2
-        fi
-      fi
-      echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child${stranded:+ (unrouted sibling $stranded is redundant and holds the anchor)}"
-      skipped=$((skipped + 1)); continue
-    fi
-    # Any rebase_hold on a bead naming this branch is an operator freeze.
-    frozen=$(printf '%s' "$kids" | jq -r '
-      [ .[] | ((.metadata.rebase_hold // "") | tostring | ascii_downcase) as $h
-        | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$frozen" ]; then
-      echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
-      skipped=$((skipped + 1)); continue
-    fi
-    reuse=""
-    if [ -n "$stranded" ]; then
-      reuse="$stranded"
-      echo "$PROG: $id re-routing stranded rework $reuse for PR#$num (a prior pass's route stamp did not land)"
-    else
-      # Orphan adoption BEFORE create: a child a prior pass created but could not
-      # stamp carries the deterministic title but no branch metadata — invisible
-      # to the branch dedup above, so re-creating would mint a twin every pass.
-      # The title is a pure function of the PR number and head branch. An
-      # unreadable probe dispatches nothing (retry next pass).
-      if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
-        echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
+        echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child${stranded:+ (unrouted sibling $stranded is redundant and holds the anchor)}"
         skipped=$((skipped + 1)); continue
       fi
-      reuse=$(printf '%s' "$forphans" | jq -r '
-        [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-      [ -n "$reuse" ] && echo "$PROG: $id adopting unstamped rework orphan $reuse for PR#$num (created by a prior pass whose stamp failed)"
+      # Any rebase_hold on a bead naming this branch is an operator freeze.
+      frozen=$(printf '%s' "$kids" | jq -r '
+        [ .[] | ((.metadata.rebase_hold // "") | tostring | ascii_downcase) as $h
+          | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null)
+      if [ -n "$frozen" ]; then
+        echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
+        skipped=$((skipped + 1)); continue
+      fi
+      reuse=""
+      if [ -n "$stranded" ]; then
+        reuse="$stranded"
+        echo "$PROG: $id re-routing stranded rework $reuse for PR#$num (a prior pass's route stamp did not land)"
+      else
+        # Orphan adoption BEFORE create: a child a prior pass created but could not
+        # stamp carries the deterministic title but no branch metadata — invisible
+        # to the branch dedup above, so re-creating would mint a twin every pass.
+        # The title is a pure function of the PR number and head branch. An
+        # unreadable probe dispatches nothing (retry next pass).
+        if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
+          echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
+        reuse=$(printf '%s' "$forphans" | jq -r '
+          [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+        [ -n "$reuse" ] && echo "$PROG: $id adopting unstamped rework orphan $reuse for PR#$num (created by a prior pass whose stamp failed)"
+      fi
+      # Atomic birth: form the child fully — every identity key plus the blocks-dep
+      # — or not at all, so a child that can veto a merge but cannot be rescued or
+      # reaped is never left behind. mint_rework_child reads the whole identity back
+      # (rejection_reason included) and unmakes a newborn it cannot complete. The
+      # route is stamped LAST, on the id it returns, so only a complete child ever
+      # becomes claimable; a route that does not land leaves a rescuable child the
+      # stranded arm re-routes next pass, never a husk.
+      FIX=$(mint_rework_child "$reuse" "$FIX_TITLE base rewritten, PR conflicts" "$id" "$fix_branch" "$base" \
+        "stale base at head $head_oid: PR#$num conflicts with '$base'. $fix_instruction Do NOT open a new PR — this reworks PR#$num." \
+        "$prepare_mode" "$live_url" "$num")
+      if [ -z "$FIX" ]; then
+        echo "$PROG: $id could not form the rework child for PR#$num; retry next pass" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+      rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+      if [ "$rgot" != "$FIX_POOL" ]; then
+        echo "$PROG: WARN rework $FIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
+      reworked=$((reworked + 1))
+      echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
+      continue
     fi
-    # Atomic birth: form the child fully — every identity key plus the blocks-dep
-    # — or not at all, so a child that can veto a merge but cannot be rescued or
-    # reaped is never left behind. mint_rework_child reads the whole identity back
-    # (rejection_reason included) and unmakes a newborn it cannot complete. The
-    # route is stamped LAST, on the id it returns, so only a complete child ever
-    # becomes claimable; a route that does not land leaves a rescuable child the
-    # stranded arm re-routes next pass, never a husk.
-    FIX=$(mint_rework_child "$reuse" "$FIX_TITLE base rewritten, PR conflicts" "$id" "$fix_branch" "$base" \
-      "stale base at head $head_oid: PR#$num conflicts with '$base'. $fix_instruction Do NOT open a new PR — this reworks PR#$num." \
-      "$prepare_mode" "$live_url" "$num")
-    if [ -z "$FIX" ]; then
-      echo "$PROG: $id could not form the rework child for PR#$num; retry next pass" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
-    rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
-    if [ "$rgot" != "$FIX_POOL" ]; then
-      echo "$PROG: WARN rework $FIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
-    reworked=$((reworked + 1))
-    echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
-    continue
   fi
 
   # --- unanswered review feedback routes to something ---------------------------
-  # Reached only when the anchor is otherwise clear: the conflict and stale-gate
-  # arms above already left a child in flight holding the merge, and the feedback
-  # gets its own dispatch on the pass after that child lands. Whatever this
+  # Reached for any anchor with unanswered feedback, a conflicting one included:
+  # the CONFLICTING arm above stands down when there is feedback to route, so the
+  # review loop runs while the branch conflicts rather than waiting for a merge-in
+  # child to land first. The retarget (base-moved) arm still ends its own anchors
+  # before here. Whatever this
   # routes to holds the merge until it closes, and the watermarks move only once
   # the routing has read back — feedback nothing answered can never fall below
   # the mark.
@@ -1563,6 +1601,11 @@ $CBODY"
           || echo "$PROG: WARN comment rework $CFIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
         gc bd dep "$CFIX" --blocks "$id" >/dev/null 2>&1 \
           || echo "$PROG: WARN could not attach comment rework $CFIX as a blocks-dep of $id" >&2
+        # The comment-rework child now exists (created or adopted, then stamped);
+        # drop the per-pass bd_list cache so the title/anchor_bead dedup probe reads
+        # it on the next anchor and does not twin it. The gc bd show reads below do
+        # not repopulate the cache. No-op outside a reconcile pass.
+        bd_cache_clear
         # anchor_bead is the dedup key the probe above reads; an unstamped child
         # is invisible to it, so routing one would twin on the next pass.
         agot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
@@ -1780,6 +1823,11 @@ $CBODY"
         v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
         v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
       fi
+      # The validation pass was created/adopted and its shape repaired above; drop
+      # the per-pass bd_list cache so a later anchor's anchor_bead/title probe reads
+      # it and does not twin it. The reads above are gc bd show, which does not
+      # repopulate the cache. No-op outside a reconcile pass.
+      bd_cache_clear
       if [ "$v_kind" != "validation" ] || [ "$v_anchor" != "$id" ] || [ "$v_lane" != "human" ] || { [ -n "$head_oid" ] && [ -z "$v_oid" ]; }; then
         echo "$PROG: WARN $id — PR#$num validation pass $VPASS did not record the batch shape (want task_kind=validation anchor_bead=$id check_name=human${head_oid:+ reviewed_oid set}; got task_kind=${v_kind:-<absent>} anchor_bead=${v_anchor:-<absent>} check_name=${v_lane:-<absent>} reviewed_oid=${v_oid:-<absent>}); nothing watermarked, the batch retries next pass" >&2
         skipped=$((skipped + 1)); continue
@@ -2199,6 +2247,17 @@ WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
         pageInfo{hasNextPage endCursor}
         nodes{id databaseId state body author{login}
           reactionGroups{content viewerHasReacted}}}}}}'
+# The Conversation tab is a third top-level connection, the same single-cursor
+# shape as the reviews read. Its comments carry no thread to resolve, so the
+# write-back only ever reacts to them — a routed one earns the same pickup EYES
+# an inline comment does, having been read into the work-order all the same.
+WB_ISSUE_COMMENTS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$num){
+      comments(first:100,after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{id databaseId author{login}
+          reactionGroups{content viewerHasReacted}}}}}}'
 # A thread's own comments stay nested: one read covers every thread short enough
 # to fit, which is nearly all of them. Truncation is read off the COUNT rather
 # than a nested pageInfo — a thread with more than a page returns exactly a full
@@ -2248,8 +2307,10 @@ while IFS= read -r wrow; do
   case "$wnum" in ''|*[!0-9]*) continue ;; esac
   wcwm=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_comment_watermark // "0") | tostring')
   wrwm=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_review_watermark // "0") | tostring')
+  wiwm=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_issue_comment_watermark // "0") | tostring')
   case "$wcwm" in ''|*[!0-9]*) wcwm=0 ;; esac
   case "$wrwm" in ''|*[!0-9]*) wrwm=0 ;; esac
+  case "$wiwm" in ''|*[!0-9]*) wiwm=0 ;; esac
 
   # The watermark is cumulative and pr_comment_disposition holds one batch at a
   # time, so a thread an earlier batch left unresolved still sits at or below the
@@ -2359,14 +2420,19 @@ WB_RECORDS
     -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wrraw=""
   wtraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$WB_THREADS_QUERY" \
     -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wtraw=""
-  if [ -z "$wrraw" ] || [ -z "$wtraw" ]; then
+  wiraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$WB_ISSUE_COMMENTS_QUERY" \
+    -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wiraw=""
+  if [ -z "$wrraw" ] || [ -z "$wtraw" ] || [ -z "$wiraw" ]; then
     echo "$PROG: $wid — PR#$wnum review threads unreadable; nothing written back (retry next pass)" >&2
     continue
   fi
-  # --paginate emits one document per page; slurp both reads back into one view.
-  wview=$(printf '%s\n%s' "$wrraw" "$wtraw" | scrub | jq -sc '{
+  # --paginate emits one document per page; slurp all three reads into one view.
+  # An empty connection is still a document, so an absent read is a failure, not
+  # an empty Conversation, and the guard above holds the pass for it.
+  wview=$(printf '%s\n%s\n%s' "$wrraw" "$wtraw" "$wiraw" | scrub | jq -sc '{
       reviews: [ .[].data.repository.pullRequest.reviews.nodes[]? ],
-      threads: [ .[].data.repository.pullRequest.reviewThreads.nodes[]? ]
+      threads: [ .[].data.repository.pullRequest.reviewThreads.nodes[]? ],
+      issue_comments: [ .[].data.repository.pullRequest.comments.nodes[]? ]
     }' 2>/dev/null) || wview=""
   if [ -z "$wview" ] || [ "$wview" = "null" ]; then
     echo "$PROG: $wid — PR#$wnum review threads unreadable; nothing written back (retry next pass)" >&2
@@ -2418,7 +2484,7 @@ WB_LONG_THREADS
   # the reason reported for leaving it open.
   wplan=$(printf '%s' "$wview" | jq -r \
     --arg self "$SELF_LOGIN" --arg reaction "$WB_REACTION" --arg marker "$WB_MARKER" \
-    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson recs "$wbrecs" '
+    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" --argjson recs "$wbrecs" '
     def reacted($rg): [ ($rg // [])[] | select(.content == $reaction and .viewerHasReacted) ] | length > 0;
     def foreign: (.author.login // "") != $self;
     ( [ .reviews[]
@@ -2433,6 +2499,11 @@ WB_LONG_THREADS
     + [ .threads[] | (.comments.nodes // [])[]
         | select(foreign)
         | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $cwm)
+        | select(reacted(.reactionGroups) | not)
+        | "R\t" + .id ]
+    + [ .issue_comments[]
+        | select(foreign)
+        | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $iwm)
         | select(reacted(.reactionGroups) | not)
         | "R\t" + .id ]
     + [ .threads[]

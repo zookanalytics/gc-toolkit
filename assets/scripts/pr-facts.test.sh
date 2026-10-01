@@ -624,6 +624,73 @@ out=$(run)
 has "$out" "filed merge-mode rework" "with no arm, the conflict dispatches a rework"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…exactly one child, now that nothing holds it"
 
+echo "# …a non-held CONFLICTING anchor with unanswered feedback routes it, files no merge-in child (tk-f9x2nb)"
+# The mirror of F5e above: past the skip guards, a conflicting anchor that owes
+# feedback falls through to the feedback arm rather than filing a merge-in child.
+# Its prepare_mode=merge child brings the branch current as it answers, so one
+# child does both and the review loop runs while the branch conflicts — which is
+# what feeds the CHANGES_REQUESTED findings/validation/write-back sweep (#843).
+store "[$(anchor CF1 160)]"
+printf '%s' "$(prview 160 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_160.json"
+echo '[]' > "$GH_DIR/reviews_160.json"
+printf '[{"id":16000,"user":{"login":"human1"},"body":"please address this"}]' > "$GH_DIR/comments_160.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+DISP="$(meta CF1 pr_comment_disposition)"
+has "$DISP" "rework:" "the conflicting anchor's feedback routes to a fix-pool rework child"
+CFIX="${DISP#rework:}"
+eq "$(meta "$CFIX" task_kind)" "rework" "…the fix unit carries the rework role marker"
+eq "$(meta "$CFIX" anchor_bead)" "CF1" "…named to the anchor it holds"
+eq "$(meta "$CFIX" prepare_mode)" "merge" "…brought current by merge, so it resolves the conflict as it answers"
+eq "$(meta "$CFIX" branch)" "polecat/x160" "…on the PR's own branch"
+eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))] | length' "$STUB_STORE")" "0" \
+  "…and NO merge-in (stale-base) child is filed — a second one would twin it on the branch"
+VP=$(vpass_id CF1)
+hasnt "$VP" "<none>" "…a human-lane validation pass is opened on the anchor"
+eq "$(meta "$VP" check_name)" "human" "…on the lane the validator's finding query selects"
+FID=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "CF1") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID" "<none>" "…the comment becomes a finding on the anchor, so the write-back has an input"
+eq "$(meta "$FID" 'finding.lane')" "human" "…on the human lane the validator rules"
+eq "$(meta CF1 pr_comment_watermark)" "16000" "…the comment is watermarked now, not deferred behind the conflict (contrast F5e)"
+eq "$(meta CF1 merge_result)" "pull_request" "…and the anchor keeps gating (no state flip)"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+
+echo "# …and with NO fix pool it STILL routes that feedback — to a visit, not the void (tk-ixiuy4)"
+# The branch/fix-pool guard is merge-in-only: it must not skip an anchor that owes
+# feedback, because the feedback arm's own fallback dispositions a missing pool (or
+# an unresolved head branch) as a human visit. Skipping it left operator feedback
+# on a conflicting PR with no visit, no finding, and no validation pass — the very
+# starvation this fix (tk-f9x2nb) was supposed to end.
+store "[$(anchor CF2 161)]"
+printf '%s' "$(prview 161 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_161.json"
+echo '[]' > "$GH_DIR/reviews_161.json"
+printf '[{"id":16100,"user":{"login":"human1"},"body":"please address this"}]' > "$GH_DIR/comments_161.json"
+: > "$STUB_ESC_LOG"
+out=$("$SUT" --review-pool "$REV" 2>&1)   # no --fix-pool: the "no configured fix pool" case
+hasnt "$out" "branch/fix-pool unavailable" "the no-pool conflict is NOT skipped at the merge-in guard"
+DISP="$(meta CF2 pr_comment_disposition)"
+has "$DISP" "visit:" "…its feedback routes to a human visit, the no-fix-pool fallback"
+has "$(cat "$STUB_ESC_LOG")" "--subject CF2 --key pr-comments.161.0.16100" "…filed under the batch's comment key"
+has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "…naming why the city cannot route the work itself"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "CF2")] | length' "$STUB_STORE")" "0" "…and no rework child is minted with no pool to route it to"
+hasnt "$(vpass_id CF2)" "<none>" "…a human-lane validation pass is still opened on the anchor"
+FID2=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "CF2") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$FID2" "<none>" "…and the comment still becomes a finding on the anchor"
+eq "$(meta CF2 pr_comment_watermark)" "16100" "…the comment is watermarked now, not stranded behind the missing pool"
+eq "$(meta CF2 merge_result)" "pull_request" "…while the anchor keeps gating"
+
+echo "# …but a no-pool conflict with NOTHING to route still parks at that guard — the fix is scoped to feedback"
+# The control for the case above: without unanswered feedback there is no feedback
+# arm to fall through to, so the merge-in guard still holds the anchor for repair
+# exactly as before. This is what proves the fix widened nothing but the feedback path.
+store "[$(anchor CF3 162)]"
+printf '%s' "$(prview 162 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_162.json"
+: > "$STUB_ESC_LOG"
+out=$("$SUT" --review-pool "$REV" 2>&1)   # no --fix-pool, no feedback owed
+has "$out" "branch/fix-pool unavailable; merge stays held" "with nothing to route, the guard still parks it for an operator to repair"
+eq "$(meta CF3 pr_comment_disposition)" "<absent>" "…nothing is dispositioned"
+eq "$(vpass_id CF3)" "<none>" "…and no validation pass is opened"
+
 store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
 printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
 out=$(run)
@@ -1878,7 +1945,7 @@ threads() {
 }
 tfile()   { cat "$GH_DIR/threads_$1.json"; }
 reacted() { # num node-id -> true/false
-  jq -r --arg id "$2" '[ (.reviews[]?, (.threads[]? | .comments.nodes[]?))
+  jq -r --arg id "$2" '[ (.reviews[]?, (.threads[]? | .comments.nodes[]?), .issue_comments[]?)
     | select(.id == $id) | (.reactionGroups // [])[]
     | select(.content == "EYES" and .viewerHasReacted) ] | length > 0' "$GH_DIR/threads_$1.json"
 }
@@ -1893,6 +1960,8 @@ one_thread() {
 wb_meta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"%s","pr_review_watermark":"0"' "$1" "${2:-100}"; }
 wb_batch() { printf ',"pr_comment_batch":"%s"' "$1"; }
 wb_rmeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","pr_review_watermark":"%s"' "$1" "$2"; }
+# the Conversation-tab variant: dispositioned, with only the issue-comment watermark raised
+wb_imeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","pr_review_watermark":"0","pr_issue_comment_watermark":"%s"' "$1" "${2:-50}"; }
 child()   { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{}}' "$1" "$2"; }
 gh_since() { tail -n +"$1" "$STUB_GH_LOG"; }
 # advance one bead between passes, the way a later pass of the city would
@@ -1910,6 +1979,27 @@ eq "$(reacted 40 NC-40)" "true" "the routed comment got its EYES reaction"
 has "$out" "1 comments acknowledged" "the pass reports the acknowledgement"
 eq "$(treply 40 T-40)" "" "no reply while the rework bead is still open"
 eq "$(tresolved 40 T-40)" "false" "…and the thread is NOT resolved on filing"
+
+echo "# a routed top-level (Conversation) comment gets the same EYES acknowledgement"
+# Issue comments are their own id space, watermarked by pr_issue_comment_watermark;
+# the write-back reads that mark, not the inline-comment one. They carry no thread,
+# so a routed one earns the pickup reaction and nothing else.
+store "[$(anchor WI 88 "$(wb_imeta rework:KI)"), $(child KI open)]"
+printf '%s' "$(prview 88 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_88.json"
+threads 88 '{"reviews":[],"threads":[],"issue_comments":[
+  {"id":"IC-88","databaseId":50,"author":{"login":"johnzook"},"reactionGroups":[]},
+  {"id":"IC-88-hi","databaseId":80,"author":{"login":"johnzook"},"reactionGroups":[]},
+  {"id":"IC-88-self","databaseId":40,"author":{"login":"gc-city-bot"},"reactionGroups":[]}]}'
+out=$(run)
+eq "$(reacted 88 IC-88)" "true" "the routed Conversation comment got its EYES reaction"
+eq "$(reacted 88 IC-88-hi)" "false" "a Conversation comment above the mark earns none"
+eq "$(reacted 88 IC-88-self)" "false" "our own Conversation comment earns none"
+has "$out" "1 comments acknowledged" "the pass reports the one acknowledgement"
+
+echo "# …and running it again writes no second reaction (idempotent off viewerHasReacted)"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "REACT" "no second reaction to the Conversation comment"
 
 echo "# a landed fix replies once naming the commit, then resolves the thread"
 store "[$(anchor W2 41 "$(wb_meta rework:K2)"), $(child K2 closed)]"
@@ -2867,6 +2957,24 @@ out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" \
   "the full pass dispatches the conflict-rework on the same fixture"
 
+echo "# …but a CONFLICTING anchor WITH feedback is routed pre-merge — not deferred while it conflicts (tk-f9x2nb, #861)"
+# The complement of RC9: route-comments-only still files no merge-in child, but a
+# conflicting anchor that owes feedback now falls through to the feedback arm and
+# routes it, so operator feedback is picked up before the merge rather than
+# starved until the branch stops conflicting.
+store "[$(anchor CF2 161)]"
+printf '%s' "$(prview 161 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_161.json"
+echo '[]' > "$GH_DIR/reviews_161.json"
+printf '[{"id":16100,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/comments_161.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_route)
+has "$(meta CF2 pr_comment_disposition)" "rework:" "route-comments-only routes the conflicting anchor's feedback pre-merge"
+eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))] | length' "$STUB_STORE")" "0" \
+  "…and files no merge-in child (the full pass owns that; the feedback child brings the branch current)"
+VP2=$(vpass_id CF2)
+hasnt "$VP2" "<none>" "…and opens the validation pass, exactly as the full arm does"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and wakes the fix pool"
+
 echo "# …a retargeted anchor is deferred to the full pass — no early transition or escalation"
 store "[$(anchor RC10 153)]"
 printf '%s' "$(prview 153 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_153.json"
@@ -2878,6 +2986,21 @@ hasnt "$(cat "$STUB_ESC_LOG")" "pr-retargeted.153" "…and files no retarget esc
 # Control: the full pass on the SAME fixture retargets, proving the skip is route mode's doing.
 out=$(run)
 eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
+
+echo "# with GC_RECONCILE_BD_CACHE set, a rework mint invalidates the dedup so a re-probe files no twin"
+# A CONFLICTING anchor mints one rework child; mint_rework_child drops the
+# per-pass bd_list cache at the create, so a later branch-dedup probe refetches
+# and adopts the child instead of reading a stale "no child" and twinning it.
+# Two runs over one cache (no between-run clear) isolate that one invalidation:
+# the first mints and clears, the second's probe must see the child.
+store "[$(anchor F9 19)]"
+printf '%s' "$(prview 19 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_19.json"
+export GC_RECONCILE_BD_CACHE="$TMP/pf-cache"; mkdir -p "$GC_RECONCILE_BD_CACHE"
+run >/dev/null 2>&1          # mints the child, invalidates the cache at the create
+run >/dev/null 2>&1          # the branch-dedup probe refetches (invalidated) and sees it
+unset GC_RECONCILE_BD_CACHE
+twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
+eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
