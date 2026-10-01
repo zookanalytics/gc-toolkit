@@ -986,7 +986,8 @@ const (
 	MachineSettled         = "settled"
 	MachineWedgedException = "wedged-exception"
 	// MachineBlocked is a hold no review verdict clears: an unresolved required
-	// review thread, a base gone BEHIND, or an unrouted blocker no automated
+	// review thread, a base gone BEHIND, a branch that CONFLICTS with the base
+	// with no merge-in rework in flight, or an unrouted blocker no automated
 	// actor will reap. It is owed by the operator and distinct from settled, so
 	// an approved PR held this way surfaces as needs-attention rather than
 	// awaiting-review. The specific cause rides mdPRMachineReason.

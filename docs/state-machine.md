@@ -486,6 +486,7 @@ so a key written only for open pull requests would miss the majority of them.
 |---|---|
 | `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
 | `settled` | every declared check reads `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
+| `blocked` | a hold no review verdict clears: an unresolved required review thread, a base gone `BEHIND`, or a branch that conflicts with the base with no merge-in rework in flight. The cause rides `pr.machine_reason`, and the board owes it to the operator as needs-attention rather than folding it into the awaiting-review tail |
 | `wedged-exception` | `merge_hold` stands with `signoff_cap` beside it: the convergence cap parked the anchor and routed it to a person, and no automated actor will lift it |
 
 `wedged-exception` names the anchor's wedge in the value itself: no automated
@@ -566,8 +567,12 @@ review's result set.
   dies after claim, a rework child filed with its dependency edge reversed —
   stop the PR moving rather than spin the dispatcher, so `liveness-sweep.sh`'s
   stale-gate pass catches them, not a count on the check.
-- **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
-  per head. Idempotent per head — re-runs never duplicate children. A
+- **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one merge-in rework
+  child while none is in flight. A live child on the branch — dispatched or
+  parked — stands a second dispatch down, so re-runs never duplicate it; a
+  closed child does not, so a branch still CONFLICTING with nothing in flight is
+  re-dispatched, on every head it conflicts at rather than only the PR's first
+  (an approved PR gone dirty after its round would otherwise wedge unseen). A
   hold (`merge_hold`, `rebase_hold`) or a live demand bead
   (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
   branch current is routinely one horn of what such a demand asks, so a child

@@ -11,11 +11,13 @@
 # + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING with no feedback owed -> file ONE
-# merge-in rework child per head to the fix pool that brings the branch current
-# by MERGE (no branch shape is
+# merge-in rework child while none is in flight, to the fix pool that brings the
+# branch current by MERGE (no branch shape is
 # rebased or force-pushed), stamped prepare_mode=merge and counted as
-# dispatched only once that stamp AND the route itself read back (dedup: a rework
-# child naming this branch whose rejection_reason names this head; an unstamped
+# dispatched only once that stamp AND the route itself read back (dedup: a LIVE
+# rework child on this branch, in flight or parked; a closed one is a finished
+# round and does not stand the dispatch down, so a still-dirty branch with
+# nothing in flight re-dispatches, not only on the PR's first head; an unstamped
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
 # operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
 # since rebasing is one horn of what a demand asks;
@@ -1353,13 +1355,18 @@ REAP_EOF
     # twin it on the branch. Fall through to route the feedback. Only a full-pass
     # conflict with no feedback owed dispatches this arm's own merge-in child.
     if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-      # Dedup on branch+head via the child's own metadata (no bookkeeping key on
-      # the anchor): a child of ANY status whose rejection_reason names this head
-      # means this head was already routed; a LIVE child on the branch means a
-      # force-push is already owned — a second one would race it. A rework child of
-      # THIS anchor counts even when it carries a merge_result: a child parked for a
-      # person sits in the `held` lifecycle state (merge_result=held) yet still owns
-      # the branch, so the merge_result test alone would drop it and re-mint a twin.
+      # Dedup on a LIVE child on this branch, in flight or parked — the child's own
+      # metadata, no bookkeeping key on the anchor. A non-closed child owns the
+      # branch: a live one is already bringing it current and a second would race
+      # its push, and one parked for a person (the `held` lifecycle state,
+      # merge_result=held) still holds it. A CLOSED child does NOT stand the
+      # dispatch down — its round is over — so a branch still CONFLICTING with
+      # nothing in flight re-dispatches, on every head it conflicts at rather than
+      # only the PR's first; this is what stops an approved PR gone dirty after its
+      # round from wedging unseen when nothing is left in flight. A rework child of
+      # THIS anchor counts even when it carries a merge_result, because the held
+      # state carries one yet still owns the branch, so the merge_result test alone
+      # would drop it and re-mint a twin.
       kids=$(bd_list --metadata-field branch="$fix_branch" --status="$ALL_STATUSES") || {
         echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
@@ -1382,16 +1389,14 @@ REAP_EOF
       # rescue; it is excluded from its own dedup and from nothing else. Any OTHER
       # match still vetoes — a second routed child would race the force-push the
       # first one already owns.
-      dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg s "$stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+      dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg s "$stranded" --arg live "$LIVE_STATUSES" '
         ($live | split(",")) as $ls
         | [ .[] | select(.id != $id) | select(.id != $s)
             | select(((.metadata.merge_result // "") | tostring) == ""
                      or (((.metadata.task_kind // "") == "rework")
                          and (((.metadata.anchor_bead // "") | tostring) == $id)))
             | ((.status // "open") | ascii_downcase) as $st
-            | ((.metadata.rejection_reason // "") | tostring) as $rr
-            | select((($rr | contains("head " + $h)) and ($h != ""))
-                     or (($ls | index($st)) != null))
+            | select(($ls | index($st)) != null)
             | .id ] | .[0] // empty' 2>/dev/null)
       if [ -n "$dup" ]; then
         # $dup is treated as already dispatched and never flows through the stamp
