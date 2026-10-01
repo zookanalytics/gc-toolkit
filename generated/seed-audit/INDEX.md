@@ -7,7 +7,6 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- `gc` version: `1.4.3`
 - agents: 18 · formulas: 25
 - input manifest: `SOURCES.txt`
 

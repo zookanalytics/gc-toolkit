@@ -24,8 +24,8 @@
 # check would fail for reasons nobody here controls. So the harness builds its
 # own throwaway city from a scenario pinned BELOW (see synth_city), renders
 # against that, and normalizes machine paths out of the result. The artifact is
-# then a pure function of this repo plus the `gc` binary version, which is what
-# a committed golden file has to be.
+# then a pure function of this repo, which is what a committed golden file has
+# to be.
 #
 # Fidelity is not assumed, it is measured. Against `gc prime` in the live
 # loomington city, seven of nine agents render BYTE-IDENTICAL (refinery, mayor,
@@ -141,12 +141,12 @@ PH_HOME="[[HOME]]"
 # and doctor/check-seed-audit-current/run.test.sh asserts a renderer-only change
 # is seen by both.
 #
-# The `gc` version is deliberately NOT folded in. Prompt composition lives in
-# the binary, so an upgrade really can move every byte of the artifact — but with
-# no commit in this repo to explain it. INDEX.md records the version on its own
-# line instead, which lets doctor/check-seed-audit-current call a content
-# mismatch an error and a version-only mismatch a warning, and lets the manifest
-# be recomputed on a host with no `gc` at all.
+# The `gc` version is deliberately not recorded. Prompt composition lives in the
+# binary, so an upgrade really can move every byte of the artifact with no commit
+# in this repo to explain it — but the version is not a function of the repo, so
+# recording it drifts with the host binary and drags host state into commits that
+# change nothing else. The commit that renders the artifact is the record of which
+# `gc` built it, and the manifest is recomputable on a host with no `gc` at all.
 #
 # The manifest is committed as generated/seed-audit/SOURCES.txt, one record per
 # input, sorted by path. Per-input records rather than one digest over all of
@@ -659,7 +659,6 @@ report_totals() {
 }
 
 DIGEST="$(source_digest "$ROOT")"
-GCVER="$(gc version 2>/dev/null | head -1)"
 
 # Resolved per-rig fragment composition, straight out of the composed config.
 # This is the one place the per-rig dimension is visible at all: `gc prime`
@@ -729,7 +728,6 @@ Every file under \`agents/\` is the complete standing prompt one agent receives
 at spawn. Every file under \`formulas/\` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- \`gc\` version: \`$GCVER\`
 - agents: ${#AGENTS[@]} · formulas: ${#FORMULAS[@]}
 - input manifest: \`SOURCES.txt\`
 
