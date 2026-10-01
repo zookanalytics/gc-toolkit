@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 function clickOpen() {
-  fireEvent.click(screen.getByRole('button', { name: /start a conversation/i }));
+  fireEvent.click(screen.getByRole('button', { name: /file a visit/i }));
 }
 
 describe('OpenConversation', () => {
@@ -186,7 +186,7 @@ describe('OpenConversation', () => {
     rerender(<OpenConversation beadId="tk-other9" />);
     expect(screen.queryByRole('status')).toBeNull();
     // …and the action is offered afresh for the new bead.
-    expect(screen.getByRole('button', { name: /start a conversation/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /file a visit/i })).toBeTruthy();
   });
 
   it('drops a failure when the panel is pointed at a different bead', async () => {
@@ -208,7 +208,7 @@ describe('OpenConversation', () => {
 
     const { rerender } = render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
-    await screen.findByRole('button', { name: /opening…/i });
+    await screen.findByRole('button', { name: /filing…/i });
 
     rerender(<OpenConversation beadId="tk-other9" />);
     release(
@@ -216,7 +216,7 @@ describe('OpenConversation', () => {
     );
     // Give the settled promise a turn to run.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /start a conversation/i })).toBeTruthy(),
+      expect(screen.getByRole('button', { name: /file a visit/i })).toBeTruthy(),
     );
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -231,7 +231,7 @@ describe('OpenConversation', () => {
     render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
 
-    const button = await screen.findByRole('button', { name: /opening…/i });
+    const button = await screen.findByRole('button', { name: /filing…/i });
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
     // A second click while in flight must not queue a second visit.

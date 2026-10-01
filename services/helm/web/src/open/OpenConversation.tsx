@@ -1,4 +1,4 @@
-// The drill panel's one write action: start a conversation on this bead.
+// The drill panel's one write action: file a visit on this bead.
 //
 // It lives in the panel's `session` section because that is the section about
 // who is working the anchor, and this is how the operator causes someone to.
@@ -100,7 +100,7 @@ export function OpenConversation({ beadId }: OpenConversationProps) {
         onClick={open}
         disabled={state.phase === 'opening'}
       >
-        {state.phase === 'opening' ? 'opening…' : 'start a conversation'}
+        {state.phase === 'opening' ? 'filing…' : 'file a visit'}
       </button>
 
       {state.phase === 'done' && <OpenedNotice result={state.result} />}
