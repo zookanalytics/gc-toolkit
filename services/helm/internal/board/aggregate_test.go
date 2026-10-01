@@ -220,6 +220,45 @@ func TestMergeAnchorWithParentChildChildDivergesPhaseFromPRPhase(t *testing.T) {
 	}
 }
 
+// TestBlockedMergeAnchorWithParentChildChildStaysNeedsAttention is the blocked
+// counterpart to the divergence case above, and the one place the two axes
+// cannot disagree. When the machine calls a merge anchor blocked, classifyPhases
+// lifts BOTH axes to needs-attention; the roll-up must honor that, not overwrite
+// Phase with a working parent-child child. Otherwise the frontier would lead
+// "working" on a row whose PR chip says the merge is blocked and owed by a
+// person.
+func TestBlockedMergeAnchorWithParentChildChildStaysNeedsAttention(t *testing.T) {
+	kid := phaseLeaf("tk-kid", nil) // working, via workingFacts below
+	m := mergeAnchor("tk-pr", map[string]string{
+		"pr.machine": dated(MachineBlocked, headLive, fixtureNow),
+	})
+	m.Children = []Child{{ID: "tk-kid", Status: "open"}} // a real parent-child child
+	b := BuildBoard([]Anchor{m, kid}, fixtureNow, false, nil, workingFacts("tk-kid"))
+
+	if got := mustTile(t, b, "tk-kid").Phase; got != PhaseWorking {
+		t.Fatalf("child phase=%q want working — test setup does not produce the intended leaf state", got)
+	}
+	tile := mustTile(t, b, "tk-pr")
+	if got := tile.PRMachine; got != MachineBlocked {
+		t.Fatalf("test premise: a blocked machine verdict, got PRMachine=%q", got)
+	}
+	if got := tile.PRPhase; got != PhaseNeedsAttention {
+		t.Errorf("a blocked PR surfaces as needs-attention on the PR axis: %q", got)
+	}
+	if got := tile.Phase; got != PhaseNeedsAttention {
+		t.Errorf("the roll-up must not overwrite the blocked lift with a working child: Phase=%q want needs-attention", got)
+	}
+	if tile.Phase != tile.PRPhase {
+		t.Errorf("a blocked machine verdict holds both axes together: Phase=%q PRPhase=%q", tile.Phase, tile.PRPhase)
+	}
+	if !strings.HasPrefix(tile.Frontier, PhaseNeedsAttention+" · ") {
+		t.Errorf("the frontier speaks the held phase, not a working child's: %q", tile.Frontier)
+	}
+	if strings.HasPrefix(tile.Frontier, PhaseWorking+" · ") {
+		t.Errorf("the frontier must not lead working on a blocked row: %q", tile.Frontier)
+	}
+}
+
 // TestAggregatePhaseIgnoresNonTileChildren keeps the roll-up scoped to child
 // TILES: a roll-up epic whose children are counts, not separate board rows, has
 // no child tiles and so keeps its own per-bead phase. This is the shape every

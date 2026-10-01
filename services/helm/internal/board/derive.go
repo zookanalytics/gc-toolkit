@@ -2069,9 +2069,17 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 func aggregatePhases(tiles []Tile, anchors []Anchor) {
 	tileSet := make(map[string]bool, len(tiles))
 	own := make(map[string]string, len(tiles))
+	// blocked marks the rows classifyPhases lifted to needs-attention off a
+	// blocked machine verdict — the one case the PR-axis and per-bead tri-states
+	// cannot disagree. The roll-up must honor that lift, so a blocked anchor is a
+	// forced leaf below rather than a parent that folds in its children.
+	blocked := make(map[string]bool, len(tiles))
 	for i := range tiles {
 		tileSet[tiles[i].ID] = true
 		own[tiles[i].ID] = tiles[i].Phase
+		if isBlocked(tiles[i].PRMachine) {
+			blocked[tiles[i].ID] = true
+		}
 	}
 
 	// childrenOf[parent] is the tiles a parent rolls up by a parent-child edge,
@@ -2108,6 +2116,15 @@ func aggregatePhases(tiles []Tile, anchors []Anchor) {
 		if phase == "" {
 			memo[id] = ""
 			return ""
+		}
+		// A blocked machine verdict holds both axes at needs-attention
+		// [classifyPhases]. The roll-up leaves such a row there: it folds in no
+		// child's state, and reports needs-attention upward — so a row the machine
+		// calls blocked never speaks "working" because a child is, and the block
+		// counts toward a parent being unable to move.
+		if blocked[id] {
+			memo[id] = PhaseNeedsAttention
+			return PhaseNeedsAttention
 		}
 		kids := childrenOf[id]
 		if len(kids) == 0 {
