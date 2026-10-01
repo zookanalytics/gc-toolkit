@@ -259,14 +259,14 @@ fx() {
 # --- Per-agent contracts. ----------------------------------------------------
 # Fields: agent | scope (rig|city) | happy-path pour result | assign-fails
 # rollback result | does the pour snippet also resolve and burn the CURRENT
-# wisp? The refinery does it in the same block; the witness and deacon burn
-# theirs from a later formula step, so their snippet burns nothing on the happy
+# wisp? The refinery and the deacon do it in the same block; the witness burns
+# its own from a later formula step, so its snippet burns nothing on the happy
 # path. The per-rig witness and refinery stamp gc.rig before the assign (two
 # updates); the city-singleton deacon takes no rig scope, so it only assigns
 # (one update).
 AGENTS=(
   "witness  rig  0||w-new,w-new      1|w-new|w-new,w-new no"
-  "deacon   city 0||w-new            1|w-new|w-new       no"
+  "deacon   city 0|w-cur|w-new       1|w-new|w-new       yes"
   "refinery rig  0|w-cur|w-new,w-new 1|w-new|w-new,w-new yes"
 )
 
@@ -401,7 +401,7 @@ for SPEC in "${AGENTS[@]}"; do
     # live path, not a spare. It must find OUR patrol wisp: not the unowned
     # same-title orphan (reconcile's job, not this step's), and not our
     # in-progress non-patrol molecule.
-    eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "0|w-cur|w-new,w-new" \
+    eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
        "$AGENT: REGRESSION: with GC_BEAD_ID unset the fallback resolves our own patrol wisp and burns it"
 
     # CONTROL, so the assertion above cannot pass for the wrong reason: put the
@@ -413,7 +413,7 @@ for SPEC in "${AGENTS[@]}"; do
     if cmp -s "$TMP/pour.sh" "$TMP/pour-mutated.sh"; then
       bad "$AGENT: control did not mutate the fallback query — its shape changed, re-check the sed"
     else
-      eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-mutated.sh")" "1||w-new,w-new" \
+      eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-mutated.sh")" "1||${POUR_OK##*|}" \
          "$AGENT: CONTROL: the pre-fix --type=wisp fallback leaves the current wisp unburned"
     fi
   fi
