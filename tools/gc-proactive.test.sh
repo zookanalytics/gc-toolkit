@@ -36,6 +36,13 @@ hasnt(){ case "$1" in *"$2"*) bad "$3 (unexpected '$2')" ;; *) ok "$3" ;; esac; 
 # rather than dispatching.
 export GC_PROACTIVE_FIXTURE="$TMP"
 
+# gc-proactive.sh rig-qualifies its pool target from GC_RIG (resolve_pool_target
+# is a pure string join, not a gc call) and fails closed when it is unset. The
+# fixture replaces gc, not that rig context, so pin GC_RIG here: left to the
+# ambient city it reads green locally and fails the SLING-GO dispatch on the bare
+# CI runner, which has no GC_RIG.
+export GC_RIG=gc-toolkit
+
 # scan.json: one raw input bead (tk-plain) and one live-intake subject
 # (tk-intake, marked). Both otherwise pass the precision filter (task type, has a
 # description, unrouted, no reaction/takeaway markers, top-level).
