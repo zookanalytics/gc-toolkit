@@ -7,8 +7,8 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- `gc` version: `1.4.1`
-- agents: 17 · formulas: 25
+- `gc` version: `1.4.3`
+- agents: 17 · formulas: 26
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -33,7 +33,7 @@ covers that dimension.
 |---|---:|---:|
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
-| [`control-dispatcher`](agents/control-dispatcher.md) | 5,326 | 1,331 |
+| [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
 | [`converse`](agents/converse.md) | 32,589 | 8,147 |
 | [`converse-codex`](agents/converse-codex.md) | 32,589 | 8,147 |
 | [`converse-fable`](agents/converse-fable.md) | 32,589 | 8,147 |
@@ -60,6 +60,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,104 | 776 |
+| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 2,691 | 672 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |

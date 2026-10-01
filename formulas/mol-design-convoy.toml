@@ -1,0 +1,343 @@
+description = """
+Executable design-convoy pattern — a dispatch molecule that stands up an owned
+integration convoy converse reaches by recommendation, then drains. Slung `--on`
+a single subject (the initiative) from the recommend-to-Accept path, it creates
+the owned convoy, cuts its integration branch, files a design child whose doc
+lands on that branch, and arms an implementation child behind the design's
+approval. Design and implementation graduate to the default branch as one
+reviewed unit. Doctrine: docs/design-convoy.md.
+
+The molecule writes no code and needs no worktree of its own; convoy-seed.sh
+carries the push rights a converse sitting lacks. Each step re-derives the
+subject from the input convoy ({{convoy_id}}'s one tracked member) in its own
+shell, records its result on the subject so a resume is idempotent, and closes
+its own step bead through assets/scripts/step-close.sh — resolved by
+(gc.root_bead_id, gc.step_ref), never a GC_*BEAD_ID env var, which after a
+hook-claim names a different step.
+
+design_gated (var, default true) chooses the shape. Gated: the design child
+carries the approval lane (check_set=codex,approval), so merge.sh holds its
+checkpoint PR until an operator approves, and the implementation is armed behind
+that closure — two operator gates (the checkpoint PR, then graduation).
+All-in-one (design_gated=false): design and implementation dispatch together and
+are reviewed once at graduation — one gate.
+"""
+formula = "mol-design-convoy"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars.design_gated]
+description = "true (default): the design child carries the approval lane, so merge.sh holds its checkpoint PR for an operator APPROVED review and the implementation child is armed behind the design's closure — two operator gates. false: design and implementation dispatch together and land on the integration branch in parallel, reviewed once at graduation — one gate. The operator overrides per initiative at Accept with --var design_gated=false."
+default = "true"
+
+[[steps]]
+id = "load-context"
+title = "Read the initiative and resolve the convoy shape"
+description = """
+Prime, then read the subject this design-convoy stands up.
+
+**1. Prime and derive the subject (the initiative):**
+```bash
+gc prime
+gc bd prime
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
+```
+
+**2. Read the subject's body and its recommendation card.** The card (in the
+subject's notes) is where converse recorded the design topic and the intended
+implementation, so read it — it is the seed for the design child's brief and the
+implementation child's scope:
+```bash
+gc bd show "$SUBJECT"
+gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq '.[0].metadata'
+```
+
+**3. Resolve the gate shape.** `design_gated` is `{{design_gated}}` (default
+`true`). Gated arms the checkpoint approval and defers implementation behind it;
+all-in-one dispatches both together. You do not act on it here — the arm steps
+read the same var — but confirm you understand which shape this initiative wants
+before standing the convoy up.
+
+**Close this step bead so the graph advances.** Non-terminal, so no drain:
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.load-context --outcome pass
+```
+
+**Exit criteria:** the subject and its card are read, and this step is closed.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+
+[[steps]]
+id = "seed-convoy"
+title = "Create the owned convoy and cut its integration branch"
+needs = ["load-context"]
+description = """
+Stand the durable convoy up with `convoy-seed.sh`: create the owned convoy, set
+its target to `integration/<convoy-id>`, and cut+push that branch from a
+disposable worktree. A converse sitting cannot do this — it never pushes — which
+is why the pattern needs this molecule.
+
+**Idempotent on resume.** `convoy-seed.sh` writes the new convoy id to `--id-file`
+the instant the convoy is created — before the fallible target-set and branch cut —
+and this step records it on the subject right then, on success or failure. A re-run
+therefore passes the recorded id back as `--convoy`, so it reuses the first convoy
+instead of creating a second, and `convoy-seed.sh` skips the cut when origin already
+carries the branch.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
+SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
+INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
+CONVOY_ID=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_id"] // empty')
+
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/convoy-seed.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+[ -n "$SCRIPTS" ] || { echo "convoy-seed.sh not found in the pack" >&2; exit 1; }
+
+IDFILE=$(mktemp "${TMPDIR:-/tmp}/gctk-design-convoy-id.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
+SEED_RC=0
+SEED_JSON=$("$SCRIPTS/convoy-seed.sh" --name "$INITIATIVE" ${CONVOY_ID:+--convoy "$CONVOY_ID"} --id-file "$IDFILE" --json) || SEED_RC=$?
+# convoy-seed.sh writes the created convoy id to --id-file before its fallible
+# target-set and branch cut. Record it now — on success OR failure — so a resume
+# after a mid-cut crash reuses this convoy instead of creating a second one.
+SEEDED_ID=$(tr -d '[:cntrl:]' < "$IDFILE" 2>/dev/null); rm -f "$IDFILE"
+[ -n "$SEEDED_ID" ] && gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$SEEDED_ID"
+[ "$SEED_RC" -eq 0 ] || { echo "convoy-seed failed (rc=$SEED_RC)" >&2; exit 1; }
+CONVOY_ID=$(printf '%s' "$SEED_JSON" | tr -d '[:cntrl:]' | jq -r '.convoy_id // empty')
+BRANCH=$(printf '%s' "$SEED_JSON" | tr -d '[:cntrl:]' | jq -r '.branch // empty')
+[ -n "$CONVOY_ID" ] && [ -n "$BRANCH" ] || { echo "convoy-seed returned no convoy id/branch" >&2; exit 1; }
+
+# Record the authoritative id+branch now that the cut has succeeded (the id was
+# already persisted above; re-recording it with the branch is idempotent).
+gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$CONVOY_ID" --set-metadata "gc.design_convoy_branch=$BRANCH"
+```
+
+**Close this step bead.** Non-terminal, so no drain:
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-convoy --outcome pass
+```
+
+**Exit criteria:** the owned convoy exists, its target is `integration/<convoy-id>`,
+that branch is on origin, the id is recorded on the subject, and this step is
+closed.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+
+[[steps]]
+id = "arm-design"
+title = "File the design child and arm gate 1"
+needs = ["seed-convoy"]
+description = """
+File the design child, link it to the convoy, and sling it to the polecat pool.
+The child branches from the integration branch, lands its design doc there, and
+the refinery opens the checkpoint PR onto that branch. For `design_gated=true`,
+stamp the approval lane so `merge.sh` holds that PR until the operator approves.
+
+**Idempotent on resume** via two markers on the subject: `gc.design_child` (the
+child was filed) and `gc.design_armed` (it was linked, gated, and slung).
+`gc.design_child` guards the non-idempotent create alone; the convoy link and the
+approval lane are idempotent sling preconditions and live under `gc.design_armed`.
+So a re-run neither files a second child nor pours a second workflow, and never
+slings a child that is unlinked from the convoy or missing its gate.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
+SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
+INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
+CONVOY_ID=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_id"] // empty')
+BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_branch"] // empty')
+DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
+DESIGN_GATED="{{design_gated}}"
+[ -n "$CONVOY_ID" ] && [ -n "$BRANCH" ] || { echo "seed-convoy did not record the convoy; cannot arm design" >&2; exit 1; }
+
+POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
+case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool; set GC_RIG" >&2; exit 1 ;; esac
+```
+
+**File the design child (only if not already filed).** Replace the `<...>` with
+the design topic and questions you read from the subject's card in load-context:
+```bash
+if [ -z "$DESIGN_CHILD" ]; then
+  DESIGN_CHILD=$(gc bd create --title "design: $INITIATIVE" -t task -d "## Goal
+Design <the topic>, per the initiative $SUBJECT. Land the design doc on
+$BRANCH (this convoy's integration branch) and open it as a checkpoint PR
+onto that branch for the operator's on-branch review. Do NOT start
+implementation — it is a separate child armed behind this design's approval.
+
+## What to settle
+<the design questions from the initiative card>
+
+## Deliverable
+A design doc committed to $BRANCH and opened as a PR onto it. The design
+defines the implementation child's breakdown. Use the filing-documentation
+skill for placement." --json | tr -d '[:cntrl:]' | jq -r '.id // .[0].id // empty')
+  [ -n "$DESIGN_CHILD" ] || { echo "bd create returned no design child id" >&2; exit 1; }
+  gc bd update "$SUBJECT" --set-metadata "gc.design_child=$DESIGN_CHILD"
+fi
+```
+
+**Link, gate, and sling (only if not already armed).** The convoy link resolves
+`metadata.target=integration/<convoy-id>` for the child at sling time, and the
+approval lane (when gated) makes `merge.sh` hold the checkpoint PR for an operator
+APPROVED review — `pr-open.sh` drops approval pre-open so the PR still opens.
+All-in-one leaves the default codex lane and lands on codex-green. Both are
+idempotent preconditions of the sling, so they run here, before every sling
+including a resumed one:
+```bash
+ARMED=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.design_armed"] // empty')
+if [ -z "$ARMED" ]; then
+  gc bd dep add "$DESIGN_CHILD" "$CONVOY_ID" --type=parent-child
+  if [ "$DESIGN_GATED" = "true" ]; then
+    gc bd update "$DESIGN_CHILD" --set-metadata "check_set=codex,approval"
+  fi
+  gc sling "$POOL" "$DESIGN_CHILD" --on mol-polecat-work || { echo "sling of design child failed" >&2; exit 1; }
+  gc bd update "$SUBJECT" --set-metadata "gc.design_armed=1"
+fi
+```
+
+**Close this step bead.** Non-terminal, so no drain:
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-design --outcome pass
+```
+
+**Exit criteria:** the design child is filed, linked to the convoy, carries the
+approval lane when gated, is slung to the pool, and this step is closed.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+
+[[steps]]
+id = "arm-implementation"
+title = "File the implementation child and arm it behind the design"
+needs = ["arm-design"]
+description = """
+File one implementation child that builds the initiative per the approved design.
+For `design_gated=true`, hold it behind the design child with a `blocks` edge and
+arm a deferred dispatch, so the design's closure is what sends it to the pool.
+For `design_gated=false`, sling it now to run in parallel.
+
+One implementation child, not a fan-out: the design defines the breakdown, so the
+implementation child carries "split into multiple beads if the approved design
+calls for it" and splits itself when it runs — the design does not exist yet to
+enumerate the pieces here.
+
+**Idempotent on resume** via `gc.impl_child` (the child was filed) and
+`gc.impl_armed` (it was linked, then slung or armed) on the subject.
+`gc.impl_child` guards the non-idempotent create alone; the convoy link is an
+idempotent dispatch precondition and lives under `gc.impl_armed`. So a re-run
+neither files a second child nor dispatches one that is unlinked from the convoy.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
+SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
+INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
+CONVOY_ID=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_id"] // empty')
+BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_branch"] // empty')
+DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
+IMPL_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_child"] // empty')
+DESIGN_GATED="{{design_gated}}"
+[ -n "$CONVOY_ID" ] && [ -n "$BRANCH" ] && [ -n "$DESIGN_CHILD" ] || { echo "convoy or design child not recorded; cannot arm implementation" >&2; exit 1; }
+
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/deferred-dispatch.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+[ -n "$SCRIPTS" ] || { echo "deferred-dispatch.sh not found in the pack" >&2; exit 1; }
+
+POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
+case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool; set GC_RIG" >&2; exit 1 ;; esac
+```
+
+**File the implementation child (only if not already filed):**
+```bash
+if [ -z "$IMPL_CHILD" ]; then
+  IMPL_CHILD=$(gc bd create --title "implement: $INITIATIVE per approved design" -t task -d "## Goal
+Implement $INITIATIVE per the design approved on $BRANCH (the design child
+$DESIGN_CHILD of this convoy). Branch FROM $BRANCH and open your PR ONTO
+$BRANCH — not the default branch. The convoy graduates holistically once this
+lands.
+
+## Scope
+Follow the approved design. Split into multiple beads if the approved design
+calls for it. Do not begin until the design child has landed and this bead has
+been routed — it is armed behind the design's approval." --json | tr -d '[:cntrl:]' | jq -r '.id // .[0].id // empty')
+  [ -n "$IMPL_CHILD" ] || { echo "bd create returned no implementation child id" >&2; exit 1; }
+  gc bd update "$SUBJECT" --set-metadata "gc.impl_child=$IMPL_CHILD"
+fi
+```
+
+**Link, then arm or sling, by shape (only if not already armed).** The convoy link
+resolves `metadata.target=integration/<convoy-id>` for the child; it is an
+idempotent precondition of the dispatch, so it runs here, before every dispatch
+including a resumed one:
+```bash
+ARMED=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.impl_armed"] // empty')
+if [ -z "$ARMED" ]; then
+  gc bd dep add "$IMPL_CHILD" "$CONVOY_ID" --type=parent-child
+  if [ "$DESIGN_GATED" = "true" ]; then
+    # Hold behind the design child and arm the deferred dispatch: the design's
+    # closure (on its approved-and-merged checkpoint PR) fires the sling.
+    gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks
+    "$SCRIPTS/deferred-dispatch.sh" arm "$IMPL_CHILD" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "deferred-dispatch arm failed" >&2; exit 1; }
+  else
+    gc sling "$POOL" "$IMPL_CHILD" --on mol-polecat-work || { echo "sling of implementation child failed" >&2; exit 1; }
+  fi
+  gc bd update "$SUBJECT" --set-metadata "gc.impl_armed=1"
+fi
+```
+
+**Close this step bead.** Non-terminal, so no drain:
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-implementation --outcome pass
+```
+
+**Exit criteria:** the implementation child is filed, linked to the convoy, and
+either armed behind the design (gated) or slung now (all-in-one); this step is
+closed.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+
+[[steps]]
+id = "drain"
+title = "Close the step chain and drain"
+needs = ["arm-implementation"]
+description = """
+The convoy is standing and its children are dispatched or armed. This molecule's
+work is done. It writes no card and holds nothing: the durable owned convoy lives
+on and graduates, the ephemeral input convoy drains with this molecule.
+
+This is the terminal step, so close its own step bead (the earlier steps closed
+themselves in order) and drain. The control-dispatcher's `workflow-finalize`
+closes the `kind=workflow` root once every step is closed; never close the root,
+the subject, or any child yourself.
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.drain --outcome pass
+gc runtime drain-ack
+```
+
+**Exit criteria:** this step is closed and the session is drained.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
