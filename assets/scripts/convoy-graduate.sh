@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# convoy-graduate — arm 5 of the merge cadence: graduate a complete OWNED
+# convoy-graduate — arm 8 of the merge cadence: graduate a complete OWNED
 # integration convoy into an ordinary mr-mode work bead for the refinery.
 # Conditions, all fail-closed: owned convoy targeting integration/*, all
 # members closed, at least one bead in the ledger records a MERGE onto that

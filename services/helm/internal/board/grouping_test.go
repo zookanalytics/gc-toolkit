@@ -123,11 +123,11 @@ func TestReviewReworkLeafBandsInFlight(t *testing.T) {
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	rev := mustTile(t, b, "tk-rev")
-	if rev.Section != SectionActive || rev.Empty || rev.Frontier != "in review" || rev.Needs != "review in flight" {
+	if rev.Section != SectionActive || rev.Empty || rev.Frontier != "needs-review · in review" || rev.Needs != "review in flight" {
 		t.Errorf("review leaf: section=%q empty=%v frontier=%q needs=%q", rev.Section, rev.Empty, rev.Frontier, rev.Needs)
 	}
 	rwk := mustTile(t, b, "tk-rwk")
-	if rwk.Section != SectionActive || rwk.Empty || rwk.Frontier != "in rework" || rwk.Needs != "rework in flight" {
+	if rwk.Section != SectionActive || rwk.Empty || rwk.Frontier != "needs-review · in rework" || rwk.Needs != "rework in flight" {
 		t.Errorf("rework leaf: section=%q empty=%v frontier=%q needs=%q", rwk.Section, rwk.Empty, rwk.Frontier, rwk.Needs)
 	}
 }

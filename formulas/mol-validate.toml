@@ -96,7 +96,7 @@ M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 lane's batch on one anchor at the head the batch was produced at:
 ```bash
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
+LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # >>> validate-no-anchor-refuse
 if [ -z "$ANCHOR" ]; then
@@ -115,8 +115,8 @@ fi
 # <<< validate-no-anchor-refuse
 echo "validating lane $LANE on anchor $ANCHOR at ${REVIEWED_OID:-<unpinned>}"
 ```
-An absent `check_name` resolves to `codex`, the same default lane-state.sh and
-gate-ensure.sh use, so a pass dispatched without one rules the codex lane.
+An absent `check_name` resolves to `correctness`, the same default lane-state.sh and
+gate-ensure.sh use, so a pass dispatched without one rules the correctness lane.
 
 A malformed dispatch cannot be ruled and never will be on a retry. Its convoy has
 no single tracked member, or that member carries no `anchor_bead`. So each refusal
@@ -188,7 +188,7 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 [ -n "$VALIDATION_PASS" ] || { echo "mol-validate needs an input convoy with exactly one tracked member" >&2; exit 1; }
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
+LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 [ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
@@ -281,7 +281,7 @@ nothing about decision 3: carry on to `rule-convergence` and judge convergence
 there on the batch's own evidence, never on the emptiness of this read.
 
 A deferred finding needs a bead someone can pick up later; filing that follow-up
-work is the fix-unit dispatch the gate authority owns (tk-o1bzbm), not this pass.
+work is the fix-unit dispatch the check authority owns (tk-o1bzbm), not this pass.
 This pass rules the disposition; it does not create or route fix units.
 
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
@@ -310,7 +310,7 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 [ -n "$VALIDATION_PASS" ] || { echo "mol-validate needs an input convoy with exactly one tracked member" >&2; exit 1; }
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
+LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 [ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -329,10 +329,10 @@ assumption the diff rests on, touches many files, or shows the reviewer and the
 diff still disagree about intent has not.
 
 This pass rules one of two shapes, and `$LANE` names which: a `check_set` lane
-(`codex`) for a reviewer's batch, or `human` for an operator feedback batch. A
+(`correctness`) for a reviewer's batch, or `human` for an operator feedback batch. A
 human batch is anchor-wide — it is input the whole diff has never been answered
 against, so its ruling moves every lane the anchor's `check_set` declares, not
-the `human` pseudo-lane no gate reader derives green from
+the `human` pseudo-lane no check reader derives green from
 (specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane backwards").
 Record the ruling with the line matching this pass's shape and your judgement;
 the `$LANE` guard on each makes the wrong line a no-op.
@@ -353,7 +353,7 @@ comment its reviewer never read, so a converged human batch runs neither line.
 **If it has NOT converged — a fresh whole-diff review is warranted.**
 
 A reviewer's lane batch supersedes its own lane, returning it to `unreviewed` so
-the gate authority pours a fresh review at the live head. supersede-lane retires
+the check authority pours a fresh review at the live head. supersede-lane retires
 the lane's standing verdict whether or not it is an approve backing: on a
 request-changes batch there is no backing, so it retires the recorded
 request-changes review itself, which is what lifts gate-ensure's per-head bar and
@@ -362,7 +362,7 @@ lets the fresh review pour at the unmoved head.
 [ "$LANE" != human ] && "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "<one line: what still needs a whole-diff look>"
 ```
 A human batch supersedes EVERY declared lane, since the whole diff owes a fresh
-look. Superseding only the `human` pseudo-lane would leave the real gates green
+look. Superseding only the `human` pseudo-lane would leave the real checks green
 and let the anchor merge without the review this ruling requires.
 ```bash
 [ "$LANE" = human ] && "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --reason "<one line: what the operator's input overturns>"

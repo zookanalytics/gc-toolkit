@@ -146,6 +146,29 @@ show_bead() { # id -> single bead object on stdout, or nothing (rc 1)
         else empty end' 2>/dev/null
 }
 
+# The armed-set snapshot armed_rows already read, reused instead of a `bd show`
+# per bead. That per-bead read summed past the reconcile order's 120s budget once
+# the armed set grew (with the per-bead dep-list, the other half of the same
+# N+1), so a full pass was killed before it dispatched and owed arms silently
+# starved. The snapshot carries every field a caller reads here (status,
+# assignee, metadata), so nothing is lost but freshness, and the pass reads it
+# consistently: the slung marker and the fail count are written only by this pass
+# (the order is single-flight, rig-scoped), so the snapshot is authoritative for
+# them; status was already read from the snapshot for the closed-retire; and
+# merge_result and assignee are now read from it too, one pass staler than the
+# prior fresh per-bead show. A bead delivered or claimed in the pass window is
+# therefore acted on from the pass-start view — at worst one redundant sling
+# before the next pass retires it from its own snapshot — and the fail-count cap
+# bounds a redundant sling that never finalizes. The pass is now seconds, not
+# minutes, so that window is small. The file is pre-scrubbed, so a raw C0 byte
+# cannot abort the read.
+bead_from_cache() { # all_json_file id -> single bead object on stdout, or nothing (rc 1)
+    local f="$1" id="$2" out
+    out="$(jq -c --arg id "$id" 'map(select(.id == $id)) | (.[0] // empty)' "$f" 2>/dev/null)" || return 1
+    [ -n "$out" ] || return 1
+    printf '%s' "$out"
+}
+
 meta_of() { # bead-json key -> value or empty
     printf '%s' "$1" | jq -r --arg k "$2" '(.metadata[$k] // "") | tostring' 2>/dev/null
 }
@@ -290,13 +313,66 @@ own_blocks_cleared() { # id -> rc 0 if every own `blocks` edge is closed
     [ "$open_blk" -eq 0 ]
 }
 
+# The own-blockers-clear gate (the second-chance dispatch gate), resolved for a
+# whole candidate set in a BOUNDED number of reads rather than a `bd dep list`
+# per bead. The per-bead form summed past the reconcile order's 120s budget as
+# the armed set grew, so a full pass was killed before it dispatched and owed
+# arms silently starved — the N+1 this replaces. The blocker ids come off the
+# snapshot's OWN dependency edges (`bd list --json` already carries them in the
+# list-edge shape, so no dep-list call is needed and the single-id-vs-batch shape
+# flip of `bd dep list` never arises), and ONE listing resolves their statuses.
+# Fail closed per candidate: a blocker whose row cannot be read leaves its
+# candidate not-cleared (0), exactly as the per-bead probe's non-array return
+# did, so the arm stays armed and the next pass retries rather than slinging on a
+# guess. The status LISTING failing outright returns non-zero, degrading the
+# whole pass to "could not enumerate" the way a failed --all read does.
+resolve_own_cleared() { # all_json  cand_id...  ->  "<id>\t<0|1>" per candidate
+    local all="$1"; shift
+    [ "$#" -gt 0 ] || return 0
+    local cand_json blocker_ids blk_raw blockers
+    cand_json="$(printf '%s\n' "$@" | jq -R . | jq -sc .)" || return 1
+    # Distinct `blocks` blockers of every candidate, read off the snapshot's own
+    # edges (list-edge shape: {issue_id: self, depends_on_id: blocker, type}).
+    blocker_ids="$(printf '%s' "$all" | scrub | jq -r --argjson c "$cand_json" '
+        [ .[] | select(.id as $i | ($c | index($i)))
+          | (.dependencies // [])[] | select(.type == "blocks") | .depends_on_id ]
+        | unique | join(",")' 2>/dev/null)" || return 1
+    blockers='[]'
+    if [ -n "$blocker_ids" ]; then
+        # A `blocks` blocker can be any bead class, and gate/infra/template
+        # blockers are common (a graduation gate blocking a convoy child); bd list
+        # hides those classes unless asked, so a hidden blocker would drop and
+        # read as unresolved. --id also silently drops an id with no row, so a
+        # blocker still absent from the join below is treated as unresolved (its
+        # candidate stays not-cleared), never as closed — an unread blocker must
+        # not read as a released one.
+        blk_raw="$(bd_ list --id "$blocker_ids" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null)" || return 1
+        printf '%s' "$blk_raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+        blockers="$(printf '%s' "$blk_raw" | scrub | jq -c '[ .[]? | {id, status} ]' 2>/dev/null)" || return 1
+        [ -n "$blockers" ] || blockers='[]'
+    fi
+    # Join per candidate: cleared (1) iff it has no `blocks` blocker whose status
+    # is unresolved or not closed.
+    printf '%s' "$all" | scrub | jq -r --argjson c "$cand_json" --argjson bl "$blockers" '
+        ($bl | map({key: .id, value: .status}) | from_entries) as $smap
+        | .[] | select(.id as $i | ($c | index($i))) | .id as $id
+        | [ (.dependencies // [])[] | select(.type == "blocks") | .depends_on_id ] as $blks
+        | (if   ([ $blks[] | select($smap[.] == null)     ] | length) > 0 then 0
+           elif ([ $blks[] | select($smap[.] != "closed") ] | length) > 0 then 0
+           else 1 end) as $cleared
+        | "\($id)\t\($cleared)"' 2>/dev/null
+}
+
 # Unreadable is not empty: every enumeration read is checked and any failure
 # returns 1. The fourth column, own_cleared, is the second-chance dispatch gate:
 # 1 for an OPEN bead that bd holds unready but whose own `blocks` edges have all
 # closed (held only by an ancestor cascade). A bd-ready bead needs no probe and a
-# non-open one is a hold, so the probe runs only on the open-but-unready rows.
-armed_rows() { # writes "<id>\t<status>\t<bd_ready 0|1>\t<own_cleared 0|1>" to $1
-    local out="$1" all ready_ids base id status ready cleared
+# non-open one is a hold, so the probe runs only on the open-but-unready rows —
+# resolved for all of them at once by resolve_own_cleared. The snapshot is cached
+# to all_out so the list and reconcile loops read each bead's fields from it
+# instead of a `bd show` per bead.
+armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<own_cleared 0|1>" per bead; caches the snapshot to all_out
+    local out="$1" all_out="$2" all ready_ids base id status ready cand_ids=() cleared_map=""
     all="$(bd_ list --has-metadata-key "$K_TARGET" --all --json --limit 0 2>/dev/null)" || return 1
     [ -n "$all" ] || return 1
     printf '%s' "$all" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
@@ -305,20 +381,28 @@ armed_rows() { # writes "<id>\t<status>\t<bd_ready 0|1>\t<own_cleared 0|1>" to $
     [ -n "$ready_ids" ] || return 1
     printf '%s' "$ready_ids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
 
+    printf '%s' "$all" | scrub > "$all_out" || return 1
+
     base="$(printf '%s' "$all" | jq -r --argjson r "$ready_ids" '
         ($r | map(.id)) as $ready
         | .[] | [ .id, (.status // ""), (if (.id as $i | $ready | index($i)) then "1" else "0" end) ]
         | @tsv' 2>/dev/null)" || return 1
 
-    : > "$out" || return 1
     while IFS=$'\t' read -r id status ready; do
         [ -n "$id" ] || continue
-        cleared=0
-        if [ "$ready" != "1" ] && [ "$status" = "open" ] && own_blocks_cleared "$id"; then
-            cleared=1
-        fi
-        printf '%s\t%s\t%s\t%s\n' "$id" "$status" "$ready" "$cleared" >> "$out"
+        [ "$ready" != "1" ] && [ "$status" = "open" ] && cand_ids+=("$id")
     done <<< "$base"
+
+    if [ "${#cand_ids[@]}" -gt 0 ]; then
+        cleared_map="$(resolve_own_cleared "$all" "${cand_ids[@]}")" || return 1
+    fi
+
+    # Join the own_cleared answers back onto the base rows in one awk pass
+    # (in-memory, no bd read): a candidate absent from the map defaults to 0.
+    awk -F'\t' '
+        NR==FNR { if ($1 != "") cl[$1] = $2; next }
+        $1 != "" { printf "%s\t%s\t%s\t%s\n", $1, $2, $3, (($1 in cl) ? cl[$1] : 0) }
+    ' <(printf '%s\n' "$cleared_map") <(printf '%s\n' "$base") > "$out" || return 1
     return 0
 }
 
@@ -332,8 +416,10 @@ cmd_list() {
         esac
         shift || true
     done
-    local rows; mktemp_tracked || { echo "$PROG: list: mktemp failed" >&2; return 1; }; rows="$REPLY"
-    armed_rows "$rows" || { echo "$PROG: list: could not enumerate armed beads" >&2; return 1; }
+    local rows all_cache
+    mktemp_tracked || { echo "$PROG: list: mktemp failed" >&2; return 1; }; rows="$REPLY"
+    mktemp_tracked || { echo "$PROG: list: mktemp failed" >&2; return 1; }; all_cache="$REPLY"
+    armed_rows "$rows" "$all_cache" || { echo "$PROG: list: could not enumerate armed beads" >&2; return 1; }
 
     if [ "$as_json" = 1 ]; then
         bd_ list --has-metadata-key "$K_TARGET" --all --json --limit 0 2>/dev/null
@@ -344,7 +430,7 @@ cmd_list() {
     while IFS=$'\t' read -r id status ready owncleared; do
         [ -n "${id:-}" ] || continue
         n=$((n + 1))
-        json="$(show_bead "$id")" || json=""
+        json="$(bead_from_cache "$all_cache" "$id")" || json=""
         target=""; reason=""; slung=""; mr=""; fails=0
         if [ -n "$json" ]; then
             target="$(meta_of "$json" "$K_TARGET")"
@@ -409,8 +495,10 @@ cmd_reconcile() {
         shift || true
     done
 
-    local rows; mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; rows="$REPLY"
-    armed_rows "$rows" || {
+    local rows all_cache
+    mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; rows="$REPLY"
+    mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; all_cache="$REPLY"
+    armed_rows "$rows" "$all_cache" || {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
 
@@ -434,7 +522,7 @@ cmd_reconcile() {
             retired=$((retired + 1)); continue
         fi
 
-        json="$(show_bead "$id")" || json=""
+        json="$(bead_from_cache "$all_cache" "$id")" || json=""
         if [ -z "$json" ]; then
             echo "$PROG: WARN $id enumerated but does not resolve — leaving armed" >&2
             failed=$((failed + 1)); continue

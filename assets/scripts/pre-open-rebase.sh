@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pre-open-rebase — arm 1a of the merge cadence: the conflict observer for
+# pre-open-rebase — arm 5 of the merge cadence: the conflict observer for
 # pre_open_gate anchors. Caller: refinery-reconcile.sh.
 #
 # A pre-open anchor has no PR, so GitHub can answer nothing about it. Every
@@ -75,14 +75,9 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 ALL_STATUSES="$LIVE_STATUSES,closed"
 
-bd_list() { # guarded array read; non-zero = "could not tell"
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
@@ -111,10 +106,8 @@ demand_gate_state() { # <anchor-id>
   local rows
   # --include-gates: the demand is a human gate (issue_type=gate), which
   # `bd list` hides by default; without it a held anchor reads released.
-  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
-  rows=$(printf '%s' "$rows" | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --include-gates --metadata-field "gc.demand_for=${1:-}") || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
     '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
     >/dev/null 2>&1 && return 0
@@ -353,6 +346,10 @@ while IFS= read -r row; do
     || echo "$PROG: WARN rework $FIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
   gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
     || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
+  # A new rework child on this branch changes the kids/orphan probes above; drop
+  # the per-pass bd_list cache so a later anchor on the same branch does not read
+  # a stale "no child" and file a duplicate. No-op outside a reconcile pass.
+  bd_cache_clear
   mgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty')
   if [ "$mgot" != "$prepare_mode" ]; then
     echo "$PROG: WARN rework $FIX did not record prepare_mode=$prepare_mode; left unrouted (retry next pass)" >&2

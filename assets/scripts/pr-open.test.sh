@@ -23,12 +23,12 @@ trap 'rm -rf "$TMP"' EXIT
 harness_init
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh" \
+mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/pr-summary-region.sh" "$HERE/lifecycle.sh" \
   "$HERE/lane-state.sh" "$HERE/finding.sh"
 SUT="$SD/pr-open.sh"
 
 pre() { # id branch extra-json [check_set]  (4th arg empty = no check_set key)
-  local cs="${4-codex}"
+  local cs="${4-correctness}"
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"%s","merged_target":"main"%s%s}}' \
     "$1" "$1" "$1" "$2" "${cs:+,\"check_set\":\"$cs\"}" "${3:-}"
 }
@@ -37,18 +37,18 @@ prrow() { # num state branch head base [mergedAt] [headrepo]
     "$1" "$1" "$2" "${6:-null}" "$5" "$3" "$4" "${7:-gc-toolkit}" "${8:-zook}"
 }
 
-# A closed approve review bead backing <anchor>'s <lane> (default codex) — the
+# A closed approve review bead backing <anchor>'s <lane> (default correctness) — the
 # green record lane-state.sh derives, in place of the retired check.<lane>=green
 # marker. reviewed_oid is what a local backing bead must carry to green a lane.
 rev() { # anchor [lane] [oid]
   printf '{"id":"rev-%s","status":"closed","assignee":"","notes":"approve","metadata":{"task_kind":"review","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","signoff_verdict":"approve"}}' \
-    "$1" "$1" "${2:-codex}" "${3:-sha-r}"
+    "$1" "$1" "${2:-correctness}" "${3:-sha-r}"
 }
 # An open must-fix finding on <anchor> — finding.sh open-must-fix reads it by
 # disposition, so no blocks edge is needed here (merge.sh reads the edge).
 finding() { # id anchor [disposition] [lane]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.disposition":"%s","finding.lane":"%s","finding.key":"%s:0"}}' \
-    "$1" "$2" "${3:-must-fix}" "${4:-codex}" "${4:-codex}"
+    "$1" "$2" "${3:-must-fix}" "${4:-correctness}" "${4:-correctness}"
 }
 # An anchor like pre(), but targeting integration/<convoy> instead of main — the
 # owned-convoy checkpoint tk-6bji7k.9 marks with a banner and a base: label.
@@ -251,7 +251,7 @@ store "[$(pre B2 polecat/b2)]"
 echo "sha-b2" > "$GH_DIR/head_polecat_b2"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "lane 'codex' does not derive green" "a lane short of green holds the open"
+has "$out" "lane 'correctness' does not derive green" "a lane short of green holds the open"
 eq "$(meta B2 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
 # The gate check is row-only (green is a state of the lane, not the head), so
 # it is judged before the head fetch: a held anchor pays no network call.
@@ -273,7 +273,7 @@ has "$(cat "$STUB_GH_LOG")" "pr create" "…and the PR is opened"
 # publishes only once that reviewer has answered, and a set naming no
 # marker-bearing gate publishes rather than waiting on a marker no arm writes.
 echo "# a second declared gate with no marker holds the publish"
-store "[$(pre B3 polecat/b3 '' 'codex,triage'), $(rev B3)]"
+store "[$(pre B3 polecat/b3 '' 'correctness,triage'), $(rev B3)]"
 echo "sha-b3" > "$GH_DIR/head_polecat_b3"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
@@ -311,7 +311,7 @@ eq "$(meta B6 merge_result)" "pull_request" "anchor flipped"
 
 echo "# create the PR at the reviewed head"
 store "[$(pre C1 polecat/c1),
-        {\"id\":\"rev-c1\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"VERDICT: APPROVE ok\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"C1\",\"check_name\":\"codex\",\"reviewed_oid\":\"sha-c1\",\"signoff_verdict\":\"approve\"}}]"
+        {\"id\":\"rev-c1\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"VERDICT: APPROVE ok\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"C1\",\"check_name\":\"correctness\",\"reviewed_oid\":\"sha-c1\",\"signoff_verdict\":\"approve\"}}]"
 echo "sha-c1" > "$GH_DIR/head_polecat_c1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/77"
 printf '%s' "$(prrow 77 OPEN polecat/c1 sha-c1 main)" > "$GH_DIR/pr_view_77.json"
@@ -447,10 +447,10 @@ echo "# the opened title carries a conventional-commit type from the bead kind"
 # recognized one — then it is kept, never double-prefixed. The bead id suffix
 # survives in every case.
 tanchor() { # id issue_type title  — a green pre_open_gate anchor + its head
-  # The anchor plus the closed approve bead that greens its codex lane, emitted
+  # The anchor plus the closed approve bead that greens its correctness lane, emitted
   # as two array elements (the store composes them with commas).
   echo "sha-$1" > "$GH_DIR/head_polecat_$1"
-  printf '{"id":"%s","status":"open","issue_type":"%s","title":"%s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"polecat/%s","merged_target":"main","check_set":"codex"}}, ' \
+  printf '{"id":"%s","status":"open","issue_type":"%s","title":"%s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"polecat/%s","merged_target":"main","check_set":"correctness"}}, ' \
     "$1" "$2" "$3" "$1" "$1"
   rev "$1"
 }

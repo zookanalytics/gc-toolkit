@@ -103,6 +103,12 @@ anchors the PR — and its rework — to landed: a lone bead is the one-child
 convoy, a multi-bead initiative the many-child convoy. The convoy stays open
 until its work merges, so `closed` always means landed.
 
+You run city-scoped, so `gc bd` and `gc convoy` resolve to the city store
+unless you name a rig. A dispatch bead left there is invisible to the rig's
+polecat pool, which reads only the rig store — it maroons, claimable by no
+one. Name the rig on every dispatch create with `--rig <rig>`: the same
+`<rig>` you sling to.
+
 A **shared input artifact** (a decisions doc, a spec several polecats need
 before any produce mergeable work) is never committed directly to the default
 branch — it is seeded on the convoy's integration branch.
@@ -117,12 +123,13 @@ that artifact on it; without it the branch starts equal to the default.
 
 ```bash
 # Create the convoy, cut + push its integration branch, seed the artifact onto
-# it. --json emits {convoy_id, branch}.
-CONVOY=$(assets/scripts/convoy-seed.sh --name "<initiative>" \
+# it. --json emits {convoy_id, branch}. You run city-scoped, so name the rig.
+# convoy-seed.sh scopes the convoy to GC_RIG, the same rig you sling to.
+CONVOY=$(GC_RIG=<rig> assets/scripts/convoy-seed.sh --name "<initiative>" \
     --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
-# File child work beads under the convoy and sling normally.
-WORK=$(gc bd create "<task>" -t task --json | jq -r .id)
+# File child work beads in the rig's store under the convoy and sling normally.
+WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
 gc bd dep add "$WORK" "$CONVOY" --type=parent-child
 gc sling <rig>/gc-toolkit.polecat "$WORK"   # inherits metadata.target via convoy walk
 ```
@@ -156,7 +163,8 @@ integration branch as above.
 ## Scope-miss recovery: amend the open PR
 
 Scope you discover while a PR is open belongs on that PR. File a supplement
-bead carrying the PR's shape — `branch` = its `headRefName`, `existing_pr` =
+bead in the rig's store (`gc bd --rig <rig> create`; you are city-scoped)
+carrying the PR's shape — `branch` = its `headRefName`, `existing_pr` =
 its URL, `target` = its `baseRefName` — write that metadata before you sling,
 and route the bead to `<rig>/gc-toolkit.polecat`. `gc sling` has no
 flag for any of this, so the metadata write comes first: a polecat that claims

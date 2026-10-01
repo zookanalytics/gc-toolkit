@@ -354,9 +354,9 @@ const (
 	// family root it hangs off, used by the grouping walk as a direct edge.
 	mdAnchorBead = "anchor_bead"
 	// mdRecommendedFormula is the execution mol a reaction names on a subject
-	// when its ruling has a determinable action. Its presence is what makes a
-	// visit a recommendation (Accept + Discuss) rather than a plain one
-	// (Discuss only); the board reads it to derive [Tile.Acceptable].
+	// via the recommend disposition. Its presence is what makes a visit a
+	// recommendation (Accept + Discuss) rather than a plain ruling (Discuss
+	// only); the board reads it to derive [Tile.Acceptable].
 	mdRecommendedFormula = "gc.recommended_formula"
 )
 
@@ -366,6 +366,15 @@ const (
 	sittingOpen       = "open"
 	sittingInProgress = "in_progress"
 	sittingClosed     = "closed"
+)
+
+// The two engagement states a held row's visit can be in, carried on
+// [Tile.VisitState]. VisitEngaged is a live sitting in the conversation now;
+// VisitParked is an open, un-engaged visit waiting for a person. A row no open
+// visit holds carries the empty string, never one of these.
+const (
+	VisitParked  = "parked"
+	VisitEngaged = "engaged"
 )
 
 // unengagedVisit reports whether subject has a visit no one has engaged: a
@@ -379,24 +388,62 @@ const (
 // Accept/Discuss invalidation rule: a live sitting suppresses Accept, and
 // leaving the sitting without a ruling (the visit reverts to open) restores it.
 func unengagedVisit(subject string, sittings []Sitting) bool {
-	parked := false
+	if engagedVisit(subject, sittings) {
+		return false
+	}
+	// Not engaged, so un-engaged exactly when a visit still stands OPEN on it.
+	// The absence of any open sitting is not un-engagement — there is nothing to
+	// accept-and-dismiss — so it does not restore Accept.
+	for _, s := range sittings {
+		if s.Subject == subject && s.Status == sittingOpen {
+			return true
+		}
+	}
+	return false
+}
+
+// engagedVisit reports whether a live sitting is holding subject's visit right
+// now: a sitting in_progress, or a non-closed one a session or an assignee is
+// bound to. The assignee arm covers the pending-engagement window — engage binds
+// the visit by assignee while it is still open, before the hook claim promotes
+// it to in_progress and stamps the session. It is the engagement half both
+// [unengagedVisit] and [classifyVisits] read, so the Accept affordance and the
+// [Tile.VisitState] a row shows are decided by one predicate and cannot drift.
+func engagedVisit(subject string, sittings []Sitting) bool {
 	for _, s := range sittings {
 		if s.Subject != subject {
 			continue
 		}
-		// A claimed sitting, or a non-closed one a session or an assignee is
-		// bound to, is a live conversation the operator is holding: it
-		// suppresses Accept whatever else is on the subject. The assignee arm
-		// covers the pending-engagement window — engage binds the visit by
-		// assignee while it is still open, before the claim stamps the session.
 		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
-			return false
-		}
-		if s.Status == sittingOpen {
-			parked = true
+			return true
 		}
 	}
-	return parked
+	return false
+}
+
+// classifyVisits stamps [Tile.VisitState] on every held row, splitting Held into
+// its two engagement states: VisitEngaged when a live sitting is holding the
+// conversation, VisitParked otherwise. A row no visit holds keeps the empty
+// string.
+//
+// It runs after the wrapper fold, where Held is final — [applyFold] flips a
+// subject to Held when a visit wrapper folds onto it — so it reads the settled
+// flag rather than the per-anchor value [deriveTile] computed. Engagement is the
+// same [engagedVisit] test Acceptable reads, so a row reads "engaged" exactly
+// when a live sitting suppresses Accept. Parked is the fallback, including the
+// case a held row's sitting has aged out of the window: an open visit no session
+// is on reads as waiting for the operator, never as being worked.
+func classifyVisits(tiles []Tile, facts Facts) {
+	for i := range tiles {
+		if !tiles[i].Held {
+			continue
+		}
+		if engagedVisit(tiles[i].ID, facts.Sittings) {
+			tiles[i].VisitState = VisitEngaged
+		} else {
+			tiles[i].VisitState = VisitParked
+		}
+	}
 }
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
@@ -574,7 +621,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalledGate bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledGate bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -601,7 +648,13 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 	// through the count branches, exactly as a decomposed ruled row is.
 	case isRuledInFlight && r.mTotal == 0:
 		sev0 = SevNormal
-	case !isRuled && !isRuledInFlight && humanGated(a):
+	// A human-gated row the city is actively working is in-flight work, not an
+	// operator gate — the un-ruled twin of the isRuledInFlight arm above. Childless
+	// like that arm; a decomposed human-gated bead is banded by its roll-up through
+	// the count branches, exactly as a decomposed ruled row is.
+	case humanGatedInFlight && r.mTotal == 0:
+		sev0 = SevNormal
+	case !isRuled && !isRuledInFlight && !humanGatedInFlight && humanGated(a):
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
@@ -670,7 +723,7 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, parkedInFlight bool,
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
@@ -707,7 +760,13 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 	// reports its counts.
 	case isRuledInFlight && r.mTotal == 0:
 		return "ruled — work in flight"
-	case !isRuled && !isRuledInFlight && a.Source == "decision":
+	// The un-ruled twin: a human-gated row with a live molecule over the bead
+	// itself is being worked, not waiting on the operator. Childless like the arm
+	// above; a decomposed one reports its roll-up. The "working ·" phase prefix
+	// classifyPhases adds leads the line, so it reads as live execution.
+	case humanGatedInFlight && r.mTotal == 0:
+		return "human-gated — work in flight"
+	case !isRuled && !isRuledInFlight && !humanGatedInFlight && a.Source == "decision":
 		return "human-gated decision"
 	// A merge anchor names the pull request instead, and OUTRANKS the
 	// human-routed phrase below, which is not a competing fact but a less
@@ -728,7 +787,7 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return prFrontier(a, owedSince, now)
 	// The marker, not the kind, for the reason [severity] gives: a bead's
 	// `human` and `parked` rows are one bead and must not describe it two ways.
-	case !isRuled && !isRuledInFlight && humanGated(a):
+	case !isRuled && !isRuledInFlight && !humanGatedInFlight && humanGated(a):
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
@@ -785,7 +844,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool,
+func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
 	machine, approval string, ask *Blocker, prIsOwed bool, stallReason string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
@@ -818,6 +877,14 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	}
 	if takeaway != "" {
 		return takeaway
+	}
+	// A human-gated row the city is actively working answers with its live state,
+	// not the un-ruled "routed to you — no question recorded" or "operator
+	// decision" below: an agent is on it, so the row wants nothing from the
+	// operator. The twin of the takeaway winning for [ruledInFlight]; this one
+	// carries no takeaway, so it names the state directly.
+	if humanGatedInFlight {
+		return "in flight"
 	}
 	// Below here the takeaway is empty, so isRuled is false by construction and
 	// the decision/human branches need no guard of their own.
@@ -857,7 +924,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, prPosture, ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -872,7 +939,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, prPosture, ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -918,6 +985,12 @@ const (
 	MachineProgressing     = "progressing"
 	MachineSettled         = "settled"
 	MachineWedgedException = "wedged-exception"
+	// MachineBlocked is a hold no review verdict clears: an unresolved required
+	// review thread, a base gone BEHIND, or an unrouted blocker no automated
+	// actor will reap. It is owed by the operator and distinct from settled, so
+	// an approved PR held this way surfaces as needs-attention rather than
+	// awaiting-review. The specific cause rides mdPRMachineReason.
+	MachineBlocked = "blocked"
 
 	// AxisUnknown is a RENDERED value on both axes, never a fallback to the
 	// quiet end. An unreadable axis and a clear one are not interchangeable,
@@ -938,17 +1011,20 @@ const (
 
 // The anchor metadata the axes are read from.
 const (
-	mdMergeResult  = "merge_result"
-	mdCheckSet     = "check_set"
-	mdPRMachine    = "pr.machine"
-	mdPRPosture    = "pr_posture"
-	mdPRNumber     = "pr_number"
-	mdPRURL        = "pr_url"
-	mdBranch       = "branch"
-	mdMergeHold    = "merge_hold"
-	mdSignoffCap   = "signoff_cap"
-	mdRebaseHold   = "rebase_hold"
-	mdPRMergeState = "pr_merge_state"
+	mdMergeResult = "merge_result"
+	mdCheckSet    = "check_set"
+	mdPRMachine   = "pr.machine"
+	// mdPRMachineReason names why a `blocked` machine verdict cannot merge. It is
+	// plain, not dated, and read only while pr.machine is MachineBlocked.
+	mdPRMachineReason = "pr.machine_reason"
+	mdPRPosture       = "pr_posture"
+	mdPRNumber        = "pr_number"
+	mdPRURL           = "pr_url"
+	mdBranch          = "branch"
+	mdMergeHold       = "merge_hold"
+	mdSignoffCap      = "signoff_cap"
+	mdRebaseHold      = "rebase_hold"
+	mdPRMergeState    = "pr_merge_state"
 
 	// The posture vocabulary pr-facts.sh records, mirroring
 	// lifecycle/lifecycle.toml [posture].postures.
@@ -985,8 +1061,12 @@ func isWedge(v string) bool {
 	return v == MachineWedgedException
 }
 
+func isBlocked(v string) bool {
+	return v == MachineBlocked
+}
+
 func knownMachine(v string) bool {
-	return v == MachineProgressing || v == MachineSettled || isWedge(v)
+	return v == MachineProgressing || v == MachineSettled || isWedge(v) || isBlocked(v)
 }
 
 // poolRouted reports whether an open blocker has an automated actor behind it.
@@ -1116,9 +1196,11 @@ func askingDemand(blockers []Blocker) *Blocker {
 
 // prOwed applies the owed rule to a merge anchor, and dates it.
 //
-// A row is owed by the operator when the machine axis is wedged, when the city
-// is asking and waiting on an answer, or when the cadence is done and GitHub is
-// holding the merge for a human review — one never given, or a standing
+// A row is owed by the operator when the machine axis is wedged, when it is
+// blocked (a hold no automated actor will clear — an unresolved required review
+// thread, a base gone BEHIND, or an unrouted blocker), when the city is asking
+// and waiting on an answer, or when the cadence is done and GitHub is holding
+// the merge for a human review — one never given, or a standing
 // `changes_requested` the city has reworked as far as it can. GitHub keeps a
 // CHANGES_REQUESTED standing across pushes and the city never dismisses it, so
 // once no fix unit, review, or finding is in flight — the settled tail merge.sh
@@ -1149,10 +1231,11 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 	}
 	owed := false
 
-	if isWedge(machine) {
+	if isWedge(machine) || isBlocked(machine) {
 		owed = true
-		// A head move is what releases a wedge, so the instant rides the
-		// head-pinned key that records it.
+		// A head move — or, for a blocked verdict, the block clearing — is what
+		// releases it, and merge.sh records the new verdict then, so the instant
+		// rides the head-pinned key that records it.
 		if _, _, at, ok := splitDated(a.Metadata[mdPRMachine]); ok {
 			note(at)
 		}
@@ -1326,7 +1409,7 @@ func humanSince(t, now time.Time) string {
 // or the re-review a standing changes_requested is waiting on — and a row
 // nothing is owed on says who has it. `unknown` says the cadence has not
 // recorded a position, which is a fact about the city rather than an all-clear.
-func prNeeds(machine, approval, posture string, ask *Blocker) string {
+func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
 	switch {
 	case machine == MachineWedgedException:
 		return "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not"
@@ -1335,6 +1418,13 @@ func prNeeds(machine, approval, posture string, ask *Blocker) string {
 			return "asking: " + t
 		}
 		return "asking — waiting on an answer"
+	case isBlocked(machine):
+		// The specific cause merge.sh recorded beside the verdict; a person must
+		// clear it, and it is not the review a settled row waits on.
+		if r := collapseWS(reason); r != "" {
+			return "blocked: " + r
+		}
+		return "blocked — a person must clear it before the merge can proceed"
 	case machine == MachineSettled && approval == ApprovalRequired:
 		if posture == postureChangesRequested {
 			return "changes requested — reviewer re-review needed"
@@ -1602,6 +1692,18 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	// molecule that has since drained stops counting at once.
 	parkedInFlight := a.Source == "parked" &&
 		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
+	// A human-gated row — a decision, or a bead routed to the operator — that the
+	// city is actively working reads as in-flight, not an operator gate: a live
+	// molecule over the bead itself falsifies "no agent will take this until a
+	// human moves it", because an agent has. Read through the shared prstatus core
+	// off the same [Facts.wfLive] join parkedInFlight uses, so the lift holds only
+	// while execution is live and the gate stands back up the instant the molecule
+	// drains. Un-ruled by construction — a row that carries a takeaway is already
+	// lifted by [ruledInFlight] — and keyed on the anchor's OWN work; a human-gated
+	// PARENT whose CHILDREN are in flight is banded by its roll-up, and rolling a
+	// child's state up to its parent is aggregation (tk-ikpyzn.6), not this slice.
+	humanGatedInFlight := humanGated(a) && !isRuled && !isRuledInFlight &&
+		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
@@ -1629,7 +1731,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		}
 	}
 
-	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalled)
+	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
 	// Tile.Takeaway is where a row's ruling rides the wire (board.go: "the ruling
@@ -1664,7 +1766,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		// would hoist it above every live demand — the exact opposite of the
 		// terminal band [rankScore] floors it into. It gates every cause,
 		// the merge anchor's included.
-		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight) || dispDue || prIsOwed),
+		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight && !humanGatedInFlight) || dispDue || prIsOwed),
 
 		Weight: w,
 		Held:   held,
@@ -1714,8 +1816,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed, stalledReason),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stalledReason),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -1775,7 +1877,7 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// attention item is one row. This runs on the deduped set — after the twin
 	// reconcile, before the owed partition — because a wrapper folds only onto a
 	// subject that has a row, and both facts are settled by here.
-	folded := foldWrappers(deduped, anchors)
+	folded := foldWrappers(deduped, anchors, facts)
 
 	// Stamp each row's dependency family — the group it renders under. This runs
 	// on the folded set, so a dropped wrapper is neither a family root nor a
@@ -1793,10 +1895,16 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// wrapper neither sources a rig's repository nor waits for one.
 	linkPRBranches(folded)
 
-	// Stamp who must act next, the same taxonomy pr-status-label.sh projects to
-	// the GitHub status: label, reading the anchors' holds and posture and the
-	// open rework children they carry.
-	classifyPRPhases(folded, anchors)
+	// Stamp who must act next — PRPhase on a merge anchor, Phase on every live
+	// row — from the shared prstatus core, the same taxonomy pr-status-label.sh
+	// projects to the GitHub status: label; then let the frontier lead with that
+	// state so the board's primary vocabulary is the liveness.
+	classifyPhases(folded, anchors, facts)
+
+	// Split Held into parked vs engaged on each held row, from the same sittings
+	// the fold read. After the fold so it sees the final Held, beside
+	// classifyPhases because both stamp a per-row derived state the renderers read.
+	classifyVisits(folded, facts)
 
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 
@@ -1866,12 +1974,20 @@ const (
 	PhaseNeedsAttention = string(prstatus.NeedsAttention)
 )
 
-// classifyPRPhases stamps each merge anchor's phase — who must act on it next.
-// It reads the holds and posture off the anchor and counts the open rework
-// children the board already gathers (a child names its anchor in
-// [mdAnchorBead]), so a non-merge row leaves the field empty. Counting is deduped
-// by child id, because one gather can list a bead twice.
-func classifyPRPhases(tiles []Tile, anchors []Anchor) {
+// classifyPhases stamps a row's tri-state — who must act on it next — from the
+// shared prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
+// round-trip axis, empty elsewhere), and Phase on every live row (the per-bead
+// liveness, empty only on a closed row). Both read the holds and posture off the
+// anchor and count the open rework children the board already gathers (a child
+// names its anchor in [mdAnchorBead]); a non-merge bead's Phase reads its own
+// live-workflow signal from facts instead. Counting is deduped by child id,
+// because one gather can list a bead twice.
+//
+// The frontier then SPEAKS that tri-state: on a live row the liveness word leads
+// the one-line summary, so the board's primary vocabulary is the state rather
+// than the roll-up. A closed row keeps its age phrase — the tri-state has no live
+// answer for it, so beadPhase left it empty and the prefix is skipped.
+func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	reworkKids := make(map[string]int)
 	seenKid := make(map[string]bool)
@@ -1891,7 +2007,30 @@ func classifyPRPhases(tiles []Tile, anchors []Anchor) {
 		if !ok {
 			continue
 		}
-		tiles[i].PRPhase = prPhase(a, reworkKids[tiles[i].ID])
+		kids := reworkKids[tiles[i].ID]
+		prP := prPhase(a, kids)
+		phase := beadPhase(a, f, kids)
+		// prstatus.Derive names the phase from posture, merge-state, holds and an
+		// in-flight count. A blocked machine verdict is a hold it cannot see from
+		// those alone — an unrouted blocker carries no count it reads, and a base
+		// gone BEHIND is not its BLOCKED case — so the board lifts a blocked row to
+		// needs-attention off the machine axis it already reads. The lift touches
+		// both tri-states a live merge anchor carries — the PR-axis PRPhase behind
+		// the chip and the per-bead Phase the frontier speaks — so a row the machine
+		// calls blocked cannot read needs-attention on one and awaiting-review on the
+		// other. A closed row has no live Phase to lift, so its frontier keeps its
+		// age phrase.
+		if isBlocked(tiles[i].PRMachine) {
+			prP = PhaseNeedsAttention
+			if phase != "" {
+				phase = PhaseNeedsAttention
+			}
+		}
+		tiles[i].PRPhase = prP
+		tiles[i].Phase = phase
+		if phase != "" {
+			tiles[i].Frontier = phase + " · " + tiles[i].Frontier
+		}
 	}
 }
 
@@ -1900,25 +2039,45 @@ func classifyPRPhases(tiles []Tile, anchors []Anchor) {
 // through `gctk pr-status derive` to write the GitHub PR list's status: label.
 // The board and the label derive the state from one code path, so a bead's board
 // liveness and its PR label cannot disagree. Empty on a non-merge row.
-//
-// The facts are read straight off the anchor: prstatus splits the dated
-// posture/merge-state on '@' and applies the hold truthiness itself, so the raw
-// metadata values pass through as stored. openReworkKids is the board's count of
-// the anchor's open review/rework children (each names it in anchor_bead); the
-// label counts the anchor's whole in-flight set, and closing that input gap is a
-// separate story.
 func prPhase(a Anchor, openReworkKids int) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	return string(prstatus.Derive(prstatus.Facts{
+	return string(prstatus.Derive(phaseFacts(a, Facts{}, openReworkKids)))
+}
+
+// beadPhase is the per-bead liveness for every LIVE row — the generalization of
+// prPhase, applied to any bead through the same prstatus core so a merge anchor
+// and a plain bead name their state from one rule. A closed row is terminal and
+// carries no live tri-state, so it reads empty, the way prPhase reads empty off a
+// non-merge row.
+func beadPhase(a Anchor, f Facts, openReworkKids int) string {
+	if !a.ClosedAt.IsZero() {
+		return ""
+	}
+	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
+}
+
+// phaseFacts gathers the prstatus.Facts a row projects. The holds and the dated
+// posture/merge-state are read straight off the anchor — prstatus splits the '@'
+// and applies the hold truthiness itself, so the stored values pass through as
+// they are. The in-flight count is the one input that differs by row shape: a
+// merge anchor counts its open review/rework children (each names it in
+// [mdAnchorBead]), the set prPhase has always fed; any other bead reads the
+// live-workflow signal standing over its own bead ([Facts.anchorInFlight]).
+func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
+	inFlight := openReworkKids
+	if !isMergeAnchor(a) {
+		inFlight = f.anchorInFlight(a)
+	}
+	return prstatus.Facts{
 		MergeHold:     a.Metadata[mdMergeHold],
 		SignoffCap:    a.Metadata[mdSignoffCap],
 		RebaseHold:    a.Metadata[mdRebaseHold],
 		PRPosture:     a.Metadata[mdPRPosture],
 		PRMergeState:  a.Metadata[mdPRMergeState],
-		InFlightCount: openReworkKids,
-	}))
+		InFlightCount: inFlight,
+	}
 }
 
 // clusterThreshold is how many rows must share one section-and-needs before the
@@ -1944,7 +2103,7 @@ const clusterThreshold = 3
 // because dropping it would erase the only trace of the attention; its needs is
 // rewritten from its own title so the kept row states the ask instead of the
 // empty "routed to you — no question recorded".
-func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
+func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	for _, a := range anchors {
 		if _, ok := anchorByID[a.ID]; !ok {
@@ -1998,7 +2157,15 @@ func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 		}
 	}
 	for subj, folded := range asks {
-		applyFold(&tiles[idx[subj]], folded)
+		j := idx[subj]
+		// Liveness outranks a demand's static ask: a subject the city is actively
+		// working — a live molecule over the bead itself, or a live child under it —
+		// is not the operator's move, so a folded demand does not mark it owed
+		// (tk-ikpyzn.5). A live child is the roll-up's own signal, not child-to-parent
+		// aggregation (tk-ikpyzn.6): the demand asks whether an agent is on the
+		// SUBJECT, which its worked children answer.
+		subjectInFlight := f.anchorInFlight(anchorByID[subj]) > 0 || tiles[j].InProgressLive > 0
+		applyFold(&tiles[j], folded, subjectInFlight)
 	}
 	if len(drop) == 0 {
 		return tiles
@@ -2087,18 +2254,37 @@ type foldedAsk struct {
 // such as a merge anchor's PR clock, is kept rather than moved forward. A merge
 // anchor also keeps its own PR needs: the pull-request position is the more
 // specific ask and the wrapper only adds that a person is on it.
-func applyFold(t *Tile, folded []foldedAsk) {
-	t.Owed = true
+func applyFold(t *Tile, folded []foldedAsk, subjectInFlight bool) {
+	hasVisit, hasDemand := false, false
 	asks := make([]string, 0, len(folded))
 	for _, f := range folded {
 		asks = append(asks, f.ask)
-		if f.kind == wrapperVisit {
+		switch f.kind {
+		case wrapperVisit:
 			t.Held = true
+			hasVisit = true
+		case wrapperDemand:
+			hasDemand = true
 		}
 		if !f.owedSince.IsZero() && (t.PROwedSince.IsZero() || f.owedSince.Before(t.PROwedSince)) {
 			t.PROwedSince = f.owedSince
 		}
 	}
+	// A folded VISIT is a conversation a person is holding, so the subject owes it
+	// regardless of any work in flight. A folded DEMAND is an operator ask, but
+	// liveness outranks it: a subject the city is actively working is not owed the
+	// demand until the work drains (tk-ikpyzn.5). The demand fold is re-derived
+	// every render, so its ask re-surfaces on its own the moment the molecule
+	// drains — the row is never left stranded.
+	if !hasVisit && hasDemand && subjectInFlight {
+		// Not owed: the subject keeps its own in-flight NEEDS and stays out of the
+		// operator's queue. The wrapper is still dropped, so the item is one row.
+		// t.Owed is left as computeTile set it — a merge anchor the PR round-trip
+		// already owed stays owed; only the demand's contribution is withheld.
+		t.Section = classifySection(*t)
+		return
+	}
+	t.Owed = true
 	if t.PRMachine == "" {
 		switch len(asks) {
 		case 0:

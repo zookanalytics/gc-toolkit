@@ -1,0 +1,25 @@
+# The check index: the checks this repo makes available to review. Mechanical
+# facts only — each check's name, a pointer to the method that governs it, and
+# one line of purpose. When a check applies is a judgment its method states in
+# prose, which triage reads; it is not a field here.
+#
+# Read from the commit under review (git show <oid>:review-checks.toml), so a
+# branch is judged against the index it carries. assets/scripts/review-checks.sh
+# is the one parser. correctness and triage are the forced baseline; triage may
+# widen check_set to add any check declared here and may not invent one.
+
+[checks.correctness]
+method = "formulas/mol-review.toml"
+purpose = "Is the change correct and safe as merged?"
+
+[checks.triage]
+method = "skills/review-triage/SKILL.md"
+purpose = "Which specialist checks does this diff warrant?"
+
+[checks.demo]
+method = "skills/gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
+purpose = "Was the operator-watched surface recorded doing the thing?"
+
+[checks.pm]
+method = "skills/review-pm/SKILL.md"
+purpose = "Does the change solve the right user problem, and present it so the operator can judge?"

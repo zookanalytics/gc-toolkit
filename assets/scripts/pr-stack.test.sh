@@ -19,7 +19,7 @@ trap 'rm -rf "$TMP"' EXIT
 harness_init
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-stack.sh"
+mk_sut_dir "$SD" "$HERE/pr-stack.sh" "$HERE/pr-summary-region.sh"
 SUT="$SD/pr-stack.sh"
 
 # An open anchor: carries merge_result, a branch and a pr_number.
@@ -33,9 +33,9 @@ rider() { # id key value created title [status]
     "$1" "${6:-closed}" "$5" "$4" "$2" "$3"
 }
 # The PR the anchor points at.
-pr() { # num state branch [body]
-  printf '{"number":%s,"state":"%s","headRefName":"%s","title":"PR %s","body":%s}' \
-    "$1" "$2" "$3" "$1" "$(jq -Rs . <<<"${4-}")" > "$GH_DIR/pr_view_$1.json"
+pr() { # num state branch [body] [head-oid]
+  printf '{"number":%s,"state":"%s","headRefName":"%s","headRefOid":"%s","title":"PR %s","body":%s}' \
+    "$1" "$2" "$3" "${5:-feedface00000000}" "$1" "$(jq -Rs . <<<"${4-}")" > "$GH_DIR/pr_view_$1.json"
 }
 body() { jq -r '.body' "$GH_DIR/pr_view_$1.json"; }
 title() { jq -r '.title' "$GH_DIR/pr_view_$1.json"; }
@@ -298,6 +298,132 @@ out=$("$SUT" 2>&1)
 has "$out" "names 2 beads" "the anchor and the real stacker are named"
 has "$(body 140)" '- `R1` — Lane-B migration impl' "the real stacker is listed"
 hasnt "$(body 140)" 'duplicate rework no-op' "the no-op duplicate is never named"
+
+# An anchor carrying a pr_summary and a check_set, for the gc:pr-summary region.
+anchor_sum() { # id branch num check_set pr_summary [desc]
+  printf '{"id":"%s","status":"open","title":"anchor %s","description":"%s","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pull_request","branch":"%s","pr_number":"%s","merged_target":"main","check_set":"%s","pr_summary":"%s"}}' \
+    "$1" "$1" "${6:-}" "$2" "$3" "$4" "$5"
+}
+# A published gc:pr-summary region carrying <summary> and the open-mode pre-open
+# sign-off line at <oldhead>, as pr-open.sh composed it at open.
+opened_region() { # id branch checkset summary oldhead
+  printf '%s\n' \
+    '<!-- gc:pr-summary -->' '## Summary' '' "$4" '' \
+    '## Refinery handoff' '' "- Issue: \`$1\`" "- Source branch: \`$2\`" '- Target: `main`' \
+    "- Gates \`$3\` signed off pre-open at \`$5\`; PR opened green." \
+    '<!-- /gc:pr-summary -->'
+}
+
+echo "# a rework restamped the anchor summary; the open PR's gc:pr-summary region is refreshed"
+# pr-open composes the region only at pre_open_gate and the anchor never returns
+# there once the PR is open, so this arm is the only thing that republishes the
+# reworked summary into the open PR — the merge surface and the squash message.
+store "[$(anchor_sum W polecat/W 200 'correctness,codex' 'NEW: regrounded the PM method to peer-not-order-taker.')]"
+STALE_W=$(printf '%s\n%s\n%s\n%s' \
+  "$(opened_region W polecat/W 'correctness,codex' 'OLD: the three-question PM lens.' '0e0f1cbd')" \
+  '' 'Operator note: keep this line.' \
+  "$(printf '%s\n' '<!-- gc:branch-beads -->' '## Beads on this branch' '- `W`' '<!-- /gc:branch-beads -->')")
+pr 200 OPEN polecat/W "$STALE_W" 6b321cdf00000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+eq "$rc" 0 "the pass completes"
+has "$out" "PR#200 summary region refreshed" "the refresh is reported"
+b=$(body 200)
+has "$b" 'NEW: regrounded the PM method to peer-not-order-taker.' "the reworked summary reached the published body"
+hasnt "$b" 'OLD: the three-question PM lens.' "…and the stale summary is gone"
+hasnt "$b" 'signed off pre-open' "the false pre-open sign-off claim at the reworked head is gone"
+has "$b" '- Head `6b321cdf`; gates `correctness,codex`; see the PR checks for current status.' \
+    "the handoff bullet names the current head and defers to the PR checks"
+has "$b" 'Operator note: keep this line.' "operator text outside the markers is preserved"
+has "$b" '## Beads on this branch' "pr-stack's own branch-beads section is preserved"
+eq "$(grep -c 'pr edit 200' "$STUB_GH_LOG")" "1" "exactly one body edit"
+
+echo "# the refresh is idempotent: a second pass over the now-current region writes nothing"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
+hasnt "$out" "summary region refreshed" "…and reports no refresh"
+
+echo "# a PR whose region already carries the anchor summary is not churned"
+# The region matches the anchor pr_summary, so an opened-green PR keeps its
+# 'signed off pre-open' line rather than being rewritten to the refresh wording.
+store "[$(anchor_sum X polecat/X 210 'correctness' 'CURRENT: the summary the region already carries.')]"
+CURR_X=$(opened_region X polecat/X 'correctness' 'CURRENT: the summary the region already carries.' 'abcdef12')
+pr 210 OPEN polecat/X "$CURR_X" abcdef12000000
+before_x=$(body 210)
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the current region is left alone"
+has "$(body 210)" 'signed off pre-open' "…and its opened-green handoff line is not churned"
+eq "$(body 210)" "$before_x" "the body is byte-identical"
+
+echo "# a rework moved the head but left the summary unchanged; the stale handoff line is refreshed"
+# The region's summary already matches the anchor, so the text comparison alone
+# reads current — but its handoff bullet still names the pre-rework head with the
+# pre-open sign-off claim. A head-only rework must still refresh, so the bullet
+# names the current head and drops the false 'signed off pre-open' claim.
+store "[$(anchor_sum H polecat/H 260 'correctness' 'STABLE: the summary a head-only rework did not touch.')]"
+STALE_H=$(opened_region H polecat/H 'correctness' 'STABLE: the summary a head-only rework did not touch.' '11112222')
+pr 260 OPEN polecat/H "$STALE_H" 3333444400000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#260 summary region refreshed" "a head-only rework refreshes the region"
+b=$(body 260)
+hasnt "$b" 'signed off pre-open' "the false pre-open sign-off claim at the old head is gone"
+has "$b" '- Head `33334444`; gates `correctness`; see the PR checks for current status.' \
+    "the handoff bullet names the current head"
+has "$b" 'STABLE: the summary a head-only rework did not touch.' "the unchanged summary is preserved"
+
+echo "# that head-only refresh is idempotent: a second pass over the now-current region writes nothing"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
+hasnt "$out" "summary region refreshed" "…and reports no refresh"
+
+echo "# a reworked summary and a newly stacked bead land in one edit"
+store "[$(anchor_sum Y polecat/Y 220 'correctness' 'NEW: the reworked Y summary.'),
+        $(printf '{"id":"Y2","status":"closed","title":"Stacked impl","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Y2","merged_target":"polecat/Y","merge_result":"merged"}}')]"
+STALE_Y=$(opened_region Y polecat/Y 'correctness' 'OLD: the pre-rework Y summary.' 'aaaa1111')
+pr 220 OPEN polecat/Y "$STALE_Y" bbbb222200000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#220 summary region refreshed" "the summary is refreshed"
+has "$out" "PR#220 body now names 2 beads" "the branch-beads section is rendered in the same pass"
+eq "$(grep -c 'pr edit 220' "$STUB_GH_LOG")" "1" "both regions land in exactly one edit"
+b=$(body 220)
+has "$b" 'NEW: the reworked Y summary.' "the new summary is published"
+has "$b" '- `Y2` — Stacked impl' "the stacked bead is named"
+
+echo "# a legacy markerless body is left for pr-open's adoption path, not reshaped here"
+# No gc:pr-summary markers: establishing the region over a legacy prefix is the
+# adoption path's job (pr-open.sh), so this arm leaves it rather than rewriting a
+# body it did not compose.
+store "[$(anchor_sum Z polecat/Z 230 'correctness' 'NEW: a summary with nowhere marked to go.')]"
+LEGACY_Z=$(printf '%s\n' '## Summary' '' 'OLD legacy summary.' '' '## Refinery handoff' '' '- Issue: `Z`')
+pr 230 OPEN polecat/Z "$LEGACY_Z" cccc333300000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the markerless body is not rewritten"
+eq "$(body 230)" "$LEGACY_Z" "…and is left byte-identical"
+
+echo "# a pre_open_gate anchor's summary is arm 6's to refresh on adoption, not this arm's"
+store "[$(printf '{"id":"PG","status":"open","title":"anchor PG","description":"","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pre_open_gate","branch":"polecat/PG","pr_number":"250","merged_target":"main","check_set":"correctness","pr_summary":"NEW: a summary arm 6 will publish on adoption."}}')]"
+STALE_PG=$(opened_region PG polecat/PG 'correctness' 'OLD PG summary.' 'ffff6666')
+pr 250 OPEN polecat/PG "$STALE_PG" 9999888800000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the pre_open_gate anchor's summary is left for arm 6"
+eq "$(body 250)" "$STALE_PG" "…and the body is byte-identical"
+
+echo "# a refresh whose edit fails is reported and retried, the body untouched"
+store "[$(anchor_sum V polecat/V 240 'correctness' 'NEW: a summary whose edit never lands.')]"
+STALE_V=$(opened_region V polecat/V 'correctness' 'OLD V summary.' 'dddd4444')
+pr 240 OPEN polecat/V "$STALE_V" eeee555500000000
+before_v=$(body 240)
+out=$(STUB_PR_EDIT_RC=1 "$SUT" 2>&1)
+has "$out" "PR#240 body edit failed" "the failed edit is reported"
+hasnt "$out" "summary region refreshed" "…and no refresh is counted"
+eq "$(body 240)" "$before_v" "the body never changed"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

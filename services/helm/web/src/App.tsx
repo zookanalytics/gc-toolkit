@@ -24,11 +24,26 @@ const REFRESH_MS = 30_000;
 // family is the derive layer's SectionOrder, mirrored here.
 const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done'] as const;
 
+// The one Tile.visit_state value the marker branches on (board.VisitEngaged).
+// A held row carries 'engaged' or 'parked'; anything that is not 'engaged' —
+// 'parked', or the '' a re-derivation slip could leave — reads as parked, the
+// state that invites the operator to look rather than telling them it is handled.
+const VISIT_ENGAGED = 'engaged';
+
 // A sitting is finished when its visit bead closed; anything else is a
 // conversation someone is still in. Reading the status rather than the presence
 // of closed_at keeps a sitting whose stamp could not be read on the running
 // side, which is the side that shows a row rather than hides one.
 const isRunning = (s: Sitting): boolean => s.status !== 'closed';
+
+// What a sitting CONCLUDED, or failing that what it is ABOUT: the takeaway wins,
+// then the outcome reason (why a decision-close closed), then the subject's title
+// (the topic), and the visit bead's own title only as a last resort. Mirrors the
+// board service's Sitting.Headline so the sittings table and the per-row visit
+// hover read one rule.
+function sittingHeadline(s: Sitting): string {
+  return s.takeaway || s.outcome_reason || s.subject_title || s.title;
+}
 
 // How long ago a stamp was, in the coarsest unit that still says something. An
 // absent stamp is unknown, never "just now": the sitting whose timestamp the
@@ -236,7 +251,9 @@ function DrillOpen({
 type Family = { root: Tile; members: Tile[] };
 
 // wantsPerson reports whether a row's next move is the operator's — the review
-// and gate bands. Model C highlights these within a family with a ● glyph.
+// and gate bands. The table marks these in place, with a ● in the band cell and
+// a row highlight where the row already sits; it never reorders the board by
+// them.
 function wantsPerson(tile: Tile): boolean {
   return tile.section === 'review' || tile.section === 'gate';
 }
@@ -287,127 +304,276 @@ function progressCell(tile: Tile): string {
   return `${tile.n_closed}/${tile.m_total}`;
 }
 
-// One dependency family, rendered as a block: a header naming its root — with a
-// ● when the root's own next move is the operator's — and a table of its members
-// beneath, each in the band that says the move it wants, a ● marking the rows
-// that want a person. Dependency structure is the top-level axis; the attention
-// band orders and highlights within a family.
-function FamilyBlock({
-  family,
-  drillTarget,
+// The whole board is ONE table. Dependency structure is its top-level axis: a
+// family whose root has members renders that root as a group row with its
+// members indented one level beneath it; a single-item family renders as one
+// plain row. `kind` carries which of the three a row is.
+type RowKind = 'group' | 'member' | 'loose';
+type BoardRow = { tile: Tile; kind: RowKind };
+
+// flattenFamilies lays the grouped families out as the table's rows: a root with
+// members leads its family as a `group` row and its members follow as `member`
+// rows; a root with none stands alone as a `loose` row. The order is preserved
+// from groupByFamily, which preserved it from the wire — owed families first,
+// oldest first, members in SECTION_ORDER — so the board is never reordered by
+// which rows want a person.
+function flattenFamilies(families: Family[]): BoardRow[] {
+  const rows: BoardRow[] = [];
+  for (const { root, members } of families) {
+    if (members.length > 0) {
+      rows.push({ tile: root, kind: 'group' });
+      for (const m of members) rows.push({ tile: m, kind: 'member' });
+    } else {
+      rows.push({ tile: root, kind: 'loose' });
+    }
+  }
+  return rows;
+}
+
+// The visit marker: a visible, self-evident chip on a row an open visit holds. It
+// says at a glance which of the two states the visit is in — PARKED (filed and
+// waiting for the operator) or ENGAGED (a live sitting is in it right now) — in a
+// word, a colour and an icon, read straight off tile.visit_state (derived once in
+// the Go layer, never re-derived here). The chip is a real button so it is
+// keyboard-reachable and announced as interactive; hovering or focusing it
+// reveals a details card naming the sittings on the bead — each one's headline,
+// its outcome or state, and the session to attach to. The details live in this
+// card rather than a native `title` tooltip because a native tooltip has no
+// visible affordance and stays invisible until an exact hover lands on a
+// one-character glyph. The card is non-interactive text, so it needs no click
+// to open or dismiss.
+function VisitMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
+  const engaged = tile.visit_state === VISIT_ENGAGED;
+  const word = engaged ? 'in session' : 'waiting';
+  const heading = engaged ? 'In session — being worked right now' : 'Parked — waiting for you';
+  const label = engaged
+    ? 'visit in session — a live conversation is on this row now; hover or focus for details'
+    : 'visit parked — waiting for you; hover or focus for details';
+  const cardId = `visit-card-${tile.id}`;
+  return (
+    <span className={`visit-marker visit-marker--${engaged ? 'engaged' : 'parked'}`}>
+      <button type="button" className="visit-chip" aria-label={label} aria-describedby={cardId}>
+        <span className="visit-chip__icon" aria-hidden="true">
+          {engaged ? '◉' : '○'}
+        </span>
+        <span className="visit-chip__text">visit · {word}</span>
+      </button>
+      {/* Non-interactive detail, revealed on hover or focus of the chip (CSS).
+          role=tooltip + aria-describedby hands the same text to a screen reader
+          as the button's description, so the details are reachable without a
+          pointer. */}
+      <span role="tooltip" id={cardId} className="visit-card">
+        <span className="visit-card__heading">{heading}</span>
+        {sittings.length > 0 ? (
+          sittings.map((s) => (
+            <span key={s.id} className="visit-card__sitting">
+              {sittingHeadline(s)}
+              <span className="visit-card__meta">
+                {' · '}
+                {s.outcome || (isRunning(s) ? 'running' : 'closed')}
+                {s.session ? ` · ${s.session}` : ''}
+              </span>
+            </span>
+          ))
+        ) : (
+          <span className="visit-card__meta">an open visit holds this row</span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+// The leading markers on a row. wants-person is a person's next move (review or
+// gate); it is already spelled by the band word and the row tint, so its ● stays
+// a decorative echo. A visit is the other signal, and the two co-occur — a review
+// row a conversation is holding — so they render side by side rather than
+// collapsing into one glyph: the ● first, then the visit chip that carries the
+// state and the details.
+function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
+  return (
+    <>
+      {wantsPerson(tile) && (
+        <span className="wants-person" aria-hidden="true">
+          ●{' '}
+        </span>
+      )}
+      {tile.held && <VisitMarker tile={tile} sittings={sittings} />}
+    </>
+  );
+}
+
+// One row of the unified table. Every row carries the same columns; `kind` sets
+// the grouping treatment (a group row's title reads as a header; a member's is
+// indented one level) and the attention highlight rides the row in place: a ●
+// and a tint where a row's next move is the operator's (wantsPerson), a tint on
+// a row an open visit is holding (held).
+function AnchorRow({
+  row,
+  drilled,
   onOpen,
   onActuated,
+  sittingsBySubject,
 }: {
-  family: Family;
-  drillTarget: string | null;
+  row: BoardRow;
+  drilled: boolean;
   onOpen: (id: string) => void;
   // Called after a board write lands, so the acted-on row re-gathers rather than
   // waiting out the poll interval. App passes its refresh.
   onActuated: () => void;
+  // The sittings on each bead, keyed by subject id, for the per-row visit hover.
+  sittingsBySubject: Map<string, Sitting[]>;
 }) {
-  const { root, members } = family;
-  const headingId = `family-${root.id}`;
+  const { tile, kind } = row;
+  const person = wantsPerson(tile);
+  const className =
+    [
+      `row-${kind}`,
+      person ? 'row-wants-person' : '',
+      tile.held ? 'row-held' : '',
+      tile.section === 'done' ? 'row-done' : '',
+      drilled ? 'drilled' : '',
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined;
   return (
-    <section className="board-family" aria-labelledby={headingId}>
-      <h2 id={headingId}>
-        {wantsPerson(root) && <span aria-hidden="true">● </span>}
-        <DrillOpen id={root.id} onOpen={onOpen} />
-      </h2>
-      <p className="sub">
-        <span className="family-title">{root.title}</span> · {root.kind} · {root.section} ·{' '}
-        {progressCell(root)} · {root.frontier}
-        {isPRRow(root) && (
-          <>
-            {' · '}
-            <PRLink tile={root} />
-          </>
-        )}
-        {root.needs && <> · {root.needs}</>}
+    <tr className={className}>
+      <td>
+        <RowMarker tile={tile} sittings={sittingsBySubject.get(tile.id) ?? []} />
+        <span className="band">{tile.section}</span>
+      </td>
+      <td>
+        <DrillOpen id={tile.id} onOpen={onOpen} />
+      </td>
+      <td>{tile.rig}</td>
+      <td>{tile.kind}</td>
+      <td>
+        <PRPhaseChip tile={tile} />
+        <PRLink tile={tile} />
+      </td>
+      <td className="title-cell">
+        {kind === 'group' ? <span className="family-title">{tile.title}</span> : tile.title}
+      </td>
+      <td>{progressCell(tile)}</td>
+      <td>{tile.frontier}</td>
+      <td>
+        {tile.needs}
         {/* Accept is the one board-row actuation, mirroring the CLI board's
             "accept ▸" marker (cmd/helm-svc/board.go). It shows only when the wire
             says the row is acceptable — a recommendation whose visit is un-engaged
             — and dispatches accept_formula at the subject then dismisses the visit.
             Discuss and Dismiss live in the drill panel, the way the CLI keeps them
             as separate verbs off the marked row. */}
-        {root.acceptable && (
+        {tile.acceptable && (
           <>
-            {' · '}
+            {' '}
             <ActuateButton
               verb="accept"
-              beadId={root.id}
-              formula={root.accept_formula}
+              beadId={tile.id}
+              formula={tile.accept_formula}
               compact
               onDone={onActuated}
             />
           </>
         )}
-        {root.section === 'done' && (
-          <>
-            . A closed family sits below every live one; a row leaves only by ageing out on a
-            clock, once it has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d,{' '}
-            <code>0</code> off).
-          </>
-        )}
-      </p>
-      {members.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>band</th>
-              <th>id</th>
-              <th>rig</th>
-              <th>kind</th>
-              <th>pr</th>
-              <th>title</th>
-              <th>progress</th>
-              <th>frontier</th>
-              <th>needs</th>
-              <th>owed since</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => (
-              <tr key={m.id} className={m.id === drillTarget ? 'drilled' : undefined}>
-                <td>
-                  {wantsPerson(m) && (
-                    <span className="wants-person" aria-hidden="true">
-                      ●{' '}
-                    </span>
-                  )}
-                  <span className="band">{m.section}</span>
-                </td>
-                <td>
-                  <DrillOpen id={m.id} onOpen={onOpen} />
-                </td>
-                <td>{m.rig}</td>
-                <td>{m.kind}</td>
-                <td>
-                  <PRPhaseChip tile={m} />
-                  <PRLink tile={m} />
-                </td>
-                <td>{m.title}</td>
-                <td>{progressCell(m)}</td>
-                <td>{m.frontier}</td>
-                <td>
-                  {m.needs}
-                  {m.acceptable && (
-                    <>
-                      {' '}
-                      <ActuateButton
-                        verb="accept"
-                        beadId={m.id}
-                        formula={m.accept_formula}
-                        compact
-                        onDone={onActuated}
-                      />
-                    </>
-                  )}
-                </td>
-                <td>{m.section === 'done' ? '' : owedSince(m)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      </td>
+      <td>{tile.section === 'done' ? '' : owedSince(tile)}</td>
+    </tr>
+  );
+}
+
+// A compact, always-visible key for the row markers and the state tints, so the
+// glyphs and colours the table spends are legible without hunting for what they
+// mean. It states what each mark MEANS and reuses the classes the rows use, so a
+// sample cannot drift from the thing it explains.
+function Legend() {
+  return (
+    <p className="legend" aria-label="key to the row markers and tints">
+      <span className="legend__title">key</span>
+      <span className="legend__item">
+        <span className="wants-person" aria-hidden="true">
+          ●
+        </span>{' '}
+        needs you
+      </span>
+      <span className="legend__item">
+        <span className="visit-marker--parked" aria-hidden="true">
+          ○
+        </span>{' '}
+        visit waiting for you
+      </span>
+      <span className="legend__item">
+        <span className="visit-marker--engaged" aria-hidden="true">
+          ◉
+        </span>{' '}
+        visit in session
+      </span>
+      <span className="legend__item">
+        <span className="legend__swatch legend__swatch--wants" aria-hidden="true" /> row needs you
+      </span>
+      <span className="legend__item">
+        <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a visit holds it
+      </span>
+      <span className="legend__item legend__item--done">closed rows dimmed</span>
+    </p>
+  );
+}
+
+// The board as one table. A closed row keeps its place below the live ones and
+// leaves only by ageing out on the window clock, so the note under the table
+// states that bound once for every DONE row rather than repeating it per family.
+function AnchorsTable({
+  rows,
+  drillTarget,
+  onOpen,
+  onActuated,
+  sittingsBySubject,
+}: {
+  rows: BoardRow[];
+  drillTarget: string | null;
+  onOpen: (id: string) => void;
+  onActuated: () => void;
+  sittingsBySubject: Map<string, Sitting[]>;
+}) {
+  if (rows.length === 0) return null;
+  const hasDone = rows.some((r) => r.tile.section === 'done');
+  return (
+    <section className="anchors" aria-labelledby="anchors-heading">
+      <h2 id="anchors-heading">anchors</h2>
+      <Legend />
+      <table>
+        <thead>
+          <tr>
+            <th>band</th>
+            <th>id</th>
+            <th>rig</th>
+            <th>kind</th>
+            <th>pr</th>
+            <th>title</th>
+            <th>progress</th>
+            <th>frontier</th>
+            <th>needs</th>
+            <th>owed since</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <AnchorRow
+              key={row.tile.id}
+              row={row}
+              drilled={row.tile.id === drillTarget}
+              onOpen={onOpen}
+              onActuated={onActuated}
+              sittingsBySubject={sittingsBySubject}
+            />
+          ))}
+        </tbody>
+      </table>
+      {hasDone && (
+        <p className="sub anchors-note">
+          A closed row keeps its place below the live ones and leaves only by ageing out, once it
+          has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d, <code>0</code>{' '}
+          off).
+        </p>
       )}
     </section>
   );
@@ -470,7 +636,7 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                     dedup close shows its outcome reason (why it closed), then
                     the subject's title (the topic) rather than the visit bead's
                     own generic title, which says nothing. */}
-                <td>{s.takeaway || s.outcome_reason || s.subject_title || s.title}</td>
+                <td>{sittingHeadline(s)}</td>
               </tr>
             );
           })}
@@ -560,6 +726,23 @@ export function App() {
   // oldest first) is preserved, so the oldest-owed family leads; within a family
   // the members read in SECTION_ORDER.
   const families = useMemo(() => groupByFamily(visibleTiles), [visibleTiles]);
+  // The one table's rows: each family flattened to a group row plus indented
+  // members, or a single loose row. The grouping split is groupByFamily's; this
+  // only shapes it for the table.
+  const boardRows = useMemo(() => flattenFamilies(families), [families]);
+
+  // Sittings keyed by the bead they are about, so each row shows the visit(s)
+  // holding it without re-scanning the list per row. Keyed off the full sittings
+  // list, not the rig-filtered one, so a shown row always finds its own.
+  const sittingsBySubject = useMemo(() => {
+    const bySubject = new Map<string, Sitting[]>();
+    for (const s of sittings) {
+      const list = bySubject.get(s.subject);
+      if (list) list.push(s);
+      else bySubject.set(s.subject, [s]);
+    }
+    return bySubject;
+  }, [sittings]);
 
   const owed = visibleTiles.filter((t) => t.owed);
   const coverage = prCoverage(visibleTiles);
@@ -661,15 +844,13 @@ export function App() {
         <p>{owed.length > 0 ? 'No other anchors need attention.' : 'No anchors need attention.'}</p>
       )}
 
-      {families.map((family) => (
-        <FamilyBlock
-          key={family.root.id}
-          family={family}
-          drillTarget={drillTarget}
-          onOpen={setDrillTarget}
-          onActuated={refresh}
-        />
-      ))}
+      <AnchorsTable
+        rows={boardRows}
+        drillTarget={drillTarget}
+        onOpen={setDrillTarget}
+        onActuated={refresh}
+        sittingsBySubject={sittingsBySubject}
+      />
 
       <Sittings sittings={visibleSittings} now={renderedAt} onOpen={setDrillTarget} />
 

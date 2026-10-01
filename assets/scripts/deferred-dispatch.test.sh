@@ -103,13 +103,24 @@ case "${1:-}" in
     if [ "$ready" = "1" ] && [ -n "$id" ]; then
       echo "Error: validation failed: --ready cannot filter on IDFilter (--id)" >&2; exit 1
     fi
+    # `--id` takes a comma list (the bulk blocker-status read passes many). Real
+    # `bd list --json` carries each bead's own outgoing edges under `.dependencies`
+    # in the list-edge shape ({issue_id: self, depends_on_id: blocker, type}); the
+    # SUT reads its candidates' blockers off that snapshot rather than a dep-list
+    # per bead, so the stub must render `.dependencies` from the `_deps` fixture
+    # field. A blocker's STATUS is NOT part of that edge shape — it is resolved by
+    # a separate `bd list --id <blocker>`, so the blocker must be its own bead in
+    # the store, exactly as it is live.
     jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" '
-      [ .[]
+      ($id | if . == "" then [] else split(",") end) as $ids
+      | [ .[]
         | select($k == "" or (.metadata | has($k)))
-        | select($id == "" or .id == $id)
+        | select(($ids | length) == 0 or (.id as $i | $ids | index($i)))
         | select($all == 1 or .status != "closed")
         | select($ready == 0 or (._ready == true))
-        | del(._ready) ]' "$STORE"
+        | . as $b
+        | .dependencies = [ ($b._deps // [])[] | {issue_id: $b.id, depends_on_id: .id, type: .dependency_type} ]
+        | del(._ready) | del(._deps) ]' "$STORE"
     ;;
   show)
     id="${2:-}"
@@ -346,7 +357,8 @@ eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1 --on mol-pr-from-issue" "armed a
 
 # --- RECONCILE: every arm that must NOT sling --------------------------------
 echo "# reconcile withholds"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "a blocked armed bead is not an error"
 eq "$(slings)" "0" "a blocked armed bead is NOT slung"
@@ -446,7 +458,8 @@ has "$out" "1 retired" "summary counts the retire"
 # never enters --ready though its own work is ready. reconcile asks the bead's
 # OWN blockers, not bd's claimability, and slings.
 echo "# reconcile dispatches an arm held out of bd --ready only by an ancestor cascade"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child","status":"open"},{"id":"b-0","dependency_type":"blocks","status":"closed"}]}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"},{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"closed","assignee":"","metadata":{},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "dispatching a cascade-held arm is a clean pass"
 eq "$(slings)" "1" "an arm whose own blocks edges are all closed is slung though bd --ready excludes it"
@@ -459,26 +472,60 @@ has "$out" "1 dispatched" "summary counts the dispatch, not a wait"
 # blocks edges gate the arm, so a parent-child edge closing must never be
 # mistaken for the thing the arm actually waits on.
 echo "# reconcile still withholds an arm whose OWN blocker is open"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child","status":"closed"},{"id":"b-0","dependency_type":"blocks","status":"open"}]}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"},{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an arm with an open OWN blocker is NOT slung even if its parent-child edge is closed"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the still-blocked arm keeps its record"
 has "$out" "1 waiting" "summary counts it as waiting"
 
-# Fail closed: a dep-list read that does not answer an array must leave an
-# otherwise-dispatchable arm armed, never slung on a guess.
-echo "# a cascade probe that cannot read the dep list fails closed"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks","status":"closed"}]}]'
-out="$(STUB_DEP_LIST_FAIL=b-1 "$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "0" "an unreadable dep list leaves the otherwise-dispatchable arm un-slung"
-eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record when its own blockers cannot be read"
-has "$out" "1 waiting" "an unresolved cascade probe counts as waiting, not dispatched"
+# Fail closed: a blocker whose status cannot be resolved must leave an
+# otherwise-dispatchable arm armed, never slung on a guess. The blocker bead is
+# absent from the store, so the bulk status read (bd list --id) silently drops
+# it — an unread blocker must not read as a released one.
+echo "# an unresolvable own blocker fails closed (arm stays waiting)"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"b-0-missing","dependency_type":"blocks"}]}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an unresolvable own blocker leaves the otherwise-dispatchable arm un-slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record when its own blocker cannot be resolved"
+has "$out" "1 waiting" "an unresolved blocker counts as waiting, not dispatched"
 
 # list surfaces the cascade-held state distinctly from a plain wait.
 echo "# list labels a cascade-held arm as dispatchable"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks","status":"closed"}]}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"closed","assignee":"","metadata":{},"notes":""}]'
 out="$("$SUT" list 2>&1)"
 has "$out" "DISPATCHABLE NOW (own blockers clear" "list flags the cascade-held arm as dispatchable, not waiting"
+
+# --- the N+1 fix: a full pass costs a bounded number of bd reads --------------
+# The stall this script's finding named: own_blocks_cleared ran a `bd dep list`
+# per waiting arm and the reconcile loop ran a `bd show` per candidate, so a full
+# pass scaled with the armed set and overran the reconcile order's 120s budget —
+# the pass was killed before it dispatched, and an owed arm silently starved. A
+# pass must now resolve every candidate's own blockers and read every candidate's
+# fields WITHOUT a per-bead call: blocker ids come off the snapshot's own edges,
+# one listing resolves their statuses, and each bead's fields come from the cached
+# snapshot. This proves the whole set dispatches in reads that do not scale with
+# the number of arms.
+echo "# reconcile resolves the whole candidate set without a per-bead read"
+export STUB_BD_LOG="$TMP/bd-bulk.log"
+store '[
+ {"id":"a-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"blk-1","dependency_type":"blocks"}]},
+ {"id":"a-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"blk-2","dependency_type":"blocks"}]},
+ {"id":"a-3","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"blk-3","dependency_type":"blocks"}]},
+ {"id":"a-4","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"blk-4","dependency_type":"blocks"}]},
+ {"id":"blk-1","status":"closed","assignee":"","metadata":{},"notes":""},
+ {"id":"blk-2","status":"closed","assignee":"","metadata":{},"notes":""},
+ {"id":"blk-3","status":"closed","assignee":"","metadata":{},"notes":""},
+ {"id":"blk-4","status":"closed","assignee":"","metadata":{},"notes":""}]'
+: > "$STUB_BD_LOG"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a bulk pass over four cascade-held arms is a clean pass"
+eq "$(slings)" "4" "all four arms whose own blockers are closed dispatch in one pass"
+eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead dep-list call — the N+1 is gone"
+eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead show call — fields come from the cached snapshot"
+eq "$(grep -c '^list' "$STUB_BD_LOG")" "3" "the whole set costs three list reads (all + ready + one blocker-status batch), not one per bead"
+unset STUB_BD_LOG
 
 echo "# reconcile keeps the record when the sling fails"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
@@ -569,7 +616,8 @@ has "$out" "no pending dispatches" "list says the queue is empty"
 # --- list -------------------------------------------------------------------
 echo "# list"
 store '[
- {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_reason":"needs b-0"},"notes":"","_ready":false},
+ {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_reason":"needs b-0"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""},
  {"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/other"},"notes":"","_ready":true},
  {"id":"b-3","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false},
  {"id":"b-6","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"},"notes":"","_ready":true},
@@ -588,7 +636,8 @@ hasnt "$out" "b-4" "list shows only armed beads"
 # what hides a dead arm: the gated one dispatches when its blocker closes, the
 # held one never dispatches at all.
 store '[
- {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false},
+ {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""},
  {"id":"b-5","status":"blocked","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false}]'
 out="$("$SUT" list 2>&1)"
 has "$out" "b-5 -> rig/pool [STRANDED — status=blocked is never --ready]" "list names a stranded arm"
@@ -606,7 +655,8 @@ has "$out" "status=blocked" "and the status that strands it"
 has "$out" "1 stranded" "the summary counts it apart from waiting"
 eq "$(meta b-5 gc.dispatch_when_ready)" "rig/pool" "the record is kept, not retired — the hold may clear"
 
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"
 has "$out" "1 waiting, 0 stranded" "an open gated arm counts as waiting, not stranded"
 hasnt "$out" "STRANDED" "and is not reported as stranded"

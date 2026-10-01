@@ -54,11 +54,11 @@ meaning = "no merge_result recorded; not a merge anchor (or rejected back to the
 
 [states.pre_open_gate]
 status = "open"
-meaning = "branch pushed, gates armed, no PR yet"
+meaning = "branch pushed, checks armed, no PR yet"
 
 [states.pull_request]
 status = "open"
-meaning = "PR open, awaiting gates + merge"
+meaning = "PR open, awaiting checks + merge"
 
 [states.merged]
 status = "closed"
@@ -180,13 +180,13 @@ to = "unanchored"
 writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
 
 [gates]
-# check_set: comma list of gate names on the anchor. Default stamped by
+# check_set: comma list of check names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
-check_set_default = "codex"
+check_set_default = "correctness,triage"
 check_set_sentinel = "none"
 # check.<g> = <state>, one bare lane-state word never bound to a commit. green
 # written only by signoff.sh; cleared/re-armed only by the merge cadence. Merge
-# requires every declared gate to read green. No reader parses this list back
+# requires every declared check to read green. No reader parses this list back
 # out (docs/state-machine.md is the vocabulary's normative source); it is kept
 # here as the declaration the state-space invariant (I2/I6) describes.
 marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
@@ -217,8 +217,8 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # cannot inherit the disposition of the sitting before it
 # (assets/scripts/takeaway-settled-pairing.test.sh).
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
-# One key per gate, so the declaration is a prefix. dispatch_backstop.<g> is
-# written by gate-ensure.sh only where a gate has spent its dispatch ceiling,
+# One key per check, so the declaration is a prefix. dispatch_backstop.<g> is
+# written by gate-ensure.sh only where a check has spent its dispatch ceiling,
 # and its value carries the count and the head it holds, so its presence is
 # "dispatch_count at the ceiling" as the writer itself recorded it.
 marker_prefixes = ["dispatch_backstop."]
@@ -300,13 +300,20 @@ machine_key = "pr.machine"
 # re-deriving the shape.
 #   progressing       some automated actor will act — a pool-routed blocker is
 #                     open, or a declared lane is short of green
-#   settled           every declared gate reads green; the cadence
+#   settled           every declared check reads green; the cadence
 #                     is done and the PR waits on approval, on the merge pass,
 #                     or on nothing
 #   wedged-exception  merge_hold stands with signoff_cap beside it: the cap
 #                     parked the anchor and routed it to a person, and no
 #                     automated actor will lift it
-machines = ["progressing", "settled", "wedged-exception"]
+#   blocked           the merge cannot proceed without a person, and no review
+#                     verdict is what it waits on: a required review thread is
+#                     unresolved, the base has gone BEHIND, or an unrouted
+#                     blocker no automated actor will clear holds it. Distinct
+#                     from settled — which waits on a review or the merge pass —
+#                     so the board can show it as needs-attention rather than
+#                     awaiting-review. The specific cause rides pr.machine_reason.
+machines = ["progressing", "settled", "wedged-exception", "blocked"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
 writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
@@ -509,10 +516,10 @@ keys = [
   "dispatch_count", "dispatch_backstop.<g>",
 ]
 # check_set and check.<g> carry their mechanics in [gates] above: check_set is
-# the comma list of gate names (default `codex` stamped by gate-ensure.sh when
+# the comma list of check names (default `correctness,triage` stamped by gate-ensure.sh when
 # empty, sentinel `none` the opt-out, `approval` the external-review lane), and
 # empty is never `none` — a reader holds the merge closed on it. check.<g> is
-# one lane marker per gate, the only value the pack writes into it being `green`
+# one lane marker per check, the only value the pack writes into it being `green`
 # (signoff.sh); its state is otherwise DERIVED by lane-state.sh, and it is
 # cleared with `--unset` on a request-changes verdict (signoff.sh) and on a
 # retarget (pr-facts.sh).
@@ -530,7 +537,7 @@ keys = [
 #   same shape. Absent is a legacy review closed before the stamp existed, which
 #   still backs a lane only via gc.outcome=recorded. Never cleared; set once.
 # check_name — the lane a review or backing bead speaks for, defaulting to
-#   `codex` when absent. Written on the review child by gate-ensure.sh and on a
+#   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
 #   the provenance check. Never cleared.
 # anchor_bead — the gating anchor a review, rework, finding or visit child
@@ -600,7 +607,7 @@ keys = [
   # The dedup handle: the lane's name plus a normalized locus and message,
   # carrying neither a commit oid nor a line number so it survives a rebase.
   # Re-raising an objection whose key already has an open finding on this anchor
-  # creates nothing; idempotency is by key, never by how often a gate is read.
+  # creates nothing; idempotency is by key, never by how often a check is read.
   "finding.key",
   # One of: unvalidated | must-fix | deferred | declined. A reviewer files a
   # finding unvalidated and the validator rules it. The disposition is the edge:
@@ -657,7 +664,11 @@ keys = [
 ]
 
 [metadata.pr_round_trip]
-keys = ["pr.machine"]
+# pr.machine_reason is the human sentence naming why a `blocked` machine verdict
+# cannot merge (which thread, which base, which blocker). It is plain, not dated:
+# it is read only while pr.machine is `blocked`, and merge.sh writes the two
+# together and clears the reason whenever it records any other verdict.
+keys = ["pr.machine", "pr.machine_reason"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the

@@ -1,0 +1,493 @@
+---
+name: Phase model for review checks — spike report
+description: Design proposal for modeling each review check's phase as a first-class fact, so the pre-open / draft-to-ready / merge transitions read a check's phase from the check index instead of the seven hardcoded none/off/approval drops. Decision-grade; to be ratified in an operator conversation before any implementation.
+---
+
+# Phase model for review checks — spike report
+
+This spike answers one question: what would let a stage transition (create the
+PR, mark it ready for review, merge it) decide which checks it must wait on by
+reading a declared fact about each check, rather than by re-deriving the same
+hardcoded rule in seven places? The answer is a **phase** on each check — the
+stage-transition by which the check must be green. This report proposes the
+phase model, resolves the four sub-questions the operator named, and recommends
+a concrete schema and migration. It does not implement any of it.
+
+## Recommendation
+
+1. **Give each check a `phase`** in the check index (`review-checks.toml`): the
+   transition by which it must be green. The four phases are ordered
+   `pre-open < open-as-draft < ready-for-review < merge`. This revisits the
+   tk-3h9mzz "no judgment in the index" choice, and the revisit is narrow and
+   defensible: a check's phase is a mechanical fact about what the check needs
+   as input, not the per-diff *applies-when* judgment that choice kept in prose.
+2. **A check's phase is fixed by what it consumes.** Correctness reads only the
+   diff, so it is `pre-open`; demo needs the deployed preview, so it is
+   `open-as-draft` and cannot be earlier. Every check in the index today has one
+   legal phase, so each declares a single `phase` and triage does not choose it.
+   Phase latitude — a check the operator could place at more than one transition —
+   is deferred until a check needs it, and when it arrives it rides the existing
+   `--add-gates` call (`--add-gates <check>:<phase>`), not a new capability.
+3. **Take `approval` out of `check_set` and make it a merge rule.** It is
+   already enforced separately in `merge.sh` from GitHub's own review state and
+   already takes no lane marker, so this is a relocation, not new behavior. It
+   removes `approval` from every drop list at a stroke.
+4. **Centralize the sentinel and phase logic in the one parser.** Give
+   `review-checks.sh` a resolver that takes an anchor's `check_set` and a
+   target transition and returns the checks that gate it. The seven copies of the
+   `none|off|approval` drop collapse into that one resolver, which is the only
+   thing that knows `none`/`off` are sentinels.
+5. **Introduce the draft-first flow only where an `open-as-draft` check
+   exists.** A repo whose checks are all `pre-open` (gc-toolkit today) keeps
+   opening its PR ready immediately; the draft state appears only when triage
+   adds a demo check that needs the open PR to run. This preserves current
+   behavior for every change that needs no demo.
+
+The rest of this document is the evidence and the mechanics behind these five
+decisions.
+
+## The problem
+
+The origin is operator intake tk-7h5l3m. Its core sentence: *"Checks should be
+flexible with one place saying what checks are landed, some worker knowing what
+checks they handle, and stage transitions being able to read on the bead
+whether all their checks are completed."* The foundation that landed under
+tk-3h9mzz (PR #876) built the first two: the check index is the one place that
+declares the checks, and each reviewer knows its check by `check_name`. The
+third — a stage transition reading whether *its* checks are done — is only half
+built. A transition today reads whether *every* check in `check_set` is green,
+with three names dropped by a rule each script re-implements. It has no notion
+that different checks belong to different transitions.
+
+That missing notion blocks a concrete case the operator named. A demo check
+produces the demo a change was asked to show, and it can only run against a
+deployed preview, which most providers build only for an open pull
+request. Put `demo` in `check_set` today and `pr-open.sh` refuses to open the
+PR until `demo` reads green, but `demo` cannot read green until the PR is open.
+The current model cannot express a check that must run *after* the PR exists but
+*before* the change is surfaced for human review. The phase model exists to
+express exactly that.
+
+## Current machinery (what the phase model replaces)
+
+### The check index carries no phase
+
+`review-checks.toml` (repo root) declares each check with exactly two fields,
+`method` and `purpose` (`review-checks.toml:11-21`). `assets/scripts/review-checks.sh`
+is the sole parser; its awk reads only those two keys and emits one TSV row per
+check, `name<TAB>method<TAB>purpose` (`review-checks.sh:42-57`). Any other key
+in a `[checks.*]` table is silently ignored, so a `phase` field is greenfield:
+no schema, loader, or reader consumes one today. The absence is deliberate —
+tk-3h9mzz kept *when a check applies* in the check's method prose, which triage
+reads, so the index would "stay a small data file rather than a document a
+parser must interpret" (`specs/tk-3h9mzz/review-gates-foundation.md:61-64`).
+
+### Both transitions read one list, minus three names
+
+An anchor declares its checks in `check_set`, a comma list. Three names are not
+review checks, and every reader knows them by name: `none` and `off` are the
+gateless sentinel, and `approval` is met by an external GitHub review
+(`docs/state-machine.md:161-167`). Pre-open and merge read the same list and drop
+the same three: `pr-open.sh` publishes once every surviving check reads green,
+and `merge.sh` merges under the same condition (`docs/state-machine.md:180-188`).
+
+The drop is one rule — `none|off|approval` — copied seven times across the six
+scripts in three syntactic shapes:
+
+| Script | Site | Shape | Transition it serves |
+|---|---|---|---|
+| `pr-summary-region.sh` | `:30-34` (`gates_of`) | `grep -Eiv '^(none\|off\|approval)$'` | create the PR, and render its managed `## Summary` |
+| `merge.sh` | `:208-212` (`lanes_of`) | `grep -Eiv '^(none\|off\|approval)$'` | merge |
+| `review-outcome.sh` | `:245-251` (inline) | `grep -Eiv '^(none\|off\|approval)$'` | supersede lane backing on a failed feedback batch |
+| `gate-ensure.sh` | `:671-676` (inline) | `case … none\|off\|approval) continue` | dispatch reviews (both transitions) |
+| `liveness-sweep.sh` | `:317-323` (`pre_open_all_green`) | jq `map(select(≠ none, off, approval))` | census: classify a pre-open anchor as gated |
+| `pr-facts.sh` | `:670` (`unengaged_holds`) | `case … none\|off\|approval) continue` | facts: every gate green (a green gate hides findings) |
+| `pr-facts.sh` | `:1954` (dismiss arm) | `case … none\|off\|approval) continue` | facts: dismiss our own stale CHANGES_REQUESTED when green |
+
+`gates_of` lives in `pr-summary-region.sh`, not in `pr-open.sh`: `pr-open.sh`
+sources it (`:48-50`) and calls it (`:391`) to build the create-gate list, and
+`pr-stack.sh` sources it too (`:94-95`). The same helper also renders the PR body
+— `compose_managed` calls `gates_of` (`:90`) for the managed `## Summary`'s
+gate-handoff line — so the drop rule has a consumer beyond the create gate, and a
+change that edits only the create path leaves the published summary rendering the
+old list.
+
+`gate-ensure.sh` also collapses `none`/`off` to the sentinel in two more places
+(`:92-97`, `:622`). The stage difference between pre-open and merge is not in the
+drop list — it is a second hardcoded fact: a pre-open lane read passes
+`--no-remote` so no GitHub approval can back it before the PR exists
+(`pr-open.sh:531-537`, `gate-ensure.sh:702-706`), and the two literal stages
+`pre_open_gate` and `pull_request` are enumerated together at
+`gate-ensure.sh:473`.
+
+Any field that says "this check gates this transition" has to replace all seven
+drop sites and the `--no-remote` split. That is the surface area of the change.
+
+### `approval` is already a merge rule wearing a check's clothes
+
+`approval` is not an index entry and not a lane derived through `lane-state.sh`.
+It is a `check_set` token that arms a requirement `merge.sh` enforces on its own
+(`merge.sh:582-632`): an external `APPROVED` review from another account at the
+live head, with a standing `CHANGES_REQUESTED` as a hard veto. The same
+requirement is armed by two other conditions that are already not check_set
+tokens — a `signoff_dismissed` marker and the city's own dismissed review — so
+the enforcement is already decoupled from the token. `approval` takes no
+`check.approval` marker; the lifecycle registry records that rule
+(`lifecycle.toml:193-195`, `approval_member = "approval"`). The default
+`check_set` is `correctness,triage` (`lifecycle.toml:185`), so approval is
+opt-in, not universal.
+
+A separate, related fact: a GitHub `APPROVED` review also backs *any* lane that
+has no local review bead (`lane-state.sh:22-27, 65-82, 127-129`) — "an approval
+names no gate, so it backs every lane." This is why the pre-open read is
+`--no-remote`. This fallback is about lane derivation and is out of scope for the
+phase model; the merge rule (`merge.sh:582-632`) is the part that relocates.
+
+### Triage widens `check_set`, monotonically, over the index
+
+Triage classifies a diff and records which specialist checks it warrants by one
+`signoff.sh --add-gates` call. `signoff.sh` is the sole writer; only a triage
+approve may widen (`signoff.sh:200-203`), the index is closed so a check must be
+declared to be added (`signoff.sh:613-657`), and the write is a set union read
+back so a widen that did not persist leaves the check owed (`signoff.sh:661-670`).
+The phase model plugs into this exact seam: a check's phase lives in the index
+beside its method, and any future phase latitude rides this same `--add-gates`
+write, validated the same way against the index.
+
+## The phase model
+
+### Four phases
+
+A **phase** is the stage transition by which a check must read green. The four
+are ordered:
+
+1. **pre-open** — the check needs only the diff. It runs before the PR exists.
+   Correctness and triage are here: a city-controlled reviewer reads the diff
+   and rules.
+2. **open-as-draft** — the check needs the open PR or a deployed preview, and
+   must finish before the change is surfaced for human review. Demo is here.
+3. **ready-for-review** — the state in which a human reviews a change whose
+   city checks are all green. No check is authored here today; it is the ceiling
+   for automated checks and the state dialogue happens in. Reserved.
+4. **merge** — the final transition. The human-approval merge rule is here, and
+   the merge re-verifies that every check from every earlier phase is still
+   green. GitHub CI (the GitHub-CLEAN signal) and GitHub approval are both
+   consumed here, read from GitHub directly; neither is a `check_set` member with
+   a phase.
+
+A check declares its phase (values `pre-open` or `open-as-draft` for real checks
+today; `ready-for-review` reserved). The approval merge rule and the GitHub CI
+signal both sit at `merge` and are not checks.
+
+### The three gated transitions
+
+The four phases mark three transitions a script must gate. Each gate is
+idempotent: it reads markers, never a "did the previous gate run" flag, so a
+crash between gates costs nothing.
+
+| Transition | Gate predicate | Owner |
+|---|---|---|
+| **create PR (draft)** | every `pre-open` check in `check_set` reads green | `pr-open.sh` |
+| **draft → ready** | every `pre-open` and `open-as-draft` check in `check_set` reads green | a `pr-open.sh` / `pr-facts.sh` arm |
+| **ready → merged** | every check in `check_set` (all phases) reads green, the approval merge rule is satisfied, no holds, GitHub CLEAN (CI), base equals target | `merge.sh` |
+
+"Opens when ready for review" is the **draft → ready** flip, not the mechanical
+`gh pr create`. The PR is *created* (as a draft) at the first transition so a
+preview can deploy; it is *surfaced* to the human at the second, once its
+pre-ready checks are green. A ready PR has, by construction, no city check still
+running — which is the operator's "do not surface ready PRs that still have city
+checks running," made structural.
+
+### The empty-phase collapse preserves today's behavior
+
+When an anchor's `check_set` has no `open-as-draft` check — every check
+gc-toolkit declares today is `pre-open` — the PR is never opened as a draft, so
+there is no draft → ready flip to gate: the create gate opens it ready
+immediately, and GitHub CI stays a merge-time concern (the merge gate's CLEAN
+requirement) exactly as today. The draft state appears only when triage has
+added an `open-as-draft` check to the anchor's `check_set`. No change without
+such a check — demo is the only one today — behaves differently; `pr-open.sh`
+keeps opening non-draft (`pr-open.sh:13, 578`) exactly as it does now.
+
+### Forward gates, with the merge gate as the backstop
+
+Phases gate forward transitions only. If a check un-greens after its phase — a
+re-review supersedes a correctness approve after the PR is already ready — the
+PR does not fall back to draft. The merge gate's all-phases-green requirement is
+the backstop that catches it: the change simply cannot merge until the check is
+green again. Reversing a ready PR to draft on an un-green is deliberately not
+proposed; it is churn the merge gate already prevents the harm of.
+
+## Where phase is declared: the index, not prose
+
+This is the decision that touches the tk-3h9mzz choice, so it earns its own
+argument.
+
+That choice rejected an **applies-when** column: whether a given diff warrants a
+given check is a per-diff judgment, and putting it in the index would make the
+index a document a parser must interpret. Phase is a different axis. *Applies-when*
+asks whether the check runs at all for this diff; **phase** asks, given that it
+runs, which transition it gates. Applies-when varies with the diff and stays a
+triage judgment. Phase is fixed by what the check consumes: correctness reads a
+diff whether the diff is one line or ten thousand, and demo needs a preview
+whatever the change. Phase is a mechanical fact about the check, the same kind of
+fact as its `method` pointer, so it belongs in the index the same way `method`
+does. Declaring phase does not reopen the applies-when judgment the index was
+right to exclude.
+
+The alternative — inferring phase from the method's prose, the way applies-when
+is read — fails the origin requirement. The origin asks for *one place* a
+transition can read. Prose a human interprets is not a place a shell transition
+reads; the whole point is to stop each transition re-deriving the rule. Phase
+must be a field a parser emits.
+
+Concretely, the index gains one key per check:
+
+```toml
+[checks.correctness]
+method = "formulas/mol-review.toml"
+purpose = "Is the change correct and safe as merged?"
+phase = "pre-open"
+
+[checks.demo]
+method = "skills/gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
+purpose = "Produce the demo this change was asked to show."
+phase = "open-as-draft"
+```
+
+`phase` is the one key each check declares, and it is the transition the check
+gates. Every check in the index today has a single legal phase, so `phase` is
+all the schema needs now. The awk parser gains this column and the resolver
+below reads it. Phase latitude — a check that could legitimately run at more than
+one transition — is deferred with its mechanism (below); it needs no second key
+until such a check exists.
+
+## What triage decides, and what it cannot
+
+Triage decides *which* checks a diff warrants — the applies-when judgment — and
+records them with `signoff.sh --add-gates`. It does not choose a check's phase:
+each check in the index today has one legal phase, fixed by what it consumes, so
+adding the check is the whole decision. Adding `demo` to `check_set` is triage
+saying "this change needs a demo"; the demo check's declared `phase`
+(`open-as-draft`) then decides when it runs.
+
+A check's phase is bounded below by its inputs: demo cannot run before the PR
+exists, so it cannot be `pre-open`. With phase fixed per check, that bound is
+already met by the declared value — there is nothing for triage to get wrong,
+and nothing to validate beyond the index membership `--add-gates` already checks
+(`signoff.sh:640-641`).
+
+The operator's two constraints hold without a special case:
+
+- **Triage cannot phase CI or approval**, because neither is a `check_set`
+  member. GitHub CI and GitHub approval are signals the merge flow reads from
+  GitHub, which is their source of truth (the approval merge rule is the next
+  section); they are not checks triage can add or move.
+- **Triage cannot put demo pre-open**, because demo's one declared phase is
+  `open-as-draft`. There is no earlier value for it to take.
+
+Phase latitude — one check the operator could legitimately place at more than one
+transition — is the only thing that would give triage a phase to choose. The arch
+check now in flight is the candidate: it reads only the diff, so it *could* run
+`pre-open`, yet the operator may want it at `ready-for-review` for a large change
+and `pre-open` for a small one. That latitude is deferred until the check that
+needs it lands, and it rides the call triage already makes:
+`--add-gates arch:ready-for-review` carries the phase in the same union write,
+validated against the index the same way. No separate `--set-phase` capability is
+introduced; a second, nearly identical widen call is the duplication this avoids.
+
+## Approval as a merge rule
+
+This is feasible end to end, and most of it is already true.
+
+`merge.sh` already enforces approval without reading a `check.approval` marker:
+it reads GitHub's review state and requires an external `APPROVED` at the live
+head (`merge.sh:573-632`). The token's only jobs are to *arm* that enforcement
+and to be *dropped* from every lane-derivation list so it is not mistaken for a
+lane. Both jobs move cleanly off the token:
+
+1. **Arming** moves to a merge rule. Add a `[merge]` section to
+   `lifecycle.toml`, or a per-anchor attribute the refinery stamps the way it
+   stamps `check_set`, that says this anchor requires human approval. `merge.sh`
+   reads that instead of scanning `check_set` for `approval`. The two other
+   arming conditions (`signoff_dismissed`, the self-dismissed review) are already
+   merge rules in everything but name and stay as they are. Because the default
+   `check_set` never included `approval` (`lifecycle.toml:185`), approval stays
+   opt-in; the rule is per-anchor, carrying the same opt-in the token carried.
+2. **Dropping** disappears. With `approval` no longer a `check_set` member,
+   nothing has to drop it. Every drop list shrinks to `none|off`, and those are
+   the sentinel the resolver owns — so the drop lists disappear entirely from the
+   six scripts.
+
+End to end, the surfaces are: the index and `check_set` stop mentioning
+`approval`; `lifecycle.toml` declares the merge rule where `approval_member`
+sits today; `merge.sh`'s approval block reads the rule rather than the token; and
+`pr-open.sh`, `review-outcome.sh`, `gate-ensure.sh`, `liveness-sweep.sh`, and
+`pr-facts.sh` stop special-casing the name because it is gone from the namespace
+they read. The
+migration also needs a one-shot rewrite of live anchors carrying `approval` in
+`check_set` into the new rule, on the pattern of the `migrate-*` scripts
+tk-3h9mzz already ships.
+
+Relocating approval does not cost the helm board its "waiting on a human" view.
+That state is not read off the `approval` token. When every declared check is
+green and the only thing left is an external approve, `merge.sh` records the
+`settled` machine state (`merge.sh:573-632`), and `pr-status-label.sh` renders
+that as the `needs-review` label, "settled at the current head; awaiting a human
+review or re-review" (`pr-status-label.sh:61`). That derivation reads "all checks
+green, no approver yet," which the per-anchor merge rule names at least as
+directly as the token did. The board keeps the signal.
+
+"Approval as a check sounds stupid" is right for a concrete reason: a check
+produces a review bead and a lane marker, and approval produces neither. It has
+always been a merge rule; the token was a way to carry it in the one field the
+refinery already stamped. The phase model gives the refinery a cleaner place to
+stamp it.
+
+## The draft → ready flow for demos
+
+The sequence a demo change moves through:
+
+1. Pre-open checks run on the branch, before any PR: correctness rules on the
+   diff, and triage classifies it. Triage's classification is where "this change
+   needs a demo" is decided — it adds `demo` to `check_set` (`--add-gates`). A
+   change triage judges needs no demo gets no `open-as-draft` check, so the rest
+   of this sequence does not apply: `pr-open.sh` opens it ready at once, the
+   empty-phase collapse above.
+2. With `demo` now in `check_set`, `pr-open.sh` creates the PR **as a draft**. A
+   draft PR is an open PR, so the preview provider deploys a preview for it.
+3. The preview URL reaches the demo check; the demo records the change against
+   the preview and `signoff.sh` greens the demo lane.
+4. Once every `open-as-draft` check is green, the **draft → ready** arm flips the
+   PR out of draft. It is now surfaced for human review with all city checks
+   green. GitHub CI need not be green to surface — CI is a merge-flow signal, the
+   next step.
+5. Human review, then the merge gate: approval merge rule, all-phases-green, and
+   GitHub CLEAN (CI).
+
+The draft state is the machinery's name for "the PR exists so previews and CI can
+run, but it is not yet the human's to review." That is precisely the
+`open-as-draft` phase.
+
+### The Vercel / preview-needs-a-PR question
+
+The sub-question: some providers cannot build a preview without an open PR. The
+draft-first flow answers it directly — a draft PR *is* an open PR, and Vercel and
+the common CI providers deploy previews and run checks on draft PRs. Opening as a
+draft is what buys the preview the demo needs, so the provider constraint is
+satisfied by construction for the mainstream case.
+
+The residual case is a provider that refuses to build even for a draft PR (it
+requires a non-draft PR to deploy). Options, in preference order:
+
+- **Prefer providers that build on draft PRs.** This is the default posture and
+  covers Vercel, Netlify, and GitHub Actions preview jobs.
+- **For a provider that truly needs non-draft**, open the PR non-draft but hold
+  the *surfacing* signal separately: the PR is non-draft so the preview builds,
+  but the human-review-ready marker (the `status:` label the pack already writes,
+  `pr-status-label.sh`) is not set to `needs-review` until the `open-as-draft`
+  checks pass. This decouples "the PR is non-draft so CI runs" from "a human
+  should look," at the cost of a second readiness signal beside the draft flag.
+  It is more moving parts and is proposed only as the fallback.
+
+Recommendation: design for draft-first, and treat the non-draft-preview provider
+as a documented fallback rather than a shape the core model must carry. The
+draft flag stays the primary readiness boundary.
+
+## Dialogue stays a visit
+
+Human dialogue on a PR is handled by a visit, independent of PR state, and is
+not modeled as a phase in this proposal. The review-cycle machinery already
+enters operator feedback into the finding and validation graph
+(`docs/state-machine.md:228-247`) without reference to a phase, and that path is
+untouched. Modeling dialogue as a phase is a larger change with no demand behind
+it yet; this spike deliberately leaves it out and flags it as a later question if
+one arises.
+
+## Retiring the seven hardcoded drops
+
+The centralization that makes the drops go away: one resolver in the one parser.
+
+`review-checks.sh` gains a mode that answers the question every stage transition
+asks — given this anchor's `check_set` and this transition, which checks gate it?
+
+```
+review-checks.sh --resolve --check-set "<check_set>" --through <phase> --file <index>
+```
+
+It tokenizes `check_set`, drops `none`/`off` (the only place that knows they are
+sentinels), looks up each remaining check's phase in the index, and emits the
+checks whose phase is at or before `<phase>`. Each transition calls it, and the
+managed PR body renders from the same resolver:
+
+- **`pr-open.sh`** (create gate) calls `--through pre-open`, reads each returned
+  lane `--no-remote` (no PR yet), and creates the draft when all are green. The
+  `gates_of` helper it drops is not its own: it lives in `pr-summary-region.sh`
+  (`:30-34`), sourced by `pr-open.sh` (`:48-50`) and `pr-stack.sh` (`:94-95`), so
+  it is deleted there.
+- **`pr-summary-region.sh`** (PR-body render) is the dropped helper's other
+  consumer: `compose_managed` (`:90`) builds the managed `## Summary`'s
+  gate-handoff line, and `pr-stack.sh` refreshes that body on an already-open PR.
+  Both route through the resolver instead of `gates_of`, rendering each check
+  under its declared phase so an `open-as-draft` check (demo) shows as a
+  draft-stage gate rather than as pre-open gate text.
+- **A `pr-open.sh` / `pr-facts.sh` arm** (ready gate) calls
+  `--through open-as-draft`, reads each returned lane with remote allowed, and
+  flips draft to ready when all are green. It does not read GitHub CI; CI is a
+  merge-flow signal the merge gate enforces as GitHub CLEAN.
+- **`merge.sh`** (merge gate) calls `--through merge`, reads each lane, applies
+  the approval merge rule and the other merge conditions. Its `lanes_of` function
+  is deleted; its approval block reads the merge rule.
+- **`gate-ensure.sh`** dispatches a review for each returned lane that owes one;
+  its inline `none|off|approval` `case` and its `--no-remote` split both read the
+  resolver and the transition instead of re-deriving.
+- **`review-outcome.sh`** supersedes the backing of each returned lane; its
+  inline drop is deleted.
+- **`pr-facts.sh`** carries two more copies today — the `unengaged_holds`
+  finding-hold (`:670`) and the self-dismissal arm (`:1954`), each computing
+  all-gates-green for merge readiness. Both call `--through merge`, and their
+  inline `none|off|approval` `case`s are deleted.
+- **`liveness-sweep.sh`** classifies a pre-open anchor by asking the resolver for
+  its `pre-open` gating set. This also fixes the outlier noted below.
+
+`liveness-sweep.sh` is the one reader that today evaluates green by reading the
+stored `check.<g>=green` marker directly (`liveness-sweep.sh:317-323`) rather than
+deriving through `lane-state.sh` like the other four. Routing it through the
+resolver is the moment to unify it, so all readers compute the gating set the
+same way even if the census keeps its own fast marker read for the green check
+itself.
+
+After this, the `none|off|approval` rule exists once (the resolver's `none|off`
+drop plus approval's departure from the namespace), and each transition's
+phase-specific set is a call, not a copied loop. That is the origin requirement
+met: one place says what checks exist and their phases, each reviewer knows its
+check, and a transition reads whether its checks are done by asking the one
+resolver.
+
+## What this spike does not decide
+
+- **Implementation.** Everything here is a proposal to ratify in conversation
+  before any code moves. No production behavior changes from this spike beyond
+  this document.
+- **The per-rig rollout** of the index and the phase declarations, and the
+  rig-agnostic naming write-up — tracked separately under tk-cwkmt2.
+- **The helm board's pre-open-stall deriver** (tk-263hr9), which recognizes the
+  pre-open gate by its own hardcoded match. It reads the same shape this proposal
+  changes and should adopt the resolver, but it is an owned Go component tracked
+  on its own bead.
+- **Reversing ready to draft** on a check that un-greens after its phase. Left
+  out on purpose; the merge gate is the backstop.
+- **Phase latitude for triage.** When a check can run at more than one
+  transition, the phase rides the `--add-gates` call
+  (`--add-gates <check>:<phase>`). Building that extension waits for the first
+  check that needs it; the arch check now in flight is the likely trigger.
+
+## Open questions for the ratification conversation
+
+1. **Where does the approval merge rule live** — a new `lifecycle.toml [merge]`
+   section, or a per-anchor attribute the refinery stamps, or both (a rig default
+   the refinery reads onto each anchor)? The per-anchor form preserves today's
+   opt-in most directly and is the recommended default, absent a reason to prefer
+   another.
+2. **The non-draft-preview provider.** Is the documented fallback enough, or does
+   a provider in the city's actual use need the second readiness signal built now?

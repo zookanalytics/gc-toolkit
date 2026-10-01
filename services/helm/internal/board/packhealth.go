@@ -51,6 +51,16 @@ type PackBuild struct {
 	// one that can say the builder itself has stopped.
 	CheckedAt time.Time `json:"checked_at,omitzero"`
 
+	// BehindMain is how many commits origin/main carries under the helm source
+	// paths that this checkout does not — the checkout serving the board is
+	// off-main by that many commits. Every other field here measures the LOCAL
+	// checkout (its sources against its binary), so a checkout parked off-main
+	// reads perfectly current on those while it serves code main has moved past;
+	// this is the one field that sees that gap. It is off the wire because the
+	// drift it signals is spoken by Detail, which the dashboard and the CLI both
+	// render, so no consumer needs the raw count.
+	BehindMain int `json:"-"`
+
 	Severity Severity `json:"severity"`
 	Detail   string   `json:"detail"`
 }
@@ -83,7 +93,8 @@ func shortRev(rev string) string {
 //
 //	HIGH      the last build failed, the binary cannot read the stores, or a
 //	          published binary is not serving
-//	ELEVATED  the serving binary predates the tree, or nothing has checked lately
+//	ELEVATED  the serving binary predates the tree, the checkout is behind main,
+//	          or nothing has checked lately
 //	NORMAL    current
 //	LOW       a row that says nothing — no revision was recorded at all
 func DerivePackHealth(rows []PackBuild, now time.Time) []PackBuild {
@@ -144,6 +155,14 @@ func bandBuild(r PackBuild, now time.Time) (Severity, string) {
 			return SevLow, fmt.Sprintf("built %s, no revision recorded — currency cannot be checked", r.BuiltAt.Format("2006-01-02T15:04Z"))
 		}
 		return SevLow, "no build recorded"
+	}
+	// Current with its own sources is not the same as current with main. Every
+	// check above keys on the local checkout, so a checkout parked off-main
+	// reaches here reading "current" while it serves code main has moved past —
+	// the false "ok" this check exists to prevent. A nonzero gap against main is
+	// staleness, so it speaks instead of the clean "current at" line.
+	if r.BehindMain > 0 {
+		return SevElevated, fmt.Sprintf("serving %s, but origin/main is %d commit(s) ahead under the helm sources; the checkout is off-main", shortRev(r.BinaryRev), r.BehindMain)
 	}
 	return SevNormal, fmt.Sprintf("current at %s", shortRev(r.BinaryRev))
 }

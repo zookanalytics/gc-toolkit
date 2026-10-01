@@ -10,11 +10,13 @@ judges its closed-field verdict.
 KEY RENAME from the old warrants: bare target/reason/requester became
 warrant.target / warrant.reason / warrant.requester ([metadata.warrant] in
 lifecycle/lifecycle.toml) — bare `target` collides with the merge-identity
-registry key of the same name. The ADDRESSING is unchanged from the old
-detectors (it demonstrably worked in this city): city bead store, route
-gc.routed_to={{binding_prefix}}dog, --label=warrant:
+registry key of the same name. Detectors file through the shared
+assets/scripts/file-warrant.sh, which resolves the wedged owner to a live
+session id — warrant.target must be one, since this dance's probe rejects any
+other value — routes gc.routed_to={{binding_prefix}}dog, labels it warrant, and
+dedups on the session id:
 
-  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"<reason>","warrant.requester":"<who>","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+  file-warrant.sh --owner <owner> --role <agent> --reason <reason> --requester <who> --dog <resolved-dog-route>
 
 The claimed warrant bead is the dance's identity, and `gc hook current
 --id-only` is what names it — it reads back the id this session claimed. A

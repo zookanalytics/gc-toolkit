@@ -148,6 +148,41 @@ func TestGatherOnARecordWrittenBeforeProbeStatusExisted(t *testing.T) {
 	}
 }
 
+func TestGatherCarriesBehindMainIntoTheRow(t *testing.T) {
+	// A checkout current with its own sources but parked behind main: rc 0,
+	// matching revisions, probe ok. behind_main is the only field separating it
+	// from a healthy component, so the decode has to keep it and the row must band
+	// ELEVATED rather than current.
+	root := city(t, map[string]string{
+		"helm": `{"component":"helm","built_at":"2026-08-26T11:00:00Z","source_rev":"aaaa","binary_rev":"aaaa","last_build_rc":0,"restart_pending":false,"probe_status":"ok","behind_main":4,"checked_at":"2026-08-26T11:58:00Z"}`,
+	})
+	rows := GatherPackHealth(root, gatherNow)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].BehindMain != 4 {
+		t.Errorf("behind_main = %d, want 4", rows[0].BehindMain)
+	}
+	if rows[0].Severity != board.SevElevated {
+		t.Errorf("severity = %s, want ELEVATED — a checkout behind main must not read as current", rows[0].Severity)
+	}
+	if !strings.Contains(rows[0].Detail, "off-main") {
+		t.Errorf("detail %q must name the drift against main", rows[0].Detail)
+	}
+}
+
+func TestGatherOnARecordWrittenBeforeBehindMainExisted(t *testing.T) {
+	// A status file from a build order that predates behind_main has no such key.
+	// It must decode as 0 and band exactly as before, never as spurious drift.
+	root := city(t, map[string]string{
+		"helm": `{"component":"helm","built_at":"2026-08-26T11:00:00Z","source_rev":"aaaa","binary_rev":"aaaa","last_build_rc":0,"restart_pending":false,"checked_at":"2026-08-26T11:58:00Z"}`,
+	})
+	rows := GatherPackHealth(root, gatherNow)
+	if len(rows) != 1 || rows[0].BehindMain != 0 || rows[0].Severity != board.SevNormal {
+		t.Fatalf("got %+v, want one NORMAL row with behind_main 0", rows)
+	}
+}
+
 // A service may declare a state root one level deeper than .gc/services/<name>
 // (a pack that groups its services), and gc-helm-build.sh writes wherever
 // `gc service list` reports. The reader must see that depth too, or the

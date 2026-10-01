@@ -63,7 +63,7 @@ UNSAFE_RC=3
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-DEFAULT_CHECK_SET="codex"
+DEFAULT_CHECK_SET="correctness,triage"
 REVIEW_FORMULA="mol-review"
 VALIDATE_FORMULA="mol-validate"
 REVIEW_POOL=""
@@ -75,7 +75,7 @@ FIX_POOL=""
 SLING_VARS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --default)        DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
+    --default)        DEFAULT_CHECK_SET="${2:-correctness,triage}"; shift 2 ;;
     --review-pool)    REVIEW_POOL="${2:-}"; shift 2 ;;
     --validate-pool)  VALIDATE_POOL="${2:-}"; shift 2 ;;
     --fix-pool)       FIX_POOL="${2:-}"; shift 2 ;;
@@ -92,7 +92,7 @@ for _v in ${SLING_VARS[@]+"${SLING_VARS[@]}"}; do SLING_VAR_ARGS+=(--var "$_v");
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
 case "$(cs_canon "$DEFAULT_CHECK_SET")" in
-  '')       DEFAULT_CHECK_SET="codex" ;;
+  '')       DEFAULT_CHECK_SET="correctness,triage" ;;
   none|off) DEFAULT_CHECK_SET="none" ;;
 esac
 
@@ -139,14 +139,9 @@ live_head_for() { # <branch> -> sha, or nothing when unanswerable
 }
 
 # Guarded list read: non-zero means "could not tell", never "nothing there".
-bd_list() {
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # The step/root reads below must see closed rows too: a spent chain is
@@ -235,8 +230,8 @@ open_rework_child() { # <anchor-id>
 # anchor_bead is this anchor; while any is open every lane derives validating and
 # no review may be dispatched — the validator rules the whole diff, so a review
 # that read it now would read a state no one intends to ship. More than one can
-# be live at once: pr-facts.sh opens a human-lane pass beside a codex pass,
-# because a codex pass holds the merge but cannot rule human findings. Non-zero
+# be live at once: pr-facts.sh opens a human-lane pass beside a correctness pass,
+# because a correctness pass holds the merge but cannot rule human findings. Non-zero
 # rc = the ledger could not answer; the caller holds the dispatch, the same as an
 # unreadable in-flight lookup.
 open_validation_passes() { # <anchor-id>
@@ -579,8 +574,8 @@ STRAY
   # pass IS the fresh whole-diff review; this arm dispatches mol-validate ONTO it
   # so the validator runs and rules the batch's findings, a second dispatch shape
   # in the same authority rather than a second authority. More than one pass can
-  # be live at once — pr-facts.sh opens a human-lane pass beside a codex pass,
-  # because a codex pass holds the merge but cannot rule human findings — so this
+  # be live at once — pr-facts.sh opens a human-lane pass beside a correctness pass,
+  # because a correctness pass holds the merge but cannot rule human findings — so this
   # iterates every open pass rather than the first: a first pass already
   # dispatched must not shadow a newer sibling that still needs a validator. Each
   # pass carries its own dispatch note (its opener built it from
@@ -860,8 +855,12 @@ STRAY
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
     # failed carries the deterministic title but no anchor_bead — invisible to
     # inflight_review, so re-creating would mint a twin every pass. Adopt it
-    # instead. An unreadable probe dispatches nothing (retry next pass).
-    RID_TITLE="Review branch $branch -> $target:"
+    # instead. The title carries the check name, so the orphan identity is
+    # per-check: with a multi-check baseline (correctness,triage) a sibling lane's
+    # half-stamped review is never adopted here and re-stamped with this lane's
+    # check_name onto a body the body-emitter wrote for the other check. An
+    # unreadable probe dispatches nothing (retry next pass).
+    RID_TITLE="Review branch $branch -> $target ($g):"
     if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
       echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
       skipped=$((skipped + 1)); continue
@@ -872,7 +871,7 @@ STRAY
       echo "$PROG: $id adopting unstamped review orphan $RID for gate '$g' (created by a prior pass whose stamp failed)"
     else
       body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --note "$why" 2>/dev/null) || body=""
+      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
       if [ -n "$body" ]; then
         RID=$(printf '%s' "$body" \
           | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \

@@ -133,7 +133,7 @@ arm_a_marker() {
         | select(((($m.task_kind // "") | tostring)) == "review")
         | ((($m.anchor_bead // "") | tostring)) as $a
         | ((($m.reviewed_oid // "") | tostring)) as $o
-        | (((($m.check_name // "") | tostring)) | if . == "" then "codex" else . end) as $g
+        | (((($m.check_name // "") | tostring)) | if . == "" then "correctness" else . end) as $g
         | (((.status // "") | tostring | ascii_downcase)) as $st
         | (($m.signoff_verdict // "") | tostring) as $sv
         | ((($m["gc.outcome"] // "") | tostring)) as $oc
@@ -255,7 +255,7 @@ arm_b_outcome() {
         | select(($set[$a] // false) == true)
         | [ ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
             ($a | gsub("[[:cntrl:]]"; " ")),
-            (((($m.check_name // "") | tostring) | if . == "" then "codex" else . end) | gsub("[[:cntrl:]]"; " ")),
+            (((($m.check_name // "") | tostring) | if . == "" then "correctness" else . end) | gsub("[[:cntrl:]]"; " ")),
             ($oc | gsub("[[:cntrl:]]"; " ")) ]
         | join("")' 2>/dev/null); jrc=$?
     if [ "$jrc" -ne 0 ]; then

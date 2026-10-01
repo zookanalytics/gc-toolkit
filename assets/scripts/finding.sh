@@ -72,7 +72,9 @@ set -uo pipefail
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 warn() { echo "finding: $*" >&2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
@@ -127,8 +129,7 @@ compute_key() {
 # tell "no such finding" from "could not ask".
 find_open_by_key() {
   local anchor="$1" key="$2" rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg k "$key" '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.key"] // "") | tostring) == $k) ]
@@ -236,6 +237,10 @@ cmd_upsert() {
     --set-metadata finding.key="$key" \
     --set-metadata finding.disposition=unvalidated \
     --set-metadata finding.source="$source" >/dev/null 2>&1 || { warn "could not stamp finding $id metadata"; exit 2; }
+  # A new finding changes this anchor's findings list; drop the per-pass bd_list
+  # cache so a same-pass re-read sees it (pr-facts files a finding for a human
+  # comment, then re-reads to wire its fix unit). No-op outside a reconcile pass.
+  bd_cache_clear
   local got
   got=$(bd_json show "$id" | jq -r '(.[0].metadata["finding.key"] // "") | tostring' 2>/dev/null)
   [ "$got" = "$key" ] || { warn "finding $id key did not read back (got '$got', want '$key')"; exit 2; }
@@ -388,8 +393,7 @@ cmd_open_must_fix() {
   esac; done
   [ -n "$anchor" ] || { warn "open-must-fix needs --anchor"; exit 1; }
   local rows ids
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 \
+  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") \
     || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -417,8 +421,7 @@ cmd_close_unvalidated() {
   # declined) belongs to the validator and is left alone; a finding a fix unit
   # still blocks refuses to close and is left for that unit's landing.
   local rows ids id note
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || { warn "could not read findings on $anchor"; return 2; }
+  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.disposition"] // "") | tostring) == "unvalidated")
@@ -429,6 +432,9 @@ cmd_close_unvalidated() {
   for id in $ids; do
     gc bd update "$id" --status=closed --append-notes "$note" >/dev/null 2>&1 || true
   done
+  # Closed findings leave the LIVE set; drop the per-pass bd_list cache so a
+  # same-pass re-read does not still see them. No-op outside a reconcile pass.
+  bd_cache_clear
 }
 
 # A must-fix finding is closed once every fix unit answering it has landed. The
@@ -451,8 +457,7 @@ cmd_close_answered() {
   esac; done
   [ -n "$anchor" ] || { warn "close-answered needs --anchor"; exit 1; }
   local rows ids id note blk n_all n_live
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || { warn "could not read findings on $anchor"; return 2; }
+  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.disposition"] // "") | tostring) == "must-fix") ]
@@ -473,6 +478,10 @@ cmd_close_answered() {
     gc bd update "$id" --status=closed --append-notes "$note" >/dev/null 2>&1 \
       || warn "could not close answered finding $id"
   done
+  # Closed findings leave the LIVE set; drop the per-pass bd_list cache so the
+  # same-pass re-read (gate-ensure recomputes quiescence right after) does not
+  # still see them. No-op outside a reconcile pass.
+  bd_cache_clear
 }
 
 [ $# -ge 1 ] || { usage; exit 1; }
