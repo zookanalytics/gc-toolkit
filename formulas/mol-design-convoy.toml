@@ -105,7 +105,17 @@ done
 
 IDFILE=$(mktemp "${TMPDIR:-/tmp}/gctk-design-convoy-id.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
 SEED_RC=0
-SEED_JSON=$("$SCRIPTS/convoy-seed.sh" --name "$INITIATIVE" ${CONVOY_ID:+--convoy "$CONVOY_ID"} --id-file "$IDFILE" --json) || SEED_RC=$?
+# Build convoy-seed.sh's argv as an array. The agent shell is zsh, which does
+# not word-split an unquoted ${CONVOY_ID:+--convoy "$CONVOY_ID"}: it reaches
+# convoy-seed.sh as the single argument `--convoy <id>`, which it rejects as an
+# unknown argument, so the resume above never reuses the recorded convoy. An
+# array keeps --convoy and the id separate words in every shell.
+# >>> seed-convoy-invoke
+SEED_ARGS=(--name "$INITIATIVE")
+[ -n "$CONVOY_ID" ] && SEED_ARGS+=(--convoy "$CONVOY_ID")
+SEED_ARGS+=(--id-file "$IDFILE" --json)
+SEED_JSON=$("$SCRIPTS/convoy-seed.sh" "${SEED_ARGS[@]}") || SEED_RC=$?
+# <<< seed-convoy-invoke
 # convoy-seed.sh writes the created convoy id to --id-file before its fallible
 # target-set and branch cut. Record it now — on success OR failure — so a resume
 # after a mid-cut crash reuses this convoy instead of creating a second one.

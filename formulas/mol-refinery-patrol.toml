@@ -663,8 +663,9 @@ unset _cs_canon
 # >>> check-set-prefer-approval-arm
 # An anchor already carrying an `approval` lane was armed by a caller for a
 # merge-time operator gate — a design-convoy checkpoint (docs/design-convoy.md).
-# The var default names only `codex`, so stamping it would erase that arm before
-# the checkpoint PR opens and the gate would never bind. Prefer the anchor's own
+# The active check_set var does not carry `approval` (its default is
+# `correctness,triage`), so stamping it would erase that arm before the
+# checkpoint PR opens and the gate would never bind. Prefer the anchor's own
 # approval-bearing check_set. This reads $BEAD_JSON, which is $WORK's metadata,
 # and $WORK is the anchor in the two arms below that stamp check_set; a rework
 # hand-back keeps gating on its existing anchor and never reaches those arms.
