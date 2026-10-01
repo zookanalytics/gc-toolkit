@@ -96,13 +96,21 @@ scripts in three syntactic shapes:
 
 | Script | Site | Shape | Transition it serves |
 |---|---|---|---|
-| `pr-open.sh` | `:87-91` (`gates_of`) | `grep -Eiv '^(none\|off\|approval)$'` | create the PR |
+| `pr-summary-region.sh` | `:30-34` (`gates_of`) | `grep -Eiv '^(none\|off\|approval)$'` | create the PR, and render its managed `## Summary` |
 | `merge.sh` | `:208-212` (`lanes_of`) | `grep -Eiv '^(none\|off\|approval)$'` | merge |
 | `review-outcome.sh` | `:245-251` (inline) | `grep -Eiv '^(none\|off\|approval)$'` | supersede lane backing on a failed feedback batch |
 | `gate-ensure.sh` | `:671-676` (inline) | `case … none\|off\|approval) continue` | dispatch reviews (both transitions) |
 | `liveness-sweep.sh` | `:317-323` (`pre_open_all_green`) | jq `map(select(≠ none, off, approval))` | census: classify a pre-open anchor as gated |
 | `pr-facts.sh` | `:670` (`unengaged_holds`) | `case … none\|off\|approval) continue` | facts: every gate green (a green gate hides findings) |
 | `pr-facts.sh` | `:1954` (dismiss arm) | `case … none\|off\|approval) continue` | facts: dismiss our own stale CHANGES_REQUESTED when green |
+
+`gates_of` lives in `pr-summary-region.sh`, not in `pr-open.sh`: `pr-open.sh`
+sources it (`:48-50`) and calls it (`:391`) to build the create-gate list, and
+`pr-stack.sh` sources it too (`:94-95`). The same helper also renders the PR body
+— `compose_managed` calls `gates_of` (`:90`) for the managed `## Summary`'s
+gate-handoff line — so the drop rule has a consumer beyond the create gate, and a
+change that edits only the create path leaves the published summary rendering the
+old list.
 
 `gate-ensure.sh` also collapses `none`/`off` to the sentinel in two more places
 (`:92-97`, `:622`). The stage difference between pre-open and merge is not in the
@@ -409,11 +417,20 @@ review-checks.sh --resolve --check-set "<check_set>" --through <phase> --file <i
 
 It tokenizes `check_set`, drops `none`/`off` (the only place that knows they are
 sentinels), looks up each remaining check's phase in the index, and emits the
-checks whose phase is at or before `<phase>`. Each transition calls it:
+checks whose phase is at or before `<phase>`. Each transition calls it, and the
+managed PR body renders from the same resolver:
 
 - **`pr-open.sh`** (create gate) calls `--through pre-open`, reads each returned
-  lane `--no-remote` (no PR yet), and creates the draft when all are green. Its
-  `gates_of` function is deleted.
+  lane `--no-remote` (no PR yet), and creates the draft when all are green. The
+  `gates_of` helper it drops is not its own: it lives in `pr-summary-region.sh`
+  (`:30-34`), sourced by `pr-open.sh` (`:48-50`) and `pr-stack.sh` (`:94-95`), so
+  it is deleted there.
+- **`pr-summary-region.sh`** (PR-body render) is the dropped helper's other
+  consumer: `compose_managed` (`:90`) builds the managed `## Summary`'s
+  gate-handoff line, and `pr-stack.sh` refreshes that body on an already-open PR.
+  Both route through the resolver instead of `gates_of`, rendering each check
+  under its declared phase so an `open-as-draft` check (demo) shows as a
+  draft-stage gate rather than as pre-open gate text.
 - **A `pr-open.sh` / `pr-facts.sh` arm** (ready gate) calls
   `--through open-as-draft`, reads each returned lane with remote allowed, and
   flips draft to ready when all are green. It does not read GitHub CI; CI is a
