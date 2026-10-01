@@ -85,10 +85,12 @@ green. That model also settles the preview-needs-a-PR case: a draft PR is an
 open PR, so the providers that build previews deploy for it.
 
 This leg depends on that model and does not restate it. The check's phase, the
-draft-first flow, and the preview question belong to the phase model, whose
-implementation is tracked under tk-cwkmt2. Until it lands, the generalized check
-has no correct phase to run in, which is why the check bead below is blocked on
-it.
+draft-first flow, and the preview question belong to the phase model. Its
+implementation is tracked under tk-yx2oqr.2, which is gated on ratifying the
+spike (tk-7h5l3m) before any code moves; the per-rig rollout and the naming
+convention are a separate concern under tk-cwkmt2. Until the implementation
+lands, the generalized check has no correct phase to run in, which is why the
+check bead below is blocked on it.
 
 ## The decision: need, then modality
 
@@ -166,7 +168,7 @@ pool and gated so none starts before the design it depends on has landed.
 - tk-vd66j1.6 — generalize the `demo` check: the need-and-modality decision and
   the broadened purpose, reaching a verdict and naming the modality even before
   any new capture is wired. Blocked on this design (tk-vd66j1.5) and on the phase
-  model implementation (tk-cwkmt2), without which the check has no correct phase
+  model implementation (tk-yx2oqr.2), without which the check has no correct phase
   to run in.
 - tk-vd66j1.7 — screenshot modality. Blocked on tk-vd66j1.6.
 - tk-vd66j1.8 — repo-artifact modality. Blocked on tk-vd66j1.6.
@@ -174,14 +176,16 @@ pool and gated so none starts before the design it depends on has landed.
   (tk-vd66j1.2), and the toolchain/TTS foundation (tk-vd66j1.1).
 
 Cost of waiting: the decision and the two new modalities wait on the phase model
-landing (tk-cwkmt2) and on nothing else in this epic. The video modality
+implementation (tk-yx2oqr.2) landing, which is itself gated on ratifying the
+spike (tk-7h5l3m), and on nothing else in this epic. The video modality
 additionally waits on tk-vd66j1.2 and tk-vd66j1.1.
 
 ## Boundaries
 
 - The check's phase, triage engagement, and the draft-first flow are the
-  review-gates phase model's (tk-yx2oqr.1, rolled out under tk-cwkmt2). This leg
-  consumes them and does not re-specify them.
+  review-gates phase model's: designed in tk-yx2oqr.1, implemented under
+  tk-yx2oqr.2, and rolled out per-rig under tk-cwkmt2. This leg consumes them and
+  does not re-specify them.
 - The reusable rig-demo mol is tk-vd66j1.2. The video modality invokes it; this
   leg does not build it.
 - The capture toolchain and the TTS key are tk-vd66j1.1. The video modality

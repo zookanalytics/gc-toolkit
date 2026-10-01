@@ -17,7 +17,7 @@ phase model. Each comment and its disposition:
 | Open question: does the check evaluate need, or does triage adding it signal need, or two-stage | who decides need | Answered in the design. Triage makes the coarse call and adds the check on a user-visible surface; the check confirms genuine need and picks the modality once engaged. |
 | This aligns with what my earlier comment expected | triage engagement | Kept and made explicit. The triage-engagement model is unchanged; it is now stated plainly in "The decision: need, then modality." |
 | Still doesn't justify why both should exist | one check vs two | Fixed. There is one check now, so the justification the comment rejected is gone. |
-| can't run until the PR exists … a bead is making the phases clearer … preview deployment needs the PR | phase / timing | Fixed. The design depends on the review-gates phase model (tk-yx2oqr.1, rolled out under tk-cwkmt2): the check runs at the `open-as-draft` phase, against the draft PR and its preview. The check bead tk-vd66j1.6 is now blocked on that implementation. |
+| can't run until the PR exists … a bead is making the phases clearer … preview deployment needs the PR | phase / timing | Fixed. The design depends on the review-gates phase model (designed in tk-yx2oqr.1, implemented under tk-yx2oqr.2): the check runs at the `open-as-draft` phase, against the draft PR and its preview. The check bead tk-vd66j1.6 is now blocked on that implementation (tk-yx2oqr.2). |
 
 ## What the reframing changed
 
