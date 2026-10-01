@@ -363,6 +363,35 @@ Subjects filed before it existed are carried across by
 `assets/scripts/backfill-operator-origin.sh`, which owns the anchored
 line-match, once, where a wrong match is visible and re-runnable.
 
+## Start talking now: create-and-engage a fresh subject
+
+The intake above files a topic and lets the reaction triage it: the operator
+gets a board row, not a conversation. When the operator wants to talk *now*
+about something that has no bead yet, `gc-helm engage --new-subject` creates the
+subject and engages it in one gesture. It files the subject bead in a chosen
+rig, files its one visit, spawns the `converse-<model>` sitting, and binds it —
+the same spawn-on-engage path a parked visit takes, with the subject created up
+front. The positional text is the subject's title and, absent
+`--reason`/`--template`, its opener; `--rig` names the rig the subject is created
+in (an interactive prompt over the converse-capable rigs otherwise, since a
+brand-new subject has no id prefix to derive a rig from), and `--no-input`
+requires it. `prefix+A` is the keystroke — the sibling of `prefix+a`, which files
+a topic for triage — and it opens the real interactive prompt in a new tmux
+window, because the choice of rig, subject, and model does not fit tmux's
+one-line command-prompt.
+
+The created subject is operator-origin, so the force-to-visit invariant still
+holds — but engage files that one visit itself, so the async worker must not file
+a second. The subject is created marked `gc.interactive_intake=1`, in the same
+`gc bd create` write so the proactive scan never observes it unmarked. Three
+gates read the marker: `scan_precision_filter` drops a marked bead (the primary,
+race-free gate, so a sweep never slings a first reaction at it),
+`sling_first_reaction_guard` refuses it as a no-op, and `mol-first-reaction`'s
+`advance-and-drain` consumes it fail-closed and files no visit if a direct pour
+reaches one — stamping `gc.proactive_reaction=1` first, so the engage counts as
+the reaction and no later scan re-reacts. The invariant is preserved, not
+relaxed: the subject gets exactly one operator-filed visit.
+
 ## How a parked conversation comes back (2026-08-22)
 
 A sitting that reaches a conclusion **parks** its subject with a
