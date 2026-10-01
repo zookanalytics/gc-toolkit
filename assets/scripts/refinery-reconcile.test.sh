@@ -556,6 +556,34 @@ has "$gate_pilot" "--sling-var lane_two_provider=claude" "lane two runs on the c
 has "$gate_pilot" "--sling-var lane_two_target=myrig/gc-toolkit.polecat" "lane two targets the claude pool"
 has "$gate_pilot" "--sling-var synthesis_target=myrig/gc-toolkit.polecat" "the synthesis runs on the claude pool"
 
+echo "# the per-pass bd_list cache is set up, reaches the arms, and is torn down"
+# The driver only enables the cache when it can source bd-lib (so run_pass can
+# clear it between arms); the SD above has no copy, which is why every drive()
+# before this ran uncached. Put one beside the runner so the wiring activates.
+cp "$HERE/bd-lib.sh" "$SD/bd-lib.sh"
+CACHE_DIR="$TMP/state/myrig/cache"
+CACHE_PROBE="$TMP/cache-probe"
+# A gate-ensure stub that records, from inside the pass: the cache var it was
+# handed, whether the dir existed, and whether a leftover file survived setup.
+cat > "$SD/gate-ensure.sh" <<ARM
+#!/usr/bin/env bash
+d="\${GC_RECONCILE_BD_CACHE:-<unset>}"
+printf '%s|%s|%s\n' "\$d" "\$([ -d "\$d" ] && echo dir-present || echo dir-absent)" "\$([ -e "\$d/stale.json" ] && echo stale-present || echo stale-absent)" >> "$CACHE_PROBE"
+exit 0
+ARM
+chmod +x "$SD/gate-ensure.sh"
+for a in pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+# Seed a leftover entry from a notional killed pass; the rm-then-create setup must clear it.
+mkdir -p "$CACHE_DIR"; echo '[{"id":"stale"}]' > "$CACHE_DIR/stale.json"
+: > "$CACHE_PROBE"
+out=$(drive); rc=$?
+eq "$rc" 0 "a pass with the bd_list cache wiring exits 0"
+probe=$(head -1 "$CACHE_PROBE")
+has "$probe" "$CACHE_DIR" "GC_RECONCILE_BD_CACHE is exported to the arms, pointing into the pass state dir"
+has "$probe" "dir-present" "the cache dir exists while an arm runs"
+has "$probe" "stale-absent" "a leftover dir from a killed pass is recreated clean (its stale entry is gone)"
+if [ ! -d "$CACHE_DIR" ]; then ok "the cache dir is removed after END"; else bad "the cache dir survived past END"; fi
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

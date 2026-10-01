@@ -217,10 +217,8 @@ demand_gate_state() { # <anchor-id>
   local rows
   # --include-gates: the demand is a human gate (issue_type=gate), which
   # `bd list` hides by default; without it a held anchor reads released.
-  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
-  rows=$(printf '%s' "$rows" | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --include-gates --metadata-field "gc.demand_for=${1:-}") || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
     '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
     >/dev/null 2>&1 && return 0
@@ -291,10 +289,8 @@ anchor_foreign_blocker() { # <anchor-id> <own-branch> <own-title>; prints foreig
 anchor_decision_held() { # <anchor-id>
   local kids kid
   takeaway_is_holding "${1:-}" && return 0
-  kids=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "anchor_bead=${1:-}" --limit=0 --json 2>/dev/null) || return 0
-  kids=$(printf '%s' "$kids" | scrub)
-  printf '%s' "$kids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  kids=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "anchor_bead=${1:-}") || return 0
   for kid in $(printf '%s' "$kids" | jq -r '.[] | select(((.metadata.task_kind // "") | tostring) == "rework") | .id' 2>/dev/null); do
     [ -n "$kid" ] || continue
     takeaway_is_holding "$kid" && return 0
@@ -431,6 +427,13 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
     fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
   fi
   [ -n "$fix" ] || return 1
+  # The child now exists in the store (freshly created, or reuse-restamped); drop
+  # the per-pass bd_list cache so a later anchor's "does a child already exist?"
+  # probe refetches and cannot mint a duplicate on a stale "no child". The verify
+  # and husk-close below read with gc bd show, which does not repopulate the
+  # cache, so the next bd_list sees whatever final state they leave. No-op outside
+  # a reconcile pass.
+  bd_cache_clear
   ok=$(mint_rework_verify "$fix" "$anchor" "$branch" "$target" "$reason" "$mode" "$prurl" "$prnum")
   if [ "$ok" != "true" ]; then
     # One retry: the write is all-or-nothing, so re-applying the whole payload
@@ -1427,6 +1430,10 @@ REAP_EOF
           else
             echo "$PROG: WARN could not re-stamp role marker on covering rework $dup (retry next pass)" >&2
           fi
+          # The re-stamp changed $dup's role marker; drop the per-pass bd_list cache
+          # so a later same-branch anchor's dedup reads the new marker. No-op outside
+          # a reconcile pass.
+          bd_cache_clear
         fi
         echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child${stranded:+ (unrouted sibling $stranded is redundant and holds the anchor)}"
         skipped=$((skipped + 1)); continue
@@ -1594,6 +1601,11 @@ $CBODY"
           || echo "$PROG: WARN comment rework $CFIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
         gc bd dep "$CFIX" --blocks "$id" >/dev/null 2>&1 \
           || echo "$PROG: WARN could not attach comment rework $CFIX as a blocks-dep of $id" >&2
+        # The comment-rework child now exists (created or adopted, then stamped);
+        # drop the per-pass bd_list cache so the title/anchor_bead dedup probe reads
+        # it on the next anchor and does not twin it. The gc bd show reads below do
+        # not repopulate the cache. No-op outside a reconcile pass.
+        bd_cache_clear
         # anchor_bead is the dedup key the probe above reads; an unstamped child
         # is invisible to it, so routing one would twin on the next pass.
         agot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
@@ -1811,6 +1823,11 @@ $CBODY"
         v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
         v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
       fi
+      # The validation pass was created/adopted and its shape repaired above; drop
+      # the per-pass bd_list cache so a later anchor's anchor_bead/title probe reads
+      # it and does not twin it. The reads above are gc bd show, which does not
+      # repopulate the cache. No-op outside a reconcile pass.
+      bd_cache_clear
       if [ "$v_kind" != "validation" ] || [ "$v_anchor" != "$id" ] || [ "$v_lane" != "human" ] || { [ -n "$head_oid" ] && [ -z "$v_oid" ]; }; then
         echo "$PROG: WARN $id — PR#$num validation pass $VPASS did not record the batch shape (want task_kind=validation anchor_bead=$id check_name=human${head_oid:+ reviewed_oid set}; got task_kind=${v_kind:-<absent>} anchor_bead=${v_anchor:-<absent>} check_name=${v_lane:-<absent>} reviewed_oid=${v_oid:-<absent>}); nothing watermarked, the batch retries next pass" >&2
         skipped=$((skipped + 1)); continue
