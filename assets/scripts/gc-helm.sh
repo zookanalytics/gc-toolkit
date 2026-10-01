@@ -1594,6 +1594,64 @@ cmd_resolve() {
     printf '%s\n' "$RESOLVED_SUBJECT"
 }
 
+# verify_subject <bead-id> <verb> <nothing-clause> [<subject-ref>] — resolve a
+# bead id to its live row before a write verb acts on it, classifying a
+# non-answer the way `open` does. A probe that did not ANSWER — empty output, or
+# an error OTHER than the "no issues found" not-found error — is a data-plane
+# outage: retryable, existence UNKNOWN, NOT a missing bead. Only a well-formed
+# result that resolves no matching row is a genuine not-found, and an id whose
+# prefix matches no rig is a not-found provable without the data plane. open,
+# engage, dismiss and accept share this one path, so a refused Dolt connection
+# is never reported to the operator as a typo and the message cannot drift
+# between verbs.
+#
+# `gc bd show <id>` is deliberately UNPINNED: it resolves across ledgers
+# regardless of BEADS_DIR, so pinning --db by prefix would false-refuse a real
+# subject. The raw read is captured before scrub so an EMPTY answer stays
+# distinguishable from an error object, and the id is compared for EQUALITY so a
+# row for a different bead is not taken as a resolution.
+#
+# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array),
+# VS_ROW (the matched object), VS_ID (its id), and returns 0. Otherwise prints
+# the classified message to stderr — "$PROG: <verb>: …" suffixed with
+# <nothing-clause> (e.g. "Nothing spawned.") — and returns 4, the fail-closed
+# exit code every caller already uses. <subject-ref> overrides how the id is
+# named in that message (accept names a subject a visit pointed at); empty uses
+# the bare quoted id.
+verify_subject() {
+    _vs_bead="$1"; _vs_verb="$2"; _vs_nothing="$3"
+    _vs_ref="${4:-}"; [ -n "$_vs_ref" ] || _vs_ref="'$_vs_bead'"
+    VS_PAYLOAD=""; VS_ROW=""; VS_ID=""
+    _vs_raw=$(gc bd show "$_vs_bead" --json 2>/dev/null || true)
+    VS_PAYLOAD=$(printf '%s' "$_vs_raw" | scrub)
+    VS_ROW=$(printf '%s' "$VS_PAYLOAD" \
+        | jq -c --arg b "$_vs_bead" \
+            'if type == "array"
+             then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first) // empty
+             else empty end' 2>/dev/null || true)
+    case "$VS_ROW" in ""|null) VS_ROW="" ;; esac
+    if [ -n "$VS_ROW" ]; then
+        VS_ID=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
+    fi
+    [ -n "$VS_ID" ] && return 0
+
+    # No matching row. Not-found is the specific "no issues found" error; any
+    # OTHER error means the read FAILED and existence is unknown — reporting an
+    # outage as a typo sends the operator hunting a bead that is there.
+    _vs_rig=$(rig_name_for_bead "$_vs_bead")
+    _vs_probe_err=$(printf '%s' "$VS_PAYLOAD" \
+        | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+    case "$_vs_probe_err" in *"no issues found"*) _vs_probe_err="" ;; esac
+    if [ -z "$_vs_rig" ]; then
+        echo "$PROG: $_vs_verb: bead not found: $_vs_ref — its id prefix '${_vs_bead%%-*}' matches no rig in 'gc rig list'. $_vs_nothing" >&2
+    elif [ -z "$_vs_raw" ] || [ -n "$_vs_probe_err" ]; then
+        echo "$PROG: $_vs_verb: could not verify $_vs_ref — 'gc bd show' did not answer${_vs_probe_err:+ ($_vs_probe_err)} (data plane down?). $_vs_nothing" >&2
+    else
+        echo "$PROG: $_vs_verb: bead not found: $_vs_ref — no rig ledger answers for that id. $_vs_nothing" >&2
+    fi
+    return 4
+}
+
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a VISIT on the bead — a small child bead in the subject's
 # continuation group, parked on the helm board via `gc.routed_to=human` (the
@@ -1636,36 +1694,11 @@ cmd_open() {
 
     # The subject must EXIST before anything is filed: fail CLOSED on every
     # unhappy reading — the alternative is filing a visit on an unverified
-    # subject. Distinct messages: each reading needs a different operator move.
+    # subject. verify_subject is the shared resolve+classify that tells a
+    # data-plane outage apart from a genuine not-found.
     # >>> open-subject-exists
-    subject_raw=$(gc bd show "$bead" --json 2>/dev/null || true)
-    # `bd show` answers an ARRAY on success, a bare {"error":…} OBJECT
-    # otherwise; control chars in notes break the parse (must not read as
-    # "missing"). Id compared for EQUALITY with what was typed. Deliberately
-    # UNPINNED: `gc bd show <id>` resolves across ledgers regardless of
-    # BEADS_DIR; pinning --db by prefix would false-refuse a real subject.
-    subject_clean=$(printf '%s' "$subject_raw" | scrub)
-    subject=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-             else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        # Not-found is the specific "no issues found" error; any OTHER error
-        # means the read FAILED and existence is unknown — reporting an outage
-        # as a typo sends the operator hunting one that is not there.
-        probe_err=$(printf '%s' "$subject_clean" \
-            | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
-        case "$probe_err" in *"no issues found"*) probe_err="" ;; esac
-        if [ -z "$rig" ]; then
-            echo "$PROG: open: bead not found: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list'. No visit filed." >&2
-        elif [ -z "$subject_raw" ] || [ -n "$probe_err" ]; then
-            echo "$PROG: open: could not verify '$bead' — 'gc bd show' did not answer${probe_err:+ ($probe_err)} (data plane down?). No visit filed." >&2
-        else
-            echo "$PROG: open: bead not found: '$bead' — no rig ledger answers for that id. No visit filed." >&2
-        fi
-        exit 4
-    fi
+    verify_subject "$bead" open "No visit filed." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
     # <<< open-subject-exists
 
     # A DONE-band row is a finished item, not open work. Minting a fresh
@@ -1951,19 +1984,12 @@ cmd_dismiss() {
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
-    # The subject must resolve before anything is written. Same fail-closed
-    # reading as `open`: a read that did not answer is not a missing bead, and
-    # dismissing an unverified id would stamp a marker nothing ever clears.
-    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
-    subject=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-             else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        echo "$PROG: dismiss: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing was written." >&2
-        exit 4
-    fi
+    # The subject must resolve before anything is written — the same
+    # resolve+classify `open` uses, so a read that did not answer is reported as
+    # a data-plane outage, not a missing bead. Dismissing an unverified id would
+    # stamp a marker nothing ever clears.
+    verify_subject "$bead" dismiss "Nothing was written." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names its own sitting. The board lists a parked visit as a row
     # of its own, and engage accepts the visit id straight off that row, so
@@ -2286,18 +2312,12 @@ cmd_accept() {
     resolve_live_subject "$bead"
     bead="$RESOLVED_SUBJECT"
 
-    # The subject must resolve before anything is dispatched: fail CLOSED on an
-    # unverified read — the alternative is a sling on a bead that may not exist.
-    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
-    subject=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-             else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        echo "$PROG: accept: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing dispatched." >&2
-        exit 4
-    fi
+    # The subject must resolve before anything is dispatched — the shared
+    # resolve+classify, so an unanswered read fails closed as a data-plane
+    # outage, not a missing bead. The alternative is a sling on a bead that may
+    # not exist.
+    verify_subject "$bead" accept "Nothing dispatched." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names the recommendation's subject. The board renders Accept on
     # the folded subject tile, so the common input is the subject id; a visit id
@@ -2337,16 +2357,8 @@ cmd_accept() {
         # empty; without this the formula reads empty and accept would wrongly report
         # the subject "discuss-only" (exit 2) on a state it could not read, where the
         # contract is to fail closed (exit 4).
-        subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
-        subject=$(printf '%s' "$subject_clean" \
-            | jq -r --arg b "$bead" \
-                'if type == "array"
-                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-                 else empty end' 2>/dev/null || true)
-        if [ -z "$subject" ]; then
-            echo "$PROG: accept: could not verify the subject '$bead' this visit names — 'gc bd show' returned no bead with that id. Nothing dispatched." >&2
-            exit 4
-        fi
+        verify_subject "$bead" accept "Nothing dispatched." "the subject '$bead' this visit names" || exit $?
+        subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
     fi
 
     # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
@@ -2776,14 +2788,11 @@ cmd_engage() {
         exit 4
     fi
 
-    # The bead must resolve before anything spawns — fail closed, as open does.
-    bead_row=$(gc bd show "$bead" --json 2>/dev/null | scrub \
-        | jq -r --arg b "$bead" \
-            'if type == "array" then ([ .[] | select(type=="object" and (.id // "")==$b) ] | first) else empty end' 2>/dev/null || true)
-    if [ -z "$bead_row" ] || [ "$bead_row" = "null" ]; then
-        echo "$PROG: engage: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing spawned." >&2
-        exit 4
-    fi
+    # The bead must resolve before anything spawns — the shared resolve+classify,
+    # so an unanswered read fails closed as a data-plane outage, not a missing
+    # bead, the way open does.
+    verify_subject "$bead" engage "Nothing spawned." || exit $?
+    bead_row="$VS_ROW"
     bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
 
     # The subject a visit id is about — for the grounding line and the success
