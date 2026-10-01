@@ -1,71 +1,103 @@
 ---
-name: Visual review check — design
-description: Design for the `visual` PR-triage review check that decides whether a change needs a visual, picks a modality, and delivers it uncommitted to the PR. Records the architecture and work breakdown for tk-vd66j1.5.
+name: Visual review — design
+description: Design for generalizing the `demo` review check into a visual-review decision — judge whether a change needs a visual, pick the cheapest modality (committed artifact, screenshot, narrated video), and deliver it uncommitted to the PR. Records the architecture and work breakdown for tk-vd66j1.5.
 ---
 
-# Visual review check
+# Visual review
 
-A PR-triage review check named `visual` decides whether a change needs a visual
-to be understood, selects the modality that fits — a screenshot, a visual
-already committed to the repo, or a narrated video demo — and captures and
-delivers that visual on the PR, inline and uncommitted. When no visual helps,
-the check does nothing. Skipping is the default.
+The `demo` review check decides whether a change's surface was recorded and
+delivers a narrated video. This leg generalizes it. The one check decides
+whether a change needs a visual to be understood, and delivers the cheapest
+modality that conveys it: a visual already committed to the repo, a screenshot,
+or the narrated video the check already produces. When no visual helps, the
+check approves with a note and attaches nothing. There is one check, not two.
 
 This records the design and the work breakdown for tk-vd66j1.5, the review-check
-leg of epic tk-vd66j1. The direction is the operator ruling in visit tk-t6lcqm
-(2026-09-29): the capability is a review check that judges visual-need and
-modality, not an option to produce a video.
+leg of epic tk-vd66j1. The direction is the operator ruling in visit tk-t6lcqm:
+the capability is a review check that judges visual-need and modality, not an
+option to produce a video.
+
+## One check, generalized — not a new one
+
+A new visual check and the existing `demo` check would judge the same thing:
+does a user-visible change need to be shown, and if so, show it. `demo` already
+does this for one modality, the narrated video. A second check beside it would
+hand triage two overlapping tokens for one decision and split the method across
+two homes. So this leg generalizes `demo` rather than declaring a sibling:
+
+- Need. `demo` today asks whether the recorded surface does the thing. It now
+  asks the prior question as well: does this change need a visual at all? A
+  refactor or a pure-logic change needs none, and the check approves with a
+  note.
+- Modality. When a visual helps, the check picks the cheapest one that conveys
+  the change — a committed repo artifact, a screenshot, or the narrated video.
+  Video is the modality it already produces.
+
+The index keeps one entry for the check. Its `purpose` broadens from "was the
+surface recorded" to "does this change need a visual, and is the right one
+delivered." The seam is unchanged: triage engages the one check, and one
+`signoff.sh` verdict records the decision.
+
+Naming: whether to rename the index token `demo` to `visual` is a review-gates
+decision, not this leg's. The token is shared with in-flight review-gates work
+(the phase model below, and its rollout under tk-cwkmt2), so the rename belongs
+in that one place if it happens. This design generalizes the check under
+whatever token the index carries.
 
 ## What already exists
 
-- Video capture runs end-to-end in Gas City. `skills/demo-capture` drives the
-  SprintShow engine (Playwright, on-screen captions, OpenAI TTS, ffmpeg) to
-  produce a narrated MP4 (tk-vd66j1.3, PR #887).
-- Delivery to a PR is a solved primitive. `assets/scripts/demo-deliver.sh
-  --file <path> --subject <bead>` attaches a file to the bead's PR with `gh pr
-  comment --attach`, which uploads to GitHub's user-attachments CDN and renders
-  it inline (a video as a player, an image inline) with no human step
-  (tk-vd66j1.4, PR #919). It pins the rig's own origin, refuses a foreign PR,
-  and fails closed on a missing or pre-2.99.0 `gh`.
+- The `demo` review check. `review-checks.toml` declares it, triage engages it
+  through `signoff.sh --add-gates`, `assets/scripts/review-dispatch-body.sh`
+  carries its method arm, and `gate-ensure.sh` pours it generically for every
+  token in `check_set`. It sits outside the baseline set
+  (`DEFAULT_CHECK_SET="correctness,triage"`), so a change triage does not flag
+  never runs it. `demo` and `pm` are the specialist checks that follow this
+  pattern today.
+- Video capture. `skills/demo-capture` drives the SprintShow engine (Playwright,
+  on-screen captions, TTS, ffmpeg) to produce a narrated MP4 (tk-vd66j1.3).
+- Delivery. `assets/scripts/demo-deliver.sh --file <path> --subject <bead>`
+  attaches a file to the bead's PR inline and uncommitted, pins the rig's own
+  origin, refuses a foreign PR, and fails closed on a missing or old `gh`
+  (tk-vd66j1.4). It requires a resolvable PR and will not deliver before one
+  exists.
 
-So the check builds on a working capture path for video and a working delivery
-path for any file. The new work is the decision (need and modality) and the two
-new modalities (screenshot, repo-artifact).
+The capture path for video and the delivery path for any file both work. The
+new work is the need-and-modality decision and the two new modalities,
+screenshot and repo-artifact.
 
-## How the check plugs into the review system
+## When the check runs: the phase model owns it
 
-A check in this pack is a declared method, not a script. The seam has four
-parts, and `visual` uses all four the way `demo` does.
+The check needs the open PR, and for a rendered modality a deployed preview:
+`demo-deliver.sh` attaches to a PR and refuses without one, and a screenshot or
+a video is captured against the running app. So the check cannot run before the
+PR exists. Today's machinery has no way to express that. Triage engages a check
+at `pre_open_gate`, and `pr-open.sh` holds the PR closed until every engaged
+lane reads green, so a check triage adds is expected to pass before the PR it
+needs to produce its artifact.
 
-- The index. `review-checks.toml` declares each check as `[checks.<name>]` with
-  a `method` pointer and a one-line `purpose`. `visual` adds one entry.
-- The baseline. `gate-ensure.sh` sets `DEFAULT_CHECK_SET="correctness,triage"`
-  and pours one `mol-review` bead per gate in an anchor's `check_set`. A check
-  absent from the set is never poured, so a check outside the baseline costs
-  nothing until something adds it. `visual` stays out of the baseline.
-- Engagement. Triage (`skills/review-triage/SKILL.md`) widens `check_set` with
-  `signoff.sh --verdict approve --add-gates <check>`, and may add any check the
-  index declares. `visual` is engaged when triage sees a diff that touches a
-  user-visible surface. Adding nothing stays the common case, so most PRs never
-  run `visual`.
-- The method and the verdict. `review-dispatch-body.sh` carries a `case
-  "$CHECK_NAME"` arm per check; `visual` adds an arm whose note tells the
-  reviewer to judge need, then pick a modality. The method itself is a SKILL and
-  an optional `docs/review-visual.md` rig-extension read from the reviewed
-  commit. The reviewer records one verdict through `signoff.sh`.
+Closing that gap is not this leg's to design. The review-gates phase model
+(tk-yx2oqr.1) makes each check's phase a first-class fact declared in the index,
+and places this check at the `open-as-draft` phase: triage decides pre-open that
+the change needs the check, `pr-open.sh` opens the PR as a draft so a preview
+deploys, the check runs against that preview and greens its lane, and the
+draft-to-ready transition surfaces the PR for human review once the check is
+green. That model also settles the preview-needs-a-PR case: a draft PR is an
+open PR, so the providers that build previews deploy for it.
 
-No change to `gate-ensure.sh` is needed; it pours generically for every token in
-`check_set`.
-
-This mirrors `demo`, which is declared, outside the baseline, engaged by triage,
-and binding once engaged. `visual` differs in two ways. Its need-judgment is
-finer: triage engages it on a surface heuristic, and the check itself decides
-whether a visual genuinely aids understanding. And it is not binding the same
-way, as the Verdict section states.
+This leg depends on that model and does not restate it. The check's phase, the
+draft-first flow, and the preview question belong to the phase model, whose
+implementation is tracked under tk-cwkmt2. Until it lands, the generalized check
+has no correct phase to run in, which is why the check bead below is blocked on
+it.
 
 ## The decision: need, then modality
 
-The check makes two judgments in order.
+Triage and the check divide the judgment. Triage makes the coarse call on the
+diff: a change that touches a user-visible surface warrants the check, and
+triage adds it; everything else does not, and the check never pours. Triage
+adding the check is the statement that a visual might be needed. The check makes
+the fine call once engaged: it confirms the change genuinely reads better shown
+than described, and if so picks the modality; if not, it approves with a note.
 
 Need. Does the diff change something a reviewer understands better by seeing it
 than by reading the diff? User-visible surfaces qualify: a rendered page or
@@ -82,28 +114,27 @@ Modality. When a visual helps, pick the cheapest one that conveys the change.
 - Video, when motion or a multi-step flow carries it, and narration explains it.
 
 Prefer the cheaper modality unless the change needs the richer one. A static
-layout change is a screenshot, not a demo; a new multi-step flow is a video.
+layout change is a screenshot, not a video; a new multi-step flow is a video.
 
 ## Modalities
 
 - Screenshot (new). Drive the headless browser already provisioned for the
-  demo-gated `agents/demo` session (Playwright) to render the affected app
-  state, save a PNG, and deliver it with `demo-deliver.sh`. Owned by
-  tk-vd66j1.7.
+  demo-gated `agents/demo` session (Playwright) to render the affected app state,
+  save a PNG, and deliver it with `demo-deliver.sh`. Owned by tk-vd66j1.7.
 - Repo-artifact (new). Locate a committed visual near the diff or named by the
   change, and deliver it inline. A committed-file URL renders only as a link, so
   inline delivery re-attaches the file through `demo-deliver.sh`. Owned by
   tk-vd66j1.8.
-- Video (reuses the epic's capture leg). Invoke the reusable rig-demo mol
-  (tk-vd66j1.2) over the proven demo-capture path to produce a narrated MP4, and
-  deliver it with `demo-deliver.sh`. Owned by tk-vd66j1.9. It waits on the mol
+- Video (the check's existing behavior). Invoke the reusable rig-demo mol
+  (tk-vd66j1.2) over the demo-capture path to produce a narrated MP4, and deliver
+  it with `demo-deliver.sh`. Owned by tk-vd66j1.9. It waits on the mol
   (tk-vd66j1.2) and the toolchain/TTS foundation (tk-vd66j1.1).
 
 ## Delivery
 
-Every modality delivers through `demo-deliver.sh`. It already attaches any file
-inline and uncommitted and resolves the PR from the anchor bead. No new delivery
-work is needed, which is why there is no delivery bead in the breakdown below.
+Every modality delivers through `demo-deliver.sh`, which attaches any file inline
+and uncommitted and resolves the PR from the anchor bead. No new delivery work is
+needed, so there is no delivery bead in the breakdown below.
 
 ## Verdict
 
@@ -112,44 +143,48 @@ the city does not approve PRs.
 
 - No need: approve with a one-line note, no attachment.
 - Need met: deliver the visual, approve, and name the modality in the comment.
-- Need unmet because the modality is not yet buildable: approve, and note that a
-  visual is warranted and why it could not be produced. This is non-blocking, on
-  purpose. The modalities land incrementally, and a PR must not be blocked
-  because the city has not finished building the capability. When the only
-  fitting modality is video and tk-vd66j1.2 or tk-vd66j1.1 have not landed, the
-  check degrades to a screenshot or a repo-artifact if one fits, and otherwise
-  leaves the note.
+- Modality not yet built: approve, and note that a visual is warranted and which
+  modality fits but is not yet available. This is non-blocking, on purpose. The
+  modalities land incrementally, and a PR must not be blocked because the city
+  has not finished building the capability. When the only fitting modality is
+  video and tk-vd66j1.2 or tk-vd66j1.1 have not landed, the check degrades to a
+  screenshot or a repo-artifact if one fits, and otherwise leaves the note.
+
+The "cannot run before the PR exists" case is not a verdict concern; the phase
+model handles it by running the check at `open-as-draft`, after the draft PR and
+its preview exist.
 
 The one case that may block is an explicit human request for a visual that
-cannot be met, the shape that opened this epic (PR#887). Whether that rises to
-request-changes is left to the decision-core bead, which owns the verdict logic.
+cannot be met, the shape that opened this epic. Whether that rises to
+request-changes is left to the check bead, which owns the verdict logic.
 
 ## Work breakdown
 
-Delivery is done (tk-vd66j1.4). The remaining work is four beads under epic
-tk-vd66j1, each armed to the polecat pool and gated so none starts before the
-design it depends on has landed.
+The remaining work is four beads under epic tk-vd66j1, each armed to the polecat
+pool and gated so none starts before the design it depends on has landed.
 
-- tk-vd66j1.6 — the check: declaration, triage engagement, and the need +
-  modality decision. The runnable core; it reaches a verdict and names the
-  modality even before any capture is wired. Blocked on tk-vd66j1.5 (this
-  design).
+- tk-vd66j1.6 — generalize the `demo` check: the need-and-modality decision and
+  the broadened purpose, reaching a verdict and naming the modality even before
+  any new capture is wired. Blocked on this design (tk-vd66j1.5) and on the phase
+  model implementation (tk-cwkmt2), without which the check has no correct phase
+  to run in.
 - tk-vd66j1.7 — screenshot modality. Blocked on tk-vd66j1.6.
 - tk-vd66j1.8 — repo-artifact modality. Blocked on tk-vd66j1.6.
 - tk-vd66j1.9 — video modality. Blocked on tk-vd66j1.6, the rig-demo mol
   (tk-vd66j1.2), and the toolchain/TTS foundation (tk-vd66j1.1).
 
-Cost of waiting: the check and its two new modalities (screenshot,
-repo-artifact) do not wait on anything outside this leg and can land as soon as
-the design does. Only the video modality waits on tk-vd66j1.2 and tk-vd66j1.1;
-until they land, an engaged check that would pick video falls back or leaves a
-note, so the capability is useful before video is wired.
+Cost of waiting: the decision and the two new modalities wait on the phase model
+landing (tk-cwkmt2) and on nothing else in this epic. The video modality
+additionally waits on tk-vd66j1.2 and tk-vd66j1.1.
 
 ## Boundaries
 
-- The reusable rig-demo mol is tk-vd66j1.2, not this leg. This check invokes it
-  for the video modality; it does not build it.
-- The capture toolchain and the TTS key are tk-vd66j1.1. This check assumes them
-  for video and names the dependency; it does not provision them.
+- The check's phase, triage engagement, and the draft-first flow are the
+  review-gates phase model's (tk-yx2oqr.1, rolled out under tk-cwkmt2). This leg
+  consumes them and does not re-specify them.
+- The reusable rig-demo mol is tk-vd66j1.2. The video modality invokes it; this
+  leg does not build it.
+- The capture toolchain and the TTS key are tk-vd66j1.1. The video modality
+  assumes them and names the dependency; it does not provision them.
 - npm-publishing the SprintShow engine stays deferred (operator-run), per the
   epic.
