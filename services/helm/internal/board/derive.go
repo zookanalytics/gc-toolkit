@@ -621,7 +621,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalledGate bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledGate bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -648,7 +648,13 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 	// through the count branches, exactly as a decomposed ruled row is.
 	case isRuledInFlight && r.mTotal == 0:
 		sev0 = SevNormal
-	case !isRuled && !isRuledInFlight && humanGated(a):
+	// A human-gated row the city is actively working is in-flight work, not an
+	// operator gate — the un-ruled twin of the isRuledInFlight arm above. Childless
+	// like that arm; a decomposed human-gated bead is banded by its roll-up through
+	// the count branches, exactly as a decomposed ruled row is.
+	case humanGatedInFlight && r.mTotal == 0:
+		sev0 = SevNormal
+	case !isRuled && !isRuledInFlight && !humanGatedInFlight && humanGated(a):
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
@@ -717,7 +723,7 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, parkedInFlight bool,
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
@@ -754,7 +760,13 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 	// reports its counts.
 	case isRuledInFlight && r.mTotal == 0:
 		return "ruled — work in flight"
-	case !isRuled && !isRuledInFlight && a.Source == "decision":
+	// The un-ruled twin: a human-gated row with a live molecule over the bead
+	// itself is being worked, not waiting on the operator. Childless like the arm
+	// above; a decomposed one reports its roll-up. The "working ·" phase prefix
+	// classifyPhases adds leads the line, so it reads as live execution.
+	case humanGatedInFlight && r.mTotal == 0:
+		return "human-gated — work in flight"
+	case !isRuled && !isRuledInFlight && !humanGatedInFlight && a.Source == "decision":
 		return "human-gated decision"
 	// A merge anchor names the pull request instead, and OUTRANKS the
 	// human-routed phrase below, which is not a competing fact but a less
@@ -775,7 +787,7 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return prFrontier(a, owedSince, now)
 	// The marker, not the kind, for the reason [severity] gives: a bead's
 	// `human` and `parked` rows are one bead and must not describe it two ways.
-	case !isRuled && !isRuledInFlight && humanGated(a):
+	case !isRuled && !isRuledInFlight && !humanGatedInFlight && humanGated(a):
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
@@ -832,7 +844,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool,
+func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
 	machine, approval string, ask *Blocker, prIsOwed bool, stallReason string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
@@ -865,6 +877,14 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	}
 	if takeaway != "" {
 		return takeaway
+	}
+	// A human-gated row the city is actively working answers with its live state,
+	// not the un-ruled "routed to you — no question recorded" or "operator
+	// decision" below: an agent is on it, so the row wants nothing from the
+	// operator. The twin of the takeaway winning for [ruledInFlight]; this one
+	// carries no takeaway, so it names the state directly.
+	if humanGatedInFlight {
+		return "in flight"
 	}
 	// Below here the takeaway is empty, so isRuled is false by construction and
 	// the decision/human branches need no guard of their own.
@@ -1672,6 +1692,18 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	// molecule that has since drained stops counting at once.
 	parkedInFlight := a.Source == "parked" &&
 		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
+	// A human-gated row — a decision, or a bead routed to the operator — that the
+	// city is actively working reads as in-flight, not an operator gate: a live
+	// molecule over the bead itself falsifies "no agent will take this until a
+	// human moves it", because an agent has. Read through the shared prstatus core
+	// off the same [Facts.wfLive] join parkedInFlight uses, so the lift holds only
+	// while execution is live and the gate stands back up the instant the molecule
+	// drains. Un-ruled by construction — a row that carries a takeaway is already
+	// lifted by [ruledInFlight] — and keyed on the anchor's OWN work; a human-gated
+	// PARENT whose CHILDREN are in flight is banded by its roll-up, and rolling a
+	// child's state up to its parent is aggregation (tk-ikpyzn.6), not this slice.
+	humanGatedInFlight := humanGated(a) && !isRuled && !isRuledInFlight &&
+		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
@@ -1699,7 +1731,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		}
 	}
 
-	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, parkedInFlight, stalled)
+	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
 	// Tile.Takeaway is where a row's ruling rides the wire (board.go: "the ruling
@@ -1734,7 +1766,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		// would hoist it above every live demand — the exact opposite of the
 		// terminal band [rankScore] floors it into. It gates every cause,
 		// the merge anchor's included.
-		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight) || dispDue || prIsOwed),
+		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight && !humanGatedInFlight) || dispDue || prIsOwed),
 
 		Weight: w,
 		Held:   held,
@@ -1784,8 +1816,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed, stalledReason),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stalledReason),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -1845,7 +1877,7 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// attention item is one row. This runs on the deduped set — after the twin
 	// reconcile, before the owed partition — because a wrapper folds only onto a
 	// subject that has a row, and both facts are settled by here.
-	folded := foldWrappers(deduped, anchors)
+	folded := foldWrappers(deduped, anchors, facts)
 
 	// Stamp each row's dependency family — the group it renders under. This runs
 	// on the folded set, so a dropped wrapper is neither a family root nor a
@@ -2071,7 +2103,7 @@ const clusterThreshold = 3
 // because dropping it would erase the only trace of the attention; its needs is
 // rewritten from its own title so the kept row states the ask instead of the
 // empty "routed to you — no question recorded".
-func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
+func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	for _, a := range anchors {
 		if _, ok := anchorByID[a.ID]; !ok {
@@ -2125,7 +2157,15 @@ func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 		}
 	}
 	for subj, folded := range asks {
-		applyFold(&tiles[idx[subj]], folded)
+		j := idx[subj]
+		// Liveness outranks a demand's static ask: a subject the city is actively
+		// working — a live molecule over the bead itself, or a live child under it —
+		// is not the operator's move, so a folded demand does not mark it owed
+		// (tk-ikpyzn.5). A live child is the roll-up's own signal, not child-to-parent
+		// aggregation (tk-ikpyzn.6): the demand asks whether an agent is on the
+		// SUBJECT, which its worked children answer.
+		subjectInFlight := f.anchorInFlight(anchorByID[subj]) > 0 || tiles[j].InProgressLive > 0
+		applyFold(&tiles[j], folded, subjectInFlight)
 	}
 	if len(drop) == 0 {
 		return tiles
@@ -2214,18 +2254,37 @@ type foldedAsk struct {
 // such as a merge anchor's PR clock, is kept rather than moved forward. A merge
 // anchor also keeps its own PR needs: the pull-request position is the more
 // specific ask and the wrapper only adds that a person is on it.
-func applyFold(t *Tile, folded []foldedAsk) {
-	t.Owed = true
+func applyFold(t *Tile, folded []foldedAsk, subjectInFlight bool) {
+	hasVisit, hasDemand := false, false
 	asks := make([]string, 0, len(folded))
 	for _, f := range folded {
 		asks = append(asks, f.ask)
-		if f.kind == wrapperVisit {
+		switch f.kind {
+		case wrapperVisit:
 			t.Held = true
+			hasVisit = true
+		case wrapperDemand:
+			hasDemand = true
 		}
 		if !f.owedSince.IsZero() && (t.PROwedSince.IsZero() || f.owedSince.Before(t.PROwedSince)) {
 			t.PROwedSince = f.owedSince
 		}
 	}
+	// A folded VISIT is a conversation a person is holding, so the subject owes it
+	// regardless of any work in flight. A folded DEMAND is an operator ask, but
+	// liveness outranks it: a subject the city is actively working is not owed the
+	// demand until the work drains (tk-ikpyzn.5). The demand fold is re-derived
+	// every render, so its ask re-surfaces on its own the moment the molecule
+	// drains — the row is never left stranded.
+	if !hasVisit && hasDemand && subjectInFlight {
+		// Not owed: the subject keeps its own in-flight NEEDS and stays out of the
+		// operator's queue. The wrapper is still dropped, so the item is one row.
+		// t.Owed is left as computeTile set it — a merge anchor the PR round-trip
+		// already owed stays owed; only the demand's contribution is withheld.
+		t.Section = classifySection(*t)
+		return
+	}
+	t.Owed = true
 	if t.PRMachine == "" {
 		switch len(asks) {
 		case 0:
