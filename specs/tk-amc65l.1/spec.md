@@ -1,6 +1,6 @@
 ---
 name: engage --new-subject — create-and-engage a fresh conversation subject
-description: Design record for gc-helm engage --new-subject (rig-aware create-and-engage in one gesture) and the gc.interactive_intake stand-down that keeps the async first-reaction worker from filing a second visit. Read when touching engage's new-subject path, the proactive scan/sling guard, or mol-first-reaction's advance-and-drain.
+description: Design record for gc-helm engage --new-subject (rig-aware create-and-engage in one gesture) and the gc.reaction_owned stand-down that keeps the async first-reaction worker from filing a second visit. Read when touching engage's new-subject path, the proactive scan/sling guard, or mol-first-reaction's advance-and-drain.
 ---
 
 # engage --new-subject
@@ -42,13 +42,13 @@ The created subject is operator-origin (`gc.origin=operator`), so the
 force-to-visit invariant would route it to a visit — but engage files that one
 visit itself. The async first-reaction / proactive worker must NOT file a second.
 
-The subject is created MARKED `gc.interactive_intake=1`, set in the same
+The subject is created MARKED `gc.reaction_owned=1`, set in the same
 `gc bd create --metadata` write, so the proactive scan can never observe the
 subject unmarked (the marker is born with the bead — no create-then-mark race).
 Three gates read it, defense in depth:
 
 1. **`tools/gc-proactive.sh` `scan_precision_filter`** drops a bead carrying
-   `gc.interactive_intake`, the same way it drops one already reacted
+   `gc.reaction_owned`, the same way it drops one already reacted
    (`gc.proactive_reaction` / `gc.first_reaction`). This is the race-free primary
    gate: the scan never slings a first reaction at a live intake.
 2. **`tools/gc-proactive.sh` `sling_first_reaction_guard`** refuses a marked bead
@@ -67,12 +67,17 @@ exactly one operator-filed visit.
 
 ## The marker lifecycle and the salvage
 
-`gc.interactive_intake` + its fail-closed consume are salvaged from the dropped
-branch `polecat/tk-9ntg93 @ d82af132` (`gc-visit-open.sh` set it,
-`converse-auto-open.sh` consumed it). There, the marker meant "auto-open the
-visit after first-reaction files it," and the fail-closed consume (unset, then
-read back, proceed only once provably gone) stopped a headless replay from
-auto-opening twice.
+The key names the bead's state — a live owner already owns reacting to it —
+rather than the path that set it, so a reader meets the marker without first
+learning the engage intake behind it. Any future setter that takes a bead's
+reaction off the autonomous worker writes the same key.
+
+The marker and its fail-closed consume are salvaged from the dropped branch
+`polecat/tk-9ntg93 @ d82af132` (`gc-visit-open.sh` set the marker,
+`converse-auto-open.sh` consumed it). There it meant "auto-open the visit after
+first-reaction files it," and the fail-closed consume (unset, then read back,
+proceed only once provably gone) stopped a headless replay from auto-opening
+twice.
 
 Here the marker's role changed: first-reaction must not run at all, because
 engage handles the subject end-to-end. The fail-closed READ (positive-finding
@@ -84,7 +89,7 @@ operator-engaged subject.
 
 ### Why the consume stamps `gc.proactive_reaction=1`
 
-Clearing `gc.interactive_intake` without a replacement would re-expose the
+Clearing `gc.reaction_owned` without a replacement would re-expose the
 subject to the scan (gate 1 drops on that marker), and a later sweep would
 re-react. So the stand-down stamps `gc.proactive_reaction=1` FIRST — the
 permanent "a reaction completed" proof the scan and the sling guard already read

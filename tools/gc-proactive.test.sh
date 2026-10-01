@@ -2,7 +2,7 @@
 # Hermetic test for tools/gc-proactive.sh's live-intake stand-down (tk-amc65l.1).
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
-# MARKED gc.interactive_intake=1, files the ONE visit, and spawns the sitting
+# MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
 # itself. The proactive worker must stand down so a sweep does not file a SECOND
 # visit for a conversation already under way. Two gates are covered here, both
 # exercised through the fixture seam (GC_PROACTIVE_FIXTURE), so no live city,
@@ -10,7 +10,7 @@
 #   (SCAN-DROP)  scan_precision_filter drops a marked bead from the candidate set
 #   (SCAN-KEEP)  …while an unmarked raw input bead is still a candidate
 #   (SLING-SKIP) sling refuses a marked bead as a no-op (exit RC_ALREADY_REACTED)
-#                and names gc.interactive_intake, filing nothing
+#                and names gc.reaction_owned, filing nothing
 #   (SLING-GO)   …while an unmarked bead proceeds to the dispatch
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
@@ -49,7 +49,7 @@ export GC_RIG=gc-toolkit
 cat > "$TMP/scan.json" <<'JSON'
 [
   {"id":"tk-plain",  "issue_type":"task", "description":"a raw input bead",      "title":"plain input",     "metadata":{}},
-  {"id":"tk-intake", "issue_type":"task", "description":"a live intake subject", "title":"intake subject",  "metadata":{"gc.interactive_intake":"1","gc.origin":"operator"}}
+  {"id":"tk-intake", "issue_type":"task", "description":"a live intake subject", "title":"intake subject",  "metadata":{"gc.reaction_owned":"1","gc.origin":"operator"}}
 ]
 JSON
 
@@ -61,7 +61,7 @@ hasnt "$IDS" "tk-intake" "(SCAN-DROP) a marked live-intake subject is dropped fr
 # beads.json: the metadata the sling guard reads per bead.
 cat > "$TMP/beads.json" <<'JSON'
 {
-  "tk-intake": {"metadata":{"gc.interactive_intake":"1","gc.origin":"operator"}},
+  "tk-intake": {"metadata":{"gc.reaction_owned":"1","gc.origin":"operator"}},
   "tk-plain":  {"metadata":{}}
 }
 JSON
@@ -71,7 +71,7 @@ set +e
 OUT="$(bash "$SCRIPT" sling tk-intake 2>&1)"; RC=$?
 set -e
 eq "$RC" 3 "(SLING-SKIP) sling of a marked bead exits RC_ALREADY_REACTED (3)"
-has "$OUT" "gc.interactive_intake=1" "(SLING-SKIP) …naming the marker"
+has "$OUT" "gc.reaction_owned=1" "(SLING-SKIP) …naming the marker"
 has "$OUT" "file a second" "(SLING-SKIP) …and why (a second visit)"
 hasnt "$OUT" "would sling" "(SLING-SKIP) …nothing dispatched"
 

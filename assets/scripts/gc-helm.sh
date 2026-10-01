@@ -83,7 +83,7 @@ its title and — absent --reason/--template — its opener), then files the one
 visit and engages it, all in one gesture. The rig to create it in comes from
 --rig or an interactive prompt over the converse-capable rigs (needed because
 there is no id prefix yet to derive a rig from); --no-input requires --rig. The
-subject is marked gc.interactive_intake=1 so the async first-reaction/proactive
+subject is marked gc.reaction_owned=1 so the async first-reaction/proactive
 worker stands down rather than file a second visit; the operator-origin
 force-to-visit invariant is preserved — engage files that one visit itself.
 dismiss ends the sitting. react slings a proactive first reaction via
@@ -2719,12 +2719,13 @@ EOF
 # Reads new_subject_title, engage_rig, engage_interactive, engage_reason*,
 # engage_template.
 #
-# The subject is created MARKED gc.interactive_intake=1 so the async first-
-# reaction / proactive worker stands down rather than file a SECOND visit (engage
-# files the one visit itself, below): tools/gc-proactive.sh drops a marked bead
-# from its scan, and formulas/mol-first-reaction.toml consumes the marker and
-# files no visit if one is slung anyway. The marker is set in the `gc bd create`
-# write itself (--metadata), so the scan can never observe the bead unmarked.
+# The subject is created MARKED gc.reaction_owned=1 — a live owner (this engage)
+# already owns reacting to it — so the async first-reaction / proactive worker
+# stands down rather than file a SECOND visit (engage files the one visit itself,
+# below): tools/gc-proactive.sh drops a marked bead from its scan, and
+# formulas/mol-first-reaction.toml consumes the marker and files no visit if one
+# is slung anyway. The marker is set in the `gc bd create` write itself
+# (--metadata), so the scan can never observe the bead unmarked.
 # gc.origin=operator is the honest origin; the force-to-visit invariant is
 # preserved, not relaxed — the subject still gets its one operator-filed visit.
 engage_create_subject() {
@@ -2772,7 +2773,7 @@ engage_create_subject() {
     # 4. Create the subject ATOMICALLY with its markers (see the header note).
     _ecs_body="Operator-initiated conversation subject (gc-helm engage --new-subject): ${engage_reason:-$new_subject_title}"
     _ecs_json=$(gc bd create -t task --title "$new_subject_title" -d "$_ecs_body" \
-        --metadata '{"gc.origin":"operator","gc.interactive_intake":"1"}' \
+        --metadata '{"gc.origin":"operator","gc.reaction_owned":"1"}' \
         --db "$_ecs_path/.beads" --json 2>/dev/null || true)
     bead=$(printf '%s' "$_ecs_json" | scrub | jq -r 'if type=="array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     if [ -z "$bead" ] || [ "$bead" = "null" ]; then
@@ -2823,7 +2824,7 @@ engage_new_subject_cleanup() {
     if ( cmd_open "$@" >/dev/null 2>&1 ); then
         echo "$PROG: engage: the live engage aborted, but filed the one visit new subject $_enc_bead owes — parked on the helm board. Engage it when ready: $PROG engage $_enc_bead" >&2
     else
-        echo "$PROG: engage: new subject $_enc_bead was created but its visit could NOT be filed (store error?); it still carries the gc.interactive_intake marker. File the visit by hand: $PROG open $_enc_bead" >&2
+        echo "$PROG: engage: new subject $_enc_bead was created but its visit could NOT be filed (store error?); it still carries the gc.reaction_owned marker. File the visit by hand: $PROG open $_enc_bead" >&2
     fi
     return "$_enc_rc"
 }

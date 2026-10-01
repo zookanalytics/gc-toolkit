@@ -282,8 +282,8 @@ reaction's own workflow so the closer is the bead's sole dispatch surface. Each
 block below resolves it and re-derives the bead in its own shell, because that is
 the only thing a block can rely on.
 
-**A live operator intake has already engaged — stand down.** A subject raised by
-`gc-helm engage --new-subject` carries `gc.interactive_intake=1`, set in its
+**A live owner already owns the reaction — stand down.** A subject raised by
+`gc-helm engage --new-subject` carries `gc.reaction_owned=1`, set in its
 create write. That engage created the subject, filed its ONE visit, and spawned
 the sitting itself, so a first reaction here would only file a SECOND visit for a
 conversation already under way. The proactive scan drops a marked bead and the
@@ -297,17 +297,17 @@ and drain. Check it ahead of the exit blocks, before the gate-visit create.
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-INTAKE=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.interactive_intake"] // "") else "" end' 2>/dev/null || printf '')
-if [ "$INTAKE" = "1" ]; then
-  echo "LIVE INTAKE: $WORK_BEAD_ID carries gc.interactive_intake=1 — gc-helm engage --new-subject created it, filed its one visit, and spawned the sitting. Running no exit and filing no visit; recording the reaction and draining."
+REACTION_OWNED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.reaction_owned"] // "") else "" end' 2>/dev/null || printf '')
+if [ "$REACTION_OWNED" = "1" ]; then
+  echo "REACTION OWNED: $WORK_BEAD_ID carries gc.reaction_owned=1 — gc-helm engage --new-subject created it, filed its one visit, and spawned the sitting. Running no exit and filing no visit; recording the reaction and draining."
   # Stamp the permanent completion proof (the scan and the sling guard read it),
-  # then CONFIRM it is on the bead before consuming the one-shot intake marker.
+  # then CONFIRM it is on the bead before consuming the one-shot marker.
   # The unset is gated on a read-back-proven gc.proactive_reaction=1, so a failed
   # or silently-dropped stamp can never combine with a successful unset to leave
   # the bead carrying NEITHER marker — the state the next proactive scan reads as
   # unreacted and re-visits, filing the second visit this block exists to prevent.
   # A marker that will not clear is left armed: the proven gc.proactive_reaction
-  # and the scan's gc.interactive_intake drop each keep a sweep off it, so either
+  # and the scan's gc.reaction_owned drop each keep a sweep off it, so either
   # way no second visit is filed.
 # >>> live-intake-consume
   REACTED=""
@@ -315,15 +315,15 @@ if [ "$INTAKE" = "1" ]; then
     REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.proactive_reaction"] // "") else "" end' 2>/dev/null || printf '')
   fi
   if [ "$REACTED" = "1" ]; then
-    # Proof is on the bead — consume the one-shot intake marker, reading it back.
-    gc bd update "$WORK_BEAD_ID" --unset-metadata gc.interactive_intake >/dev/null 2>&1 || true
-    INTAKE_LEFT=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.interactive_intake"] // "") else "unknown" end' 2>/dev/null || printf 'unknown')
-    [ "$INTAKE_LEFT" = "1" ] && echo "note: gc.interactive_intake did not clear on $WORK_BEAD_ID (still armed) — left as-is; the scan drop and gc.proactive_reaction both keep a sweep off it" >&2
+    # Proof is on the bead — consume the one-shot marker, reading it back.
+    gc bd update "$WORK_BEAD_ID" --unset-metadata gc.reaction_owned >/dev/null 2>&1 || true
+    REACTION_OWNED_LEFT=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.reaction_owned"] // "") else "unknown" end' 2>/dev/null || printf 'unknown')
+    [ "$REACTION_OWNED_LEFT" = "1" ] && echo "note: gc.reaction_owned did not clear on $WORK_BEAD_ID (still armed) — left as-is; the scan drop and gc.proactive_reaction both keep a sweep off it" >&2
   else
-    # The stamp is not proven on the bead, so DO NOT unset the intake marker —
+    # The stamp is not proven on the bead, so DO NOT unset the marker —
     # leaving it armed keeps scan_precision_filter's drop over the bead, so no
     # second visit is filed even without the permanent proof.
-    echo "warning: could not confirm gc.proactive_reaction=1 on $WORK_BEAD_ID; left gc.interactive_intake armed so scan_precision_filter's drop still keeps a sweep off it" >&2
+    echo "warning: could not confirm gc.proactive_reaction=1 on $WORK_BEAD_ID; left gc.reaction_owned armed so scan_precision_filter's drop still keeps a sweep off it" >&2
   fi
 # <<< live-intake-consume
   SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -335,7 +335,7 @@ if [ "$INTAKE" = "1" ]; then
 fi
 ```
 
-If it prints LIVE INTAKE, you are done: do not run any exit block below.
+If it prints REACTION OWNED, you are done: do not run any exit block below.
 
 **A landed reaction disposes once — check before you run an exit.** A completed
 reaction carries `gc.proactive_reaction=1`, stamped by the release the dispose

@@ -898,7 +898,7 @@ hasnt "$CALLED" "bd create" "(IA-REASON-TEMPLATE) …and nothing filed"
 
 echo "# --new-subject: file a fresh marked subject in a chosen rig, then engage it"
 # One-shot: --rig names the rig, the positional is the subject title. The subject
-# is created MARKED (gc.interactive_intake=1 + gc.origin=operator) in that rig's
+# is created MARKED (gc.reaction_owned=1 + gc.origin=operator) in that rig's
 # .beads store, then the ONE visit is filed and a sitting spawned. The marker is
 # what keeps the async first-reaction/proactive worker from filing a second visit.
 export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
@@ -906,7 +906,7 @@ printf 'open' > "$VIS_STATUS"
 run_engage "ship the new intake flow" --new-subject --rig gc-toolkit --no-input --no-attach
 eq "$RC" 0 "(NEWSUBJ) --new-subject --rig --no-input exits 0"
 SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
-has "$SUBJ_CREATE" "interactive_intake" "(NEWSUBJ) the subject is created with the gc.interactive_intake marker"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ) the subject is created with the gc.reaction_owned marker"
 has "$SUBJ_CREATE" "gc.origin" "(NEWSUBJ) …and gc.origin=operator (honest origin; the force-to-visit invariant is preserved)"
 has "$SUBJ_CREATE" "--db $TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
 has "$SUBJ_CREATE" "ship the new intake flow" "(NEWSUBJ) …titled with the subject text"
@@ -919,7 +919,7 @@ has "$VISIT_CREATE" "ship the new intake flow" "(NEWSUBJ-OPENER) the title doubl
 # The marker outlives a SUCCESSFUL engage (it is what stands the async worker
 # down); the abort backstop must be disarmed once the visit is filed, so a clean
 # engage never revokes it. (The disarm's control; its arm is NEWSUBJ-ABORT below.)
-hasnt "$CALLED" "unset-metadata gc.interactive_intake" "(NEWSUBJ) a successful engage keeps the marker — the backstop is disarmed once the visit is filed"
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ) a successful engage keeps the marker — the backstop is disarmed once the visit is filed"
 
 echo "# --new-subject one-shot without --rig is refused (no id prefix to derive a rig)"
 export BEAD_KIND=task
@@ -958,7 +958,7 @@ run_engage "doomed subject" --new-subject --rig gc-toolkit --no-input --no-attac
 eq "$RC" 4 "(NEWSUBJ-CREATEFAIL) a failed subject create exits 4"
 has "$OUT" "could not create the subject" "(NEWSUBJ-CREATEFAIL) …naming the fault"
 hasnt "$CALLED" "session new" "(NEWSUBJ-CREATEFAIL) …and no sitting spawned"
-hasnt "$CALLED" "unset-metadata gc.interactive_intake" "(NEWSUBJ-CREATEFAIL) …and no cleanup runs — nothing was created to clean up"
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-CREATEFAIL) …and no cleanup runs — nothing was created to clean up"
 unset SUBJ_CREATE_FAIL
 
 echo "# --new-subject whose post-create gate aborts still files the subject's one visit"
@@ -975,10 +975,10 @@ printf 'open' > "$VIS_STATUS"
 run_engage "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
 eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
 SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
-has "$SUBJ_CREATE" "interactive_intake" "(NEWSUBJ-ABORT) the subject was already created with the marker (the abort is post-create)"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-ABORT) the subject was already created with the marker (the abort is post-create)"
 VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
 has "$VISIT_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one parked visit, carrying its opener"
-hasnt "$CALLED" "unset-metadata gc.interactive_intake" "(NEWSUBJ-ABORT) …and LEAVES the marker, exactly as a successful engage does"
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-ABORT) …and LEAVES the marker, exactly as a successful engage does"
 has "$OUT" "parked on the helm board" "(NEWSUBJ-ABORT) …and tells the operator the visit is parked for them to engage"
 hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
 
@@ -992,7 +992,7 @@ eq "$RC" 0 "(NEWSUBJ-IA) interactive --new-subject exits 0"
 has "$OUT" "the only converse-capable rig" "(NEWSUBJ-IA) the lone converse rig auto-selects"
 SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
 has "$SUBJ_CREATE" "draft the Q3 plan" "(NEWSUBJ-IA) the typed title becomes the subject"
-has "$SUBJ_CREATE" "interactive_intake" "(NEWSUBJ-IA) …created with the marker"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-IA) …created with the marker"
 has "$CALLED" "session new converse-opus" "(NEWSUBJ-IA) …then a sitting spawns (Opus, the Enter default)"
 
 echo

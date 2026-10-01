@@ -2,7 +2,7 @@
 # Hermetic test for mol-first-reaction.toml's live-intake consume block
 # (tk-amc65l.1 / tk-lefs8h).
 #
-# A direct pour of a subject marked gc.interactive_intake=1 records the reaction
+# A direct pour of a subject marked gc.reaction_owned=1 records the reaction
 # (gc.proactive_reaction=1, the permanent proof) and consumes the one-shot intake
 # marker. The invariant the consume must hold: the bead is NEVER left with NEITHER
 # marker — that state is what a later proactive scan reads as unreacted and
@@ -37,7 +37,7 @@ BLOCK="$(awk '/# >>> live-intake-consume/{f=1; next} /# <<< live-intake-consume/
 [ -n "$BLOCK" ] && ok "live-intake-consume block extracted" || bad "could not extract live-intake-consume block"
 
 # A stateful gc stub. $STATE/proactive and $STATE/intake hold the two markers;
-# $STATE/unset_calls records every --unset-metadata gc.interactive_intake call.
+# $STATE/unset_calls records every --unset-metadata gc.reaction_owned call.
 # $STAMP_MODE controls the gc.proactive_reaction=1 write:
 #   ok   -> persists it, exit 0 (normal)
 #   fail -> writes nothing, exit 1 (the store refused the write)
@@ -56,7 +56,7 @@ case "$1 $2" in
           drop) exit 0 ;;
           *)    printf '1' > "$STATE/proactive"; exit 0 ;;
         esac ;;
-      *"--unset-metadata gc.interactive_intake"*)
+      *"--unset-metadata gc.reaction_owned"*)
         printf '%s\n' "$*" >> "$STATE/unset_calls"
         : > "$STATE/intake"
         exit 0 ;;
@@ -68,7 +68,7 @@ case "$1 $2" in
     jq -n --arg pr "$pr" --arg ik "$ik" \
       '[{id:"tk-sub", metadata:
           ((if $pr=="1" then {"gc.proactive_reaction":"1"} else {} end)
-         + (if $ik=="1" then {"gc.interactive_intake":"1"} else {} end))}]' ;;
+         + (if $ik=="1" then {"gc.reaction_owned":"1"} else {} end))}]' ;;
 esac
 STUB
 chmod +x "$TMP/bin/gc"
@@ -89,20 +89,20 @@ run_consume() {
 echo "# a proven stamp consumes the intake marker, leaving the permanent proof"
 run_consume ok
 eq "$UNSET_CALLED" "yes" "(OK) the intake marker is consumed once the stamp is proven"
-eq "$IK_LEFT" "" "(OK) …gc.interactive_intake is gone"
+eq "$IK_LEFT" "" "(OK) …gc.reaction_owned is gone"
 eq "$PR_LEFT" "1" "(OK) …gc.proactive_reaction remains as the permanent proof"
 keeps_a_marker "$PR_LEFT" "$IK_LEFT" "(OK-INVARIANT) the bead keeps at least one marker"
 
 echo "# a stamp that FAILS leaves the intake marker armed (never both-empty)"
 run_consume fail
 eq "$UNSET_CALLED" "no" "(FAIL) the intake marker is NOT consumed when the stamp failed"
-eq "$IK_LEFT" "1" "(FAIL) …gc.interactive_intake stays armed so the scan drop still covers the bead"
+eq "$IK_LEFT" "1" "(FAIL) …gc.reaction_owned stays armed so the scan drop still covers the bead"
 keeps_a_marker "$PR_LEFT" "$IK_LEFT" "(FAIL-INVARIANT) the bead keeps at least one marker"
 
 echo "# a stamp that SILENTLY DROPS (exit 0, no persist) is caught by the read-back"
 run_consume drop
 eq "$UNSET_CALLED" "no" "(DROP) an unconfirmed stamp does not license the unset"
-eq "$IK_LEFT" "1" "(DROP) …gc.interactive_intake stays armed"
+eq "$IK_LEFT" "1" "(DROP) …gc.reaction_owned stays armed"
 keeps_a_marker "$PR_LEFT" "$IK_LEFT" "(DROP-INVARIANT) the bead keeps at least one marker"
 
 echo

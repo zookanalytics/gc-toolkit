@@ -100,7 +100,7 @@ rig_beads_db() {
 # bead is not proof of a reaction, so it proceeds. Returns non-zero when the
 # bead is already reacted, so the caller skips the sling.
 sling_first_reaction_guard() {
-    local bead="$1" meta fr pr ii detail
+    local bead="$1" meta fr pr ro detail
     if [ -n "$FIXTURE" ]; then
         [ -f "$FIXTURE/beads.json" ] || return 0
         meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null || printf '{}')"
@@ -111,12 +111,12 @@ sling_first_reaction_guard() {
             | jq -c 'if type=="array" then (.[0].metadata // {}) else {} end' 2>/dev/null || printf '{}')"
     fi
     # A live operator intake (gc-helm engage --new-subject) marks the subject
-    # gc.interactive_intake=1 and handles it end-to-end — it has already filed the
+    # gc.reaction_owned=1 and handles it end-to-end — it has already filed the
     # one visit and spawned the sitting. Refuse to sling a first reaction that
     # would only file a SECOND visit for a conversation already under way.
-    ii="$(printf '%s' "$meta" | jq -r '."gc.interactive_intake" // ""' 2>/dev/null || printf '')"
-    if [ "$ii" = "1" ]; then
-        log "$PROG: sling: $bead carries gc.interactive_intake=1 — a live operator intake is handling it end-to-end and has filed its one visit. Not slinging a first reaction that would file a second."
+    ro="$(printf '%s' "$meta" | jq -r '."gc.reaction_owned" // ""' 2>/dev/null || printf '')"
+    if [ "$ro" = "1" ]; then
+        log "$PROG: sling: $bead carries gc.reaction_owned=1 — a live operator intake is handling it end-to-end and has filed its one visit. Not slinging a first reaction that would file a second."
         return 1
     fi
     fr="$(printf '%s' "$meta" | jq -r '."gc.first_reaction" // ""' 2>/dev/null || printf '')"
@@ -311,13 +311,14 @@ cmd_demand() {
 # leaves — gc.proactive_reaction (the release) and gc.first_reaction (the
 # dispose) — the same pair sling_first_reaction_guard refuses, so a reacted bead
 # is dropped here and never reaches the sling loop to spend a cap slot.
-#   - gc.interactive_intake — a live operator intake (gc-helm engage
-#     --new-subject) is being handled end-to-end by that engage: it creates the
-#     subject marked, files the ONE visit, and spawns the sitting itself. The
-#     marker is set in the create write, so the scan never sees the subject
-#     unmarked; dropping it here is what keeps a sweep from filing a SECOND visit
-#     for a conversation that already has one. sling_first_reaction_guard refuses
-#     it too, and mol-first-reaction consumes it if a direct pour reaches one.
+#   - gc.reaction_owned — a live owner already owns reacting to this bead, so an
+#     autonomous first reaction would duplicate it. An operator engage (gc-helm
+#     engage --new-subject) is the setter today: it creates the subject marked,
+#     files the ONE visit, and spawns the sitting itself. The marker is set in
+#     the create write, so the scan never sees the subject unmarked; dropping it
+#     here keeps a sweep from filing a SECOND visit for a conversation that
+#     already has one. sling_first_reaction_guard refuses it too, and
+#     mol-first-reaction consumes it if a direct pour reaches one.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -329,7 +330,7 @@ scan_precision_filter() {
         map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
             and ((.metadata["gc.first_reaction"] // "") == "")
-            and ((.metadata["gc.interactive_intake"] // "") == "")
+            and ((.metadata["gc.reaction_owned"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)

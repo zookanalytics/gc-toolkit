@@ -382,7 +382,7 @@ one-line command-prompt.
 
 The created subject is operator-origin, so the force-to-visit invariant still
 holds — but engage files that one visit itself, so the async worker must not file
-a second. The subject is created marked `gc.interactive_intake=1`, in the same
+a second. The subject is created marked `gc.reaction_owned=1`, in the same
 `gc bd create` write so the proactive scan never observes it unmarked. Three
 gates read the marker: `scan_precision_filter` drops a marked bead (the primary,
 race-free gate, so a sweep never slings a first reaction at it),
