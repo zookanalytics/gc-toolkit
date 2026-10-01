@@ -561,10 +561,13 @@ bash -n <(printf '%s\n' "$ARM") 2>/dev/null \
 hasnt "$ARM" "gc mail send" "it escalates rather than mails; a polecat's mail budget is zero"
 has "$ARM" "escalate.sh" "and it escalates through escalate.sh"
 
-# The arm executed, against helpers that can refuse. The drain is gated on BOTH
-# the escalation and the hold: escalate.sh records the release path, molecule-
-# hold.sh quiesces the molecule, and the arm drains only after both land. Each
-# stub records its call and returns a code the runner controls.
+# The arm executed, against helpers that can refuse. This drives the LIVE-conflict
+# path (a foreign owner still in the session list), where the drain is gated on
+# BOTH the escalation and the hold: escalate.sh records the release path,
+# molecule-hold.sh quiesces the molecule, and the arm drains only after both
+# land. The finished-work path (a completed hand-off or a merge_result) drains on
+# the hold ALONE and files no visit — the gate's own test covers it. Each stub
+# records its call and returns a code the runner controls.
 mkdir -p "$TMP/armpack/assets/scripts"
 cat > "$TMP/armpack/assets/scripts/escalate.sh" <<'ESC'
 #!/usr/bin/env bash

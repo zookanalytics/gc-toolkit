@@ -45,6 +45,8 @@ env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps (default 3600)
        GC_DOCTOR_SWEEP_STATE_DIR     where the run record lives
        GC_DOCTOR_SWEEP_NO_SYSTEMD    set to skip the transient user service and
                                      launch with setsid/nohup instead
+       GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT  seconds bounding the pre-spawn Dolt
+                                     health probe (default 20)
 USAGE
 }
 
@@ -85,6 +87,11 @@ resolve_num BOUND "${GC_DOCTOR_SWEEP_BOUND:-}" 1800 GC_DOCTOR_SWEEP_BOUND
 MAX_ATTEMPTS=""
 resolve_num MAX_ATTEMPTS "${GC_DOCTOR_SWEEP_MAX_ATTEMPTS:-}" 2 GC_DOCTOR_SWEEP_MAX_ATTEMPTS
 [ "$MAX_ATTEMPTS" -lt 1 ] && MAX_ATTEMPTS=1
+# The pre-spawn Dolt health probe is bounded: a data plane too slow to answer
+# its own health check is itself overloaded, so an exceeded probe reads as
+# degraded rather than something to wait on.
+DOLT_PROBE_TIMEOUT=""
+resolve_num DOLT_PROBE_TIMEOUT "${GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT:-}" 20 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
@@ -165,6 +172,58 @@ kill_tree() { # <root-pid>
   sleep 2
   for p in $pids; do kill -KILL "$p" 2>/dev/null; done
   kill -KILL "$root" 2>/dev/null
+}
+
+# Whether a doctor sweep this launcher started is still running, read from the
+# systemd user manager rather than STATE_DIR so a blind or non-persistent state
+# directory cannot hide it. Echoes the live unit and returns 0; returns 1 when
+# none is active, when systemd is not the launcher here, or when the query
+# cannot answer — a backstop never blocks a start it could not justify.
+sweep_unit_live() {
+  [ -z "${GC_DOCTOR_SWEEP_NO_SYSTEMD:-}" ] || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+  { [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; } || return 1
+  local unit
+  unit="$(timeout 10 systemctl --user list-units --no-legend \
+            'gc-doctor-sweep-*.service' 2>/dev/null \
+          | awk '$3 == "active" { print $1; exit }')"
+  [ -n "$unit" ] || return 1
+  printf '%s' "$unit"
+}
+
+# Whether Dolt is degraded enough that a sweep must not pile onto it. Echoes a
+# one-line reason and returns 0 when degraded, 1 when healthy or unproven.
+# Judged off server.reachable and server.latency_ms — the same fields and
+# 5000ms ceiling the deacon patrol's dolt-health step uses — with a probe that
+# outruns its own bound counted as overloaded. A missing gc, a non-timeout
+# error, or an unparseable answer is unproven, never degraded, so a broken
+# probe cannot disable sweeping.
+dolt_degraded() {
+  local gcbin out rc reachable latency
+  gcbin="$(command -v gc 2>/dev/null)"
+  [ -n "$gcbin" ] || return 1
+  out="$(timeout "$DOLT_PROBE_TIMEOUT" "$gcbin" dolt health --json 2>/dev/null)"; rc=$?
+  if [ "$rc" -eq 124 ]; then
+    printf 'health probe exceeded %ss; data plane too slow to answer' "$DOLT_PROBE_TIMEOUT"
+    return 0
+  fi
+  [ "$rc" -eq 0 ] || return 1
+  # Not `// empty`: jq's `//` treats boolean false like null, so it would swallow
+  # the very `reachable:false` this is looking for. Read the field raw.
+  reachable="$(printf '%s' "$out" | jq -r '.server.reachable' 2>/dev/null)"
+  if [ "$reachable" = "false" ]; then
+    printf 'Dolt server unreachable'
+    return 0
+  fi
+  latency="$(printf '%s' "$out" | jq -r '.server.latency_ms // empty' 2>/dev/null)"
+  case "$latency" in
+    ''|*[!0-9]*) return 1 ;;
+    *) if [ "$latency" -gt 5000 ]; then
+         printf 'Dolt server latency %sms over 5000ms' "$latency"
+         return 0
+       fi ;;
+  esac
+  return 1
 }
 
 STATE_DIR_OK=1
@@ -352,6 +411,35 @@ fi
 
 if [ "$MODE" = "status" ]; then
   report idle "next_in=0" "interval=$INTERVAL" "since_last=${SINCE:-never}"
+  exit 0
+fi
+
+# --------------------------------------------------------------- pre-spawn --
+# A start is due. Two last gates stand before spawning a ~10-minute sweep that
+# queries every store's Dolt, and both exist so this health check can never
+# drive the data plane it watches from a slowdown into a collapse.
+
+# A sweep already running, even when STATE_DIR cannot see it. The in-flight and
+# interval guards above read only STATE_DIR, which falls back to a per-process
+# /tmp path when the city is unset and need not survive a rapidly recycled fresh
+# session; a blind STATE_DIR un-gates a burst of concurrent starts where there
+# should be one. A systemd user unit outlives the session, so it answers "is a
+# sweep already running" independent of STATE_DIR, and one live unit collapses a
+# would-be burst to a single sweep.
+if UNIT_LIVE="$(sweep_unit_live)"; then
+  report running "reason=unit-already-live" "unit=$UNIT_LIVE" "bound=$BOUND"
+  exit 0
+fi
+
+# Dolt degraded. Starting a sweep while the data plane is unreachable or
+# overloaded is the amplifier this brake removes; the probe is far cheaper than
+# the sweep it gates. Deferring here, past the start decision, covers the
+# ordinary hourly start and equally the retry a failed run armed at the gate
+# above: neither spawns while Dolt is down. window-start and attempts are left
+# untouched, so the deferred start fires on the next pass once Dolt recovers,
+# with no attempt burned on a sweep that never ran.
+if DOLT_DETAIL="$(dolt_degraded)"; then
+  report deferred "reason=dolt-degraded" "detail=$DOLT_DETAIL"
   exit 0
 fi
 

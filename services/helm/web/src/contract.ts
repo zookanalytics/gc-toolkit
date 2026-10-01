@@ -68,6 +68,18 @@ export interface Tile {
   weight: number;
   /** An open visit bead names this anchor — a conversation is holding it. */
   held: boolean;
+  /**
+   * Refines `held` into the visit's engagement: `'engaged'` when a live sitting
+   * is in the conversation right now, `'parked'` when the visit stands open and
+   * un-engaged — filed and waiting for a person to pick it up. `''` on a row no
+   * open visit holds (`held` is false).
+   *
+   * Derived on the Go side from the same rule `acceptable` reads — a parked
+   * visit is the one Accept is offered on, an engaged one suppresses it — so the
+   * web reads this field rather than re-deriving it (the rule reads the visit's
+   * assignee, which the wire does not carry). Always present.
+   */
+  visit_state: string;
   n_closed: number;
   m_total: number;
   open: number;
@@ -281,13 +293,18 @@ export interface Tile {
   pr_phase: string;
   /**
    * This bead's liveness in the same tri-state vocabulary — `'working'`,
-   * `'needs-review'`, or `'needs-attention'` — but on EVERY live row, where
-   * `pr_phase` is set on merge anchors alone. A merge anchor reads the same value
-   * as `pr_phase`; any other bead reads its own live-work signal through the
-   * identical core, so a row cannot carry two disagreeing tri-states. `''` only
+   * `'needs-review'`, or `'needs-attention'` — on EVERY live row, and the word
+   * the `frontier` string leads with. It begins as the per-bead value derived
+   * from the same inputs as `pr_phase`, but a row with child tiles then takes its
+   * children's rolled-up state instead: an epic's frontier is its children's.
+   *
+   * So `phase` and `pr_phase` are two independent axes. `pr_phase` is the PR
+   * round-trip value and is never rolled up; `phase` equals it on a merge anchor
+   * with no child tiles (the common case, since a merge anchor's review/rework
+   * children hang off a blocked edge the roll-up does not climb) and diverges
+   * from it on a merge anchor that also has parent-child child tiles. `''` only
    * on a closed (`DONE`) row, where the live vocabulary has no answer — the same
-   * not-applicable empty `pr_phase` uses off a non-merge row. The `frontier`
-   * string leads with this word on every live row.
+   * not-applicable empty `pr_phase` uses off a non-merge row.
    */
   phase: string;
 }

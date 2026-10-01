@@ -149,13 +149,133 @@ th {
 }
 
 /*
- * The visit marker: an open converse sitting holds this row. A different hue from
- * the amber wants-person ● because it is a different fact — a conversation is on
- * the bead — and the two can co-occur (◉). Teal reads as informational against
- * the red/amber/green the rest of the board already spends.
+ * The visit marker: a visible chip on a row an open visit holds, telling a PARKED
+ * visit (filed, waiting for the operator) from an ENGAGED one (a live sitting is
+ * in it now) by word and colour. Parked wears the amber the board already spends
+ * on the operator's own move — it is waiting for them; engaged wears teal, a live
+ * conversation someone else is holding. The chip reads as interactive, and
+ * hovering or focusing it reveals the details card below — not a native title,
+ * which had no affordance and needed an exact hover to find.
  */
-.held-marker {
+.visit-marker {
+  display: inline-block;
+  position: relative;
+}
+
+.visit-marker--parked {
+  color: #8a6100;
+}
+
+.visit-marker--engaged {
   color: #0e7490;
+}
+
+.visit-chip {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  padding: 0.02rem 0.4rem;
+  white-space: nowrap;
+}
+
+.visit-chip__icon {
+  margin-right: 0.2em;
+}
+
+.visit-card {
+  background: Canvas;
+  border: 1px solid rgb(128 128 128 / 45%);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+  color: CanvasText;
+  display: none;
+  font-size: 0.8125rem;
+  left: 0;
+  max-width: 28rem;
+  min-width: 15rem;
+  padding: 0.5rem 0.6rem;
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  white-space: normal;
+  z-index: 10;
+}
+
+/* Revealed on hover OR keyboard focus, so a pointer is not the only way in. */
+.visit-marker:hover .visit-card,
+.visit-marker:focus-within .visit-card {
+  display: block;
+}
+
+.visit-card__heading {
+  color: inherit;
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.visit-card__sitting {
+  color: CanvasText;
+  display: block;
+  padding: 0.15rem 0;
+}
+
+.visit-card__sitting + .visit-card__sitting {
+  border-top: 1px solid rgb(128 128 128 / 25%);
+}
+
+.visit-card__meta {
+  opacity: 0.75;
+}
+
+/*
+ * The key: a compact strip stating what the row markers and tints mean, since the
+ * board spends glyphs and colour the operator has to be able to read. Small and
+ * muted — a reference, not a demand — and it reuses the rows' own marker classes
+ * so a sample cannot drift from the thing it explains.
+ */
+.legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  gap: 0.2rem 0.9rem;
+  margin: 0 0 0.5rem;
+  opacity: 0.85;
+}
+
+.legend__title {
+  font-weight: 600;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.legend__item {
+  white-space: nowrap;
+}
+
+.legend__item--done {
+  opacity: 0.55;
+}
+
+.legend__swatch {
+  border-radius: 2px;
+  display: inline-block;
+  height: 0.7em;
+  vertical-align: baseline;
+  width: 1.1em;
+}
+
+.legend__swatch--wants {
+  background: rgb(138 97 0 / 30%);
+}
+
+.legend__swatch--held {
+  background: rgb(128 128 128 / 30%);
 }
 
 /*

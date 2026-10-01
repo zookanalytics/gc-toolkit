@@ -153,12 +153,25 @@ bd_show() { bd_json "$1" show "$2" --brief-deps; }
 # frontier per-blocker read and the horizon child scan so the two cannot drift. A
 # bead moving on its own advances without external input: in progress, or routed
 # to a worker or pool that will action it. A route to the reserved `human` alias
-# is the opposite — a human gate — so it is stuck, as is an unrouted, parked (park
-# clears the route), or unknown bead. One level, one bead's own row; a transitive
-# walk (a blocker blocked by a blocker) drops in on the same enum later.
-# gc.execution_routed_to is a finished pour's provenance, not a live route, so it
-# is not consulted here.
-ADV='(.metadata["gc.routed_to"] // "") as $r | if .status == "in_progress" then "advancing" elif ($r == "" or $r == "human" or ($r | endswith("/human"))) then "stuck" else "advancing" end'
+# is a human gate, so it is stuck, as is an unrouted, parked (park clears the
+# route), or unknown bead.
+#
+# EXCEPT a tracked review or rework bead (task_kind): that is machine work the pool
+# owns, and its route is cleared by the pour that dispatched it, so an empty route on
+# one is the pour's residue, not a human gate — a review in flight is advancing, never
+# stuck (tk-ikpyzn.5). This mirrors the board's isReviewReworkKind band
+# (services/helm/internal/board/derive.go), which treats a review/rework leaf as
+# in-flight by kind. Liveness — whether that review's session is still up — is the
+# finer signal the board's wfLive join adds and this jq surface does not reach, so a
+# STRANDED review reads advancing here as it does in the board's severity; catching it
+# is a separate mechanism, the frontier analogue of the board's preOpenCodexStall. An
+# explicit `human` route still wins: it is checked first, so a review somehow routed to
+# a person stays stuck.
+#
+# One level, one bead's own row; a transitive walk (a blocker blocked by a blocker)
+# drops in on the same enum later. gc.execution_routed_to is a finished pour's
+# provenance, not a live route, so it is not consulted here.
+ADV='(.metadata["gc.routed_to"] // "") as $r | (.metadata["task_kind"] // "") as $tk | if .status == "in_progress" then "advancing" elif ($r == "human" or ($r | endswith("/human"))) then "stuck" elif ($tk == "review" or $tk == "rework") then "advancing" elif ($r == "") then "stuck" else "advancing" end'
 
 # A blocker read reduced to the facts the frontier turns on: {status, advance,
 # title}, as compact JSON so an empty route survives (a tab-delimited read

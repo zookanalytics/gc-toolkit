@@ -90,6 +90,10 @@ overlay_dir = "overlays/gh-origin-guard"
 name = "proactive"
 overlay_dir = "overlays/gh-origin-guard"
 
+[[patches.agent]]
+name = "demo"
+overlay_dir = "overlays/gh-origin-guard"
+
 # Named singletons. The pool templates (polecat, polecat-codex, converse,
 # proactive) need no stanza — instance expansion is their lifecycle.
 [[named_session]]

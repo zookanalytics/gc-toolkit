@@ -471,6 +471,9 @@ func fixtureBoard() board.Board {
 
 				Weight: 14,
 				Held:   true,
+				// Its sitting (tk-vst01) is in_progress, so a live conversation is
+				// engaged on it — the state that carries the field into the check.
+				VisitState: board.VisitEngaged,
 
 				NClosed:    3,
 				MTotal:     11,

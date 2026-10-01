@@ -40,7 +40,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
-  gc-helm engage [<subject>] [--subject <id>] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior
+  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
@@ -77,6 +77,15 @@ fresh one is filed only when the subject has none. A --reason with an explicit
 visit id is refused, because a new visit needs a subject and the reason would
 otherwise be dropped. The summary and prompts print on stdout; a single [debug]
 line of visit/sitting/routing ids is always printed on stderr.
+--new-subject raises a topic that has no bead yet: it creates a fresh
+operator-origin subject bead (the positional text, or an interactive prompt, is
+its title and — absent --reason/--template — its opener), then files the one
+visit and engages it, all in one gesture. The rig to create it in comes from
+--rig or an interactive prompt over the converse-capable rigs (needed because
+there is no id prefix yet to derive a rig from); --no-input requires --rig. The
+subject is marked gc.reaction_owned=1 so the async first-reaction/proactive
+worker stands down rather than file a second visit; the operator-origin
+force-to-visit invariant is preserved — engage files that one visit itself.
 dismiss ends the sitting. react slings a proactive first reaction via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one
@@ -1594,6 +1603,64 @@ cmd_resolve() {
     printf '%s\n' "$RESOLVED_SUBJECT"
 }
 
+# verify_subject <bead-id> <verb> <nothing-clause> [<subject-ref>] — resolve a
+# bead id to its live row before a write verb acts on it, classifying a
+# non-answer the way `open` does. A probe that did not ANSWER — empty output, or
+# an error OTHER than the "no issues found" not-found error — is a data-plane
+# outage: retryable, existence UNKNOWN, NOT a missing bead. Only a well-formed
+# result that resolves no matching row is a genuine not-found, and an id whose
+# prefix matches no rig is a not-found provable without the data plane. open,
+# engage, dismiss and accept share this one path, so a refused Dolt connection
+# is never reported to the operator as a typo and the message cannot drift
+# between verbs.
+#
+# `gc bd show <id>` is deliberately UNPINNED: it resolves across ledgers
+# regardless of BEADS_DIR, so pinning --db by prefix would false-refuse a real
+# subject. The raw read is captured before scrub so an EMPTY answer stays
+# distinguishable from an error object, and the id is compared for EQUALITY so a
+# row for a different bead is not taken as a resolution.
+#
+# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array),
+# VS_ROW (the matched object), VS_ID (its id), and returns 0. Otherwise prints
+# the classified message to stderr — "$PROG: <verb>: …" suffixed with
+# <nothing-clause> (e.g. "Nothing spawned.") — and returns 4, the fail-closed
+# exit code every caller already uses. <subject-ref> overrides how the id is
+# named in that message (accept names a subject a visit pointed at); empty uses
+# the bare quoted id.
+verify_subject() {
+    _vs_bead="$1"; _vs_verb="$2"; _vs_nothing="$3"
+    _vs_ref="${4:-}"; [ -n "$_vs_ref" ] || _vs_ref="'$_vs_bead'"
+    VS_PAYLOAD=""; VS_ROW=""; VS_ID=""
+    _vs_raw=$(gc bd show "$_vs_bead" --json 2>/dev/null || true)
+    VS_PAYLOAD=$(printf '%s' "$_vs_raw" | scrub)
+    VS_ROW=$(printf '%s' "$VS_PAYLOAD" \
+        | jq -c --arg b "$_vs_bead" \
+            'if type == "array"
+             then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first) // empty
+             else empty end' 2>/dev/null || true)
+    case "$VS_ROW" in ""|null) VS_ROW="" ;; esac
+    if [ -n "$VS_ROW" ]; then
+        VS_ID=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
+    fi
+    [ -n "$VS_ID" ] && return 0
+
+    # No matching row. Not-found is the specific "no issues found" error; any
+    # OTHER error means the read FAILED and existence is unknown — reporting an
+    # outage as a typo sends the operator hunting a bead that is there.
+    _vs_rig=$(rig_name_for_bead "$_vs_bead")
+    _vs_probe_err=$(printf '%s' "$VS_PAYLOAD" \
+        | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+    case "$_vs_probe_err" in *"no issues found"*) _vs_probe_err="" ;; esac
+    if [ -z "$_vs_rig" ]; then
+        echo "$PROG: $_vs_verb: bead not found: $_vs_ref — its id prefix '${_vs_bead%%-*}' matches no rig in 'gc rig list'. $_vs_nothing" >&2
+    elif [ -z "$_vs_raw" ] || [ -n "$_vs_probe_err" ]; then
+        echo "$PROG: $_vs_verb: could not verify $_vs_ref — 'gc bd show' did not answer${_vs_probe_err:+ ($_vs_probe_err)} (data plane down?). $_vs_nothing" >&2
+    else
+        echo "$PROG: $_vs_verb: bead not found: $_vs_ref — no rig ledger answers for that id. $_vs_nothing" >&2
+    fi
+    return 4
+}
+
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a VISIT on the bead — a small child bead in the subject's
 # continuation group, parked on the helm board via `gc.routed_to=human` (the
@@ -1636,36 +1703,11 @@ cmd_open() {
 
     # The subject must EXIST before anything is filed: fail CLOSED on every
     # unhappy reading — the alternative is filing a visit on an unverified
-    # subject. Distinct messages: each reading needs a different operator move.
+    # subject. verify_subject is the shared resolve+classify that tells a
+    # data-plane outage apart from a genuine not-found.
     # >>> open-subject-exists
-    subject_raw=$(gc bd show "$bead" --json 2>/dev/null || true)
-    # `bd show` answers an ARRAY on success, a bare {"error":…} OBJECT
-    # otherwise; control chars in notes break the parse (must not read as
-    # "missing"). Id compared for EQUALITY with what was typed. Deliberately
-    # UNPINNED: `gc bd show <id>` resolves across ledgers regardless of
-    # BEADS_DIR; pinning --db by prefix would false-refuse a real subject.
-    subject_clean=$(printf '%s' "$subject_raw" | scrub)
-    subject=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-             else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        # Not-found is the specific "no issues found" error; any OTHER error
-        # means the read FAILED and existence is unknown — reporting an outage
-        # as a typo sends the operator hunting one that is not there.
-        probe_err=$(printf '%s' "$subject_clean" \
-            | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
-        case "$probe_err" in *"no issues found"*) probe_err="" ;; esac
-        if [ -z "$rig" ]; then
-            echo "$PROG: open: bead not found: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list'. No visit filed." >&2
-        elif [ -z "$subject_raw" ] || [ -n "$probe_err" ]; then
-            echo "$PROG: open: could not verify '$bead' — 'gc bd show' did not answer${probe_err:+ ($probe_err)} (data plane down?). No visit filed." >&2
-        else
-            echo "$PROG: open: bead not found: '$bead' — no rig ledger answers for that id. No visit filed." >&2
-        fi
-        exit 4
-    fi
+    verify_subject "$bead" open "No visit filed." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
     # <<< open-subject-exists
 
     # A DONE-band row is a finished item, not open work. Minting a fresh
@@ -1951,19 +1993,12 @@ cmd_dismiss() {
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
-    # The subject must resolve before anything is written. Same fail-closed
-    # reading as `open`: a read that did not answer is not a missing bead, and
-    # dismissing an unverified id would stamp a marker nothing ever clears.
-    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
-    subject=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-             else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        echo "$PROG: dismiss: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing was written." >&2
-        exit 4
-    fi
+    # The subject must resolve before anything is written — the same
+    # resolve+classify `open` uses, so a read that did not answer is reported as
+    # a data-plane outage, not a missing bead. Dismissing an unverified id would
+    # stamp a marker nothing ever clears.
+    verify_subject "$bead" dismiss "Nothing was written." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names its own sitting. The board lists a parked visit as a row
     # of its own, and engage accepts the visit id straight off that row, so
@@ -2286,18 +2321,12 @@ cmd_accept() {
     resolve_live_subject "$bead"
     bead="$RESOLVED_SUBJECT"
 
-    # The subject must resolve before anything is dispatched: fail CLOSED on an
-    # unverified read — the alternative is a sling on a bead that may not exist.
-    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
-    subject=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-             else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        echo "$PROG: accept: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing dispatched." >&2
-        exit 4
-    fi
+    # The subject must resolve before anything is dispatched — the shared
+    # resolve+classify, so an unanswered read fails closed as a data-plane
+    # outage, not a missing bead. The alternative is a sling on a bead that may
+    # not exist.
+    verify_subject "$bead" accept "Nothing dispatched." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names the recommendation's subject. The board renders Accept on
     # the folded subject tile, so the common input is the subject id; a visit id
@@ -2337,16 +2366,8 @@ cmd_accept() {
         # empty; without this the formula reads empty and accept would wrongly report
         # the subject "discuss-only" (exit 2) on a state it could not read, where the
         # contract is to fail closed (exit 4).
-        subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
-        subject=$(printf '%s' "$subject_clean" \
-            | jq -r --arg b "$bead" \
-                'if type == "array"
-                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-                 else empty end' 2>/dev/null || true)
-        if [ -z "$subject" ]; then
-            echo "$PROG: accept: could not verify the subject '$bead' this visit names — 'gc bd show' returned no bead with that id. Nothing dispatched." >&2
-            exit 4
-        fi
+        verify_subject "$bead" accept "Nothing dispatched." "the subject '$bead' this visit names" || exit $?
+        subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
     fi
 
     # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
@@ -2654,6 +2675,160 @@ engage_prompt_model() {
     return 0
 }
 
+# engage_prompt_rig — numbered selection over the rigs that carry a converse
+# template (only those can host a sitting). A single such rig is auto-selected;
+# none is an error. Sets ENGAGE_RIG.
+engage_prompt_rig() {
+    enumerate_rigs
+    _epr_i=0; _epr_map=""; _epr_menu=""
+    while IFS="$TAB" read -r _epr_name _epr_path; do
+        [ -n "$_epr_name" ] || continue
+        rig_carries_converse "$_epr_path" || continue
+        _epr_i=$((_epr_i + 1))
+        _epr_map="$_epr_map$_epr_i $_epr_name
+"
+        [ -n "$_epr_menu" ] && _epr_menu="$_epr_menu · "
+        _epr_menu="$_epr_menu[$_epr_i] $_epr_name"
+    done <<EOF
+$(printf '%s' "$RIGS" | jq -r '.[] | [.name, .path] | @tsv' 2>/dev/null)
+EOF
+    if [ "$_epr_i" -eq 0 ]; then
+        echo "$PROG: engage: no rig in this city carries a converse template, so there is nowhere to host a new-subject sitting." >&2
+        return 1
+    fi
+    if [ "$_epr_i" -eq 1 ]; then
+        ENGAGE_RIG=$(printf '%s' "$_epr_map" | awk 'NR==1{print $2}')
+        printf '  Rig: %s (the only converse-capable rig)\n' "$ENGAGE_RIG"
+        return 0
+    fi
+    printf '  Rig — %s › ' "$_epr_menu"
+    IFS= read -r _epr_reply || return 1
+    case "$_epr_reply" in
+        ""|*[!0-9]*) printf '  (not a listed number)\n'; return 1 ;;
+    esac
+    ENGAGE_RIG=$(printf '%s' "$_epr_map" | awk -v n="$_epr_reply" '$1==n{print $2}')
+    [ -n "$ENGAGE_RIG" ] || { printf '  (no such choice)\n'; return 1; }
+    return 0
+}
+
+# engage_create_subject — the --new-subject pre-step. Resolve the target rig,
+# obtain the subject title, and create a fresh operator-origin subject bead in
+# that rig's store. Mutates the caller's engage state the way the engage_prompt_*
+# helpers set ENGAGE_*: on return $bead is the new id and the opener is primed
+# (engage_reason/engage_file_new), so the rest of cmd_engage runs unchanged.
+# Reads new_subject_title, engage_rig, engage_interactive, engage_reason*,
+# engage_template.
+#
+# The subject is created MARKED gc.reaction_owned=1 — a live owner (this engage)
+# already owns reacting to it — so the async first-reaction / proactive worker
+# stands down rather than file a SECOND visit (engage files the one visit itself,
+# below): tools/gc-proactive.sh drops a marked bead from its scan, and
+# formulas/mol-first-reaction.toml consumes the marker and files no visit if one
+# is slung anyway. The marker is set in the `gc bd create` write itself
+# (--metadata), so the scan can never observe the bead unmarked.
+# gc.origin=operator is the honest origin; the force-to-visit invariant is
+# preserved, not relaxed — the subject still gets its one operator-filed visit.
+engage_create_subject() {
+    enumerate_rigs
+    # 1. Resolve the rig: a --rig value, else an interactive prompt, else refuse.
+    if [ -z "$engage_rig" ]; then
+        if [ "$engage_interactive" = 1 ]; then
+            engage_prompt_rig || { echo "$PROG: engage: no rig chosen — nothing created" >&2; exit 2; }
+            engage_rig="$ENGAGE_RIG"
+        else
+            echo "$PROG: engage: --new-subject needs a rig to create the subject in; pass --rig <name> (one-shot) or run interactively." >&2
+            exit 2
+        fi
+    fi
+    _ecs_path=$(printf '%s' "$RIGS" | jq -r --arg n "$engage_rig" '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
+    if [ -z "$_ecs_path" ]; then
+        echo "$PROG: engage: --rig '$engage_rig' matches no rig in 'gc rig list' (known: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null)). Nothing created." >&2
+        exit 4
+    fi
+    if ! rig_carries_converse "$_ecs_path"; then
+        echo "$PROG: engage: rig '$engage_rig' ($_ecs_path) carries no converse template, so it can host no converse sitting. Pick a converse-capable rig. Nothing created." >&2
+        exit 4
+    fi
+    if [ ! -d "$_ecs_path/.beads" ]; then
+        echo "$PROG: engage: rig '$engage_rig' has no .beads ledger at $_ecs_path/.beads — nothing created." >&2
+        exit 4
+    fi
+    # 2. The subject title: the positional/pre-filled text, else an interactive
+    #    prompt. It is the new bead's title and, absent a starter, the opener.
+    if [ -z "$new_subject_title" ] && [ "$engage_interactive" = 1 ]; then
+        printf '  New subject — what is it about? › '
+        IFS= read -r new_subject_title || { echo "$PROG: engage: no subject text — nothing created" >&2; exit 2; }
+    fi
+    new_subject_title=$(printf '%s' "$new_subject_title" | sed 's/^ *//; s/ *$//')
+    [ -n "$new_subject_title" ] || { echo "$PROG: engage: --new-subject needs a subject (the new bead's title / what it is about). Nothing created." >&2; exit 2; }
+    # 3. The opener: an explicit --reason/--template wins; otherwise the title
+    #    doubles as it. A new subject always files a fresh visit (engage_file_new),
+    #    so the opener is settled here — mark the starter pre-filled so the
+    #    interactive visit/starter prompt (which lists a subject's EXISTING visits)
+    #    is skipped; a brand-new subject has none.
+    if [ -z "$engage_template" ] && [ "$engage_reason_set" = 0 ]; then
+        engage_reason="$new_subject_title"; engage_reason_set=1
+    fi
+    engage_file_new=1; starter_prefilled=1
+    # 4. Create the subject ATOMICALLY with its markers (see the header note).
+    _ecs_body="Operator-initiated conversation subject (gc-helm engage --new-subject): ${engage_reason:-$new_subject_title}"
+    _ecs_json=$(gc bd create -t task --title "$new_subject_title" -d "$_ecs_body" \
+        --metadata '{"gc.origin":"operator","gc.reaction_owned":"1"}' \
+        --db "$_ecs_path/.beads" --json 2>/dev/null || true)
+    bead=$(printf '%s' "$_ecs_json" | scrub | jq -r 'if type=="array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
+    if [ -z "$bead" ] || [ "$bead" = "null" ]; then
+        _ecs_err=$(printf '%s' "$_ecs_json" | scrub | jq -r 'if type=="object" then (.error // empty) else empty end' 2>/dev/null || true)
+        echo "$PROG: engage: could not create the subject bead in rig '$engage_rig'${_ecs_err:+: $_ecs_err}. Nothing spawned." >&2
+        exit 4
+    fi
+    # Arm the abort backstop the instant the marked subject exists. Every gate
+    # from here to the visit-filing in cmd_engage can still abort (a suspended or
+    # not-running rig, an unknown --template or --model, a store read that will
+    # not confirm the bead), and until the visit is filed an abort would leave this
+    # operator-origin subject owing a visit that nothing supplies: its own
+    # stand-down marker hides it from the async worker (gc-proactive drops a marked
+    # bead, mol-first-reaction consumes-and-ignores it), and even unmarked a first
+    # reaction does not force a visit for gc.origin=operator (actionable/blocked/
+    # close file none). So engage_new_subject_cleanup files that one visit itself on
+    # exit; cmd_engage disarms it once the visit is filed. enumerate_rigs (called at
+    # the top of this function) already set and cleared its own trap and memoizes on
+    # every later call, so it never clobbers this one.
+    _ens_cleanup_bead="$bead"
+    trap 'engage_new_subject_cleanup' EXIT
+    trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+    echo "$PROG: engage: filed subject $bead in rig '$engage_rig' — \"$new_subject_title\"" >&2
+}
+
+# engage_new_subject_cleanup — the abort backstop for --new-subject, armed by
+# engage_create_subject the instant the marked subject exists and disarmed by
+# cmd_engage once the visit is filed. While armed, any exit (an abort gate or a
+# signal) means the live engage stopped before cmd_engage filed the subject's one
+# visit. The subject still owes that visit and the async worker will not supply it
+# — the stand-down marker hides it from the scan, and even unmarked a first
+# reaction does not force a visit for an operator-origin bead. So file the one
+# parked visit here with cmd_open, the same path the happy flow uses: it resolves
+# the subject's rig from its id, dedups, and parks the visit on the board. The
+# marker is LEFT set, exactly as a successful engage leaves it, so the async worker
+# still stands down rather than filing a second. Run cmd_open in a subshell so its
+# own exits cannot abort this trap, and disarm first so it cannot re-enter. A no-op
+# when nothing is armed; it preserves the process's exit code.
+_ens_cleanup_bead=""
+engage_new_subject_cleanup() {
+    _enc_rc=$?
+    [ -n "${_ens_cleanup_bead:-}" ] || return "$_enc_rc"
+    _enc_bead="$_ens_cleanup_bead"
+    _ens_cleanup_bead=""
+    trap - EXIT INT TERM HUP
+    set -- "$_enc_bead"
+    [ -n "${engage_reason:-}" ] && set -- "$@" --reason "$engage_reason"
+    if ( cmd_open "$@" >/dev/null 2>&1 ); then
+        echo "$PROG: engage: the live engage aborted, but filed the one visit new subject $_enc_bead owes — parked on the helm board. Engage it when ready: $PROG engage $_enc_bead" >&2
+    else
+        echo "$PROG: engage: new subject $_enc_bead was created but its visit could NOT be filed (store error?); it still carries the gc.reaction_owned marker. File the visit by hand: $PROG open $_enc_bead" >&2
+    fi
+    return "$_enc_rc"
+}
+
 # ── Verb: engage ─────────────────────────────────────────────────────
 # The operator's "I want to talk about this now" — the spawn-on-engagement
 # entry point. The converse routed-pool is retired: a filed visit PARKS on the
@@ -2678,6 +2853,10 @@ cmd_engage() {
     engage_no_input=0; engage_model_set=0; engage_reason_set=0; engage_template=""
     # Interactive decisions carried into the visit-resolution and output below.
     engage_body=""; engage_file_new=0; engage_chosen_visit=""; visit_new=0
+    # --new-subject files a FRESH subject bead, then engages it (rig-aware, since
+    # there is no id prefix yet to derive the rig from). --rig names that rig;
+    # --subject names an EXISTING one, so the two are mutually exclusive.
+    engage_new_subject=0; engage_rig=""; engage_subject_flag=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --model=*)   engage_model="${1#--model=}"; engage_model_set=1; shift ;;
@@ -2689,9 +2868,13 @@ cmd_engage() {
             --template=*) engage_template="${1#--template=}"; shift ;;
             --template)  shift; [ $# -gt 0 ] || { echo "$PROG: engage: --template requires a value" >&2; exit 2; }
                          engage_template="$1"; shift ;;
-            --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; shift ;;
+            --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; engage_subject_flag=1; shift ;;
             --subject)   shift; [ $# -gt 0 ] || { echo "$PROG: engage: --subject requires a value" >&2; exit 2; }
-                         [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; shift ;;
+                         [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; engage_subject_flag=1; shift ;;
+            --new-subject) engage_new_subject=1; shift ;;
+            --rig=*)     engage_rig="${1#--rig=}"; shift ;;
+            --rig)       shift; [ $# -gt 0 ] || { echo "$PROG: engage: --rig requires a value" >&2; exit 2; }
+                         engage_rig="$1"; shift ;;
             --no-input)  engage_no_input=1; shift ;;
             --no-attach) engage_attach=0; shift ;;
             -h|--help)   usage; exit 0 ;;
@@ -2717,6 +2900,31 @@ cmd_engage() {
     # opener, so the interactive visit/starter prompts are skipped for it.
     starter_prefilled=0
     if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ]; then starter_prefilled=1; fi
+
+    # --rig names the rig a NEW subject is created in; an existing subject's rig
+    # comes from its id prefix, so --rig is meaningless there. Refuse rather than
+    # silently ignore it.
+    if [ -n "$engage_rig" ] && [ "$engage_new_subject" = 0 ]; then
+        echo "$PROG: engage: --rig applies only with --new-subject; an existing subject's rig is derived from its id. Drop --rig, or add --new-subject to create one." >&2
+        exit 2
+    fi
+
+    # --new-subject: file a FRESH subject bead in a chosen rig, then engage it in
+    # one gesture. The positional argument is the subject TEXT (the new bead's
+    # title), not an id; --subject names an EXISTING bead, so the two conflict.
+    # engage_create_subject resolves the rig, obtains the title, creates the
+    # marked bead, and leaves its id in $bead with the opener primed — after it
+    # the rest of this verb runs unchanged, deriving the rig from the new id's
+    # prefix and filing the ONE visit the marker keeps the async worker from
+    # duplicating.
+    if [ "$engage_new_subject" = 1 ]; then
+        if [ "$engage_subject_flag" = 1 ]; then
+            echo "$PROG: engage: --subject names an existing bead and --new-subject creates one — pass only one." >&2
+            exit 2
+        fi
+        new_subject_title="$bead"; bead=""
+        engage_create_subject
+    fi
 
     # Subject: prompt when absent on a TTY; a flag or positional pre-fills it.
     if [ -z "$bead" ]; then
@@ -2776,14 +2984,11 @@ cmd_engage() {
         exit 4
     fi
 
-    # The bead must resolve before anything spawns — fail closed, as open does.
-    bead_row=$(gc bd show "$bead" --json 2>/dev/null | scrub \
-        | jq -r --arg b "$bead" \
-            'if type == "array" then ([ .[] | select(type=="object" and (.id // "")==$b) ] | first) else empty end' 2>/dev/null || true)
-    if [ -z "$bead_row" ] || [ "$bead_row" = "null" ]; then
-        echo "$PROG: engage: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing spawned." >&2
-        exit 4
-    fi
+    # The bead must resolve before anything spawns — the shared resolve+classify,
+    # so an unanswered read fails closed as a data-plane outage, not a missing
+    # bead, the way open does.
+    verify_subject "$bead" engage "Nothing spawned." || exit $?
+    bead_row="$VS_ROW"
     bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
 
     # The subject a visit id is about — for the grounding line and the success
@@ -2938,6 +3143,13 @@ cmd_engage() {
             # stderr and still surface.
             cmd_open "$@" >/dev/null || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
             filed_fresh=1
+            # The visit is filed, so a --new-subject subject is no longer an
+            # orphan — disarm the abort backstop armed in engage_create_subject.
+            # Guarded, so a non-new-subject engage never touches traps.
+            if [ -n "${_ens_cleanup_bead:-}" ]; then
+                _ens_cleanup_bead=""
+                trap - EXIT INT TERM HUP
+            fi
             [ -n "$VISIT" ] && visit_new=1
             [ -n "$VISIT" ] || candidates=$(engage_find_visits "$bead")
         fi

@@ -49,10 +49,9 @@ Before gathering context, verify:
 If the bead doesn't exist, stop and report:
 "Bead `<id>` not found. Check the ID and try again."
 
-Unlike `demo:epic`, this skill does NOT require Playwright MCP, ImageMagick,
-or a running app — it only generates a script file.
-The script can be executed later by `demo:capture` from a session that has
-those prerequisites.
+Unlike `demo:epic`, this skill needs no browser, no ffmpeg, and no running
+app — it only reads the bead and its diff to write a script file. `demo:capture`
+runs that script later, from a session that carries the demo toolchain.
 
 ## Phase A: Gather Context (sequential reads)
 

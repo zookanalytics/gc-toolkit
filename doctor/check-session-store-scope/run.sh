@@ -171,13 +171,20 @@ else
         [ -z "$sess_city" ] || [ "$sess_city" = "$city" ] || continue
         sessions_checked=$((sessions_checked + 1))
 
-        # Rig prefix of the qualified alias when the session carries one; pool
-        # members do not, and their session name carries the same prefix.
+        # Rig prefix of the qualified alias when the session carries one. An
+        # aliasless session (a pool member) names its store rig as the leading
+        # segment of its own name: <rig>__<template>-<id> when it shares the
+        # store's rig, <rig>--<template> when it is bound to a rig from
+        # elsewhere. GC_RIG is that first segment either way, so split on
+        # whichever of `--` or `__` opens the name.
         alias_name=$(env_val GC_ALIAS "$senv")
         want_rig=""
         case "$alias_name" in
             */*) want_rig="${alias_name%%/*}" ;;
-            "")  case "$sess" in *--*) want_rig="${sess%%--*}" ;; esac ;;
+            "")  case "$sess" in
+                     *--*) want_rig="${sess%%--*}" ;;
+                     *__*) want_rig="${sess%%__*}" ;;
+                 esac ;;
         esac
         want_scope="city"; [ -n "$want_rig" ] && want_scope="rig"
         scope_desc="city-scoped"; [ -n "$want_rig" ] && scope_desc="scoped to rig $want_rig"

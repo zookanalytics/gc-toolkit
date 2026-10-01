@@ -133,23 +133,46 @@ if [ "$OWNER_LIVE" = "0" ] && [ -z "$DONE_ELSEWHERE" ]; then
   [ -n "$WORK_MERGE_RESULT" ] && DONE_ELSEWHERE="already carrying merge_result=$WORK_MERGE_RESULT; a PR or merge exists for this bead"
 fi
 if [ "$OWNER_LIVE" != "0" ] || [ -n "$DONE_ELSEWHERE" ]; then
-  if [ -n "$DONE_ELSEWHERE" ]; then
-    DUP_REASON="$DONE_ELSEWHERE"
-  else
-    DUP_REASON="already $WORK_STATUS under live $WORK_OWNER"
-  fi
-  gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused: $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
   SCRIPTS=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
   : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
-  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is $DUP_REASON, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. If the work is done, close this visit and the redundant molecule; if two dispatches are live, decide which owns the bead, then re-offer that one."; then
-    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
-  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID $DUP_REASON"; then
-    gc runtime drain-ack
+  if [ -n "$DONE_ELSEWHERE" ]; then
+    # FINISHED, not a live conflict: a PR or merge already exists for this bead
+    # (a completed hand-off, or a merge_result stamp), so the work has landed or
+    # is landing with the refinery and no human has a decision to make. This
+    # reaches a polecat two ways — a redundant dispatch the refinery already
+    # carried past, or a lease-expiry re-offer of THIS molecule's own
+    # load-context after its own work finished — and both are husks. Quiesce the
+    # molecule and drain; do NOT escalate. A human visit here answers nothing and
+    # is what stranded finished work: molecule-hold.sh is one-way and
+    # dead-molecule-dispose.sh refuses a live root, so a false hold behind a
+    # visit had no way back. molecule-hold.sh never touches the work bead, so the
+    # refinery keeps it and its PR proceeds.
+    DUP_REASON="$DONE_ELSEWHERE"
+    gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused (work finished; quiesced without escalation): $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
+    if "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch (work finished): $WORK_BEAD_ID $DUP_REASON"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
   else
-    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    # A LIVE conflict: in flight under a foreign owner still present in the
+    # session list. Two live dispatches building at once are a routing anomaly a
+    # human must adjudicate, so record the release path first and hold only if it
+    # landed. A blocked, de-routed molecule with no visit is a silent stall no
+    # one is asked to clear, so the drain is conditional on the escalation AND
+    # the hold.
+    DUP_REASON="already $WORK_STATUS under live $WORK_OWNER"
+    gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused: $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is $DUP_REASON, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Two dispatches are live: decide which owns the bead, then re-offer that one."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID $DUP_REASON"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
   fi
   exit 1
 fi
@@ -168,21 +191,34 @@ re-derives the same refusal, and leaves it open again. Clearing the route
 without changing the status does not help either: gascity's stranded-worker
 repair sweeps `open` and `in_progress` beads assigned to a drained session and
 re-stamps a run_target fallback on any it finds unrouted. `blocked` is outside
-that sweep. The escalation above is what releases the hold.
+that sweep.
 
-The drain is conditional on the escalation AND the hold. The escalation records
-the release path — a board-visible visit a human can claim — so a hold on its
-own is never enough: a blocked, de-routed molecule with no visit is a silent
-stall no one is asked to clear, which is worse than the loop. If `escalate.sh`
-cannot file or route that visit it exits non-zero, and the arm then neither
-holds nor drains, leaving the step claimable and visible so the next worker
-retries rather than parking it silently. `molecule-hold.sh` in turn exits
-non-zero when it cannot prove which bead this shell is executing, when duplicate
-step beads make that ambiguous, when the blocking write is refused, and when a
-route it had to clear — on the molecule root or on a sibling step — survived.
-Draining on any of those paths leaves this step or the molecule around it
-claimable, which is the loop the hold exists to stop, so every arm below drains
-only after an escalation that landed and a hold that landed.
+The two arms dispose of two different situations and drain differently.
+
+A FINISHED bead — a completed hand-off or a `merge_result` — is not a live
+conflict. A PR or merge already exists for it, so the work has landed or is
+landing with the refinery and no human has a decision to make. The arm quiesces
+the molecule and drains with no escalation; the drain is conditional on the hold
+alone. A human visit here answers nothing, and it is what stranded finished
+work with no way back — `molecule-hold.sh` is one-way and
+`dead-molecule-dispose.sh` refuses a live root. `molecule-hold.sh` never touches
+the work bead, so the refinery keeps the bead and its PR proceeds.
+
+A LIVE conflict — in flight under a foreign owner still present in `gc session
+list --state all` — is two dispatches building at once, a routing anomaly a
+human must adjudicate. That arm records the release path first: `escalate.sh`
+files a board-visible visit a human can claim, and the drain is conditional on
+that visit AND the hold. A hold on its own is never enough there — a blocked,
+de-routed molecule with no visit is a silent stall no one is asked to clear. If
+`escalate.sh` cannot file or route the visit it exits non-zero and the arm
+neither holds nor drains, leaving the step claimable so the next worker retries.
+
+`molecule-hold.sh` in turn exits non-zero when it cannot prove which bead this
+shell is executing, when duplicate step beads make that ambiguous, when the
+blocking write is refused, and when a route it had to clear — on the molecule
+root or on a sibling step — survived. Draining on any of those leaves this step
+or the molecule around it claimable, the loop the hold exists to stop, so both
+arms drain only after a hold that landed.
 
 `CLAIMED_STEP_BEAD_ID` is the `bead_id` from the `gc hook --claim --json` that
 handed you the step you are running. Set it at the top of each step. It is a

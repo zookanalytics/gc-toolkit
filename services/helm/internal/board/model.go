@@ -231,6 +231,18 @@ type Tile struct {
 	// never stranded — the conversation IS the attention it would be flagged
 	// for lacking.
 	Held bool `json:"held"`
+	// VisitState refines Held into the visit's engagement: VisitEngaged when a
+	// live sitting is in the conversation right now, VisitParked when the visit
+	// stands open and un-engaged — filed and waiting for a person to pick it up.
+	// Empty on a row no open visit holds (Held is false), the same
+	// not-applicable empty a closed row's Phase carries.
+	//
+	// It reads the same [unengagedVisit] rule Acceptable does, so the two never
+	// disagree: a parked visit is the one Accept is offered on, an engaged one
+	// suppresses it. It is derived here rather than in the browser because the
+	// rule reads the visit's assignee — the pending-engagement window — which
+	// [Sitting.Assignee] deliberately keeps off the wire.
+	VisitState string `json:"visit_state"`
 
 	NClosed int `json:"n_closed"`
 	MTotal  int `json:"m_total"`
@@ -455,19 +467,26 @@ type Tile struct {
 	PRPhase string `json:"pr_phase"`
 
 	// Phase is this bead's liveness in the shared tri-state vocabulary —
-	// `working`, `needs-review`, or `needs-attention` — derived through
-	// [prstatus.Derive], the one core the GitHub `status:` label also reads. It
-	// is the board's per-bead liveness on EVERY live row, where PRPhase is set
-	// on merge anchors alone: a merge anchor reads the same value PRPhase does
-	// (its holds and posture and its open rework/review children), and any other
-	// bead reads its own live-work signal — a graph.v2 workflow standing over it
-	// — through the identical rule, so one bead cannot carry two disagreeing
-	// tri-states.
+	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
+	// leads with on every live row. It begins as the per-bead value
+	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, posture,
+	// and for a merge anchor its open rework/review children, or for any other
+	// bead the live-workflow signal standing over it. A bead's board liveness and
+	// its GitHub `status:` label come from that one core. A row WITH child tiles
+	// then takes their rolled-up state in place of that per-bead value
+	// ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
-	// Empty on a terminal (closed) row, where the live vocabulary has no answer
-	// — the same not-applicable empty PRPhase leaves off a non-merge row. The
-	// in-flight input a merge anchor and a plain bead each feed the core is the
-	// narrower per-anchor signal.
+	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
+	// round-trip value and is never rolled up. Phase equals it on a merge anchor
+	// with no child tiles — the common case, because a merge anchor's rework and
+	// review children hang off it by a blocked/anchor_bead edge the roll-up does
+	// not climb — and diverges from it on a merge anchor that ALSO has
+	// parent-child child tiles, whose Phase becomes their roll-up. The one place
+	// the two cannot disagree is a blocked machine verdict, which lifts both to
+	// needs-attention together.
+	//
+	// Empty on a terminal (closed) row, where the live vocabulary has no answer,
+	// the same not-applicable empty PRPhase leaves off a non-merge row.
 	Phase string `json:"phase"`
 }
 
