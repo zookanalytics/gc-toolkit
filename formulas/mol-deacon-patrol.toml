@@ -304,8 +304,13 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 ```
 `STATE` is the first line's value, and it says what this cycle owes:
 
-- `idle`, `started` or `running`: there is no payload to read. Say which one
-  and close the step. A sweep started now is collected a cycle or two later.
+- `idle`, `started`, `running` or `deferred`: there is no payload to read. Say
+  which one and close the step. A `started` sweep is collected a cycle or two
+  later. A `deferred` one did not start because the pre-spawn `gc dolt health`
+  gate found the data plane unreachable or overloaded — a sweep queries every
+  store's Dolt, so it stands down rather than amplify a degradation. The
+  dolt-health step above already filed any finding for that, so this files
+  nothing of its own and resumes on a later cycle once the data plane recovers.
 - `complete`: the payload is the file named by `payload=`. Filter it below.
 - `failed`, `exceeded` or `blocked`: a FAILED scan. File it as a finding with
   the recipe below — `--key doctor-sweep-failed`, the whole `state=` block as
@@ -436,7 +441,19 @@ description = """
 
 **1. Quick inbox hygiene:** `gc mail inbox`; handle urgent, archive rest.
 
-**2. Pour next iteration BEFORE burning — and GUARD the assign** (a poured
+**2. Wait out the cycle BEFORE pouring.** The pour below arms `exit 1` on a
+failed pour or assign, and the deacon wakes fresh, so an exit here respawns a
+deacon that re-runs the doctor sweep with no pause. Waiting first means a
+degraded data plane that fails the pour cannot hot-loop that respawn: every
+cycle pays one inter-cycle wait, whether the pour then succeeds or fails. A
+bounded clock-poll in ONE tool call (the harness blocks a standalone sleep, and
+caps one call at 600s):
+```bash
+end=$(( $(date +%s) + {{event_timeout}} ))
+until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
+```
+
+**3. Pour next iteration BEFORE burning — and GUARD the assign** (a poured
 but unassigned wisp reaches no hook and drops the loop; forward every
 declared var, so a value chosen at the startup pour is not silently replaced
 by the formula default from the next cycle on):
@@ -455,14 +472,7 @@ fi
 # <<< patrol-wisp-pour
 ```
 
-**3. Wait before the next cycle** — a bounded clock-poll in ONE tool call
-(the harness blocks a standalone sleep, and caps one call at 600s):
-```bash
-end=$(( $(date +%s) + {{event_timeout}} ))
-until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
-```
-
-**4. Burn this wisp — only if step 2 succeeded:**
+**4. Burn this wisp — only if step 3 succeeded:**
 ```bash
 gc bd mol burn <this-wisp-id> --force
 ```
