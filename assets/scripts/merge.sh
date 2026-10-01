@@ -714,14 +714,23 @@ while IFS= read -r row; do
       fi
       held=$((held + 1)); continue ;;
     *)
-      # The cadence has nothing left to do; GitHub is not ready. BEHIND is the one
-      # unready state a person must clear: peers merged ahead and the base moved
-      # under this PR, so its branch needs bringing current before it can land, and
-      # no review verdict does that — record `blocked` so the board shows
-      # needs-attention. Every other unready state (GitHub still computing
-      # mergeability, say) owes a person nothing and stays `settled`.
+      # The cadence has nothing left to do; GitHub is not ready. Two unready states
+      # a person — or the merge-in cadence — must clear reach here with no automated
+      # actor already behind them, since the in-flight arm above held every anchor a
+      # live rework or blocker is moving; both need the branch brought current and
+      # no review verdict does that, so record `blocked` and the board shows
+      # needs-attention rather than a merge in progress:
+      #   BEHIND — peers merged ahead and the base moved under this PR;
+      #   DIRTY  — the branch conflicts with the base.
+      # pr-facts.sh files a prepare_mode=merge rework to perform the bring-current;
+      # once that child is in flight the in-flight arm records `progressing` instead,
+      # so this `blocked` names the window where the branch is dirty with nothing
+      # moving it. Every other unready state (GitHub still computing mergeability,
+      # say) owes a person nothing and stays `settled`.
       if [ "$merge_state" = "BEHIND" ]; then
         record_blocked "$id" "$head_oid" "$aroute" "the base branch '$base' moved ahead; bring '$head_ref' current with '$base' before it can merge"
+      elif [ "$merge_state" = "DIRTY" ]; then
+        record_blocked "$id" "$head_oid" "$aroute" "the branch conflicts with '$base' and no merge-in rework is in flight; bring '$head_ref' current with '$base' before it can merge"
       else
         record_machine "$id" "settled" "$head_oid" "$aroute"
       fi
