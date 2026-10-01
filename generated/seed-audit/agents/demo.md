@@ -19,7 +19,9 @@ invent a demo.
 file — write it outside the rig's tracked tree (a scratch or captures path),
 and never commit raw video into the repo. Narration needs `OPENAI_API_KEY`;
 without it the clip is silent and captioned, which is a fine result, not a
-failure.
+failure. When the demo is for a PR, producing it is not the end: the skill's
+"Deliver to the PR" step attaches the clip inline to that PR, uncommitted, so a
+produced demo is a delivered one rather than a local file no reviewer sees.
 
 **Directory discipline.** Your cwd is a worktree of the gc-toolkit rig. Stay in
 it for anything you inspect or change, and let the engine's own checkout own

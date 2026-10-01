@@ -217,6 +217,95 @@ func TestRecommendationWithNoVisitIsNotAcceptable(t *testing.T) {
 	}
 }
 
+// heldSubject is a plain live anchor, held by a visit through Facts.Visits — the
+// path an engaged (in_progress) visit takes, which is not itself gathered as an
+// open anchor and so never folds.
+func heldSubject(id string) Anchor {
+	return Anchor{
+		ID: id, Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+		Children: []Child{{ID: id + ".c", Status: "open"}},
+	}
+}
+
+// TestVisitStateSplitsHeldIntoParkedAndEngaged: VisitState refines Held into the
+// two states the operator distinguishes on the board — a parked visit waiting for
+// them, and an engaged one a live sitting is in right now. A row no visit holds
+// carries the empty string. The pending-engagement window (open, bound by
+// assignee, not yet claimed) reads engaged, the same window that suppresses Accept.
+func TestVisitStateSplitsHeldIntoParkedAndEngaged(t *testing.T) {
+	anchors := []Anchor{
+		heldSubject("tk-engaged"), heldSubject("tk-parked"),
+		heldSubject("tk-pending"), heldSubject("tk-novisit"),
+	}
+	facts := Facts{
+		Visits: map[string]bool{"tk-engaged": true, "tk-parked": true, "tk-pending": true},
+		Sittings: []Sitting{
+			engagedSitting("tk-engaged"),
+			openSitting("tk-parked"),
+			pendingSitting("tk-pending"),
+		},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
+
+	want := map[string]string{
+		"tk-engaged": VisitEngaged,
+		"tk-parked":  VisitParked,
+		"tk-pending": VisitEngaged,
+		"tk-novisit": "",
+	}
+	for id, state := range want {
+		tl := mustTile(t, b, id)
+		if (id != "tk-novisit") != tl.Held {
+			t.Fatalf("%s: Held = %v; the fixture holds every row but tk-novisit", id, tl.Held)
+		}
+		if tl.VisitState != state {
+			t.Errorf("%s: VisitState = %q, want %q", id, tl.VisitState, state)
+		}
+	}
+}
+
+// TestFoldedVisitWithNoSittingReadsParked: a visit wrapper folds Held onto its
+// subject even when its sitting has aged out of the window, so classifyVisits has
+// no sitting to read. The fallback is parked — an open visit no session is on is
+// waiting for the operator, never reported as being worked.
+func TestFoldedVisitWithNoSittingReadsParked(t *testing.T) {
+	anchors := []Anchor{
+		visitAnchor("tk-vis", "tk-subj", "please review the plan"),
+		{ID: "tk-subj", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Children: []Child{{ID: "tk-c1", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	subj := mustTile(t, b, "tk-subj")
+	if !subj.Held {
+		t.Fatalf("the folded subject must be held")
+	}
+	if subj.VisitState != VisitParked {
+		t.Errorf("a held row with no readable sitting falls back to parked: got %q", subj.VisitState)
+	}
+}
+
+// TestVisitStateAgreesWithAcceptable: engaged and Accept read one predicate
+// (engagedVisit), so a recommendation subject cannot read "parked" while Accept
+// is suppressed, or "engaged" while Accept is offered.
+func TestVisitStateAgreesWithAcceptable(t *testing.T) {
+	build := func(s Sitting) Board {
+		return BuildBoard(
+			[]Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")},
+			fixtureNow, false, nil,
+			Facts{Visits: map[string]bool{"tk-subj": true}, Sittings: []Sitting{s}},
+		)
+	}
+	p := mustTile(t, build(openSitting("tk-subj")), "tk-subj")
+	if p.VisitState != VisitParked || !p.Acceptable {
+		t.Errorf("an open un-engaged recommendation is parked and acceptable: state=%q acceptable=%v", p.VisitState, p.Acceptable)
+	}
+	e := mustTile(t, build(engagedSitting("tk-subj")), "tk-subj")
+	if e.VisitState != VisitEngaged || e.Acceptable {
+		t.Errorf("a live-sitting recommendation is engaged and not acceptable: state=%q acceptable=%v", e.VisitState, e.Acceptable)
+	}
+}
+
 // TestVisitKeptWhenSubjectHasNoTile: a visit whose subject is no anchor keeps
 // its row — dropping it would erase the attention — stating the ask in NEEDS.
 // Its TITLE names the visit and its subject, not the ask, so a surface that

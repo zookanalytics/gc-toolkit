@@ -14,17 +14,25 @@
 # --refresh-cache refetches the role map and exits without rendering. The
 # picker spawns it detached, for the next keypress; nothing else calls it.
 #
-# Rig + identity derivation, in the order the awk block tries them:
-#   1. GC_AGENT is "<rig>/<pack>.<role>". Both fields come from it.
-#   2. The session name is "<rig>--<pack>__<agent>". The rig is the part
-#      before "--"; the display is the rest, with "__" rendered as ".".
-#   3. GC_AGENT is set but carries no slash. The agent is city-scoped:
-#      the rig is "city" and the display is GC_AGENT.
-#   4. Nothing answers. The rig is "city" and the display is the raw
-#      session name.
-# Rule 2 must precede rule 3. A pool instance carries its own tmux
-# session name in GC_AGENT rather than an address, so it satisfies both,
-# and rule 3 would file it under a rig that does not exist.
+# Rig, role, and display derivation:
+#   Rig comes from the supervisor-API template when it covers the session:
+#   the template's leading "<rig>/" segment is authoritative. This is the
+#   only rig source for a wisp-cycle pool session, whose GC_AGENT is the
+#   bare wisp id and whose session name has no "<rig>--" segment; a
+#   slashless template names a city-scoped agent and sets no rig.
+#   Display, and the rig for a session the template does not cover, come
+#   from the first of these that answers:
+#     1. GC_AGENT is "<rig>/<pack>.<role>". Both fields come from it.
+#     2. The session name is "<rig>--<pack>__<agent>". The rig is the part
+#        before "--"; the display is the rest, with "__" rendered as ".".
+#     3. GC_AGENT is set but carries no slash. The agent is city-scoped:
+#        the rig is "city" and the display is GC_AGENT.
+#     4. Nothing answers. The rig is "city" and the display is the raw
+#        session name.
+#   Rule 2 must precede rule 3. A pool instance carries its own tmux
+#   session name in GC_AGENT rather than an address, so it satisfies both,
+#   and rule 3 would file it under a rig that does not exist. A template
+#   rig, when present, overrides the rig these rules chose.
 # `switch-client -t` always targets the raw tmux session_name; the
 # derived display is label-only.
 #
@@ -299,6 +307,13 @@ BEGIN {
         ti = substr(rest, tab + 1)
         gsub(/[\t\r\n]/, " ", ti)
         gc_title[sn] = ti
+        # Rig is the leading "<rig>/" segment of the template, when present.
+        # The API row is "<rig>/<pack>.<role>"; a slashless template is a
+        # city-scoped agent and carries no rig. This is the only rig source
+        # for a wisp-cycle pool session, whose GC_AGENT is the bare wisp id
+        # and whose session name has no "<rig>--".
+        sl = index(tmpl, "/")
+        if (sl > 0) gc_rig[sn] = substr(tmpl, 1, sl - 1)
         # Role is the last dotted component of the template: both
         # "<rig>/<pack>.<role>" and the slashless "<pack>.<role>" end in it.
         sub(/^.*\//, "", tmpl)
@@ -331,6 +346,15 @@ BEGIN {
     } else {
         rig = "city"; rig_sort = "0city"
         display = name
+    }
+    # The API template names the rig authoritatively, so it wins over the
+    # GC_AGENT and name-shape guesses above. A wisp-cycle pool session
+    # carries the rig in neither of those, so without this it lands in the
+    # city group. Rig only: the display column keeps what the chain resolved,
+    # and the role below still counts the session under that rig.
+    if (gc_rig[name] != "") {
+        rig = gc_rig[name]
+        rig_sort = gc_rig[name]
     }
 
     # One predicate for the count, the hide and the sort rank: they must

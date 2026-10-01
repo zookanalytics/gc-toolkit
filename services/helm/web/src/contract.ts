@@ -68,6 +68,18 @@ export interface Tile {
   weight: number;
   /** An open visit bead names this anchor — a conversation is holding it. */
   held: boolean;
+  /**
+   * Refines `held` into the visit's engagement: `'engaged'` when a live sitting
+   * is in the conversation right now, `'parked'` when the visit stands open and
+   * un-engaged — filed and waiting for a person to pick it up. `''` on a row no
+   * open visit holds (`held` is false).
+   *
+   * Derived on the Go side from the same rule `acceptable` reads — a parked
+   * visit is the one Accept is offered on, an engaged one suppresses it — so the
+   * web reads this field rather than re-deriving it (the rule reads the visit's
+   * assignee, which the wire does not carry). Always present.
+   */
+  visit_state: string;
   n_closed: number;
   m_total: number;
   open: number;

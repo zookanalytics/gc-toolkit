@@ -16,6 +16,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     owed: false,
     weight: 0,
     held: false,
+    visit_state: '',
     n_closed: 0,
     m_total: 0,
     open: 0,
@@ -301,42 +302,42 @@ it('surfaces the operator-owned bead as a gate row indented under its family', a
   expect((row as HTMLElement).className).toContain('row-member');
 });
 
-// The board marks a visit on a row, the same vocabulary the CLI prints
-// (cmd/helm-svc/board.go, familyGlyph): ○ a row an open visit holds, ◉ a row that
-// both is held and wants a person, ● a plain person's move. The held marker is
-// announced rather than decorative (aria-label), and its hover names the sittings
-// on the bead — each one's headline, its outcome or "running", and the session to
-// attach to.
-it('marks the beads a visit holds and names the sitting in the hover', async () => {
+// A held row carries a VISIBLE, self-evident chip, not a bare glyph in a native
+// title: it names the state in a word — a parked visit waiting for the operator
+// vs an engaged one a live sitting is in now — is a real button announced as
+// interactive, and reveals the sittings (headline, state, session) in a details
+// card reached by hover or focus rather than a native `title`. The wire's
+// visit_state, not the sitting shape, decides parked vs engaged.
+it('marks a held row with a visible parked/engaged chip and reveals the sittings', async () => {
   const board: Board = {
     generated_at: '2026-08-26T08:00:00Z',
-    total: 4,
+    total: 5,
     sittings: [
       {
-        id: 'tk-vsit-held',
+        id: 'tk-vsit-engaged',
         rig: 'gc-toolkit',
-        subject: 'tk-held',
-        title: 'visit: tk-held',
+        subject: 'tk-engaged',
+        title: 'visit: tk-engaged',
         status: 'in_progress',
         outcome: '',
         outcome_reason: '',
         session: 'gc-toolkit__converse-9',
         opened_at: '2026-08-26T07:00:00Z',
         takeaway: '',
-        subject_title: 'what the held row is about',
+        subject_title: 'what the engaged row is about',
       },
       {
-        id: 'tk-vsit-both',
+        id: 'tk-vsit-parked',
         rig: 'gc-toolkit',
-        subject: 'tk-both',
-        title: 'visit: tk-both',
-        status: 'in_progress',
+        subject: 'tk-parked',
+        title: 'visit: tk-parked',
+        status: 'open',
         outcome: '',
         outcome_reason: '',
-        session: 'gc-toolkit__converse-10',
-        opened_at: '2026-08-26T07:10:00Z',
+        session: '',
+        opened_at: '2026-08-26T07:05:00Z',
         takeaway: '',
-        subject_title: 'the gated topic',
+        subject_title: 'what the parked row is about',
       },
     ],
     tiles: [
@@ -353,15 +354,28 @@ it('marks the beads a visit holds and names the sitting in the hover', async () 
         rank_score: 3_000_000,
       }),
       tile({
-        id: 'tk-held',
+        id: 'tk-engaged',
         kind: 'task',
-        title: 'held only',
+        title: 'engaged row',
         severity: 'NORMAL',
         section: 'active',
         held: true,
+        visit_state: 'engaged',
         group_root: 'tk-fam',
         frontier: 'in flight',
         rank_score: 2_500_000,
+      }),
+      tile({
+        id: 'tk-parked',
+        kind: 'task',
+        title: 'parked row',
+        severity: 'NORMAL',
+        section: 'active',
+        held: true,
+        visit_state: 'parked',
+        group_root: 'tk-fam',
+        frontier: 'in flight',
+        rank_score: 2_450_000,
       }),
       tile({
         id: 'tk-both',
@@ -370,6 +384,7 @@ it('marks the beads a visit holds and names the sitting in the hover', async () 
         severity: 'ELEVATED',
         section: 'gate',
         held: true,
+        visit_state: 'engaged',
         group_root: 'tk-fam',
         frontier: 'PR #7',
         rank_score: 2_400_000,
@@ -401,28 +416,54 @@ it('marks the beads a visit holds and names the sitting in the hover', async () 
   );
 
   render(<App />);
-  await waitFor(() => expect(screen.getByText('held only')).toBeTruthy());
+  await waitFor(() => expect(screen.getByText('engaged row')).toBeTruthy());
 
-  // ○ a held row no one owes; the marker is announced and hovers its one sitting.
-  const held = rowFor('held only') as HTMLElement;
-  expect(held.textContent).toContain('○');
-  expect(held.textContent).not.toContain('●');
-  const heldMarker = within(held).getByTitle(/what the held row is about/);
-  expect(heldMarker.getAttribute('aria-label')).toBe('held by an open visit');
-  expect(heldMarker.getAttribute('title')).toBe(
-    'what the held row is about · running · gc-toolkit__converse-9',
-  );
+  // Engaged: a visible chip, a real button announced as interactive, naming the
+  // live state in a word — and NO native title tooltip.
+  const engaged = rowFor('engaged row') as HTMLElement;
+  const engagedChip = within(engaged).getByRole('button', { name: /in session/i });
+  expect(engagedChip.textContent).toContain('in session');
+  expect(engagedChip.getAttribute('title')).toBeNull();
+  // The details live in a real card, wired to the chip for assistive tech, naming
+  // the sitting's headline, its state, and the session to attach to.
+  expect(engagedChip.getAttribute('aria-describedby')).toBe('visit-card-tk-engaged');
+  const engagedCard = document.getElementById('visit-card-tk-engaged') as HTMLElement;
+  expect(engagedCard.textContent).toMatch(/being worked right now/i);
+  expect(engagedCard.textContent).toContain('what the engaged row is about');
+  expect(engagedCard.textContent).toContain('gc-toolkit__converse-9');
 
-  // ◉ a held row that also wants a person; the label says both.
+  // Parked: a different word and heading, told apart from engaged at a glance.
+  const parked = rowFor('parked row') as HTMLElement;
+  const parkedChip = within(parked).getByRole('button', { name: /waiting/i });
+  expect(parkedChip.textContent).toContain('waiting');
+  const parkedCard = document.getElementById('visit-card-tk-parked') as HTMLElement;
+  expect(parkedCard.textContent).toMatch(/waiting for you/i);
+  expect(parkedCard.textContent).toContain('what the parked row is about');
+
+  // Held AND wants-person: the ● and the visit chip both render, not one merged glyph.
   const both = rowFor('held and gated') as HTMLElement;
-  expect(both.textContent).toContain('◉');
-  const bothMarker = within(both).getByTitle(/the gated topic/);
-  expect(bothMarker.getAttribute('aria-label')).toBe('held by an open visit; wants you');
+  expect(both.textContent).toContain('●');
+  expect(within(both).getByRole('button', { name: /in session/i })).toBeTruthy();
 
-  // ● a plain person's move, unheld, still leads as it did before.
+  // A plain person's move, unheld: the ● leads and there is no visit chip.
   const wants = rowFor('wants a person') as HTMLElement;
   expect(wants.textContent).toContain('●');
-  expect(wants.textContent).not.toContain('○');
+  expect(within(wants).queryByRole('button', { name: /in session|waiting/i })).toBeNull();
+});
+
+// The key states what the row markers and tints mean, so the board's glyphs and
+// colours are legible without hunting. It rides with the anchors table, naming
+// both visit states the marker distinguishes.
+it('shows a key for the row markers and the state tints', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  const key = anchors().querySelector('.legend') as HTMLElement;
+  expect(key).not.toBeNull();
+  expect(key.textContent).toContain('needs you');
+  expect(key.textContent).toContain('visit waiting for you');
+  expect(key.textContent).toContain('visit in session');
+  expect(key.textContent).toContain('a visit holds it');
 });
 
 // Within a family the members read in SECTION_ORDER — the most-pressing move
