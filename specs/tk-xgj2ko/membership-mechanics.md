@@ -146,16 +146,20 @@ else changes.
 
 ## Create-time parenting: an advisory epic-context indicator
 
-Create-time parenting is a default, not a law, and it keys on the subject being
-an epic. A sitting or visit on an epic is likely to create items that belong
-under that epic, so the created work's parent defaults to that epic — a real
-`parent-child` member. The default is overridable: work that is not actually part
-of the epic is not forced under it. And when the subject is not an epic — a task,
-a visit, a gate, a merge anchor — there is no epic to default to, so nothing is
-parented. Never turn a leaf into a container. The created work is then its own
-thing, or a dependency filed as a sibling.
+Create-time parenting is a default, not a law. It reads the subject's position in
+the graph to surface the likely epic for the sitting: the subject itself when it
+is an epic, otherwise the epic in the subject's ancestry. A sitting or visit on a
+story under epic `E` is likely about `E`, so `E` is the likely parent; the signal
+is not whether the subject is literally an epic. That likely epic is offered as
+the default parent for work the sitting creates, becoming a real `parent-child`
+member only when the created work genuinely decomposes it. The default is
+overridable in every case and never forces parenting. Work that is not actually
+part of the indicated epic is not filed under it; it is its own thing, or a
+dependency filed as a sibling. When the subject has no epic in its ancestry, no
+default surfaces. That is no suggestion rather than a prohibition, and the work is
+classified on its own merits. Never turn a leaf into a container.
 
-A member created this way carries no `blocks` edge back to its subject: the
+A member created this way carries no `blocks` edge back to that epic: the
 completion-wait is implicit in containment, and beads refuses the
 parent→descendant edge in any case. Work that is a dependency rather than a
 member keeps the sibling `blocks` edge.
@@ -165,7 +169,7 @@ demand is retired, parenting unstarted work under an epic that still carries one
 would freeze it under the halt cascade. The mechanism changes the sites that file
 routed work today — `assets/scripts/converse-parent.sh` and the converse prompt
 and settle skill that read it as `$PARENT` — so that routed work defaults to a
-member of an epic subject while gates and demands keep the sibling shape.
+member of the indicated epic while gates and demands keep the sibling shape.
 
 ## The sign-off's wait-for-work edge branches on the relationship
 

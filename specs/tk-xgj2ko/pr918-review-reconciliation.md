@@ -21,8 +21,9 @@ mechanism makes another redundant. The resolution is the four-relationship model
 a bead is a member (a `parent-child` child), a halt (a `blocks` edge on the
 epic), a hold on finalization (the finalize-gate on the `tracks` edge), or a
 dependency (a sibling `blocks` edge). Each relationship has one mechanism, and
-create-time parenting becomes an advisory indicator keyed on the subject being an
-epic rather than a law applied to everything.
+create-time parenting becomes an advisory indicator that surfaces the likely epic
+(the subject when it is an epic, otherwise its epic ancestor) rather than a law
+applied to everything.
 
 ## Disposition of the ten findings
 
@@ -65,8 +66,11 @@ Nine hold; one (#3) is factually wrong and is dropped with its reason.
 
 5. **Subject is not always an epic — HOLDS.** Blanket parenting under the
    subject turns a leaf (a task, visit, gate, or merge anchor) into a container.
-   Resolved by making create-time parenting an advisory indicator keyed on the
-   subject being an epic: a non-epic subject is never forced to parent.
+   Resolved by making create-time parenting an advisory indicator that surfaces
+   the likely epic (the subject when it is an epic, otherwise the epic in its
+   ancestry) and offers it as an overridable default. The parent is never blindly
+   the subject; a non-epic subject with no epic ancestor yields no suggestion; and
+   parenting happens only when the work genuinely belongs.
 
 6. **Contradicts component-model (routed work is a sibling) — HOLDS.**
    `docs/component-model.md` stated flatly that work handed out by a sitting "is
