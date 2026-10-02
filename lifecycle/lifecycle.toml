@@ -609,30 +609,42 @@ keys = [
   # Re-raising an objection whose key already has an open finding on this anchor
   # creates nothing; idempotency is by key, never by how often a check is read.
   "finding.key",
-  # One of: unvalidated | must-fix | deferred | declined. A reviewer files a
-  # finding unvalidated and the validator rules it. The disposition is the edge:
-  # must-fix wires finding --blocks anchor, the hold merge.sh's blocker probe
-  # already reads; deferred wires finding --discovered-from anchor, which is
-  # neither ready-blocking nor read by that probe, so it holds nothing; declined
-  # takes no edge and the finding closes with the reason.
+  # One of: unvalidated | must-fix | deferred | declined | needs-you. A reviewer
+  # files a finding unvalidated and the validator rules it; every ruling ends the
+  # finding closed or converts it to a visit. must-fix wires finding --blocks
+  # anchor, the hold merge.sh's blocker probe reads, until the fix unit lands.
+  # deferred files a claimable follow-up bead (its provenance edge --discovered-from
+  # the anchor) and closes the finding; declined closes it with the reason, no edge.
+  # needs-you files a visit for the operator and leaves the finding OPEN — an open
+  # finding holds its human review changes-requested until they rule the visit.
   "finding.disposition",
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
   "finding.source",
   # The GitHub comment databaseId that raised a human finding, stamped by
   # pr-facts.sh at file time. For an inline review comment it is also the id the
-  # reviewThread carries, so the write-back can find the thread and post a
-  # declined finding's owed reply into it.
+  # reviewThread carries, so the write-back can find the thread and post the
+  # finding's owed reply into it.
   "finding.comment_id",
-  # The answer a declined HUMAN objection owes its raiser, set by the validator
-  # on `finding.sh set-disposition declined --reply`. pr-facts.sh's write-back
-  # posts it to finding.comment_id's thread; a machine or no-objection decline
-  # owes none and sets it not. The peer model: the validator may overrule a
-  # human on the merits, never in silence.
+  # The answer a HUMAN objection owes its raiser, which pr-facts.sh's write-back
+  # posts to finding.comment_id's thread: a declined finding's overrule (set on
+  # `set-disposition declined --reply`), a deferred finding's follow-up id, or a
+  # needs-you finding's visit id (both set by set-disposition as it rules). A
+  # machine or no-objection finding owes none and sets it not. The peer model: the
+  # validator may overrule or defer a human objection, or send it to them, never
+  # in silence.
   "finding.reply",
   # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
   # pass does not answer the same thread twice.
   "finding.reply_posted",
+  # The claimable follow-up bead a deferred finding files to carry the later work,
+  # set by finding.sh as the deferral runs. It carries the objection, the deferral
+  # reason, and a --discovered-from edge to the anchor for provenance.
+  "finding.follow_up",
+  # The visit a needs-you finding files for the operator, set by finding.sh as the
+  # ruling runs. The finding stays open and its visit id is posted to the raiser's
+  # thread; the operator's ruling on the visit re-dispositions the finding.
+  "finding.visit",
   # The databaseId of the GitHub review that raised a human finding, stamped by
   # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's
   # human findings by their originating review, so once every finding one review

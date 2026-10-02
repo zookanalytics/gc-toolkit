@@ -193,8 +193,10 @@ that worker completes, all three are answered.
 | `anchor_bead` | the gating anchor |
 | `finding.lane` | the lane whose review raised it, or `human` |
 | `finding.key` | the lane's name plus a normalized locus and message; the dedup handle |
-| `finding.disposition` | `unvalidated`, `must-fix`, `deferred`, or `declined` |
+| `finding.disposition` | `unvalidated`, `must-fix`, `deferred`, `declined`, or `needs-you` |
 | `finding.source` | `machine:<lane>` or `human:<login>` |
+| `finding.follow_up` | the claimable later-work bead a `deferred` finding filed |
+| `finding.visit` | the open visit a `needs-you` finding filed for the operator |
 
 `finding.key` is what keeps a re-raised objection from becoming a second bead.
 `tk-elc0x` names this shape, and the design it cites is
@@ -222,9 +224,17 @@ only `blocks` as well, but the contrast it draws there is with `tracks` and
 
 | Disposition | Edge | Effect |
 |---|---|---|
-| `must-fix` | anchor `blocks` on the finding | holds the merge and the anchor's close |
-| `deferred` | finding `discovered-from` the anchor | records where it came from, holds nothing |
-| `declined` | none | closed with the validator's reason |
+| `must-fix` | anchor `blocks` on the finding | holds the merge and the anchor's close until the fix unit lands |
+| `deferred` | follow-up `discovered-from` the anchor | finding closed; a claimable follow-up carries the later work |
+| `declined` | none | finding closed with the validator's reason |
+| `needs-you` | none; the finding stays open | a visit carries the operator's decision; the open finding holds the review |
+
+Every ruling ends the finding closed or converts it to a visit. That is the
+invariant this cycle keeps: a ruled finding never stays open holding nothing. A
+`must-fix` closes when its fix unit lands; `deferred` and `declined` close as the
+validator rules them; `needs-you` stays open on purpose, and the open finding is
+what holds its human review changes-requested until the operator rules the visit
+and that ruling re-dispositions the finding.
 
 A `must-fix` blocker needs no new merge code. `merge.sh` already reads every
 live `blocks` blocker of the anchor into its in-flight hold, through a
@@ -235,10 +245,16 @@ therefore stops the anchor closing as well as the PR merging, which is what
 makes the merge predicate structural instead of a rule each reader has to
 remember.
 
-`deferred` needs an edge outside both sets. `merge.sh` reads `blocks` downward
-and `parent-child` upward, and `discovered-from` is neither ready-blocking nor
-read by either probe, so a deferred finding stays open across the merge holding
-nothing.
+`deferred` is a real objection not fixed in this PR, so it becomes tracked
+later-work. `finding.sh` files a follow-up bead carrying the objection and the
+deferral reason, hangs the `discovered-from` edge from that follow-up to the
+anchor, records the follow-up id as the reply the raiser's thread receives, and
+closes the finding. `merge.sh` reads `blocks` downward and `parent-child`
+upward, so `discovered-from` is neither ready-blocking nor read by either probe:
+it names where the follow-up came from and holds nothing. The follow-up — a
+claimable bead, not the finding — is what outlives the merge; the finding,
+answered by that follow-up and the reply posted to its raiser, closes, which
+lets its human review auto-dismiss once every finding clears.
 
 A `declined` finding raised by a human owes one thing a machine's does not: the
 raiser hears why. The validator rules it on the merits like any finding — the
@@ -251,6 +267,17 @@ finding closes, so the content key re-adopts the still-standing objection as a
 fresh finding, which re-opens the human validation pass and re-holds the anchor.
 A human objection is weighed and answered, never held as one only its raiser may
 withdraw.
+
+`needs-you` is the ruling for a human comment the validator cannot judge — one
+that turns on product intent, a business fact, or a call that is the operator's
+to make, not one the pass can weigh against the diff. `finding.sh` files a visit
+(board-visible, routed to the operator), records its id as the reply the raiser's
+thread receives, and leaves the finding open. The open finding holds the human
+review changes-requested, so the merge waits — but visibly, as a visit on the
+board and a comment on the PR, never a silent park. The operator rules the visit
+and that ruling re-dispositions the finding: a `must-fix` to fix, a `declined` to
+overrule, a `deferred` to track for later. It is the escape hatch the three
+merits-rulings leave open, because not every objection is the pass's to settle.
 
 The earlier design's mistake was the shape, not the edge. It attached the
 finding to the anchor with `parent-child`, which states decomposition and
