@@ -22,6 +22,13 @@
 # between turns owns no process and does not appear — so it only ever protects,
 # and the horizon carries the rest.
 #
+# A caller retiring a specific session names it with --session <id>: that one
+# tree goes now, without the horizon and without the running-process hold. The
+# retiring session is itself that running process, so the hold would refuse the
+# very tree it means to take; the caller overrides it because it knows the
+# session is done where the horizon only estimates. The hourly pass is the
+# backstop for sessions that end without naming themselves.
+#
 # Scope is the harness scratch root and nothing else. Other /tmp tenants
 # (worktrees, build roots, tool temp dirs) are their own owners' to reclaim.
 #
@@ -31,22 +38,37 @@
 # chmod below is what makes them deletable; the measurement is what proves it.
 #
 # Usage:
-#   scratch-reap.sh              reap, print one summary line
-#   scratch-reap.sh --dry-run    report the plan, touch nothing
+#   scratch-reap.sh                reap, print one summary line
+#   scratch-reap.sh --dry-run      report the plan, touch nothing
+#   scratch-reap.sh --session <id> remove exactly that session's tree now
 # Env: SCRATCH_REAP_ROOT, SCRATCH_REAP_INACTIVE_AFTER, SCRATCH_REAP_BUDGET
 #      (seconds, except the root).
 # Exit: 0 reaped or nothing to do · 2 usage or an unsafe root.
-# Caller: the scratch-reap exec order. See docs/scratch-reclaim.md.
+# Callers: the scratch-reap exec order (horizon pass); the cycle-recycle hook
+# (--session, the retiring session's own tree). See docs/scratch-reclaim.md.
 set -euo pipefail
 
 PROG="${0##*/}"
 DRY_RUN=0
-for arg in "$@"; do
-    case "$arg" in
-        --dry-run) DRY_RUN=1 ;;
-        *) echo "$PROG: unknown argument: $arg" >&2; exit 2 ;;
+SESSION=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dry-run) DRY_RUN=1; shift ;;
+        --session) [ "$#" -ge 2 ] || { echo "$PROG: --session needs an id" >&2; exit 2; }
+                   SESSION="$2"; shift 2 ;;
+        --session=*) SESSION="${1#--session=}"; shift ;;
+        *) echo "$PROG: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# A session id names a directory this script deletes recursively, so it has to
+# be a bare id and never a path: the [A-Za-z0-9-] charset the harness uses for
+# CLAUDE_CODE_SESSION_ID cannot carry a '/' or a '..'.
+if [ -n "$SESSION" ]; then
+    case "$SESSION" in
+        *[!A-Za-z0-9-]*) echo "$PROG: --session id must match [A-Za-z0-9-]" >&2; exit 2 ;;
+    esac
+fi
 
 UID_NUM="$(id -u)"
 ROOT="${SCRATCH_REAP_ROOT:-${TMPDIR:-/tmp}/claude-$UID_NUM}"
@@ -72,6 +94,42 @@ case "${ROOT##*/}" in
 esac
 [ -O "$ROOT" ] || { echo "$PROG: refusing to reap '$ROOT' — not owned by uid $UID_NUM" >&2; exit 2; }
 
+# du walks a tree other processes are writing; a vanished entry is an expected
+# non-zero exit, not a reason to abandon the measurement.
+tree_kb() { du -sk "$1" 2>/dev/null | awk 'NR == 1 { print $1 }' || true; }
+gib() { awk -v b="$1" 'BEGIN { printf "%.2f", b / 1073741824 }'; }
+
+# --- targeted mode: reap one named session's tree now ----------------------
+# Found by a directory named exactly the session id at the session depth
+# (<root>/<slug>/<id>), under the same -P and -xdev as the full pass, so a
+# session id can only ever name a tree inside the validated root. No horizon
+# and no live-process hold: the caller has named a session it knows is done.
+if [ -n "$SESSION" ]; then
+    session_dirs() { find -P "$ROOT" -mindepth 2 -maxdepth 2 -xdev -type d -name "$SESSION" "$@" 2>/dev/null; }
+    if [ -z "$(session_dirs -print -quit)" ]; then
+        echo "$PROG: no scratch tree for session $SESSION under $ROOT — nothing to reap"
+        exit 0
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "$PROG: DRY RUN — would remove session $SESSION's tree under $ROOT:"
+        session_dirs -print | sed 's/^/  /' || true
+        exit 0
+    fi
+    BEFORE_KB="$(tree_kb "$ROOT")"; BEFORE_KB="${BEFORE_KB:-0}"
+    # chmod before delete, as the full pass does: a read-only subtree (a Go
+    # module cache copied into scratch) refuses rm, and a swallowed refusal
+    # frees nothing. -exec is NUL-clean and a no-op when nothing matches.
+    session_dirs -exec chmod -R u+w {} + || true
+    session_dirs -exec rm -rf {} + || true
+    # A slug directory emptied of its last session goes too, depth-pinned like
+    # the full pass so a kept session one level down is never touched.
+    find -P "$ROOT" -mindepth 1 -maxdepth 1 -xdev -type d -empty -delete 2>/dev/null || true
+    AFTER_KB="$(tree_kb "$ROOT")"; AFTER_KB="${AFTER_KB:-0}"
+    FREED_KB=$((BEFORE_KB - AFTER_KB)); [ "$FREED_KB" -ge 0 ] || FREED_KB=0
+    printf '%s: reaped session %s — freed %s GiB\n' "$PROG" "$SESSION" "$(gib $((FREED_KB * 1024)))"
+    exit 0
+fi
+
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/gctk-scratch-reap.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 LIVE="$WORK/live"; REMOVE_LIST="$WORK/remove"
@@ -90,9 +148,6 @@ sort -u -o "$LIVE" "$LIVE"
 LIVE_N=$(wc -l < "$LIVE")
 
 START=$(date +%s)
-# du and find both walk a tree other processes are writing; a vanished entry
-# is an expected non-zero exit, not a reason to abandon the pass.
-tree_kb() { du -sk "$1" 2>/dev/null | awk 'NR == 1 { print $1 }' || true; }
 BEFORE_KB="$(tree_kb "$ROOT")"; BEFORE_KB="${BEFORE_KB:-0}"
 
 # One walk answers every question. Malformed rows — a newline in a filename
@@ -156,8 +211,6 @@ END {
 
 # shellcheck disable=SC1090  # a generated key=value file, not a script
 . "$WORK/plan"
-
-gib() { awk -v b="$1" 'BEGIN { printf "%.2f", b / 1073741824 }'; }
 
 # The largest files this pass is taking, so a recurring writer stays visible in
 # the order log rather than only in the total. It reads both tiers, and a tier
