@@ -366,7 +366,7 @@ if printf '%s\n' "$HOLD_DEF" | grep -q 'demand'; then
     ok "the Hold definition ties the mandatory stamp to the demand it files"
 else
     bad "the Hold definition ties the mandatory stamp to the demand it files" \
-        "the stamp is mandatory because the hold IS a demand — the gate the item blocks on and re-surfaces under; that reason, not restart-fear, is what a tidy edit must not drop"
+        "the stamp is mandatory because the hold IS a demand — the gate the conversation blocks on; that reason, not restart-fear, is what a tidy edit must not drop"
 fi
 if printf '%s\n' "$HOLD_DEF" | grep -q 'mandatory'; then
     ok "the Hold definition makes the hold-time stamp mandatory"
@@ -1409,7 +1409,7 @@ fi
 # prompt states which and calls them. Matched on the CAPTURE, not the call: the
 # sign-off re-states a demand with the same tokens, so a looser pattern passes
 # on a hold that files nothing.
-have "the hold files a demand, not only a stamp" 'DEMAND_OUT=$("$HELM" demand "$ITEM"' "$REPO/assets/scripts/converse-hold.sh"
+have "the hold files a demand, not only a stamp" 'DEMAND_OUT=$("$HELM" demand "$GATED"' "$REPO/assets/scripts/converse-hold.sh"
 have "…and reads the demand id back off stdout" "awk '/^demand /{print \$2; exit}'" "$REPO/assets/scripts/converse-hold.sh"
 lacks "…and never authorizes a prose-only wait in its place" \
       'the takeaway is then the only record' "$REPO/assets/scripts/converse-hold.sh" \
@@ -1417,7 +1417,7 @@ lacks "…and never authorizes a prose-only wait in its place" \
 
 have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
-have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
+have "…and re-states it when it does not" '"$HELM" demand "$GATED" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
 have "the prompt states the sibling rule for everything a sitting files" \
      'SIBLING of the subject, never a' "$PROMPT"
 
@@ -1601,8 +1601,17 @@ case "${2:-}" in
             *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
                  else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
         esac ;;
-    list)  if [ "${SO_DEMAND:-1}" = "1" ]; then jq -nc '[{id:"d-x",assignee:"",metadata:{"gc.demand_for":"item-x"}}]'
-           else printf '[]\n'; fi ;;
+    list)
+        # The demand list the discharge filters client-side: an item/anchor demand
+        # (SO_DEMAND, default on — the explicit merge-hold case) and/or a demand on
+        # the visit (SO_VISIT_DEMAND, default off — the conversation-wait case).
+        items=""
+        [ "${SO_DEMAND:-1}" = "1" ] && items='{"id":"d-x","assignee":"","metadata":{"gc.demand_for":"item-x"}}'
+        if [ "${SO_VISIT_DEMAND:-0}" = "1" ]; then
+            [ -n "$items" ] && items="$items,"
+            items="$items"'{"id":"d-v","assignee":"","metadata":{"gc.demand_for":"v-x"}}'
+        fi
+        printf '[%s]\n' "$items" ;;
     gate)  printf 'GC: %s\n' "$*" >>"$SOGC"; exit "${SO_GATE_RC:-0}" ;;
     close) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
     update) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
@@ -1664,6 +1673,30 @@ eq "$SO_RC" "0" "the cut-short discharge exits 0"
 have "an unruled sitting re-states the demand on the item" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
 if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled sitting" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled sitting"; fi
 if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unruled sitting" "found a release on --ruled no"; else ok "…and releases nothing on an unruled sitting"; fi
+
+echo "── the conversation wait gates the VISIT: a ruling resolves the visit demand ──"
+# Default Phase A shape: converse-hold files the conversation demand on the visit,
+# not the anchor, so the PR is never frozen by the conversation. The discharge
+# finds and resolves it off the visit exactly as it does an anchor demand.
+SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
+eq "$SO_RC" "0" "the discharge exits 0 on a conversation-wait ruling"
+have "a ruled sitting resolves the demand gating the VISIT" 'bd gate resolve d-v --reason approved' "$SOGC"
+have "…and stamps the ruling onto the visit demand's board sentence" 'helm[RIG] takeaway d-v approved --by converse --no-wait' "$SOLOG"
+
+echo "── the conversation wait, unruled: the visit demand is re-stated ──"
+SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
+have "an unruled sitting re-states the demand on the visit" 'helm[RIG] demand v-x still need X --by converse' "$SOLOG"
+if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled conversation wait" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled conversation wait"; fi
+
+echo "── a conversation wait AND an explicit merge hold: both demands discharge ──"
+# A sitting that both waits on the operator (visit demand) and pauses the merge
+# (anchor demand) discharges each on the ruling.
+SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_DEMAND=1 SO_VISIT_DEMAND=1 STUB_STATE=pull_request
+have "the conversation (visit) demand resolves" 'bd gate resolve d-v --reason approved' "$SOGC"
+have "the merge-hold (anchor) demand resolves too" 'bd gate resolve d-x --reason approved' "$SOGC"
 
 echo "── the item is the stall_root, and falls back to the subject ──"
 SOARGS=(--visit v-x --subject sub --outcome "x — y" --ruled no --still-owed z)

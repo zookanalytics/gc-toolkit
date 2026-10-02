@@ -4,12 +4,14 @@
 # is posted and the visit is closed.
 #
 # It stamps the closing takeaway on the item, reads it back, and discharges the
-# demand the hold filed. One question decides the discharge: did the decision
-# this hold waited on land here (--ruled yes) or not (--ruled no)?
-#   --ruled yes: the operator ruled in this thread. The gate is RESOLVED (a
+# demands the hold filed. A conversation wait gates the VISIT, an explicit merge
+# hold gates the anchor; a sitting may have filed either or both, and each is
+# discharged. One question decides each discharge: did the decision this hold
+# waited on land here (--ruled yes) or not (--ruled no)?
+#   --ruled yes: the operator ruled in this thread. Each gate is RESOLVED (a
 #     pre-gate demand is closed on the same terms), and where the item still
 #     reads `held` it is released back to the pool that owns it.
-#   --ruled no:  cut short, or the question outlived the sitting. The demand is
+#   --ruled no:  cut short, or the question outlived the sitting. Each demand is
 #     re-stated so the wait stays a graph state, and the item stays `held`.
 # `held` is keyed to this sitting's outcome, not to the state read off the item,
 # because the cut-short exit runs this same discharge on an item still waiting.
@@ -104,37 +106,48 @@ done
 gc bd show "$ITEM" --json | scrub \
   | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
   || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
-# Discharge the hold. One question decides both halves — did the decision
-# this sitting waited on land here? — so both read the same switch.
-# --include-gates: the demand is a human gate, hidden from `bd list` by
+# Discharge the hold. A conversation wait gates the VISIT (the default — a
+# conversation does not freeze its subject) and an explicit merge hold gates the
+# ITEM; a sitting may have filed either or both, so discharge each demand it
+# filed, keyed off the bead that demand gates. One question decides each — did
+# the decision this sitting waited on land here? — so every demand reads the same
+# switch. --include-gates: a demand is a human gate, hidden from `bd list` by
 # default, so the discharge would otherwise never find it.
-DEMAND=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 | scrub \
-  | jq -r --arg i "$ITEM" '[ .[]? | select((.metadata["gc.demand_for"] // "") == $i)
-                             | select((.assignee // "") == "") | .id ] | first // empty')
-if [ -n "$DEMAND" ] && [ "$RULED" = yes ]; then
-  # SETTLED — the operator ruled in this thread. Resolving the gate lifts
-  # the block and $ITEM goes back to the pool. A demand filed before
-  # demands were gates (issue_type=decision) is refused by `gate resolve`
-  # ("is not a gate issue"), so it is closed on the same terms instead.
-  gc bd gate resolve "$DEMAND" --reason "$RULING" \
-    || gc bd close "$DEMAND" --reason "$RULING"
-  # A demand's board sentence (gc.takeaway) is the QUESTION it was filed with,
-  # and the ruling is the answer. Left only in the gate's close reason, which no
-  # board reads, the closed demand lingers on the DONE band still asking and a
-  # glance re-engages a settled decision. The takeaway verb overwrites it with the
-  # ruling; --no-wait is what stamps gc.takeaway_settled, the settled mark only
-  # that verb writes, so every board surface reads the answer as a discharged
-  # wait. Run AFTER the close, so the demand never sits open-but-settled — the
-  # shape doctor/check-wait-is-an-edge reads as a wait already discharged while it
-  # still blocks. The verb's stamp is a plain metadata write, so it lands on the
-  # closed demand; if it does not, the renderer still suppresses the stale question.
-  "$HELM" takeaway "$DEMAND" "$RULING" --by converse --no-wait \
-    || echo "COULD NOT STAMP THE RULING on $DEMAND — the board may still show its question; run: $HELM takeaway $DEMAND \"$RULING\" --by converse --no-wait"
-elif [ -n "$DEMAND" ]; then
-  # STILL OWED — cut short, or the question outlived the sitting. The
-  # demand stays open, re-stated, so the wait stays a graph state.
-  "$HELM" demand "$ITEM" "$STILL_OWED" --by converse
-fi
+DEMANDS_JSON=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 | scrub)
+for GATED in "$VISIT" "$ITEM"; do
+  # An empty target would match every bead that carries no gc.demand_for at all,
+  # so skip it rather than resolve or close an unrelated bead.
+  [ -n "$GATED" ] || continue
+  DEMAND=$(printf '%s' "$DEMANDS_JSON" \
+    | jq -r --arg i "$GATED" '[ .[]? | select((.metadata["gc.demand_for"] // "") == $i)
+                               | select((.assignee // "") == "") | .id ] | first // empty')
+  [ -n "$DEMAND" ] || continue
+  if [ "$RULED" = yes ]; then
+    # SETTLED — the operator ruled in this thread. Resolving the gate lifts the
+    # block: the visit demand lets the conversation conclude, the anchor demand
+    # releases the merge. A demand filed before demands were gates
+    # (issue_type=decision) is refused by `gate resolve` ("is not a gate issue"),
+    # so it is closed on the same terms instead.
+    gc bd gate resolve "$DEMAND" --reason "$RULING" \
+      || gc bd close "$DEMAND" --reason "$RULING"
+    # A demand's board sentence (gc.takeaway) is the QUESTION it was filed with,
+    # and the ruling is the answer. Left only in the gate's close reason, which no
+    # board reads, the closed demand lingers on the DONE band still asking and a
+    # glance re-engages a settled decision. The takeaway verb overwrites it with the
+    # ruling; --no-wait is what stamps gc.takeaway_settled, the settled mark only
+    # that verb writes, so every board surface reads the answer as a discharged
+    # wait. Run AFTER the close, so the demand never sits open-but-settled — the
+    # shape doctor/check-wait-is-an-edge reads as a wait already discharged while it
+    # still blocks. The verb's stamp is a plain metadata write, so it lands on the
+    # closed demand; if it does not, the renderer still suppresses the stale question.
+    "$HELM" takeaway "$DEMAND" "$RULING" --by converse --no-wait \
+      || echo "COULD NOT STAMP THE RULING on $DEMAND — the board may still show its question; run: $HELM takeaway $DEMAND \"$RULING\" --by converse --no-wait"
+  else
+    # STILL OWED — cut short, or the question outlived the sitting. The demand
+    # stays open, re-stated on the bead it gates, so the wait stays a graph state.
+    "$HELM" demand "$GATED" "$STILL_OWED" --by converse
+  fi
+done
 # `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
 # runs this same block on an item still waiting, so the release is keyed to
 # this sitting's outcome rather than to the state read off the item. Erring

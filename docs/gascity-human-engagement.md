@@ -525,6 +525,36 @@ skips assigned demands on purpose — and neither does a gate whose gated bead
 is no longer open, which the sweep names on stderr until it is resolved by
 hand.
 
+### A conversation does not freeze its subject; a merge hold is an opt-in
+
+What the conversation demand gates is the choice that keeps a sitting from
+freezing the work it is about. A conversation about a PR anchor files its demand
+against the VISIT, not the anchor: the conversation cannot conclude until the
+operator answers, and the anchor keeps moving, so a conversation opened to help
+a stuck PR land does not itself hold it from landing. This is the default, and it
+needs no detection — the sitting never flags a hold it did not mean. The visit is
+itself the sitting that resolves that demand, so `converse-hold.sh` records it on
+the gate as `gc.gate_visit=<visit>` at filing time and `gate-visit-sweep.toml`
+files no second visit for it.
+
+When the sitting decides the merge must wait on the operator — the PR should not
+land until this is settled — it takes one explicit step: a second demand filed
+against the ANCHOR (`gc-helm.sh demand <anchor> "<why the merge waits>"`). That
+is the same `blocks` edge the merge sweep already honors — `merge.sh` holds on
+any open dep-edge blocker of the anchor, and `pr-facts.sh` and
+`pre-open-rebase.sh` read the anchor as held by matching `gc.demand_for=<anchor>`
+— so it pauses the PR with no change to any of them. The conversation demand on
+the visit never matches `gc.demand_for=<anchor>`, which is why the default no
+longer freezes the merge. A shepherd sitting simply omits the step, and the PR
+stays on the merge track. The sign-off (`converse-signoff.sh`) discharges
+whichever demands the sitting filed: the visit demand always, the anchor demand
+only when the explicit hold was taken.
+
+A pre-PR (unanchored) item is the one case the conversation demand still gates
+directly, because its `held` lifecycle state is a hold marker that
+`doctor/check-wait-is-an-edge` requires a live edge for. There is no merge to
+freeze there, so the hold stays on the item as before.
+
 ### The shape constraint, and why it is the hard part
 
 beads REFUSES a `blocks` edge from a parent to its own descendant. The

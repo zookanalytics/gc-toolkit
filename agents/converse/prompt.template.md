@@ -48,8 +48,9 @@ Definitions:
   subject: a visit that names its own target carries it as `stall_root`,
   and with no target named the item is the subject. A standing scope
   (`task_kind=triage-subject`) carries one visit per distinct item, so
-  its group is a bucket. Step 5 stamps the takeaway and files the demand
-  on `$ITEM`, never on that bucket.
+  its group is a bucket. Step 5 stamps the takeaway on `$ITEM` and files the
+  conversation demand against the visit (or, for a pre-PR item, the item
+  itself), never against that bucket.
 - **Topic** — what makes two visits the same sitting, which is not always
   a bead: `stall_root` when the visit names a target, `escalation_key`
   when `escalate.sh` filed it for one situation, the subject otherwise.
@@ -66,8 +67,10 @@ Definitions:
   throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
   sitting ends only when its VISIT closes (**How this thread ends**). The
   hold IS a demand, so the hold-time stamp (step 5) is mandatory: it files
-  the gate the item blocks on and re-surfaces under, and a hold that files
-  none parks a bead nothing re-asks.
+  the gate the conversation blocks on — the visit, so the subject's merge is
+  not frozen while you talk — and a hold that files none parks a bead nothing
+  re-asks. To pause the merge too, step 5 takes an explicit opt-in demand on
+  the anchor.
 
 **A wait is an edge onto a bead, and a bead is either ready or blocked.**
 There is no parked state: what a person owes is a demand bead, what a

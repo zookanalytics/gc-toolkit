@@ -21,26 +21,45 @@ else
   exit 1
 fi
 ```
-**A hold IS a demand.** The operator owes an answer, and until it lands
-the item cannot move, so the wait is a bead the item's work blocks on,
-not a comment. A ruling files unassigned and routes to the operator's
-partition; pass `--assignee <who>` to the writer only when the demand is
-work a named person must perform, and that one is theirs
-to close, never yours. One open demand per item: a resumed hold refreshes
-the existing bead.
+**A hold IS a demand.** The operator owes an answer before the
+conversation can conclude, so the wait is a bead with a `blocks` edge,
+not a comment, and `converse-hold.sh` files it against the right bead for
+you. A conversation about a PR anchor gates the VISIT: the conversation
+cannot conclude until the operator answers, and the subject anchor keeps
+moving — a conversation does not freeze its subject's merge. Only a
+pre-PR (unanchored) item takes the demand on itself, because its `held`
+marker needs that edge. A ruling files unassigned and routes to the
+operator's partition; pass `--assignee <who>` to the writer only when the
+demand is work a named person must perform, and that one is theirs to
+close, never yours. One open demand per gated bead: a resumed hold
+refreshes the existing bead.
 
 **Stamp BEFORE you wait, not after.** The hold IS a demand: until the
-item carries it nothing gates the work behind it or re-asks the question,
-so the stamp lands before you hand control to the operator. Write the
-takeaway to state the decision needed when read cold off the board. The
-same write sets `gc.hold_demand`, the trace step 1's `action=hold` arm
-reads off this visit to tell a real hold from a claim that died before
-step 2.
+demand is filed nothing re-asks the question, so it lands before you hand
+control to the operator. Write the takeaway to state the decision needed
+when read cold off the board. The same step sets `gc.hold_demand` on this
+visit, the trace step 1's `action=hold` arm reads to tell a real hold
+from a claim that died before step 2.
+
+**To pause the merge, take the explicit step — by default a conversation
+does not.** The hold above leaves a PR free to land while you talk, which
+is the shepherd case a conversation opened to help a stuck PR wants. When
+the sitting instead decides the merge must wait on the operator — the PR
+should not land until this is settled — file a second demand against the
+ANCHOR, which the merge sweep already honors:
+```
+<the resolved gc-helm.sh path> demand "$SUBJECT" "<why the merge waits, ≤140 chars>"
+```
+Omit it and the PR keeps moving; the step-7 sign-off discharges whichever
+demands you filed. Write the resolved path, not the variable, as with the
+close-out below.
 
 **The takeaway is the sentence; `held` is the state.** Where `$ITEM`
-already carries an anchor state the transition is skipped, and refused
-if attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh` enumerate
-anchors by that state, and `held` drops it from all three.
+already carries an anchor state the held transition is skipped, and
+refused if attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
+enumerate anchors by that state, and `held` drops it from all three. It
+is the pre-PR hold; the explicit merge hold above is an edge on the
+anchor, not this state.
 
 A framing that asks for no decision still files one. What the
 operator owes then is the close-out itself, and the demand is what

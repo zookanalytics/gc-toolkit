@@ -57,14 +57,21 @@ case "${2:-}" in
                 + (if $sr == "" then {} else {"stall_root":$sr} end)
                 + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)))}]' ;;
     update)
-        if [ "${STAMP_PERSIST:-1}" = "1" ]; then
-            v="${STAMP_VALUE:-}"
-            if [ -z "$v" ]; then
-                for a in "$@"; do case "$a" in gc.hold_demand=*) v="${a#gc.hold_demand=}" ;; esac; done
-            fi
-            printf '%s' "$v" >"$PERSIST"
-        fi
-        exit "${STAMP_RC:-0}" ;;
+        [ -n "${HLOG:-}" ] && printf 'gc %s\n' "$*" >>"$HLOG"
+        # Only the gc.hold_demand write on the visit is the stamp gate under test;
+        # a gc.gate_visit write on the demand (an anchored-item hold) just succeeds.
+        case "$*" in
+            *gc.hold_demand=*)
+                if [ "${STAMP_PERSIST:-1}" = "1" ]; then
+                    v="${STAMP_VALUE:-}"
+                    if [ -z "$v" ]; then
+                        for a in "$@"; do case "$a" in gc.hold_demand=*) v="${a#gc.hold_demand=}" ;; esac; done
+                    fi
+                    printf '%s' "$v" >"$PERSIST"
+                fi
+                exit "${STAMP_RC:-0}" ;;
+            *) exit 0 ;;
+        esac ;;
     *) exit 2 ;;
 esac
 STUB
@@ -179,6 +186,23 @@ run STUB_STATE=unanchored
 has "an unanchored item is transitioned to held" "lc transition item-x --to held" "$(calls)"
 run STUB_STATE=held
 hasnt "an item already anchored is not transitioned again" "lc transition" "$(calls)"
+
+echo "── an anchored item: the conversation demand gates the VISIT, not the item ──"
+# A conversation about a PR anchor must not freeze the merge (operator ruling):
+# its wait gates the visit, and the subject anchor keeps moving. Only a pre-PR
+# (unanchored) item takes the demand itself, which the default case above proves.
+run STUB_STATE=pull_request
+is "an anchored item still lets the hold proceed" "$(verdict)" "held"
+has "the demand is filed on the VISIT, so the anchor is never blocked" "helm[RIG] demand v-x need X --by converse" "$(calls)"
+hasnt "…and NOT on the item, so the merge is not frozen" "demand item-x" "$(calls)"
+has "the visit is recorded as the gate's own visit, so gate-visit-sweep files no second one" "gc bd update d-x --set-metadata gc.gate_visit=v-x" "$(calls)"
+hasnt "…and an anchored item is not transitioned to held" "lc transition" "$(calls)"
+is "the hold_demand stamp still lands on the visit" "$(cat "$PERSIST" 2>/dev/null)" "d-x"
+has "the takeaway headline still lands on the item" "helm[RIG] takeaway item-x holding — need X --by converse" "$(calls)"
+# The gate_visit stamp is best-effort: a hold whose demand landed still proceeds
+# even if that hygiene write is refused.
+run STUB_STATE=pull_request STAMP_RC=0
+is "an anchored hold proceeds regardless of the gate_visit stamp outcome" "$(verdict)" "held"
 
 echo "── the writers are searched for on the candidate roots, not assumed ──"
 run
