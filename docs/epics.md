@@ -20,10 +20,9 @@ elaborated — the form every epic follows.
 
 **Boundaries.** The form of an epic, not the scope content of any particular
 epic: a given epic's own Belongs/Boundaries is authored on that epic, not here.
-Not how a bead becomes a member of an epic — that classification by the
-`parent-child` edge is the membership mechanism, settled in
-[specs/tk-xgj2ko/membership-mechanics.md](../specs/tk-xgj2ko/membership-mechanics.md).
-Not dispatch-time grouping (whether two beads should have been one convoy),
+Not how a bead becomes a member of an epic — classification by the
+`parent-child` edge is the membership mechanism, a separate concern. Not
+dispatch-time grouping (whether two beads should have been one convoy),
 which the engine owns. Not a standing theme or initiative layer above epics,
 which is deliberately deferred. Filing conventions are
 [file-structure.md](file-structure.md); where epics sit in the workflow is
@@ -32,16 +31,25 @@ which is deliberately deferred. Filing conventions are
 
 ## The contract an epic carries
 
-An epic carries four fields. Together they make it first-class: readable on its
-own, verifiable against an outcome, and scoped at its edges. The shape follows
-the current BMAD epic template (`Outcome`, `Boundaries`, `Done when`) and SAFe's
+An epic carries five fields. Together they make it first-class: readable on its
+own, verifiable against an outcome, and scoped at its edges. Four follow the
+current BMAD epic template (`Outcome`, `Boundaries`, `Done when`) and SAFe's
 epic hypothesis, reusing [file-structure.md](file-structure.md)'s
-Mandate/Boundaries vocabulary so epics and docs read the same way.
+Mandate/Boundaries vocabulary so epics and docs read the same way; the label is
+gc-toolkit's own, for operator legibility.
+
+**Label.** A short handle, three to five words, that names the epic wherever it
+is surfaced — the Helm board, a brief, a cross-reference. It is the operator's
+context handle: a stable phrase that calls the whole epic to mind without
+re-reading the hypothesis. It sits on the epic alone; a child is known by the
+epic it belongs to and carries no label of its own.
 
 **Hypothesis statement.** One sentence: for whom, what changes, and the signal
 that shows it worked. This is the epic's goal sharpened into a claim that can be
 answered, not a theme that can only be worked on. It is what makes the epic
-readable without opening a child.
+readable without opening a child. A rough first statement that sets the general
+direction is enough to start; sharpening it as evidence comes in is expected,
+not a reopening.
 
 **Belongs and Boundaries.** The epic's scope, in the two-part form every
 authoritative doc uses. *Belongs* is the hypothesis plus the work it owns.
@@ -61,10 +69,12 @@ flight, that say whether the hypothesis is being borne out. They inform the
 pivot-or-persevere call before the full cost is spent. They are not a progress
 bar of closed tickets.
 
-The floor for an epic to exist is lower than the full contract: a hypothesis
-sentence plus boundaries is enough to file one and to classify work into it (see
-[Elaboration is progressive](#elaboration-is-progressive)). The closure
-condition and indicators are filled in as the epic is elaborated.
+The floor for an epic to exist is lower than the full contract: a label, a
+hypothesis sentence, and boundaries are enough to file one and to classify work
+into it (see [Elaboration is progressive](#elaboration-is-progressive)). The
+closure condition and indicators are filled in as the epic is elaborated. The
+only hard gate is that a hypothesis exists at all — its wording is expected to
+improve through the work, and nothing here is meant as a major gate on filing.
 
 ## How an epic closes
 
@@ -76,10 +86,13 @@ only then does the epic close. An epic is never closed by the automatic
 transition that closes an ordinary bead when its last child merges.
 
 The ruling can be persevere, pivot, or close. An epic whose hypothesis is
-disproven closes just as validly as one whose hypothesis holds; surviving work
-continues as ordinary flow without the epic. The mechanism that runs the
-validation and slings an epic's next unit is epic stewardship, a separate
-concern from this contract.
+disproven closes just as validly as one whose hypothesis holds. Its surviving
+work is not swept back into ordinary flow by default: work begun to serve a
+disproven hypothesis is evaluated deliberately, and work that still coheres
+around a hypothesis is rehomed onto an epic that owns it rather than scattered.
+What the disproven case warrants in full is its own question, left to epic
+stewardship — the same concern that runs the validation and slings an epic's
+next unit, separate from this contract.
 
 ## Epics are mortal
 
@@ -98,27 +111,33 @@ can be measured against, it is not an epic.
 
 An epic lands as a reviewed sequence of units, never as one omnibus PR. A unit
 is material: a spec plus the implementation that solves something useful on its
-own. Review effectiveness collapses past a few hundred changed lines and
-AI-assisted changes inflate diffs, so an epic reviewed as a single PR cannot be
-judged; the unit keeps each review at a size a human can actually read.
+own. An epic reviewed as a single PR mixes too many concerns for a reviewer to
+judge any of them well; a unit keeps each review scoped to one coherent change a
+human can hold in mind. The measure is scope — how many distinct concerns a
+review must carry — not the line count of the diff.
 
-The user-facing shape of a unit is one PR from a branch into main, fully
-reviewed, as the operator's last gate before the work is live. Mid-flight,
-reviewable pieces — a mockup, a unit spec — land as PRs into an integration
-branch for operator review; nothing reaches main until everything the unit's
-spec carries has come along with it. Convoys are an engine-internal grouping and
-never materialize to the operator as a unit.
+What an epic cares about is that it is a collection of discrete units of
+deliverable work, each separable and independently reviewable. How a unit
+actually moves to main — the review gate, the integration branches that hold
+mid-flight pieces, the convoys the engine groups work into — is the workflow's,
+described in [architecture.md](architecture.md); an epic does not redefine it.
 
 A spec that spans more than one unit is not a unit-spec. It is an epic-level
 elaboration artifact, and the units it describes are filed and land separately.
 
 ## Elaboration is progressive
 
-A thin epic is legal at intake. The floor is one hypothesis sentence plus
-boundaries — enough to read the epic and to classify work into it — and the rest
-of the contract is filled in as the epic is elaborated. Obvious work under the
-epic proceeds in parallel with that flesh-out; there is no freeze of all work
+A thin epic is legal at intake. The floor is a label, one hypothesis sentence,
+and boundaries — enough to read the epic and to classify work into it — and the
+rest of the contract is filled in as the epic is elaborated. Obvious work under
+the epic proceeds in parallel with that flesh-out; there is no freeze of all work
 behind a fully elaborated epic.
+
+A thin epic needs no committed document: it lives as a filed bead carrying its
+label, hypothesis, and boundaries — a place to hang work before anything is
+written down. When an epic is elaborated into a product brief, or a spec that
+spans its units, that artifact is a committed repo document under `specs/`, the
+same as any other durable record ([file-structure.md](file-structure.md)).
 
 The city has a natural tendency to elaborate: it generates the elaboration work
 itself and surfaces drafts for operator review, rather than waiting for a human
@@ -130,9 +149,11 @@ audit machinery is epic stewardship, authored separately from this contract.
 
 ## Worked example: this epic
 
-The template applied to `tk-rctkrj`, the epic this contract descends from. Its
-hypothesis and closure condition are the create-time draft, proposed for the
+The template applied to `tk-rctkrj`, the epic this doc is filed under. Its label,
+hypothesis, and closure condition are the create-time draft, proposed for the
 operator to ratify; the live contract for an epic is carried on the epic itself.
+
+**Label.** First-class epics.
 
 **Hypothesis.** For the operator judging the city's work, a first-class epic —
 one carrying a stated hypothesis, a declared scope, and reliable membership —
@@ -155,8 +176,8 @@ redefined). The standing theme/initiative layer is out of scope and deferred.
   standalone with a reason; no work is a silent orphan.
 - The helm board renders each epic's work grouped under it, not scattered beside
   its own children.
-- A new epic is filed with at least the floor contract (hypothesis plus
-  boundaries), and the city proposes a contract for an epic that lacks one.
+- A new epic is filed with at least the floor contract (a label, a hypothesis,
+  and boundaries), and the city proposes a contract for an epic that lacks one.
 - An epic closes by a ruling on its hypothesis after a validation step, and an
   area with no provable hypothesis is not filed as an epic.
 
