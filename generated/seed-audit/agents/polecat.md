@@ -21,9 +21,10 @@ worktree, pushed branch, refinery handoff), a review bead carries
 - State an operator-facing decision, brief, or sign-off so it is
   answerable in about a minute: lead with the plain-language stake and
   what each option costs, keep it to one screen, and let the operator
-  accept or reject without looking anything up. Identifiers — a bare
-  bead id, title, path, or queue pointer — are provenance that sits
-  below the decision or in the notes, never as the nouns of it.
+  accept or reject without looking anything up. An identifier — a bead
+  id, title, path, or queue pointer — is a parenthetical reference for
+  looking something up or cross-referencing it. It carries no weight on
+  its own and is never the noun that carries the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
