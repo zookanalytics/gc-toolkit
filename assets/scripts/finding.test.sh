@@ -223,5 +223,55 @@ gc bd update cfuh --status=closed >/dev/null
 eq "$(bstatus "$FHM")" "closed" "close-answered closes the human finding once its batch child lands"
 has "$(notes "$FHM")" "fix unit landed" "the close records why the human finding was resolved"
 
+# ---------------------------------------------------------------------------
+# set-disposition must-fix wires the close-ordering edge even when the fix unit
+# has ALREADY LANDED. The dispatch of a fix unit and the validator's must-fix
+# ruling race: a fix unit can close before its finding is ruled. Wiring only to a
+# LIVE fix unit (the old behavior) then left the finding edge-less, and nothing
+# ever closed it — it wedged the re-gate at pre_open_gate for days. A landed fix
+# unit still blocks the finding, and bd refuses a close only on an OPEN blocker,
+# so close-answered closes the finding on the next pass.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+export STUB_ENFORCE_BLOCKS=1
+store '[{"id":"tk-ancL","status":"open","assignee":"","title":"ancL","notes":"","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+        {"id":"fuL","status":"closed","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancL","source_review_bead":"revL"}}]'
+FL=$("$SUT" upsert --anchor tk-ancL --lane codex --locus "assets/scripts/l.sh:f()" --message "guard the write")
+"$SUT" set-disposition --finding "$FL" --anchor tk-ancL --disposition must-fix
+has "$(deps)" "fuL|blocks|$FL" "must-fix hangs the close-ordering edge onto a fix unit that ALREADY LANDED (the dispatch-vs-ruling race)"
+"$SUT" close-answered --anchor tk-ancL
+eq "$(bstatus "$FL")" "closed" "close-answered then closes the finding — a landed (closed) blocker does not refuse the close"
+unset STUB_ENFORCE_BLOCKS
+
+# ---------------------------------------------------------------------------
+# close-answered is the backstop for an edge-less must-fix finding: if the
+# close-ordering edge was missed for any reason, a finding with NO blocker whose
+# lane's fix unit has LANDED is not an unanswered objection — its fix is on the
+# branch — so close-answered closes it from the lane census rather than letting it
+# wedge the re-gate. (The finding here carries no inbound edge at all, simulating
+# the missed wire.)
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancE","status":"open","assignee":"","title":"ancE","notes":"","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+        {"id":"fuE","status":"closed","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancE","source_review_bead":"revE"}}]'
+FE=$("$SUT" upsert --anchor tk-ancE --lane codex --locus "assets/scripts/e.sh:f()" --message "guard the write")
+gc bd update "$FE" --set-metadata finding.disposition=must-fix >/dev/null
+hasnt "$(deps)" "fuE|blocks|$FE" "the finding is edge-less (the close-ordering edge was missed)"
+"$SUT" close-answered --anchor tk-ancE
+eq "$(bstatus "$FE")" "closed" "close-answered closes an edge-less must-fix finding once its lane's fix unit has LANDED (the backstop)"
+has "$(notes "$FE")" "no close-ordering edge" "…and records that it was matched by lane, not by edge"
+
+# An edge-less must-fix finding whose lane's fix unit is still IN FLIGHT must stay
+# open: the fix has not landed, so the finding still holds. (With no live fix unit
+# AND no landed one — a genuinely unanswered objection — it also stays open, as
+# the earlier F6 case proves.)
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancF","status":"open","assignee":"","title":"ancF","notes":"","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+        {"id":"fuF","status":"open","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancF","source_review_bead":"revF"}}]'
+FF=$("$SUT" upsert --anchor tk-ancF --lane codex --locus "assets/scripts/f.sh:f()" --message "guard the write")
+gc bd update "$FF" --set-metadata finding.disposition=must-fix >/dev/null
+"$SUT" close-answered --anchor tk-ancF
+eq "$(bstatus "$FF")" "open" "close-answered leaves an edge-less must-fix finding open while its lane's fix unit is in flight"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
