@@ -60,7 +60,7 @@ is  "--check emits one row" "$(printf '%s\n' "$OUT" | grep -c .)" "1"
 has "--check emits the asked row" "$OUT" "triage	skills/review-triage/SKILL.md	"
 
 # --check for an undeclared check fails closed.
-"$SUT" --file "$IDX" --check arch >/dev/null 2>&1
+"$SUT" --file "$IDX" --check nonesuch >/dev/null 2>&1
 is "undeclared --check exits 1" "$?" "1"
 
 # A missing index fails closed.
@@ -76,13 +76,15 @@ is "index with no checks exits 1" "$?" "1"
 "$SUT" >/dev/null 2>&1
 is "no --file exits 2" "$?" "2"
 
-# The repo's own index declares the forced baseline.
+# The repo's own index declares the forced baseline and the arch specialist.
 REAL="$REPO/review-checks.toml"
 if [ -r "$REAL" ]; then
   "$SUT" --file "$REAL" --check correctness >/dev/null 2>&1
   is "repo index declares correctness" "$?" "0"
   "$SUT" --file "$REAL" --check triage >/dev/null 2>&1
   is "repo index declares triage" "$?" "0"
+  "$SUT" --file "$REAL" --check arch >/dev/null 2>&1
+  is "repo index declares the arch specialist check" "$?" "0"
 else
   bad "repo carries review-checks.toml" "no $REAL"
 fi
