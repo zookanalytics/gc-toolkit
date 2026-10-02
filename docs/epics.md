@@ -147,7 +147,8 @@ to write the contract up front. Create-time classification proposes an epic's
 hypothesis, boundaries, and closure condition; the operator confirms, recorded
 as a dated decision on the epic. A periodic scope-reading audit re-reads the
 epic against completed work and proposes updates in place. That generation-and-
-audit machinery is epic stewardship, authored separately from this contract.
+audit machinery is [epic stewardship](epic-stewardship.md), authored separately
+from this contract.
 
 ## Worked example: this epic
 

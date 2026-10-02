@@ -26,6 +26,11 @@ visit_cg() { # <id> <status> <continuation_group-subject>
   printf '{"id":"%s","status":"%s","assignee":"","title":"%s","description":"","notes":"","issue_type":"task","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
     "$1" "$2" "$1" "$3"
 }
+# An epic bead carrying arbitrary metadata.
+epic_bead() { # <id> <status> <metadata-json>
+  printf '{"id":"%s","status":"%s","assignee":"","title":"%s","description":"","notes":"","issue_type":"epic","metadata":%s}' \
+    "$1" "$2" "$1" "$3"
+}
 
 # 1. No tracker at all -> may finalize.
 store "[$(work A1 open)]"; : > "$STUB_DEPS"
@@ -100,6 +105,46 @@ store "[$(work A11 open), $(work OTHER11 open), $(visit_cg V11 open A11)]"
 printf 'V11|tracks|OTHER11\n' > "$STUB_DEPS"
 out=$("$SUT" check A11 2>/dev/null); rc=$?
 eq "$rc" 0 "stamp here but tracks edge elsewhere: exit 0"
+
+# 13. clause_epic_ruling_recorded: a STEWARDED epic (has a hypothesis) with no
+# recorded ruling is held.
+store "[$(epic_bead E1 open '{"epic_hypothesis":"h"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E1 2>/dev/null); rc=$?
+eq "$rc" 1 "stewarded epic without a ruling: exit 1"
+has "$out" "epic_ruling" "unruled epic: names the missing ruling"
+has "$out" "E1" "unruled epic: names the epic"
+
+# 14. An epic carrying a ruling may finalize.
+store "[$(epic_bead E2 open '{"epic_hypothesis":"h","epic_ruling":"persevere"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E2 2>/dev/null); rc=$?
+eq "$rc" 0 "ruled epic: exit 0"
+
+# 15. An empty epic_ruling is not a ruling.
+store "[$(epic_bead E3 open '{"epic_hypothesis":"h","epic_ruling":""}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E3 2>/dev/null); rc=$?
+eq "$rc" 1 "epic with an empty ruling: exit 1"
+
+# 16. A pre-stewardship epic (no hypothesis) is exempt — it predates the model.
+store "[$(epic_bead E3b open '{}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E3b 2>/dev/null); rc=$?
+eq "$rc" 0 "an epic with no hypothesis is not held by the ruling clause: exit 0"
+
+# 17. A disposed epic (gc.superseded_by) is exempt — a recorded terminal reason.
+store "[$(epic_bead E3c open '{"epic_hypothesis":"h","gc.superseded_by":"s-1"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E3c 2>/dev/null); rc=$?
+eq "$rc" 0 "a disposed epic is not held by the ruling clause: exit 0"
+
+# 18. The clause is epic-only: a plain work bead with no ruling may finalize.
+store "[$(work W1 open)]"; : > "$STUB_DEPS"
+out=$("$SUT" check W1 2>/dev/null); rc=$?
+eq "$rc" 0 "non-epic bead is untouched by the epic-ruling clause: exit 0"
+
+# 19. The clauses are independent: an open visit still holds a ruled epic.
+store "[$(epic_bead E4 open '{"epic_hypothesis":"h","epic_ruling":"close"}'), $(visit VE4 open)]"
+printf 'VE4|tracks|E4\n' > "$STUB_DEPS"
+out=$("$SUT" check E4 2>/dev/null); rc=$?
+eq "$rc" 1 "a ruled epic under an open visit is still held by the visit clause"
+has "$out" "VE4" "the visit clause names the visit, first refusal stops the set"
 
 # 12. Usage.
 "$SUT" check >/dev/null 2>&1; eq "$?" 2 "check without a bead id: exit 2"
