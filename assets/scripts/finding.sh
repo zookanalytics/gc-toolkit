@@ -12,30 +12,41 @@
 #   anchor_bead          the gating anchor
 #   finding.lane         the lane whose review raised it, or `human`
 #   finding.key          lane name + normalized locus + message; the dedup handle
-#   finding.disposition  unvalidated | must-fix | deferred | declined
+#   finding.disposition  unvalidated | must-fix | deferred | declined | needs-you
 #   finding.source       machine:<lane> | human:<login>
 #   finding.comment_id   the GitHub comment databaseId that raised it (stamped by
 #                        pr-facts.sh for a human finding); the thread the write-back
-#                        posts an owed decline reply into
-#   finding.reply        the answer a declined HUMAN objection owes its raiser,
-#                        set on `set-disposition declined --reply`; pr-facts.sh's
-#                        write-back posts it to finding.comment_id's thread. A
-#                        machine or no-objection decline owes none and sets it not.
+#                        posts an owed reply into
+#   finding.reply        the answer a HUMAN objection owes its raiser, which
+#                        pr-facts.sh's write-back posts into finding.comment_id's
+#                        thread: a declined finding's overrule, a deferred finding's
+#                        follow-up id, or a needs-you finding's visit id. A machine
+#                        or no-objection finding owes none and sets it not.
+#   finding.follow_up    the claimable later-work bead a deferred finding filed
+#   finding.visit        the open visit a needs-you finding filed for the operator
 #
-# The interlock a finding places on its anchor is a graph edge, and the
-# disposition picks the type (component-model I1: no wait lives only in a
-# metadata string):
+# What a ruled finding holds, and how it ends (component-model I1: no wait lives
+# only in a metadata string):
 #
-#   must-fix   finding --blocks anchor            holds the merge and the close
-#   deferred   finding --discovered-from anchor   records provenance + the
-#                                                 deferral reason, holds nothing
-#   declined   no edge                            closed with the reason
+#   must-fix   finding --blocks anchor    holds the merge and the close until the
+#                                         fix unit answering it lands; then closed
+#   deferred   closed; a follow-up bead   the objection is not fixed in this PR — a
+#              --discovered-from anchor   claimable follow-up carries the later work
+#                                         and the finding closes holding nothing
+#   declined   closed, no edge            not an objection: closed with the reason
+#   needs-you  stays open, no edge        only the operator can judge it — a visit
+#                                         carries the decision and the open finding
+#                                         holds the review until they rule it
 #
 # `blocks` is the type must-fix uses, and not because it is the only edge that
 # blocks a close: merge.sh reads exactly `blocks` downward, so a finding held by
 # any other type would leave the PR free to land with the objection still open.
-# `discovered-from` is neither ready-blocking nor read by merge.sh's probes, so
-# a deferred finding stays open across the merge holding nothing.
+# Every ruling ends the finding closed or converts it to a visit: a deferred or
+# declined finding closes, so the human review it belongs to auto-dismisses once
+# every finding clears (pr-facts.sh); a needs-you finding stays open, which is
+# what holds that review until the operator rules its visit. The discovered-from
+# edge records provenance on the follow-up — a claimable bead — never on a finding
+# left open holding nothing.
 #
 # The route never lives on a finding. A finding states an objection; the bead
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
@@ -84,7 +95,7 @@ usage() {
 usage:
   finding.sh key --lane <lane> --locus <locus> --message <msg>
   finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>]
-  finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined [--reason <r>] [--reply <text>]
+  finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you [--reason <r>] [--reply <text>]
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
   finding.sh close-unvalidated --anchor <id> --lane <lane> [--reason <r>]
@@ -260,8 +271,8 @@ cmd_set_disposition() {
   [ -n "$finding" ] && [ -n "$anchor" ] && [ -n "$disp" ] \
     || { warn "set-disposition needs --finding, --anchor, --disposition"; exit 1; }
   case "$disp" in
-    must-fix|deferred|declined) ;;
-    *) warn "--disposition must be must-fix, deferred, or declined (got '$disp')"; exit 1 ;;
+    must-fix|deferred|declined|needs-you) ;;
+    *) warn "--disposition must be must-fix, deferred, declined, or needs-you (got '$disp')"; exit 1 ;;
   esac
   gc bd update "$finding" --set-metadata finding.disposition="$disp" >/dev/null 2>&1 \
     || { warn "could not set finding.disposition=$disp on $finding"; exit 2; }
@@ -291,36 +302,54 @@ cmd_set_disposition() {
       fi
       ;;
     deferred)
-      # Provenance only, holding nothing: discovered-from is neither
-      # ready-blocking nor read by merge.sh, so a deferred finding stays open
-      # across the merge. A must-fix -> deferred reclassification must first
-      # retract the blocks edge the earlier disposition wired — merge.sh reads
-      # blocks downward, so a surviving edge would keep a deferred finding
-      # holding the merge it must not. Fail closed if it survives rather than
-      # report a still-standing hold as cleared. Retract before adding
-      # discovered-from so the removal cannot touch the provenance edge.
+      # A real objection not fixed in this PR: it becomes tracked later-work. File
+      # a follow-up bead carrying the objection and the deferral reason, hang its
+      # provenance onto the anchor (discovered-from, now on a claimable bead rather
+      # than an orphan finding), record the follow-up id as the reply the raiser's
+      # thread receives, and CLOSE the finding. The close is what lets the human
+      # review auto-dismiss once every finding clears; a deferral holds neither the
+      # merge nor the review. First retract the blocks edge a prior must-fix ruling
+      # may have wired — merge.sh reads blocks downward, so a survivor would keep a
+      # deferral holding the merge it must release — and fail closed if it survives;
+      # strip inbound blocks so the close is not refused by a cross-wired fix unit.
       if edge_exists "$finding" "$anchor"; then
         gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
           || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
       fi
       ! edge_exists "$finding" "$anchor" \
         || { warn "$finding still blocks $anchor after deferred reclassification"; exit 2; }
-      # A deferred finding is fresh work picked up after the merge, answered by no
-      # fix unit now, so drop any fix-unit edge a prior must-fix ruling hung onto it
-      # — the deferral holds nothing and nothing may hold it. Retract before adding
-      # the provenance edge so the strip cannot touch discovered-from.
       strip_inbound_blocks "$finding"
-      gc bd dep add "$finding" "$anchor" --type discovered-from >/dev/null 2>&1 \
-        || warn "could not wire $finding --discovered-from $anchor (deferred records provenance only)"
-      # The deferral REASON is the whole justification for not fixing now, and
-      # a deferred finding holds nothing — the bead is the only place whoever
-      # picks it up after the merge can read why it was left. Record it the way
-      # declined does, or the policy's "deferral needs a reason" is unenforced
-      # prose: the caller passes one and nothing keeps it.
-      local dnote="deferred"
-      [ -n "$reason" ] && dnote="deferred: $reason"
-      gc bd update "$finding" --append-notes "$dnote" >/dev/null 2>&1 \
-        || warn "could not record the deferral reason on $finding"
+      # The follow-up is the real later-work. Its title carries the objection, its
+      # body the objection, the deferral reason, and the provenance; discovered-from
+      # records that it came from this anchor's review. A deferral with no tracked
+      # follow-up is the orphan this retires, so fail closed if it cannot be filed.
+      local ftitle fdesc followup
+      ftitle=$(bd_json show "$finding" | jq -r '(.[0].title // "") | tostring' 2>/dev/null)
+      [ -n "$ftitle" ] || ftitle="finding[$finding]"
+      ftitle="follow-up: $(printf '%s' "$ftitle" | sed -E 's/^finding\[[^]]*\]: //')"
+      fdesc=$(printf 'Deferred from the review of anchor %s (finding %s), to be picked up after the PR merges.\n\n%s' \
+        "$anchor" "$finding" "${reason:-No reason recorded.}")
+      followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+      [ -n "$followup" ] \
+        || { warn "could not file a follow-up bead for deferred finding $finding; NOT closing (a deferral with no tracked later-work is the orphan this retires)"; exit 2; }
+      gc bd dep add "$followup" "$anchor" --type discovered-from >/dev/null 2>&1 \
+        || warn "could not wire follow-up $followup --discovered-from $anchor (provenance only)"
+      gc bd update "$finding" --set-metadata finding.follow_up="$followup" >/dev/null 2>&1 \
+        || warn "could not stamp finding.follow_up=$followup on $finding"
+      # The follow-up id is the answer the raiser is owed: pr-facts.sh's write-back
+      # posts it into finding.comment_id's thread. Stamp it BEFORE the close and
+      # fail closed if it does not stick — a finding closed without the reply is a
+      # silent deferral the write-back can no longer post, and a closed finding is
+      # off the validator's unvalidated set so nothing re-attempts it.
+      local dreply="Deferred — tracked as follow-up $followup"
+      [ -n "$reason" ] && dreply="$dreply: $reason"
+      dreply="$dreply. It will be picked up after this merges."
+      gc bd update "$finding" --set-metadata finding.reply="$dreply" >/dev/null 2>&1 \
+        || { warn "could not stamp finding.reply on $finding; NOT closing (a silent deferral)"; exit 2; }
+      local dnote="deferred: tracked as follow-up $followup"
+      [ -n "$reason" ] && dnote="$dnote — $reason"
+      gc bd update "$finding" --status=closed --append-notes "$dnote" >/dev/null 2>&1 \
+        || { warn "could not close deferred finding $finding"; exit 2; }
       ;;
     declined)
       # No objection to answer: close it with the reason. A declined finding
@@ -351,6 +380,48 @@ cmd_set_disposition() {
       [ -n "$reason" ] && note="declined: $reason"
       gc bd update "$finding" --status=closed --append-notes "$note" >/dev/null 2>&1 \
         || { warn "could not close declined finding $finding"; exit 2; }
+      ;;
+    needs-you)
+      # The objection turns on a call only the operator can make, so this ruling
+      # does not close the finding — it converts it to a visit. File the visit
+      # (board-visible, routed to the operator by escalate.sh's default `human`
+      # route), record its id as the reply the raiser's thread receives, and leave
+      # the finding OPEN. An open finding keeps pr-facts.sh from auto-dismissing
+      # the human review, so the review holds the merge changes-requested until the
+      # operator rules the visit; their ruling then re-dispositions this finding
+      # (must-fix, declined, or deferred). needs-you holds nothing of its own, so
+      # retract any blocks edge a prior must-fix ruling hung and strip inbound
+      # blocks — the hold is the review, carried by this finding staying open.
+      if edge_exists "$finding" "$anchor"; then
+        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
+          || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
+      fi
+      strip_inbound_blocks "$finding"
+      # One visit per finding, keyed on its id; escalate.sh dedups on the
+      # (escalation_key, subject) pair, so a re-ruled finding reuses its open visit
+      # rather than filing a second. The path is overridable for the hermetic test.
+      local vkey="review-needs-you.$finding" vmsg vid escalate
+      vmsg="A review comment on anchor $anchor needs your decision; the review pass cannot judge it."
+      [ -n "$reason" ] && vmsg="$vmsg $reason"
+      escalate="${GC_ESCALATE_SH:-$_bd_lib_dir/escalate.sh}"
+      [ -x "$escalate" ] \
+        || { warn "escalate.sh not found beside this script; cannot file the needs-you visit for $finding"; exit 2; }
+      "$escalate" --subject "$anchor" --key "$vkey" --message "$vmsg" >/dev/null 2>&1 \
+        || { warn "could not file the needs-you visit for $finding (escalate.sh failed)"; exit 2; }
+      # The open visit on this subject carrying our key — escalate.sh filed or
+      # found exactly one. Its id is the answer the raiser is owed on the PR.
+      vid=$(bd_list --metadata-field escalation_key="$vkey" --status="$LIVE_STATUSES" 2>/dev/null \
+        | jq -r --arg a "$anchor" '[ .[]? | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a) ] | .[0].id // empty' 2>/dev/null)
+      [ -n "$vid" ] \
+        || { warn "needs-you visit filed for $finding but its id did not read back; NOT recording a reply"; exit 2; }
+      gc bd update "$finding" \
+        --set-metadata finding.visit="$vid" \
+        --set-metadata finding.reply="This comment needs your decision — opened visit $vid. The review stays changes-requested until you rule it." >/dev/null 2>&1 \
+        || { warn "could not stamp finding.visit/finding.reply on $finding"; exit 2; }
+      local nnote="needs-you: opened visit $vid"
+      [ -n "$reason" ] && nnote="$nnote — $reason"
+      gc bd update "$finding" --append-notes "$nnote" >/dev/null 2>&1 \
+        || warn "could not record the needs-you note on $finding"
       ;;
   esac
 }

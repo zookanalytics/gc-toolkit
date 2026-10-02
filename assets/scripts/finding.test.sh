@@ -61,31 +61,40 @@ has " $(probe_blockers tk-anc) " " $F1 " "merge.sh's down-blocker probe sees the
 eq "$(grep -c "^$F1|blocks|tk-anc$" "$STUB_DEPS")" "1" "re-running must-fix adds no second edge"
 
 # ---------------------------------------------------------------------------
-# set-disposition deferred: discovered-from holds nothing — the probe ignores it.
+# set-disposition deferred: a real objection becomes tracked later-work. The
+# finding CLOSES (no stay-open orphan that holds the human review hostage), a
+# claimable follow-up bead carries the work, and the follow-up — not the finding
+# — holds the discovered-from provenance.
 # ---------------------------------------------------------------------------
 F3=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "docs/x.md" --message "stale reference to a retired script")
 "$SUT" set-disposition --finding "$F3" --anchor tk-anc --disposition deferred --reason "the rewrite it needs lands in the next PR"
 eq "$(meta "$F3" 'finding.disposition')" "deferred" "disposition recorded as deferred"
-# A deferred finding holds nothing and outlives the merge: its bead is the only
-# place whoever picks it up can read WHY it was not fixed now.
-has "$(notes "$F3")" "the rewrite it needs lands in the next PR" "the deferral reason is recorded"
-has "$(deps)" "$F3|discovered-from|tk-anc" "deferred wires finding --discovered-from anchor"
+eq "$(bstatus "$F3")" "closed" "a deferred finding closes — no stay-open orphan holding the review"
+F3FU=$(meta "$F3" 'finding.follow_up')
+if [ -n "$F3FU" ] && [ "$F3FU" != "<absent>" ]; then ok "deferred files a follow-up bead and records its id on the finding"; else bad "deferred did not record finding.follow_up"; fi
+has "$(deps)" "$F3FU|discovered-from|tk-anc" "the follow-up — not the finding — carries the discovered-from provenance"
+hasnt "$(deps)" "$F3|discovered-from|tk-anc" "the closed finding holds no provenance edge of its own"
 hasnt "$(deps)" "$F3|blocks|tk-anc" "deferred writes no blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F3 " "merge.sh's probe does NOT see the deferred finding"
+has "$(meta "$F3" 'finding.reply')" "$F3FU" "the follow-up id is stamped as the reply the raiser's thread receives"
+has "$(notes "$F3")" "the rewrite it needs lands in the next PR" "the deferral reason is recorded on the finding"
 
 # ---------------------------------------------------------------------------
 # set-disposition must-fix -> deferred: the reclassification retracts the blocks
-# edge, or merge.sh keeps reading the finding as a live blocker and a deferred
-# finding holds the merge it must not (regression).
+# edge (else merge.sh keeps reading the finding as a live blocker and a deferred
+# finding holds the merge it must not), closes the finding, and files the
+# follow-up carrying the provenance.
 # ---------------------------------------------------------------------------
 F5=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/qux.sh:main()" --message "double-quote the array expansion")
 "$SUT" set-disposition --finding "$F5" --anchor tk-anc --disposition must-fix
 has " $(probe_blockers tk-anc) " " $F5 " "must-fix first wires the finding as a live blocker"
-"$SUT" set-disposition --finding "$F5" --anchor tk-anc --disposition deferred
+"$SUT" set-disposition --finding "$F5" --anchor tk-anc --disposition deferred --reason "safer to land and fix fresh"
 eq "$(meta "$F5" 'finding.disposition')" "deferred" "reclassified must-fix -> deferred"
+eq "$(bstatus "$F5")" "closed" "the reclassified finding closes"
 hasnt "$(deps)" "$F5|blocks|tk-anc" "must-fix -> deferred retracts the blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F5 " "merge.sh's probe no longer sees the reclassified finding"
-has "$(deps)" "$F5|discovered-from|tk-anc" "must-fix -> deferred keeps the discovered-from provenance edge"
+F5FU=$(meta "$F5" 'finding.follow_up')
+has "$(deps)" "$F5FU|discovered-from|tk-anc" "the reclassification files a follow-up carrying the provenance"
 
 # ---------------------------------------------------------------------------
 # set-disposition declined: closed with the reason, holding nothing.
@@ -110,6 +119,59 @@ eq "$(meta "$FH" 'finding.disposition')" "declined" "the human objection is decl
 eq "$(bstatus "$FH")" "closed" "…and closed like any decline, so a re-raise re-adopts fresh"
 has "$(meta "$FH" 'finding.reply')" "no change needed" "…and the owed reply is stamped for the write-back to post"
 hasnt " $(probe_blockers tk-anc) " " $FH " "…and it holds nothing once declined"
+
+# ---------------------------------------------------------------------------
+# set-disposition needs-you: a comment only the operator can judge. The finding
+# stays OPEN (holding its review changes-requested), a visit is filed for the
+# operator, and the visit id is stamped as the reply the raiser's thread receives.
+# ---------------------------------------------------------------------------
+# A stub escalate.sh files a visit-shaped bead the needs-you arm looks up by key.
+cat > "$TMP/escalate-stub.sh" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+subj=""; key=""; msg=""
+while [ $# -gt 0 ]; do case "$1" in
+  --subject) subj="${2:-}"; shift 2 ;;
+  --key) key="${2:-}"; shift 2 ;;
+  --message) msg="${2:-}"; shift 2 ;;
+  --pool) shift 2 ;;
+  *) shift ;;
+esac; done
+existing=$(gc bd list --metadata-field escalation_key="$key" --status=open,in_progress,blocked --json 2>/dev/null \
+  | jq -r --arg s "$subj" '[.[]? | select((.metadata["gc.continuation_group"] // "") == $s)][0].id // empty')
+[ -n "$existing" ] && exit 0
+vid=$(gc bd create "visit: $subj — $msg" -t task --json | jq -r '.id // .[0].id')
+gc bd update "$vid" --set-metadata task_kind=visit --set-metadata escalation_key="$key" \
+  --set-metadata gc.continuation_group="$subj" --set-metadata gc.routed_to=human >/dev/null
+gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true
+STUB
+chmod +x "$TMP/escalate-stub.sh"
+export GC_ESCALATE_SH="$TMP/escalate-stub.sh"
+
+FNU=$("$SUT" upsert --anchor tk-anc --lane human --source "human:johnzook" --locus "specs/x.md" --message "does this match the product intent?")
+gc bd update "$FNU" --set-metadata finding.comment_id=778899 >/dev/null
+"$SUT" set-disposition --finding "$FNU" --anchor tk-anc --disposition needs-you --reason "turns on product intent only the operator knows"
+eq "$(meta "$FNU" 'finding.disposition')" "needs-you" "disposition recorded as needs-you"
+eq "$(bstatus "$FNU")" "open" "a needs-you finding stays OPEN — it holds the review until the operator rules"
+FNUV=$(meta "$FNU" 'finding.visit')
+if [ -n "$FNUV" ] && [ "$FNUV" != "<absent>" ]; then ok "needs-you files a visit and records its id on the finding"; else bad "needs-you did not record finding.visit"; fi
+eq "$(meta "$FNUV" task_kind)" "visit" "the filed bead is a visit"
+has "$(meta "$FNU" 'finding.reply')" "$FNUV" "the visit id is stamped as the reply the raiser's thread receives"
+hasnt " $(probe_blockers tk-anc) " " $FNU " "needs-you holds nothing via blocks — the open finding and the review are the hold"
+# Idempotent: re-ruling needs-you reuses the one open visit (escalate dedups on key).
+BEFORE_V=$(jq 'length' "$STUB_STORE")
+"$SUT" set-disposition --finding "$FNU" --anchor tk-anc --disposition needs-you --reason "still the operator's call"
+eq "$(meta "$FNU" 'finding.visit')" "$FNUV" "re-ruling needs-you reuses the same visit"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE_V" "…and files no second visit"
+
+# must-fix -> needs-you retracts the block: the review, not a blocks edge, holds it.
+FNU2=$("$SUT" upsert --anchor tk-anc --lane human --source "human:johnzook" --locus "a.md" --message "unsure about the scope here")
+gc bd update "$FNU2" --set-metadata finding.comment_id=112233 >/dev/null
+"$SUT" set-disposition --finding "$FNU2" --anchor tk-anc --disposition must-fix
+has " $(probe_blockers tk-anc) " " $FNU2 " "must-fix first wires the block"
+"$SUT" set-disposition --finding "$FNU2" --anchor tk-anc --disposition needs-you --reason "escalating to the operator"
+hasnt " $(probe_blockers tk-anc) " " $FNU2 " "must-fix -> needs-you retracts the block"
+eq "$(bstatus "$FNU2")" "open" "the reclassified needs-you finding stays open"
 
 # ---------------------------------------------------------------------------
 # wire-fix-unit: the fix unit's two blocks edges.
