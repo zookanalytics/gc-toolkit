@@ -243,16 +243,24 @@ parent.
 The reason is what `parent-child` means. It is decomposition: the child is part
 of the parent's work, so the parent's blocked state cascades down to it. That
 cascade is the correct reading of containment and is not a defect to route
-around. It only does damage where the edge has been used for something that is
-not decomposition, and routed work is that case. Work `W` handed out by a
-sitting on subject `S` is not a part of `S`; it is what `S` is waiting for.
-Filing `W` as a child of `S` therefore states a containment that is not true,
-and the stranding follows from the false statement rather than from the
-cascade. Filed as the graph actually is, `W` sits beside `S` and `S` blocks on
-`W`. That reads correctly, and `W` stays claimable. beads enforces the sharpest
-case of this directly, refusing an edge that would make a parent wait on its
-own descendant. Where a container is wanted for roll-up, it is a bead that
-never blocks.
+around. It does damage only where the edge has been used for something that is
+not decomposition, and whether routed work is that case depends on what the work
+is. Work `W` a sitting hands out on subject `S` is a dependency by default: `S`
+is waiting for it and does not contain it, so `W` is not a part of `S`. Filing
+that `W` as a child of `S` would state a containment that is not true, and the
+stranding would follow from the false statement rather than from the cascade;
+filed as the graph is, `W` sits beside `S` and `S` blocks on `W`, which reads
+correctly and keeps `W` claimable. The exception is work that genuinely
+decomposes an epic subject — a story or task that is part of the epic. That `W`
+is a member, a `parent-child` child, and it carries no `blocks` edge back to the
+subject: the completion-wait is implicit in containment, and beads refuses a
+parent→descendant `blocks` edge in any case. "The subject is an epic" is the
+indicator that tells the two apart, and the shape law decides the mechanism
+either way — a dependency sibling carries the `blocks` edge, a member child
+never does (`specs/tk-xgj2ko/membership-mechanics.md`). beads enforces the
+sharpest case directly, refusing an edge that would make a parent wait on its
+own descendant. Where a container is wanted for roll-up, it is a bead that never
+blocks.
 
 Two boundaries. A conclusion is prose, stored once and never cleared, and it
 does not become a wait by being written down; that seam is
