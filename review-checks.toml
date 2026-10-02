@@ -7,6 +7,17 @@
 # branch is judged against the index it carries. assets/scripts/review-checks.sh
 # is the one parser. correctness and triage are the forced baseline; triage may
 # widen check_set to add any check declared here and may not invent one.
+#
+# Adding a check. Declare it here as a [checks.<name>] row whose `method` points
+# at the skill that carries its full generic method. Give it a dispatch arm in
+# assets/scripts/review-dispatch-body.sh: a short summary and a pointer to that
+# skill, plus the boundary lines that keep it in its lane (what belongs to
+# `correctness`, what to `demo`). The shared specialist stance — enforce through
+# findings, never edit, leave another check's concern to that check — is emitted
+# once by the dispatch body ahead of every specialist arm, so neither the arm nor
+# the skill restates it. A rig tunes a check for its own repo with
+# docs/review-<name>.md, which the dispatch body appends from the reviewed
+# commit; the pack skill stays rig-agnostic.
 
 [checks.correctness]
 method = "formulas/mol-review.toml"
