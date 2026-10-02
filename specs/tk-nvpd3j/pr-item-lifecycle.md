@@ -136,7 +136,7 @@ fix unit.
 | Fix form | What closes the fix unit (the addressing action) | New work? |
 |---|---|---|
 | Commit | merge-push closes the rework child when its commit lands on the branch | none |
-| Artifact (e.g. demo) | `demo-deliver.sh` closes the fix unit on successful attach | **the artifact bridge** |
+| Artifact (e.g. demo) | `demo-deliver.sh` closes the fix unit on successful attach | **the artifact bridge**, plus a write-back evidence edit |
 
 This is the symmetry the design rests on: **the addressing action is the closing
 action**, whatever the form. A commit's landing is its merge; an artifact's landing
@@ -144,11 +144,19 @@ is its delivery. An artifact fix unit carries no commit, so the refinery cannot
 close it on merge-push — its delivery is its landing, and the delivery closes it.
 
 Because `close-answered` already reads the fix unit's *closed* status without caring
-*how* it closed, the commit and artifact forms collapse into one derivation with no
-new resolution verb: once the artifact fix unit closes, the existing owner resolves
-the finding, and the existing write-back (which keys on the rework child closing)
-posts the resolved mark and resolves the thread. The whole artifact form reduces to
-one change in `demo-deliver.sh`.
+*how* it closed, the commit and artifact forms collapse into one resolution
+derivation with no new resolution verb: once the artifact fix unit closes, the
+existing owner resolves the finding.
+
+The write-back that answers the thread, however, is not yet form-agnostic.
+`pr-facts.sh` keys its reply off the rework child closing and names the PR's current
+head commit as the evidence: it sets the landed OID to the live head for every
+closed rework child (`pr-facts.sh:2415`) and posts "Addressed in `<head>` on this
+PR" (`pr-facts.sh:2595`). An artifact fix unit lands no commit, so that reply would
+attribute the resolution to a commit that did not make it. The artifact form
+therefore needs two edits, not one: `demo-deliver.sh` records durable delivery
+evidence and closes the fix unit, and `pr-facts.sh` cites that evidence for an
+artifact fix unit in place of the head commit.
 
 ### One owner: `gate-ensure.sh` runs stage-3 resolution
 
@@ -180,9 +188,13 @@ disagree (`finding.sh:604–609`).
 
 `demo-deliver.sh` closes the fix unit it delivers for, on successful attach. It
 already resolves and pins the origin repo, validates the PR against it, and fails
-closed on a bad attach; the addition is:
-when invoked for a fix unit (a `task_kind=rework` subject), close that fix unit
-once the attach returns success, so the one addressed-signal exists.
+closed on a bad attach; the additions are: when invoked for a fix unit (a
+`task_kind=rework` subject), record the delivered artifact's durable evidence (the
+attached comment's URL, which `gh pr comment --attach` returns) on the fix unit,
+then close it once the attach returns success. The record is what lets the
+write-back cite the artifact: with it on the fix unit, `pr-facts.sh` replies with
+the artifact for an artifact fix unit and keeps "Addressed in `<head>`" only for a
+commit one, so a resolved thread never claims a commit the fix did not make.
 
 **Residual gap (open question, below): a demo attached by hand** — not through the
 fix unit — still closes nothing. The supported path (a worker delivers the artifact
@@ -230,15 +242,24 @@ not per-path code. Two edits, carried by the implementation beads, not applied h
 - **"The fix unit" section.** State the normalized addressed-signal: a fix unit
   closes when its addressing action completes — a commit by merge-push, an artifact
   by delivery — and the finding resolves off that one signal regardless of form.
-  Record that an artifact fix unit's delivery is its landing.
+  Record that an artifact fix unit's delivery is its landing, and that it carries
+  durable delivery evidence so the write-back cites the artifact rather than a
+  commit.
 - **"The validator" section (stage-3 resolution).** State that `gate-ensure.sh`
   owns stage-3 resolution for every form, from the one addressed-signal plus the
   moot-lane derivation, and that no item resolves on a proxy such as re-approval.
 
 ## Implementation sequence — tracked
 
-Design-first: nothing dispatches until the operator approves this spec. Each bead
-is filed open and **unrouted**; approving routes them.
+Design-first: nothing dispatches until the operator approves this spec. Approval is
+this design landing — merging the PR closes `tk-nvpd3j` — so the gated hand-off is a
+graph edge, not a later manual sling. Each follow-up bead is **blocked-by** its
+prerequisite and carries an **armed deferred dispatch** to the polecat pool: when
+the prerequisite closes and `bd` reports the bead ready, the arm slings it on
+`mol-polecat-work`. Beads 1 (`tk-6mt7li`) and 2 (`tk-5u0ok8`) are blocked-by this
+design bead; bead 3 (`tk-fspfp2`) is blocked-by beads 1 and 2, so it waits for both
+to land. No bead is routed while its prerequisite is open, and none waits on a human
+to remember to sling it.
 
 1. **Artifact bridge** (`tk-6mt7li`) — `demo-deliver.sh` closes its fix unit on
    attach, so the existing owner resolves the finding. Smallest change; closes the
