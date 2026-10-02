@@ -14,7 +14,7 @@ agents/converse/PROVENANCE.md
 agents/converse/agent.toml
 09b47a4ec2eb7117ff67f585751f98a95b48c192e422bcbaa86ed64b56627ca7
 agents/converse/prompt.template.md
-8b59402f7477cf977ddc31a833db64afbc2411eaf75cbc9dc3c2f9a73278df39
+d3b5714f0adaf82448dbdb6ea5b5528386f2df234b584334ab306be6cec1d491
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
@@ -121,8 +121,6 @@ template-fragments/file-work-records.template.md
 6295309f08c0c935f5b94706aaa66340ef9e6b960f1ef25624154ed67833b32d
 template-fragments/heartbeat-no-consent-ui.template.md
 b5d65c46d8e4bd0911cf6c469c49fbde226001563003dd25e7b8ec57ee17a823
-template-fragments/learned-conventions-converse.template.md
-c73b034dd4951fcbef2d08a4bf3bf3e95fcbefc2e70a78ed24033e0920de5c31
 template-fragments/learned-conventions-mechanik.template.md
 90f310161f50a50a96fcbb7277ee0a87a735ddeed39deaeeb68f3813e23bbdeb
 template-fragments/learned-conventions-polecat.template.md
@@ -140,7 +138,7 @@ f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
 a6333144bdeae8e504c1902803f8c778c2fb1f75bbbfbcb3ea43938cabdfa856
 template-fragments/work-quality-base.template.md
-ca5d4164ea5ca3d6585f313f7bf9392596af083a1ef078ff5afb3a9785dfd442
+94a12ec830210d88ee03f1f7bd8fe38fb4badafc21d1291ba6fe828feabcd81d
 template-fragments/work-quality-human.template.md
 81a8e7fe094bfa28d717a73e78faa8d82425c90886881a815b15bac19b611e16
 template-fragments/work-quality-polecats.template.md

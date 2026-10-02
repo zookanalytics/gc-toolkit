@@ -412,5 +412,3 @@ Rules:
 {{ template "scratch-reclaim" . }}
 
 {{ template "file-feedback-observations" . }}
-
-{{ template "learned-conventions-converse" . }}
