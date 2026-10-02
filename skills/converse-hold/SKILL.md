@@ -46,9 +46,12 @@ does not.** The hold above leaves a PR free to land while you talk, which
 is the shepherd case a conversation opened to help a stuck PR wants. When
 the sitting instead decides the merge must wait on the operator — the PR
 should not land until this is settled — file a second demand against the
-ANCHOR, which the merge sweep already honors:
+ANCHOR, which the merge sweep already honors. The anchor is the visit's
+`stall_root`, or `$SUBJECT` when it names none; it is the same bead the
+step-7 sign-off discharges, so resolve it the way the hold does:
 ```
-<the resolved gc-helm.sh path> demand "$SUBJECT" "<why the merge waits, ≤140 chars>"
+ANCHOR=$(gc bd show "$VISIT" --json | jq -r '.[0].metadata.stall_root // ""')
+<the resolved gc-helm.sh path> demand "${ANCHOR:-$SUBJECT}" "<why the merge waits, ≤140 chars>"
 ```
 Omit it and the PR keeps moving; the step-7 sign-off discharges whichever
 demands you filed. Write the resolved path, not the variable, as with the
