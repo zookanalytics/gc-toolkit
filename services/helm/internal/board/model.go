@@ -427,6 +427,16 @@ type Tile struct {
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
 
+	// GroupParent is the id of this row's IMMEDIATE parent — the one anchor its
+	// edges climb to a single level up, empty when it climbs to nothing. GroupRoot
+	// names the top of the family tree; GroupParent names the next step toward it,
+	// so a surface renders the family as the nested containment tree it is — a
+	// sub-epic beneath its parent, that sub-epic's own children beneath it —
+	// instead of one flat member list under the top root. Both come from the same
+	// per-tile parent walk in [assignGroupRoots]: GroupRoot follows it to the top,
+	// GroupParent reports its first step.
+	GroupParent string `json:"group_parent"`
+
 	// Acceptable marks a recommendation row: the subject carries a
 	// gc.recommended_formula AND its visit is un-engaged, so a person can Accept
 	// it — dispatch that formula at the subject and dismiss the visit in one
@@ -457,19 +467,26 @@ type Tile struct {
 	PRPhase string `json:"pr_phase"`
 
 	// Phase is this bead's liveness in the shared tri-state vocabulary —
-	// `working`, `needs-review`, or `needs-attention` — derived through
-	// [prstatus.Derive], the one core the GitHub `status:` label also reads. It
-	// is the board's per-bead liveness on EVERY live row, where PRPhase is set
-	// on merge anchors alone: a merge anchor reads the same value PRPhase does
-	// (its holds and posture and its open rework/review children), and any other
-	// bead reads its own live-work signal — a graph.v2 workflow standing over it
-	// — through the identical rule, so one bead cannot carry two disagreeing
-	// tri-states.
+	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
+	// leads with on every live row. It begins as the per-bead value
+	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, posture,
+	// and for a merge anchor its open rework/review children, or for any other
+	// bead the live-workflow signal standing over it. A bead's board liveness and
+	// its GitHub `status:` label come from that one core. A row WITH child tiles
+	// then takes their rolled-up state in place of that per-bead value
+	// ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
-	// Empty on a terminal (closed) row, where the live vocabulary has no answer
-	// — the same not-applicable empty PRPhase leaves off a non-merge row. The
-	// in-flight input a merge anchor and a plain bead each feed the core is the
-	// narrower per-anchor signal.
+	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
+	// round-trip value and is never rolled up. Phase equals it on a merge anchor
+	// with no child tiles — the common case, because a merge anchor's rework and
+	// review children hang off it by a blocked/anchor_bead edge the roll-up does
+	// not climb — and diverges from it on a merge anchor that ALSO has
+	// parent-child child tiles, whose Phase becomes their roll-up. The one place
+	// the two cannot disagree is a blocked machine verdict, which lifts both to
+	// needs-attention together.
+	//
+	// Empty on a terminal (closed) row, where the live vocabulary has no answer,
+	// the same not-applicable empty PRPhase leaves off a non-merge row.
 	Phase string `json:"phase"`
 }
 

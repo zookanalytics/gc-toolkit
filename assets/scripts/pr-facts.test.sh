@@ -481,7 +481,7 @@ out=$(run)
 has "$out" "already covers branch" "an existing child suppresses a twin"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child"
 
-echo "# …a closed child at the SAME head still dedups; holds veto the dispatch"
+echo "# …a hold vetoes the dispatch"
 store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
 printf '%s' "$(prview 14 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_14.json"
 out=$(run)
@@ -691,10 +691,15 @@ has "$out" "branch/fix-pool unavailable; merge stays held" "with nothing to rout
 eq "$(meta CF3 pr_comment_disposition)" "<absent>" "…nothing is dispositioned"
 eq "$(vpass_id CF3)" "<none>" "…and no validation pass is opened"
 
-store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
+echo "# …a CLOSED rework at the current head is a finished round, NOT a cover: an approved PR gone CONFLICTING after its round, head unchanged, re-dispatches instead of wedging on the closed child"
+store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"task_kind\":\"rework\",\"anchor_bead\":\"F6\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
 printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
 out=$(run)
-has "$out" "already covers branch" "a closed child at the same head suppresses a re-file"
+has "$out" "filed merge-mode rework" "a closed child no longer suppresses the re-file; the still-dirty branch is re-dispatched"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "exactly one fresh merge-in child is minted"
+out=$(run)
+has "$out" "already covers branch" "…and the fresh OPEN child then dedups the next pass: the live-child guard still prevents a re-dispatch loop"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child — no loop"
 
 echo "# …a created-but-unstamped rework orphan is ADOPTED, never twinned"
 store "[$(anchor F4b 19)]"
@@ -878,16 +883,16 @@ eq "$(meta cov-drop anchor_bead)" "<absent>" "…both halves of it"
 has "$out" "already covers branch 'polecat/x38' at this head, no new child" "…while it still dedups the conflict"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "no child was minted"
 
-echo "# …a CLOSED covering child is dispositioned; its absent marker is left alone"
+echo "# …a CLOSED covering child blocks nothing: its round is over, so it is neither re-stamped nor read as covering, and the still-conflicting branch re-dispatches"
 cov2='{"id":"cov-closed","status":"closed","assignee":"","notes":"",'
 cov2="$cov2"'"title":"Rebase PR#37 onto main: base rewritten, PR conflicts",'
 cov2="$cov2"'"metadata":{"branch":"polecat/x37","rejection_reason":"stale base at head sha-37: x"}}'
 store "[$(anchor CW 37), $cov2]"
 printf '%s' "$(prview 37 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_37.json"
 out=$(run)
-hasnt "$out" "re-stamped role marker" "a closed dup is read by no live gate, so it is not re-stamped"
+hasnt "$out" "re-stamped role marker" "a closed child is read by no live gate, so it is not re-stamped"
 eq "$(meta cov-closed task_kind)" "<absent>" "…and its marker stays absent"
-has "$out" "already covers branch" "…while it still dedups the conflict"
+has "$out" "filed merge-mode rework" "…and it no longer dedups: the still-conflicting branch re-dispatches"
 
 echo "# …a stranded rework a polecat has since claimed is never re-stamped under them"
 held='{"id":"held-rw","status":"in_progress","assignee":"rig/gc-toolkit.polecat-2","notes":"",'

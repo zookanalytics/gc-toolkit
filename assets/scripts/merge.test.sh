@@ -1036,6 +1036,32 @@ out=$("$SUT" 2>&1)
 eq "$(pinned BK4)" "blocked@sha-95" "a base gone BEHIND is a blocked hold, not settled"
 has "$(reason BK4)" "moved ahead" "…and the reason says to bring the branch current"
 
+# The conflicting-after-approval wedge: gates green, nothing in flight, but the
+# branch conflicts with the base. No review verdict brings it current, so it is
+# the operator's (or the merge-in cadence's), not the awaiting-review tail —
+# record blocked, not settled, so the board stops reading it as a merge in
+# progress. This is the state defect #911 masked for ~12h as "working".
+echo "# a branch gone CONFLICTING (DIRTY) with nothing in flight records blocked, not settled"
+store "[$(anchor BK5 97), $(rev BK5)]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 97 OPEN DIRTY)" > "$GH_DIR/pr_view_97.json"
+echo '[]' > "$GH_DIR/reviews_97.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned BK5)" "blocked@sha-97" "a conflicting branch with nothing in flight is a blocked hold, not settled"
+has "$(reason BK5)" "conflicts" "…and the reason names the conflict and says to bring the branch current"
+
+# pr-facts.sh files the merge-in rework; once it is in flight the in-flight arm
+# records progressing BEFORE the DIRTY switch is reached, so "working" stays
+# correct exactly while a rework is moving the branch.
+echo "# …but a conflicting branch WITH a pool-routed merge-in in flight stays progressing, not blocked"
+store "[$(anchor BK6 99), $(rev BK6),
+        {\"id\":\"rw-bk6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\",\"task_kind\":\"rework\",\"anchor_bead\":\"BK6\",\"branch\":\"polecat/x99\"}}]"
+printf 'rw-bk6|blocks|BK6\n' > "$STUB_DEPS"
+printf '%s' "$(prview 99 OPEN DIRTY)" > "$GH_DIR/pr_view_99.json"
+echo '[]' > "$GH_DIR/reviews_99.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed merge-in in flight is the city's move, not a wedge"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

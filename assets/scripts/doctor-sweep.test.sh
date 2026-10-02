@@ -25,6 +25,15 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
+# The pre-spawn Dolt health probe. Answer from the fixture the case set (default
+# healthy), and do NOT log it: the sweep-count assertions below count doctor
+# runs by log line, and the probe is not a sweep.
+if [ "${1:-}" = "dolt" ] && [ "${2:-}" = "health" ]; then
+  [ -n "${STUB_DOLT_SLEEP:-}" ] && sleep "$STUB_DOLT_SLEEP"
+  if [ -n "${STUB_DOLT_HEALTH:-}" ]; then printf '%s' "$STUB_DOLT_HEALTH"
+  else printf '%s' '{"server":{"reachable":true,"latency_ms":120}}'; fi
+  exit "${STUB_DOLT_RC:-0}"
+fi
 printf '%s\n' "$*" >> "${STUB_LOG:?}"
 [ "${1:-}" = "doctor" ] || exit 0
 [ -n "${STUB_CHECK:-}" ] && "$STUB_CHECK" &
@@ -33,6 +42,24 @@ printf '%s\n' "$*" >> "${STUB_LOG:?}"
 exit "${STUB_RC:-0}"
 STUB
 chmod +x "$BIN/gc"
+
+# The pre-spawn unit cross-check calls `systemctl --user list-units`; stub that
+# one answer (the single active unit a case declares via STUB_UNIT, else none)
+# and pass everything else — including the tests' own `systemctl --user stop` —
+# through to the real binary, so the cross-check never reads a live deacon's
+# real units and the test stays hermetic.
+REAL_SYSTEMCTL="$(command -v systemctl || true)"; export REAL_SYSTEMCTL
+cat > "$BIN/systemctl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "list-units" ]; then
+    [ -n "${STUB_UNIT:-}" ] && printf '%s loaded active running gc doctor sweep\n' "$STUB_UNIT"
+    exit 0
+  fi
+done
+exec "${REAL_SYSTEMCTL:-/bin/systemctl}" "$@"
+STUB
+chmod +x "$BIN/systemctl"
 export PATH="$BIN:$PATH"
 
 # A pack check the sweep can be caught inside. Its PATH is what names it.
@@ -45,6 +72,9 @@ chmod +x "$TMP/rig/doctor/check-fixture-slow/run.sh"
 
 export STUB_LOG="$TMP/gc.log"; : > "$STUB_LOG"
 export STUB_SLEEP="" STUB_RC=0 STUB_PAYLOAD="" STUB_CHECK=""
+# Pre-spawn gate controls: Dolt health probe answer (empty = healthy default)
+# and the live sweep unit the cross-check sees (empty = none).
+export STUB_DOLT_HEALTH="" STUB_DOLT_RC=0 STUB_DOLT_SLEEP="" STUB_UNIT=""
 # The ambient city must never be an input; every case names its own state dir.
 unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG 2>/dev/null || true
 
@@ -473,6 +503,108 @@ run
 has "$OUT" "state=idle" "  ... and the floor of 1 arms no retry, never a hot loop"
 eq "$(grep -c . "$STUB_LOG")" "1" "  ... only the single start the clamped minimum allows"
 unset GC_DOCTOR_SWEEP_MAX_ATTEMPTS
+
+# --- the pre-spawn Dolt health gate: a degraded data plane defers the start --
+# A sweep queries every store's Dolt, so starting one while the data plane is
+# unreachable or overloaded is the amplifier that turned a slowdown into a
+# collapse. The gate stands the sweep down instead — and because it sits past
+# the start decision, it brakes both the ordinary hourly start and the retry a
+# failed run arms, without spending either's state.
+export STUB_PAYLOAD="$TMP/payload.json" STUB_RC=1 STUB_SLEEP=0
+
+new_state dolt_unreachable
+: > "$STUB_LOG"
+export STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=deferred" "an unreachable Dolt defers the start instead of sweeping"
+has "$OUT" "reason=dolt-degraded" "  ... naming why"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts no sweep"
+if [ -d "$STATE/current" ]; then bad "  ... and creates no run dir"; else ok "  ... and creates no run dir"; fi
+
+new_state dolt_overloaded
+: > "$STUB_LOG"
+export STUB_DOLT_HEALTH='{"server":{"reachable":true,"latency_ms":9999}}'
+run
+has "$OUT" "state=deferred" "a Dolt server past the latency ceiling defers too"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
+
+# The deferred start is held, not spent: window-start and attempts are left
+# untouched, so the SAME due start fires once Dolt recovers.
+new_state dolt_recover
+: > "$STUB_LOG"
+export STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=deferred" "degraded: the due start defers"
+if [ -e "$STATE/window-start" ]; then bad "  ... and stamps no window-start while deferred"; else ok "  ... and stamps no window-start while deferred"; fi
+export STUB_DOLT_HEALTH='{"server":{"reachable":true,"latency_ms":80}}'
+run
+has "$OUT" "state=started" "once Dolt recovers the held start fires"
+await_run
+
+# A Dolt-caused failure arms no retry while Dolt stays degraded: seed the state
+# a failed run leaves (window open, a retry due), hold it degraded, and prove no
+# sweep starts and no attempt is burned — then recovery lets the retry run.
+new_state dolt_retry_held
+: > "$STUB_LOG"
+RECENT=$(( $(date +%s) - 100 ))
+printf '%s' "$RECENT" > "$STATE/window-start"
+printf '1'            > "$STATE/attempts"
+printf 'failed'       > "$STATE/last-outcome"
+printf '%s' "$RECENT" > "$STATE/last-start"
+export STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=deferred" "a failed run's retry defers while Dolt is degraded"
+eq "$(cat "$STATE/attempts")" "1" "  ... burning no attempt on a sweep that never ran"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starting no retry"
+export STUB_DOLT_HEALTH='{"server":{"reachable":true,"latency_ms":80}}'
+run
+has "$OUT" "state=started" "  ... and the retry fires once Dolt recovers"
+eq "$(cat "$STATE/attempts")" "2" "  ... counted as attempt 2 of the same window"
+await_run
+
+# An unprovable probe must NOT disable sweeping: a health check that returns an
+# unreadable answer is treated as healthy-enough to proceed, so a broken probe
+# can never silence the patrol.
+new_state dolt_unprovable
+: > "$STUB_LOG"
+export STUB_DOLT_RC=0 STUB_DOLT_HEALTH='not json'
+run
+has "$OUT" "state=started" "an unreadable health probe proceeds, never blocks the sweep"
+await_run
+export STUB_DOLT_RC=0 STUB_DOLT_HEALTH=""
+
+# A probe that outruns its own bound is itself the overload signal.
+new_state dolt_probe_timeout
+: > "$STUB_LOG"
+export STUB_DOLT_SLEEP=2 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT=1
+run
+has "$OUT" "state=deferred" "a health probe past its bound defers the start"
+has "$OUT" "reason=dolt-degraded" "  ... as a degraded data plane"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
+unset GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
+export STUB_DOLT_SLEEP=""
+
+# --- the pre-spawn unit cross-check: a live sweep unit blocks a second start -
+# STATE_DIR can go blind (a per-process /tmp fallback a recycled session does
+# not inherit), and that is what let one incident start ~20 sweeps at once. A
+# live systemd user unit is the STATE_DIR-independent proof that a sweep is
+# already running, so a start defers to it. Only exercised where this host
+# launches via systemd — the same guard the launch and shedding assertions use.
+if command -v systemd-run >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+  new_state unit_live
+  : > "$STUB_LOG"
+  export STUB_UNIT="gc-doctor-sweep-424242.service"
+  run
+  has "$OUT" "state=running" "a live sweep unit reports running, even with a fresh STATE_DIR"
+  has "$OUT" "reason=unit-already-live" "  ... named as the unit, not STATE_DIR, that caught it"
+  eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts no second sweep"
+  if [ -d "$STATE/current" ]; then bad "  ... and creates no run dir"; else ok "  ... and creates no run dir"; fi
+  export STUB_UNIT=""
+  run
+  has "$OUT" "state=started" "with no unit live the start proceeds"
+  await_run
+fi
+export STUB_DOLT_HEALTH="" STUB_UNIT="" STUB_PAYLOAD="" STUB_RC=0
 
 # --- the shipped patrol step must handle every state this script reports -----
 # The step is prose plus one snippet, read by an agent, and both halves can go

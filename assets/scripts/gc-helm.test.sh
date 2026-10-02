@@ -1797,14 +1797,16 @@ else
     bad "(DISMISS-BLIND) the shape gate refused a legitimate empty result (got: $EOUT)"
 fi
 
-# (DISMISS-VERIFY) an id nothing answers for writes NOTHING. A marker stamped on
-# an unverified id is a row nobody can ever bring back.
+# (DISMISS-VERIFY) an id that does not resolve writes NOTHING. A marker stamped
+# on an unverified id is a row nobody can ever bring back. dismiss classifies the
+# refusal the way `open` does (shared verify_subject): UNKNOWN-9's prefix matches
+# no rig, a not-found provable without the data plane, so the refusal names that.
 : > "$TMP/updates"; : > "$TMP/closes"
 VRC=0
 VERR="$(sh "$SCRIPT" dismiss UNKNOWN-9 2>&1 >/dev/null)" || VRC=$?
 eq "$VRC" "4" "(DISMISS-VERIFY) an unresolvable subject is a runtime failure"
 eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-VERIFY) …and nothing was written"
-if grep -q 'could not verify' <<< "$VERR"; then
+if grep -qE 'bead not found|could not verify' <<< "$VERR"; then
     ok "(DISMISS-VERIFY) …and the refusal says why"
 else
     bad "(DISMISS-VERIFY) unclear refusal (got: $VERR)"

@@ -31,6 +31,12 @@ PROG="gc-visit-open"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# The one definition of whether a rig carries converse, shared with gc-helm.sh's
+# engage so this intake and that spawn read the capability the same way. Exposes
+# rig_carries_converse / converse_roster.
+# shellcheck source=converse-capability.sh
+. "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
+    || { printf '%s: cannot source converse-capability.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
 
 # The default rig — deliberately NOT inferred from cwd: a wrong-but-FIXED
 # default is discoverable, a wrong-and-VARYING one is not.
@@ -192,27 +198,28 @@ enumerate_rigs() {
 # this backstops — is the one with no resume. An unreadable roster refuses
 # nothing; a dead zone is a positive finding only.
 require_reaction_agent() {
-    if command -v timeout >/dev/null 2>&1; then
-        _rra_roster=$(timeout "${GC_VISIT_ROSTER_TIMEOUT:-15}" gc agent list --json 2>/dev/null || true)
-    else
-        _rra_roster=$(gc agent list --json 2>/dev/null || true)
-    fi
-    [ -n "$_rra_roster" ] || return 0
-    # A positive dead-zone finding requires a well-formed roster — a JSON object
-    # carrying an .agents array. Malformed, truncated, preface-prefixed, or
-    # wrong-shaped output is a degraded data plane, not a dead zone, so fail open
-    # (per the header) rather than strand a legitimate intake on a roster gc could
-    # not answer. Empty .agents stays a genuine finding; only unreadable is spared.
-    printf '%s' "$_rra_roster" | jq -e 'type == "object" and (.agents | type == "array")' >/dev/null 2>&1 || return 0
-    # Serviceable when a proactive pool OR a converse (base name or a model
-    # variant) is registered for the rig, in any cap or suspension state.
-    if printf '%s' "$_rra_roster" | jq -e --arg r "$1" '
-            [ .agents[]? | (.qualified_name // "")
-              | select(. == ($r + "/gc-toolkit.proactive")
-                       or startswith($r + "/gc-toolkit.converse")) ] | length > 0' >/dev/null 2>&1; then
+    # Converse is one of the two reaction agents; its capability is the shared
+    # predicate (converse-capability.sh), so this intake and gc-helm engage read
+    # it the same way and cannot drift. Serviceable the moment it is registered.
+    if rig_carries_converse "$1"; then
         return 0
     fi
-    _rra_alt=$(printf '%s' "$_rra_roster" | jq -r '
+    # The other reaction agent is the proactive first-reaction pool. Read the one
+    # roster converse_roster already fetched and validated well-formed (into
+    # $_CONVERSE_ROSTER), for it and for the alt-rig suggestion. Empty means
+    # unreadable or malformed — a degraded data plane, not a dead zone — so fail
+    # open (per the header) rather than strand a legitimate intake on a roster gc
+    # could not answer.
+    converse_roster
+    [ -n "${_CONVERSE_ROSTER:-}" ] || return 0
+    # Serviceable when a proactive pool is registered for the rig, in any cap or
+    # suspension state. (Converse was handled by the shared predicate above.)
+    if printf '%s' "$_CONVERSE_ROSTER" | jq -e --arg r "$1" \
+            '[ .agents[]? | (.qualified_name // "")
+               | select(. == ($r + "/gc-toolkit.proactive")) ] | length > 0' >/dev/null 2>&1; then
+        return 0
+    fi
+    _rra_alt=$(printf '%s' "$_CONVERSE_ROSTER" | jq -r '
         [ .agents[]? | (.qualified_name // "")
           | select(test("/gc-toolkit[.](proactive|converse)"))
           | split("/")[0] ] | unique | join(", ")' 2>/dev/null || true)

@@ -4,14 +4,17 @@ import { App, resolveDrillTarget } from './App';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board arrives as one ranked list; every row carries its dependency FAMILY
-// in `tile.group_root` and the band it wants within that family in
-// `tile.section`. The app groups by reading those fields — it never re-derives
-// the split — so these fixtures set them the way the derive layer would, and the
-// tests address a family by its root's heading. group_root defaults to the
-// tile's own id (its own family root); a member sets it to its root's id.
+// in `tile.group_root`, its immediate parent in that family in `tile.group_parent`,
+// and the band it wants within the family in `tile.section`. The app groups by
+// reading those fields — it never re-derives the split — so these fixtures set
+// them the way the derive layer would, and the tests address a family by its
+// root's heading. group_root defaults to the tile's own id (its own family root)
+// and group_parent to empty (no parent); a member sets group_root to its root's
+// id, and a nested member also sets group_parent to its immediate parent.
 function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severity'>): Tile {
   return {
     group_root: over.id,
+    group_parent: '',
     rig: 'gc-toolkit',
     owed: false,
     weight: 0,
@@ -262,6 +265,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // Collapse state persists to localStorage, which a jsdom shares across the
+  // tests in this file; clear it so one test's fold does not leak into the next.
+  localStorage.clear();
 });
 
 // A fixed region by its accessible name — the owed cover-sheet, the sittings
@@ -484,11 +490,295 @@ it('orders members within a family by the move they want', async () => {
   expect(precedes(review, gate)).toBe(true);
 });
 
+// A family nests as a tree: a member that is itself a parent (a sub-epic) renders
+// as a sub-group above its own children, each row indented by its depth, rather
+// than as a flat sibling beside them. The wire's group_parent draws the edges;
+// group_root still names the top of the tree for every row.
+it('nests a family as a tree, indenting each row by its depth', async () => {
+  const board: Board = {
+    generated_at: '2026-09-30T08:00:00Z',
+    total: 3,
+    sittings: [],
+    tiles: [
+      tile({
+        id: 'tk-top',
+        kind: 'epic',
+        title: 'top epic',
+        severity: 'HIGH',
+        section: 'stalled',
+        m_total: 1,
+        open: 1,
+        group_root: 'tk-top',
+        rank_score: 3_000_000,
+      }),
+      tile({
+        id: 'tk-sub',
+        kind: 'epic',
+        title: 'sub epic',
+        severity: 'ELEVATED',
+        section: 'active',
+        m_total: 1,
+        open: 1,
+        group_root: 'tk-top',
+        group_parent: 'tk-top',
+        rank_score: 2_500_000,
+      }),
+      tile({
+        id: 'tk-leaf',
+        kind: 'task',
+        title: 'leaf task',
+        severity: 'NORMAL',
+        section: 'active',
+        group_root: 'tk-top',
+        group_parent: 'tk-sub',
+        rank_score: 2_000_000,
+      }),
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(url, 'http://localhost/').pathname.endsWith('/helm')) {
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('top epic')).toBeTruthy());
+
+  const top = rowFor('top epic') as HTMLElement;
+  const sub = rowFor('sub epic') as HTMLElement;
+  const leaf = rowFor('leaf task') as HTMLElement;
+
+  // Tree pre-order: the top epic, then its sub-epic, then the sub-epic's leaf —
+  // the leaf sits under its own parent, not flat beside it.
+  expect(precedes(top, sub)).toBe(true);
+  expect(precedes(sub, leaf)).toBe(true);
+
+  // The top root leads its family as a group row; the sub-epic and leaf nest as
+  // members.
+  expect(top.className).toContain('row-group');
+  expect(sub.className).toContain('row-member');
+  expect(leaf.className).toContain('row-member');
+
+  // Depth rides the title cell as --depth: the root at 0, the sub-epic one step
+  // in, the leaf one step deeper.
+  const depthOf = (row: HTMLElement): string =>
+    (row.querySelector('.title-cell') as HTMLElement).style.getPropertyValue('--depth');
+  expect(depthOf(top)).toBe('0');
+  expect(depthOf(sub)).toBe('1');
+  expect(depthOf(leaf)).toBe('2');
+
+  // A member that heads a sub-group reads as a header (family-title); a leaf does
+  // not.
+  expect(sub.querySelector('.family-title')?.textContent).toBe('sub epic');
+  expect(leaf.querySelector('.family-title')).toBeNull();
+});
+
 // The board renders as ONE table, not a mini-table per family.
 it('renders the whole board as one table', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
   expect(within(anchors()).getAllByRole('table')).toHaveLength(1);
+});
+
+// A parent is a navigable header: its disclosure control folds the subtree
+// below it and unfolds it again. Default is expanded — nothing is hidden until
+// the operator folds it — so the members start visible.
+it('folds and unfolds a parent subtree from its disclosure control', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  // Expanded by default: the epic's two members are on the board.
+  expect(rowFor(/the canvas PR waiting on your review/)).not.toBeNull();
+  expect(rowFor(/anchorless open PR/)).not.toBeNull();
+
+  const epic = rowFor('Attention Canvas') as HTMLElement;
+  fireEvent.click(within(epic).getByRole('button', { name: /collapse Attention Canvas/i }));
+
+  // Folded: the members leave the DOM, the epic header stays.
+  expect(rowFor('Attention Canvas')).not.toBeNull();
+  expect(rowFor(/the canvas PR waiting on your review/)).toBeNull();
+  expect(rowFor(/anchorless open PR/)).toBeNull();
+
+  // The control now offers to expand, and does.
+  fireEvent.click(
+    within(rowFor('Attention Canvas') as HTMLElement).getByRole('button', {
+      name: /expand Attention Canvas/i,
+    }),
+  );
+  expect(rowFor(/the canvas PR waiting on your review/)).not.toBeNull();
+  expect(rowFor(/anchorless open PR/)).not.toBeNull();
+});
+
+// What a fold leaves legible: the needs-you count shows whether folded or not —
+// the one signal a collapse must not swallow — and the band breakdown of the
+// hidden subtree shows only once it is folded, because an expanded parent has
+// its rows below to carry it.
+it('summarizes the subtree on the parent header, needs-you count always and the band spread when folded', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  // Expanded: the needs-you count is present (both members are owed); the band
+  // breakdown is not, because the member rows are visible.
+  let epic = rowFor('Attention Canvas') as HTMLElement;
+  expect(epic.textContent).toContain('2 need you');
+  expect(epic.textContent).not.toContain('1 review');
+
+  fireEvent.click(within(epic).getByRole('button', { name: /collapse Attention Canvas/i }));
+
+  // Folded: the needs-you count stays, and the band spread appears — one review
+  // member, one gate member — so the family's shape reads without its rows.
+  epic = rowFor('Attention Canvas') as HTMLElement;
+  expect(epic.textContent).toContain('2 need you');
+  expect(epic.textContent).toContain('1 review');
+  expect(epic.textContent).toContain('1 gate');
+});
+
+// Folding hides rows; it never reorders them. The epic still leads the family
+// below it after a fold, so the owed-first family order (#878/#911) is untouched.
+it('does not reorder the board when a parent is folded', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  const epic = rowFor('Attention Canvas') as HTMLElement;
+  const nextFamily = rowFor(/fix\+guard ruled/) as HTMLElement;
+  expect(precedes(epic, nextFamily)).toBe(true);
+
+  fireEvent.click(within(epic).getByRole('button', { name: /collapse Attention Canvas/i }));
+
+  // The epic header still precedes the next family; nothing floated.
+  expect(precedes(rowFor('Attention Canvas') as HTMLElement, rowFor(/fix\+guard ruled/) as HTMLElement)).toBe(
+    true,
+  );
+});
+
+// A fold is a durable view choice: it survives a remount, because it is kept in
+// localStorage, not just React state. The board reinstates the operator's view
+// the way it reinstates their context — by place.
+it('persists a fold across a remount', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  fireEvent.click(
+    within(rowFor('Attention Canvas') as HTMLElement).getByRole('button', {
+      name: /collapse Attention Canvas/i,
+    }),
+  );
+  expect(rowFor(/the canvas PR waiting on your review/)).toBeNull();
+
+  // A fresh mount reads the persisted fold and starts collapsed.
+  cleanup();
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(rowFor(/the canvas PR waiting on your review/)).toBeNull();
+  expect(
+    within(rowFor('Attention Canvas') as HTMLElement).getByRole('button', {
+      name: /expand Attention Canvas/i,
+    }),
+  ).toBeTruthy();
+});
+
+// The escape hatch: expand-all appears only once something is folded, and
+// unfolds every parent so a row folded away is never lost.
+it('offers expand-all only while something is folded, and unfolds everything', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  // Nothing folded: no escape hatch.
+  expect(within(anchors()).queryByRole('button', { name: /expand all/i })).toBeNull();
+
+  fireEvent.click(
+    within(rowFor('Attention Canvas') as HTMLElement).getByRole('button', {
+      name: /collapse Attention Canvas/i,
+    }),
+  );
+  const expandAll = within(anchors()).getByRole('button', { name: /expand all/i });
+  fireEvent.click(expandAll);
+
+  expect(rowFor(/the canvas PR waiting on your review/)).not.toBeNull();
+  expect(within(anchors()).queryByRole('button', { name: /expand all/i })).toBeNull();
+});
+
+// A leaf cannot fold: a single-item family (a loose row) carries no disclosure
+// control, so the affordance appears only where there is a subtree to fold.
+it('gives a loose row no disclosure control', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  const loose = rowFor(/fix\+guard ruled/) as HTMLElement;
+  expect(loose.className).toContain('row-loose');
+  expect(within(loose).queryByRole('button', { name: /collapse|expand/i })).toBeNull();
+});
+
+// Degrade: a family whose members carry no group_parent renders as a flat
+// one-level list under its root (the #911 safe degrade), and that root still
+// folds — the disclosure works whether the family is a deep tree or a flat list.
+it('folds a flat (unstamped group_parent) family from its root', async () => {
+  const board: Board = {
+    generated_at: '2026-09-30T08:00:00Z',
+    total: 3,
+    sittings: [],
+    tiles: [
+      tile({
+        id: 'tk-flat',
+        kind: 'epic',
+        title: 'flat root',
+        severity: 'HIGH',
+        section: 'stalled',
+        m_total: 2,
+        open: 2,
+        group_root: 'tk-flat',
+      }),
+      tile({
+        id: 'tk-m1',
+        kind: 'task',
+        title: 'flat member one',
+        severity: 'NORMAL',
+        section: 'active',
+        group_root: 'tk-flat',
+      }),
+      tile({
+        id: 'tk-m2',
+        kind: 'task',
+        title: 'flat member two',
+        severity: 'NORMAL',
+        section: 'active',
+        group_root: 'tk-flat',
+      }),
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(url, 'http://localhost/').pathname.endsWith('/helm')) {
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('flat root')).toBeTruthy());
+  // Both members hang directly off the root (depth 1) — the flat degrade.
+  const depthOf = (row: HTMLElement): string =>
+    (row.querySelector('.title-cell') as HTMLElement).style.getPropertyValue('--depth');
+  expect(depthOf(rowFor('flat member one') as HTMLElement)).toBe('1');
+
+  fireEvent.click(
+    within(rowFor('flat root') as HTMLElement).getByRole('button', { name: /collapse flat root/i }),
+  );
+  expect(rowFor('flat member one')).toBeNull();
+  expect(rowFor('flat member two')).toBeNull();
 });
 
 // The needs-you highlight rides the row in place; the board keeps wire order and
