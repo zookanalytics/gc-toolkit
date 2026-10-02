@@ -90,9 +90,15 @@ cat > "$FIX/reviews.json" <<'JSON'
 ]
 JSON
 
+# rk1: a post-open "Rework PR#..." round. rk2: a pre-open "Rework branch ..."
+# child — a different title the live fetch now reaches via task_kind=rework, not
+# the old title prefix. rk3: a finding bead that merely quotes "Rework PR" in its
+# title and carries no branch; it must join no row.
 cat > "$FIX/reworks.json" <<'JSON'
 [
-  {"id":"rk1","title":"Rework PR#100: address findings","metadata":{"branch":"polecat/wb-merged1"}}
+  {"id":"rk1","title":"Rework PR#100: address findings","metadata":{"branch":"polecat/wb-merged1"}},
+  {"id":"rk2","title":"Rework branch polecat/wb-merged1: address pre-open signoff findings","metadata":{"task_kind":"rework","branch":"polecat/wb-merged1","source_review_bead":"rv2"}},
+  {"id":"rk3","title":"finding[correctness]: the report fetches rework rows with the Rework PR title match","metadata":{"task_kind":"finding"}}
 ]
 JSON
 
@@ -124,7 +130,7 @@ eq "$(printf '%s' "$M" | jq -r '.tokens.output_tokens')" "300" "(SUM) wb-merged1
 eq "$(printf '%s' "$M" | jq -r '.tokens.cost_usd_estimate')" "3" "(SUM) wb-merged1 cost = 1.0+2.0"
 eq "$(printf '%s' "$M" | jq -r '.reviews')" "2" "(REVIEWS) wb-merged1 counts 2 gate reviews on its branch"
 eq "$(printf '%s' "$M" | jq -r '.reviews_by_check.correctness')" "1" "(REVIEWS) by-check breakdown present"
-eq "$(printf '%s' "$M" | jq -r '.reworks')" "1" "(REWORKS) wb-merged1 counts 1 rework on its branch"
+eq "$(printf '%s' "$M" | jq -r '.reworks')" "2" "(REWORKS) wb-merged1 counts its post-open and pre-open 'Rework branch' rounds; a branchless title match is excluded"
 eq "$(printf '%s' "$M" | jq -r '.start_source')" "started_at" "(START) wb-merged1 uses started_at"
 eq "$(printf '%s' "$M" | jq -r '.tokens_shared')" "false" "(SHARE) wb-merged1 not shared"
 

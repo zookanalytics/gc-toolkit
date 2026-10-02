@@ -13,8 +13,10 @@
 #   - PR facts: pr_number, pr_url, merge_result, merged_sha.
 #   - review / rework rounds: reviews counted from the gate-review beads on the
 #     anchor's branch (task_kind=review, grouped by review_branch), reworks from
-#     the "Rework PR#..." beads on that branch; check_set and dispatch_count are
-#     surfaced when present.
+#     the rework beads on that branch (task_kind=rework, which every rework
+#     dispatch carries — pre-open "Rework branch ..." children included — plus a
+#     legacy "Rework PR" title match for beads filed before that convention);
+#     check_set and dispatch_count are surfaced when present.
 #   - tokens + estimated cost: joined from the usage sink by session id.
 #
 # Token attribution, and why it needs a trace. The sink is keyed by session id;
@@ -135,6 +137,24 @@ fetch_or_empty() {  # $1 fixture file, rest: bd_list args; empty array on a fail
   local out; out="$(bd_list "$@")" && printf '%s' "$out" || echo '[]'
 }
 
+# Reworks are the task_kind=rework beads on a branch — every rework dispatch
+# carries that stamp, whatever its title: post-open "Rework PR#...", pre-open
+# "Rework branch ...: address pre-open signoff findings", review-comment and
+# failing-check rounds, base-refresh merges. A title match on "Rework PR" is
+# kept only as a bridge to legacy beads filed before the task_kind convention,
+# which carry no task_kind. The two reads are unioned and deduped by id; the
+# downstream grouping keys on metadata.branch, so a branchless match (a review
+# or finding bead that merely quotes the title) joins no row and is dropped.
+# A failed read degrades to empty rather than fail-closed — a missing rework
+# column is a count of zero, not a reason to abort the report.
+fetch_reworks() {
+  if [ -n "$FIXTURE" ]; then cat "$FIXTURE/reworks.json" 2>/dev/null || echo '[]'; return; fi
+  local by_kind by_title
+  by_kind="$(bd_list --metadata-field task_kind=rework --status all)" || by_kind='[]'
+  by_title="$(bd_list --title-contains 'Rework PR' --status all)" || by_title='[]'
+  printf '%s\n%s' "$by_kind" "$by_title" | jq -s -c 'add | unique_by(.id)'
+}
+
 # --- epoch cutoff for the window -----------------------------------------
 if [ "$ALL" -eq 1 ]; then
   SINCE_EPOCH=0
@@ -148,7 +168,7 @@ trap 'rm -rf "$TMP"' EXIT
 ANCHORS="$(fetch_anchors)" || die "could not read anchor beads (fail-closed; not reporting an empty set over a broken read)" 3
 printf '%s' "$ANCHORS"            > "$TMP/anchors.json"
 fetch_or_empty reviews.json     --metadata-field task_kind=review --status all  > "$TMP/reviews.json"
-fetch_or_empty reworks.json     --title-contains "Rework PR" --status all       > "$TMP/reworks.json"
+fetch_reworks                                                                   > "$TMP/reworks.json"
 fetch_or_empty loadcontext.json --metadata-field gc.step_ref=mol-polecat-work.load-context --status all > "$TMP/loadcontext.json"
 fetch_or_empty roots.json       --metadata-field gc.formula_name=mol-polecat-work --status all          > "$TMP/roots.json"
 fetch_or_empty convoys.json     --type convoy --status all                      > "$TMP/convoys.json"
