@@ -15,7 +15,12 @@ that hold across handoffs (G3).
 
 gc-toolkit is the pack that runs a Gas City: a crew of autonomous agents that turn
 work into reviewed, mergeable changes. The **operator** is the human who runs that
-city.
+city, and here also the person it serves: gc-toolkit's product is the city's
+trustworthy output, and its user is the operator. Where another rig's product
+serves users the operator never meets, in gc-toolkit the two are one person — which
+is why this file reads the product's value as value to the operator. Where the
+generic PM review method asks who the product serves, in this rig the answer is the
+operator.
 
 ## The operator's problem
 
