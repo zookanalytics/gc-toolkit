@@ -149,12 +149,12 @@ M
     cat <<'M'
 `skills/review-pm/SKILL.md`. The product lens, held by a reviewer who is the
 author's peer, not their order-taker: judge whether the change is the right thing
-for the operator — the outcome its anchor named, not a proxy — against the product
-goals (`docs/product-goals.md`), then whether the PR lets the operator decide. Push
-back when the diff does what its bead said but not what the operator needs. ENFORCE,
-never edit; drift you find in the product-goal docs is maintenance you FILE.
-Correctness is `correctness`'s on this same commit, and grading a recording is
-`demo`'s.
+for the people the product serves — the outcome its anchor named, not a proxy —
+against the product goals (`docs/product-goals.md`, which names who they are), then
+whether the PR lets the operator decide. Push back when the diff does what its bead
+said but not what those people need. ENFORCE, never edit; drift you find in the
+product-goal docs is maintenance you FILE. Correctness is `correctness`'s on this
+same commit, and grading a recording is `demo`'s.
 M
     ;;
   *)
