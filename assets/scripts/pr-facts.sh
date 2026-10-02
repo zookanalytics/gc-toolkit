@@ -121,6 +121,47 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # task_kind=finding bead through it, so the validation pass it opens has a finding
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The approved-baseline writer and scope-digest source. When a NEW external
+# APPROVED review appears, its own commit is captured as the lane's approved
+# baseline so check-selection can later tell a standing approval that still
+# applies from one an architectural growth has outrun.
+DRIFT="$SCRIPTS_DIR/approval-drift.sh"
+
+# Capture the approved baseline for each derivable lane when a NEW external
+# APPROVED review appears. The approved commit is the latest external APPROVED
+# review's own commit_id — the commit that reviewer read — deliberately not the
+# live head: reviewDecision stays APPROVED across the ordinary pushes that
+# follow an approval, so reading the head would move the baseline forward and
+# erase the drift the classifier exists to catch. The dedup is the commit_id
+# itself: a standing approval re-observed after a push keeps the same commit_id,
+# so a baseline already at that commit is left untouched, and only a genuinely
+# new approved commit writes. Best-effort — a baseline that does not land leaves
+# the lane classifying `stands`, so nothing here fabricates a re-review.
+capture_external_approval_baseline() { # <anchor-id> <reviews-json> <check_set> <anchor-row>
+  local id="$1" revs="$2" cs="$3" row="$4" approved_commit digest lanes lane prev
+  [ -n "$SELF_LOGIN" ] || return 0
+  approved_commit=$(printf '%s' "$revs" | jq -r --arg self "$SELF_LOGIN" '
+    [ .[] | select(((.user.login // "") | tostring) != $self)
+          | select(((.state // "") | tostring) == "APPROVED")
+          | {c: ((.commit_id // "") | tostring), i: (.id // 0)} ]
+    | sort_by(.i) | last | .c // ""' 2>/dev/null)
+  [ -n "$approved_commit" ] || return 0
+  digest=$("$DRIFT" scope-digest --anchor "$id" 2>/dev/null || true)
+  # The lanes a GitHub approval backs: every derivable lane the anchor declares
+  # (an approval names no gate, so it backs every lane), the sentinels dropped.
+  lanes=$(printf '%s' "$cs" | tr ',' '\n' | awk '{gsub(/[[:space:]]/,""); l=tolower($0); if (l!="" && l!="none" && l!="off" && l!="approval") print l}')
+  [ -n "$lanes" ] || lanes="codex"
+  while IFS= read -r lane; do
+    [ -n "$lane" ] || continue
+    prev=$(printf '%s' "$row" | jq -r --arg l "$lane" '(.metadata["approved_oid." + $l] // "") | tostring' 2>/dev/null)
+    [ "$approved_commit" = "$prev" ] && continue
+    gc bd update "$id" --set-metadata "approved_oid.$lane=$approved_commit" >/dev/null 2>&1 || continue
+    [ -z "$digest" ] || gc bd update "$id" --set-metadata "approved_scope_digest.$lane=$digest" >/dev/null 2>&1 || true
+    echo "$PROG: $id — captured approval baseline for lane '$lane' at $approved_commit"
+  done <<LANES
+$lanes
+LANES
+}
 
 FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0
 while [ $# -gt 0 ]; do
@@ -1006,6 +1047,10 @@ CHILDREN_EOF
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi
+      # A fresh external approval captures the lane's baseline. Deduped on the
+      # approved commit_id, so a standing approval re-observed after an ordinary
+      # push does not recapture (which would erase the drift it exists to catch).
+      capture_external_approval_baseline "$id" "$revs_raw" "$checkset" "$row"
     fi
   fi
   case " $PR_POSTURES " in

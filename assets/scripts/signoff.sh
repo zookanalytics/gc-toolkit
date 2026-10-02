@@ -62,6 +62,12 @@ PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 # opens, so the validator polecat that claims it names the method. Same builder
 # pr-facts.sh uses for the human feedback batch's pass. Overridable for the test.
 VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
+# The approved-baseline writer and scope-digest source. An approving verdict
+# captures the lane's baseline (the commit it stands on and the bead's scope
+# digest) through it, so check-selection can later tell a standing approval that
+# still applies from one a scope rewrite or an architectural growth has outrun.
+# Overridable for the hermetic test.
+DRIFT="${GC_APPROVAL_DRIFT_TOOL:-$HERE/approval-drift.sh}"
 
 usage() {
   cat >&2 <<'U'
@@ -594,6 +600,18 @@ if [ "$VERDICT" = "approve" ]; then
   esac
   post_artifact
   stamp_anchor "check.$CHECK_NAME" green
+  # Capture the lane's approved baseline beside the green it records: the commit
+  # this verdict stood on, and the bead's scope digest at this moment.
+  # check-selection reads these to tell a standing approval that still applies
+  # from one a scope rewrite or an architectural growth has outrun. Best-effort:
+  # a baseline that does not land leaves the lane with none, which classifies as
+  # `stands`, so a failed capture never fabricates a re-review.
+  gc bd update "$ANCHOR" --set-metadata "approved_oid.$CHECK_NAME=$REVIEWED_OID" >/dev/null 2>&1 \
+    || warn "approved_oid.$CHECK_NAME did not write on $ANCHOR; the lane keeps no drift baseline this round"
+  if BASE_DIGEST=$("$DRIFT" scope-digest --anchor "$ANCHOR" 2>/dev/null) && [ -n "$BASE_DIGEST" ]; then
+    gc bd update "$ANCHOR" --set-metadata "approved_scope_digest.$CHECK_NAME=$BASE_DIGEST" >/dev/null 2>&1 \
+      || warn "approved_scope_digest.$CHECK_NAME did not write on $ANCHOR; the lane keeps no scope baseline this round"
+  fi
   dismiss_superseded
   close_review
   # The verdict is in; reconcile rather than assert a value, so an open rework

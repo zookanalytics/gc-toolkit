@@ -106,6 +106,10 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # (holds the dispatch), never dispatches blind.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The drift counterpart to lane-state: for a lane that derives green, whether the
+# approved baseline still covers the change. Answers stands/scope/arch and fails
+# toward stands, so a probe it cannot complete keeps the standing approval.
+DRIFT="$SCRIPTS_DIR/approval-drift.sh"
 WEDGE_KEY="review-wedge"
 
 # Origin pin for the live-head read; optional — an unresolvable origin or a
@@ -473,6 +477,54 @@ is_oid() { # <string>
   [ "${#v}" -eq 40 ]
 }
 
+# Scope drift re-reads a lane whose approved requirements changed under a
+# standing approval, at a head that may not have moved — so the per-head bar
+# below would refuse the re-dispatch. Superseding the lane's current backing
+# review(s) lifts that bar (reviewed_at_head excludes superseded) and returns
+# the lane to unreviewed, the same move the validator makes, so the fresh
+# dispatch pours. A GitHub-only approval has no bead to supersede; the fresh
+# open review it dispatches holds the lane out of green by lane-state's
+# in-flight precedence regardless. The backing query mirrors lane-state.sh so
+# the two agree on which beads green the lane.
+supersede_lane_backing() { # <anchor-id> <lane>
+  local anchor="$1" lane="$2" rows ids rid
+  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status=closed --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  ids=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
+    .[] | (.metadata // {}) as $m
+        | select((($m.task_kind // "") | tostring) == "review")
+        | select((($m.check_name // "") | tostring | if . == "" then "codex" else . end) == $lane)
+        | select((($m.reviewed_oid // "") | tostring) != "")
+        | (($m.signoff_verdict // "") | tostring) as $sv
+        | (($m["gc.outcome"] // "") | tostring) as $oc
+        | select(($sv == "approve" and $oc != "superseded") or ($sv == "" and $oc == "recorded"))
+        | .id' 2>/dev/null)
+  [ -n "$ids" ] || return 0
+  while IFS= read -r rid; do
+    [ -n "$rid" ] || continue
+    gc bd update "$rid" --set-metadata gc.outcome=superseded \
+      --append-notes "gate-ensure: superseded by approval-drift (scope) — the lane's approved requirements were rewritten; re-review dispatched at the live head." >/dev/null 2>&1 || true
+  done <<SB
+$ids
+SB
+}
+
+# Architectural drift needs human eyes, and no human-reviewer lane greens like
+# codex yet, so the implementable escalation is merge.sh's head-pinned approval
+# gate: naming `approval` in check_set arms it, and the standing approval at the
+# drifted head's old commit no longer counts, so the merge holds until a human
+# approves the grown change at the live head. Returns 0 newly armed, 3 already
+# armed (hold quietly), 1 the write did not stick.
+arm_approval_gate() { # <anchor-id> <current-check_set>
+  local anchor="$1" cs="$2" new got
+  case ",$(cs_canon "$cs")," in *,approval,*) return 3 ;; esac
+  if [ -z "$cs" ]; then new="approval"; else new="$cs,approval"; fi
+  gc bd update "$anchor" --set-metadata check_set="$new" \
+    --append-notes "gate-ensure: armed the approval gate (approval-drift: arch) — the change grew architecturally beyond the reviewed envelope; a fresh human approval at the live head is required." >/dev/null 2>&1 || return 1
+  got=$(gc bd show "$anchor" --json 2>/dev/null | scrub | jq -r '.[0].metadata.check_set // empty' 2>/dev/null)
+  case ",$(cs_canon "$got")," in *,approval,*) return 0 ;; *) return 1 ;; esac
+}
+
 # --- enumerate the gating set (both sub-states); unreadable = cannot vouch ------
 ROWS=""
 for MR in pre_open_gate pull_request; do
@@ -676,6 +728,7 @@ STRAY
   gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue
+    why=""   # the dispatch note for this gate; set by the drift arm or the default below
     case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in
       none|off|approval) continue ;;  # approval is evidenced by GitHub review state
     esac
@@ -710,12 +763,40 @@ STRAY
       "$LANE_STATE" green --anchor "$id" --lane "$g" --no-remote; lrc=$?
     fi
     case "$lrc" in
-      0) continue ;;  # green — settled, nothing owed
+      0)
+        # The lane derives green. Before treating it as settled, ask whether the
+        # approved baseline still covers the change. stands: settled, as today.
+        # scope: the requirements were rewritten under the approval — supersede
+        # the stale backing (which lifts the per-head bar) and fall through to
+        # re-review the change's own lane. arch: the change grew beyond the
+        # reviewed envelope — arm the human approval gate and hold, no lane
+        # dispatch. An unreadable classify is stands, so a probe that cannot
+        # answer never fabricates a re-review.
+        drift=$("$DRIFT" classify --anchor "$id" --lane "$g" ${head:+--head "$head"} --base "$target" 2>/dev/null) || drift=stands
+        case "$drift" in
+          scope)
+            supersede_lane_backing "$id" "$g" \
+              || echo "$PROG: $id gate '$g' scope drift: could not supersede the stale backing; the per-head bar may still hold the re-review, retry next pass" >&2
+            why="lane '$g' approved scope was rewritten (approval-drift: scope); re-review at the live head"
+            echo "$PROG: $id gate '$g' approval no longer covers the rewritten scope; re-arming the lane"
+            ;;
+          arch)
+            arm_approval_gate "$id" "$checkset"; arc=$?
+            case "$arc" in
+              0) echo "$PROG: $id gate '$g' grew architecturally beyond the reviewed envelope (approval-drift: arch); armed the approval gate for a fresh human sign-off" ;;
+              3) echo "$PROG: $id gate '$g' arch drift persists; approval gate already armed, merge held for a fresh human sign-off" ;;
+              *) echo "$PROG: $id gate '$g' arch drift: could not arm the approval gate; merge not yet held for it, retry next pass" >&2 ;;
+            esac
+            mach_progress=1
+            held=$((held + 1)); continue ;;
+          *) continue ;;  # stands — green is settled, nothing owed
+        esac
+        ;;
       1) : ;;         # not green — the lane owes a review, has one running, or the anchor is mid-change
       *) echo "$PROG: $id gate '$g' lane-state derivation unreadable (rc=$lrc); dispatching nothing (merge stays held, retry next pass)" >&2
          skipped=$((skipped + 1)); continue ;;
     esac
-    why="lane '$g' does not derive green (no non-superseded approve review backs it)"
+    [ -n "$why" ] || why="lane '$g' does not derive green (no non-superseded approve review backs it)"
 
     # A lane short of green is what machine `progressing` names — not the outcome
     # of this particular attempt. A dispatch the operator hold defers, one held
