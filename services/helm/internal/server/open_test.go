@@ -126,13 +126,13 @@ func TestOpenDistinguishesFiledFromExisting(t *testing.T) {
 	}{
 		{
 			name:        "filed",
-			stdout:      "gc-helm: visit tk-v1s1t filed on tk-abc12 (pool gc-toolkit/gc-toolkit.converse) — a converse session will spawn (cold) or vacuum it (warm).\n       Attach via the sessions picker.\n",
+			stdout:      "gc-helm: visit tk-v1s1t filed on tk-abc12 — parked on the helm board (gc.routed_to=human); no session spawned.\n       Engage it when ready: gc-helm engage tk-v1s1t\n",
 			wantOutcome: "filed",
 			wantVisit:   "tk-v1s1t",
 		},
 		{
 			name:        "already open",
-			stdout:      "gc-helm: visit tk-old99 is already open for tk-abc12 — a converse session holds it (or will spawn/vacuum it).\n       Attach via the sessions picker.\n",
+			stdout:      "gc-helm: visit tk-old99 is already open for tk-abc12 — parked on the helm board until an operator engages it.\n       Engage it when ready: gc-helm engage tk-old99\n",
 			wantOutcome: "existing",
 			wantVisit:   "tk-old99",
 		},
