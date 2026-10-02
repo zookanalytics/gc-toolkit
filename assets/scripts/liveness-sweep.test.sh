@@ -35,6 +35,14 @@ case "$sub" in
     cat "$FAKE_READY"; exit 0 ;;
   "bd list")
     case "$args" in
+      *anchor_bead=*)
+        # The edge-less wedge's lane fix-unit census: reworks for an anchor,
+        # served from $SHOW_DIR/reworks-<anchor>.json (default []).
+        aid=""
+        for a in "$@"; do case "$a" in anchor_bead=*) aid="${a#anchor_bead=}"; break ;; esac; done
+        f="$SHOW_DIR/reworks-$aid.json"
+        if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
+        exit 0 ;;
       *--status=closed*)
         if [ -n "${PRIOR_VISITS:-}" ] && [ -f "${PRIOR_VISITS:-}" ]; then cat "$PRIOR_VISITS"; fi
         exit "${GC_LIST_RC:-0}" ;;
@@ -601,6 +609,32 @@ run_sweep
 grep -q 'w-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an unanswered objection escalated as a wedge" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "a finding no fix unit blocks is not a wedge — nothing escalated"
+
+echo "── edge-less wedge: a must-fix finding with NO edge whose lane fix LANDED escalates ──"
+# The silent shape the original backstop missed: the close-ordering edge was never
+# hung, so the finding has no blocker at all, yet its lane's fix unit has closed.
+# Caught from the lane census (anchor_bead + rework), not the finding's edges.
+cat > "$TMP/live.json" <<'JSON'
+[
+  {"id":"we-anchor","status":"open","title":"edge-less wedge at pre_open_gate","metadata":{"merge_result":"pre_open_gate","branch":"polecat/we-anchor"}},
+  {"id":"we-find","status":"open","title":"edge-less must-fix finding","metadata":{"task_kind":"finding","finding.disposition":"must-fix","finding.lane":"codex","anchor_bead":"we-anchor"}}
+]
+JSON
+printf '[]\n' > "$TMP/show/dep-we-find.json"   # edge-less: the finding has no blocker
+printf '%s\n' '[{"id":"we-fix","status":"closed","metadata":{"task_kind":"rework","anchor_bead":"we-anchor","source_review_bead":"we-rev"}}]' > "$TMP/show/reworks-we-anchor.json"
+run_sweep
+grep -q '^we-anchor landed-fix-wedge$' "$ESC_CALLS" \
+    && ok "an edge-less finding whose lane fix landed escalates its wedged anchor" \
+    || bad "edge-less wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
+grep -q 'edge-less' "$ESC_BODIES" \
+    && ok "…and the visit body names the edge-less shape" || bad "edge-less body" "$(cat "$ESC_BODIES")"
+
+echo "── …but an edge-less finding whose lane fix is still IN FLIGHT is not a wedge ──"
+printf '%s\n' '[{"id":"we-fix","status":"open","metadata":{"task_kind":"rework","anchor_bead":"we-anchor","source_review_bead":"we-rev"}}]' > "$TMP/show/reworks-we-anchor.json"
+run_sweep
+grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"

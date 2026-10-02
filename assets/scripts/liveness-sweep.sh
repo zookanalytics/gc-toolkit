@@ -489,42 +489,72 @@ next pass past the floor raises it again while the PR is still stale."
 }
 stale_escalations
 
-# --- landed-fix wedge: a must-fix finding whose fix unit has closed -----------
+# --- landed-fix wedge: a must-fix finding whose fix landed but did not close ---
 # gate-ensure closes a must-fix finding once its fix unit lands, which releases
 # the re-gate the open finding held. If that close is ever missed the finding
 # stays open, holds the re-gate through quiescence forever, and wedges the
 # anchor at pre_open_gate with the fix already on the branch — the silent
-# multi-day strand this backstop exists to make loud. The anchor is blocked by
-# its own finding, so it is absent from `bd ready` and from the classify census
+# multi-day strand this backstop exists to make loud. Two shapes reach it: the
+# finding's fix-unit edge is present and all closed, and the finding carries NO
+# edge at all (a missed close-ordering edge), where the landed fix shows only in
+# the lane's fix-unit census. Both must be caught, or the edge-less wedge is
+# skipped here exactly as it is by close-answered. The anchor is blocked by its
+# own finding, so it is absent from `bd ready` and from the classify census
 # above; this scans ALIVE. A wedge here means the auto-close is not running, so
 # escalate.sh's one-open-visit-per-subject dedup is the whole bound: re-raising
 # each pass until it clears is correct, not noise.
-WEDGE_BLK="$TMP/wedge-blk.json"
+WEDGE_BLK="$TMP/wedge-blk.json"; WEDGE_FU="$TMP/wedge-fu.json"
 wedged_fix_escalations() {
-    local rows row fid anchor amr n_all n_live body out filed=0
+    local rows row fid anchor lane amr n_all n_live census c_live c_landed edgeless body out filed=0
     rows=$(jq -c '[ .[] | select((.metadata.task_kind // "") == "finding")
                         | select((.metadata["finding.disposition"] // "") == "must-fix")
-                        | {fid: .id, anchor: ((.metadata.anchor_bead // "") | tostring)} ]
+                        | {fid: .id, anchor: ((.metadata.anchor_bead // "") | tostring), lane: ((.metadata["finding.lane"] // "") | tostring)} ]
                   | .[]' "$ALIVE" 2>/dev/null)
     while IFS= read -r row; do
         [ -n "$row" ] || continue
         fid=$(printf '%s' "$row" | jq -r '.fid // ""')
         anchor=$(printf '%s' "$row" | jq -r '.anchor // ""')
+        lane=$(printf '%s' "$row" | jq -r '.lane // ""')
         [ -n "$fid" ] && [ -n "$anchor" ] || continue
         # The anchor is a live pre_open_gate anchor — read from ALIVE, since a
         # finding-blocked anchor is open (here) but not in READY.
         amr=$(jq -r --arg a "$anchor" 'first(.[] | select(.id == $a) | (.metadata.merge_result // "")) // ""' "$ALIVE" 2>/dev/null)
         [ "$amr" = "pre_open_gate" ] || continue
-        # Its fix unit(s) — the finding's blocks-blockers — are ALL closed: the
-        # fix landed but the finding was not closed with it. A finding no fix
-        # unit blocks is a live objection awaiting one, not a wedge.
+        edgeless=""
         bd_read "$WEDGE_BLK" dep list "$fid" --direction=down -t blocks --json || continue
         n_all=$(jq -r 'length' "$WEDGE_BLK" 2>/dev/null)
         n_live=$(jq -r '[ .[] | select(((.status // "open") | ascii_downcase) != "closed") ] | length' "$WEDGE_BLK" 2>/dev/null)
-        [ "${n_all:-0}" -gt 0 ] && [ "${n_live:-1}" -eq 0 ] || continue
-        body="landed-fix wedge: anchor $anchor is held at pre_open_gate by must-fix finding $fid whose fix unit has already closed — the fix is on the branch.
+        if [ "${n_all:-0}" -gt 0 ]; then
+            # Edge present: the fix unit(s) blocking the finding are ALL closed —
+            # the fix landed but the finding was not closed with it.
+            [ "${n_live:-1}" -eq 0 ] || continue
+        else
+            # No edge at all. The landed fix shows only in the lane's fix-unit
+            # census (anchor_bead + task_kind=rework), read by metadata because the
+            # fix-unit->anchor edge is itself sometimes absent. A fix unit LANDED
+            # with none still live is the wedge; a live fix unit (fix in flight) or
+            # no fix unit (unanswered objection) is not. --status carries closed
+            # because a landed fix unit is closed and a bare query is open-only.
+            bd_read "$WEDGE_FU" list --metadata-field anchor_bead="$anchor" --status=open,in_progress,blocked,deferred,hooked,pinned,closed --limit=0 --json || continue
+            census=$(jq -r --arg lane "$lane" '
+              [ .[] | select((.metadata.task_kind // "") == "rework")
+                    | select(if $lane == "human" then (.metadata.source_review_bead // "") == "" else (.metadata.source_review_bead // "") != "" end) ] as $fus
+              | ([ $fus[] | select(((.status // "open") | ascii_downcase) != "closed") ] | length) as $l
+              | ([ $fus[] | select(((.status // "open") | ascii_downcase) == "closed") ] | length) as $c
+              | "\($l) \($c)"' "$WEDGE_FU" 2>/dev/null)
+            c_live="${census%% *}"; c_landed="${census##* }"
+            { [ "${c_live:-0}" -eq 0 ] && [ "${c_landed:-0}" -gt 0 ]; } || continue
+            edgeless=1
+        fi
+        if [ -n "$edgeless" ]; then
+            body="landed-fix wedge (edge-less): anchor $anchor is held at pre_open_gate by must-fix finding $fid, which carries NO fix-unit edge, yet its lane ($lane) fix unit has already closed — the fix is on the branch.
+The missing close-ordering edge hides the landed fix from the normal close, so the finding stays open and the anchor cannot re-gate or open its PR until $fid closes.
+Disposition: close $fid to release the re-gate (its fix landed, matched by lane), then find why the close-ordering edge was never hung (finding.sh set-disposition / anchor_fix_unit)."
+        else
+            body="landed-fix wedge: anchor $anchor is held at pre_open_gate by must-fix finding $fid whose fix unit has already closed — the fix is on the branch.
 gate-ensure closes such a finding each pass so the re-gate proceeds; this one is still open, so that close is not running, and the anchor cannot re-gate or open its PR until $fid closes.
 Disposition: close $fid to release the re-gate (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
+        fi
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "$PROG: dry-run: would escalate $anchor [landed-fix-wedge] (finding $fid)"
             filed=$((filed + 1)); continue
