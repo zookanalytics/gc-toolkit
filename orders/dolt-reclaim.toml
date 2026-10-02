@@ -2,10 +2,10 @@
 # flatten commit-threshold. A store retains the chunks of every reachable
 # commit, so one that churns grows on disk while its live rows do not; scheduled
 # `gc dolt compact` only flattens a store past 2000 commits, so a store that
-# fell below that count keeps accumulating orphaned chunks that nothing
+# fell below that count keeps accumulating on-disk chunk history that nothing
 # reclaims. This pass measures each store's noms SIZE and runs
-# `gc dolt compact --gc-only --only-db <db>` — the full GC that rewrites oldgen
-# regardless of commit count — on every store over the line.
+# `gc dolt compact --gc-only --only-db <db>` — the full GC that rewrites the
+# whole store regardless of commit count — on every store over the line.
 #
 # `--gc-only` only. The bare flatten rewrites commit history and names
 # stop-the-writers preconditions, so it stays an operator action; this cadence

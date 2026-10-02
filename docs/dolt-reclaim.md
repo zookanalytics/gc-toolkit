@@ -2,17 +2,18 @@
 
 A managed Dolt store keeps the chunks of every reachable commit, so a store
 that churns grows on disk even when its live rows do not. A store that deletes
-and rewrites rows under batch mode holds the old chunks until a full garbage
+and rewrites rows under batch mode holds the superseded chunks — across the
+chunk journal, newgen archive tables, and oldgen — until a full garbage
 collection rewrites the store, and `CALL DOLT_GC('--full')` is the only pass
-that rewrites `oldgen` and frees them.
+that rewrites the whole store and frees them.
 
 Scheduled `gc dolt compact` with no flags flattens a store only once it passes
 a commit-count threshold (`GC_DOLT_COMPACT_THRESHOLD_COMMITS`, default 2000).
-A store flattened once drops below that count, then accumulates orphaned chunks
-from ongoing churn that the scheduled pass skips from then on. Its footprint
-climbs while its commit count stays low, so a commit-count cadence never
-reaches it. `gc dolt compact --gc-only` is the recovery: it runs the full GC
-regardless of commit count and skips the flatten entirely.
+A store flattened once drops below that count, then keeps accumulating on-disk
+chunk history from ongoing churn that the scheduled pass skips from then on. Its
+footprint climbs while its commit count stays low, so a commit-count cadence
+never reaches it. `gc dolt compact --gc-only` is the recovery: it runs the full
+GC regardless of commit count and skips the flatten entirely.
 
 ## What the pass does
 

@@ -5,10 +5,12 @@
 # churns grows on disk even when its live rows do not. Scheduled
 # `gc dolt compact` (no flags) only flattens a store once it passes a
 # commit-count threshold (GC_DOLT_COMPACT_THRESHOLD_COMMITS, default 2000); a
-# store flattened once drops below that count, then accumulates orphaned chunks
+# store flattened once drops below that count, then keeps accumulating on-disk
+# chunk history — the chunk journal, newgen archive tables, and oldgen alike —
 # that the scheduled pass skips from then on. The sanctioned recovery is
 # `gc dolt compact --gc-only`, which runs `CALL DOLT_GC('--full')` regardless of
-# commit count and rewrites oldgen — and nothing re-runs it on a cadence.
+# commit count and rewrites the whole store — and nothing re-runs it on a
+# cadence.
 #
 # This pass reads each store's on-disk noms SIZE, not its commit count, and
 # runs `gc dolt compact --gc-only --only-db <db>` on every store whose noms is
@@ -205,6 +207,16 @@ while IFS=$'\t' read -r name noms kb; do
     fi
     if over_budget; then
         echo "$PROG: $name deferred — ${BUDGET}s budget spent; the next pass takes it"
+        deferred=$(( deferred + 1 ))
+        continue
+    fi
+    # Re-check the data plane before every compact, not only once before the
+    # loop: a --gc-only pass is a full GC and can leave the server slow or
+    # unreachable, and the contract is that a reclaim never STARTS on a degraded
+    # plane. Defer this store to the next pass; a later store still proceeds if
+    # the plane has recovered by its turn.
+    if DEGRADED="$(dolt_degraded)"; then
+        echo "$PROG: $name deferred — $DEGRADED; the next pass reclaims once the data plane recovers"
         deferred=$(( deferred + 1 ))
         continue
     fi

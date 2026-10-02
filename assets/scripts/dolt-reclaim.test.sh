@@ -40,6 +40,12 @@ case "$sub" in
   "dolt health")
     for a in "$@"; do case "$a" in --city | --city=*) echo "gc dolt health: unknown flag: --city" >&2; exit 1 ;; esac; done
     [ -n "${STUB_HEALTH_SLEEP:-}" ] && sleep "$STUB_HEALTH_SLEEP"
+    # A plane that degrades only AFTER the first compact models a full GC leaving
+    # the server slow or unreachable: once a compact has been logged, answer
+    # degraded. This drives the per-compact re-check, not just the pre-loop one.
+    if [ -n "${STUB_HEALTH_AFTER_COMPACT:-}" ] && [ -s "${COMPACT_LOG:-/dev/null}" ]; then
+      printf '%s' "$STUB_HEALTH_AFTER_COMPACT"; exit "${STUB_HEALTH_RC:-0}"
+    fi
     if [ -n "${STUB_HEALTH:-}" ]; then printf '%s' "$STUB_HEALTH"
     else printf '%s' '{"server":{"reachable":true,"latency_ms":120}}'; fi
     exit "${STUB_HEALTH_RC:-0}" ;;
@@ -113,7 +119,7 @@ export GC_DOLT_RECLAIM_THRESHOLD_MIB=1
 reset_case() {
   COMPACT_LOG="$TMP/compact.log"; : > "$COMPACT_LOG"; export COMPACT_LOG
   CITY_LOG="$TMP/city.log"; : > "$CITY_LOG"; export CITY_LOG
-  export STUB_HEALTH="" STUB_HEALTH_RC=0 STUB_HEALTH_SLEEP="" STUB_NO_GC_ONLY=""
+  export STUB_HEALTH="" STUB_HEALTH_RC=0 STUB_HEALTH_SLEEP="" STUB_HEALTH_AFTER_COMPACT="" STUB_NO_GC_ONLY=""
   export STUB_COMPACT_FAIL_DB="" STUB_COMPACT_FAIL_RC=1 STUB_COMPACT_SLEEP=""
   export STUB_NO_CITY="" STUB_CITY_PATH="/fixture-city"
   unset GC_DOLT_RECLAIM_BUDGET GC_DOLT_RECLAIM_HEALTH_TIMEOUT 2>/dev/null || true
@@ -231,6 +237,21 @@ run
 eq "$RC" "0" "a health probe that outruns its bound defers"
 has "$OUT" "too slow" "  ... says the plane is too slow"
 eq "$(compact_lines)" "0" "  ... and runs no compact"
+
+# --- the plane degrades mid-pass: the next store defers, a GC does not pile on -
+# The guard is re-run before every compact, not only once before the loop: a
+# --gc-only pass is a full GC and can leave the server slow or unreachable.
+reset_case
+make_db fat1 "$OVER"; make_db fat2 "$OVER"; write_list fat1 fat2
+export STUB_HEALTH_AFTER_COMPACT='{"server":{"reachable":false}}'
+run
+eq "$RC" "0" "a plane that degrades mid-pass still exits 0"
+eq "$(compact_lines)" "1" "  ... the first store is reclaimed before it degrades"
+has "$OUT" "fat1 reclaimed" "  ... names the store it reclaimed"
+has "$OUT" "fat2 deferred" "  ... and defers the next instead of piling a GC on a degraded plane"
+has "$OUT" "unreachable" "  ... naming the degraded-plane reason"
+has "$OUT" "1 reclaimed, 0 failed, 1 deferred" "  ... and the summary counts the deferral"
+if every_compact_is_gc_only; then ok "  ... the one reclaim was --gc-only"; else bad "a bare flatten slipped in"; fi
 
 # --- a compact that fails surfaces as exit 1 ---------------------------------
 reset_case
