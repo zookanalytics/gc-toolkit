@@ -40,8 +40,13 @@ type fakeActuator struct {
 	ctx context.Context
 }
 
-// actCall is one (verb, bead) the handler ran.
-type actCall struct{ verb, bead string }
+// actCall is one (verb, bead, extra-args) the handler ran. args records the
+// handler-supplied flags, so a dismiss test can assert --json and the gate
+// decisions reached the subprocess.
+type actCall struct {
+	verb, bead string
+	args       []string
+}
 
 func (f *fakeActuator) handedCtx() context.Context {
 	f.mu.Lock()
@@ -49,9 +54,9 @@ func (f *fakeActuator) handedCtx() context.Context {
 	return f.ctx
 }
 
-func (f *fakeActuator) Run(ctx context.Context, verb, bead string) (ToolResult, error) {
+func (f *fakeActuator) Run(ctx context.Context, verb, bead string, extraArgs ...string) (ToolResult, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, actCall{verb, bead})
+	f.calls = append(f.calls, actCall{verb: verb, bead: bead, args: append([]string(nil), extraArgs...)})
 	f.ctx = ctx
 	f.mu.Unlock()
 	if f.block != nil {

@@ -129,19 +129,26 @@ func (o *Actuator) Script() string { return o.script }
 // the caller passes fixed literals, so a false here is a wiring fault, reported
 // as an internal error rather than run.
 //
-// engage is the one verb that carries fixed extra flags. Over HTTP there is no
-// TTY to prompt at and no tmux pane to attach, so --no-input drives engage's
-// flag-driven one-shot path (no prompts) and --no-attach spawns the Discuss
-// sitting WITHOUT attaching. The operator then attaches from the terminal tile
-// or the sessions picker — exactly how `open`'s filed visit is reached, and the
-// documented use of engage's --no-attach (the tmux board picker uses it too).
-// Every other semantic is the CLI's, unchanged (tk-hsm4d9).
-func argvFor(verb, bead string) ([]string, bool) {
+// extra is appended after the positionals: the handler's own flags for the verb,
+// each already an argv element so no shell quoting arises, and each validated at
+// the HTTP boundary (internal/server/actuate.go) exactly as the bead is. dismiss
+// carries the gate-decision flags there — --json, and the operator's
+// --resolve-gate/--ruling/--leave-gate choices — so the one copy of the dismiss
+// gate contract stays in gc-helm.sh and this layer only forwards the decision.
+//
+// engage additionally carries FIXED flags. Over HTTP there is no TTY to prompt at
+// and no tmux pane to attach, so --no-input drives engage's flag-driven one-shot
+// path (no prompts) and --no-attach spawns the Discuss sitting WITHOUT attaching.
+// The operator then attaches from the terminal tile or the sessions picker —
+// exactly how `open`'s filed visit is reached, and the documented use of engage's
+// --no-attach (the tmux board picker uses it too). Every other semantic is the
+// CLI's, unchanged (tk-hsm4d9).
+func argvFor(verb, bead string, extra []string) ([]string, bool) {
 	switch verb {
 	case "open", "accept", "dismiss":
-		return []string{verb, bead}, true
+		return append([]string{verb, bead}, extra...), true
 	case "engage":
-		return []string{verb, bead, "--no-input", "--no-attach"}, true
+		return append([]string{verb, bead, "--no-input", "--no-attach"}, extra...), true
 	default:
 		return nil, false
 	}
@@ -155,11 +162,13 @@ func argvFor(verb, bead string) ([]string, bool) {
 // sentinels [server.ErrToolUnavailable] and [server.ErrToolTimeout] so the
 // mapping can tell them apart from each other and from an exit code.
 //
-// The bead argument is passed as an argv element — there is no shell, so no
-// quoting question arises. It has already been validated against the bead-id
-// shape by the handler, which is what keeps it from being read as a flag.
-func (o *Actuator) Run(ctx context.Context, verb, bead string) (server.ToolResult, error) {
-	args, ok := argvFor(verb, bead)
+// The bead argument, and every extraArgs element, is passed as an argv element —
+// there is no shell, so no quoting question arises. The bead has already been
+// validated against the bead-id shape by the handler, which is what keeps it from
+// being read as a flag; the handler validates each extraArgs element the same way
+// (internal/server/actuate.go).
+func (o *Actuator) Run(ctx context.Context, verb, bead string, extraArgs ...string) (server.ToolResult, error) {
+	args, ok := argvFor(verb, bead, extraArgs)
 	if !ok {
 		// A wiring fault, not a tool failure: the handlers pass fixed verbs.
 		return server.ToolResult{}, fmt.Errorf("unknown helm write verb %q", verb)

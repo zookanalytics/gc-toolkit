@@ -196,6 +196,94 @@ describe('ActuateButton', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  // THE FINDING (review tk-89vkuv, P1). A dismiss held for a gate decision is not
+  // an error and not a closed sitting: the gates are surfaced for a resolve/leave
+  // decision in place, and nothing is closed until the operator decides.
+  it('dismiss surfaces open linked gates and offers the decision, not an error', async () => {
+    const onDone = vi.fn();
+    reply = () =>
+      json({
+        bead: BEAD_ID,
+        verb: 'dismiss',
+        outcome: 'held_for_gate_decision',
+        message: 'Dismiss is held: this subject has an open linked gate a close would orphan. Decide it below.',
+        gates: [{ id: 'tk-g1', blocks: BEAD_ID, demand: 'should the merge wait on this?' }],
+      });
+    render(<ActuateButton verb="dismiss" beadId={BEAD_ID} onDone={onDone} />);
+    fireEvent.click(screen.getByRole('button', { name: /^dismiss$/i }));
+
+    await screen.findByText(/should the merge wait on this\?/i);
+    // A held dismiss is not a failure.
+    expect(screen.queryByRole('alert')).toBeNull();
+    // The decision controls are offered, and nothing closed means no board refresh.
+    expect(screen.getByRole('button', { name: /resolve/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /leave open/i })).toBeTruthy();
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it('submits a leave-open decision — no ruling — and completes the dismissal', async () => {
+    const onDone = vi.fn();
+    let n = 0;
+    reply = () => {
+      n += 1;
+      if (n === 1) {
+        return json({
+          bead: BEAD_ID,
+          verb: 'dismiss',
+          outcome: 'held_for_gate_decision',
+          message: 'held',
+          gates: [{ id: 'tk-g1', blocks: BEAD_ID, demand: 'q1' }],
+        });
+      }
+      return json({ bead: BEAD_ID, verb: 'dismiss', outcome: 'closed', message: 'The visit was closed.' });
+    };
+    render(<ActuateButton verb="dismiss" beadId={BEAD_ID} onDone={onDone} />);
+    fireEvent.click(screen.getByRole('button', { name: /^dismiss$/i }));
+    await screen.findByText('q1');
+
+    fireEvent.click(screen.getByRole('button', { name: /leave open/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm dismissal/i }));
+
+    await screen.findByText(/visit was closed/i);
+    const body = JSON.parse(String(calls[calls.length - 1].init?.body));
+    // A leave carries no ruling, and JSON.stringify drops the undefined field.
+    expect(body).toEqual({ bead: BEAD_ID, decisions: [{ gate: 'tk-g1', action: 'leave' }] });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires a ruling to resolve a gate, then submits the ruling with the decision', async () => {
+    let n = 0;
+    reply = () => {
+      n += 1;
+      if (n === 1) {
+        return json({
+          bead: BEAD_ID,
+          verb: 'dismiss',
+          outcome: 'held_for_gate_decision',
+          message: 'held',
+          gates: [{ id: 'tk-g1', blocks: BEAD_ID, demand: 'q1' }],
+        });
+      }
+      return json({ bead: BEAD_ID, verb: 'dismiss', outcome: 'closed', message: 'The visit was closed.' });
+    };
+    render(<ActuateButton verb="dismiss" beadId={BEAD_ID} />);
+    fireEvent.click(screen.getByRole('button', { name: /^dismiss$/i }));
+    await screen.findByText('q1');
+
+    fireEvent.click(screen.getByRole('button', { name: /^resolve$/i }));
+    // A resolve with no ruling cannot confirm yet — the same shape gc-helm.sh enforces.
+    const confirm = screen.getByRole('button', { name: /confirm dismissal/i });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/ruling/i), { target: { value: 'land it' } });
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(confirm);
+
+    await screen.findByText(/visit was closed/i);
+    const body = JSON.parse(String(calls[calls.length - 1].init?.body));
+    expect(body).toEqual({ bead: BEAD_ID, ruling: 'land it', decisions: [{ gate: 'tk-g1', action: 'resolve' }] });
+  });
+
   it('disables the button while a request is in flight and makes only one', async () => {
     let release: (r: Response) => void = () => {};
     reply = () => new Promise<Response>((resolve) => { release = resolve; });
