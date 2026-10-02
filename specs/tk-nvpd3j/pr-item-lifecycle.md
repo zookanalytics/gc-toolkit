@@ -10,25 +10,41 @@ description: Design-first proposal (pending operator review) for one reusable, f
 ## The decision
 
 Every PR item — an operator comment or a machine review finding — moves through
-three stages: **identify** a change is needed, **address** it, **validate** it was
-addressed and mark it resolved. Today stage 3 has no single owner: whether an item
-closes is inferred per *form* by three separate verbs, and one whole form (a PR
-artifact, such as a demo) has no close path at all. That gap left PR#887's demo
-objection open ~13h after the demo was delivered, holding the merge, until a human
-closed it by hand (visit tk-026mkj).
+three stages: **identify** a change is needed, **address** it, and **validate** the
+addressing happened, then resolve the item and mark it. Two beads carry an item
+through those stages, and keeping them distinct is what the rest of this design
+turns on:
+
+- **The finding** is the item (`task_kind=finding`). It opens at stage 1 and holds
+  the merge. It closes — is *resolved* — at stage 3, and never before.
+- **The fix unit** is the addressing work (a `task_kind=rework` child). It opens at
+  stage 2, carries a `blocks` edge onto the finding, and closes when its addressing
+  action completes — a commit by landing, an artifact by delivery.
+
+The two closes are ordered by the graph, not a flag: the fix unit `blocks` the
+finding, and `bd` refuses to close a blocked issue, so the finding cannot resolve
+until its fix unit closes. There is no "ready to close" state between them — "ready"
+is "unblocked", which is "the fix unit closed", which `gate-ensure.sh` reads.
+
+Today stage 3 has no single owner: whether a finding resolves is inferred per *form*
+by separate verbs, and one whole form — a PR artifact, such as a demo — has no close
+path at all. That gap left PR#887's demo objection open ~13h after the demo was
+delivered, holding the merge, until a human closed it by hand (visit tk-026mkj).
 
 This design makes stage 3 **one rule, applied the same way regardless of form**:
 
 - **One addressed-signal.** Every addressing form normalizes to the same signal —
-  *the fix unit answering the item is closed*. A commit closes it by landing
-  (merge-push, today). An artifact closes it by being delivered: `demo-deliver.sh`
-  closes the fix unit it answers on successful attach. The delivering action
-  becomes the closing action, so the untracked out-of-band delivery that wedged
+  *the fix unit is closed*. A commit closes the fix unit by landing (merge-push,
+  today). An artifact closes the fix unit by being delivered: `demo-deliver.sh`
+  closes the fix unit it answers on successful attach. The delivering action becomes
+  the fix unit's closing action, so the untracked out-of-band delivery that wedged
   #887 cannot happen.
-- **One owner.** `gate-ensure.sh` — already the per-pass authority that closes a
-  finding when its fix unit lands — becomes the sole owner of stage-3 resolution.
-  It resolves every stage-1 item from the one addressed-signal, and marks it
-  resolved, uniformly.
+- **One owner.** `gate-ensure.sh` — already the per-pass authority that resolves a
+  finding when its fix unit closes — becomes the sole owner of stage-3 resolution.
+  It resolves every stage-1 finding from the one addressed-signal, uniformly, and
+  drives the mark. What stage 3 does and does not re-check is "One owner" below; the
+  short version is that it confirms the addressing *happened* and is not a second
+  reviewer of whether the fix is *right*.
 
 This **supersedes PR#925** (tk-umkk4d). #925 keyed objection-close off the human's
 *re-approval* of the PR. The operator rejected that (review 5375369005): the demo
@@ -66,16 +82,24 @@ which the operator has said is tunable.
 
 ## The lifecycle — the reusable rule
 
-| Stage | What happens | Signal that advances it | Visible mark on the comment |
-|---|---|---|---|
-| **1. Identify** | A change is needed — an operator comment, or a machine review finding. A `finding` bead is filed. | A finding exists on the anchor for this comment. | picked-up (`EYES`) |
-| **2. Address** | A worker delivers the fix in some form — a code commit, or a PR artifact. A fix unit carries the work. | A fix unit answering the finding is in flight. | being-fixed ("done") |
-| **3. Validate** | The owner confirms the item was addressed, closes the finding, and marks it. | The fix unit answering the finding is **closed** (addressed), **or** the finding is moot (its lane re-reviewed clean). | resolved — or awaiting-a-human when the item routed to an open operator visit |
+Each stage opens or closes one of the two beads; the mark column is the visible
+write-back reaction the bead state drives, not a third state the beads carry.
 
-The invariant: **stage 3 re-checks every item that reached stage 1, from one
-normalized signal, the same way regardless of the item's form. A fixed item cannot
-stay open**, because closing it is an owned act keyed on the addressing action, not
-an assumption and not a proxy.
+| Stage | What happens | Bead transition | Visible mark on the comment |
+|---|---|---|---|
+| **1. Identify** | A change is needed — an operator comment, or a machine review finding. | The **finding** opens. | picked-up (`EYES`) |
+| **2. Address** | A worker delivers the fix in some form — a code commit, or a PR artifact. | The **fix unit** opens, blocking the finding; it closes when its addressing action completes (commit lands, artifact delivered). | being-fixed ("done") |
+| **3. Validate** | `gate-ensure.sh` confirms the addressing happened and resolves the item. | The **finding** closes — because its fix unit closed (addressed), or because its lane re-reviewed clean and the finding was moot. | resolved — or awaiting-a-human when the finding is `needs-you` with an open operator visit |
+
+The finding carries no intermediate stored state: it is open or closed, and the
+`blocks` edge from its fix unit is what forbids it closing early. The invariant:
+**every item that reached stage 1 is resolved by one owner from one normalized
+signal, the same way regardless of form. A fixed item cannot stay open**, because
+resolving it is an owned act keyed on the addressing action actually completing —
+not an assumption, and not a proxy such as a re-approval.
+
+Stage 3 confirms the addressing *happened*; it does not re-judge whether the fix is
+*correct*. That judgement is the validator's convergence call, under "One owner".
 
 ## What already holds — the substrate this reuses
 
@@ -145,8 +169,9 @@ close it on merge-push — its delivery is its landing, and the delivery closes 
 
 Because `close-answered` already reads the fix unit's *closed* status without caring
 *how* it closed, the commit and artifact forms collapse into one resolution
-derivation with no new resolution verb: once the artifact fix unit closes, the
-existing owner resolves the finding.
+derivation with no new resolution verb: once the fix unit closes, the existing owner
+resolves the finding. This is a resolution keyed on the addressing action completing,
+not a re-judgement of the fix — "One owner" states what that does and does not buy.
 
 The write-back that answers the thread, however, is not yet form-agnostic.
 `pr-facts.sh` keys its reply off the rework child closing and names the PR's current
@@ -171,6 +196,33 @@ resolution sweep over the anchor's findings, from two derivations:
    today's `close-unvalidated`, moved out of `signoff.sh` and triggered by the
    derived lane state, so resolution has exactly one home.)
 
+**What stage 3's validation is, and what it is not.** Stage 3 confirms the
+*addressing action completed* — that a tracked fix unit for this finding actually
+closed — and resolves the finding off that fact. That confirmation has teeth the
+pre-design state lacked: a finding cannot resolve unless a fix unit answering it
+exists and has closed, so the untracked delivery that left #887 open is no longer a
+path, and no proxy — a re-approval, or an assumption that a commit probably fixed it
+— can stand in for it. What stage 3 does **not** do is re-read the delivered fix to
+re-judge whether it is correct. That is the ruled cycle's design, not this spec's
+shortcut: `specs/tk-ztapg/review-cycle-architecture.md` makes fix-correctness a
+*convergence judgement* the validator holds, not a per-fix re-read ("there is no path
+where a commit landing on the branch changes a lane's state",
+review-cycle-architecture.md:168–169). The validator decides whether another
+whole-diff review is warranted; if it is, that fresh review re-reads the changed diff
+and files a new finding when the fix fell short; if it is not, the lane goes green
+when the must-fix set closes, with no re-review. Stage 3 resolves off that ruling and
+the fix unit's close. It is the resolution owner, not a second validator.
+
+This is the honest limit to name: on the convergence path the validator can rule a
+lane green against the pre-fix head, and the finding then closes when its fix unit
+lands, so the delivered fix itself is never re-read against the finding — its
+adequacy rests on the fix worker and the validator's convergence bet. If a per-item
+re-reading validation is wanted instead — stage 3 re-reads the fix and judges it
+against the finding before resolving — that is **Option B** under Open questions, and
+it reopens the ruled "no re-review" convergence model. It is left out here on the
+operator's steer (visit tk-hpjrr0); it is named as the operator's call, not silently
+adopted or discarded.
+
 PR#925's third derivation — resolve on re-approval — is **not built**. Re-approval
 is the human's reaction to addressing, not an addressing action; keying on it
 resolves an item nothing was shown to have done. The operator's own re-approval,
@@ -190,17 +242,15 @@ disagree (`finding.sh:604–609`).
 already resolves and pins the origin repo, validates the PR against it, and fails
 closed on a bad attach; the additions are: when invoked for a fix unit (a
 `task_kind=rework` subject), record the delivered artifact's durable evidence (the
-attached comment's URL, which `gh pr comment --attach` returns) on the fix unit,
-then close it once the attach returns success. The record is what lets the
+attached comment's URL, which `gh pr comment --attach` returns on stdout) on the fix
+unit, then close it once the attach returns success. The record is what lets the
 write-back cite the artifact: with it on the fix unit, `pr-facts.sh` replies with
 the artifact for an artifact fix unit and keeps "Addressed in `<head>`" only for a
 commit one, so a resolved thread never claims a commit the fix did not make.
 
-**Residual gap (open question, below): a demo attached by hand** — not through the
-fix unit — still closes nothing. The supported path (a worker delivers the artifact
-*as* its fix unit) closes cleanly; the hand-attach remains the exception, and
-catching it is Option B (a re-reading validation pass), left out of this design on
-the operator's steer in visit tk-hpjrr0.
+Addressing runs through the fix unit, which is how work on the PR closes the work
+that was requested — the same path a commit takes. A demo delivered as its fix unit
+closes that fix unit on attach, exactly as a commit closes its fix unit on landing.
 
 ### The visible marks — folding in tk-fspfp2
 
@@ -220,6 +270,18 @@ Per raising comment, derived from its finding's batch record:
 GitHub's reaction set has no check or question glyph, so "resolved" and
 "awaiting-a-human" are a mechanism choice (a reaction, a short reply, or thread
 resolution) — tk-fspfp2's to make, and tunable.
+
+**Per-thread answer vs. the holistic all-clear.** The per-thread reply stays with
+the fix unit: a commit answers how it answered the thread, a demo answers a demo ask,
+a "we did X" answers a requested change — stage 2's output, posted when the fix unit
+closes. Stage 3 adds the *collective* signal: when the last finding on the anchor
+resolves and every lane derives green, the write-back posts one holistic comment —
+the actions taken, everything resolved, the PR ready — the single statement that
+stage 3 completed for the whole PR. This builds on the write-back's existing
+all-findings-closed arm, which already dismisses a human CHANGES_REQUESTED review and
+re-requests the author once every finding of that review closes (`pr-facts.sh`), and
+it is tk-fspfp2's to drive. It can start as one comment and grow richer over time;
+the design fixes that the signal exists and when, not its final wording.
 
 **The ledger extension is the real work in tk-fspfp2.** The write-back drives
 reply/resolve off `pr_comment_batch`, a `<disposition>|<floor>|<mark>` record per
@@ -269,8 +331,9 @@ to remember to sling it.
    keep `close-answered`); `signoff.sh` becomes a pure verdict-recorder; no
    re-approval close.
 3. **Marks + ledger** (`tk-fspfp2`, sequenced after 1–2) — extend `pr_comment_batch`
-   to the review and issue-comment id spaces, then drive being-fixed / resolved /
-   awaiting-a-human.
+   to the review and issue-comment id spaces, drive being-fixed / resolved /
+   awaiting-a-human, and post the holistic all-clear when the anchor's findings all
+   resolve and every lane is green.
 4. **Doctrine fold-in** — apply the two edits above to review-cycle-architecture.md
    (carried by beads 1–2 as each lands its half).
 
@@ -282,12 +345,14 @@ an item being fixed from one awaiting a person.
 
 ## Open questions
 
-- **A hand-attached artifact.** The bridge closes a fix unit delivered *through* the
-  fix unit; a demo an operator attaches by hand closes nothing. Option B — a
-  validation pass that re-reads the PR and judges whether an attached artifact
-  answers the comment — would catch it, at the cost of a re-reading agent pass the
-  current validator deliberately avoids. Deferred unless the operator wants the
-  hand-attach case covered.
+- **A per-item re-reading validation (Option B).** Stage 3 as designed confirms the
+  addressing happened; it does not re-read the delivered fix to judge it against the
+  finding. A validation pass that did — re-reading the PR and ruling whether the fix
+  answers the comment before resolving — would give stage 3 that second check, at the
+  cost of a re-reading agent pass the ruled convergence model deliberately avoids
+  ("no path where a commit landing changes a lane's state"). It reopens that ruling,
+  so it is the operator's call; left out here on the operator's steer (visit
+  tk-hpjrr0).
 - **The "being-fixed" glyph.** Whether stage 2's mark is a reaction, a reply, or
   nothing until resolution is tk-fspfp2's mechanism choice; this design fixes the
   state and its derivation, not the glyph.
