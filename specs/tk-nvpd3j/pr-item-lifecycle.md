@@ -179,7 +179,8 @@ disagree (`finding.sh:604–609`).
 ### The artifact bridge
 
 `demo-deliver.sh` closes the fix unit it delivers for, on successful attach. It
-already resolves and pins its PR and fails closed on a bad attach; the addition is:
+already resolves and pins the origin repo, validates the PR against it, and fails
+closed on a bad attach; the addition is:
 when invoked for a fix unit (a `task_kind=rework` subject), close that fix unit
 once the attach returns success, so the one addressed-signal exists.
 
