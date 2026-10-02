@@ -522,13 +522,16 @@ type dismissGate struct {
 // held result {subject, ok:false, held_for_gate_decision:true, gates:[…]}. Fields
 // absent from one shape stay zero-valued.
 type dismissToolJSON struct {
-	Subject             string        `json:"subject"`
-	OK                  bool          `json:"ok"`
-	Matched             int           `json:"matched"`
-	Closed              int           `json:"closed"`
-	HeldForGateDecision bool          `json:"held_for_gate_decision"`
-	Gates               []dismissGate `json:"gates"`
-	GateReadFailed      bool          `json:"gate_read_failed"`
+	Subject string `json:"subject"`
+	OK      bool   `json:"ok"`
+	// Matched is gc-helm.sh's array of the visits it matched to the subject. This
+	// layer reports `closed`, not the match list, so it keeps the array raw rather
+	// than decoding an element it never reads.
+	Matched             json.RawMessage `json:"matched"`
+	Closed              int             `json:"closed"`
+	HeldForGateDecision bool            `json:"held_for_gate_decision"`
+	Gates               []dismissGate   `json:"gates"`
+	GateReadFailed      bool            `json:"gate_read_failed"`
 }
 
 // heldMessage is the board sentence for a dismiss held on a gate decision; it

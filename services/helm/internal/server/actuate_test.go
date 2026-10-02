@@ -241,7 +241,7 @@ func TestActuateRoutesBeatTheSPACatchAll(t *testing.T) {
 			// dismiss runs with --json, so its stub must answer JSON, not prose.
 			stdout := "gc-helm: " + verb + ": ok on tk-abc12\n"
 			if verb == "dismiss" {
-				stdout = `{"subject":"tk-abc12","matched":1,"closed":1,"ok":true}`
+				stdout = `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`
 			}
 			f := &fakeActuator{res: ToolResult{Stdout: stdout}}
 			s := New(newFake(), time.Minute, WithSPA(spa), WithActuator(f))
@@ -293,7 +293,11 @@ func argFollows(args []string, flag, val string) bool {
 // sitting. The flag is not optional — it is how the service reads the structured
 // result and the held gates — so the forwarding is asserted here.
 func TestDismissClosedReportsOutcomeAndForwardsJSON(t *testing.T) {
-	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":1,"closed":1,"ok":true}`}}
+	// The stub mirrors gc-helm.sh dismiss --json's closed shape exactly: `matched`
+	// is the ARRAY of matched visits the script emits, not a count. The parse must
+	// read `closed` past it, so the fixture carries the array a scalar field would
+	// choke on.
+	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`}}
 	rr := serveOpen(t, f, actuateReq("dismiss", `{"bead":"tk-abc12"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
@@ -366,7 +370,7 @@ func TestDismissHeldDoesNotInvalidateBoard(t *testing.T) {
 // ruling gc-helm.sh records for every resolved gate; the service turns them into
 // the flags, each value adjacent to its flag.
 func TestDismissForwardsTheGateDecision(t *testing.T) {
-	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":1,"closed":1,"ok":true}`}}
+	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`}}
 	body := `{"bead":"tk-abc12","ruling":"land it","decisions":[{"gate":"tk-g1","action":"resolve"},{"gate":"tk-g2","action":"leave"}]}`
 	rr := serveOpen(t, f, actuateReq("dismiss", body))
 	if rr.Code != http.StatusOK {
@@ -387,7 +391,7 @@ func TestDismissForwardsTheGateDecision(t *testing.T) {
 
 // A leave-only decision needs no ruling: re-asking a gate records nothing.
 func TestDismissLeaveOnlyNeedsNoRuling(t *testing.T) {
-	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":1,"closed":1,"ok":true}`}}
+	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`}}
 	body := `{"bead":"tk-abc12","decisions":[{"gate":"tk-g1","action":"leave"}]}`
 	rr := serveOpen(t, f, actuateReq("dismiss", body))
 	if rr.Code != http.StatusOK {
