@@ -91,6 +91,18 @@ for _v in ${SLING_VARS[@]+"${SLING_VARS[@]}"}; do SLING_VAR_ARGS+=(--var "$_v");
 
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
+# Token membership in a check_set: lowercase and strip whitespace but PRESERVE
+# the commas that delimit tokens, so ",$cs," matched against *",$tok,"* answers
+# membership — the shape merge.sh's approval check uses. cs_canon cannot answer
+# this: it strips commas for whole-string canonicalization, folding
+# "codex,approval" to "codexapproval" where ",approval," never matches, so an
+# already-armed gate reads as unarmed.
+cs_has() { # <check_set> <token>
+  case ",$(printf '%s' "${1:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')," in
+    *",$2,"*) return 0 ;;
+  esac
+  return 1
+}
 case "$(cs_canon "$DEFAULT_CHECK_SET")" in
   '')       DEFAULT_CHECK_SET="codex" ;;
   none|off) DEFAULT_CHECK_SET="none" ;;
@@ -487,7 +499,7 @@ is_oid() { # <string>
 # in-flight precedence regardless. The backing query mirrors lane-state.sh so
 # the two agree on which beads green the lane.
 supersede_lane_backing() { # <anchor-id> <lane>
-  local anchor="$1" lane="$2" rows ids rid
+  local anchor="$1" lane="$2" rows ids rid got rc=0
   rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status=closed --limit=0 --json 2>/dev/null | scrub)
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   ids=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
@@ -504,9 +516,17 @@ supersede_lane_backing() { # <anchor-id> <lane>
     [ -n "$rid" ] || continue
     gc bd update "$rid" --set-metadata gc.outcome=superseded \
       --append-notes "gate-ensure: superseded by approval-drift (scope) — the lane's approved requirements were rewritten; re-review dispatched at the live head." >/dev/null 2>&1 || true
+    # Prove the supersede stuck. The caller lifts the lane out of green only if
+    # the backing actually records gc.outcome=superseded; a write the store
+    # dropped leaves the approve standing and the lane green, so report the
+    # failure (rc=1) and let the caller fail closed rather than fall through to a
+    # dispatch the per-head bar can then block.
+    got=$(gc bd show "$rid" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null)
+    [ "$got" = superseded ] || rc=1
   done <<SB
 $ids
 SB
+  return "$rc"
 }
 
 # Architectural drift needs human eyes, and no human-reviewer lane greens like
@@ -517,12 +537,13 @@ SB
 # armed (hold quietly), 1 the write did not stick.
 arm_approval_gate() { # <anchor-id> <current-check_set>
   local anchor="$1" cs="$2" new got
-  case ",$(cs_canon "$cs")," in *,approval,*) return 3 ;; esac
+  cs_has "$cs" approval && return 3
   if [ -z "$cs" ]; then new="approval"; else new="$cs,approval"; fi
   gc bd update "$anchor" --set-metadata check_set="$new" \
     --append-notes "gate-ensure: armed the approval gate (approval-drift: arch) — the change grew architecturally beyond the reviewed envelope; a fresh human approval at the live head is required." >/dev/null 2>&1 || return 1
   got=$(gc bd show "$anchor" --json 2>/dev/null | scrub | jq -r '.[0].metadata.check_set // empty' 2>/dev/null)
-  case ",$(cs_canon "$got")," in *,approval,*) return 0 ;; *) return 1 ;; esac
+  cs_has "$got" approval && return 0
+  return 1
 }
 
 # --- enumerate the gating set (both sub-states); unreadable = cannot vouch ------
@@ -775,20 +796,37 @@ STRAY
         drift=$("$DRIFT" classify --anchor "$id" --lane "$g" ${head:+--head "$head"} --base "$target" 2>/dev/null) || drift=stands
         case "$drift" in
           scope)
-            supersede_lane_backing "$id" "$g" \
-              || echo "$PROG: $id gate '$g' scope drift: could not supersede the stale backing; the per-head bar may still hold the re-review, retry next pass" >&2
+            # Supersede the stale backing so the lane leaves green and the
+            # per-head bar (which excludes superseded reviews) lets the re-review
+            # below pour. When the supersede cannot be proven — an unreadable
+            # store, or a gc.outcome write that did not stick — the approve still
+            # backs the lane, so it stays green and the per-head bar can then
+            # block the fresh dispatch, leaving a green lane with no new review
+            # for merge.sh to merge. There is no durable hold to fall through on,
+            # so fail closed for the pass rather than return success.
+            if ! supersede_lane_backing "$id" "$g"; then
+              echo "$PROG: $id gate '$g' scope drift: could not supersede the stale backing (lane still derives green); holding the merge this pass" >&2
+              mach_progress=1
+              unsafe=$((unsafe + 1)); continue
+            fi
             why="lane '$g' approved scope was rewritten (approval-drift: scope); re-review at the live head"
             echo "$PROG: $id gate '$g' approval no longer covers the rewritten scope; re-arming the lane"
             ;;
           arch)
             arm_approval_gate "$id" "$checkset"; arc=$?
-            case "$arc" in
-              0) echo "$PROG: $id gate '$g' grew architecturally beyond the reviewed envelope (approval-drift: arch); armed the approval gate for a fresh human sign-off" ;;
-              3) echo "$PROG: $id gate '$g' arch drift persists; approval gate already armed, merge held for a fresh human sign-off" ;;
-              *) echo "$PROG: $id gate '$g' arch drift: could not arm the approval gate; merge not yet held for it, retry next pass" >&2 ;;
-            esac
             mach_progress=1
-            held=$((held + 1)); continue ;;
+            case "$arc" in
+              0) echo "$PROG: $id gate '$g' grew architecturally beyond the reviewed envelope (approval-drift: arch); armed the approval gate for a fresh human sign-off"
+                 held=$((held + 1)); continue ;;
+              3) echo "$PROG: $id gate '$g' arch drift persists; approval gate already armed, merge held for a fresh human sign-off"
+                 held=$((held + 1)); continue ;;
+              *) # The write did not stick: the approval gate is not armed, the
+                 # lane still derives green, and nothing holds the merge (the
+                 # local held tally merge.sh never reads), so a stale approval
+                 # could merge before the next retry. Fail closed for the pass.
+                 echo "$PROG: $id gate '$g' arch drift: could not arm the approval gate (lane still green and UNHELD); holding the merge this pass" >&2
+                 unsafe=$((unsafe + 1)); continue ;;
+            esac ;;
           *) continue ;;  # stands — green is settled, nothing owed
         esac
         ;;

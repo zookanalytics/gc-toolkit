@@ -1134,6 +1134,37 @@ has "$(meta DK2 check_set)" "approval" "arch: the approval gate is armed in chec
 eq "$(meta rev-dk2 gc.outcome)" "recorded" "arch: the standing codex approval is left intact"
 has "$out" "0 reviews dispatched" "arch: it holds for a human sign-off, dispatching no lane review"
 
+# arm_approval_gate tested membership through cs_canon, which strips the commas
+# it needs, so an already-armed gate read as unarmed and arch drift re-appended
+# `approval` every pass. cs_has preserves the separators: an anchor already
+# carrying `approval` holds quietly and the token is not doubled.
+echo "# arch drift on an already-armed gate holds quietly (no doubled approval token)"
+store "[$(anchor DK3 pull_request "codex,approval" "" polecat/dk3),$(backed rev-dk3 DK3 codex)]"
+STUB_DRIFT=arch; out=$(run); rc=$?; STUB_DRIFT=""
+eq "$rc" 0 "arch already-armed: pass exits 0"
+eq "$(meta DK3 check_set)" "codex,approval" "arch already-armed: the approval token is not doubled"
+has "$out" "already armed" "arch already-armed: the gate reads as armed and holds quietly"
+
+# When the arm write does not persist, the gate is NOT armed, the lane still
+# derives green, and merge.sh cannot see gate-ensure's local held tally — so a
+# stale approval could merge. The drift response must fail closed (rc=3).
+echo "# arch drift whose arm write does not persist fails closed (rc=3)"
+store "[$(anchor DK4 pull_request codex "" polecat/dk4),$(backed rev-dk4 DK4 codex)]"
+STUB_DRIFT=arch; out=$(STUB_DROP_KEYS="DK4:check_set" run); rc=$?; STUB_DRIFT=""
+eq "$rc" 3 "arch arm did not persist: the pass exits rc=3 (merge held)"
+eq "$(meta DK4 check_set)" "codex" "arch arm did not persist: check_set is unchanged (write dropped)"
+has "$out" "UNHELD" "arch arm did not persist: the unheld lane is named"
+
+# When the supersede write does not persist, the backing still derives green and
+# the per-head bar can block the re-review, leaving a green lane with no new
+# review. The scope response must fail closed rather than fall through (rc=3).
+echo "# scope drift whose supersede write does not persist fails closed (rc=3)"
+store "[$(anchor DK5 pull_request codex "" polecat/dk5),$(backed rev-dk5 DK5 codex)]"
+STUB_DRIFT=scope; out=$(STUB_DROP_KEYS="rev-dk5:gc.outcome" run); rc=$?; STUB_DRIFT=""
+eq "$rc" 3 "scope supersede did not persist: the pass exits rc=3 (merge held)"
+eq "$(meta rev-dk5 gc.outcome)" "recorded" "scope supersede did not persist: the backing is unchanged (write dropped)"
+has "$out" "could not supersede" "scope supersede did not persist: the failure is named"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
