@@ -1,0 +1,38 @@
+# dolt-reclaim — reclaim the managed Dolt stores that are size-bloated below the
+# flatten commit-threshold. A store retains the chunks of every reachable
+# commit, so one that churns grows on disk while its live rows do not; scheduled
+# `gc dolt compact` only flattens a store past 2000 commits, so a store that
+# fell below that count keeps accumulating on-disk chunk history that nothing
+# reclaims. This pass measures each store's noms SIZE and runs
+# `gc dolt compact --gc-only --only-db <db>` — the full GC that rewrites the
+# whole store regardless of commit count — on every store over the line.
+#
+# `--gc-only` only. The bare flatten rewrites commit history and names
+# stop-the-writers preconditions, so it stays an operator action; this cadence
+# runs the server-up reclaim the operator approved and nothing more. The script
+# refuses if the deployed compact has no --gc-only rather than fall back.
+#
+# City scope is forced, not preferred: `gc dolt list` and `gc dolt compact`
+# open every store named in city.toml and take no rig argument, so a per-rig
+# registration would run the same city-wide pass from each rig and race.
+#
+# No `idempotent` key, because the pass writes: a full GC run twice over one
+# store would collide. Idempotence lets the dispatcher fire past a timed-out
+# open-work gate, which is the moment a second pass is most likely to overlap
+# the first.
+#
+# Daily, matching the dolt pack's compaction cadence: a full GC is heavy and a
+# store climbs slowly, so a store over the line is reclaimed once a day and no
+# more. The interval is the only cooldown — the script holds no state.
+#
+# The 1800s timeout sits a store's GC above the script's own budget
+# (GC_DOLT_RECLAIM_BUDGET, 1200s), which stops it starting a new reclaim near
+# the end: the last reclaim the budget lets start finishes before this hard
+# kill, so the timeout never lands mid-GC and quarantines a store.
+[order]
+description = "Run 'gc dolt compact --gc-only' on each managed Dolt store whose noms size is over the per-database line"
+trigger = "cooldown"
+interval = "24h"
+exec = "$PACK_DIR/assets/scripts/dolt-reclaim.sh"
+timeout = "1800s"
+scope = "city"

@@ -246,6 +246,16 @@ every id in a batch is authored by a login other than the city's, so a codex
 veto is not operator feedback. A human's is, on the same terms as any other
 feedback — it routes to a rework child or a visit and opens a validation pass.
 
+The validator rules each finding in that batch, and every ruling ends the
+finding closed or converts it to a visit: a `must-fix` holds the merge until its
+fix lands, a `deferred` files a claimable follow-up and closes, a `declined`
+closes with an answer posted to the raiser, and a `needs-you` — a comment only
+the operator can judge — files a visit and stays open. A human
+`CHANGES_REQUESTED` is auto-dismissed once every finding it raised has closed,
+so a `needs-you` finding holds that review open until the operator rules its
+visit while the others let it clear. The review the operator reads on the PR
+therefore always matches what is still owed.
+
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
 `reviewed_oid=<live head>` on the review bead, naming the commit the reviewer

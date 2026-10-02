@@ -78,10 +78,13 @@
 # that comment, so nothing has answered it yet.
 # The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
 # as GitHub's own blocking signal until someone clears it; once every finding a
-# particular human review raised has closed — a must-fix fixed and landed, or a
-# decline replied and resolved above — that review is answered in full, so the
-# sweep dismisses it (clearing the block) and re-requests its author, per-review
-# via finding.review_id so one reviewer clears independently of another. The
+# particular human review raised has closed — a must-fix fixed and landed, a
+# decline replied and resolved, or a deferral's follow-up filed and its id
+# replied — that review is answered in full, so the sweep dismisses it (clearing
+# the block) and re-requests its author, per-review via finding.review_id so one
+# reviewer clears independently of another. A needs-you finding is the exception
+# that holds the review open on purpose: it stays open until the operator rules
+# its visit, so the review it belongs to is never auto-dismissed meanwhile. The
 # confidence is the validator's, carried by the finding's closure, never a commit
 # oid, so a later push does not reopen it. A dismissal is not an approval: the
 # merge still gates on an explicit one.
@@ -2616,32 +2619,39 @@ $WB_MARKER"
 $wplan
 WB_PLAN
 
-  # --- a declined human objection owes its raiser an answer on the PR ----------
-  # The peer model lets the validator decline a human finding on its merits, but
-  # never in silence: declining it stamps the answer (finding.reply) and the row
-  # it answers (finding.comment_id) on the finding. This posts that answer into
-  # the raiser's thread and resolves it, so the decline is visible and no open
-  # thread holds the merge. The operator re-raises by re-reviewing — the content
-  # key re-adopts the closed finding as a fresh one and pr-facts re-opens the
-  # human validation pass — so resolving here forecloses no re-raise. Idempotent:
-  # finding.reply_posted marks a finding answered, and a thread already carrying
-  # our marker is never doubled. Only a pass that read the threads cleanly acts,
-  # the same $wplan_ok gate the plan above turns on.
-  if [ "$wplan_ok" = 1 ] && wdf=$(bd_list --metadata-field anchor_bead="$wid" --status=closed); then
+  # --- a human objection owes its raiser an answer on the PR -------------------
+  # Every ruling a human finding takes, bar an open must-fix the fix unit answers
+  # in code, owes its raiser a visible answer stamped as finding.reply against the
+  # row it answers (finding.comment_id): a declined finding's overrule, a deferred
+  # finding's follow-up id, or a needs-you finding's visit id. This posts that
+  # answer into the raiser's thread. A declined or deferred finding is settled, so
+  # the thread is resolved behind the reply and no open thread holds the merge; a
+  # needs-you finding is NOT settled — the operator still owes a ruling — so its
+  # thread is left unresolved and the review holds the merge until they give it.
+  # The operator re-raises a decline by re-reviewing — the content key re-adopts
+  # the closed finding as a fresh one and pr-facts re-opens the human validation
+  # pass — so resolving forecloses no re-raise. Idempotent: finding.reply_posted
+  # marks a finding answered, and a thread already carrying our marker is never
+  # doubled. Only a pass that read the threads cleanly acts, the same $wplan_ok
+  # gate the plan above turns on. Reads live + closed, because a needs-you finding
+  # owes its reply while still open.
+  if [ "$wplan_ok" = 1 ] && wdf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
     wdrows=$(printf '%s' "$wdf" | jq -rc '.[]?
         | select(((.metadata.task_kind // "") | tostring) == "finding")
         | select(((.metadata["finding.lane"] // "") | tostring) == "human")
-        | select(((.metadata["finding.disposition"] // "") | tostring) == "declined")
+        | (((.metadata["finding.disposition"] // "") | tostring)) as $disp
+        | select($disp == "declined" or $disp == "deferred" or $disp == "needs-you")
         | select(((.metadata["finding.reply"] // "") | tostring) != "")
         | select(((.metadata["finding.reply_posted"] // "") | tostring) == "")
         | { id: .id, cid: ((.metadata["finding.comment_id"] // "") | tostring),
-            reply: ((.metadata["finding.reply"]) | tostring) } | @base64' 2>/dev/null)
+            reply: ((.metadata["finding.reply"]) | tostring), disp: $disp } | @base64' 2>/dev/null)
     while IFS= read -r wdrow; do
       [ -n "$wdrow" ] || continue
       wdj=$(printf '%s' "$wdrow" | base64 -d 2>/dev/null) || continue
       wdfid=$(printf '%s' "$wdj" | jq -r '.id // empty')
       [ -n "$wdfid" ] || continue
       wdcid=$(printf '%s' "$wdj" | jq -r '.cid // empty')
+      wddisp=$(printf '%s' "$wdj" | jq -r '.disp // empty')
       wdbody="$(printf '%s' "$wdj" | jq -r '.reply')
 $WB_MARKER"
       # The thread whose originating comment is the one this finding answers. An
@@ -2674,6 +2684,14 @@ $WB_MARKER"
           echo "$PROG: $wid — PR#$wnum could not reply the decline for $wdfid on thread $wdtid; retry next pass" >&2
           continue
         fi
+      fi
+      # A needs-you reply posts the visit id but leaves the thread UNRESOLVED: the
+      # operator still owes a ruling and the open finding holds the review until
+      # they give it, so resolving would tell the reader the objection is answered
+      # when it is not. Mark it posted so the reply is not doubled, and move on.
+      if [ "$wddisp" = "needs-you" ]; then
+        gc bd update "$wdfid" --set-metadata finding.reply_posted=1 >/dev/null 2>&1 || true
+        continue
       fi
       # Resolve behind the reply so the answered thread no longer holds the merge.
       # A thread this identity cannot resolve, or one already resolved, needs no
@@ -2714,11 +2732,12 @@ WB_DECLINES
   if [ "$wplan_ok" = 1 ]; then
     # Every finding on this anchor that names a review, open and closed, grouped by
     # that review. A review is answered when every one of its findings is closed and
-    # every declined finding has had its owed reply posted and its thread resolved
-    # (finding.reply_posted=1). A declined finding closes when the validator stamps
-    # finding.reply, which is before the reply/resolve arm above delivers that answer,
-    # so closure alone does not mean answered. A deferred or still-unruled finding is
-    # open, so its review is not yet clear.
+    # every declined or deferred finding has had its owed reply posted
+    # (finding.reply_posted=1). Such a finding closes when the validator rules it,
+    # which is before the reply arm above delivers that answer, so closure alone does
+    # not mean answered. A needs-you or still-unvalidated finding is open, so its
+    # review is not yet clear — a needs-you finding deliberately holds the review
+    # changes-requested until the operator rules its visit.
     if wrf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
       wrev_ready=$(printf '%s' "$wrf" | jq -rc '
           [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -2734,10 +2753,11 @@ WB_DECLINES
           | [ .[] | { rid: .[0].rid,
                       ready: (all(.[];
                                   (.open == false)
-                                  and (( .lane == "human" and .disp == "declined"
+                                  and (( .lane == "human" and (.disp == "declined" or .disp == "deferred")
                                          and .reply != "" and .reply_posted != "1" ) | not))),
                       lines: [ .[] | "- " + (.title | sub("^finding\\[[^]]*\\]: "; "")) + ": "
                                  + (if .disp == "declined" then "resolved by an accepted decline"
+                                    elif .disp == "deferred" then "tracked as a follow-up for after the merge"
                                     elif .disp == "must-fix" then "addressed by a change"
                                     else "resolved" end) ] } ]
           | .[] | select(.ready) | @base64' 2>/dev/null)

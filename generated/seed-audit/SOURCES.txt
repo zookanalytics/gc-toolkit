@@ -64,7 +64,7 @@ formulas/mol-deacon-patrol.toml
 formulas/mol-dog-shutdown-dance.toml
 ef06872c2ec83927dd1854e979d338bba988d53c1285798e47d48ff07639a9b6
 formulas/mol-feedback-distiller.toml
-f58820b28310130d413a0938c88137b2f04a8fcd373adf579f1ea38659caacef
+142373a74bfc86e597ac6a0a3662fb4897c35e07219dc0300739c09698849039
 formulas/mol-feedback-miner.toml
 a1a5d78111439112af1510c61e81268e67b6f74e9b7e9134894380ed2b24e6ba
 formulas/mol-first-reaction.toml
@@ -80,7 +80,7 @@ formulas/mol-review.toml
 formulas/mol-validate-close.toml
 73580bb5fee932a95cd766bc2e51bde6d3c2ea7354a213c77090f560d695a947
 formulas/mol-validate.toml
-61f593ef86c90e9edab639926afa249e2e31b4cb7a55d2929032a1f124ab7d40
+f379f61f5148efeef13d8d06e78cc6115b4bafe26bd7f7940ec2f982d70051b7
 formulas/mol-visit.toml
 6736d5b27b5b6445610bcc5db9ffb094bcd985b40092ed7e7ec6e7a70c43ac01
 formulas/mol-witness-patrol.toml
@@ -130,7 +130,7 @@ template-fragments/learning-exemplars.template.md
 template-fragments/operator-next-step-trailing.template.md
 2f8fdff64ab4e7cc4600fb641ee4bf909e0033a185c23996fb1737994394f924
 template-fragments/operator-profile.template.md
-300fe1760da04a64116818cd6b90207e879cf1c8206df10f0a7fa6ed5190735a
+4cc4ec151e31b86d2d38f6d435d98361cc710274c5a1a884c23d45bbde434d69
 template-fragments/polecat-doctrine.template.md
 fc78ee4c74edaee62dc5e011f7d7a2d18a3a8c4c495ab751d2b236f97f8a4ab0
 template-fragments/scratch-reclaim.template.md
