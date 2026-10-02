@@ -7,6 +7,10 @@
 # branch is judged against the index it carries. assets/scripts/review-checks.sh
 # is the one parser. correctness and triage are the forced baseline; triage may
 # widen check_set to add any check declared here and may not invent one.
+#
+# The naming convention for this file, the per-check method extensions
+# (docs/review-<check>.md), and the reference docs a check reads is
+# docs/review-config.md.
 
 [checks.correctness]
 method = "formulas/mol-review.toml"
