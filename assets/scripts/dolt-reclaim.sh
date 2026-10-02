@@ -97,6 +97,11 @@ if [ -z "$CITY_PATH" ]; then
 fi
 [ -n "$CITY_PATH" ] || { echo "$PROG: cannot resolve the city (GC_CITY_PATH unset and 'gc service list' reported no city_path)" >&2; exit 2; }
 
+# compact and health reject a --city flag (only `gc dolt list` honors it), so
+# the resolved city reaches every leaf through the environment. Export it once
+# to hold a single city across the whole pass.
+export GC_CITY_PATH="$CITY_PATH"
+
 # Refuse unless the deployed compact offers --gc-only. Falling back to a bare
 # `gc dolt compact` would run the flatten this cadence must never auto-run, so a
 # stale dolt pack is a hard stop, not a downgrade. Capture the help and match it
@@ -113,7 +118,7 @@ esac
 # Managed databases as name<TAB>path. `gc dolt list` prints that TSV; keep only
 # rows whose second field is an absolute path, so a stray warning line cannot be
 # read as a database named after its own prose.
-DB_TSV="$("$GC" dolt list --city "$CITY_PATH" 2>/dev/null | awk -F'\t' 'NF >= 2 && $2 ~ /^\// { print $1 "\t" $2 }' || true)"
+DB_TSV="$("$GC" dolt list 2>/dev/null | awk -F'\t' 'NF >= 2 && $2 ~ /^\// { print $1 "\t" $2 }' || true)"
 if [ -z "$DB_TSV" ]; then
     echo "$PROG: 'gc dolt list' returned no databases — nothing to reclaim" >&2
     exit 2
@@ -162,7 +167,7 @@ dolt_degraded() { # echoes a reason and returns 0 when degraded
     local out reachable latency rc=0
     # `|| rc=$?` keeps the failing probe from aborting the script under `set -e`
     # and captures timeout's 124 or the command's own code.
-    out="$(timeout "$HEALTH_TIMEOUT" "$GC" dolt health --json --city "$CITY_PATH" 2>/dev/null)" || rc=$?
+    out="$(timeout "$HEALTH_TIMEOUT" "$GC" dolt health --json 2>/dev/null)" || rc=$?
     if [ "$rc" -eq 124 ]; then
         printf 'health probe exceeded %ss; data plane too slow to answer' "$HEALTH_TIMEOUT"; return 0
     fi
@@ -205,7 +210,7 @@ while IFS=$'\t' read -r name noms kb; do
     fi
     before="$(noms_kb "$noms")"; before="${before:-$kb}"
     rc=0
-    "$GC" dolt compact --gc-only --only-db "$name" --city "$CITY_PATH" || rc=$?
+    "$GC" dolt compact --gc-only --only-db "$name" || rc=$?
     after="$(noms_kb "$noms")"; after="${after:-$before}"
     if [ "$rc" -eq 0 ]; then
         succeeded=$(( succeeded + 1 ))

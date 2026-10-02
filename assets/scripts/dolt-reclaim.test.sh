@@ -38,6 +38,7 @@ case "$sub" in
   "dolt list")
     cat "$STUB_DOLT_LIST" ;;
   "dolt health")
+    for a in "$@"; do case "$a" in --city | --city=*) echo "gc dolt health: unknown flag: --city" >&2; exit 1 ;; esac; done
     [ -n "${STUB_HEALTH_SLEEP:-}" ] && sleep "$STUB_HEALTH_SLEEP"
     if [ -n "${STUB_HEALTH:-}" ]; then printf '%s' "$STUB_HEALTH"
     else printf '%s' '{"server":{"reachable":true,"latency_ms":120}}'; fi
@@ -51,6 +52,12 @@ case "$sub" in
       echo "  --dry-run"
       exit 0
     fi
+    # The deployed compact leaf rejects --city; model that so a pass that reaches
+    # for the flag instead of the environment fails here as it would in a city.
+    for a in "$@"; do case "$a" in --city | --city=*) echo "compact: unknown flag --city (supported: --gc-only, --only-db <name>, --dry-run, --skip-fetch)" >&2; exit 2 ;; esac; done
+    # Record the city conveyed by environment, so the test can prove it reached
+    # the leaf without a flag.
+    printf '%s\n' "${GC_CITY_PATH:-<unset>}" >> "${CITY_LOG:?}"
     # An actual compact. Log the verbatim args so the test can prove every
     # invocation carries --gc-only, then simulate the reclaim.
     printf '%s\n' "$*" >> "${COMPACT_LOG:?}"
@@ -105,6 +112,7 @@ export GC_DOLT_RECLAIM_THRESHOLD_MIB=1
 
 reset_case() {
   COMPACT_LOG="$TMP/compact.log"; : > "$COMPACT_LOG"; export COMPACT_LOG
+  CITY_LOG="$TMP/city.log"; : > "$CITY_LOG"; export CITY_LOG
   export STUB_HEALTH="" STUB_HEALTH_RC=0 STUB_HEALTH_SLEEP="" STUB_NO_GC_ONLY=""
   export STUB_COMPACT_FAIL_DB="" STUB_COMPACT_FAIL_RC=1 STUB_COMPACT_SLEEP=""
   export STUB_NO_CITY="" STUB_CITY_PATH="/fixture-city"
@@ -175,6 +183,19 @@ hasnt "$(cat "$COMPACT_LOG")" "--only-db a" "  ... and NOT the under-threshold o
 if every_compact_is_gc_only; then ok "  ... no bare flatten was issued"; else bad "a bare flatten was issued"; fi
 has "$OUT" "fat reclaimed" "  ... and reports the reclaim as measured bytes"
 has "$OUT" "1 reclaimed, 0 failed" "  ... with a one-store summary"
+
+# --- the city reaches the dolt leaves by env, never as a --city flag ---------
+# The deployed `gc dolt compact` and `gc dolt health` reject --city (only
+# `gc dolt list` honors it), so the pass conveys the resolved city through the
+# environment. The stub leaves refuse --city exactly as the real ones do, so a
+# green reclaim here proves the flag is gone and the env carries the city.
+reset_case
+make_db fat "$OVER"; write_list fat
+run
+eq "$RC" "0" "the reclaim succeeds when the dolt leaves refuse --city"
+hasnt "$(cat "$COMPACT_LOG")" "--city" "  ... compact is invoked without --city"
+eq "$(cat "$CITY_LOG")" "/fixture-city" "  ... and the resolved city reaches compact by GC_CITY_PATH"
+has "$OUT" "fat reclaimed" "  ... and the store is reclaimed"
 
 # --- dry run: plan only, never a compact -------------------------------------
 reset_case

@@ -59,7 +59,10 @@ A cooldown order's exec runs under a supervisor with a bare environment, so
 no databases every tick. The script resolves the city from the environment
 first, so an operator's hand run probes the city they meant, then falls back to
 `gc service list`, which reads the running services and reports their city. It
-fails loud if neither answers rather than reclaim nothing in silence.
+fails loud if neither answers rather than reclaim nothing in silence. The
+resolved path is exported as `GC_CITY_PATH` so every `gc dolt` leaf inherits it:
+`compact` and `health` reject a `--city` flag, so the environment is the one
+channel all of them honor.
 
 ## Operating it
 
