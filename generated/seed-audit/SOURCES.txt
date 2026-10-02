@@ -130,7 +130,7 @@ template-fragments/learning-exemplars.template.md
 template-fragments/operator-next-step-trailing.template.md
 2f8fdff64ab4e7cc4600fb641ee4bf909e0033a185c23996fb1737994394f924
 template-fragments/operator-profile.template.md
-300fe1760da04a64116818cd6b90207e879cf1c8206df10f0a7fa6ed5190735a
+4cc4ec151e31b86d2d38f6d435d98361cc710274c5a1a884c23d45bbde434d69
 template-fragments/polecat-doctrine.template.md
 fc78ee4c74edaee62dc5e011f7d7a2d18a3a8c4c495ab751d2b236f97f8a4ab0
 template-fragments/scratch-reclaim.template.md
