@@ -27,6 +27,7 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
+has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 
 [ -f "$SCRIPT" ] && ok "gc-helm.sh present" || bad "gc-helm.sh missing at $SCRIPT"
 
@@ -308,6 +309,10 @@ case "$1 ${2:-}" in
           esac ;;
       esac
     done ;;
+  "bd gate")
+    # `gate resolve <id>` is the gate-close verb dismiss uses to settle a gate on
+    # a ruling. Log it so a test can assert which gate was resolved, and succeed.
+    printf '%s\n' "$*" >> "$FAKE_GATES" ;;
   "bd dep")
     # `dep list` is a READ: it answers from a per-bead fixture and never lands
     # in FAKE_DEPS, which models the graph writes the edge assertions count.
@@ -339,7 +344,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes"
+       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_GATES="$TMP/gates"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -1932,6 +1937,91 @@ eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-INFER) …and 
 ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 
+# ── dismiss couples the sitting's end to the gate it holds ───────────────────
+# A converse hold files a human demand gate the subject blocks on and stamps
+# gc.hold_demand on the visit. Closing the visit without deciding the gate
+# orphans it — open, still blocking, its gc.gate_visit naming a closed visit the
+# sweep never re-offers. So a dismiss on a subject with an open linked gate does
+# not silently proceed: it surfaces each gate and takes an explicit decision
+# (resolve on a ruling, or leave open / re-ask) before it closes anything. A gate
+# ASSIGNED to a person is that person's task, not a ruling, and is left alone.
+cat > "$TMP/gated.json" <<'JSON'
+[
+  {"id":"v-GATED","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"A-GATED","gc.hold_demand":"g-OPEN"}},
+  {"id":"g-OPEN","status":"open","assignee":"","issue_type":"gate","await_type":"human","title":"should we ship X?","metadata":{"gc.demand_for":"A-GATED","gc.gate_visit":"v-GATED"}},
+  {"id":"v-ASG","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"A-ASG","gc.hold_demand":"g-ASG"}},
+  {"id":"g-ASG","status":"open","assignee":"human/op","issue_type":"gate","await_type":"human","title":"a person's task","metadata":{"gc.demand_for":"A-ASG","gc.gate_visit":"v-ASG"}}
+]
+JSON
+export FAKE_STEPS_JSON="$TMP/gated.json"
+
+# (DISMISS-GATE-SURFACE) no decision on a subject that carries an open linked gate
+# holds the dismiss: it surfaces the gate and exits 5, closing nothing.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+GSRC=0; GSOUT="$(sh "$SCRIPT" dismiss A-GATED 2>&1)" || GSRC=$?
+eq "$GSRC" "5" "(DISMISS-GATE-SURFACE) an undecided linked gate holds the dismiss (exit 5)"
+has "$GSOUT" "g-OPEN" "(DISMISS-GATE-SURFACE) …naming the gate"
+has "$GSOUT" "--resolve-gate" "(DISMISS-GATE-SURFACE) …with the resolve re-run line"
+has "$GSOUT" "--leave-gate" "(DISMISS-GATE-SURFACE) …and the leave re-run line"
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-GATE-SURFACE) …and closes nothing"
+
+# (DISMISS-GATE-SURFACE-JSON) --json emits the held-for-decision object, gate listed.
+GSJ="$(sh "$SCRIPT" dismiss A-GATED --json 2>/dev/null || true)"
+if printf '%s' "$GSJ" | jq -e '.ok == false and .held_for_gate_decision == true and (.gates[0].id == "g-OPEN")' >/dev/null 2>&1; then
+    ok "(DISMISS-GATE-SURFACE-JSON) --json holds for the decision and lists the gate"
+else
+    bad "(DISMISS-GATE-SURFACE-JSON) wrong held-for-decision object (got: $GSJ)"
+fi
+
+# (DISMISS-GATE-RESOLVE) --resolve-gate + --ruling settles the gate on the ruling,
+# stamps the ruling as the gate's board sentence (takeaway), then closes the visit.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+GRRC=0; sh "$SCRIPT" dismiss A-GATED --resolve-gate g-OPEN --ruling "ship it" >/dev/null 2>&1 || GRRC=$?
+eq "$GRRC" "0" "(DISMISS-GATE-RESOLVE) a decided gate lets the dismiss complete (exit 0)"
+grep -q 'gate resolve g-OPEN' "$TMP/gates" \
+  && ok "(DISMISS-GATE-RESOLVE) the gate is resolved" \
+  || bad "(DISMISS-GATE-RESOLVE) the gate was not resolved (gates: $(cat "$TMP/gates"))"
+grep -Eq '^bd update g-OPEN .*gc.takeaway=ship it' "$TMP/updates" \
+  && ok "(DISMISS-GATE-RESOLVE) …the ruling is stamped as the gate's board sentence" \
+  || bad "(DISMISS-GATE-RESOLVE) the ruling was not stamped on the gate (updates: $(grep 'g-OPEN' "$TMP/updates" || true))"
+grep -Eq '^bd close v-GATED' "$TMP/closes" \
+  && ok "(DISMISS-GATE-RESOLVE) …and the visit is then closed" \
+  || bad "(DISMISS-GATE-RESOLVE) the visit was not closed (closes: $(cat "$TMP/closes"))"
+
+# (DISMISS-GATE-RESOLVE-NORULING) --resolve-gate without --ruling is a usage error.
+: > "$TMP/closes"
+NRRC=0; sh "$SCRIPT" dismiss A-GATED --resolve-gate g-OPEN >/dev/null 2>&1 || NRRC=$?
+eq "$NRRC" "2" "(DISMISS-GATE-RESOLVE-NORULING) resolve without a ruling is refused"
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-GATE-RESOLVE-NORULING) …closing nothing"
+
+# (DISMISS-GATE-LEAVE) --leave-gate re-asks the gate (gc.gate_visit unset, so the
+# sweep offers a fresh visit), does NOT resolve it, then closes the visit.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+GLRC=0; sh "$SCRIPT" dismiss A-GATED --leave-gate g-OPEN >/dev/null 2>&1 || GLRC=$?
+eq "$GLRC" "0" "(DISMISS-GATE-LEAVE) leaving a gate open lets the dismiss complete (exit 0)"
+grep -Eq '^bd update g-OPEN --unset-metadata gc.gate_visit' "$TMP/updates" \
+  && ok "(DISMISS-GATE-LEAVE) the gate is re-asked (gc.gate_visit cleared)" \
+  || bad "(DISMISS-GATE-LEAVE) gc.gate_visit was not cleared (updates: $(grep 'g-OPEN' "$TMP/updates" || true))"
+eq "$(grep -c 'gate resolve' "$TMP/gates" || true)" "0" "(DISMISS-GATE-LEAVE) …and the gate is NOT resolved"
+grep -Eq '^bd close v-GATED' "$TMP/closes" \
+  && ok "(DISMISS-GATE-LEAVE) …and the visit is then closed" \
+  || bad "(DISMISS-GATE-LEAVE) the visit was not closed (closes: $(cat "$TMP/closes"))"
+
+# (DISMISS-GATE-UNLINKED) naming a gate that is not this sitting's is a usage error.
+NLRC=0; sh "$SCRIPT" dismiss A-GATED --leave-gate g-NOTLINKED >/dev/null 2>&1 || NLRC=$?
+eq "$NLRC" "2" "(DISMISS-GATE-UNLINKED) a gate not linked to the sitting is refused"
+
+# (DISMISS-GATE-ASSIGNED) a gate ASSIGNED to a person is a task, not a ruling, so
+# dismiss leaves it alone and ends the sitting normally.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+GARC=0; sh "$SCRIPT" dismiss A-ASG >/dev/null 2>&1 || GARC=$?
+eq "$GARC" "0" "(DISMISS-GATE-ASSIGNED) an assigned gate does not hold the dismiss"
+grep -Eq '^bd close v-ASG' "$TMP/closes" \
+  && ok "(DISMISS-GATE-ASSIGNED) …the visit closes" \
+  || bad "(DISMISS-GATE-ASSIGNED) the visit was not closed (closes: $(cat "$TMP/closes"))"
+eq "$(grep -c 'gate resolve' "$TMP/gates" || true)" "0" "(DISMISS-GATE-ASSIGNED) …and the assigned gate is untouched"
+
+: > "$TMP/settled"; : > "$TMP/gates"
 export FAKE_STEPS_JSON="$TMP/steps.json"
 
 # ── The releasing session's own step survives the release ────────────────────

@@ -5,9 +5,8 @@
 # (merge.sh) or closing the bead (bead-rehome.sh). This gate is the single place
 # that answers, for one bead, whether every precondition for that act holds. It
 # is a SET of independent clauses run in order; the first to refuse stops the set
-# and names why. Today the set is one clause; a later precondition (an epic's
-# goal-met, say) is one more `clause_* "$1" || return 1` line in
-# finalize_gate_check.
+# and names why. A later precondition (an epic's goal-met, say) is one more
+# `clause_* "$1" || return 1` line in finalize_gate_check.
 #
 # Clause no-open-visit: an OPEN visit whose SUBJECT is this bead refuses the
 # bead's finalization. A visit is a subject-scoped conversation a person owes an
@@ -29,6 +28,16 @@
 # Among either, an OPEN task_kind=visit holds finalization. A `tracks` edge is
 # non-blocking, so the gate holds only THIS bead's finalization and touches
 # neither the bead's readiness nor its children (docs/finalize-gate.md).
+#
+# Clause no-orphan-gate: the backstop for a gate whose conversation died without
+# a decision. A converse hold files a human demand gate (gc.demand_for=<this
+# bead>) the work blocks on; ending the sitting is meant to resolve or re-ask it,
+# but a path that closes the visit and leaves the gate open strands it — open,
+# still blocking, its gc.gate_visit naming a closed visit the sweep never
+# re-offers. no-open-visit cannot see it (the visit is closed), so this clause
+# refuses finalize while such an orphan stands and names how to clear it. It is
+# the consistency net: any path that still orphans a gate is caught here, not
+# silent.
 #
 # FAIL CLOSED. A tracker list that does not read, or does not answer with a JSON
 # array, refuses the finalization: an unreadable probe is never an all-clear,
@@ -122,11 +131,64 @@ clause_no_open_visit() {
     return 0
 }
 
+# clause_no_orphan_gate <bead-id> — prints a one-line refusal reason and returns 1
+# when the bead carries an ORPHAN gate: an open, unassigned human gate naming this
+# bead as the work it holds (gc.demand_for), whose gc.gate_visit points at a visit
+# that is no longer open. That is the shape a dismiss-without-a-decision leaves —
+# the gate stays open and still blocks its bead, but gate-visit-sweep is idempotent
+# on gc.gate_visit and never re-offers a stamped gate, so no conversation is left to
+# re-ask the decision. clause_no_open_visit catches the live-visit case; this clause
+# catches the dead-visit one it cannot see. A gate whose gc.gate_visit is unset (the
+# sweep will offer a visit) or `skip` (deliberate operator suppression) is not an
+# orphan. The gate lookup is the gc.demand_for convention signoff and the sweep
+# share; --include-gates is load-bearing (a gate is hidden from a plain list).
+clause_no_orphan_gate() {
+    _fgo_bead="$1"
+    _fgo_raw=$(gc bd list --include-gates --has-metadata-key gc.demand_for \
+        --status open,in_progress,blocked --limit 0 --json 2>/dev/null) || {
+        echo "orphan-gate probe unreadable ('gc bd list' failed) — refusing finalize on $_fgo_bead (fail-closed)"
+        return 1
+    }
+    _fgo_gates=$(printf '%s' "$_fgo_raw" | scrub | jq -r --arg s "$_fgo_bead" '
+        if type != "array" then error("not an array")
+        else ( .[]?
+                 | select((.metadata["gc.demand_for"] // "") == $s)
+                 | select(((.assignee // "") | tostring) == "")
+                 | [ .id, ((.metadata["gc.gate_visit"] // "") | tostring) ] | @tsv ) end' 2>/dev/null) || {
+        echo "orphan-gate probe unreadable (gate filter failed) — refusing finalize on $_fgo_bead (fail-closed)"
+        return 1
+    }
+    [ -n "$_fgo_gates" ] || return 0
+    _fgo_tab=$(printf '\t')
+    _fgo_hit=""
+    while IFS="$_fgo_tab" read -r _fgo_g _fgo_gv; do
+        [ -n "$_fgo_g" ] || continue
+        # Unset -> the sweep will offer a visit; `skip`/`filed` -> handled or
+        # unresolvable, not a dead-visit orphan. Everything else is a visit id:
+        # read it back, and an id that is not open (closed, missing, unreadable)
+        # is the orphan — a visit no longer there to carry the decision.
+        case "$_fgo_gv" in ""|skip|filed) continue ;; esac
+        _fgo_vst=$(gc bd show "$_fgo_gv" --json 2>/dev/null | scrub \
+            | jq -r 'if type == "array" then (.[0].status // "missing") else "unreadable" end' 2>/dev/null)
+        case "$_fgo_vst" in open|in_progress) continue ;; esac
+        _fgo_hit="$_fgo_g"
+        break
+    done <<FGO_GATES
+$_fgo_gates
+FGO_GATES
+    if [ -n "$_fgo_hit" ]; then
+        echo "orphan gate $_fgo_hit on $_fgo_bead — its gc.gate_visit names a visit no longer open, so the human decision it holds is stranded with no conversation to re-ask. Re-ask it (gc bd update $_fgo_hit --unset-metadata gc.gate_visit) or resolve it (gc bd gate resolve $_fgo_hit) before finalize"
+        return 1
+    fi
+    return 0
+}
+
 # finalize_gate_check <bead-id> — run the clause set in order; the first clause to
 # refuse prints its reason (on stdout) and stops the set.
 finalize_gate_check() {
     [ -n "${1:-}" ] || { echo "$PROG: check requires a bead id" >&2; return 2; }
     clause_no_open_visit "$1" || return 1
+    clause_no_orphan_gate "$1" || return 1
     # A further precondition is one more `clause_* "$1" || return 1` here.
     return 0
 }

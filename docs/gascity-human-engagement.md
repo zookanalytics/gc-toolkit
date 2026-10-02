@@ -514,9 +514,11 @@ question arrives as a conversation with framing and an owner. One visit per
 gate: the sweep records the visit it filed (or the sitting already standing
 for the gated bead) on the gate as `gc.gate_visit=<visit-id>`, and never
 re-offers a stamped gate — a sitting that ends with the gate still open (a
-benign close, a cut-short hold, an operator dismiss) must not re-spawn a
-session every cooldown; the return trip for a cut-short hold rides the
-liveness sweep, as before. Stamping `gc.gate_visit=skip` on a gate before the
+benign close, or a cut-short hold that re-states the demand) must not re-spawn
+a session every cooldown; the return trip for a cut-short hold rides the
+liveness sweep, as before. An operator `dismiss` decides the gate it holds (it
+resolves it on a ruling or re-asks it; see *How a held sitting ends*), so it
+leaves no stamped-open gate here. Stamping `gc.gate_visit=skip` on a gate before the
 sweep reaches it suppresses its visit, which is the operator's selection
 point when the default is too much; `gc bd update <gate> --unset-metadata
 gc.gate_visit` re-offers one. A gate assigned to a person gets
@@ -667,6 +669,24 @@ it can read as OPEN, so a visit closed without an outcome is one no re-run
 reaches. A refused stamp leaves that visit open, and the run exits 4. It writes
 nothing to the subject: the subject's DONE row, once it closes, leaves the board
 only by ageing out of `GC_HELM_DONE_WINDOW`, with no per-row clear.
+
+Ending the sitting is coupled to the gate the hold filed. A hold that reached an
+open question filed a human demand gate the subject blocks on, and stamped
+`gc.hold_demand` on the visit. Closing the visit without settling that gate would
+strand it: the gate stays open and still blocks its bead, while its
+`gc.gate_visit` names a closed visit the sweep never re-offers. So `dismiss` does
+not silently pass a subject that still carries an open linked gate. It surfaces
+each one, with the gate id, the bead it blocks, and its headline, and exits 5
+until the caller decides it. `--resolve-gate <gate> --ruling "<decision>"` closes
+the gate on the ruling and stamps that ruling as the gate's board sentence, the
+way a sign-off records one. `--leave-gate <gate>` re-asks it, clearing
+`gc.gate_visit` so the sweep offers a fresh visit. A gate changes state only on a
+ruling, never as a byproduct of closing a conversation. The decider is the
+caller: a converse agent holding the ruling from the thread supplies it, and a
+raw board dismiss surfaces the gate to the operator. A gate assigned to a person
+is that person's task, and dismiss leaves it alone. A gate that still slips
+through, stranded by another path, is caught by finalize-gate's orphan-gate
+clause, which refuses to finalize the gated bead while the orphan stands.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
