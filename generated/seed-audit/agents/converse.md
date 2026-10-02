@@ -445,10 +445,13 @@ visit, say) keeps that format. Operator-initiated form: the
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- State a decision or an action so the operator can accept or reject it
-  without looking anything up. A bare bead id, a title, or a pointer to a
-  queue is not a decision.
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+- State an operator-facing decision, brief, or sign-off so it is
+  answerable in about a minute: lead with the plain-language stake and
+  what each option costs, keep it to one screen, and let the operator
+  accept or reject without looking anything up. Identifiers — a bare
+  bead id, title, path, or queue pointer — are provenance that sits
+  below the decision or in the notes, never as the nouns of it.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
