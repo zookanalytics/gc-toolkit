@@ -2182,6 +2182,36 @@ eq "$(treply 48 T-48)" "" "a no-objection decline owes no reply, so none is post
 eq "$(tresolved 48 T-48)" "false" "…and the thread is left untouched"
 eq "$(meta DF3 finding.reply_posted)" "<absent>" "…and the finding is not marked answered"
 
+# ---- a deferred or needs-you human finding owes its raiser an answer too -------
+# The write-back answers every human ruling that owes a reply, not only declines:
+# a deferred finding posts its follow-up id and resolves the thread (the deferral
+# is settled on this PR), a needs-you finding posts its visit id and leaves the
+# thread UNRESOLVED (the operator still owes a ruling). A finding carrying the
+# disposition, its comment_id, and the owed reply.
+xfind() { # id anchor comment_id disposition status reply
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"%s","finding.source":"human:johnzook","finding.comment_id":"%s","finding.reply":"%s"}}' \
+    "$1" "$5" "$2" "$4" "$3" "$6"
+}
+
+echo "# a deferred human objection posts its follow-up id into the thread and resolves it"
+store "[$(anchor WDF1 51 "$(wb_meta visit:VDF1)"), $(xfind DFF1 WDF1 100 deferred closed 'Deferred — tracked as follow-up tk-fup1. It will be picked up after this merges.')]"
+printf '%s' "$(prview 51 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_51.json"
+threads 51 "$(one_thread 51)"
+out=$(run)
+has "$(treply 51 T-51)" "tracked as follow-up tk-fup1" "the deferred finding's follow-up id is posted into the raiser's thread"
+has "$(treply 51 T-51)" "<!-- gc-writeback -->" "…carrying the write-back marker"
+eq "$(tresolved 51 T-51)" "true" "…and the thread is resolved: a deferral is settled on this PR"
+eq "$(meta DFF1 finding.reply_posted)" "1" "…and the finding is marked answered"
+
+echo "# a needs-you objection posts its visit id into the thread but leaves it UNRESOLVED"
+store "[$(anchor WNU1 52 "$(wb_meta visit:VNU1)"), $(xfind NUF1 WNU1 100 needs-you open 'This comment needs your decision — opened visit tk-vis1. The review stays changes-requested until you rule it.')]"
+printf '%s' "$(prview 52 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_52.json"
+threads 52 "$(one_thread 52)"
+out=$(run)
+has "$(treply 52 T-52)" "opened visit tk-vis1" "the needs-you finding's visit id is posted into the raiser's thread"
+eq "$(tresolved 52 T-52)" "false" "…but the thread is NOT resolved: the operator still owes a ruling"
+eq "$(meta NUF1 finding.reply_posted)" "1" "…and the finding is marked answered so the reply is not doubled"
+
 echo "# a re-raise re-blocks: a re-review after a decline re-opens the human validation pass"
 # Declining closes the finding, so a still-standing objection re-adopts as a
 # FRESH finding on re-review (find_open_by_key reads open findings only), and
@@ -2830,8 +2860,17 @@ printf '%s' "$(prview 141 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_141.json"
 threads 141 "$(hreview 141 556 CHANGES_REQUESTED)"
 : > "$STUB_GH_LOG"
 out=$(run)
-hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an open finding (unfixed or deferred) keeps the review standing"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an open finding (an unfixed must-fix) keeps the review standing"
 hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested"
+
+echo "# …nor while a needs-you finding holds the review open for the operator's ruling"
+store "[$(anchor HR2b 146 "$(wb_meta rework:HRC2b)"), $(child HRC2b closed), $(rfind HF3b HR2b 561 declined), $(rfind HF4b HR2b 561 needs-you open)]"
+printf '%s' "$(prview 146 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_146.json"
+threads 146 "$(hreview 146 561 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a needs-you finding deliberately holds the review changes-requested"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested until the operator rules the visit"
 
 echo "# …a review already DISMISSED is left alone — its state is the idempotency"
 store "[$(anchor HR3 142 "$(wb_meta rework:HRC3)"), $(child HRC3 closed), $(rfind HF5 HR3 557 declined)]"
@@ -2881,6 +2920,34 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/145/reviews/560/dismissals" "a delivered decline reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/145/requested_reviewers" "…and its author is re-requested"
 has "$(cat "$STUB_GH_LOG")" "resolved by an accepted decline" "…the dismiss message names the accepted decline"
+
+# ---- a deferred finding's owed reply gates its review's dismissal the same way --
+# A deferred finding closes when the validator rules it, but it owes its raiser
+# the follow-up id before the review is cleared — the same reply_posted gate the
+# decline rides, extended to the deferral. Once delivered the review dismisses,
+# and the dismiss message names the deferral, not a bare "resolved".
+rfinddeferred() { # id anchor review_id comment_id [reply_posted]
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","title":"finding[human]: y","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"deferred","finding.source":"human:johnzook","finding.review_id":"%s","finding.comment_id":"%s","finding.reply":"Deferred — tracked as follow-up tk-fup9. It will be picked up after this merges."%s}}' \
+    "$1" "$2" "$3" "$4" "${5:+,\"finding.reply_posted\":\"$5\"}"
+}
+
+echo "# a deferred finding whose follow-up reply has not landed holds its review's dismissal"
+store "[$(anchor HR7 147 "$(wb_meta rework:HRC7)"), $(child HRC7 closed), $(rfinddeferred HF9 HR7 562 100)]"
+printf '%s' "$(prview 147 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_147.json"
+threads 147 "$(jq -cn --argjson r "$(hreview 147 562 CHANGES_REQUESTED)" --argjson t "$(one_thread 147)" '{reviews: $r.reviews, threads: $t.threads}')"
+: > "$STUB_GH_LOG"
+out=$(STUB_RESOLVE_RC=1 run)
+eq "$(meta HF9 finding.reply_posted)" "<absent>" "the resolve failed, so the deferral reply is not yet marked delivered"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an undelivered deferral reply holds the review's dismissal"
+
+echo "# …and once the deferral reply is delivered (finding.reply_posted=1) the review is dismissed"
+store "[$(anchor HR8 148 "$(wb_meta rework:HRC8)"), $(child HRC8 closed), $(rfinddeferred HF10 HR8 563 101 1)]"
+printf '%s' "$(prview 148 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_148.json"
+threads 148 "$(hreview 148 563 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
+has "$(cat "$STUB_GH_LOG")" "tracked as a follow-up for after the merge" "…the dismiss message names the deferral"
 
 # ---- --route-comments-only: route operator feedback early, before merge --------
 # The tk-8qtkvv divergence: --posture-only stamps commented/changes_requested on
