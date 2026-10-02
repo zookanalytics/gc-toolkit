@@ -51,6 +51,10 @@ harness_init() {
   export STUB_PR_EDIT_RC=0
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
+  # Session roster for `gc session list`. Unset = no stdout (the historical
+  # behaviour every existing suite relies on); a file path serves that roster;
+  # STUB_SESSION_LIST_RC models the read the liveness guard must fail closed on.
+  export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
@@ -92,7 +96,16 @@ case "$sub" in
   convoy)
     [ "${1:-}" = "list" ] && { cat "${STUB_CONVOYS:-/dev/null}" 2>/dev/null || echo '{"convoys":[]}'; exit 0; }
     exit 0 ;;
-  session) printf '%s\n' "gc session $*" >> "${STUB_SESSION_LOG:?}"; exit 0 ;;
+  session)
+    printf '%s\n' "gc session $*" >> "${STUB_SESSION_LOG:?}"
+    # `gc session list` is the liveness source. Unset STUB_SESSIONS keeps the
+    # historical silent exit 0; a fixture file is served verbatim; a set
+    # STUB_SESSION_LIST_RC fails the read, the shape the liveness guard refuses on.
+    if [ "${1:-}" = "list" ]; then
+      [ -n "${STUB_SESSION_LIST_RC:-}" ] && { echo "gc: simulated session list failure" >&2; exit "${STUB_SESSION_LIST_RC}"; }
+      [ -n "${STUB_SESSIONS:-}" ] && [ -f "${STUB_SESSIONS:-}" ] && cat "$STUB_SESSIONS"
+    fi
+    exit 0 ;;
   mail) exit 0 ;;
   workflow)
     # delete-source / reopen-source over the JSON store. delete-source matches
