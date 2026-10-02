@@ -59,8 +59,9 @@ until you rule here):
    change, closes the live #887 wedge on its own.
 2. The unified stage-3 owner — consolidate resolution under `gate-ensure.sh`; no
    re-approval close is built.
-3. The visible marks and the ledger they need — tk-fspfp2, sequenced after 1–2 as
-   the lifecycle's output.
+3. The visible marks and the ledger they need — tk-fspfp2, the lifecycle's output.
+   It is scoped here but sits behind its own open operator discussion (tk-sl8sq7),
+   so approving this does not dispatch it; it waits on that discussion.
 
 Then the ruled contract folds into `specs/tk-ztapg/review-cycle-architecture.md`.
 
@@ -315,13 +316,16 @@ not per-path code. Two edits, carried by the implementation beads, not applied h
 
 Design-first: nothing dispatches until the operator approves this spec. Approval is
 this design landing — merging the PR closes `tk-nvpd3j` — so the gated hand-off is a
-graph edge, not a later manual sling. Each follow-up bead is **blocked-by** its
-prerequisite and carries an **armed deferred dispatch** to the polecat pool: when
-the prerequisite closes and `bd` reports the bead ready, the arm slings it on
-`mol-polecat-work`. Beads 1 (`tk-6mt7li`) and 2 (`tk-5u0ok8`) are blocked-by this
-design bead; bead 3 (`tk-fspfp2`) is blocked-by beads 1 and 2, so it waits for both
-to land. No bead is routed while its prerequisite is open, and none waits on a human
-to remember to sling it.
+graph edge, not a later manual sling. Beads 1 (`tk-6mt7li`) and 2 (`tk-5u0ok8`) are
+**blocked-by** this design bead and each carries an **armed deferred dispatch** to
+the polecat pool: when this design lands and `bd` reports the bead ready, the arm
+slings it on `mol-polecat-work`, with no human needed to remember the sling. Bead 3
+(`tk-fspfp2`, marks + ledger) does not auto-dispatch on this approval: it is
+blocked-by beads 1 and 2 and also by `tk-sl8sq7`, an open operator discussion of its
+direction, and it is routed to human rather than armed. It becomes ready for the
+pool only when the operator settles that gate and beads 1 and 2 have landed. It is
+scoped here as the lifecycle's mark-driving half, not promised as part of the
+auto-dispatched sequence.
 
 1. **Artifact bridge** (`tk-6mt7li`) — `demo-deliver.sh` closes its fix unit on
    attach, so the existing owner resolves the finding. Smallest change; closes the
@@ -330,10 +334,11 @@ to remember to sling it.
    `gate-ensure.sh` (move `close-unvalidated`'s trigger to the derived lane state;
    keep `close-answered`); `signoff.sh` becomes a pure verdict-recorder; no
    re-approval close.
-3. **Marks + ledger** (`tk-fspfp2`, sequenced after 1–2) — extend `pr_comment_batch`
-   to the review and issue-comment id spaces, drive being-fixed / resolved /
-   awaiting-a-human, and post the holistic all-clear when the anchor's findings all
-   resolve and every lane is green.
+3. **Marks + ledger** (`tk-fspfp2`, after 1–2 and behind operator gate `tk-sl8sq7`)
+   — extend `pr_comment_batch` to the review and issue-comment id spaces, drive
+   being-fixed / resolved / awaiting-a-human, and post the holistic all-clear when
+   the anchor's findings all resolve and every lane is green. Routed to human and
+   not auto-dispatched; it waits on the operator settling `tk-sl8sq7`.
 4. **Doctrine fold-in** — apply the two edits above to review-cycle-architecture.md
    (carried by beads 1–2 as each lands its half).
 
