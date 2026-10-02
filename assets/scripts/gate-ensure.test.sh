@@ -62,6 +62,21 @@ set -u
 exit 0
 ESC
 chmod +x "$SD/escalate.sh"
+# approval-drift.sh stub: classify echoes $STUB_DRIFT (default stands) so the
+# gate-ensure RESPONSE arms (supersede on scope, arm-approval on arch) are
+# exercised deterministically; the real git-backed detection is covered by
+# approval-drift.test.sh. scope-digest is unused on this path.
+cat > "$SD/approval-drift.sh" <<'DRIFT'
+#!/usr/bin/env bash
+set -u
+case "${1:-}" in
+  classify)     echo "${STUB_DRIFT:-stands}" ;;
+  scope-digest) echo "deadbeefcafe" ;;
+esac
+exit 0
+DRIFT
+chmod +x "$SD/approval-drift.sh"
+export STUB_DRIFT=""
 SUT="$SD/gate-ensure.sh"
 # The SUT forwards GC_RIG into every sling; an ambient value would rewrite the
 # assertions below. Lane state is DERIVED (there is no dispatch ceiling and no
@@ -1087,6 +1102,68 @@ eq "$(meta rev-p2 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 has "$(cat "$STUB_GC_LOG")" "--var lane_one_provider=codex" "lane one's provider var is forwarded through the stranded re-sling"
 has "$(cat "$STUB_GC_LOG")" "--var lane_two_provider=claude" "lane two's provider var is forwarded through the stranded re-sling"
 has "$(cat "$STUB_GC_LOG")" "--var synthesis_target=$FIXP" "the synthesis target var is forwarded through the stranded re-sling"
+
+# --- approval drift: a green lane is re-armed when its baseline no longer holds --
+# The classifier's verdict is stubbed ($STUB_DRIFT) so the RESPONSE arms are
+# isolated from the git-backed detection (approval-drift.test.sh covers that).
+echo "# approval drift re-arms a green lane"
+
+# stands: a green lane whose baseline still applies dispatches nothing, and the
+# backing review is left untouched — the overwhelming default.
+store "[$(anchor DK0 pull_request codex "" polecat/dk0),$(backed rev-dk0 DK0 codex)]"
+STUB_DRIFT=""; out=$(run); rc=$?
+eq "$rc" 0 "stands: pass exits 0"
+has "$out" "0 reviews dispatched" "stands: a green lane that still stands dispatches nothing"
+eq "$(meta rev-dk0 gc.outcome)" "recorded" "stands: the backing review is left intact"
+
+# scope: the lane's approved requirements were rewritten. The stale backing is
+# superseded (lifting the per-head bar) and a fresh review of the lane is poured.
+store "[$(anchor DK1 pull_request codex "" polecat/dk1),$(backed rev-dk1 DK1 codex)]"
+STUB_DRIFT=scope; out=$(run); rc=$?; STUB_DRIFT=""
+eq "$rc" 0 "scope: pass exits 0"
+eq "$(meta rev-dk1 gc.outcome)" "superseded" "scope: the stale backing review is superseded"
+has "$out" "dispatched review" "scope: a fresh review of the lane is dispatched"
+
+# arch: the change grew beyond the reviewed envelope. The approval gate is armed
+# (check_set gains `approval`) so the merge holds for a fresh human sign-off; no
+# lane review is dispatched, and the codex approval that still stands is left be.
+store "[$(anchor DK2 pull_request codex "" polecat/dk2),$(backed rev-dk2 DK2 codex)]"
+STUB_DRIFT=arch; out=$(run); rc=$?; STUB_DRIFT=""
+eq "$rc" 0 "arch: pass exits 0"
+has "$(meta DK2 check_set)" "approval" "arch: the approval gate is armed in check_set"
+eq "$(meta rev-dk2 gc.outcome)" "recorded" "arch: the standing codex approval is left intact"
+has "$out" "0 reviews dispatched" "arch: it holds for a human sign-off, dispatching no lane review"
+
+# arm_approval_gate tested membership through cs_canon, which strips the commas
+# it needs, so an already-armed gate read as unarmed and arch drift re-appended
+# `approval` every pass. cs_has preserves the separators: an anchor already
+# carrying `approval` holds quietly and the token is not doubled.
+echo "# arch drift on an already-armed gate holds quietly (no doubled approval token)"
+store "[$(anchor DK3 pull_request "codex,approval" "" polecat/dk3),$(backed rev-dk3 DK3 codex)]"
+STUB_DRIFT=arch; out=$(run); rc=$?; STUB_DRIFT=""
+eq "$rc" 0 "arch already-armed: pass exits 0"
+eq "$(meta DK3 check_set)" "codex,approval" "arch already-armed: the approval token is not doubled"
+has "$out" "already armed" "arch already-armed: the gate reads as armed and holds quietly"
+
+# When the arm write does not persist, the gate is NOT armed, the lane still
+# derives green, and merge.sh cannot see gate-ensure's local held tally — so a
+# stale approval could merge. The drift response must fail closed (rc=3).
+echo "# arch drift whose arm write does not persist fails closed (rc=3)"
+store "[$(anchor DK4 pull_request codex "" polecat/dk4),$(backed rev-dk4 DK4 codex)]"
+STUB_DRIFT=arch; out=$(STUB_DROP_KEYS="DK4:check_set" run); rc=$?; STUB_DRIFT=""
+eq "$rc" 3 "arch arm did not persist: the pass exits rc=3 (merge held)"
+eq "$(meta DK4 check_set)" "codex" "arch arm did not persist: check_set is unchanged (write dropped)"
+has "$out" "UNHELD" "arch arm did not persist: the unheld lane is named"
+
+# When the supersede write does not persist, the backing still derives green and
+# the per-head bar can block the re-review, leaving a green lane with no new
+# review. The scope response must fail closed rather than fall through (rc=3).
+echo "# scope drift whose supersede write does not persist fails closed (rc=3)"
+store "[$(anchor DK5 pull_request codex "" polecat/dk5),$(backed rev-dk5 DK5 codex)]"
+STUB_DRIFT=scope; out=$(STUB_DROP_KEYS="rev-dk5:gc.outcome" run); rc=$?; STUB_DRIFT=""
+eq "$rc" 3 "scope supersede did not persist: the pass exits rc=3 (merge held)"
+eq "$(meta rev-dk5 gc.outcome)" "recorded" "scope supersede did not persist: the backing is unchanged (write dropped)"
+has "$out" "could not supersede" "scope supersede did not persist: the failure is named"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

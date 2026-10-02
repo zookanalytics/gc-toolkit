@@ -349,6 +349,10 @@ eq "$(meta tk-anc check.codex)" "green" "check.codex records the lane green"
 eq "$(status rv-1)" "closed" "review bead closed"
 eq "$(meta rv-1 gc.outcome)" "recorded" "review bead closed with gc.outcome=recorded"
 eq "$(meta rv-1 signoff_verdict)" "approve" "…and signoff_verdict=approve rides in the same close"
+# The approve captures the lane's drift baseline on the anchor beside the green:
+# the commit the verdict stood on, keyed to the lane.
+eq "$(meta tk-anc approved_oid.codex)" "$(meta rv-1 reviewed_oid)" "approve captures approved_oid.codex = the reviewed commit"
+G=$(meta tk-anc approved_scope_digest.codex); case "$G" in ""|"<absent>") bad "approve captures approved_scope_digest.codex (got '$G')" ;; *) ok "approve captures approved_scope_digest.codex baseline" ;; esac
 
 echo "# approve pre-open"
 reset "$ANCHOR_PRE"
@@ -358,6 +362,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr review" "pre-open posts no gh pr review (no PR
 eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "pre-open records reviewed_oid on the review bead"
 has "$(notes rv-1)" "tk-anc" "pre-open verdict notes carry the anchor link"
 eq "$(meta tk-anc check.codex)" "green" "pre-open still stamps the lane"
+eq "$(meta tk-anc approved_oid.codex)" "$OID_HEAD" "pre-open approve captures approved_oid.codex at the reviewed head"
 eq "$(status rv-1)" "closed" "pre-open closes the review bead"
 
 echo "# --reviewed-oid override"

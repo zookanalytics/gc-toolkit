@@ -69,7 +69,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/approval-drift.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -958,6 +958,28 @@ printf '%s' "$(prview 50 OPEN CLEAN MERGEABLE)" \
 out=$(run)
 eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture follows the head it was read at"
 eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…so does the merge state"
+
+echo "# a fresh external approval captures the lane's drift baseline"
+store "[$(anchor DB1 55)]"
+printf '%s' "$(prview 55 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED" | .headRefOid = "sha-APPR"' > "$GH_DIR/pr_view_55.json"
+printf '[{"id":7001,"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-APPR","submitted_at":"2026-09-20T00:00:00Z"}]' > "$GH_DIR/reviews_55.json"
+echo '[]' > "$GH_DIR/comments_55.json"
+out=$(run)
+eq "$(meta DB1 approved_oid.codex)" "sha-APPR" "the approved baseline oid is the review's own commit, not the live head"
+G=$(meta DB1 approved_scope_digest.codex); case "$G" in ""|"<absent>") bad "capture writes approved_scope_digest.codex (got '$G')" ;; *) ok "the approved scope digest is captured beside the oid" ;; esac
+
+echo "# …an ordinary push that leaves the approval standing does not move the baseline"
+# The head advances but the APPROVED review keeps its own commit_id. Recapturing
+# would move the baseline to the drifted head and erase the drift the classifier
+# exists to catch, so a re-observed standing approval must not recapture.
+printf '%s' "$(prview 55 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED" | .headRefOid = "sha-MOVED"' > "$GH_DIR/pr_view_55.json"
+out=$(run)
+eq "$(meta DB1 approved_oid.codex)" "sha-APPR" "a re-observed standing approval does not recapture (baseline stays at the reviewed commit)"
+
+echo "# …a genuinely new approval at the moved head recaptures"
+printf '[{"id":7001,"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-APPR","submitted_at":"2026-09-20T00:00:00Z"},{"id":7002,"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-MOVED","submitted_at":"2026-09-21T00:00:00Z"}]' > "$GH_DIR/reviews_55.json"
+out=$(run)
+eq "$(meta DB1 approved_oid.codex)" "sha-MOVED" "a new approval (a later review at the moved head) recaptures the baseline"
 
 echo "# COMMENTED is representable, and it routes to work"
 # The tk-9heqfh/PR#477 fixture: inline comments that were neither approval nor
