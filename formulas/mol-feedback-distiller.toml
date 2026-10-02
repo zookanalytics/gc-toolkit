@@ -389,7 +389,10 @@ file.
 
 Check live prompt-update beads AND the open PRs of closed ones (the
 pipeline closes the bead at PR-open, so a bead-only query misses in-flight
-PRs). Cap survivors at {{max_beads_per_run}}, strongest-reasoned first.
+PRs). A concurrent peer distiller pour files ordinary prompt-update beads too,
+so this same dedup is what keeps a non-atomic double-pour from double-filing: the
+later run's survivors empty here and it finalizes as a no-op. Cap survivors at
+{{max_beads_per_run}}, strongest-reasoned first.
 Then close this step (non-terminal; the session carries the survivors and
 the consumed-observation map forward):
 ```bash
@@ -410,6 +413,16 @@ title = "File one prompt-update bead per proposal, stamp consumed observations, 
 needs = ["judge-and-cluster"]
 description = """
 The TERMINAL step — the one place this workflow drains, on every path.
+
+This step MUST finalize on every path it can reach: close its own bead, then
+`gc runtime drain-ack`. Never leave it `open` or `blocked`, and never hold the
+molecule here. The order that pours this formula is single-flight on an open
+root — the root closes only when this step closes, and the cooldown gate counts
+an open root with any non-closed descendant as a run still in flight. A step
+left blocked here therefore stalls the whole distiller cadence, which a human
+then has to clear by hand with `gc order sweep-tracking --include-wisps
+feedback-distiller`. A run with nothing to file finalizes the same as a full
+one; it never blocks.
 
 ## 0. Carry the run disposition
 
@@ -434,6 +447,15 @@ fi
 `DISTILL_RUN` unset: rebuild via load-and-gate §1-§3; never file on a
 guess. A `gated` run reaches here normally with an empty consumed map and
 possibly retirement proposals — file those like any survivor.
+
+A run whose corpus a concurrent peer pour already holds is redundant, not
+blocked. The order's single-flight gate is not atomic, so two molecules can
+judge the same observations at once; judge-and-cluster §6 dedups every proposal
+a peer has already filed, so a redundant run arrives here with an empty survivor
+set and finalizes as a no-op — it files nothing, closes, and drains. When a peer
+races past that dedup the cost is one extra prompt-update bead, which the
+operator's review and the next run's veto sweep absorb. Ceding that way is cheap;
+a blocked step, which wedges the cadence above, never is.
 
 ## 1. File one bead per surviving proposal
 
