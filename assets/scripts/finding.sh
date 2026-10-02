@@ -273,12 +273,15 @@ cmd_set_disposition() {
   esac; done
   [ -n "$finding" ] && [ -n "$anchor" ] && [ -n "$disp" ] \
     || { warn "set-disposition needs --finding, --anchor, --disposition"; exit 1; }
-  case "$disp" in
-    must-fix|deferred|declined|needs-you) ;;
-    *) warn "--disposition must be must-fix, deferred, declined, or needs-you (got '$disp')"; exit 1 ;;
-  esac
-  gc bd update "$finding" --set-metadata finding.disposition="$disp" >/dev/null 2>&1 \
-    || { warn "could not set finding.disposition=$disp on $finding"; exit 2; }
+  # finding.disposition is the committing write of each arm, stamped last — never
+  # up front. A disposition recorded before the ruling's follow-up, visit, or edge
+  # exists outlives a fail-closed exit as a validated value, and the validator
+  # retries only findings still `unvalidated` (formulas/mol-validate.toml), so the
+  # half-done ruling is off the retry set and silently dropped — the orphan this
+  # whole change retires. Until an arm reaches its commit the finding keeps its
+  # current disposition (`unvalidated` on a first ruling), so any failure leaves it
+  # retryable. The arms carry the per-disposition stamp; `*` rejects a bad name
+  # before any write.
   case "$disp" in
     must-fix)
       # The hold merge.sh's blocker probe already reads. Idempotent: a re-run
@@ -303,6 +306,9 @@ cmd_set_disposition() {
         cmd_wire_fix_unit --fix-unit "$fu" --anchor "$anchor" --findings "$finding" >/dev/null 2>&1 \
           || warn "could not hang fix unit $fu --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"
       fi
+      # Commit the disposition last, now the anchor-blocking hold is proven wired.
+      gc bd update "$finding" --set-metadata finding.disposition=must-fix >/dev/null 2>&1 \
+        || { warn "could not record finding.disposition=must-fix on $finding"; exit 2; }
       ;;
     deferred)
       # A real objection not fixed in this PR: it becomes tracked later-work. File a
@@ -388,7 +394,7 @@ cmd_set_disposition() {
         || { warn "could not stamp finding.reply on $finding; NOT closing (a silent deferral)"; exit 2; }
       local dnote="deferred: tracked as follow-up $followup"
       [ -n "$reason" ] && dnote="$dnote — $reason"
-      gc bd update "$finding" --status=closed --append-notes "$dnote" >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=deferred --status=closed --append-notes "$dnote" >/dev/null 2>&1 \
         || { warn "could not close deferred finding $finding"; exit 2; }
       ;;
     declined)
@@ -418,7 +424,7 @@ cmd_set_disposition() {
       fi
       local note="declined"
       [ -n "$reason" ] && note="declined: $reason"
-      gc bd update "$finding" --status=closed --append-notes "$note" >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=declined --status=closed --append-notes "$note" >/dev/null 2>&1 \
         || { warn "could not close declined finding $finding"; exit 2; }
       ;;
     needs-you)
@@ -455,14 +461,16 @@ cmd_set_disposition() {
       [ -n "$vid" ] \
         || { warn "needs-you visit filed for $finding but its id did not read back; NOT recording a reply"; exit 2; }
       gc bd update "$finding" \
+        --set-metadata finding.disposition=needs-you \
         --set-metadata finding.visit="$vid" \
         --set-metadata finding.reply="This comment needs your decision — opened visit $vid. The review stays changes-requested until you rule it." >/dev/null 2>&1 \
-        || { warn "could not stamp finding.visit/finding.reply on $finding"; exit 2; }
+        || { warn "could not stamp finding.disposition/finding.visit/finding.reply on $finding"; exit 2; }
       local nnote="needs-you: opened visit $vid"
       [ -n "$reason" ] && nnote="$nnote — $reason"
       gc bd update "$finding" --append-notes "$nnote" >/dev/null 2>&1 \
         || warn "could not record the needs-you note on $finding"
       ;;
+    *) warn "--disposition must be must-fix, deferred, declined, or needs-you (got '$disp')"; exit 1 ;;
   esac
 }
 

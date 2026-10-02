@@ -127,6 +127,7 @@ BEFORE_N=$(jq 'length' "$STUB_STORE")
 "$SUT" set-disposition --finding "$F8" --anchor tk-nopool --disposition deferred --reason "later"; rc=$?
 if [ "$rc" -ne 0 ]; then ok "deferred fails closed (exit $rc) when no fix pool resolves"; else bad "deferred closed with an unroutable follow-up (exit 0)"; fi
 eq "$(bstatus "$F8")" "open" "the finding stays open on a fail-closed deferral — it still holds the review"
+eq "$(meta "$F8" 'finding.disposition')" "unvalidated" "a fail-closed deferral leaves the finding unvalidated, so the validator's retry set still contains it — not stamped deferred and silently dropped"
 eq "$(meta "$F8" 'finding.follow_up')" "<absent>" "no follow-up id is recorded on a fail-closed deferral"
 eq "$(jq 'length' "$STUB_STORE")" "$BEFORE_N" "no orphan follow-up bead is filed when the pool cannot be resolved"
 
