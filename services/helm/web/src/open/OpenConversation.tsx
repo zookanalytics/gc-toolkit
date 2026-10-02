@@ -1,4 +1,4 @@
-// The drill panel's one write action: start a conversation on this bead.
+// The drill panel's one write action: file a visit on this bead.
 //
 // It lives in the panel's `session` section because that is the section about
 // who is working the anchor, and this is how the operator causes someone to.
@@ -6,11 +6,13 @@
 // TWO THINGS IT IS CAREFUL ABOUT, both of them the operator's complaint about
 // the tmux affordance ("not enough details to really be the main action"):
 //
-//  1. It never claims more than happened. Filing a visit queues a conversation;
-//     it does not put the operator in one. There is no pane to attach to in a
-//     browser until the embedded ttyd can be retargeted (tk-rbf9r / tk-xlup8,
-//     unapplied), so the success copy says a conversation is being opened and
-//     points at the terminal tile — it does not say "you are in it".
+//  1. It never claims more than happened. Filing a visit parks it on the helm
+//     board; it does not start a sitting or put the operator in one. Engaging
+//     the parked visit (the Discuss button beside this one) is what spawns the
+//     session, and there is no pane to attach to in a browser until the
+//     embedded ttyd can be retargeted (tk-rbf9r / tk-xlup8, unapplied). So the
+//     success copy says the visit is parked and points at Discuss — it does
+//     not say "you are in it".
 //  2. A failure says which failure. The service returns a stable `reason` slug
 //     beside the tool's own sentence; the sentence is shown verbatim and the
 //     slug picks a next move. A button whose only failure mode is a shrug is
@@ -98,7 +100,7 @@ export function OpenConversation({ beadId }: OpenConversationProps) {
         onClick={open}
         disabled={state.phase === 'opening'}
       >
-        {state.phase === 'opening' ? 'opening…' : 'start a conversation'}
+        {state.phase === 'opening' ? 'filing…' : 'file a visit'}
       </button>
 
       {state.phase === 'done' && <OpenedNotice result={state.result} />}
@@ -130,14 +132,14 @@ function OpenedNotice({ result }: { result: OpenResult }) {
     <p className="open-conversation-result" role="status">
       <strong>
         {result.outcome === 'existing'
-          ? 'A conversation is already open on this bead.'
-          : 'A conversation is being opened.'}
+          ? 'A visit is already open on this bead.'
+          : 'A visit is parked on the board.'}
       </strong>{' '}
       {result.message}{' '}
       <span className="muted">
         {result.outcome === 'existing'
-          ? 'Attach to it from the sessions picker or the terminal tile.'
-          : 'A converse session will pick it up; attach from the sessions picker or the terminal tile. This button does not attach you.'}
+          ? 'Engage it with Discuss, or attach from the sessions picker or the terminal tile if a sitting already holds it.'
+          : 'No session holds it yet. Engage it with Discuss to start one. This button does not attach you.'}
       </span>
     </p>
   );

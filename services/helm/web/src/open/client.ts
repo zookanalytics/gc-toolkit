@@ -79,13 +79,15 @@ interface OpenErrorBody {
 }
 
 /**
- * File a visit on `bead`, so a converse session picks it up.
+ * File a visit on `bead` and park it on the helm board (gc.routed_to=human);
+ * no session is spawned until an operator engages it.
  *
- * NOTE WHAT THIS DOES NOT DO: it does not put the operator into the
- * conversation. In tmux, `gc-helm.sh open` reattaches the caller; in a browser
- * there is no pane to attach until the embedded ttyd can be retargeted at the
- * new session (tk-rbf9r / tk-xlup8, unapplied). Callers must say so rather than
- * implying the conversation is on screen.
+ * NOTE WHAT THIS DOES NOT DO: it neither starts a sitting nor attaches the
+ * operator to one. Engaging the parked visit (the drill panel's Discuss action,
+ * or `gc-helm engage`) is what spawns the session; in a browser there is no
+ * pane to attach to regardless, until the embedded ttyd can be retargeted at
+ * the session (tk-rbf9r / tk-xlup8, unapplied). Callers must say so rather than
+ * implying a conversation is on screen.
  */
 export async function openConversation(bead: string, signal?: AbortSignal): Promise<OpenResult> {
   let res: Response;
