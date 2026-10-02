@@ -469,6 +469,17 @@ git checkout -B "$BRANCH" "origin/{{base_branch}}"
 gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH"
 ```
 
+**Record the resolved worktree.** `self-review` and `submit-and-exit` read
+`work_dir` from this bead to locate the checkout. Three paths reach here: a
+fresh create, a reuse of a recorded worktree, and a rework child that adopts
+the anchor's already-checked-out worktree. Stamp the directory you are in now,
+so every path records it. Re-stamping the same path is a no-op.
+```bash
+# >>> workspace-setup-record-worktree
+gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$(pwd)"
+# <<< workspace-setup-record-worktree
+```
+
 **4. Clean state + setup:** `git status` should be clean; run
 `{{setup_command}}` (empty = skip).
 
