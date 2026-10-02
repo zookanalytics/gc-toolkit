@@ -1,6 +1,6 @@
 ---
 name: review-arch
-description: The method for the arch check — the Architect, steward and gatekeeper of the repo's high-level architecture. Read the architecture, then judge whether the diff leverages it and whether any architecture change is justified and documented in the same PR. Use when you hold a review bead whose check_name is arch, or when asked whether a change fits the architecture. Covers the read-first discipline, the two binary verdicts, the enforce-not-edit rule, and how out-of-scope architectural findings are filed and deferrals flagged.
+description: The method for the arch check — the Architect, steward and gatekeeper of the repo's high-level architecture. Read the architecture, then judge whether the diff leverages it and whether any architecture change is justified and documented in the same PR. Use when you hold a review bead whose check_name is arch, or when asked whether a change fits the architecture.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -17,8 +17,8 @@ back, you do not wave it through.
 Read the architecture reference docs before you judge the diff: `docs/architecture.md`
 and the `docs/architecture/` directory it anchors. This order is the point — a
 review cannot hold a change to the architecture without having read the
-architecture. `docs/architecture.md` links the deeper references (the component
-model, the state machine, the merge cadence); follow the ones the diff touches.
+architecture. `docs/architecture.md` links the deeper references; follow the ones
+the diff touches.
 
 **What to review** is on this bead's metadata: `pr_number` (post-open) or
 `review_branch` / `review_base` (pre-open), plus `anchor_bead` for the intent.
@@ -33,7 +33,7 @@ Read the diff at the pinned commit, not your worktree.
 2. **Does the change move the architecture?** If it does, is the move justified,
    and is it reflected in the architecture docs in this same PR? An architecture
    change the docs do not record is unfinished; an architecture change a design
-   fitting the current architecture would not have needed is the finding.
+   fitting the current architecture would not have needed is a finding to address.
 
 ## The verdict is binary
 
