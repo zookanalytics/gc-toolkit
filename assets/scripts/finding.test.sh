@@ -24,7 +24,7 @@ if [ "$K1" != "$K3" ]; then ok "key is lane-scoped"; else bad "key collides acro
 # ---------------------------------------------------------------------------
 # upsert: files a finding bead with the full metadata contract.
 # ---------------------------------------------------------------------------
-store '[{"id":"tk-anc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","pr_number":"42"}}]'
+store '[{"id":"tk-anc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","pr_number":"42","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
 F1=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/foo.sh:bar()" --message "Unquoted expansion in the loop")
 eq "$(meta "$F1" task_kind)" "finding" "upsert stamps task_kind=finding"
 eq "$(meta "$F1" anchor_bead)" "tk-anc" "upsert stamps anchor_bead"
@@ -78,6 +78,14 @@ hasnt "$(deps)" "$F3|blocks|tk-anc" "deferred writes no blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F3 " "merge.sh's probe does NOT see the deferred finding"
 has "$(meta "$F3" 'finding.reply')" "$F3FU" "the follow-up id is stamped as the reply the raiser's thread receives"
 has "$(notes "$F3")" "the rewrite it needs lands in the next PR" "the deferral reason is recorded on the finding"
+# The follow-up is a DISPATCHABLE unit, not a bare open task: gated behind the
+# anchor (bd withholds it until the merge closes the anchor) and armed to the fix
+# pool, so deferred-dispatch's reconcile slings it once the merge lands. An
+# un-routed follow-up was the silent drop this whole change retires.
+eq "$(bstatus "$F3FU")" "open" "the follow-up stays open so reconcile can dispatch it"
+has "$(deps)" "tk-anc|blocks|$F3FU" "the anchor blocks the follow-up — it waits for the merge"
+eq "$(meta "$F3FU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "the follow-up is armed to the anchor's fix pool (derived from gc.execution_routed_to)"
+has "$(meta "$F3FU" 'gc.dispatch_when_ready_args')" "mol-polecat-work" "...to be re-poured through mol-polecat-work"
 
 # ---------------------------------------------------------------------------
 # set-disposition must-fix -> deferred: the reclassification retracts the blocks
@@ -95,6 +103,32 @@ hasnt "$(deps)" "$F5|blocks|tk-anc" "must-fix -> deferred retracts the blocks ed
 hasnt " $(probe_blockers tk-anc) " " $F5 " "merge.sh's probe no longer sees the reclassified finding"
 F5FU=$(meta "$F5" 'finding.follow_up')
 has "$(deps)" "$F5FU|discovered-from|tk-anc" "the reclassification files a follow-up carrying the provenance"
+has "$(deps)" "tk-anc|blocks|$F5FU" "the reclassified deferral's follow-up is gated behind the anchor"
+eq "$(meta "$F5FU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "the reclassified deferral's follow-up is armed to the fix pool"
+
+# ---------------------------------------------------------------------------
+# --fix-pool overrides the pool the anchor would otherwise supply.
+# ---------------------------------------------------------------------------
+F6=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "assets/scripts/z.sh:z()" --message "defer with an explicit fix pool")
+"$SUT" set-disposition --finding "$F6" --anchor tk-anc --disposition deferred --reason "later work" --fix-pool "gc-toolkit/gc-toolkit.polecat-codex"
+F6FU=$(meta "$F6" 'finding.follow_up')
+eq "$(meta "$F6FU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat-codex" "--fix-pool overrides the anchor-derived fix pool"
+
+# ---------------------------------------------------------------------------
+# set-disposition deferred FAILS CLOSED when no fix pool resolves: the follow-up
+# cannot be made dispatchable, so the finding does not close and no orphan is
+# filed. An unrouted follow-up silently dropped is exactly the failure this
+# retires — leaving the finding holding the review beats promising work that
+# nothing will ever pick up.
+# ---------------------------------------------------------------------------
+store "$(jq -c '. + [{"id":"tk-nopool","status":"open","assignee":"","title":"a","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness"}}]' "$STUB_STORE")"
+F8=$("$SUT" upsert --anchor tk-nopool --lane correctness --locus "x.sh:x()" --message "no pool anywhere")
+BEFORE_N=$(jq 'length' "$STUB_STORE")
+"$SUT" set-disposition --finding "$F8" --anchor tk-nopool --disposition deferred --reason "later"; rc=$?
+if [ "$rc" -ne 0 ]; then ok "deferred fails closed (exit $rc) when no fix pool resolves"; else bad "deferred closed with an unroutable follow-up (exit 0)"; fi
+eq "$(bstatus "$F8")" "open" "the finding stays open on a fail-closed deferral — it still holds the review"
+eq "$(meta "$F8" 'finding.follow_up')" "<absent>" "no follow-up id is recorded on a fail-closed deferral"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE_N" "no orphan follow-up bead is filed when the pool cannot be resolved"
 
 # ---------------------------------------------------------------------------
 # set-disposition declined: closed with the reason, holding nothing.

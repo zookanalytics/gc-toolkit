@@ -298,7 +298,8 @@ carry on to `rule-convergence` and judge convergence there on the batch's own
 evidence, never on the emptiness of this read.
 
 A deferred finding's follow-up is filed by `finding.sh` as the ruling runs — a
-claimable bead that outlives the merge — so a deferral never leaves an orphan.
+bead armed to its fix pool and gated behind the anchor, so it dispatches once
+the merge lands — so a deferral never leaves an unclaimable orphan.
 The must-fix set is answered by a separate fix-unit dispatch the check authority
 owns (tk-o1bzbm), not this pass: this pass rules dispositions and lets the
 primitive file a deferral's follow-up; it does not create or route must-fix fix
