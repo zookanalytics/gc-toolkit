@@ -138,6 +138,92 @@ th {
   font-weight: 600;
 }
 
+/*
+ * A parent reads as a navigable, summarizing header rather than an indented
+ * title: a disclosure control folds its subtree, and a summary beside the title
+ * states what the fold leaves legible — how many descendants want the operator,
+ * and (folded) the spread across the attention bands. A leaf reserves the
+ * disclosure's width so its title lines up under its siblings'. The block stays
+ * muted and calm by the whole surface's rule: nothing here shouts.
+ */
+.title-lead {
+  /* inline, not flex: a long title wraps and the summary flows after it rather
+     than a flex row pinning everything to one line. */
+}
+
+.disclosure,
+.disclosure--leaf {
+  display: inline-block;
+  vertical-align: baseline;
+  width: 1.1rem;
+}
+
+.disclosure {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  opacity: 0.6;
+  padding: 0;
+  text-align: left;
+}
+
+.disclosure:hover,
+.disclosure:focus-visible {
+  opacity: 1;
+}
+
+.disclosure__icon {
+  font-size: 0.75em;
+}
+
+.family-summary {
+  font-size: 0.75rem;
+}
+
+/* The one signal a fold must never swallow: how many descendants are the
+   operator's move. The board's own amber for the operator's move, stated as a
+   count — unmissable yet calm, never a klaxon. */
+.family-summary__owed {
+  color: #8a6100;
+  font-weight: 600;
+  margin-left: 0.5rem;
+  white-space: nowrap;
+}
+
+/* The band spread of a folded subtree, muted because it is reference, not a
+   demand; a middot joins the bands. Shown only when the parent is collapsed and
+   its rows are therefore off screen. */
+.family-summary__shape {
+  margin-left: 0.5rem;
+  opacity: 0.7;
+}
+
+.family-summary__band {
+  white-space: nowrap;
+}
+
+.family-summary__band + .family-summary__band::before {
+  content: ' · ';
+}
+
+/* The escape hatch: unfold everything, a quiet underlined control by the table
+   heading, present only while something is folded. */
+.expand-all {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  font-size: 0.75rem;
+  margin: 0 0 0.35rem;
+  opacity: 0.8;
+  padding: 0;
+  text-decoration: underline;
+}
+
 .band {
   font-size: 0.8125rem;
   opacity: 0.8;
