@@ -11,7 +11,7 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
-mkdir -p "$TMP/bin" "$TMP/pack/orders" "$TMP/hist"
+mkdir -p "$TMP/bin" "$TMP/pack/orders" "$TMP/hist" "$TMP/empty-city"
 cat > "$TMP/pack/orders/tick.toml" <<'EOF'
 [order]
 trigger = "cooldown"
@@ -51,7 +51,10 @@ export PATH="$TMP/bin:$PATH" HIST_DIR="$TMP/hist" HIST_ARGS="$TMP/hist-args.log"
 # binary, which is neither hermetic nor what those cases are about. The gctk
 # cases below override it deliberately. An order case that hand-rolls its own
 # `bash "$CHECK"` loses that pin, so vary ORDERS_JSON or RIGS_JSON and call this.
-run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/no-such-gctk}" bash "$CHECK" 2>&1; }
+# GC_CITY_PATH is pinned the same way, to a fixture city (empty by default) so
+# the registration arm never reads the AMBIENT city.toml; the disable cases set
+# CITY_DIR to a fixture that carries [[orders.overrides]] / skip entries.
+run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/no-such-gctk}" GC_CITY_PATH="${CITY_DIR:-$TMP/empty-city}" bash "$CHECK" 2>&1; }
 
 # A pack dir that is its own git repo, so arm 3 has a tree revision to compare
 # against. Local and never pushed; the identity is scaffolding.
@@ -216,6 +219,82 @@ has "$OUT" "shell fallbacks" "and the arm says the fallback is what answers ther
 mkdir -p "$TMP/empty-pack"
 OUT=$(GC_PACK_DIR="$TMP/empty-pack" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a pack shipping no orders has no cadence to assert"
+
+# --- 10. a deliberate city.toml disable is a NOTE, not a missing registration ------
+# `gc order list` omits a disabled order, so arm 1 sees it as unregistered. The
+# check reads city.toml and tells an intended disable apart from a real gap, so a
+# true stall (arm 2) is never buried beside a deliberate one.
+mkdir -p "$TMP/city-tick-beta"
+cat > "$TMP/city-tick-beta/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "tick"
+rig = "beta"
+enabled = false
+EOF
+# tick registered on alpha only (orders-missing.json); beta's gap is the disable.
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-tick-beta" run_check); RC=$?
+eq "$RC" "0" "a rig-scoped order disabled on a rig is a NOTE, not an error"
+has "$OUT" "deliberately disabled on rig beta" "the disable is named as intended, not as a gap"
+hasnt "$OUT" "rig beta imports this pack but has NO registration" "and it did not stay a missing-registration error"
+
+# A disabled rig (note) beside a registered-but-stopped rig (error): the real
+# stall must survive, un-buried.
+printf '{"entries":[]}' > "$TMP/hist/tick.json"   # alpha registered but did not fire
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-tick-beta" run_check); RC=$?
+eq "$RC" "2" "a real stall is still an ERROR while a disabled rig is only a note"
+has "$OUT" "has NOT fired" "the stall is reported"
+has "$OUT" "deliberately disabled on rig beta" "the deliberate disable rides along as a note"
+hasnt "$OUT" "rig beta imports this pack but has NO registration" "the disable did not add a false error"
+printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
+
+# A gap the config does NOT disable stays an error — the true positive preserved.
+mkdir -p "$TMP/city-unrelated"
+cat > "$TMP/city-unrelated/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "some-other-order"
+rig = "beta"
+enabled = false
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-unrelated" run_check); RC=$?
+eq "$RC" "2" "a gap the city config does not explain is still an ERROR"
+has "$OUT" "tick: rig beta imports this pack but has NO registration" "the genuine gap is still named"
+
+# An unscoped (rigless) enabled=false covers a rig-scoped order on every rig.
+mkdir -p "$TMP/city-tick-all"
+cat > "$TMP/city-tick-all/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "tick"
+enabled = false
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-tick-all" run_check); RC=$?
+eq "$RC" "0" "an unscoped disable covers a rig-scoped order's missing rig"
+has "$OUT" "tick: deliberately disabled on rig beta" "the missing rig reads as deliberate"
+
+# A city-scoped order: an unscoped disable answers its city-wide question.
+mkdir -p "$TMP/city-wide-off"
+cat > "$TMP/city-wide-off/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "citywide"
+enabled = false
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-nocity.json" CITY_DIR="$TMP/city-wide-off" run_check); RC=$?
+eq "$RC" "0" "a city-scoped order disabled by an unscoped override is a NOTE"
+has "$OUT" "citywide: deliberately disabled" "the disabled city order is noted"
+hasnt "$OUT" "NO live registration" "and not reported as never registered"
+
+# The [orders] skip list is the other deliberate-disable mechanism.
+mkdir -p "$TMP/city-skip"
+cat > "$TMP/city-skip/city.toml" <<'EOF'
+[orders]
+skip = ["citywide"]
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-nocity.json" CITY_DIR="$TMP/city-skip" run_check); RC=$?
+eq "$RC" "0" "an order in the [orders] skip list is a NOTE, not an error"
+has "$OUT" "citywide: deliberately disabled" "the skipped order is noted"
 
 echo
 echo "check-cadence-live: $PASS passed, $FAIL failed"
