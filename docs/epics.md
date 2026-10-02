@@ -35,14 +35,16 @@ An epic carries five fields. Together they make it first-class: readable on its
 own, verifiable against an outcome, and scoped at its edges. Four follow the
 current BMAD epic template (`Outcome`, `Boundaries`, `Done when`) and SAFe's
 epic hypothesis, reusing [file-structure.md](file-structure.md)'s
-Mandate/Boundaries vocabulary so epics and docs read the same way; the label is
+Mandate/Boundaries vocabulary so epics and docs read the same way; the handle is
 gc-toolkit's own, for operator legibility.
 
-**Label.** A short handle, three to five words, that names the epic wherever it
+**Handle.** A short phrase, three to five words, that names the epic wherever it
 is surfaced — the Helm board, a brief, a cross-reference. It is the operator's
 context handle: a stable phrase that calls the whole epic to mind without
-re-reading the hypothesis. It sits on the epic alone; a child is known by the
-epic it belongs to and carries no label of its own.
+re-reading the hypothesis. It is not a bead `label`, which is a first-class,
+many-per-bead grouping primitive; the handle is a single phrase that belongs to
+the epic. It sits on the epic alone, and a child does not inherit it: a child
+may carry its own short name, but that name is never the epic's handle.
 
 **Hypothesis statement.** One sentence: for whom, what changes, and the signal
 that shows it worked. This is the epic's goal sharpened into a claim that can be
@@ -69,7 +71,7 @@ flight, that say whether the hypothesis is being borne out. They inform the
 pivot-or-persevere call before the full cost is spent. They are not a progress
 bar of closed tickets.
 
-The floor for an epic to exist is lower than the full contract: a label, a
+The floor for an epic to exist is lower than the full contract: a handle, a
 hypothesis sentence, and boundaries are enough to file one and to classify work
 into it (see [Elaboration is progressive](#elaboration-is-progressive)). The
 closure condition and indicators are filled in as the epic is elaborated. The
@@ -127,14 +129,14 @@ elaboration artifact, and the units it describes are filed and land separately.
 
 ## Elaboration is progressive
 
-A thin epic is legal at intake. The floor is a label, one hypothesis sentence,
+A thin epic is legal at intake. The floor is a handle, one hypothesis sentence,
 and boundaries — enough to read the epic and to classify work into it — and the
 rest of the contract is filled in as the epic is elaborated. Obvious work under
 the epic proceeds in parallel with that flesh-out; there is no freeze of all work
 behind a fully elaborated epic.
 
 A thin epic needs no committed document: it lives as a filed bead carrying its
-label, hypothesis, and boundaries — a place to hang work before anything is
+handle, hypothesis, and boundaries — a place to hang work before anything is
 written down. When an epic is elaborated into a product brief, or a spec that
 spans its units, that artifact is a committed repo document under `specs/`, the
 same as any other durable record ([file-structure.md](file-structure.md)).
@@ -149,11 +151,11 @@ audit machinery is epic stewardship, authored separately from this contract.
 
 ## Worked example: this epic
 
-The template applied to `tk-rctkrj`, the epic this doc is filed under. Its label,
+The template applied to `tk-rctkrj`, the epic this doc is filed under. Its handle,
 hypothesis, and closure condition are the create-time draft, proposed for the
 operator to ratify; the live contract for an epic is carried on the epic itself.
 
-**Label.** First-class epics.
+**Handle.** First-class epics.
 
 **Hypothesis.** For the operator judging the city's work, a first-class epic —
 one carrying a stated hypothesis, a declared scope, and reliable membership —
@@ -176,7 +178,7 @@ redefined). The standing theme/initiative layer is out of scope and deferred.
   standalone with a reason; no work is a silent orphan.
 - The helm board renders each epic's work grouped under it, not scattered beside
   its own children.
-- A new epic is filed with at least the floor contract (a label, a hypothesis,
+- A new epic is filed with at least the floor contract (a handle, a hypothesis,
   and boundaries), and the city proposes a contract for an epic that lacks one.
 - An epic closes by a ruling on its hypothesis after a validation step, and an
   area with no provable hypothesis is not filed as an epic.
