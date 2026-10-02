@@ -94,6 +94,22 @@ case "$1 ${2:-}" in
     _live="${LIVE_SITTINGS-$VIS_OWNER}"
     jq -n --arg live "$_live" \
       '{sessions:[ $live | split(" ")[] | select(. != "") | {session_name:., name:., id:., state:"running", closed:false} ]}' ;;
+  "agent list")
+    # The import-resolved roster rig_carries_converse reads — capability comes
+    # from here, NOT from a glob of $RIG_PATH's checkout. Default: gc-toolkit
+    # carries converse (base + variants), so engage's converse guard passes.
+    # $NO_CONVERSE drops the converse entries (the roster shows the rig without
+    # converse — an HQ root, or a rig that does not import the pack); it keeps a
+    # proactive entry to prove the guard is converse-specific. $ROSTER_BROKEN
+    # fails the listing and $ROSTER_MALFORMED prints non-roster JSON, both to
+    # exercise the fail-open path.
+    if [ -n "${ROSTER_BROKEN:-}" ]; then echo "agent list: data plane down" >&2; exit 1; fi
+    if [ -n "${ROSTER_MALFORMED:-}" ]; then printf '{"not":"a roster"}\n'; exit 0; fi
+    if [ -n "${NO_CONVERSE:-}" ]; then
+      jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.proactive"}]}'
+    else
+      jq -n '{agents:[ "gc-toolkit/gc-toolkit.converse","gc-toolkit/gc-toolkit.converse-opus","gc-toolkit/gc-toolkit.converse-fable","gc-toolkit/gc-toolkit.converse-codex" | {qualified_name:.} ]}'
+    fi ;;
   "bd show")
     id="$3"
     if [ "$id" = "tk-vis" ]; then
@@ -219,13 +235,15 @@ mkdir -p "$TMP/agents/converse-opus" "$TMP/agents/converse-fable" \
          "$TMP/agents/converse-codex" "$TMP/agents/converse"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
-# The subject rig's checkout, which engage's converse-template guard globs for
-# converse-<model> templates ($path/agents/converse-*). $TMP/rig carries them, so
-# the default cases pass the guard; $TMP/rig-bare is a rig checkout with none, for
-# the refusal case. Distinct from GC_HELM_AGENTS_DIR above (the pack's own
-# model-menu dir).
+# The subject rig's checkout. Converse CAPABILITY now comes from the resolved
+# roster (gc agent list), not a glob of this tree, so these converse-* dirs no
+# longer gate engage — they stay only as a realistic checkout. $TMP/rig-bare is a
+# checkout with NO converse templates but a .beads ledger: the importer case
+# proves engage still proceeds from it when the roster registers converse.
+# Distinct from GC_HELM_AGENTS_DIR above (the pack's own model-menu dir).
 mkdir -p "$TMP/rig/agents/converse-opus" "$TMP/rig/agents/converse-fable" \
-         "$TMP/rig/agents/converse-codex" "$TMP/rig/.beads" "$TMP/rig-bare"
+         "$TMP/rig/agents/converse-codex" "$TMP/rig/.beads" \
+         "$TMP/rig-bare" "$TMP/rig-bare/.beads"
 export RIG_PATH="$TMP/rig"
 
 # run_engage <bead> [extra-args...] -> RC/OUT, with per-case env preset by caller.
@@ -583,20 +601,37 @@ eq "$RC" 4 "(NORIG) an unknown prefix exits 4"
 has "$OUT" "matches no rig" "(NORIG) …saying so"
 hasnt "$CALLED" "session new" "(NORIG) …and spawns nothing"
 
-echo "# a subject whose rig carries no converse template is refused with no side effect"
-# An HQ / city-store bead resolves to a rig checkout that carries no
-# converse-<model> template, so no converse sitting could spawn there. engage
-# refuses BEFORE it files a visit or exports GC_RIG, rather than half-acting and
-# failing at the spawn. $TMP/rig-bare is such a checkout (no agents/converse-*).
+echo "# a subject whose rig carries no converse is refused with no side effect"
+# An HQ / city-store root carries no converse in the resolved roster, so no
+# converse sitting could spawn there. engage refuses BEFORE it files a visit or
+# exports GC_RIG, rather than half-acting and failing at the spawn. Capability is
+# read from the roster (gc agent list), not the checkout — $NO_CONVERSE makes the
+# roster show gc-toolkit without converse (a proactive-only entry remains, to
+# prove the guard is converse-specific).
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
-export RIG_PATH="$TMP/rig-bare"
+export NO_CONVERSE=1
 printf 'open' > "$VIS_STATUS"
 run_engage tk-vis --no-attach
-eq "$RC" 4 "(NOCONVERSE) a rig with no converse template exits 4"
+eq "$RC" 4 "(NOCONVERSE) a rig with no converse exits 4"
 has "$OUT" "carries no converse template" "(NOCONVERSE) …saying why"
 hasnt "$CALLED" "session new" "(NOCONVERSE) …spawning nothing"
 hasnt "$CALLED" "bd create" "(NOCONVERSE) …filing no visit"
 hasnt "$CALLED" "bd update" "(NOCONVERSE) …binding nothing"
+unset NO_CONVERSE
+
+echo "# an importer whose CHECKOUT holds no converse template is still engageable (roster-sourced)"
+# The tk-353e79 regression: capability must come from the import-resolved roster,
+# not a glob of the rig's checkout. Only the pack-source rig keeps agents/converse-*
+# in its tree; every importer obtains converse through the roster. $TMP/rig-bare is
+# a checkout with no converse templates, yet the default roster registers converse
+# for gc-toolkit — so engage clears the converse guard and spawns, where the old
+# glob predicate would have refused.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+export RIG_PATH="$TMP/rig-bare"
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(IMPORTER) an importer with converse in the roster but not the checkout engages"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IMPORTER) …spawning the converse sitting"
 export RIG_PATH="$TMP/rig"
 
 echo "# attach behaviour: default attaches, --no-attach does not"
