@@ -23,7 +23,9 @@
 #         the root or its input-convoy work bead while still open. An open visit
 #         is a human owning the decision, and disposing would strand it.
 #       - SOURCE NOT MID-PR: the input-convoy work bead carries no merge_result
-#         of pre_open_gate or pull_request — an in-flight PR the refinery owns.
+#         of pre_open_gate or pull_request (an in-flight PR the refinery owns),
+#         and no pr_number/pr_url left unresolved by an empty merge_result (a PR
+#         reference the store cannot prove closed — fail closed).
 #     Guard semantics mirror doctor/check-root-advancing (I13): a session is
 #     live iff its state is active.
 #
@@ -42,8 +44,9 @@
 # closed — only the refinery closes a work bead, on a verified merge.
 #
 # REFUSALS (nothing is written, and the chain is left for a human):
-#   * a non-closed root with a live session, an open escalation, or a source
-#     mid-PR — not residue yet, or not this script's to close;
+#   * a non-closed root with a live session, an open escalation, a source
+#     mid-PR, or a source carrying an unresolved PR reference — not residue yet,
+#     or not this script's to close;
 #   * a root that will not read — an unreadable root is not a disposable one;
 #   * a bead in the chain carrying `branch` or `merge_result` — that is a work
 #     bead, and only the refinery closes an anchor, on a verified merge.
@@ -240,14 +243,17 @@ if [ "$ROOT_NOT_CLOSED" = "1" ]; then
         refuse live_root "root_status=$ROOT_STATUS,liveness_undetermined"
     fi
     # A live-identity set, keyed on every name an active session carries (id,
-    # session_name, alias); then the first chain name that is in it. A name the
-    # root or a non-closed member carries as its assignee, gc.session_id or
-    # gc.session_name — any of the three forms a claim writes.
+    # session_name, alias, name, agent_name); then the first chain name that is in
+    # it. A name the root or a non-closed member carries as its assignee,
+    # gc.session_id or gc.session_name — any of the three forms a claim writes. A
+    # pool worker carries its agent address (the form an assignee often takes,
+    # e.g. gc-toolkit/gc-toolkit.polecat-1) in name/agent_name with alias empty,
+    # so id/session_name/alias alone would miss it and dispose a live molecule.
     declare -A LIVE_SET=()
     while IFS= read -r _id; do
         [ -n "$_id" ] && LIVE_SET["$_id"]=1
     done <<EOF
-$(printf '%s' "$SESS" | jq -r '.[] | select(((.state // "") | tostring) == "active" or (.running == true)) | (.id, .session_name, .alias) | select((. // "") != "")' 2>/dev/null)
+$(printf '%s' "$SESS" | jq -r '.[] | select(((.state // "") | tostring) == "active" or (.running == true)) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "")' 2>/dev/null)
 EOF
     LIVE_SESSION=""
     while IFS= read -r _cand; do
@@ -277,8 +283,12 @@ EOF
     fi
 
     # GUARD 2 — SOURCE NOT MID-PR. An in-flight PR is the refinery's to land, so
-    # disposing the molecule under it would orphan the PR. Mirrors
-    # orphan-dispose.sh's source-arm inflight_pr skip.
+    # disposing the molecule under it would orphan the PR. merge_result is the
+    # store's record of a PR's fate: the two detached states (pre_open_gate,
+    # pull_request) are a live PR and refuse here. A pr_number/pr_url left with an
+    # empty merge_result is a PR reference nothing resolved — unprovable from the
+    # store, so it fails closed rather than risk orphaning an open PR. A resolved
+    # merge_result (merged/abandoned/…) proves the PR is not open.
     if [ -n "$WORK_BEAD" ]; then
         WB_JSON="$(show_bead "$WORK_BEAD")" || WB_JSON=""
         if [ -z "$WB_JSON" ]; then
@@ -286,10 +296,17 @@ EOF
             refuse refused "work_bead_unreadable=$WORK_BEAD"
         fi
         WB_MR="$(meta_of "$WB_JSON" merge_result)"
+        WB_PR="$(meta_of "$WB_JSON" pr_number)"
+        [ -n "$WB_PR" ] || WB_PR="$(meta_of "$WB_JSON" pr_url)"
         case "$WB_MR" in
             pre_open_gate|pull_request)
                 echo "$PROG: root $ROOT is $ROOT_STATUS but its work bead $WORK_BEAD carries merge_result=$WB_MR (a PR the refinery owns) — nothing disposed" >&2
                 refuse refused "source_inflight_pr=$WB_MR" ;;
+            "")
+                if [ -n "$WB_PR" ]; then
+                    echo "$PROG: root $ROOT is $ROOT_STATUS but its work bead $WORK_BEAD references a PR ($WB_PR) with no merge_result to prove it resolved — cannot prove the PR is not open; nothing disposed" >&2
+                    refuse refused "source_pr_unresolved=$WB_PR"
+                fi ;;
         esac
     fi
 

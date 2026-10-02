@@ -274,6 +274,17 @@ jq -c 'map(if .id=="tk-himpl" then (.status="in_progress" | .metadata["gc.sessio
 OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
 has "$OUT" "result=live_root" "an in_progress step under a live session keeps the molecule"
 has "$OUT" "live_session=lx-worker" "the live worker is named"
+# A member pinned only by its agent-address assignee (no gc.session_id/
+# gc.session_name), matching an active session that carries that identity in
+# name/agent_name while alias is empty — the pool-worker roster shape. LIVE_SET
+# must read name and agent_name or this live worker is missed and the molecule
+# disposed under it.
+husk '{"sessions":[{"id":"lx-pool-7","session_name":"gc-toolkit__polecat-lx-pool-7","alias":"","name":"gc-toolkit/gc-toolkit.polecat-1","agent_name":"gc-toolkit/gc-toolkit.polecat-1","state":"active"}]}'
+jq -c 'map(if .id=="tk-himpl" then (.status="in_progress" | .assignee="gc-toolkit/gc-toolkit.polecat-1") else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=live_root" "a member pinned by agent-address assignee keeps the molecule (LIVE_SET reads agent_name)"
+has "$OUT" "live_session=gc-toolkit/gc-toolkit.polecat-1" "the agent-address live session is named"
 # A non-active session is not live: a stopped roster entry does not protect.
 husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"stopped"}]}'
 OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
@@ -304,6 +315,26 @@ for MR in pre_open_gate pull_request; do
   hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a source mid-PR draws no write"
   eq "$(bstatus tk-hroot)" "in_progress" "the husk root is left alone"
 done
+
+echo "--- non-closed root: a source PR reference with no merge_result is SKIPPED (fail closed) ---"
+for KEY in pr_number pr_url; do
+  husk
+  jq -c --arg k "$KEY" 'map(if .id=="tk-hwork" then .metadata[$k]="123" else . end)' \
+    "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+  OUT=$("$SCRIPT" tk-hroot --apply 2>&1); rc=$?
+  eq "$rc" "0" "a source with $KEY and no merge_result is refused, chain intact"
+  has "$OUT" "result=refused" "an unresolved PR reference ($KEY) is refused"
+  has "$OUT" "source_pr_unresolved=123" "the refusal names the unresolved PR reference"
+  hasnt "$(cat "$STUB_GC_LOG")" "bd update" "an unresolved PR reference draws no write"
+  eq "$(bstatus tk-hroot)" "in_progress" "the husk root is left alone"
+done
+# A resolved PR does not block disposal: a set merge_result records the PR's fate,
+# so a lingering pr_number alongside merged is proven not-open and the husk disposes.
+husk
+jq -c 'map(if .id=="tk-hwork" then (.metadata.pr_number="123" | .metadata.merge_result="merged") else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=disposed" "a resolved PR (merge_result=merged) with a stale pr_number still disposes"
 
 echo "--- non-closed root: an OPEN escalation keeps it, a CLOSED one does not ---"
 husk
