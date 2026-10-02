@@ -25,6 +25,14 @@ const REFRESH_MS = 30_000;
 // family is the derive layer's SectionOrder, mirrored here.
 const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done'] as const;
 
+// Where the operator's collapsed-parent choice is kept. Collapse is a view
+// state, not a board fact, so it lives client-side and persists across the 30s
+// poll and the next visit: a parent keeps its "room" between glances, the
+// durable-place principle this board is built on. The value is a JSON array of
+// the collapsed parents' ids; absent means every parent is expanded, the
+// information-complete default that hides nothing until the operator folds it.
+const COLLAPSE_STORAGE_KEY = 'helm.board.collapsed';
+
 // The one Tile.visit_state value the marker branches on (board.VisitEngaged).
 // A held row carries 'engaged' or 'parked'; anything that is not 'engaged' —
 // 'parked', or the '' a re-derivation slip could leave — reads as parked, the
@@ -369,6 +377,101 @@ function appendFamilyTree(rows: BoardRow[], { root, members }: Family): void {
   }
 }
 
+// visibleRows drops the rows beneath a collapsed parent. flattenFamilies emits a
+// pre-order walk carrying each row's depth, so a collapsed parent's descendants
+// are exactly the rows that follow it with a greater depth, up to the next row at
+// its own depth or shallower. Filtering here — after the families are laid out —
+// leaves family order, sibling order, and the owed-first partition untouched: a
+// collapse hides rows, it never reorders them, so the #878/#911 ordering holds.
+function visibleRows(rows: BoardRow[], collapsed: ReadonlySet<string>): BoardRow[] {
+  const out: BoardRow[] = [];
+  // The depth below which rows are hidden while inside a collapsed subtree.
+  // Infinity hides nothing; a collapsed parent at depth d sets it to d, hiding
+  // every deeper row until one at depth ≤ d resets it. A collapsed parent that
+  // is itself hidden by a collapsed ancestor is skipped before it can widen the
+  // window, so nested folds collapse under the shallowest one.
+  let hideBelow = Infinity;
+  for (const row of rows) {
+    if (row.depth > hideBelow) continue;
+    hideBelow = Infinity;
+    out.push(row);
+    if (row.isParent && collapsed.has(row.tile.id)) hideBelow = row.depth;
+  }
+  return out;
+}
+
+// descendantsByParent maps each parent id to the tiles beneath it at every level,
+// read off the same pre-order row list by the same depth rule visibleRows uses.
+// A summarizing header reads its subtree's shape and state from these so the
+// operator can grasp a family without scanning each descendant — and, when the
+// parent is collapsed, without any descendant row on screen at all.
+function descendantsByParent(rows: BoardRow[]): Map<string, Tile[]> {
+  const map = new Map<string, Tile[]>();
+  for (let i = 0; i < rows.length; i++) {
+    const parent = rows[i];
+    if (!parent.isParent) continue;
+    const kids: Tile[] = [];
+    for (let j = i + 1; j < rows.length && rows[j].depth > parent.depth; j++) {
+      kids.push(rows[j].tile);
+    }
+    map.set(parent.tile.id, kids);
+  }
+  return map;
+}
+
+// The attention shape of a subtree: how many descendants want the operator, and
+// the spread across the attention bands in SECTION_ORDER. Both are read from the
+// same wire fields a row renders — `owed` and `section` — so a header summarizes
+// exactly what its rows say and never re-derives their state. Zero-count bands
+// are dropped; the order is the table's own.
+function summarizeSubtree(descendants: Tile[]): {
+  owed: number;
+  bands: { section: string; count: number }[];
+} {
+  let owed = 0;
+  const counts = new Map<string, number>();
+  for (const t of descendants) {
+    if (t.owed) owed += 1;
+    counts.set(t.section, (counts.get(t.section) ?? 0) + 1);
+  }
+  const bands = SECTION_ORDER.filter((s) => counts.has(s)).map((section) => ({
+    section,
+    count: counts.get(section) as number,
+  }));
+  return { owed, bands };
+}
+
+// The summarizing half of a parent header. The needs-you count is the one signal
+// a collapse must never swallow, so it shows whenever the subtree has an owed
+// descendant, folded or not — "unmissable yet calm": the board's own amber, a
+// count, no klaxon. The per-band breakdown shows only when the parent is
+// collapsed, because an expanded parent already has its rows below carrying it;
+// folding the subtree is what makes the breakdown the only view of it.
+function FamilySummary({ descendants, collapsed }: { descendants: Tile[]; collapsed: boolean }) {
+  if (descendants.length === 0) return null;
+  const { owed, bands } = summarizeSubtree(descendants);
+  if (owed === 0 && !collapsed) return null;
+  return (
+    <span className="family-summary">
+      {owed > 0 && (
+        <span className="family-summary__owed">
+          <span aria-hidden="true">● </span>
+          {owed} need{owed === 1 ? 's' : ''} you
+        </span>
+      )}
+      {collapsed && (
+        <span className="family-summary__shape">
+          {bands.map(({ section, count }) => (
+            <span key={section} className="family-summary__band">
+              {count} {section}
+            </span>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // The visit marker: a visible, self-evident chip on a row an open visit holds. It
 // says at a glance which of the two states the visit is in — PARKED (filed and
 // waiting for the operator) or ENGAGED (a live sitting is in it right now) — in a
@@ -443,16 +546,20 @@ function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
 
 // One row of the unified table. Every row carries the same columns; the grouping
 // treatment reads from the row shape (a row that heads a group — the family root
-// or a nested sub-epic — has a header title, and every row is indented by its
-// depth in the family tree) and the attention highlight rides the row in place: a
-// ● and a tint where a row's next move is the operator's (wantsPerson), a tint on
-// a row an open visit is holding (held).
+// or a nested sub-epic — leads with a disclosure control, a header title, and a
+// summary of its subtree, and every row is indented by its depth in the family
+// tree) and the attention highlight rides the row in place: a ● and a tint where
+// a row's next move is the operator's (wantsPerson), a tint on a row an open
+// visit is holding (held).
 function AnchorRow({
   row,
   drilled,
   onOpen,
   onActuated,
   sittingsBySubject,
+  descendants,
+  collapsed,
+  onToggleCollapse,
 }: {
   row: BoardRow;
   drilled: boolean;
@@ -462,6 +569,12 @@ function AnchorRow({
   onActuated: () => void;
   // The sittings on each bead, keyed by subject id, for the per-row visit hover.
   sittingsBySubject: Map<string, Sitting[]>;
+  // This row's subtree tiles (empty for a leaf), for the header summary.
+  descendants: Tile[];
+  // Whether this parent is folded. Meaningless on a leaf, which never collapses.
+  collapsed: boolean;
+  // Fold or unfold this parent's subtree.
+  onToggleCollapse: (id: string) => void;
 }) {
   const { tile, kind, depth, isParent } = row;
   const person = wantsPerson(tile);
@@ -491,7 +604,34 @@ function AnchorRow({
         <PRLink tile={tile} />
       </td>
       <td className="title-cell" style={{ '--depth': depth } as CSSProperties}>
-        {isParent ? <span className="family-title">{tile.title}</span> : tile.title}
+        {isParent ? (
+          <span className="title-lead">
+            {/* The one navigable affordance that makes a parent a header, not an
+                indented title: a real button so it is keyboard-reachable and
+                announced with its expanded state. It folds the subtree below it;
+                the summary beside it is what the fold leaves legible. */}
+            <button
+              type="button"
+              className="disclosure"
+              aria-expanded={!collapsed}
+              aria-label={`${collapsed ? 'expand' : 'collapse'} ${tile.title}`}
+              onClick={() => onToggleCollapse(tile.id)}
+            >
+              <span className="disclosure__icon" aria-hidden="true">
+                {collapsed ? '▸' : '▾'}
+              </span>
+            </button>
+            <span className="family-title">{tile.title}</span>
+            <FamilySummary descendants={descendants} collapsed={collapsed} />
+          </span>
+        ) : (
+          <span className="title-lead">
+            {/* A leaf cannot fold, but it reserves the disclosure's width so its
+                title lines up under its siblings' rather than shifting left. */}
+            <span className="disclosure disclosure--leaf" aria-hidden="true" />
+            {tile.title}
+          </span>
+        )}
       </td>
       <td>{progressCell(tile)}</td>
       <td>{tile.frontier}</td>
@@ -567,18 +707,39 @@ function AnchorsTable({
   onOpen,
   onActuated,
   sittingsBySubject,
+  descByParent,
+  collapsed,
+  onToggleCollapse,
+  anyCollapsed,
+  onExpandAll,
 }: {
   rows: BoardRow[];
   drillTarget: string | null;
   onOpen: (id: string) => void;
   onActuated: () => void;
   sittingsBySubject: Map<string, Sitting[]>;
+  // Each parent's subtree tiles, for the header summaries.
+  descByParent: Map<string, Tile[]>;
+  // The folded parents; a row is collapsed when its id is in here.
+  collapsed: ReadonlySet<string>;
+  onToggleCollapse: (id: string) => void;
+  // Whether any parent is folded, so the escape hatch shows only when it can act.
+  anyCollapsed: boolean;
+  onExpandAll: () => void;
 }) {
   if (rows.length === 0) return null;
   const hasDone = rows.some((r) => r.tile.section === 'done');
   return (
     <section className="anchors" aria-labelledby="anchors-heading">
       <h2 id="anchors-heading">anchors</h2>
+      {/* The one global control: unfold everything, so a row folded away and
+          forgotten is always one click from view. Shown only when something is
+          folded — a board with nothing collapsed has nothing to expand. */}
+      {anyCollapsed && (
+        <button type="button" className="expand-all" onClick={onExpandAll}>
+          expand all
+        </button>
+      )}
       <Legend />
       <table>
         <thead>
@@ -604,6 +765,9 @@ function AnchorsTable({
               onOpen={onOpen}
               onActuated={onActuated}
               sittingsBySubject={sittingsBySubject}
+              descendants={descByParent.get(row.tile.id) ?? []}
+              collapsed={collapsed.has(row.tile.id)}
+              onToggleCollapse={onToggleCollapse}
             />
           ))}
         </tbody>
@@ -686,6 +850,34 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
   );
 }
 
+// The collapsed set as last persisted. A missing or unreadable value is an empty
+// set — every parent expanded — because the safe default of this board is to
+// hide nothing: a storage that cannot be read must not fold a subtree the
+// operator never folded. Malformed entries are dropped rather than trusted.
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(COLLAPSE_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((x): x is string => typeof x === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+// Persist the collapsed set. A storage that refuses — private mode, quota, no
+// localStorage at all — just means the fold does not outlive this session; the
+// in-memory state still drives the view, so the write failing is silent by
+// design rather than an error the operator must see.
+function persistCollapsed(ids: ReadonlySet<string>): void {
+  try {
+    window.localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Intentionally ignored; see the doc comment above.
+  }
+}
+
 export function App() {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -698,8 +890,30 @@ export function App() {
   );
   // The rig the operator narrowed the view to, or '' for all rigs.
   const [rigFilter, setRigFilter] = useState<string>('');
+  // The folded parents, seeded from storage so a fold survives a refresh and the
+  // next visit. Every write goes through the two setters below, which keep
+  // storage in step, so the board never persists a set it is not showing.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
+
+  const toggleCollapse = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      persistCollapsed(next);
+      return next;
+    });
+  }, []);
+
+  const expandAll = useCallback(() => {
+    setCollapsed(() => {
+      const next = new Set<string>();
+      persistCollapsed(next);
+      return next;
+    });
+  }, []);
 
   // Read once: these overrides are launch-time knobs, and re-reading them on
   // every render would tear the terminal down whenever the board refreshes.
@@ -770,6 +984,19 @@ export function App() {
   // members, or a single loose row. The grouping split is groupByFamily's; this
   // only shapes it for the table.
   const boardRows = useMemo(() => flattenFamilies(families), [families]);
+  // Each parent's subtree, derived from the full row list before any fold, so a
+  // collapsed header still summarizes the descendants it is hiding.
+  const descByParent = useMemo(() => descendantsByParent(boardRows), [boardRows]);
+  // The rows actually rendered: the full list minus anything under a folded
+  // parent. Order is untouched — this filters, never reorders.
+  const visibleBoardRows = useMemo(() => visibleRows(boardRows, collapsed), [boardRows, collapsed]);
+  // Whether any CURRENTLY-SHOWN parent is folded, so the expand-all escape hatch
+  // appears only when it would do something. A stale id left in the set by a
+  // parent that has since left the board does not count.
+  const anyCollapsed = useMemo(
+    () => boardRows.some((r) => r.isParent && collapsed.has(r.tile.id)),
+    [boardRows, collapsed],
+  );
 
   // Sittings keyed by the bead they are about, so each row shows the visit(s)
   // holding it without re-scanning the list per row. Keyed off the full sittings
@@ -885,11 +1112,16 @@ export function App() {
       )}
 
       <AnchorsTable
-        rows={boardRows}
+        rows={visibleBoardRows}
         drillTarget={drillTarget}
         onOpen={setDrillTarget}
         onActuated={refresh}
         sittingsBySubject={sittingsBySubject}
+        descByParent={descByParent}
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapse}
+        anyCollapsed={anyCollapsed}
+        onExpandAll={expandAll}
       />
 
       <Sittings sittings={visibleSittings} now={renderedAt} onOpen={setDrillTarget} />
