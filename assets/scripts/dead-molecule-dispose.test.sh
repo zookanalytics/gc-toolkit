@@ -208,6 +208,159 @@ has "$OUT" "result=partial" "a rolled-back close says partial"
 has "$OUT" "tk-verdict" "the member that did not close is named"
 eq "$(meta tk-verdict gc.routed_to)" "<absent>" "it is de-routed even so, so no pool can claim it"
 
+# A molecule whose root never reached `closed`: parked by a prior molecule-hold
+# (blocked head, dead wisp pinned, de-routed) or drained mid-flight. It is
+# residue only under three guards — nothing live behind it, every escalation
+# answered, and a source work bead that is not mid-PR. The work bead and the
+# input convoy are READ for the guards and must never be enumerated or closed.
+DEAD_ROSTER='{"sessions":[{"id":"lx-live-other","session_name":"gc-toolkit__polecat-lx-live-other","alias":"","state":"active"}]}'
+husk() { # [roster-json] — default roster is active but names nothing in the chain
+  store '[
+    {"id":"tk-hroot","status":"in_progress","assignee":"","title":"mol-polecat-work",
+     "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2",
+                 "gc.input_convoy_id":"tk-hconv",
+                 "gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}},
+    {"id":"tk-hload","status":"blocked","assignee":"","title":"Load context",
+     "metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"tk-hroot",
+                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead-wisp"}},
+    {"id":"tk-himpl","status":"open","assignee":"","title":"Implement",
+     "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-hroot"}},
+    {"id":"tk-hfinal","status":"open","assignee":"","title":"Finalize workflow",
+     "metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"tk-hroot"}},
+    {"id":"tk-hwork","status":"open","assignee":"","title":"the work bead","metadata":{}},
+    {"id":"tk-hconv","status":"open","assignee":"","title":"input convoy","metadata":{}}
+  ]'
+  : > "$STUB_GC_LOG"; : > "$STUB_SESSION_LOG"
+  printf 'tk-hconv|tracks|tk-hwork\n' > "$STUB_DEPS"   # the convoy tracks its work bead
+  printf '%s' "${1:-$DEAD_ROSTER}" > "$TMP/sessions.json"
+  export STUB_SESSION_LIST_RC=""
+  export STUB_SESSIONS="$TMP/sessions.json"
+}
+
+echo "--- non-closed root: a clean dead husk IS disposed ---"
+husk
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1); rc=$?
+eq "$rc" "0" "a dead husk disposes (exit 0)"
+has "$OUT" "result=disposed" "a dead husk reports disposed"
+for B in tk-hroot tk-hload tk-himpl tk-hfinal; do
+  eq "$(bstatus $B)" "closed" "$B is closed"
+  eq "$(meta $B gc.routed_to)" "<absent>" "$B is de-routed"
+  eq "$(meta $B gc.outcome)" "moot" "$B records outcome moot"
+  eq "$(meta $B gc.work_outcome)" "no-op" "$B records no work"
+done
+eq "$(meta tk-hload gc.session_id)" "<absent>" "the dead wisp pin is cleared"
+has "$(notes tk-hload)" "dead husk" "the note names the husk disposal"
+eq "$(bstatus tk-hwork)" "open" "the source work bead is never touched"
+eq "$(bstatus tk-hconv)" "open" "the input convoy is never touched"
+eq "$(meta tk-hwork gc.routed_to)" "<absent>" "the work bead is not even in the enumeration"
+
+echo "--- non-closed root: a LIVE molecule is UNTOUCHED ---"
+# A live session behind a MEMBER (the dead wisp is actually still running).
+husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"active"}]}'
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1); rc=$?
+eq "$rc" "0" "a live molecule is refused, chain intact (exit 0)"
+has "$OUT" "result=live_root" "a live molecule is refused as live_root"
+has "$OUT" "live_session=lx-dead-wisp" "the live session that held it is named"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a live molecule draws no write"
+eq "$(bstatus tk-hload)" "blocked" "the live molecule's step is left alone"
+# A live session matching the ROOT's gc.session_name (the affinity pool slot).
+husk '{"sessions":[{"id":"x","session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","alias":"","state":"active"}]}'
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=live_root" "a live session on the root's own session_name keeps it"
+# no-live-step: an in_progress member under a live worker.
+husk '{"sessions":[{"id":"lx-worker","session_name":"","alias":"","state":"active"}]}'
+jq -c 'map(if .id=="tk-himpl" then (.status="in_progress" | .metadata["gc.session_id"]="lx-worker") else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=live_root" "an in_progress step under a live session keeps the molecule"
+has "$OUT" "live_session=lx-worker" "the live worker is named"
+# A non-active session is not live: a stopped roster entry does not protect.
+husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"stopped"}]}'
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=disposed" "a stopped (non-active) session does not keep the molecule"
+
+echo "--- non-closed root: liveness that cannot be read refuses (fail closed) ---"
+husk
+export STUB_SESSION_LIST_RC=1
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1); rc=$?
+export STUB_SESSION_LIST_RC=""
+eq "$rc" "0" "an unreadable roster refuses, chain intact"
+has "$OUT" "result=live_root" "an unreadable roster refuses as live_root"
+has "$OUT" "liveness_undetermined" "the refusal names why"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "an unreadable roster draws no write"
+husk '{"sessions":[]}'
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "liveness_undetermined" "an empty roster is undetermined, not proof of death"
+
+echo "--- non-closed root: a source bead mid-PR is SKIPPED ---"
+for MR in pre_open_gate pull_request; do
+  husk
+  jq -c --arg mr "$MR" 'map(if .id=="tk-hwork" then .metadata.merge_result=$mr else . end)' \
+    "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+  OUT=$("$SCRIPT" tk-hroot --apply 2>&1); rc=$?
+  eq "$rc" "0" "a source mid-PR ($MR) is refused, chain intact"
+  has "$OUT" "result=refused" "a source mid-PR ($MR) is refused"
+  has "$OUT" "source_inflight_pr=$MR" "the refusal names the merge_result"
+  hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a source mid-PR draws no write"
+  eq "$(bstatus tk-hroot)" "in_progress" "the husk root is left alone"
+done
+
+echo "--- non-closed root: an OPEN escalation keeps it, a CLOSED one does not ---"
+husk
+jq -c '. + [{"id":"tk-hvisit","status":"open","assignee":"","title":"visit: husk blocked",
+  "metadata":{"escalation_key":"husk-blocked","task_kind":"visit"}}]' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+printf 'tk-hvisit|tracks|tk-hwork\n' >> "$STUB_DEPS"   # the visit tracks the work bead
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1); rc=$?
+eq "$rc" "0" "an open escalation refuses, chain intact"
+has "$OUT" "result=refused" "an open escalation is refused"
+has "$OUT" "open_escalation=tk-hvisit" "the open visit is named"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "an open escalation draws no write"
+# Same molecule, the visit now closed: the molecule is residue and disposes.
+husk
+jq -c '. + [{"id":"tk-hvisit","status":"closed","assignee":"","title":"visit: husk blocked",
+  "metadata":{"escalation_key":"husk-blocked","task_kind":"visit"}}]' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+printf 'tk-hvisit|tracks|tk-hwork\n' >> "$STUB_DEPS"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=disposed" "a closed escalation does not block disposal"
+eq "$(bstatus tk-hroot)" "closed" "the husk root closes once its visit is answered"
+eq "$(bstatus tk-hvisit)" "closed" "the visit itself is never touched"
+
+echo "--- non-closed root: an unreadable convoy fails closed ---"
+husk
+export STUB_DEP_GARBAGE=1
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1); rc=$?
+export STUB_DEP_GARBAGE=""
+eq "$rc" "0" "an unreadable convoy refuses, chain intact"
+has "$OUT" "result=refused" "an unreadable convoy is refused"
+has "$OUT" "convoy_unreadable=tk-hconv" "the refusal names the convoy"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "an unreadable convoy draws no write"
+
+echo "--- non-closed root: the work-bead-in-chain refusal still fires first ---"
+# The anchor guard runs BEFORE the husk guards: a chain member carrying branch /
+# merge_result is the refinery's regardless of the root's status.
+husk
+jq -c 'map(if .id=="tk-himpl" then .metadata.branch="polecat/tk-x" else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=refused" "a non-closed chain holding a work bead is refused"
+has "$OUT" "work_bead_in_chain=tk-himpl" "the refusal names the work bead"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a chain holding a work bead draws no write"
+
+echo "--- non-closed root: preview reaches the same verdict, writing nothing ---"
+husk
+OUT=$("$SCRIPT" tk-hroot 2>&1); rc=$?
+eq "$rc" "0" "preview of a dead husk exits 0"
+has "$OUT" "result=preview" "a dead husk previews as would-dispose"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "preview of a dead husk writes nothing"
+eq "$(bstatus tk-hroot)" "in_progress" "preview leaves the husk root alone"
+husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"active"}]}'
+OUT=$("$SCRIPT" tk-hroot 2>&1)
+has "$OUT" "result=live_root" "preview of a live molecule reports live_root, not would-dispose"
+# Do not let the guarded path's env leak into the closed-root tests below.
+export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
+
 echo "--- usage ---"
 fixture
 "$SCRIPT" >/dev/null 2>&1; eq "$?" "2" "no bead id exits 2"
