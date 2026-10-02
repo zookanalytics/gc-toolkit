@@ -20,6 +20,10 @@ purpose = "Which specialist checks does this diff warrant?"
 method = "skills/gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
 purpose = "Was the operator-watched surface recorded doing the thing?"
 
+[checks.arch]
+method = "skills/review-arch/SKILL.md"
+purpose = "Does the change fit the architecture, and is any architecture change justified and documented in the same PR?"
+
 [checks.pm]
 method = "skills/review-pm/SKILL.md"
 purpose = "Does the change solve the right user problem, and present it so the operator can judge?"
