@@ -463,7 +463,8 @@ type Tile struct {
 	// PRPhase is who must act on this merge anchor next — `working`,
 	// `needs-review`, or `needs-attention` — the same status: taxonomy
 	// pr-status-label.sh projects to the GitHub PR list, so the board and the
-	// label read one vocabulary rather than two. Empty on a non-merge row.
+	// label read one vocabulary rather than two. Empty on a non-merge row, and
+	// on a terminal (closed) row, where the live vocabulary has no answer.
 	PRPhase string `json:"pr_phase"`
 
 	// Phase is this bead's liveness in the shared tri-state vocabulary —
