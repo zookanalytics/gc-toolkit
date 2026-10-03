@@ -189,6 +189,35 @@ else
     ok "the check is ledger-only (no gh calls)"
 fi
 
+# --- disk pressure must not forge an all-clear --------------------------------
+# bash backs a `<<<` here-string with a temp file; under disk pressure that file
+# cannot be staged, the redirection fails silently (the check is set -u, not
+# set -e), and the loop runs zero times — so the pre-fix check read a non-empty
+# store as empty and printed the OK line. The fix stages every enumeration
+# through a checked `mktemp -d`, so a failing `mktemp` aborts the run non-clean.
+# A failing `mktemp` command is a NO-OP on the pre-fix `<<<` (bash's here-string
+# temp is internal, never the mktemp command), which is exactly what makes this
+# case fail against the pre-fix script and so proves it discriminates.
+store "$(bead c-dp '{"merge_result":"pull_request","pr_url":"https://x/pr/dp"}')"
+# Mirror: with a working mktemp the fixture yields its finding, so the
+# disk-pressure assertions below are not vacuously satisfied by an empty store.
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "mirror: the fixture reports its finding when mktemp works"
+has "$OUT" "c-dp" "mirror: the finding names the bead"
+# Now fail every mktemp — the hermetic stand-in for a full /tmp — and re-run.
+cat > "$TMP/bin/mktemp" <<'MK'
+#!/usr/bin/env bash
+echo "mktemp: stubbed disk-pressure failure" >&2
+exit 1
+MK
+chmod +x "$TMP/bin/mktemp"
+OUT=$(run_check); RC=$?
+rm -f "$TMP/bin/mktemp"
+eq "$RC" "1" "a temp-file failure warns (1) — it neither passes (0) nor errors (2)"
+has "$OUT" "not an all-clear" "it says the run could not scan, not that the invariant holds"
+hasnt "$OUT" "OK:" "it does not forge the clean all-clear line"
+hasnt "$OUT" "c-dp" "the store is not reported clean — the run is non-clean, not a false pass"
+
 echo
 echo "check-closed-implies-landed: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
