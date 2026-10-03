@@ -1968,6 +1968,9 @@ wb_rmeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","
 # the Conversation-tab variant: dispositioned, with only the issue-comment watermark raised
 wb_imeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","pr_review_watermark":"0","pr_issue_comment_watermark":"%s"' "$1" "${2:-50}"; }
 child()   { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{}}' "$1" "$2"; }
+# an artifact fix unit: closed by demo-deliver on attach, carrying the attached
+# comment's URL as artifact_url (what the write-back cites in place of a commit).
+child_artifact() { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{"artifact_url":"%s"}}' "$1" "$2" "$3"; }
 gh_since() { tail -n +"$1" "$STUB_GH_LOG"; }
 # advance one bead between passes, the way a later pass of the city would
 bmut() { # <id> <jq-expression over that bead>
@@ -2025,6 +2028,21 @@ hasnt "$(gh_since "$mark")" "REPLY" "no second reply"
 hasnt "$(gh_since "$mark")" "RESOLVE" "no second resolve"
 has "$out" "0 comments acknowledged, 0 threads replied, 0 threads resolved" "the repeat pass reports no writes"
 eq "$(jq -r '[ .threads[].comments.nodes[] ] | length' "$GH_DIR/threads_41.json")" "2" "the thread still carries exactly one reply"
+
+echo "# an artifact fix unit cites the delivered artifact, not a commit, then resolves"
+# demo-deliver closed this fix unit on attach and recorded the attached comment's
+# URL as artifact_url. The write-back cites that URL and never a head commit the
+# artifact did not make, and still resolves the thread behind the reply.
+store "[$(anchor WART 47 "$(wb_meta rework:KART)"), $(child_artifact KART closed https://github.com/zook/gc-toolkit/pull/47#issuecomment-900)]"
+printf '%s' "$(prview 47 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_47.json"
+threads 47 "$(one_thread 47)"
+out=$(run)
+eq "$(reacted 47 NC-47)" "true" "the comment is acknowledged"
+has "$(treply 47 T-47)" "issuecomment-900" "the reply cites the delivered artifact's URL"
+hasnt "$(treply 47 T-47)" "Addressed in sha-47" "…and never claims a commit the artifact did not make"
+has "$(treply 47 T-47)" "KART" "the reply names the fix unit that carried the work"
+eq "$(tresolved 47 T-47)" "true" "the thread is resolved behind the artifact reply"
+has "$out" "1 threads replied, 1 threads resolved" "the pass reports both writes"
 
 echo "# a comment nothing acted on is never touched"
 store "[$(anchor W3 42)]"

@@ -2405,19 +2405,31 @@ while IFS= read -r wrow; do
   if [ "$wbatch_ok" = 1 ]; then
     while IFS='|' read -r rdisp rlo rhi; do
       [ -n "${rdisp:-}" ] || continue
-      rchild=""; rlanded=""
+      rchild=""; rlanded=""; rartifact=""
       case "$rdisp" in
         rework:*)
           rchild="${rdisp#rework:}"
           if [ -n "$rchild" ]; then
-            rcst=$(gc bd show "$rchild" --json 2>/dev/null | scrub \
-              | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
-            [ "$rcst" = "closed" ] && [ -n "$whead" ] && rlanded="$whead"
+            rcjson=$(gc bd show "$rchild" --json 2>/dev/null | scrub)
+            rcst=$(printf '%s' "$rcjson" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+            if [ "$rcst" = "closed" ]; then
+              # An artifact fix unit (one demo-deliver closed on attach) carries its
+              # delivery evidence and lands no commit: that evidence IS its landed
+              # signal and what the reply cites. A commit fix unit lands at the PR
+              # head, cited as before. rartifact flags the form so the reply does
+              # not truncate a URL or claim a commit the fix never made.
+              rart=$(printf '%s' "$rcjson" | jq -r '.[0].metadata.artifact_url // ""' 2>/dev/null)
+              if [ -n "$rart" ]; then
+                rlanded="$rart"; rartifact="1"
+              elif [ -n "$whead" ]; then
+                rlanded="$whead"
+              fi
+            fi
           fi ;;
       esac
       wbrecs=$(printf '%s' "$wbrecs" | jq -c --argjson lo "$rlo" --argjson hi "$rhi" \
-        --arg child "$rchild" --arg landed "$rlanded" \
-        '. + [ { lo: $lo, hi: $hi, child: $child, landed: $landed } ]')
+        --arg child "$rchild" --arg landed "$rlanded" --arg artifact "$rartifact" \
+        '. + [ { lo: $lo, hi: $hi, child: $child, landed: $landed, artifact: $artifact } ]')
     done <<WB_RECORDS
 $(printf '%s' "$wbwant" | tr ';' '\n')
 WB_RECORDS
@@ -2544,13 +2556,15 @@ WB_LONG_THREADS
                 | length end) as $unrouted
         | (if ([ $orecs[] | select(.landed == "") ] | length) > 0 or $unrouted > 0
            then "-" else $orecs[-1].landed end) as $landed
+        | (if $landed == "-" then "" else (($orecs[-1].artifact // "") | tostring) end) as $artifact
         | (if $after > 0 then "live"
            elif (($t.viewerCanResolve // false) != true) then "norights"
            else "ok" end) as $why
         | "T\t" + $t.id + "\t" + ($needreply | tostring) + "\t" + $why
           + "\t" + ([ $orecs[] | .child ] | join(", "))
           + "\t" + $landed
-          + "\t" + ($own | map(tostring) | join(",")) ]
+          + "\t" + ($own | map(tostring) | join(","))
+          + "\t" + $artifact ]
     ) | .[]' 2>/dev/null) && wplan_ok=1 || { wplan=""; wplan_ok=0; }
 
   # The reaction is what shows the operator a comment was picked up. A pass that
@@ -2585,15 +2599,22 @@ WB_REACTIONS
   if [ "$wack_ok" != 1 ] && [ "$wtees" -gt 0 ]; then
     echo "$PROG: $wid — PR#$wnum still has comments awaiting their pickup reaction; nothing replied or resolved this pass" >&2
   fi
-  while IFS="$(printf '\t')" read -r act a1 a2 a3 a4 a5 a6; do  # a3: ok | live | norights
+  while IFS="$(printf '\t')" read -r act a1 a2 a3 a4 a5 a6 a7; do  # a3: ok | live | norights; a7: artifact flag
     [ "${act:-}" = "T" ] || continue
     # A tab is IFS whitespace, so read collapses runs of it: every field the plan
     # emits has to be non-empty, and "-" is a batch whose work has not landed.
     if [ "$a5" = "-" ] || [ "$wack_ok" != 1 ]; then owe "$a6"; continue; fi
     wshort=$(printf '%.8s' "$a5")
     if [ "$a2" = "1" ]; then
-      wbody="Addressed in $wshort on this PR (${a4:-no bead recorded}).
+      if [ "$a7" = "1" ]; then
+        # An artifact fix unit lands no commit; a5 carries the delivered
+        # artifact's URL, so cite it rather than a head commit the fix never made.
+        wbody="Addressed by the demo delivered on this PR: $a5 (${a4:-no bead recorded}).
 $WB_MARKER"
+      else
+        wbody="Addressed in $wshort on this PR (${a4:-no bead recorded}).
+$WB_MARKER"
+      fi
       if gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
            -f t="$a1" -f b="$wbody" >/dev/null; then
         replied=$((replied + 1))
