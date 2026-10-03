@@ -51,12 +51,21 @@ eq "$NBLOCKS" "2" "both rejection arms carry the mr-aware-rejection block"
 
 for i in 1 2; do
   [ -s "$TMP/block-$i.sh" ] || { bad "block $i extracted"; continue; }
-  grep -q '[\]' "$TMP/block-$i.sh" \
-    && bad "block $i backslash-free (TOML would eat it)" \
-    || ok "block $i backslash-free (TOML would eat it)"
+  case "$(cat "$TMP/block-$i.sh")" in
+    *\\*) bad "block $i backslash-free (TOML would eat it)" ;;
+    *)    ok  "block $i backslash-free (TOML would eat it)" ;;
+  esac
   sed -e "s|{{binding_prefix}}|gc-toolkit.|g" "$TMP/block-$i.sh" > "$TMP/run-$i.sh"
   bash -n "$TMP/run-$i.sh" && ok "block $i is valid bash" || bad "block $i is valid bash"
 done
+# Positive control: a backslash-free run of the guard above proves nothing
+# unless the guard still discriminates. Pin that `case … in *\\*` catches a
+# literal backslash on this host, so a green suite is never a vacuous pass.
+printf 'x\\y\n' > "$TMP/backslash-control"
+case "$(cat "$TMP/backslash-control")" in
+  *\\*) ok  "backslash guard detects a backslash (not vacuous)" ;;
+  *)    bad "backslash guard is vacuous — a literal backslash went undetected" ;;
+esac
 
 # --- Stubs. ---------------------------------------------------------------------
 # gc: bd show answers $FAKE_META (or nothing when FAKE_BD_FAILS=1); drain-ack
@@ -156,9 +165,10 @@ awk '
   && ok "the rejection arm carries the branch decision" \
   || bad "the rejection arm carries the branch decision"
 for b in strategy-1 strategy-2 branch-keep; do
-  grep -q '[\]' "$TMP/$b.sh" \
-    && bad "$b is backslash-free (TOML would eat it)" \
-    || ok "$b is backslash-free (TOML would eat it)"
+  case "$(cat "$TMP/$b.sh")" in
+    *\\*) bad "$b is backslash-free (TOML would eat it)" ;;
+    *)    ok  "$b is backslash-free (TOML would eat it)" ;;
+  esac
 done
 
 # git: records the branch delete. Everything else fails, so the block's
