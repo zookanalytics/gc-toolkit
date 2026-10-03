@@ -225,13 +225,20 @@ has " $out " " $F1 " "open-must-fix names the must-fix finding"
 if "$SUT" open-must-fix --anchor tk-anc --lane arch >/dev/null; then bad "open-must-fix found a must-fix on a lane with none"; else ok "open-must-fix is lane-scoped (none on arch)"; fi
 
 # ---------------------------------------------------------------------------
-# close-unvalidated: an approving lane clears its own unruled findings, and
-# leaves a validated one (must-fix) alone.
+# close-unvalidated: a green lane clears its own unruled findings, and leaves a
+# validated one (must-fix) alone. gate-ensure.sh drives this per reconcile pass
+# off the derived green lane state (the close moved out of signoff.sh), so it
+# must also be a safe no-op when the lane has nothing left to resolve.
 # ---------------------------------------------------------------------------
-eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the approve"
-"$SUT" close-unvalidated --anchor tk-anc --lane correctness --reason "lane approved"
+eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the lane derives green"
+"$SUT" close-unvalidated --anchor tk-anc --lane correctness --reason "lane green"
 eq "$(bstatus "$F2")" "closed" "close-unvalidated closes the unvalidated finding"
 eq "$(bstatus "$F1")" "open" "close-unvalidated leaves the must-fix finding for the validator/fix unit"
+# Re-run on the now-clean lane: it closes nothing and still exits 0. This is the
+# per-pass-safe shape gate-ensure relies on — it early-returns before the cache
+# invalidation when there is nothing to resolve, exactly as close-answered does.
+if "$SUT" close-unvalidated --anchor tk-anc --lane correctness >/dev/null; then ok "close-unvalidated is a no-op when the lane has no unvalidated findings"; else bad "close-unvalidated errored on a lane with nothing to resolve"; fi
+eq "$(bstatus "$F1")" "open" "…and still leaves the must-fix finding open"
 
 # ---------------------------------------------------------------------------
 # close-answered: the must-fix finding closes once its fix unit LANDS (every

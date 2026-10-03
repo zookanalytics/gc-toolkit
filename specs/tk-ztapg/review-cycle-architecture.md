@@ -371,6 +371,28 @@ validator's prompt would be neither.
 The value of that variable is deliberately out of scope. Build the surface,
 leave the tuning.
 
+### Stage-3 resolution: one owner, no proxy
+
+Ruling a finding's disposition is the validator's act; resolving a finding —
+closing it once it has been addressed — is `gate-ensure.sh`'s. It is the single
+owner of stage-3 resolution, resolving every finding that reached stage 1 from one
+normalized signal, the same way regardless of the item's form, through two
+derivations:
+
+- **Addressed.** A finding whose fix unit has closed resolves. The resolver reads
+  the fix unit's closed status without caring how it closed, so every addressing
+  form that closes the fix unit (see *The fix unit*) resolves its finding
+  identically.
+- **Moot.** A still-unvalidated finding on a lane that now derives green — the lane
+  re-reviewed clean, with nothing in flight — resolves as moot.
+
+No finding resolves on a proxy for the addressing action. A re-approval is the
+human's reaction to a fix, not the fix itself, so it resolves no item; the
+operator's approval is a review the lane reads for green, never a per-finding
+resolution signal. Both derivations live in `gate-ensure.sh`, the reader that
+computes lane state and quiescence, so the one component that holds the re-gate is
+the one that releases it and the two cannot disagree.
+
 ## Quiescence
 
 **No full review is dispatched while anything is acting on the anchor.**

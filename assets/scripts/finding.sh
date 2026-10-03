@@ -69,12 +69,13 @@
 #   finding.sh close-unvalidated --anchor A --lane L [--reason R]
 #   finding.sh close-answered --anchor A [--reason R]
 #
-# Callers: signoff.sh (upsert on request-changes, close-unvalidated on
-# approve), the validator through set-disposition — which hangs the fix unit's
-# edge onto a finding only as it rules that finding must-fix, so the fix unit
-# blocks only the findings it must answer — and gate-ensure (open-must-fix
-# computes quiescence; close-answered releases it once a fix unit lands). Exit
-# 0 on success; a read verb exits 1 when its predicate is false, 2 when the
+# Callers: signoff.sh (upsert on request-changes), the validator through
+# set-disposition — which hangs the fix unit's edge onto a finding only as it
+# rules that finding must-fix, so the fix unit blocks only the findings it must
+# answer — and gate-ensure, the sole owner of stage-3 resolution (open-must-fix
+# computes quiescence; close-answered releases it once a fix unit lands;
+# close-unvalidated resolves a green lane's still-unvalidated findings as moot).
+# Exit 0 on success; a read verb exits 1 when its predicate is false, 2 when the
 # store would not read.
 set -uo pipefail
 
@@ -583,6 +584,11 @@ cmd_close_unvalidated() {
           | select(((.metadata["finding.disposition"] // "") | tostring) == "unvalidated")
           | select(((.metadata["finding.lane"] // "") | tostring) == $lane) ]
     | .[].id' 2>/dev/null)
+  # Nothing to resolve: return before the cache invalidation below, exactly as
+  # close-answered does. gate-ensure runs this every pass for each green lane, so
+  # a clean lane is the common case; clearing the per-pass cache when no finding
+  # closed would reopen the read window the cache exists to collapse.
+  [ -n "$ids" ] || return 0
   note="resolved: lane $lane found clean"
   [ -n "$reason" ] && note="$note — $reason"
   for id in $ids; do
