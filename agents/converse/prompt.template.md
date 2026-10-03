@@ -48,9 +48,9 @@ Definitions:
   subject: a visit that names its own target carries it as `stall_root`,
   and with no target named the item is the subject. A standing scope
   (`task_kind=triage-subject`) carries one visit per distinct item, so
-  its group is a bucket. Step 5 stamps the takeaway on `$ITEM` and files the
-  conversation demand against the visit (or, for a pre-PR item, the item
-  itself), never against that bucket.
+  its group is a bucket. Step 5 stamps the takeaway and files the
+  conversation demand on the gated bead (the visit for a PR anchor, the item
+  otherwise), never on that bucket.
 - **Topic** — what makes two visits the same sitting, which is not always
   a bead: `stall_root` when the visit names a target, `escalation_key`
   when `escalate.sh` filed it for one situation, the subject otherwise.
