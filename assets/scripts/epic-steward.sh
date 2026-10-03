@@ -217,10 +217,11 @@ An epic closes by a ruling on its hypothesis — persevere, pivot, or close — 
 
 # The gate holds every non-closed epic (finalize-gate.sh clause_epic_ruling_
 # recorded is status-agnostic), so the pass audits the same live set: every
-# non-closed status (open, in_progress, blocked, deferred). A narrower set would
-# miss a blocked or deferred epic whose units all land — no ruling visit would
-# ever be filed and the gate would hold its close forever.
-EPICS_JSON=$(bd_list --type=epic --status=open,in_progress,blocked,deferred) || {
+# non-closed status (open, in_progress, blocked, deferred, hooked, pinned — the
+# live set gc-helm.sh and the pack's other readers use). A narrower set would
+# miss a blocked, deferred, hooked, or pinned epic whose units all land — no
+# ruling visit would ever be filed and the gate would hold its close forever.
+EPICS_JSON=$(bd_list --type=epic --status=open,in_progress,blocked,deferred,hooked,pinned) || {
   echo "$PROG[$RIG]: could not read live epics (bd_list failed) — nothing stewarded this pass" >&2
   exit 1
 }

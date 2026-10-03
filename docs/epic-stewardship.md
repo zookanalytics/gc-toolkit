@@ -38,8 +38,9 @@ rhymes with. Not the invariant catalog or the finalize gate's full contract
 
 `orders/epic-steward.toml` runs `assets/scripts/epic-steward.sh` on a cadence
 (`scope=rig`: an epic is a per-rig anchor). One pass enumerates every non-closed
-`issue_type=epic` in the rig — `open`, `in_progress`, `blocked`, and `deferred`,
-the same live set the finalize gate holds — and runs three arms over each. Each
+`issue_type=epic` in the rig — `open`, `in_progress`, `blocked`, `deferred`,
+`hooked`, and `pinned`, the same live set the finalize gate holds — and runs
+three arms over each. Each
 arm detects whether the epic owes a particular decision and, when it does, files
 exactly one operator visit through `escalate.sh`, keyed by concern; when the
 decision has since been made, it retracts the visit it filed. `escalate.sh`

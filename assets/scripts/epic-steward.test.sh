@@ -157,6 +157,17 @@ store "[$(epic EDF deferred '{}')]"
 run_sut
 if esc_has file EDF epic-floor; then ok "a deferred epic is audited (its floor is owed)"; else bad "expected the floor visit on a deferred epic"; fi
 
+# --- 8e'. a hooked and a pinned epic are audited too: the gate holds every
+# non-closed status, so the pass must enumerate the full live set (the set
+# gc-helm.sh uses), not stop at blocked/deferred. A hooked or pinned epic left
+# out would strand exactly as a blocked one does. -----------------------------
+store "[$(epic EHK hooked '{}')]"
+run_sut
+if esc_has file EHK epic-floor; then ok "a hooked epic is audited (its floor is owed)"; else bad "expected the floor visit on a hooked epic"; fi
+store "[$(epic EPN pinned '{}')]"
+run_sut
+if esc_has file EPN epic-floor; then ok "a pinned epic is audited (its floor is owed)"; else bad "expected the floor visit on a pinned epic"; fi
+
 # --- 8f. a multi-line contract value must not split one epic across read rows.
 # epic_closure_condition is a multi-line list (3-6 checks); jq -r decodes its JSON
 # \n to a real newline. The pass emits presence flags, not the raw text, so this
