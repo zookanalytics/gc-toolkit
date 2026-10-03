@@ -1901,10 +1901,12 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// wrapper neither sources a rig's repository nor waits for one.
 	linkPRBranches(folded)
 
-	// Stamp who must act next — PRPhase on a merge anchor, Phase on every live
-	// row — from the shared prstatus core, the same taxonomy pr-status-label.sh
-	// projects to the GitHub status: label; then let the frontier lead with that
-	// state so the board's primary vocabulary is the liveness.
+	// Stamp each row's phase: PRPhase on a merge anchor, Phase on every live row.
+	// A live row's phase is the status: label tri-state from the shared prstatus
+	// core, the same one pr-status-label.sh projects to the GitHub status: label;
+	// a closed merge anchor's PRPhase is instead a board-only terminal state
+	// (merged or closed). Then let the frontier lead with that state so the
+	// board's primary vocabulary is the liveness.
 	classifyPhases(folded, anchors, facts)
 
 	// Split Held into parked vs engaged on each held row, from the same sittings

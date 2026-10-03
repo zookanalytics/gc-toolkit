@@ -32,7 +32,9 @@ package prstatus
 
 import "strings"
 
-// State is one value of the mutually-exclusive `status:` label group.
+// State is a PR anchor's status value: the live, mutually-exclusive `status:`
+// label group (working, needs-review, needs-attention) plus the board-only
+// terminal states (merged, closed) a resolved anchor shows.
 type State string
 
 const (
