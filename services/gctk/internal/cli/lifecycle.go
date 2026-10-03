@@ -519,6 +519,28 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// A transition into a closed state is a terminal land, and a landed bead
+	// carries no live objection: a rejection or a hold reason still on it now
+	// contradicts the record — a merged bead that still reads "do not merge".
+	// Clear every live-objection marker here, at the one writer every close
+	// passes through, so a caller or a field added later cannot reintroduce the
+	// divergence by listing some fields and forgetting others. Deduped against
+	// the caller's own --unset list so the clear is never written twice.
+	if lifecycle.IsClosedState(o.to) {
+		for _, obj := range []string{"rejection_reason", "blocked_reason"} {
+			seen := false
+			for _, u := range o.unsets {
+				if u == obj {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				o.unsets = append(o.unsets, obj)
+			}
+		}
+	}
+
 	var updateArgs []string
 	if o.to == "unanchored" {
 		updateArgs = append(updateArgs, "--unset-metadata", "merge_result")

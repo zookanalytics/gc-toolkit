@@ -225,6 +225,10 @@ case "$1 ${2:-}" in
       *STUCK*) exit 1 ;;
     esac ;;
   "convoy status")
+    # Record each convoy resolved, so a test can prove the quiesce confirms only
+    # the ONE molecule the reverse-tracks lookup matched — not one status call
+    # per open root in the store.
+    printf '%s\n' "$3" >> "${FAKE_CONVOY_CALLS:-/dev/null}"
     anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
@@ -316,6 +320,15 @@ case "$1 ${2:-}" in
     # the way the real `dep list` reports a bead it cannot resolve — a JSON
     # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
     if [ "${3:-}" = "list" ]; then
+      # reverse `tracks` (dep list <bead> --direction=up -t tracks): the convoys
+      # that TRACK this bead — how the quiesce resolves the released molecule
+      # from its anchor. Derived from FAKE_CONVOYS (convoy|anchor).
+      case "$*" in
+        *--direction=up*)
+          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$FAKE_CONVOYS" \
+            | jq -Rnc '[inputs | select(length > 0) | {id: .}]'
+          exit 0 ;;
+      esac
       case "${4:-}" in
         A-PROBEDEAD*) exit 1 ;;
         A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
@@ -339,8 +352,9 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes"
+       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
+: > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
 # returns: one full bead row per edge, keyed .dependency_type.
@@ -401,6 +415,7 @@ unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
+: > "$FAKE_CONVOY_CALLS"
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait 2>"$TMP/err" || true)"
 ERR="$(cat "$TMP/err")"
 UP="$TMP/updates"
@@ -526,6 +541,16 @@ grep -q 'could not reap step s-NOPIN' <<< "$ERR" \
 # (REPORT) the run announces the steps it reaped.
 grep -q 'reaped step s-load' <<< "$OUT" \
   && ok "(REPORT) run reports the affine step it reaped" || bad "(REPORT) run reports s-load (out: $OUT)"
+
+# (BOUND) the resolution is keyed on the parked anchor, not the store: one
+# reverse-tracks lookup, then a convoy-status confirm for the ONE matched root,
+# NOT a status call per open root. Enumerating every root would confirm
+# convoy-PARKED, convoy-OTHER and convoy-FOLD; asserting only the matched
+# molecule's convoy is touched is what keeps the fan-out from coming back.
+eq "$(grep -c . "$FAKE_CONVOY_CALLS")" "1" \
+  "(BOUND) --release confirms only the matched molecule's convoy, not one per open root"
+eq "$(cat "$FAKE_CONVOY_CALLS")" "convoy-PARKED" \
+  "(BOUND) …and the one it confirms is the parked anchor's own convoy"
 
 # (REAP static) the reap block is what force-closes; the markers bound it, and
 # --status=closed is the close verb it uses.
@@ -2046,7 +2071,18 @@ case "$1 ${2:-}" in
         *)                shift ;;
       esac
     done ;;
-  "bd dep") printf 'dep %s\n' "$*" >> "$LIVE_LOG" ;;
+  "bd dep")
+    printf 'dep %s\n' "$*" >> "$LIVE_LOG"
+    # reverse `tracks`: the convoys tracking this bead, from LIVE_CONVOYS — the
+    # quiesce resolves the released molecule from its anchor this way.
+    if [ "${3:-}" = "list" ]; then
+      case "$*" in
+        *--direction=up*)
+          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$LIVE_CONVOYS" \
+            | jq -Rnc '[inputs | select(length > 0) | {id: .}]' ;;
+        *) printf '[]\n' ;;
+      esac
+    fi ;;
 esac
 exit 0
 GCL
