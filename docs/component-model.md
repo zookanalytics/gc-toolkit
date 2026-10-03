@@ -384,6 +384,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
 | `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
+| `orders/stale-branch-triage.toml` | patrol | Fires the stale-branch reaper hourly, per rig: deletes superseded origin branches, archive-then-deletes cold unmerged ones, files a finding for the contested. |
 | `orders/dolt-reclaim.toml` | patrol | Fires the Dolt reclaim pass daily, city-wide: runs `gc dolt compact --gc-only` on each store whose noms size is over the per-database line. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
@@ -397,6 +398,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
+| `assets/scripts/stale-branch-triage.sh` | patrol | Reclaims origin branches with no live owner: deletes the superseded, archive-then-deletes the cold-unmerged (pinned by an annotated tag first, so reversible), and files a finding for the contested. The pack's only direct mutation of origin refs. |
 | `assets/scripts/notification-wisp-reap.sh` | patrol | Closes a city-store "Human gate awaiting you" notice once its gate is no longer open, and collapses duplicate "ESCALATION" copies to one open notice — the notification wisps core mails and never retires. |
 | `assets/scripts/dolt-reclaim.sh` | patrol | Measures each managed Dolt store's noms size and runs `gc dolt compact --gc-only --only-db <db>` on the ones over the per-database line, so a store size-bloated below the flatten commit-threshold is reclaimed on a cadence. Never runs a bare flatten; defers while the data plane is degraded. |
 | `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key — the door to a human, for what only a human can answer. The window is one OPEN visit, so a recurring observation belongs in `patrol-finding.sh` instead. |

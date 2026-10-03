@@ -1,0 +1,36 @@
+# stale-branch-triage — dispose of the origin branches nobody owns.
+#
+# Merged PRs delete their own head (a GitHub repo setting); nothing deletes the
+# branch of work that never merged. So abandoned attempts — superseded retries,
+# cold research branches, unmerged spikes — accrete on origin with no ceiling,
+# and the only disposal on offer was a human's: land unassessed work or delete
+# it, both terminal, neither with a safe default. The branch waits forever.
+#
+# This is that disposal. Nothing else owns it: the merge cadence lands and moves
+# on, the witness inventories but does not delete, the polecat drains. Like
+# worktree-reap it takes a destructive-looking act unattended, because the act is
+# reversible: a cold unmerged branch is pinned by an annotated archive tag and
+# only then deleted, so nothing is destroyed and restoring is one command. It is
+# a reclaim cadence, not a healer — it repairs no state a single-writer
+# transition should have kept; it disposes of refs no transition owns.
+#
+# It is the pack's first direct mutation of origin refs (branch delete, archive
+# tag), done through the same gh token the order is handed. The merge cadence's
+# "GitHub signs merges" rule is about commits reaching a protected ref; a delete
+# and a tag add no commit, so neither is subject to it. See
+# docs/stale-branch-triage.md.
+#
+# scope=rig: one registration per importing rig, cwd at the rig root so
+# `git config --get remote.origin.url` and ls-remote resolve that rig's origin;
+# GC_RIG and GC_RIG_ROOT name the store and checkout. A pass cut short by its
+# budget costs only the disposals the next pass takes instead. Hourly is ample —
+# branches accrete over days, not seconds. Tune the interval and the cold horizon
+# (STALE_BRANCH_COLD_DAYS) from city.toml [[orders.overrides]], not here.
+[order]
+description = "Reclaim stale origin branches: delete the superseded, archive-then-delete the cold-unmerged, file a finding for the contested"
+trigger = "cooldown"
+interval = "1h"
+timeout = "600s"
+exec = "$PACK_DIR/assets/scripts/stale-branch-triage.sh"
+scope = "rig"
+idempotent = true
