@@ -387,7 +387,7 @@ while IFS= read -r row; do
       *) short=$(printf '%.8s' "$merge_oid") ;;
     esac
     if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
-         --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --set "merged_sha=$merge_oid" \
          --unset merge_record_failures \
          --append-notes "Merged to $base at $short (record recovered by merge)"; then
       recovered=$((recovered + 1))
@@ -873,7 +873,7 @@ $sa_out" >/dev/null 2>&1 || true
     *) short=$(printf '%.8s' "$merge_oid") ;;
   esac
   if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
-       --set "merged_sha=$merge_oid" --unset rejection_reason \
+       --set "merged_sha=$merge_oid" \
        --unset merge_record_failures \
        --append-notes "Merged to ${target:-$base} at ${short:-merge}"; then
     merged=$((merged + 1))
