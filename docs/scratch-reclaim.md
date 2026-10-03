@@ -47,6 +47,22 @@ durable work goes in the repo. It carries one habit beyond that, because the
 reaper cannot cover it: a single turn can exhaust the quota between passes, so
 build artifacts and whole-store bead dumps stay out of scratch.
 
+## Reaping a retiring session
+
+A long-running patrol agent recycles its context as it works, and each recycle
+abandons its session tree whole: the inheriting session gets a new id and a new
+tree. This churn is the largest source of dead trees, and the horizon is slow
+to take it — a session between turns owns no process and reads as inactive, so
+the horizon stays long on purpose, to spare a session that is only idle.
+
+The retiring session has the certainty the horizon lacks. At the recycle, the
+cycle-recycle hook names its own session to `scratch-reap.sh --session <id>`,
+which takes that one tree at once: the same root rails and chmod-before-delete
+as the full pass, but no horizon and no running-process hold, because the hook
+is itself that process and the hold would decline the very tree the recycle
+leaves. The hourly pass is the backstop for every session that ends without
+naming itself.
+
 ## Rails
 
 The script deletes recursively, so it refuses any root that is not a scratch
@@ -64,8 +80,9 @@ against a synthetic root in a tempdir — no city, no network, no `gc`.
 ## Operating it
 
 ```bash
-assets/scripts/scratch-reap.sh --dry-run   # the plan, and the largest files in it
-assets/scripts/scratch-reap.sh             # reap, one summary line
+assets/scripts/scratch-reap.sh --dry-run     # the plan, and the largest files in it
+assets/scripts/scratch-reap.sh               # reap, one summary line
+assets/scripts/scratch-reap.sh --session <id> # take one session's tree now
 ```
 
 `SCRATCH_REAP_ROOT` overrides the root, `SCRATCH_REAP_BUDGET` (default 240s)

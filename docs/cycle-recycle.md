@@ -46,8 +46,10 @@ At the end of every turn the hook, in order:
    to publish.
 3. **Compares against an absolute 200K threshold.** Under it — the common
    path — the hook exits cheaply.
-4. **Over threshold**, writes a durable HANDOFF mail (`gc handoff`) and
-   triggers a restart (`gc session reset`).
+4. **Over threshold**, writes a durable HANDOFF mail (`gc handoff`), reaps the
+   retiring session's scratch (`scratch-reap.sh --session`, since the recycle
+   abandons that tree whole — docs/scratch-reclaim.md), and triggers a restart
+   (`gc session reset`).
 
 ### Why 200K, absolutely rather than proportionally
 
