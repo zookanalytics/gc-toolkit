@@ -637,10 +637,12 @@ _resolve_superseded_reference() {
 # (gc.routed_to / assignee / session_affinity) that re-spawn a polecat onto the
 # husk. That is why the walk is reachable on a closed anchor too. Both doors
 # carry them: the graph.v2 STEP beads, and the gc.kind=workflow ROOT, which is
-# only a tracker but is pool-routed in its own right. Walk both in reverse (a
-# step through gc.root_bead_id, a root through itself, then on through the
-# root's gc.input_convoy_id to the convoy's single tracked member) to the
-# molecules that resolve to THIS anchor.
+# only a tracker but is pool-routed in its own right. The anchor's input convoy
+# TRACKS it, so a reverse `tracks` lookup on the anchor names the convoy(s)
+# whose molecule resolves HERE; a root belongs to this molecule when its
+# gc.input_convoy_id is one of them and that convoy's single tracked member is
+# the anchor. Keying on the anchor keeps the resolution bounded — the work does
+# not grow with the number of molecules open in the store.
 #
 # What each resolved molecule gets turns on whether the RELEASING session holds
 # one of its steps. If it does, the molecule is the session's OWN and live — a
@@ -699,25 +701,50 @@ quiesce_release_molecule_steps() (
                                   else ($b.metadata["gc.step_ref"] // "") end),
             root:     (if $isroot then $b.id
                                   else ($b.metadata["gc.root_bead_id"] // "") end),
+            convoy:   (if $isroot then ($b.metadata["gc.input_convoy_id"] // "") else "" end),
             routed:   ($b.metadata["gc.routed_to"] // ""),
             assignee: ($b.assignee // ""),
             affinity: ($b.metadata["gc.session_affinity"] // "") }' 2>/dev/null || true)
     [ -n "$_rows" ] || exit 0
 
-    _roots=$(printf '%s\n' "$_rows" | jq -r -s 'map(.root) | map(select(. != "")) | unique | .[]' 2>/dev/null || true)
-    [ -n "$_roots" ] || exit 0
+    # Resolve the released molecule DIRECTLY from the parked anchor. The input
+    # convoy TRACKS the anchor, so a reverse `tracks` lookup names the convoy(s)
+    # whose molecule resolves here — one read keyed on the anchor. Enumerating
+    # every open root and resolving each one's convoy back to the anchor instead
+    # is O(open molecules) `gc bd show` + `gc convoy status` round trips per
+    # release, work that scales with the store rather than with the one molecule
+    # being released. An unreadable or empty lookup leaves the husk to the
+    # witness patrol — the same skip an absent root already takes.
+    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+    _convoys=$(gc bd dep list "$_anchor" --direction=up -t tracks ${_db:+--db "$_db"} --json 2>/dev/null \
+        | jq -r 'if type == "array" then (.[] | .id // empty) else empty end' 2>/dev/null | grep . || true)
+    [ -n "$_convoys" ] || exit 0
 
-    printf '%s\n' "$_roots" | while IFS= read -r _root; do
+    # Match roots whose input convoy is in that set, in memory against the scan
+    # above — no per-root store read. A root reachable only through its steps
+    # (its own bead already closed) carries no convoy row here and is the witness
+    # patrol's, the same boundary the enumeration drew.
+    _match_roots=$(printf '%s\n' "$_rows" | jq -r -s --arg c "$_convoys" '
+        ($c | split("\n") | map(select(length > 0))) as $cs
+        | [ .[]
+            | select(.kind == "root")
+            | . as $r | ($r.convoy // "") as $cv
+            | select($cv != "" and ($cs | any(. == $cv)))
+            | $r.root ]
+        | unique | .[]' 2>/dev/null || true)
+    [ -n "$_match_roots" ] || exit 0
+
+    printf '%s\n' "$_match_roots" | while IFS= read -r _root; do
         [ -n "$_root" ] || continue
-
-        # Resolve this root's anchor; an empty read (failed OR absent root) skips.
-        _convoy=$(gc bd show "$_root" ${_db:+--db "$_db"} --json 2>/dev/null \
-            | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null || true)
+        _convoy=$(printf '%s\n' "$_rows" | jq -r --arg r "$_root" \
+            'select(.kind == "root" and .root == $r) | .convoy' 2>/dev/null | head -n1)
         [ -n "$_convoy" ] || continue
+
+        # FAIL CLOSED: the reverse lookup proved the convoy tracks the anchor;
+        # confirm it is a clean 1:1 input convoy whose single tracked member IS
+        # the parked bead before acting — the guard the enumeration enforced.
         _ranchor=$(gc convoy status "$_convoy" --json 2>/dev/null \
             | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null || true)
-
-        # FAIL CLOSED: act only on the molecule whose anchor IS the parked bead.
         [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
 
         _mol_rows=$(printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null || true)
