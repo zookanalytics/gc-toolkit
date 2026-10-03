@@ -1947,6 +1947,16 @@ export FAKE_STEPS_JSON="$TMP/steps.json"
 # wrote.
 LIVE="$TMP/live"; mkdir -p "$LIVE/bin"
 export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIVE/log"
+# A store write the stub cannot land must not pass silently. The stub mutates the
+# store with a whole-file `jq > tmp && mv` rewrite — the largest write here and
+# the first to hit ENOSPC when a concurrent run-tests.sh batch transiently
+# exhausts the shared tmpfs. Unchecked, that failed rewrite leaves the store at
+# its pre-takeaway value while the stub still exits 0, so every field() read
+# below sees stale state and the quiesce assertions FALSELY fault gc-helm.sh.
+# The stub records this flag instead, and live_store_intact turns it into a
+# distinct infra abort. Sited in $TMP, not $LIVE, so it still lands when $LIVE
+# is the directory that cannot be written.
+export LIVE_WRITE_FAILED="$TMP/live-store-write-failed"
 SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
 
@@ -1983,7 +1993,10 @@ cat > "$LIVE/bin/gc" <<'GCL'
 #!/usr/bin/env bash
 # A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
 # answers the state the earlier write left behind.
-sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE"; }
+# Fail CLOSED: an unchecked `jq > … && mv` drops the write silently when the
+# rewrite cannot land (ENOSPC under disk pressure) and still returns success, so
+# the SUT reads back pre-write state. Record the flag the suite checks instead.
+sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE" && return 0; : >> "$LIVE_WRITE_FAILED"; return 1; }
 case "$1 ${2:-}" in
   "rig list") printf '{"rigs":[{"name":"gc-toolkit","path":"/nonexistent-rig","prefix":"tk"}]}\n' ;;
   "bd list")
@@ -2041,9 +2054,21 @@ chmod +x "$LIVE/bin/gc"
 
 field() { jq -r --arg i "$1" --arg k "$2" '.[] | select(.id==$i) | (if $k=="status" then .status elif $k=="assignee" then (.assignee // "") else (.metadata[$k] // "") end)' "$LIVE_STORE"; }
 
+# Call after each mutating run, at TOP LEVEL (never inside a $(field …), where an
+# exit would only leave the subshell). A write the stub could not land leaves the
+# store stale; reading it as a gc-helm.sh verdict would be the false failure this
+# guards against, so stop with a distinct infra message the gate can tell from a
+# real fault.
+live_store_intact() {
+  [ -e "$LIVE_WRITE_FAILED" ] || return 0
+  echo "ABORT(disk-pressure): a LIVE fixture-store write did not land (ENOSPC on the filesystem backing $TMP); the assertions below neither fault nor exonerate gc-helm.sh. Re-run with free tmp space." >&2
+  exit 1
+}
+
 SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
 RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
+live_store_intact   # the quiesce writes landed, or this is disk pressure not a verdict
 
 eq "$(field L-live assignee)" "$SESSION" \
    "(LIVESTEP) the step the release runs FROM keeps its assignee"
@@ -2090,6 +2115,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 SCRC=0
 SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
 eq "$(field L-live status)" "closed" \
    "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
@@ -2104,6 +2130,7 @@ FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-FOLD "superseded by A-CARRIER; the pour raced the fold" \
      --by proactive --release 2>"$LIVE/folderr")" || FOLDRC=$?
 FOLDERR="$(cat "$LIVE/folderr")"
+live_store_intact   # the fold reap's writes landed, or this is disk pressure not a verdict
 eq "$FOLDRC" "0" "(FOLDSTORE) the release on a folded anchor succeeds"
 eq "$(field A-FOLD status)" "closed" \
    "(FOLDSTORE) the anchor is still CLOSED — its disposition was not resurrected"
@@ -2138,6 +2165,30 @@ grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
 grep -q 'anchor left closed' <<< "$FOLDOUT" \
   && ok "(FOLDSTORE) …and reports a quiesce, not a release" \
   || bad "(FOLDSTORE) the run claimed a release (stdout: $FOLDOUT)"
+
+# ── the disk-pressure guard itself ───────────────────────────────────────────
+# The quiesce assertions above read the store back through field(); a stub write
+# the host could not land (ENOSPC under a concurrent run-tests.sh batch) would
+# leave that store stale and read as a false gc-helm.sh failure — the flake this
+# guard removes. Prove both halves so a regression that re-swallows the write is
+# caught: the stub FLAGS a write it could not land, and the flag ABORTS the block
+# distinctly instead of rendering a verdict on stale state. A store directory
+# with no write bit is the hermetic stand-in for a full disk: jq's temp-file
+# create fails exactly as ENOSPC would, while $LIVE stays readable/traversable so
+# the stub still runs and the flag (in $TMP) still lands.
+rm -f "$LIVE_WRITE_FAILED"
+chmod 555 "$LIVE"
+GUARD_WROTE="$("$LIVE/bin/gc" bd update A-LIVE --status=open 2>&1 || true)"
+chmod 755 "$LIVE"
+[ -e "$LIVE_WRITE_FAILED" ] \
+  && ok "(DISKGUARD) a stub store write that cannot land is flagged, not dropped silently" \
+  || bad "(DISKGUARD) a failed store write was swallowed (out: $GUARD_WROTE)"
+GRC=0; GOUT="$(live_store_intact 2>&1)" || GRC=$?
+rm -f "$LIVE_WRITE_FAILED"
+eq "$GRC" "1" "(DISKGUARD) the flag aborts the LIVE block, not a verdict on stale state"
+grep -q 'disk-pressure' <<< "$GOUT" \
+  && ok "(DISKGUARD) …and the abort names disk pressure, not a gc-helm.sh fault" \
+  || bad "(DISKGUARD) the abort is unexplained (out: $GOUT)"
 PATH="$SAVED_PATH"
 
 # ── demand: what a person owes, as a bead the work is blocked by ──────────────
