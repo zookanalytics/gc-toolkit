@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for tools/gc-proactive.sh's live-intake stand-down (tk-amc65l.1).
+# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down
+# (tk-amc65l.1) and the fail-closed-on-unset-GC_RIG sweep guard.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -81,6 +82,38 @@ OUT="$(bash "$SCRIPT" sling tk-plain 2>&1)"; RC=$?
 set -e
 eq "$RC" 0 "(SLING-GO) sling of an unmarked bead exits 0"
 has "$OUT" "would sling" "(SLING-GO) …and dispatches (fixture dry line)"
+
+# --- fail closed with no rig context --------------------------------------
+# resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route
+# to. The --sling sweep must abort ONCE, not surface that failure and attempt
+# `gc sling "" <bead>` per candidate. Two unmarked candidates make "once, not
+# per-bead" observable; env -u GC_RIG drops, for just this invocation, the rig
+# context the harness pinned above.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-a", "issue_type":"task", "description":"raw input a", "title":"a", "metadata":{}},
+  {"id":"tk-b", "issue_type":"task", "description":"raw input b", "title":"b", "metadata":{}}
+]
+JSON
+cat > "$TMP/beads.json" <<'JSON'
+{"tk-a": {"metadata":{}}, "tk-b": {"metadata":{}}}
+JSON
+
+echo "# scan --sling with no rig context aborts the whole sweep once"
+set +e
+OUT="$(env -u GC_RIG bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+[ "$RC" -ne 0 ] && ok "(SWEEP-FAILCLOSED) scan --sling exits non-zero when GC_RIG is unset" || bad "(SWEEP-FAILCLOSED) scan --sling exited 0 with no rig context (got $RC)"
+hasnt "$OUT" "would sling" "(SWEEP-FAILCLOSED) …no empty-target dispatch attempted"
+NSET="$(printf '%s\n' "$OUT" | grep -c 'set GC_RIG' || true)"
+eq "$NSET" 1 "(SWEEP-FAILCLOSED) …the set-GC_RIG guidance surfaces once, not per candidate"
+
+echo "# a direct sling with no rig context also fails closed"
+set +e
+OUT="$(env -u GC_RIG bash "$SCRIPT" sling tk-a 2>&1)"; RC=$?
+set -e
+[ "$RC" -ne 0 ] && ok "(SLING-FAILCLOSED) sling exits non-zero when GC_RIG is unset" || bad "(SLING-FAILCLOSED) sling exited 0 with no rig context (got $RC)"
+hasnt "$OUT" "would sling" "(SLING-FAILCLOSED) …nothing dispatched"
 
 echo
 echo "gc-proactive stand-down: $PASS passed, $FAIL failed"
