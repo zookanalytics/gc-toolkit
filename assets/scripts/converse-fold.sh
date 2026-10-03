@@ -22,7 +22,7 @@
 #   ITEM=<the bead step 5 writes to>
 #   TOPIC=<what decides sameness>
 #   HOLDER=<$VISIT when you hold it, another visit's id to fold into it,
-#           EMPTY when the listing did not read (hold, do not fold)>
+#           EMPTY when no store read (hold, do not fold)>
 set -u
 
 # The one definition of what subject a visit covers (its tracks-edge identity,
@@ -49,6 +49,15 @@ scrub() { tr -d '\000-\037'; }
 # quote becomes the '\'' idiom.
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # <<< eval-safe-quote
+
+# >>> bounded-store-read
+# The HOLDER scan below reads every rig's store, so one slow or hung Dolt
+# server would otherwise wedge a converse claim. Bound each read; a store that
+# does not answer in time is skipped like an unreadable one. No `timeout` on
+# the box means no bound, as the ledger migrations do.
+BOUND="${GC_FOLD_SCAN_TIMEOUT:-20}"
+run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
+# <<< bounded-store-read
 
 VISIT="${VISIT:-${1:-}}"
 SUBJECT="${SUBJECT:-${2:-}}"
@@ -84,24 +93,67 @@ if [ -z "$SUBJECT" ]; then
   # You are the holder.
   HOLDER="$VISIT"
 else
-  HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
-    | scrub \
-    | jq -r --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" "$VISIT_IDENTITY_JQ"'
-        def topic($fallback):
-          (.metadata.stall_root // "") as $r
-          | (.metadata.escalation_key // "") as $k
-          | if $r != "" then $r
-            elif $k != "" then "key:" + $k
-            else $fallback end;
-        [ .[]
-          | select((.metadata.task_kind // "")=="visit")
-          # a sibling wears the same flaky stamp: read ITS subject the shared way
-          | (visit_subject) as $cg
-          | select($cg==$s)
-          | select(topic($s)==$t)
-          | select((.assignee // "")!="")
-          | .id ]
-        + [$v] | unique | .[0]')
+  # The peer scan must see sittings in EVERY store, not just the claiming
+  # session's. A subject's visits can be filed into more than one store — the
+  # pool that files a visit need not be the pool that claims it — so a
+  # single-store scan reads only its own half: both sittings read themselves as
+  # the sole holder and the lowest-id tiebreak never runs. Union the
+  # in_progress listing across the rigs' stores, then apply the same predicates
+  # and the same tiebreak. Store-prefixed ids are totally ordered, so the
+  # tiebreak sorts across stores unchanged.
+  SCOPES=$(run_bounded gc rig list --json 2>/dev/null | scrub \
+    | jq -r '.rigs[]? | select((.path // "") != "")
+             | [.path, ((.suspended // false) | tostring)] | join("\u001f")' 2>/dev/null)
+  if [ -z "$SCOPES" ]; then
+    # gc rig list named no store, so no scan can be proven complete. Resolve
+    # EMPTY, which the caller reads as hold — never a fold on an unread listing.
+    HOLDER=""
+  else
+    UNION=""
+    READABLE=0
+    while IFS=$'\037' read -r rig_path suspended; do
+      [ -n "$rig_path" ] || continue
+      # A suspended rig has no live session to hold a sitting, and querying its
+      # store would auto-start an orphan Dolt server.
+      [ "$suspended" = "true" ] && continue
+      rows=$(run_bounded gc bd list --db "$rig_path/.beads" --status=in_progress --json --limit=0 2>/dev/null | scrub)
+      if printf '%s' "$rows" | jq -e 'type=="array"' >/dev/null 2>&1; then
+        READABLE=$((READABLE + 1))
+        UNION="$UNION$rows
+"
+      else
+        # A store that did not read cannot be proven free of a peer, but the
+        # readable stores still dedup among themselves: a fold only ever targets
+        # a readable lower id, so a blip here degrades to the old single-store
+        # miss, never a fold into a sitting no one can see.
+        echo "converse-fold: store $rig_path/.beads did not read; its in_progress visits are absent from this scan" >&2
+      fi
+    done <<SCOPES_EOF
+$SCOPES
+SCOPES_EOF
+    if [ "$READABLE" -eq 0 ]; then
+      # Not one store read — the same unprovable case as a single unreadable
+      # listing, so hold rather than fold.
+      HOLDER=""
+    else
+      HOLDER=$(printf '%s' "$UNION" | jq -s -r --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" "$VISIT_IDENTITY_JQ"'
+          def topic($fallback):
+            (.metadata.stall_root // "") as $r
+            | (.metadata.escalation_key // "") as $k
+            | if $r != "" then $r
+              elif $k != "" then "key:" + $k
+              else $fallback end;
+          [ (add // [])[]
+            | select((.metadata.task_kind // "")=="visit")
+            # a sibling wears the same flaky stamp: read ITS subject the shared way
+            | (visit_subject) as $cg
+            | select($cg==$s)
+            | select(topic($s)==$t)
+            | select((.assignee // "")!="")
+            | .id ]
+          + [$v] | unique | .[0]')
+    fi
+  fi
 fi
 
 printf 'SUBJECT=%s\n' "$(shq "$SUBJECT")"
