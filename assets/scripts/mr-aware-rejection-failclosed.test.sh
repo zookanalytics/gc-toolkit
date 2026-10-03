@@ -246,6 +246,33 @@ grep -q '^DELETE-REFUSED|polecat/tk-work$' "$TMP/log" \
   || bad "(18c) the delete was actually attempted (the case is not vacuous)"
 unset FAKE_DELETE_FAILS
 
+# A target under polecat/ is another bead's per-bead PR head. Work landing there
+# folds into that PR; opening a nested branch -> polecat/* PR is never the
+# intent. The refinery resolves such a bead to direct and KEEPS its branch (the
+# branch carries the fold), with no operator picking a strategy by hand.
+# (19) fold-in target -> direct, branch kept (not a nested PR, not a deleted branch).
+arm "{$BR,\"target\":\"polecat/tk-anchor\"}" >/dev/null
+eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(19) fold-in target polecat/* + no own PR -> branch kept"
+grep -q 'folds into the PR at polecat/tk-anchor' "$TMP/out" \
+  && ok "(19b) kept for the fold reason (strategy resolved to direct, not mr)" \
+  || bad "(19b) kept for the fold reason (strategy resolved to direct, not mr)"
+
+# (20) A non-polecat non-default target (integration/*, a named branch) is NOT a
+#      fold-in: it stays mr so convoy/integration work keeps its review PR.
+arm "{$BR,\"target\":\"integration/cv-1\"}" >/dev/null
+eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(20) integration/* target -> branch kept"
+grep -q 'the PR pipeline needs the branch' "$TMP/out" \
+  && ok "(20b) integration/* target -> stays mr (not flipped to a fold-in direct)" \
+  || bad "(20b) integration/* target -> stays mr (not flipped to a fold-in direct)"
+
+# (21) A bead already recording its own PR keeps mr even under a polecat/ target:
+#      the recorded PR is reused, not folded over.
+arm "{$BR,\"target\":\"polecat/tk-anchor\",\"existing_pr\":\"https://github.com/o/r/pull/7\"}" >/dev/null
+eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(21) polecat/ target + own existing_pr -> branch kept (mr)"
+grep -q 'the PR pipeline needs the branch' "$TMP/out" \
+  && ok "(21b) own existing_pr keeps mr, not flipped to a fold-in direct" \
+  || bad "(21b) own existing_pr keeps mr, not flipped to a fold-in direct"
+
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
