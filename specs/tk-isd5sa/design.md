@@ -89,32 +89,41 @@ transition. No single layer covers every close, so enforcement is three layers:
 
 ## Deferred, with cost
 
-Each deferred piece is tracked; none is dropped. The deliverable that shipped is
-the running mechanism (floor, contract, ruling arms + the before-close trio); the
-pieces below extend it.
+The deliverable that shipped is the running mechanism (floor, contract, ruling
+arms + the before-close trio). One extension is committed work, tracked as a
+follow-on bead; the rest are scope boundaries the shipped design makes
+unnecessary today, recorded here with what would reopen each.
+
+Tracked as a follow-on bead:
 
 - **Membership scope-reading arm** — the fourth arm (re-home work that drifted
-  outside its epic). Blocked on the repair primitive **tk-8bzuc2** (re-parent a
-  bead, refusing a cascade-unsafe re-parent) and on a scope classification the
-  shell pass cannot do (which sibling belongs under which epic is LLM judgment).
-  Filed as a follow-on bead. Cost while deferred: misfiled work is not swept and
+  outside its epic). Tracked as **tk-lt585p**, blocked on the repair primitive
+  **tk-8bzuc2** (re-parent a bead, refusing a cascade-unsafe re-parent) and on a
+  scope classification the shell pass cannot do (which sibling belongs under which
+  epic is LLM judgment). Cost while deferred: misfiled work is not swept and
   membership drifts as work is filed — the same cost the membership spec records
   for this audit.
+
+Scope boundaries, not separately tracked — the shipped design covers the need,
+and each names what would reopen it:
+
 - **Exact create-time audit** — a first-reaction-style arm that reacts the moment
-  an epic is filed, rather than on the next cadence tick. Cost while deferred: a
-  new epic waits up to one interval for its first audit; the field data
-  (tk-xgj2ko notes) also shows coordination roles file epics directly, bypassing
-  first-reaction, so the periodic audit is the robust backstop regardless.
+  an epic is filed, rather than on the next cadence tick. The short cadence
+  approximates audit-on-create, and coordination roles file epics directly
+  (tk-xgj2ko notes), so the periodic audit is the robust backstop. Reopen if the
+  up-to-one-interval wait for a new epic's first audit proves too long.
 - **LLM drafting arm** — generate the proposed hypothesis/closure draft for the
-  operator to ratify, rather than asking the operator to draft it. Cost while
-  deferred: the visit asks the operator to write the floor rather than editing a
-  proposed one; the elaboration still happens, with more operator effort.
-- **City scope** — if epics are ever shown to span rigs. Cost while deferred:
-  none today; epics are per-rig.
+  operator to ratify, rather than asking the operator to draft it. The operator
+  drafts the floor at the visit today and the elaboration still happens; an LLM
+  arm would only reduce operator effort. Reopen if drafting effort becomes the
+  bottleneck.
+- **City scope** — one registration spanning rigs rather than one per rig. Epics
+  are per-rig, so rig scope is correct and the cost today is none. Reopen only if
+  epics are shown to span rigs.
 
 ## Follow-on beads filed
 
-- Membership scope-reading arm (blocked on tk-8bzuc2).
-- A doctor-check-count drift in docs/architecture.md and docs/component-model.md
-  (prose predating the current 23→24 check count), found while adding I14; left
-  untouched here as out of scope.
+- Membership scope-reading arm — **tk-lt585p** (blocked on tk-8bzuc2).
+- Doctor-check-count drift in docs/architecture.md and docs/component-model.md —
+  **tk-td0fpz** (prose predating the current 23→24 check count), found while
+  adding I14; left untouched here as out of scope.
