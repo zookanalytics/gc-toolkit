@@ -349,6 +349,25 @@ PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
+# A target under polecat/ is another bead's per-bead PR head, so work landing
+# there folds into that PR rather than opening one of its own. In mr mode with
+# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
+# which a fold never wants, so resolve it to direct: the branch merges onto the
+# PR head and the PR re-reviews at the new head. Shaped targets (the rig
+# default, integration/, a named branch) stay mr, and so does a bead already
+# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
+# a kept branch and this flip cannot disagree.
+MS_FOLD_IN=
+MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
+MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
+case "$MS_TARGET" in
+  polecat/*)
+    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
+      MERGE_STRATEGY="direct"
+      MS_FOLD_IN=1
+    fi ;;
+esac
 # <<< merge-strategy-resolve
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 # Nothing PR-shaped on the bead means "no PR will ever want this branch" only
@@ -362,6 +381,8 @@ elif [ "$MERGE_STRATEGY" != "direct" ]; then
   echo "keeping origin/$BRANCH — merge_strategy=$MERGE_STRATEGY; the PR pipeline needs the branch"
 elif [ "${PR_SHAPED:-1}" != "0" ]; then
   echo "keeping origin/$BRANCH — the bead already records a PR"
+elif [ -n "$MS_FOLD_IN" ]; then
+  echo "keeping origin/$BRANCH — it folds into the PR at $MS_TARGET and carries the rework"
 else
   git push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
 fi
@@ -472,6 +493,25 @@ TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "{{target_bra
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
+# A target under polecat/ is another bead's per-bead PR head, so work landing
+# there folds into that PR rather than opening one of its own. In mr mode with
+# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
+# which a fold never wants, so resolve it to direct: the branch merges onto the
+# PR head and the PR re-reviews at the new head. Shaped targets (the rig
+# default, integration/, a named branch) stay mr, and so does a bead already
+# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
+# a kept branch and this flip cannot disagree.
+MS_FOLD_IN=
+MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
+MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
+case "$MS_TARGET" in
+  polecat/*)
+    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
+      MERGE_STRATEGY="direct"
+      MS_FOLD_IN=1
+    fi ;;
+esac
 # <<< merge-strategy-resolve
 EXISTING_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.existing_pr // empty')
 if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
