@@ -33,10 +33,18 @@ bash -n "$GUARD" \
   && ok "guard is executable (ttyd execs it directly)" \
   || bad "guard is not executable — ttyd could not spawn it"
 
-if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck -S warning "$GUARD" \
-    && ok "guard is shellcheck-clean" \
-    || bad "guard has shellcheck findings"
+# Lint the guard through shellcheck-run.sh, which uses the host binary or the
+# pinned shellcheck container and exits 3 when neither is available. A linter
+# that could not run is a VISIBLE skip, never a silent pass that reads as clean.
+if "$HERE/shellcheck-run.sh" "$GUARD"; then
+  ok "guard is shellcheck-clean"
+else
+  rc=$?
+  if [ "$rc" -eq 3 ]; then
+    echo "skip - shellcheck unavailable (no host binary, no podman image); guard not linted this run"
+  else
+    bad "guard has shellcheck findings (shellcheck-run exit $rc)"
+  fi
 fi
 
 # --- The stub `gc`. ----------------------------------------------------------
