@@ -1,6 +1,6 @@
 ---
 name: Plan-to-beads — declare targets with a binding, check it before merge
-description: Decision record for a right-sized plan-to-beads mechanism. A plan declares its targets in an explicit marked block, each row bound to a bead or a stated non-bead disposition, and a structural check on the pull-request test lane refuses a declared target with no binding. Chooses this over a merge-path gate, a patrol audit, and live store resolution; keeps convention-only as the fallback. Supersedes specs/tk-hnrind; tk-liq8xf implements after arch/pm review.
+description: Decision record for a right-sized plan-to-beads mechanism. A plan declares its targets in an explicit marked block, each row bound to a bead or a stated non-bead disposition, and a structural check on the pull-request test lane refuses a declared target with no binding. Chooses this over a merge-path gate, a patrol audit, and live store resolution; keeps convention-only as the fallback. Supersedes the tk-hnrind attempt; tk-liq8xf implements after arch/pm review.
 ---
 
 # Plan-to-beads: declare targets with a binding, check it before merge
@@ -57,7 +57,7 @@ declaration-based mechanism carries, made explicit rather than papered over.
 
 **Declare.** A plan marks a targets block and binds each row. An explicit
 delimiter lets a reader and a check find the block without guessing; the
-`<!-- plan-targets -->` marker drafted in the earlier attempt is a fitting
+`<!-- plan-targets -->` marker the `tk-dks4kk` attempt drafted is a fitting
 primitive. Each row's binding cell holds a bead id, or `none — <reason>`, or
 `landed — <what>`. This formalizes the standing "put the bead id in the row that
 proposed it" convention and turns "what did this plan produce" into a grep. It
@@ -108,8 +108,8 @@ declaration needs a check behind it.
 
 ## Lineage
 
-Supersedes `specs/tk-hnrind`, whose merge-gate-plus-manifest design was sent back
-as heavier than its guarantee with the plan-signal question deferred. Keeps the
+Supersedes the `tk-hnrind` attempt, whose merge-gate-plus-manifest design was
+sent back as heavier than its guarantee with the plan-signal question deferred. Keeps the
 marker primitive from the `tk-dks4kk` attempt while dropping its patrol and its
 store resolution. A still-earlier stop deliberately halted at convention-only and
 recorded that a real guarantee needs a gate chosen by the operator; this record
