@@ -60,7 +60,7 @@ agents/witness/prompt.template.md
 assets/scripts/render-seed-audit.sh
 e716c2305c3d5ae4cd5239cb46675cc179660842c1d34ad84532395f1e4c79dc
 formulas/mol-deacon-patrol.toml
-0a7c1b6ab7d6a7c80951dbda9de1c65311492f48ef4964622c33f29342e6c174
+f212631b1c51dc4fcbeac7f4780a1cffe6abac21d8d3246cc48bde17d7d02683
 formulas/mol-dog-shutdown-dance.toml
 ef06872c2ec83927dd1854e979d338bba988d53c1285798e47d48ff07639a9b6
 formulas/mol-feedback-distiller.toml

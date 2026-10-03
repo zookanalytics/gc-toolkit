@@ -43,23 +43,6 @@ exit "${STUB_RC:-0}"
 STUB
 chmod +x "$BIN/gc"
 
-# The pre-spawn unit cross-check calls `systemctl --user list-units`; stub that
-# one answer (the single active unit a case declares via STUB_UNIT, else none)
-# and pass everything else — including the tests' own `systemctl --user stop` —
-# through to the real binary, so the cross-check never reads a live deacon's
-# real units and the test stays hermetic.
-REAL_SYSTEMCTL="$(command -v systemctl || true)"; export REAL_SYSTEMCTL
-cat > "$BIN/systemctl" <<'STUB'
-#!/usr/bin/env bash
-for a in "$@"; do
-  if [ "$a" = "list-units" ]; then
-    [ -n "${STUB_UNIT:-}" ] && printf '%s loaded active running gc doctor sweep\n' "$STUB_UNIT"
-    exit 0
-  fi
-done
-exec "${REAL_SYSTEMCTL:-/bin/systemctl}" "$@"
-STUB
-chmod +x "$BIN/systemctl"
 export PATH="$BIN:$PATH"
 
 # A pack check the sweep can be caught inside. Its PATH is what names it.
@@ -72,11 +55,15 @@ chmod +x "$TMP/rig/doctor/check-fixture-slow/run.sh"
 
 export STUB_LOG="$TMP/gc.log"; : > "$STUB_LOG"
 export STUB_SLEEP="" STUB_RC=0 STUB_PAYLOAD="" STUB_CHECK=""
-# Pre-spawn gate controls: Dolt health probe answer (empty = healthy default)
-# and the live sweep unit the cross-check sees (empty = none).
-export STUB_DOLT_HEALTH="" STUB_DOLT_RC=0 STUB_DOLT_SLEEP="" STUB_UNIT=""
+# Pre-spawn gate control: the Dolt health probe answer (empty = healthy default).
+export STUB_DOLT_HEALTH="" STUB_DOLT_RC=0 STUB_DOLT_SLEEP=""
 # The ambient city must never be an input; every case names its own state dir.
 unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG 2>/dev/null || true
+# The cadence floor defaults to a per-user runtime path; pin it into TMP so no
+# case reads or writes the real one, and give each case its own dir below so none
+# inherits another's last-start stamp. XDG_RUNTIME_DIR is left as the host set it,
+# so the systemd-launch cases still run where a user manager is reachable.
+export GC_DOCTOR_SWEEP_CADENCE_DIR="$TMP/cadence.default"; mkdir -p "$GC_DOCTOR_SWEEP_CADENCE_DIR"
 
 payload_ok() { # <file>
   cat > "$1" <<'JSON'
@@ -89,8 +76,10 @@ payload_ok() { # <file>
 JSON
 }
 
-# STATE is per-case so no case inherits another's stamp.
-new_state() { STATE="$TMP/state.$1"; mkdir -p "$STATE"; export GC_DOCTOR_SWEEP_STATE_DIR="$STATE"; }
+# STATE and CADENCE are per-case so no case inherits another's stamp. The
+# cadence floor lives outside STATE_DIR, so it gets its own per-case dir too.
+new_state() { STATE="$TMP/state.$1"; mkdir -p "$STATE"; export GC_DOCTOR_SWEEP_STATE_DIR="$STATE";
+              CADENCE="$TMP/cadence.$1"; mkdir -p "$CADENCE"; export GC_DOCTOR_SWEEP_CADENCE_DIR="$CADENCE"; }
 run() { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 field() { sed -n "s/^$2=//p" <<< "$1"; }
 # The sweep is DETACHED, so the script returns state=started before its child
@@ -157,9 +146,12 @@ if [ "$NEXT" -gt 3400 ] && [ "$NEXT" -le 3600 ]; then ok "  ... and the wait is 
 else bad "  ... and the wait is the hour, not the patrol cycle (got '$NEXT')"; fi
 eq "$(grep -c . "$STUB_LOG")" "1" "  ... still exactly one sweep run"
 
-# An elapsed interval is an aged window-start now; last-start ages with it.
+# An elapsed interval is an aged window-start now; last-start ages with it, and
+# so does the cadence floor's own stamp — otherwise the floor would hold this
+# second start back seconds after the first, which is exactly its job.
 printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/window-start"
 printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/last-start"
+printf '%s' "$(( $(date +%s) - 3601 ))" > "$CADENCE/last-start"
 run
 has "$OUT" "state=started" "once the interval has passed it sweeps again"
 await_sweeps 2
@@ -584,27 +576,85 @@ eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
 unset GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
 export STUB_DOLT_SLEEP=""
 
-# --- the pre-spawn unit cross-check: a live sweep unit blocks a second start -
-# STATE_DIR can go blind (a per-process /tmp fallback a recycled session does
-# not inherit), and that is what let one incident start ~20 sweeps at once. A
-# live systemd user unit is the STATE_DIR-independent proof that a sweep is
-# already running, so a start defers to it. Only exercised where this host
-# launches via systemd — the same guard the launch and shedding assertions use.
-if command -v systemd-run >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
-  new_state unit_live
-  : > "$STUB_LOG"
-  export STUB_UNIT="gc-doctor-sweep-424242.service"
-  run
-  has "$OUT" "state=running" "a live sweep unit reports running, even with a fresh STATE_DIR"
-  has "$OUT" "reason=unit-already-live" "  ... named as the unit, not STATE_DIR, that caught it"
-  eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts no second sweep"
-  if [ -d "$STATE/current" ]; then bad "  ... and creates no run dir"; else ok "  ... and creates no run dir"; fi
-  export STUB_UNIT=""
-  run
-  has "$OUT" "state=started" "with no unit live the start proceeds"
-  await_run
-fi
-export STUB_DOLT_HEALTH="" STUB_UNIT="" STUB_PAYLOAD="" STUB_RC=0
+# --- the pre-spawn cadence floor: the one cross-session gate -----------------
+# STATE_DIR can go blind — a per-session fallback a recycled session does not
+# inherit — and that is what let one incident start a burst of sweeps at once.
+# The cadence floor is the STATE_DIR-independent gate: a last-start stamp every
+# session shares, taken under flock, that holds the interval even when two
+# sessions cannot see each other's STATE_DIR. It rests on a file lock, not on a
+# query a loaded host cannot answer.
+export STUB_PAYLOAD="$TMP/payload.json" STUB_RC=1 STUB_SLEEP=0
+
+# Two sessions, two blind STATE_DIRs, one shared cadence dir: only the first
+# sweeps; the second is throttled though its own STATE_DIR shows nothing. This
+# is the incident, reproduced — the burst the floor collapses to a single sweep.
+SHARED_CADENCE="$TMP/cadence.shared"; mkdir -p "$SHARED_CADENCE"
+: > "$STUB_LOG"
+OUT=$(GC_DOCTOR_SWEEP_STATE_DIR="$TMP/state.burst-a" GC_DOCTOR_SWEEP_CADENCE_DIR="$SHARED_CADENCE" "$SUT" 2>/dev/null)
+has "$OUT" "state=started" "cadence: the first session's sweep starts"
+await_sweeps 1
+OUT=$(GC_DOCTOR_SWEEP_STATE_DIR="$TMP/state.burst-b" GC_DOCTOR_SWEEP_CADENCE_DIR="$SHARED_CADENCE" "$SUT" 2>/dev/null)
+has "$OUT" "state=throttled" "cadence: a second session with a blind STATE_DIR is throttled, not a second start"
+has "$OUT" "reason=cadence-floor" "  ... named as the floor, not STATE_DIR, that caught it"
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... so exactly one sweep ran across both sessions"
+if [ -d "$TMP/state.burst-b/current" ]; then bad "  ... and the throttled session creates no run dir"; else ok "  ... and the throttled session creates no run dir"; fi
+
+# A start due by STATE_DIR is throttled while the floor's own stamp is recent.
+new_state cadence_recent
+: > "$STUB_LOG"
+printf '%s' "$(( $(date +%s) - 100 ))" > "$CADENCE/last-start"
+run
+has "$OUT" "state=throttled" "cadence: a due start is throttled while the floor's stamp is inside the interval"
+has "$OUT" "floor=3600" "  ... reporting the floor it enforced"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts nothing"
+
+# Once the floor has elapsed the same start proceeds, and refreshes the stamp.
+new_state cadence_old
+: > "$STUB_LOG"
+printf '%s' "$(( $(date +%s) - 3601 ))" > "$CADENCE/last-start"
+run
+has "$OUT" "state=started" "cadence: once the floor has elapsed the start proceeds"
+NEWSTAMP=$(cat "$CADENCE/last-start")
+if [ "$NEWSTAMP" -gt "$(( $(date +%s) - 60 ))" ]; then ok "  ... and refreshes the floor's stamp, at the cadence dir not STATE_DIR"
+else bad "  ... and refreshes the floor's stamp (got '$NEWSTAMP')"; fi
+await_run
+
+# The retry a failed run armed is exempt from the floor: it was authorized by a
+# STATE_DIR this session could read, where the burst cannot arise. A recent
+# floor stamp that would throttle a FRESH start does not hold the retry back.
+new_state cadence_retry_exempt
+: > "$STUB_LOG"; export STUB_RC=2
+RECENT=$(( $(date +%s) - 100 ))
+printf '%s' "$RECENT" > "$STATE/window-start"
+printf '1'            > "$STATE/attempts"
+printf 'failed'       > "$STATE/last-outcome"
+printf '%s' "$RECENT" > "$STATE/last-start"
+printf '%s' "$RECENT" > "$CADENCE/last-start"
+run
+has "$OUT" "state=started" "cadence: the retry a failed run armed is exempt from the floor"
+eq "$(cat "$STATE/attempts")" "2" "  ... counted as attempt 2 of the window"
+await_run
+export STUB_RC=1
+
+# --status takes no floor: it reports without starting, so it writes no stamp.
+new_state cadence_status
+: > "$STUB_LOG"
+run --status
+has "$OUT" "state=idle" "cadence: --status reports without taking the floor"
+if [ -e "$CADENCE/last-start" ]; then bad "  ... and writes no cadence stamp"; else ok "  ... and writes no cadence stamp"; fi
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts nothing"
+
+# A cadence dir it cannot write fails OPEN — the patrol is never silenced by a
+# broken guard — and the report says the cross-session guard was skipped.
+new_state cadence_failopen
+: > "$STUB_LOG"
+mkdir -p "$TMP/cad-nowrite"; chmod 500 "$TMP/cad-nowrite"
+OUT=$(GC_DOCTOR_SWEEP_CADENCE_DIR="$TMP/cad-nowrite/sub" "$SUT" 2>/dev/null)
+has "$OUT" "state=started" "cadence: an unwritable cadence dir fails open, never silences the sweep"
+has "$OUT" "cadence floor unavailable" "  ... and the note says the guard was skipped"
+chmod 700 "$TMP/cad-nowrite"
+await_run
+export STUB_DOLT_HEALTH="" STUB_PAYLOAD="" STUB_RC=0
 
 # --- the shipped patrol step must handle every state this script reports -----
 # The step is prose plus one snippet, read by an agent, and both halves can go

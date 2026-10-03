@@ -304,13 +304,17 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 ```
 `STATE` is the first line's value, and it says what this cycle owes:
 
-- `idle`, `started`, `running` or `deferred`: there is no payload to read. Say
-  which one and close the step. A `started` sweep is collected a cycle or two
-  later. A `deferred` one did not start because the pre-spawn `gc dolt health`
-  gate found the data plane unreachable or overloaded — a sweep queries every
-  store's Dolt, so it stands down rather than amplify a degradation. The
-  dolt-health step above already filed any finding for that, so this files
-  nothing of its own and resumes on a later cycle once the data plane recovers.
+- `idle`, `started`, `running`, `deferred` or `throttled`: there is no payload
+  to read. Say which one and close the step. A `started` sweep is collected a
+  cycle or two later. A `deferred` one did not start because the pre-spawn `gc
+  dolt health` gate found the data plane unreachable or overloaded — a sweep
+  queries every store's Dolt, so it stands down rather than amplify a
+  degradation. A `throttled` one did not start because a sweep had already
+  started within the inter-sweep cadence floor; that floor holds the hourly
+  cadence across sessions even when one session's state directory cannot see
+  another's start, so it is the one-per-interval ceiling doing its job, not a
+  fault. The dolt-health step above already filed any finding for a degradation,
+  so this files nothing of its own and resumes on a later cycle.
 - `complete`: the payload is the file named by `payload=`. Filter it below.
 - `failed`, `exceeded` or `blocked`: a FAILED scan. File it as a finding with
   the recipe below — `--key doctor-sweep-failed`, the whole `state=` block as
