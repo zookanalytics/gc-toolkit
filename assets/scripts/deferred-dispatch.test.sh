@@ -25,6 +25,12 @@
 #   * every OTHER arm that must NOT sling: still blocked, assignee held, sling
 #     failed;
 #   * the closed-bead retire arm;
+#   * the UNTIL resolved-by consumer — an `until` dep ("X resolves me") disposes
+#     the gated bead through bead-rehome once its targets all close, while ONLY
+#     `until` disposes (a `blocks` edge to a closed target never does — the scope
+#     guard), a non-open or assigned bead is left alone, a held close (bead-rehome
+#     refuses) and a hard failure are told apart, dry-run disposes nothing, and the
+#     whole candidate set resolves in a bounded read count with no per-bead call;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
 #     another path already delivered (a merge_result stamp) RETIRES without
@@ -243,21 +249,56 @@ done
 printf '%s\t%s\n' "$subject" "$key" >> "${ESC_CALLS:?}"
 echo "escalate: filed visit tk-visit1 on $subject [$key]"
 ESC
-chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh"
+# bead-rehome.sh stub: the resolved-by consumer's disposer. Records each call
+# (origin + successor + kind) so a test can prove reconcile disposed the right
+# bead toward the right successor with the right kind, and on success CLOSES the
+# origin + stamps gc.superseded_by in the store, exactly as the real tool leaves
+# it — so a second pass no longer enumerates the bead. STUB_REHOME_RC forces the
+# held (5) / conflict (6) / hard-fail paths. Resolved by the SUT via GC_REHOME_TOOL.
+cat > "$BIN/bead-rehome.sh" <<'RH'
+#!/usr/bin/env bash
+set -u
+origin=""; successor=""; kind=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --origin) shift; origin="${1:-}" ;;
+    --successor) shift; successor="${1:-}" ;;
+    --kind) shift; kind="${1:-}" ;;
+    --note) shift ;;
+    *) : ;;
+  esac
+  shift || true
+done
+printf '%s\t%s\t%s\n' "$origin" "$successor" "$kind" >> "${REHOME_CALLS:?}"
+rc="${STUB_REHOME_RC:-0}"
+if [ "$rc" = 0 ]; then
+  tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-rehome-stub.XXXXXX")"
+  jq -c --arg o "$origin" --arg s "$successor" \
+    'map(if .id == $o then (.status = "closed" | .metadata["gc.superseded_by"] = $s) else . end)' \
+    "${STUB_STORE:?}" > "$tmp" && mv "$tmp" "$STUB_STORE"
+fi
+exit "$rc"
+RH
+chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh" "$BIN/bead-rehome.sh"
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
 export STUB_SLING_LOG="$TMP/sling.log"
 export ESC_CALLS="$TMP/escalate.log"
+export REHOME_CALLS="$TMP/rehome.log"
 export GC_ESCALATE_TOOL="$BIN/escalate.sh"
+export GC_REHOME_TOOL="$BIN/bead-rehome.sh"
 export BEADS_ACTOR="test-actor"
 unset GC_AGENT GC_RIG GC_RIG_ROOT 2>/dev/null || true
 
-store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$ESC_CALLS"; }
+store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$ESC_CALLS"; : > "$REHOME_CALLS"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
 escalations() { wc -l < "$ESC_CALLS" | tr -d ' '; }
+rehomes() { wc -l < "$REHOME_CALLS" | tr -d ' '; }
+rehome_call() { sed -n "${1}p" "$REHOME_CALLS"; }   # tab-separated: origin<TAB>successor<TAB>kind
+status_of() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
 
 # --- ARM ---------------------------------------------------------------------
 echo "# arm"
@@ -528,7 +569,11 @@ eq "$rc" 0 "a bulk pass over four cascade-held arms is a clean pass"
 eq "$(slings)" "4" "all four arms whose own blockers are closed dispatch in one pass"
 eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead dep-list call — the N+1 is gone"
 eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead show call — fields come from the cached snapshot"
-eq "$(grep -c '^list' "$STUB_BD_LOG")" "3" "the whole set costs three list reads (all + ready + one blocker-status batch), not one per bead"
+# Four bounded reads, none per-bead: armed all + armed ready + one armed
+# blocker-status batch (these four arms are all cascade-held), plus the until
+# consumer's one whole-store candidate scan (no until candidates here, so it
+# adds no blocker batch of its own).
+eq "$(grep -c '^list' "$STUB_BD_LOG")" "4" "the whole set costs a bounded read count, not one per bead"
 unset STUB_BD_LOG
 
 # --- the ARG_MAX fix: a large armed set enumerates, never dies on argv --------
@@ -618,6 +663,130 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "a malformed arg list does not produce a sling"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a malformed arg list leaves the record for a human"
 has "$out" "malformed" "the malformed record is reported"
+
+# --- RECONCILE: the until resolved-by consumer -------------------------------
+# An `until` dep means "X resolves me", wired alongside a `blocks` wait so the
+# bead waits, then is DISPOSED (not re-triaged) when X closes. The same pass
+# disposes every open, unassigned bead whose own `until` targets have all closed,
+# through bead-rehome so the close carries a successor pointer. ONLY `until`
+# disposes — a `blocks` edge is sequencing and its target closing leaves the
+# dependent fully owed.
+echo "# until: dispose a resolved bead"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a resolved until-gated bead is a clean pass"
+eq "$(rehomes)" "1" "exactly one disposal"
+eq "$(rehome_call 1)" "$(printf 'g-1\tx-1\tfolded')" "disposed g-1 toward its until target x-1, kind folded (successor pointer, not a bare close)"
+eq "$(status_of g-1)" "closed" "the disposed bead is closed by bead-rehome, never by this script"
+has "$out" "disposed g-1" "the disposal is reported"
+has "$out" "until-resolved: 1 disposed" "the summary counts it"
+
+echo "# until: wait while the target is still open"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"open","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(rehomes)" "0" "an until-gated bead whose target is still open is NOT disposed"
+eq "$(status_of g-1)" "open" "it stays open"
+has "$out" "until-resolved: 0 disposed, 0 held, 1 waiting" "it counts as waiting"
+
+echo "# until: ONLY until disposes — a blocks edge to a closed target never does"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"blocks"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"
+eq "$(rehomes)" "0" "a blocks edge to a closed target is never disposed (the scope guard)"
+eq "$(status_of g-1)" "open" "the blocks-gated bead is untouched"
+has "$out" "until-resolved: 0 disposed, 0 held, 0 waiting (of 0 until-gated)" "a blocks-only bead is not even an until candidate"
+
+echo "# until: a deliberate hold (non-open status) is left alone"
+store '[
+ {"id":"g-1","status":"blocked","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"
+eq "$(rehomes)" "0" "a non-open (held) until-gated bead is left alone"
+has "$out" "of 0 until-gated" "a held status is not an until candidate"
+
+echo "# until: a bead a live worker holds is left alone"
+store '[
+ {"id":"g-1","status":"open","assignee":"someone/else","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"
+eq "$(rehomes)" "0" "an until-gated bead an assignee holds is left alone"
+has "$out" "of 0 until-gated" "an assigned bead is not an until candidate"
+
+echo "# until: dispose only when ALL targets closed; successor is the latest-closed"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"},{"id":"x-2","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":"","closed_at":"2026-01-01T00:00:00Z"},
+ {"id":"x-2","status":"open","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"
+eq "$(rehomes)" "0" "a bead with two until targets, one still open, is NOT disposed"
+has "$out" "0 disposed, 0 held, 1 waiting" "it waits for the last target to close"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"},{"id":"x-2","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":"","closed_at":"2026-01-01T00:00:00Z"},
+ {"id":"x-2","status":"closed","assignee":"","metadata":{},"notes":"","closed_at":"2026-02-01T00:00:00Z"}]'
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(rehome_call 1)" "$(printf 'g-1\tx-2\tfolded')" "with all targets closed, the successor is the latest-closed (x-2)"
+
+echo "# until: a held close (bead-rehome refuses) is reported and retried, not a failure"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_REHOME_RC=5 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a held close (bead-rehome rc=5) is not a pass failure"
+eq "$(rehomes)" "1" "the disposal was attempted"
+has "$out" "HELD g-1" "the hold is reported, not silent"
+has "$out" "until-resolved: 0 disposed, 1 held" "the summary counts it as held"
+
+echo "# until: a hard dispose failure fails the pass (fail-closed)"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_REHOME_RC=7 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a hard dispose failure fails the pass"
+has "$out" "could not dispose" "the failure is reported, not swallowed"
+
+echo "# until: dry-run disposes nothing"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile --dry-run 2>&1)"
+eq "$(rehomes)" "0" "dry-run calls bead-rehome zero times"
+eq "$(status_of g-1)" "open" "dry-run leaves the bead open"
+has "$out" "DRY-RUN would dispose g-1" "dry-run says what it would do"
+
+echo "# until: an unreadable store never disposes (fail-closed)"
+store '[
+ {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_BD_LIST_FAIL=1 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "an unreadable store exits non-zero, never disposing an until-gated bead"
+eq "$(rehomes)" "0" "and attempts no disposal"
+
+echo "# until: the consumer resolves the whole candidate set in bounded reads (no N+1)"
+export STUB_BD_LOG="$TMP/bd-until.log"
+store '[
+ {"id":"u-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"ux-1","dependency_type":"until"}]},
+ {"id":"u-2","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"ux-2","dependency_type":"until"}]},
+ {"id":"u-3","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"ux-3","dependency_type":"until"}]},
+ {"id":"ux-1","status":"closed","assignee":"","metadata":{},"notes":""},
+ {"id":"ux-2","status":"closed","assignee":"","metadata":{},"notes":""},
+ {"id":"ux-3","status":"closed","assignee":"","metadata":{},"notes":""}]'
+: > "$STUB_BD_LOG"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a bulk pass over three until-gated beads is a clean pass"
+eq "$(rehomes)" "3" "all three resolved until-gated beads are disposed in one pass"
+eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "the until consumer makes NO per-bead show call"
+eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "the until consumer makes NO per-bead dep-list call"
+# No armed beads here, so armed costs two reads (all + ready, no blocker batch);
+# the until consumer costs two (candidate scan + one blocker-status batch),
+# regardless of how many candidates — four total, none per-bead.
+eq "$(grep -c '^list' "$STUB_BD_LOG")" "4" "the until consumer costs a bounded read count (candidate scan + one blocker-status batch), not one per bead"
+unset STUB_BD_LOG
 
 # --- the false-empty-queue guard ---------------------------------------------
 # This is the failure this script must not have. A dispatcher that cannot read

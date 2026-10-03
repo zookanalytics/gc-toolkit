@@ -14,6 +14,13 @@
 # deliberate hold and is never dispatched. `list` answers "what dispatches are
 # owed?"; `disarm` withdraws one.
 #
+# The same pass also runs the resolved-by consumer: a bead carrying an `until`
+# dep ("X resolves me", distinct from `blocks`'s "X must land before me") is
+# disposed through bead-rehome once that dep closes, so a wait whose named cause
+# has landed is closed with a successor pointer, not handed back to triage as
+# fresh work. ONLY `until` disposes — a `blocks` edge is sequencing, and its
+# target closing still leaves the dependent fully owed.
+#
 # `arm` is the default move for a blocked follow-up you file or hold by hand:
 # arm it instead of leaving it unrouted for someone to route once its blocker
 # lands, and the reconcile pass routes it the moment bd reports it ready — so a
@@ -85,6 +92,16 @@ DRY_RUN=0
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
 
+# The resolved-by consumer disposes a bead whose `until` dep has closed, through
+# bead-rehome so the close carries a successor pointer rather than a bare close.
+# Resolved beside this script; the env override points the hermetic test at a stub.
+REHOME="${GC_REHOME_TOOL:-$SCRIPTS_DIR/bead-rehome.sh}"
+UNTIL_TYPE="until"
+# bead-rehome's closed-set bucket for a resolved-by close: the gated bead's
+# resolution is folded into the target it waited on. The --note states the exact
+# mechanism; the pointer bead-rehome stamps (gc.superseded_by) is the precise record.
+UNTIL_KIND="folded"
+
 TMPFILES=()
 cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
 trap cleanup EXIT
@@ -127,8 +144,10 @@ Verbs:
              delivered (a merge_result stamp), and — because each sling mints an
              input convoy — stop re-slinging and escalate a bead whose dispatch
              has failed to finalize MAX_SLING_FAILURES times rather than leak a
-             convoy per pass. Driven by orders/deferred-dispatch.toml (cooldown,
-             scope="rig").
+             convoy per pass. The same pass disposes every open bead whose `until`
+             dependency ("X resolves me") has closed, through bead-rehome, so a
+             resolved wait is closed with a successor pointer not re-triaged.
+             Driven by orders/deferred-dispatch.toml (cooldown, scope="rig").
 
 --sling-arg is repeatable and is passed through to `gc sling` verbatim after the
 target and bead, e.g. --sling-arg --on --sling-arg mol-pr-from-issue.
@@ -494,6 +513,102 @@ sling_bead() { # id target args_json -> rc
     fi
 }
 
+# --- until: the resolved-by consumer -----------------------------------------
+# An `until` dep means "X resolves me" — the half the gate disposition wires
+# alongside a `blocks` wait ("X must land before me"): when the target closes the
+# dependent is disposed, not re-triaged as fresh work. This enumerates every
+# OPEN, UNASSIGNED bead carrying an `until` dep. A non-open status is a deliberate
+# hold and an assignee is a live worker; both are left alone (bead-rehome would
+# refuse their close anyway), so the attempt is skipped. The `until` edge carries
+# no metadata key to scope on, so enumeration is one whole-store list; until edges
+# are rare, so the per-candidate work below is usually zero. Fail closed: an
+# unreadable or non-array listing returns non-zero so the caller leaves the beads
+# for the next pass rather than reading "none" from a store it could not see.
+until_candidates() { # out_file -> "<id>\t<target_ids_csv>" per candidate; rc1 if unreadable
+    local out="$1" all
+    all="$(bd_ list --brief --json --limit 0 2>/dev/null)" || return 1
+    [ -n "$all" ] || return 1
+    printf '%s' "$all" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    printf '%s' "$all" | scrub | jq -r --arg ut "$UNTIL_TYPE" '
+        .[]
+        | select((.status // "") == "open")
+        | select((.assignee // "") == "")
+        | [ (.dependencies // [])[] | select(.type == $ut) | .depends_on_id ] as $u
+        | select(($u | length) > 0)
+        | "\(.id)\t\($u | unique | join(","))"' > "$out" 2>/dev/null || return 1
+    return 0
+}
+
+# Dispose every candidate whose `until` targets have ALL closed, through
+# bead-rehome so the close carries a successor pointer. Returns non-zero only on a
+# hard dispose failure; a held close (an open visit, or another open blocker — bead-rehome
+# refuses rather than force-closing) and an already-recorded different successor
+# are expected states, reported and retried, never a pass failure. "all closed"
+# is conservative: a target absent from the status read, or not yet closed, leaves
+# its candidate waiting — an unread target never reads as a released one.
+reconcile_until() {
+    local cand
+    mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; cand="$REPLY"
+    until_candidates "$cand" || {
+        echo "$PROG: reconcile: could not enumerate until-gated beads — NOT treating this as none owed" >&2
+        return 1; }
+
+    local total
+    total="$(grep -c . "$cand" 2>/dev/null)"; case "$total" in ''|*[!0-9]*) total=0 ;; esac
+
+    # One read resolves every candidate's target statuses (and close times, for
+    # picking the successor when more than one target resolved). --all so a CLOSED
+    # target is visible; the include-* flags so a gate/infra/template target is not
+    # hidden and read as unresolved; --id drops an id with no row, so a target
+    # still absent from the map below stays unresolved, never closed.
+    local target_ids blk_raw map_json
+    target_ids="$(cut -f2 "$cand" | tr ',' '\n' | grep . | sort -u | paste -sd, -)"
+    map_json="{}"
+    if [ -n "$target_ids" ]; then
+        blk_raw="$(bd_ list --id "$target_ids" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null)" || {
+            echo "$PROG: reconcile: could not read until-target statuses — leaving until-gated beads for the next pass" >&2; return 1; }
+        printf '%s' "$blk_raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || {
+            echo "$PROG: reconcile: until-target status read was not an array — leaving until-gated beads for the next pass" >&2; return 1; }
+        map_json="$(printf '%s' "$blk_raw" | scrub | jq -c '[ .[]? | {key:.id, value:{status:(.status//""), closed_at:(.closed_at//"")}} ] | from_entries' 2>/dev/null)" || map_json="{}"
+        [ -n "$map_json" ] || map_json="{}"
+    fi
+
+    local disposed=0 held=0 waiting=0 ufailed=0 id blks decision allclosed succ rc
+    while IFS=$'\t' read -r id blks; do
+        [ -n "$id" ] || continue
+        decision="$(printf '%s' "$blks" | jq -Rc --argjson m "$map_json" '
+            (split(",") | map(select(length > 0))) as $bs
+            | [ $bs[] | {id:., st:($m[.].status // null), ca:($m[.].closed_at // "")} ] as $rows
+            | { allclosed: (($rows | length) > 0 and ([ $rows[] | select(.st != "closed") ] | length == 0)),
+                succ: ([ $rows[] | select(.st == "closed") ] | sort_by(.ca) | last | .id // "") }' 2>/dev/null)"
+        allclosed="$(printf '%s' "$decision" | jq -r '.allclosed // false' 2>/dev/null)"
+        succ="$(printf '%s' "$decision" | jq -r '.succ // ""' 2>/dev/null)"
+        if [ "$allclosed" != "true" ] || [ -z "$succ" ]; then
+            waiting=$((waiting + 1)); continue
+        fi
+        if [ "$DRY_RUN" = 1 ]; then
+            echo "$PROG: DRY-RUN would dispose $id — until target $succ closed — via bead-rehome --kind $UNTIL_KIND"
+            disposed=$((disposed + 1)); continue
+        fi
+        if [ ! -x "$REHOME" ]; then
+            echo "$PROG: WARN bead-rehome tool '$REHOME' not executable — cannot dispose until-resolved $id; leaving it" >&2
+            ufailed=$((ufailed + 1)); continue
+        fi
+        "$REHOME" --origin "$id" --successor "$succ" --kind "$UNTIL_KIND" \
+            --note "resolved by its 'until' dependency on $succ, which has closed (deferred-dispatch until-consumer)" >/dev/null 2>&1
+        rc=$?
+        case "$rc" in
+            0) echo "$PROG: disposed $id — its until target $succ closed"; disposed=$((disposed + 1)) ;;
+            5) echo "$PROG: HELD $id — until target $succ closed and the successor pointer is recorded, but the close is held (an open visit, or another open blocker); it will retry" >&2; held=$((held + 1)) ;;
+            6) echo "$PROG: $id already records a successor other than its until target $succ — leaving that disposition alone" >&2; held=$((held + 1)) ;;
+            *) echo "$PROG: WARN could not dispose until-resolved $id via bead-rehome (rc=$rc) — leaving it for the next pass" >&2; ufailed=$((ufailed + 1)) ;;
+        esac
+    done < "$cand"
+
+    echo "$PROG: until-resolved: $disposed disposed, $held held, $waiting waiting (of $total until-gated)"
+    [ "$ufailed" = 0 ]
+}
+
 cmd_reconcile() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -712,7 +827,12 @@ cmd_reconcile() {
         return 1
     fi
     echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $capped capped, $failed failed (of $expected armed)"
-    [ "$failed" = 0 ]
+
+    # Second half of the pass: dispose beads their `until` dependency has resolved.
+    # It owns its own enumeration and summary; a failure in either half fails the pass.
+    local until_rc=0
+    reconcile_until || until_rc=1
+    [ "$failed" = 0 ] && [ "$until_rc" = 0 ]
 }
 
 # --- main --------------------------------------------------------------------
