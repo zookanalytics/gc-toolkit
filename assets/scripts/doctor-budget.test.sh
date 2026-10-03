@@ -90,6 +90,10 @@ echo "── 4. the slice is the time left, capped ──"
 SLICES="$(GC_DOCTOR_CHECK_TIMEOUT=20 bash -c '
     set -u; . "$1"
     printf "%s " "$(budget_slice)"                                  # capped at half
+    # budget_slice reads budget_now() again internally; freeze it so the tight
+    # cases below test the min/cap/floor arithmetic, not whether two live
+    # date(1) reads land in the same second.
+    budget_now() { printf %s 1000; }
     BUDGET_DEADLINE=$(( $(budget_now) + 3 )); printf "%s " "$(budget_slice)"   # under the cap
     BUDGET_DEADLINE=$(( $(budget_now) - 9 )); printf "%s " "$(budget_slice)"   # past it
     budget_spent && printf spent' _ "$TMP/block.sh")"
