@@ -468,6 +468,17 @@ is_oid() { # <string>
   [ "${#v}" -eq 40 ]
 }
 
+# --- shed orphaned stage-3 findings -------------------------------------------
+# An anchor that left the open set — merged, disposed, closed by hand — is never
+# revisited by the per-anchor loop below (it reads open anchors only), so a
+# lane's still-unvalidated findings on it would sit open forever. They are moot
+# the moment the anchor closed: no validator runs on closed work. Shed them here,
+# once per pass, before the open-set enumeration — this must run even when no
+# open anchor exists, the exact case the early return below would otherwise skip.
+# Keyed on the anchor being gone, never on an approve signal, so it rebuilds no
+# re-approval proxy. Best-effort: finding.sh warns on an unreadable set.
+"$FINDING" shed-orphaned --reason "gate-ensure stage-3 close-on-transition" || true
+
 # --- enumerate the gating set (both sub-states); unreadable = cannot vouch ------
 ROWS=""
 for MR in pre_open_gate pull_request; do
@@ -625,9 +636,10 @@ STRAY
   # state of the lane, and a commit landing on the branch does not change it.
   # It is still read once per anchor, for the dispatch pin the reviewer reads
   # and for the head the machine axis is dated at.
-  # merge_result splits the two gating sub-states: a pre_open_gate anchor has no
-  # PR yet, so no GitHub approval can back a lane there — the lane-state read
-  # below passes --no-remote for it; a pull_request anchor may be human-approved.
+  # merge_result scopes the GitHub-approval fallback: a pre_open_gate anchor has
+  # no PR, so no approval can back a lane there; a pull_request anchor may be
+  # human-approved, which settles a lane for DISPATCH but is not the addressing
+  # signal the moot close keys on (the lane loop below reads local backing first).
   mr=$(meta_of "$row" merge_result)
   head=$(live_head_for "$branch")
   # The machine axis this pass reaches for the anchor as a whole. The gate loop
@@ -656,6 +668,10 @@ STRAY
   quiesce_hold=""
   quiesce_reason=""
   quiesce_unreadable=0
+  # Lanes that derive LOCAL green this pass. Their still-unvalidated findings are
+  # moot and close in one batched call after the gate loop — one finding-set read
+  # per anchor, not one per green lane.
+  green_lanes=""
 
   # Close any must-fix finding on this anchor whose fix unit has landed — every
   # blocks-blocker closed. The fix unit's close leaves the finding it answered
@@ -695,29 +711,46 @@ STRAY
     # marker: lane-state.sh is the one helper merge.sh and pr-open.sh derive green
     # through, so the readers agree. Green is settled — a non-superseded approve
     # review backs the lane — and a push moves no bead it reads, so green survives
-    # new commits. A pre_open_gate anchor carries no PR, so no GitHub approval can
-    # back a lane there. An unreadable derivation holds the dispatch (fail closed),
+    # new commits. An unreadable derivation holds the dispatch (fail closed),
     # exactly as an unreadable in-flight lookup does; a missing helper reads the
     # same way rather than dispatching blind.
-    if [ "$mr" = pull_request ]; then
-      "$LANE_STATE" green --anchor "$id" --lane "$g"; lrc=$?
-    else
-      "$LANE_STATE" green --anchor "$id" --lane "$g" --no-remote; lrc=$?
-    fi
+    #
+    # Derive LOCAL backing first (--no-remote). It answers both questions this
+    # loop asks, and the moot close must split them: a non-superseded approve
+    # review bead is the addressing signal — it settles the lane AND makes the
+    # lane's own earlier-round unvalidated findings moot. A human GitHub approval
+    # (the remote fallback, pull_request only) settles the lane for DISPATCH, but
+    # it is not the addressing action, so it backs no moot close; keying the close
+    # on it would rebuild the re-approval proxy this design refuses. So a lane
+    # green only through the remote fallback settles WITHOUT enrolling for it.
+    "$LANE_STATE" green --anchor "$id" --lane "$g" --no-remote; lrc=$?
     case "$lrc" in
-      0) # green — settled, nothing owed. The lane re-reviewed clean, so its own
-         # still-unvalidated findings from earlier rounds are moot: resolve them.
-         # This is stage-3's moot derivation, fired by the derived green lane state
-         # and owned here beside close-answered above so resolution has one home
-         # (moved out of signoff.sh, which now only records the verdict). A
-         # validated finding and one a fix unit still blocks are left alone; a lane
-         # with nothing to close touches no bead and leaves the cache intact.
-         "$FINDING" close-unvalidated --anchor "$id" --lane "$g" --reason "lane green (gate-ensure stage-3)" >/dev/null 2>&1 || true
+      0) # Locally green — settled, and the lane re-reviewed clean, so its own
+         # still-unvalidated findings from earlier rounds are moot. Enroll the
+         # lane for the one batched close-unvalidated after the loop (stage-3's
+         # moot derivation, owned here beside close-answered above so resolution
+         # has one home — moved out of signoff.sh, which now only records the
+         # verdict).
+         green_lanes="${green_lanes:+$green_lanes,}$g"
          continue ;;
-      1) : ;;         # not green — the lane owes a review, has one running, or the anchor is mid-change
+      1) : ;;         # not locally green — the remote fallback below, then dispatch
       *) echo "$PROG: $id gate '$g' lane-state derivation unreadable (rc=$lrc); dispatching nothing (merge stays held, retry next pass)" >&2
          skipped=$((skipped + 1)); continue ;;
     esac
+    # No local backing. On a pull_request anchor an APPROVED GitHub review still
+    # settles the lane for dispatch (it names no gate, so it backs every lane);
+    # pre_open_gate carries no PR, so there is no such fallback. A remote-green
+    # lane settles WITHOUT enrolling for the moot close, per the split above; an
+    # unreadable remote lookup holds the dispatch, exactly as the local one does.
+    if [ "$mr" = pull_request ]; then
+      "$LANE_STATE" green --anchor "$id" --lane "$g"; rrc=$?
+      case "$rrc" in
+        0) continue ;;
+        1) : ;;
+        *) echo "$PROG: $id gate '$g' lane-state derivation unreadable (rc=$rrc); dispatching nothing (merge stays held, retry next pass)" >&2
+           skipped=$((skipped + 1)); continue ;;
+      esac
+    fi
     why="lane '$g' does not derive green (no non-superseded approve review backs it)"
 
     # A lane short of green is what machine `progressing` names — not the outcome
@@ -929,6 +962,18 @@ STRAY
   done <<GATES
 $gates
 GATES
+
+  # One moot close for every lane that derived LOCAL green this pass (stage-3):
+  # resolve each green lane's still-unvalidated findings in a single finding-set
+  # read, not one read per green lane. Keyed to the reviewed head so the closing
+  # note records which commit cleared the lane (an audit can compare it against
+  # the branch). Best-effort: finding.sh warns and returns on an unreadable set
+  # rather than reading a filter failure as a clean lane, and the next pass
+  # retries; stderr is left to surface rather than discarded.
+  if [ -n "$green_lanes" ]; then
+    "$FINDING" close-unvalidated --anchor "$id" --lanes "$green_lanes" \
+      --reason "lane green at ${head:-unknown} (gate-ensure stage-3)" || true
+  fi
 
   # --- record the pass's own verdict on the anchor ------------------------------
   # The derivation above is reached once per pass. Recording it is what lets

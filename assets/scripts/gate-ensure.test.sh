@@ -757,6 +757,41 @@ out=$(run)
 eq "$(bstatus find-u2)" "open" "an ungreen lane leaves its unvalidated finding open"
 has "$out" "1 reviews dispatched" "…and the ungreen lane still gets a review"
 
+echo "# …a lane green ONLY through a human GitHub approval does NOT moot-close (no re-approval proxy)"
+# No local approve bead: the lane derives green only via github_approved. The moot
+# close keys on the addressing signal — a local non-superseded approve review bead
+# — so the human approval settles the lane for dispatch but resolves no finding.
+# This is the one path where the moved close must not diverge into the proxy.
+store "[$(anchor GA1 pull_request correctness "" polecat/ga1 ',"pr_number":"7701"'), $(unvalidated find-ga1 GA1)]"
+printf '[{"state":"APPROVED","id":1}]' > "$GH_DIR/reviews_7701.json"
+oid ga1 > "$GH_DIR/head_polecat_ga1"
+out=$(run)
+eq "$(bstatus find-ga1)" "open" "a GitHub-approval-only green lane leaves its unvalidated finding open (no re-approval proxy)"
+has "$out" "0 reviews dispatched" "…and the human-approved lane still dispatches nothing"
+rm -f "$GH_DIR/reviews_7701.json"
+
+echo "# …the moot close is lane-scoped: a green lane does not resolve another lane's finding"
+# correctness is backed (locally green) and resolves its own unvalidated finding;
+# arch has no backing (ungreen) and keeps its unvalidated finding. The batched
+# close names only the lanes that derived green.
+store "[$(anchor LS1 pull_request "correctness, arch" "" polecat/ls1),
+        $(backed rev-ls1 LS1 correctness),
+        $(unvalidated find-ls1c LS1 correctness),
+        $(unvalidated find-ls1a LS1 arch)]"
+oid ls1 > "$GH_DIR/head_polecat_ls1"
+out=$(run)
+eq "$(bstatus find-ls1c)" "closed" "the green lane's own unvalidated finding resolves"
+eq "$(bstatus find-ls1a)" "open" "a second lane's unvalidated finding is left open (lane-scoped close)"
+has "$out" "1 reviews dispatched" "…and the ungreen second lane still gets a review"
+
+echo "# …a still-unvalidated finding on a CLOSED anchor is shed (the anchor left the open set first)"
+# gate-ensure reads open anchors only, so a finding whose anchor merged or closed
+# would orphan open forever. The once-per-pass orphan shed resolves it as moot —
+# no validator runs on closed work — keyed on the anchor being gone, not on approve.
+store "[{\"id\":\"OC1\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"t OC1\",\"metadata\":{\"merge_result\":\"merged\",\"branch\":\"polecat/oc1\"}}, $(unvalidated find-oc1 OC1)]"
+out=$(run)
+eq "$(bstatus find-oc1)" "closed" "an unvalidated finding on a closed anchor is shed as moot-on-close"
+
 echo "# …and an unreadable quiescence probe holds the dispatch, fail-closed"
 store "[$(anchor R1u pull_request correctness "" polecat/r1u)]"
 oid r1u > "$GH_DIR/head_polecat_r1u"
