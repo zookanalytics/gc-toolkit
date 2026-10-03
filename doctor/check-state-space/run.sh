@@ -111,6 +111,25 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     exit 1
 fi
 
+# A `<<<` here-string is backed by a temp file in $TMPDIR; under disk pressure
+# that file cannot be created, the redirection fails silently (this check is
+# set -u, not set -e), and the loop it feeds runs zero times — a non-empty set
+# read as empty, which this check would otherwise report as a clean all-clear.
+# Each enumeration below is staged into a file under this checked, templated temp
+# dir and read with a plain `< "$file"`, which keeps the loop in the current
+# shell so the finding arrays survive it; a staging failure is loud, never a
+# forged all-clear. The dir and its files die with this process.
+ENUM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-state-space.XXXXXX" 2>/dev/null) || {
+    echo "cannot determine whether the state space holds (I2)"
+    detail "could not create a temp directory to stage the store enumerations (mktemp -d failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+}
+trap 'rm -rf "$ENUM_TMP" 2>/dev/null' EXIT
+if ! printf '%s\n' "$scopes" > "$ENUM_TMP/scopes"; then
+    echo "cannot determine whether the state space holds (I2)"
+    detail "could not stage the store enumeration (temp-file write failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+fi
 while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
@@ -174,14 +193,22 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         if [ $? -ne 0 ]; then
             warnings+=("$label: claimed/held anchor listing from $rig_path/.beads could not be parsed — the detached-state claim check did NOT run for this store")
         elif [ -n "$crows" ]; then
-            while IFS=$'\037' read -r id mr st; do
-                [ -n "$id" ] || continue
-                errors+=("$label bead $id: merge_result=$mr is a detached state (lifecycle/lifecycle.toml detached_states) but the bead is status=$st, not open — a detached anchor rests open so the merge cadence can drive it, and every cadence reader (pr-open, merge, pr-facts, gate-ensure) enumerates --status=open, so this claimed/held anchor has dropped out of the pipeline unseen until the claim resolves")
-            done <<< "$crows"
+            if printf '%s\n' "$crows" > "$ENUM_TMP/crows"; then
+                while IFS=$'\037' read -r id mr st; do
+                    [ -n "$id" ] || continue
+                    errors+=("$label bead $id: merge_result=$mr is a detached state (lifecycle/lifecycle.toml detached_states) but the bead is status=$st, not open — a detached anchor rests open so the merge cadence can drive it, and every cadence reader (pr-open, merge, pr-facts, gate-ensure) enumerates --status=open, so this claimed/held anchor has dropped out of the pipeline unseen until the claim resolves")
+                done < "$ENUM_TMP/crows"
+            else
+                warnings+=("$label: could not stage the detached-state claim enumeration (temp-file write failed — e.g. /tmp under disk pressure) — the detached-state claim check did NOT run for this store")
+            fi
         fi
     fi
 
     [ -n "$rows" ] || continue
+    if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
+        warnings+=("$label: could not stage the state-space enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
+        continue
+    fi
     while IFS=$'\037' read -r kind id val extra; do
         [ -n "$kind" ] || continue
         case "$kind" in
@@ -191,8 +218,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             detachedassignee) errors+=("$label bead $id: merge_result=$val carries assignee=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states) and rests unheld; a holder here is a second driver racing the cadence on one anchor") ;;
             healer)     errors+=("$label bead $id: carries deleted healer-bookkeeping key \"$val\" — lifecycle/lifecycle.toml removed it with its writer, so something retired is still writing state") ;;
         esac
-    done <<< "$rows"
-done <<< "$scopes"
+    done < "$ENUM_TMP/rows"
+done < "$ENUM_TMP/scopes"
 
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
