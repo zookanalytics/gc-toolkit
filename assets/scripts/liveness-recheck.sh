@@ -215,10 +215,14 @@ CENSUS=$(jq -n \
                      + (if ($b | mv("merge_result")) != "" then ["merge_result=" + ($b | mv("merge_result"))] else [] end)
                      + (if ($b | mv("pr_number"))   != "" then ["pr=" + ($b | mv("pr_number"))] else [] end))
                     | join("  ")}
-         elif ((($b.assignee // "") != "") or (($b | mv("gc.routed_to")) != "")) then
+         # A work bead under execution carries gc.execution_routed_to while
+         # assignee and gc.routed_to are empty, so a worked test on those two
+         # alone misreads in-flight work as idle and a sitting re-dispatches it.
+         elif ((($b.assignee // "") != "") or (($b | mv("gc.routed_to")) != "") or (($b | mv("gc.execution_routed_to")) != "")) then
            {verdict: "worked",
             detail: ((if ($b.assignee // "") != "" then ["assignee=" + $b.assignee] else [] end)
-                     + (if ($b | mv("gc.routed_to")) != "" then ["routed_to=" + ($b | mv("gc.routed_to"))] else [] end))
+                     + (if ($b | mv("gc.routed_to")) != "" then ["routed_to=" + ($b | mv("gc.routed_to"))] else [] end)
+                     + (if ($b | mv("gc.execution_routed_to")) != "" then ["execution_routed_to=" + ($b | mv("gc.execution_routed_to"))] else [] end))
                     | join("  ")}
          elif ((standing_kinds | index($b | mv("task_kind"))) != null) then
            {verdict: "standing",
