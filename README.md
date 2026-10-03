@@ -90,6 +90,7 @@ and `render-seed-audit.sh --check` verifies it exactly.
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
+- [docs/rig-demo.md](docs/rig-demo.md) — capturing a narrated video demo of a rig's app with the reusable rig-demo mol
 
 ## Related
 
