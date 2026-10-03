@@ -8,6 +8,10 @@
 # is the one parser. correctness and triage are the forced baseline; triage may
 # widen check_set to add any check declared here and may not invent one.
 #
+# The naming convention for this file, the per-check method extensions
+# (docs/review-<check>.md), and the reference docs a check reads is
+# docs/review-config.md.
+#
 # Adding a check. Declare it here as a [checks.<name>] row whose `method` points
 # at the skill that carries its full generic method. Give it a dispatch arm in
 # assets/scripts/review-dispatch-body.sh: a short summary and a pointer to that
@@ -16,7 +20,7 @@
 # findings, never edit, leave another check's concern to that check — is emitted
 # once by the dispatch body ahead of every specialist arm, so neither the arm nor
 # the skill restates it. A rig tunes a check for its own repo with
-# docs/review-<name>.md, which the dispatch body appends from the reviewed
+# docs/review-<check>.md, which the dispatch body appends from the reviewed
 # commit; the pack skill stays rig-agnostic.
 
 [checks.correctness]
