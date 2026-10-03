@@ -705,7 +705,15 @@ STRAY
       "$LANE_STATE" green --anchor "$id" --lane "$g" --no-remote; lrc=$?
     fi
     case "$lrc" in
-      0) continue ;;  # green — settled, nothing owed
+      0) # green — settled, nothing owed. The lane re-reviewed clean, so its own
+         # still-unvalidated findings from earlier rounds are moot: resolve them.
+         # This is stage-3's moot derivation, fired by the derived green lane state
+         # and owned here beside close-answered above so resolution has one home
+         # (moved out of signoff.sh, which now only records the verdict). A
+         # validated finding and one a fix unit still blocks are left alone; a lane
+         # with nothing to close touches no bead and leaves the cache intact.
+         "$FINDING" close-unvalidated --anchor "$id" --lane "$g" --reason "lane green (gate-ensure stage-3)" >/dev/null 2>&1 || true
+         continue ;;
       1) : ;;         # not green — the lane owes a review, has one running, or the anchor is mid-change
       *) echo "$PROG: $id gate '$g' lane-state derivation unreadable (rc=$lrc); dispatching nothing (merge stays held, retry next pass)" >&2
          skipped=$((skipped + 1)); continue ;;
