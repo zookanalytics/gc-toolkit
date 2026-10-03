@@ -313,6 +313,11 @@ if [ -x "$_LS_DIR/review-checks.sh" ]; then
 fi
 
 # >>> classify
+# PREOPEN_GATES_MAP and HAVE_RESOLVER are set above for the whole-sweep run;
+# default them here as well, since the precheck test extracts this marked block
+# and sources it on its own under `set -u`.
+[ -n "${HAVE_RESOLVER:-}" ] || HAVE_RESOLVER=0
+[ -n "${PREOPEN_GATES_MAP:-}" ] || PREOPEN_GATES_MAP="{}"
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
       --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" \
