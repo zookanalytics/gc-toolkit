@@ -113,6 +113,11 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
+# The one resolver of the check index: the two merge-readiness all-green reads
+# below ask it for every declared lane (`--through merge` spans all phases),
+# which drops the non-lanes none/off and the approval merge rule in one place.
+REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
+[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot reconcile" >&2; exit 1; }
 # The merged-record retry cap, shared with merge.sh: this arm and merge.sh's two
 # record arms perform the same repair on the same anchor, so their failures
 # count against one budget rather than each keeping a private tally.
@@ -676,14 +681,23 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
            | select(((.body // "") | contains($marker)) | not) ] | length' 2>/dev/null)
   case "$sf" in ''|*[!0-9]*) sf=0 ;; esac
   [ "$sf" -gt 0 ] || return 1
-  # Only a green check hides findings: a red lane is already re-reviewing.
+  # Only a green check hides findings: a red lane is already re-reviewing. The one
+  # resolver names the declared lanes and drops the non-lanes; the marker read is
+  # the census's own fast green check, kept. The resolver's exit status is
+  # load-bearing: a crash prints nothing, and an empty check list would leave grn=1
+  # (vacuously "all green") and flag a hold with no basis. If it cannot name the
+  # checks, this probe cannot establish its own precondition — return no hold here;
+  # merge.sh's lane gate holds on an unreadable resolver independently.
+  local utgates
+  if ! utgates=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge 2>/dev/null); then
+    return 1
+  fi
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
     m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
     [ "$m" = "green" ] || grn=0
   done <<UTGATES
-$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+$utgates
 UTGATES
   [ "$grn" = 1 ] || return 1
   stamp=$(printf '%s' "$row" | jq -r '(.metadata.pr_unengaged_threads // "") | tostring')
@@ -2005,13 +2019,20 @@ $CBODY"
   # skipped when native auto-merge is armed (the dismissal would hand GitHub the
   # landing).
   all_green=1
+  # The resolver's exit status is safety-critical here: a crash prints nothing, and
+  # an empty check list would leave all_green=1 and dismiss the city's OWN standing
+  # CHANGES_REQUESTED block — removing a merge veto — with the checks possibly not
+  # green. Fail closed: a resolver that cannot name the checks cannot prove them
+  # green, so the block stands.
+  if ! dgates=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge 2>/dev/null); then
+    all_green=0; dgates=""
+  fi
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
     m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
     [ "$m" = "green" ] || all_green=0
   done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+$dgates
 GATES
   if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \
      && [ -n "$SELF_LOGIN" ]; then

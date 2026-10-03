@@ -423,6 +423,7 @@ case "$sub" in
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment) exit 0 ;;
+      ready)   exit "${STUB_PR_READY_RC:-0}" ;;
       edit)
         # The edit MUTATES the fixture the next `pr view` serves, so a second
         # pass over an unchanged store is idempotent because the caller read
