@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# formula-unquoted-for.sh — hardened learned rule: no formula shell block
-# iterates an UNQUOTED expansion (ported from the retired
-# doctor/check-formula-shell-portability). Formula blocks are pasted into
-# whatever shell the agent has; zsh does NOT word-split unquoted $VAR or
-# $(cmd), so `for X in $LIST` runs the body ONCE on the whole joined list —
-# the per-element command fails on the joined token and the step reports an
-# honest-looking failure having silently skipped every real element. Scope:
-# fenced shell blocks in */formulas/*.toml only; quoted lists, literal/glob
-# lists, and zsh's explicit ${=VAR} split are all fine. No exception list.
-# Fix: capture to a file and `while IFS= read -r X; do …; done < "$FILE"`.
+# formula-unquoted-for.sh — hardened learned rule: no agent-executed shell
+# block iterates an UNQUOTED parameter expansion. These blocks are pasted into
+# whatever shell the agent or operator has. zsh does NOT word-split an unquoted
+# $VAR or ${VAR}, so `for X in $LIST` runs the body ONCE on the whole joined
+# list: the per-element command fails on the joined token, and the step
+# reports an honest-looking failure having silently skipped every real element.
+# zsh does split the output of an unquoted command substitution, as sh does,
+# so a list built from $(cmd) or backticks iterates per word in both shells
+# and is not a finding. Words inside a substitution are argument quoting,
+# which this rule does not judge. Quoted lists, literal/glob lists, and zsh's
+# explicit ${=VAR} split are fine too. Scope: fenced shell blocks in formula
+# TOMLs, agent prompt templates, startup fragments, skills, and named
+# paste-to-run docs runbooks. Rendered (generated/, base-snapshots/) and
+# frozen (specs/) trees are excluded. Fix: capture to a file and
+# `while IFS= read -r X`, or pipe into it.
 # Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
 
 set -uo pipefail
@@ -22,24 +27,49 @@ function is_shell_fence(l,   lang) {
     sub(/[[:space:]].*$/, "", lang)
     return (lang == "" || lang == "bash" || lang == "sh" || lang == "shell")
 }
-# True when s still holds an expansion after every QUOTED span is removed.
+# Drop every command substitution span whole: backticks, $(cmd), and the
+# arithmetic $((expr)), nested parentheses included. zsh splits a
+# substitution's output, so neither the span nor the words inside it decide
+# how the list splits. An unterminated $( runs to the end of the list.
+function strip_substitutions(s,   out, i, n, c, depth) {
+    gsub(/`[^`]*`/, " ", s)
+    out = ""; depth = 0; n = length(s)
+    for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (depth == 0) {
+            if (c == "$" && substr(s, i + 1, 1) == "(") { depth = 1; i++; out = out " "; continue }
+            out = out c
+        } else if (c == "(") {
+            depth++
+        } else if (c == ")") {
+            depth--
+        }
+    }
+    return out
+}
+# True when s still holds a parameter expansion ($NAME, $1, ${...}) after
+# every QUOTED span and every command substitution is removed.
 function unquoted_expansion(s,   t) {
     t = s
     gsub(/\$\{=[^}]*\}/, " ", t)   # ${=VAR}: zsh's explicit split — sanctioned
     gsub(/'[^']*'/, " ", t)
     gsub(/"[^"]*"/, " ", t)
     sub(/#.*$/, "", t)
-    return (t ~ /\$/ || t ~ /`/)
+    t = strip_substitutions(t)
+    return (t ~ /\$([A-Za-z_0-9]|\{)/)
 }
-# The word list of a for-statement: after `in`, up to the `;` or `do` that
-# ends it — without the truncation the BODY would be scanned too.
+# The word list of the first for-statement in s: after `in`, up to the `;` or
+# `do` that ends it — without the truncation the BODY would be scanned too.
+# The text after the list is left in WL_REST, where a later for-statement on
+# the same line is found.
 function word_list(s,   rest, p) {
+    WL_REST = ""
     rest = s
     if (!match(rest, /(^|[;&|(){}]|\$\(|[[:space:]](do|then|else))[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]/)) return ""
     rest = substr(rest, RSTART + RLENGTH)
     p = index(rest, ";")
-    if (p > 0) rest = substr(rest, 1, p - 1)
-    if (match(rest, /[[:space:]]do([[:space:]]|$)/)) rest = substr(rest, 1, RSTART - 1)
+    if (p > 0) { WL_REST = substr(rest, p); rest = substr(rest, 1, p - 1) }
+    if (match(rest, /[[:space:]]do([[:space:]]|$)/)) { WL_REST = substr(rest, RSTART) WL_REST; rest = substr(rest, 1, RSTART - 1) }
     return rest
 }
 /^[[:space:]]*```/ {
@@ -55,9 +85,11 @@ function word_list(s,   rest, p) {
     stripped = text
     sub(/^[[:space:]]+/, "", stripped)
     if (stripped ~ /^#/) next
-    list = word_list(text)
-    if (list == "") next
-    if (unquoted_expansion(list)) print start ":" stripped
+    remain = text
+    while ((list = word_list(remain)) != "") {
+        if (unquoted_expansion(list)) { print start ":" stripped; break }
+        remain = WL_REST
+    }
 }
 AWKEOF
 )
@@ -65,12 +97,36 @@ AWKEOF
 found=0
 for f in "$@"; do
     [ -f "$f" ] || continue
-    case "$f" in */lint-learned.d/* | */base-snapshots/*) continue ;; esac
-    case "$f" in */formulas/*.toml | formulas/*.toml) ;; *) continue ;; esac
+    # Excluded trees first: the detector's own fixtures, frozen spec records,
+    # and rendered artifacts. generated/seed-audit re-renders from the agent
+    # prompts and fragments below, so a finding there would duplicate the
+    # source finding it re-renders; base-snapshots is a frozen render too.
+    case "$f" in
+        */lint-learned.d/* \
+        | */base-snapshots/* | base-snapshots/* \
+        | */generated/* | generated/* \
+        | */specs/* | specs/*) continue ;;
+    esac
+    # In scope: surfaces whose fenced shell blocks are pasted into a shell and
+    # run, not prose. Formula TOMLs, agent prompt templates, the startup
+    # fragments injected into every prompt, the skills agents load and run,
+    # and the dispatch-containment runbook operators paste and run. Docs are
+    # named here one by one rather than matched by a docs/* glob: most docs
+    # are prose whose fenced examples are illustrative, and flagging those
+    # trains readers to ignore the rule. Add a runbook to this list when it
+    # becomes paste-to-run.
+    case "$f" in
+        */formulas/*.toml | formulas/*.toml) ;;
+        */template-fragments/*.template.md | template-fragments/*.template.md) ;;
+        */agents/*/prompt.template.md | agents/*/prompt.template.md) ;;
+        */skills/*/SKILL.md | skills/*/SKILL.md) ;;
+        */docs/gascity-dispatch-containment.md | docs/gascity-dispatch-containment.md) ;;
+        *) continue ;;
+    esac
     while IFS= read -r hit; do
         [ -n "$hit" ] || continue
         no="${hit%%:*}"
-        echo "$f:$no: formula shell block iterates an UNQUOTED expansion — zsh does not word-split, so the body runs once on the joined list; capture to a file and \`while IFS= read -r X\`, or write \${=VAR} and mean it (learned rule: formula-unquoted-for)"
+        echo "$f:$no: shell block iterates an UNQUOTED parameter expansion — zsh does not word-split \$VAR, so the body runs once on the joined list; capture to a file and \`while IFS= read -r X\`, or write \${=VAR} and mean it (learned rule: formula-unquoted-for)"
         found=1
     done < <(awk "$SCAN_AWK" "$f" 2>/dev/null)
 done
