@@ -108,10 +108,10 @@ it; the refinery opens the PR; **operator review of that PR is the
 gate**. The distiller records and proposes — it never edits a prompt,
 fragment, or skill, and neither does any capturing agent.
 
-### Two gates on promotion into a paid carrier
+### Three gates on promotion into a paid carrier
 
 Not every earned pattern may be auto-adopted into content every future agent
-pays for. Two gates — defined in full in the `learning-distill` rubric,
+pays for. Three gates — defined in full in the `learning-distill` rubric,
 `skills/learning-distill/SKILL.md` — guard the `convention`, `profile`,
 `work-quality`, and `review-rubric` carriers:
 
@@ -120,9 +120,13 @@ pays for. Two gates — defined in full in the `learning-distill` rubric,
   `obs.endorsed=operator` observation: a self-report that promotes itself
   has no external check. An all-operator cluster spanning two or more
   distinct `obs.provenance` events is corroborated and promotes unendorsed,
-  because the operator's correction is that check. A blocked pattern is
-  *surfaced* to the operator (held with the block stated), never adopted;
-  it promotes later on corroboration or an explicit `learn this`
+  because the operator's correction is that check. Endorsement clears this
+  gate for the **direction** the operator endorsed, not for the
+  conventions-list mechanism: agreeing a behavior matters is not agreeing
+  that a static bullet every agent pays for is how to secure it, so an
+  endorsed cluster still faces the carrier choice and Gate 3. A blocked
+  pattern is *surfaced* to the operator (held with the block stated), never
+  adopted; it promotes later on corroboration or an explicit `learn this`
   endorsement.
 - **Remedy class (Gate 2).** A remedy that is an exhortation ("be
   thorough", "try harder") or that fixes a structural failure (a
@@ -132,8 +136,22 @@ pays for. Two gates — defined in full in the `learning-distill` rubric,
   instead to an **engineering work bead** (the promotion-time twin of the
   retirement pass's *hardenable?* question). Only a concrete behavior keyed
   to a concrete trigger promotes as prose.
+- **Lever fit (Gate 3).** A candidate that clears Gate 2 is a concrete
+  behavior keyed to a trigger, but that does not yet make a static entry the
+  right *lever* for it. A `convention` bullet or a `work-quality` entry
+  states an outcome and waits to be read: it can bind a behavior an agent
+  carries into the turn, but it cannot make a decision when the decision
+  arrives. When the target is a live judgment call — the agent weighing
+  particulars that differ every time — the entry names the outcome it wants
+  and leaves the agent to judge exactly as they would have without it. The
+  tell for the wrong lever is a candidate that hardcodes the easy half of a
+  discrimination and leaves the hard half to judgment anyway. When the lever
+  is wrong, the distiller **holds rather than files the static bullet** and
+  routes to where the call is made: a decision-point mechanism (an
+  engineering bead, a gate), a `review-rubric` dimension a reader applies to
+  the diff, or the author's own discrimination in the moment.
 
-Both gates guard the paid carriers only; they do not apply to
+All three gates guard the paid carriers only; they do not apply to
 `learning-rubric` proposals against the skill, to retirements, or to
 hardens (see decisions D8/D9 in
 `specs/2026-08-learning-system/decisions.md`). Gate 2 has one redirect
