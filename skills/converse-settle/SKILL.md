@@ -54,12 +54,22 @@ VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
   --ruled no --still-owed "<what is still owed, ≤140 chars>"
   # --ruled yes --ruling "<the ruling, one line>" --route <rig>/<agent>|human
   # --no-wait   |   --waiting-on <bead> [--waiting-on <bead> ...]
+  # --rework    (with --ruled yes) the ruling makes the subject's open PR stale
 ```
 **Set `--ruled` from what this sitting actually settled.** The gate
 starts shut, so `--ruled no` re-states the wait rather than dropping it;
 `--ruled yes` resolves it and releases a `held` item. A demand a named
 person must perform is assigned, and the discharge leaves it alone —
 that one is theirs to close.
+
+**Add `--rework` when a `--ruled yes` ruling makes an already-published
+PR stale** — the ruling changes what the branch must contain, but the PR
+still reads review-ready against a head that predates it. It files the
+rework demand a review verdict would file, a fix unit that blocks the
+subject anchor and resumes its branch, sourced by this visit. Without it
+the ruling lands only in notes nothing reads, and the stale PR keeps
+reading ready. It applies only to an open-PR subject; on anything else it
+is a no-op the sign-off reports.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),

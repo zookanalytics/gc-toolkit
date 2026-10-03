@@ -566,6 +566,14 @@ review's result set.
   `gate-ensure.sh` also clear a marker, each under a condition
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
   and cannot assert it.
+- **Ruling** (operator, via converse): `converse-rework.sh` files and slings one
+  rework child for an operator ruling whose consequence is a stale open PR,
+  sourced by `source_ruling_bead=<visit>` in place of a verdict's
+  `source_review_bead`. It is the same fix unit — `task_kind=rework`, the
+  anchor's branch resumed, a `blocks` edge holding the merge — reached from the
+  second authority a rework originates from, so a ruling on a published PR
+  becomes demand the refinery lands rather than prose nobody reads. converse
+  never pushes code; the molecule does.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — an open `must-fix` finding on any lane, a fix unit in
   flight, a validation pass in flight, or a full review already in flight on

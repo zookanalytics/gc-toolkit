@@ -513,7 +513,7 @@ keys = [
 keys = [
   "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
-  "review_pool", "source_review_bead", "source_review", "task_kind",
+  "review_pool", "source_review_bead", "source_ruling_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
   "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
   "dispatch_count", "dispatch_backstop.<g>",
@@ -569,6 +569,12 @@ keys = [
 #   stamps source_review = the comma-joined GitHub review ids whose bodies its
 #   child carries verbatim, a comment batch rather than a signoff round.
 #   Neither is cleared.
+# source_ruling_bead — the visit a ruling-sourced rework child answers, the
+#   analog of source_review_bead for an operator ruling rather than a review
+#   verdict. converse-rework.sh stamps it = the visit the sitting reached the
+#   ruling in, and dedups a second child against it. A rework child carries
+#   source_review_bead or source_ruling_bead, never both: the two name the two
+#   authorities a rework originates from, a review and a ruling. Not cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a

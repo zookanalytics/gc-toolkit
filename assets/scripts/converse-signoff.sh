@@ -28,9 +28,13 @@
 #   converse-signoff.sh --visit <id> --outcome "<takeaway, ≤140 chars>" \
 #     [--subject <id>] [--ruled yes|no] \
 #     [--no-wait | --waiting-on <bead> ...] \
-#     [--ruling "<one line>"] [--still-owed "<≤140 chars>"] [--route <rig>/<agent>|human]
+#     [--ruling "<one line>"] [--still-owed "<≤140 chars>"] [--route <rig>/<agent>|human] \
+#     [--rework]
 #   --outcome is required. --ruled defaults to `no`. --ruled yes requires
 #   --ruling and --route; --ruled no requires --still-owed.
+#   --rework (with --ruled yes): the ruling makes an already-published PR stale,
+#     so file the rework demand against the subject anchor — the review verdict's
+#     rework child, sourced by this visit — instead of only resolving the demand.
 set -u
 
 # >>> control-char-scrub
@@ -48,6 +52,7 @@ RULED=no
 RULING=""
 STILL_OWED=""
 ROUTE=""
+REWORK=0
 WAIT=()
 
 die() { echo "converse-signoff: $1" >&2; exit 2; }
@@ -61,9 +66,10 @@ while [ $# -gt 0 ]; do
     --ruling)     shift; [ $# -gt 0 ] || die "--ruling needs a value"; RULING="$1" ;;
     --still-owed) shift; [ $# -gt 0 ] || die "--still-owed needs a value"; STILL_OWED="$1" ;;
     --route)      shift; [ $# -gt 0 ] || die "--route needs a value"; ROUTE="$1" ;;
+    --rework)     REWORK=1 ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
-    -h|--help)    sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            die "unknown argument '$1'" ;;
   esac
   shift
@@ -77,6 +83,9 @@ if [ "$RULED" = yes ]; then
   [ -n "$ROUTE" ]  || die "--ruled yes requires --route (where the item is released to)"
 else
   [ -n "$STILL_OWED" ] || die "--ruled no requires --still-owed (what the item still waits on)"
+fi
+if [ "$REWORK" = 1 ] && [ "$RULED" != yes ]; then
+  die "--rework requires --ruled yes (the rework demand follows a ruling that settled the question)"
 fi
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
@@ -220,6 +229,32 @@ if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" 
     || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
 fi
 
+# A ruling can make an already-published PR stale: it changes what the branch
+# must contain, while the PR still reads review-ready against a head that
+# predates it. --rework turns that ruling into the rework demand a review verdict
+# files — a fix unit that blocks the anchor and resumes its branch — sourced by
+# this visit instead of a verdict. It is the sitting's explicit opt-in, because
+# only the sitting knows a ruling's consequence reaches the open PR.
+# converse-rework.sh refuses anything but an open-PR anchor, so a --rework on a
+# non-PR item is a loud no-op, not a bad child. The filing is independent of the
+# demand discharge above: a ruling with no prior hold still needs its rework.
+REWORK_FILED=""
+if [ "$RULED" = yes ] && [ "$REWORK" = 1 ]; then
+  CR=""
+  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$cand/assets/scripts/converse-rework.sh" ] && { CR="$cand/assets/scripts/converse-rework.sh"; break; }
+  done
+  if [ -z "$CR" ]; then
+    echo "NO converse-rework.sh on any candidate root — the ruling did NOT reach rework on $ITEM; file it by hand once the script resolves: converse-rework.sh --anchor $ITEM --ruling-bead $VISIT --ruling \"$RULING\""
+  elif REWORK_OUT=$("$CR" --anchor "$ITEM" --ruling-bead "$VISIT" --ruling "$RULING" 2>&1); then
+    echo "$REWORK_OUT"
+    REWORK_FILED=yes
+  else
+    echo "REWORK NOT FILED on $ITEM: $REWORK_OUT"
+    echo "  the ruling is recorded but the open PR is NOT held for rework; re-run: $CR --anchor $ITEM --ruling-bead $VISIT --ruling \"$RULING\""
+  fi
+fi
+
 # Stash what the visit's PR-reminder close will say, for the writer that runs
 # AFTER the visit is actually closed: converse-settle's close step on a normal
 # sign-off, or converse-claim.sh's stranded-finish recovery. This script is the
@@ -240,6 +275,7 @@ SIGNOFF_ACTIONS=""
 [ -n "$routed" ] && SIGNOFF_ACTIONS="routed work to $routed"
 if [ "$RULED" = yes ]; then
   SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }ruling: $RULING (released to $ROUTE)"
+  [ -n "$REWORK_FILED" ] && SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS}; filed ruling-driven rework on $ITEM"
 elif [ -n "$STILL_OWED" ]; then
   SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }still owed: $STILL_OWED"
 fi

@@ -1815,6 +1815,7 @@ SOARGS=(--visit v-x --outcome "o — p" --ruled yes --route human); run_so; eq "
 SOARGS=(--visit v-x --outcome "o — p" --ruled yes --ruling r);    run_so; eq "$SO_RC" "2" "--ruled yes without --route is refused"
 SOARGS=(--visit v-x --outcome "o — p" --ruled no);                run_so; eq "$SO_RC" "2" "--ruled no without --still-owed is refused"
 SOARGS=(--visit v-x --ruled no --still-owed z);                   run_so; eq "$SO_RC" "2" "a missing --outcome is refused"
+SOARGS=(--visit v-x --outcome "o — p" --ruled no --still-owed z --rework); run_so; eq "$SO_RC" "2" "--rework without --ruled yes is refused"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
