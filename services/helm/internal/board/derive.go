@@ -1901,10 +1901,12 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// wrapper neither sources a rig's repository nor waits for one.
 	linkPRBranches(folded)
 
-	// Stamp who must act next — PRPhase on a merge anchor, Phase on every live
-	// row — from the shared prstatus core, the same taxonomy pr-status-label.sh
-	// projects to the GitHub status: label; then let the frontier lead with that
-	// state so the board's primary vocabulary is the liveness.
+	// Stamp each row's phase: PRPhase on a merge anchor, Phase on every live row.
+	// A live row's phase is the status: label tri-state from the shared prstatus
+	// core, the same one pr-status-label.sh projects to the GitHub status: label;
+	// a closed merge anchor's PRPhase is instead a board-only terminal state
+	// (merged or closed). Then let the frontier lead with that state so the
+	// board's primary vocabulary is the liveness.
 	classifyPhases(folded, anchors, facts)
 
 	// Split Held into parked vs engaged on each held row, from the same sittings
@@ -1971,14 +1973,23 @@ func repoBaseFromPRURL(prURL string) string {
 	return u.Scheme + "://" + u.Host + "/" + parts[0] + "/" + parts[1]
 }
 
-// The phase values — the mutually-exclusive status: taxonomy
-// pr-status-label.sh projects to a GitHub PR label, defined by the shared
-// prstatus package so the board and the label name the states from one source.
+// The phase values — the status: vocabulary defined by the shared prstatus
+// package so the board and the GitHub PR label name the states from one source.
+// The live tri-state is what pr-status-label.sh projects to the label; the
+// terminal pair is the board's alone, stamped on a resolved row by
+// [terminalPRPhase].
 const (
 	PhaseWorking        = string(prstatus.Working)
 	PhaseNeedsReview    = string(prstatus.NeedsReview)
 	PhaseNeedsAttention = string(prstatus.NeedsAttention)
+	PhaseMerged         = string(prstatus.Merged)
+	PhaseClosed         = string(prstatus.Closed)
 )
+
+// mergeResultMerged is the merge_result the refinery records on the anchor it
+// closes for a landed PR — the lifecycle's one closed state, and the board's
+// signal that a resolved row merged rather than closed without merging.
+const mergeResultMerged = "merged"
 
 // classifyPhases stamps a row's tri-state — who must act on it next — from the
 // shared prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
@@ -1993,8 +2004,10 @@ const (
 // place of its own ([aggregatePhases]) — a parent's frontier is its children's
 // states — before the frontier SPEAKS that tri-state: on a live row the liveness
 // word leads the one-line summary, so the board's primary vocabulary is the state
-// rather than the roll-up. A closed row keeps its age phrase — the tri-state has
-// no live answer for it, so beadPhase left it empty and the prefix is skipped.
+// rather than the roll-up. A closed row keeps its age phrase: the per-bead Phase
+// has no live answer for it, so the terminal branch below leaves Phase empty and
+// the prefix is skipped. The PR round-trip axis is not empty there — a resolved PR
+// has a final state — so that branch stamps PRPhase merged or closed.
 func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	reworkKids := make(map[string]int)
@@ -2015,6 +2028,18 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		if !ok {
 			continue
 		}
+		// A closed row is terminal: nobody must act on it next, so the per-bead
+		// liveness (Phase) stays empty and the frontier keeps its age phrase. The PR
+		// round-trip axis is not empty there — a resolved PR has a final state — so
+		// the board names it off the close, merged or closed. The two axes part here
+		// on purpose: the terminal word is the board's to stamp because the frozen
+		// pre-merge facts prPhase would read (posture=approved, merge_state=CLEAN)
+		// still say working. Recorded axes (PRMachine) travel on a closed row
+		// unchanged.
+		if !a.ClosedAt.IsZero() {
+			tiles[i].PRPhase = terminalPRPhase(a)
+			continue
+		}
 		kids := reworkKids[tiles[i].ID]
 		prP := prPhase(a, kids)
 		phase := beadPhase(a, f, kids)
@@ -2026,13 +2051,10 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		// both tri-states a live merge anchor carries — the PR-axis PRPhase behind
 		// the chip and the per-bead Phase the frontier speaks — so a row the machine
 		// calls blocked cannot read needs-attention on one and awaiting-review on the
-		// other. A closed row has no live Phase to lift, so its frontier keeps its
-		// age phrase.
+		// other.
 		if isBlocked(tiles[i].PRMachine) {
 			prP = PhaseNeedsAttention
-			if phase != "" {
-				phase = PhaseNeedsAttention
-			}
+			phase = PhaseNeedsAttention
 		}
 		tiles[i].PRPhase = prP
 		tiles[i].Phase = phase
@@ -2180,11 +2202,13 @@ func aggregatePhases(tiles []Tile, anchors []Anchor) {
 	}
 }
 
-// prPhase answers who must act on a merge anchor next, delegating to
+// prPhase answers who must act on a LIVE merge anchor next, delegating to
 // prstatus.Derive — the same function assets/scripts/pr-status-label.sh runs
 // through `gctk pr-status derive` to write the GitHub PR list's status: label.
 // The board and the label derive the state from one code path, so a bead's board
 // liveness and its PR label cannot disagree. Empty on a non-merge row.
+// [classifyPhases] calls it only on a live row; a resolved anchor's PR state is
+// [terminalPRPhase]'s, off the close rather than the frozen pre-merge facts.
 func prPhase(a Anchor, openReworkKids int) string {
 	if !isMergeAnchor(a) {
 		return ""
@@ -2192,15 +2216,30 @@ func prPhase(a Anchor, openReworkKids int) string {
 	return string(prstatus.Derive(phaseFacts(a, Facts{}, openReworkKids)))
 }
 
-// beadPhase is the per-bead liveness for every LIVE row — the generalization of
-// prPhase, applied to any bead through the same prstatus core so a merge anchor
-// and a plain bead name their state from one rule. A closed row is terminal and
-// carries no live tri-state, so it reads empty, the way prPhase reads empty off a
-// non-merge row.
-func beadPhase(a Anchor, f Facts, openReworkKids int) string {
-	if !a.ClosedAt.IsZero() {
+// terminalPRPhase names a resolved PR's final state for the PR round-trip axis on
+// a closed anchor: merged when the refinery landed it (it closes the anchor
+// carrying merge_result=merged), else closed — a merge anchor that reached a
+// closed bead without that marker closed without merging, a supersede or disposal.
+// prstatus.Derive cannot name this: a merged anchor freezes at posture=approved,
+// merge_state=CLEAN (never restamped), which it reads as working, and the sole
+// terminal signal is the close the board holds. Empty on a non-merge row, which
+// has no PR to resolve.
+func terminalPRPhase(a Anchor) string {
+	if !isMergeAnchor(a) {
 		return ""
 	}
+	if a.Metadata[mdMergeResult] == mergeResultMerged {
+		return PhaseMerged
+	}
+	return PhaseClosed
+}
+
+// beadPhase is the per-bead liveness for every live row — the generalization of
+// prPhase, applied to any bead through the same prstatus core so a merge anchor
+// and a plain bead name their state from one rule. Terminal-ness is not its
+// concern: [classifyPhases] returns on a closed row before it calls beadPhase — a
+// closed bead's per-bead liveness is empty — so beadPhase derives unconditionally.
+func beadPhase(a Anchor, f Facts, openReworkKids int) string {
 	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
 }
 
