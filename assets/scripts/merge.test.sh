@@ -14,8 +14,24 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+
+# Build the port BEFORE the harness puts stub binaries on PATH: the stub git
+# answers nothing, and a toolchain that consults it for a VCS stamp would be
+# reading a fixture. -buildvcs=false keeps the build off that path entirely; no
+# assertion here reads a version.
+GCTK_BUILT=""
+GCTK_BUILD_LOG="$TMP/gctk-build.log"
+GO_PRESENT=0
+if command -v go >/dev/null 2>&1; then
+    GO_PRESENT=1
+    if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
+        GCTK_BUILT="$TMP/gctk"
+    fi
+fi
+
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
 harness_init
@@ -58,6 +74,14 @@ visit() { # id anchor [status]
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"visit: %s","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
     "$1" "${3:-open}" "$2" "$2"
 }
+
+# TWO ARMS, ONE BODY. The merge writer exists twice during the gctk migration —
+# `gctk merge` (services/gctk) and the shell fallback in merge.sh — and a caller
+# cannot tell which answered. So every assertion below runs against both: arm
+# "shell" forces the fallback with GCTK_BIN=none, arm "gctk" points GCTK_BIN at
+# a freshly built binary and reaches it through merge.sh, which also proves the
+# preference wiring.
+suite() {
 
 echo "# happy path"
 store "[$(anchor M1 10), $(rev M1)]"
@@ -816,6 +840,9 @@ STUB
 chmod +x "$SD/render-seed-audit.sh"
 export STUB_RENDER_RC=0 STUB_RENDER_OUT=""
 mkdir -p "$TMP/repo/generated/seed-audit"; printf 'name = "t"\n' > "$TMP/repo/pack.toml"
+# The body runs once per arm; S0 is the no-rendered-audit case, so drop any
+# INDEX.md a prior arm's S1 rendered before asserting the probe stays idle.
+rm -f "$TMP/repo/generated/seed-audit/INDEX.md"
 export STUB_TOPLEVEL="$TMP/repo" STUB_FETCHED_HEAD="sha-80"
 
 store "[$(anchor S0 80), $(rev S0)]"
@@ -1061,6 +1088,54 @@ printf '%s' "$(prview 99 OPEN DIRTY)" > "$GH_DIR/pr_view_99.json"
 echo '[]' > "$GH_DIR/reviews_99.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed merge-in in flight is the city's move, not a wedge"
+
+}
+
+echo "## arm: shell fallback (GCTK_BIN=none)"
+export GCTK_BIN=none
+suite
+
+echo
+echo "## arm: gctk merge (reached through merge.sh)"
+if [ -n "$GCTK_BUILT" ]; then
+    export GCTK_BIN="$GCTK_BUILT"
+    suite
+    # The arm proves nothing unless merge.sh actually handed off. merge's stdout
+    # is byte-identical across the two, so a sentinel on the resolved path is the
+    # discriminator: it names itself and the subcommand merge.sh must pass it.
+    SENTINEL="$TMP/sentinel-gctk"
+    printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s\\n" "$*"\n' > "$SENTINEL"
+    chmod +x "$SENTINEL"
+    has "$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)" "SENTINEL-GCTK merge" "merge.sh execs \$GCTK_BIN with the merge subcommand when it resolves"
+elif [ "$GO_PRESENT" -eq 0 ]; then
+    bad "no Go toolchain: the gctk merge port was NOT exercised, and this suite is its acceptance bar"
+else
+    bad "gctk did not build; the port was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+fi
+
+echo
+echo "## arm: the city chain, with no GCTK_BIN to shortcut it"
+# GC_CITY_PATH is the city root a supervisor puts in an agent session; GC_CITY
+# and GC_CITY_ROOT are absent there. A resolver blind to it leaves every agent
+# on the fallback, so the port ships and never runs in the shape most callers
+# have. Reached with GCTK_BIN unset, which is how a real caller reaches it. The
+# deployed binary is byte-identical to the shell, so a self-naming sentinel at
+# the resolved path is the discriminator.
+if [ -n "$GCTK_BUILT" ]; then
+    CITY="$TMP/city"
+    mkdir -p "$CITY/.gc/services/gctk/bin"
+    printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s\\n" "$*"\n' > "$CITY/.gc/services/gctk/bin/gctk"
+    chmod +x "$CITY/.gc/services/gctk/bin/gctk"
+    for VAR in GC_CITY_PATH GC_CITY GC_CITY_ROOT; do
+        out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$VAR=$CITY" "$SUT" 2>&1)
+        has "$out" "SENTINEL-GCTK merge" "$VAR alone resolves the deployed binary"
+    done
+    # The control: the same binary on disk, named by nothing — the shell answers.
+    out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" 2>&1)
+    hasnt "$out" "SENTINEL-GCTK" "no city named: the shell fallback answers"
+else
+    bad "gctk did not build; the city resolution chain was NOT exercised"
+fi
 
 echo
 echo "passed: $PASS  failed: $FAIL"

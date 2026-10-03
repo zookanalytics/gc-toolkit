@@ -150,6 +150,29 @@ func (c *Client) List(args ...string) (rows []Bead, ok bool) {
 	return rows, true
 }
 
+// DepList runs `gc bd dep list <id> <args>` and decodes the JSON array of
+// dependency rows it prints. ok mirrors List's fail-closed contract: false when
+// the output does not decode as an array, so a caller holds on an unreadable
+// probe rather than reading it as "no dependencies". Exit status and the
+// rig-preface are handled exactly as Show and List handle them.
+func (c *Client) DepList(id string, args ...string) (rows []Bead, ok bool) {
+	full := append([]string{"bd", "dep", "list", id}, args...)
+	cmd := exec.Command(c.bin, full...)
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			return nil, false
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
+	dec.UseNumber()
+	if err := dec.Decode(&rows); err != nil {
+		return nil, false
+	}
+	return rows, true
+}
+
 // Update runs one `gc bd update`, returning its combined output. Callers pass
 // the whole transition in a single call: a partial write is the failure mode
 // the atomic update exists to prevent.

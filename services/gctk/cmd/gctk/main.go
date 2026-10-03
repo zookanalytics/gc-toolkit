@@ -14,13 +14,13 @@
 // gctk shells out to gc/bd/gh exactly as the scripts did rather than linking
 // the beads library. Same observability, same stubs, same permissions surface.
 //
-// Ported so far: lifecycle and pr-status. The rest of the merge-cadence cluster
-// (gate-ensure, pr-open, merge, pr-facts, convoy-graduate, signoff) still runs
-// as shell. assets/scripts/lifecycle.sh remains as the fallback for a city whose
-// gctk build has not landed yet; pr-status has none by design — its tri-state
-// lives only in gctk so the status: label and the helm board share one code
-// path, so when the binary is absent or stale pr-status-label.sh leaves the
-// label unchanged rather than deriving it in shell.
+// Ported so far: lifecycle, merge and pr-status. The rest of the merge-cadence
+// cluster (gate-ensure, pr-open, pr-facts, convoy-graduate, signoff) still runs
+// as shell. assets/scripts/lifecycle.sh and assets/scripts/merge.sh remain as
+// fallbacks for a city whose gctk build has not landed yet; pr-status has none
+// by design — its tri-state lives only in gctk so the status: label and the helm
+// board share one code path, so when the binary is absent or stale
+// pr-status-label.sh leaves the label unchanged rather than deriving it in shell.
 package main
 
 import (
@@ -33,6 +33,7 @@ import (
 
 const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
+  gctk merge                      merge cadence arm 4 — the single writer of merged truth (assets/scripts/merge.sh)
   gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
   gctk version                    the revision this binary was built from
 
@@ -51,6 +52,8 @@ func run(args []string, stdout, stderr *os.File) int {
 	switch args[0] {
 	case "lifecycle":
 		return cli.Lifecycle(args[1:], stdout, stderr)
+	case "merge":
+		return cli.Merge(args[1:], stdout, stderr)
 	case "pr-status":
 		return cli.PRStatus(args[1:], stdout, stderr)
 	case "version":
