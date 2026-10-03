@@ -132,6 +132,20 @@ echo "--- usage ---"
 "$SWEEP" --nope >/dev/null 2>&1; eq "$?" "2" "an unknown flag exits 2"
 "$SWEEP" extra >/dev/null 2>&1; eq "$?" "2" "a positional argument exits 2"
 
+echo "--- orders/dead-molecule-sweep.toml is a rig-scoped cooldown order ---"
+# The sweep reaps on a cadence only because this order fires it; a missing or
+# miswired order means the husks accumulate with nothing running the reaper.
+ORDER="$HERE/../../orders/dead-molecule-sweep.toml"
+[ -s "$ORDER" ] || bad "orders/dead-molecule-sweep.toml exists" "missing $ORDER"
+O="$(cat "$ORDER" 2>/dev/null)"
+has "$O" 'trigger = "cooldown"' "it is cooldown-triggered"
+has "$O" 'scope = "rig"' "it is rig-scoped (reaps the rig's own store)"
+has "$O" 'assets/scripts/dead-molecule-sweep.sh --apply' "exec runs this sweep with --apply"
+has "$O" 'interval =' "a cooldown trigger declares an interval (the cadence)"
+has "$O" 'timeout =' "it bounds the pass with a timeout"
+# The key itself, not the word: the header explains WHY the key is absent.
+eq "$(grep -cE '^[[:space:]]*idempotent[[:space:]]*=' "$ORDER")" "0" "no idempotent key — the sweep writes, single-flight guards it"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

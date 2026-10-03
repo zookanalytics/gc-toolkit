@@ -1,0 +1,45 @@
+# dead-molecule-sweep — reap the dead graph.v2 molecule husks in one store. A
+# molecule parked by a molecule-hold whose teardown never ran, or drained
+# mid-flight, leaves a non-closed workflow root (gc.kind=workflow) whose steps
+# re-offer a finished molecule or sit `blocked` outside every readiness query.
+# Nothing else reaches them: the witness patrol skips workflow roots by kind,
+# orphan recovery keys on an assignee these owner-less roots lack, and
+# orphan-dispose routes only a CLOSED root to the disposer. So the husks
+# accumulate in the in_progress list under dead owners until something
+# enumerates the roots and disposes them. This pass is that something: it hands
+# every non-closed workflow root to dead-molecule-dispose.sh, which de-routes
+# then closes a dead, uncontested husk and refuses a live molecule, an open
+# escalation, or a source mid-PR. All safety is the disposer's; the sweep holds
+# no guard of its own.
+#
+# Cooldown, not condition. A root names its owner only in gc.session_name — a
+# pool-slot label a successor keeps alive — so an owner-liveness pre-filter
+# cannot tell a live molecule from a husk; the disposer is the authority on
+# liveness and must run per root. There is no cheap precheck to gate on, so the
+# pass runs on a timer rather than a condition.
+#
+# Hourly. A husk is inert — de-routed or blocked, offered to no pool — so
+# reaping is not urgent; the interval keeps the in_progress list clean at modest
+# cost. The disposer refuses a live root after a cheap liveness read, so a pass
+# over a store of mostly-live molecules is cheap; the cost is the one-time
+# backlog, which drains across a few passes.
+#
+# Rig scope: the sweep pins one store (GC_RIG_ROOT/.beads), so each rig reaps its
+# own; a city-wide pass would race the same store from every rig. Tune the
+# interval from city.toml [[orders.overrides]], not here.
+#
+# The 300s timeout bounds the pass. The disposer de-routes every member before
+# it closes any, and re-enumerates the live members on each run, so a pass killed
+# mid-backlog leaves a chain either intact or de-routed-and-closing and the next
+# pass continues it — no step is readied while still routed.
+#
+# No `idempotent` key, because the pass writes: firing a second pass past a
+# timed-out open-work gate could overlap the first over one store. Single-flight
+# is the only concurrency guard it needs.
+[order]
+description = "Reap dead graph.v2 molecule husks: hand each non-closed workflow root to dead-molecule-dispose.sh, which disposes a dead uncontested husk and refuses a live, escalated, or mid-PR one"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/dead-molecule-sweep.sh --apply"
+timeout = "300s"
+scope = "rig"
