@@ -149,6 +149,13 @@ mustfix() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"%s","finding.disposition":"must-fix"}}' \
     "$1" "$2" "${3:-correctness}"
 }
+# An open still-unvalidated finding on <anchor> <lane>: a task_kind=finding bead
+# the lane raised that the validator has not ruled. A lane that derives green
+# resolves it as moot (gate-ensure's stage-3 moot derivation).
+unvalidated() { # <id> <anchor> [lane=correctness]
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"%s","finding.disposition":"unvalidated"}}' \
+    "$1" "$2" "${3:-correctness}"
+}
 # An open validation pass on <anchor> (quiescence clause c): a task_kind=validation
 # bead (a mol-validate pour) whose anchor_bead is the anchor.
 validation() { # <id> <anchor> [lane=correctness]
@@ -729,6 +736,27 @@ out=$(run)
 eq "$(bstatus find-w2)" "open" "an in-flight fix unit's finding is left open"
 has "$out" "0 reviews dispatched" "…and the fix unit still in flight quiesces the anchor"
 
+echo "# a green lane resolves its own still-unvalidated findings as moot (the stage-3 close moved out of signoff.sh)"
+# A lane that re-reviewed clean (a backing approve) answers its own unruled
+# findings. gate-ensure — the single stage-3 owner — closes the lane's
+# still-unvalidated findings off the derived green state, the close signoff.sh
+# used to perform at the approve verdict.
+store "[$(anchor U1 pull_request correctness "" polecat/u1), $(backed rev-u1 U1), $(unvalidated find-u1 U1)]"
+oid u1 > "$GH_DIR/head_polecat_u1"
+out=$(run)
+eq "$(bstatus find-u1)" "closed" "gate-ensure resolves a green lane's unvalidated finding as moot"
+has "$out" "0 reviews dispatched" "…and the green lane dispatches nothing"
+
+echo "# …but a lane short of green does NOT resolve its unvalidated findings (the trigger is the derived green state)"
+# No backing review, so the lane is ungreen: the moot close must not fire, and the
+# lane still gets a review. Resolution stays keyed on the addressing signal — a
+# clean re-review — never firing every pass regardless of lane state.
+store "[$(anchor U2 pull_request correctness "" polecat/u2), $(unvalidated find-u2 U2)]"
+oid u2 > "$GH_DIR/head_polecat_u2"
+out=$(run)
+eq "$(bstatus find-u2)" "open" "an ungreen lane leaves its unvalidated finding open"
+has "$out" "1 reviews dispatched" "…and the ungreen lane still gets a review"
+
 echo "# …and an unreadable quiescence probe holds the dispatch, fail-closed"
 store "[$(anchor R1u pull_request correctness "" polecat/r1u)]"
 oid r1u > "$GH_DIR/head_polecat_r1u"
@@ -1113,8 +1141,9 @@ echo "# with GC_RECONCILE_BD_CACHE set, the arm's repeated anchor_bead reads col
 # A settled-green anchor dispatches nothing, but gate-ensure and the real
 # finding.sh / lane-state it shells out to each read the same (anchor_bead, LIVE)
 # query a few times per pass. Uncached every read is a server call; with the
-# per-pass cache the repeats are served from disk. close-answered touches
-# nothing on a green anchor, so no mid-arm invalidation reopens the window.
+# per-pass cache the repeats are served from disk. On a green anchor with no
+# findings to resolve, close-answered and the green-lane close-unvalidated both
+# early-return before their cache invalidation, so neither reopens the window.
 store "[$(anchor CA pre_open_gate correctness "" polecat/ca), $(backed rev-ca CA)]"
 oid ca > "$GH_DIR/head_polecat_ca"
 unset GC_RECONCILE_BD_CACHE 2>/dev/null || true
