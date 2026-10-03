@@ -1417,7 +1417,8 @@ lacks "…and never authorizes a prose-only wait in its place" \
 
 have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
-have "…and re-states it when it does not" '"$HELM" demand "$GATED" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
+have "…and re-states the wait on the ITEM when it does not (cut-short consolidation)" \
+     '"$HELM" demand "$ITEM" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
 have "the prompt states the sibling rule for everything a sitting files" \
      'SIBLING of the subject, never a' "$PROMPT"
 
@@ -1684,11 +1685,24 @@ eq "$SO_RC" "0" "the discharge exits 0 on a conversation-wait ruling"
 have "a ruled sitting resolves the demand gating the VISIT" 'bd gate resolve d-v --reason approved' "$SOGC"
 have "…and stamps the ruling onto the visit demand's board sentence" 'helm[RIG] takeaway d-v approved --by converse --no-wait' "$SOLOG"
 
-echo "── the conversation wait, unruled: the visit demand is re-stated ──"
+echo "── a cut-short conversation wait is MOVED off the closing visit onto the item ──"
+# The visit is about to close, so a demand left on it orphans — gate-visit-sweep
+# names it on stderr forever and no return trip re-offers it. The cut-short
+# discharge closes the visit demand and re-states the wait on the ITEM, where the
+# liveness sweep re-offers the next sitting and the merge holds until it is answered.
 SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
 run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
-have "an unruled sitting re-states the demand on the visit" 'helm[RIG] demand v-x still need X --by converse' "$SOLOG"
-if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled conversation wait" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled conversation wait"; fi
+have "the visit demand is closed so it does not orphan on the closing visit" 'gate resolve d-v' "$SOGC"
+have "…its board question is settled as moved" \
+     'helm[RIG] takeaway d-v cut short; wait moved to item-x --by converse --no-wait' "$SOLOG"
+have "…and the wait is re-stated on the ITEM, not the visit" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+if grep -q 'demand v-x' "$SOLOG"; then bad "…and no longer re-states on the closing visit" "found 'demand v-x' on a cut-short"; else ok "…and no longer re-states on the closing visit"; fi
+
+echo "── cut-short with BOTH a visit wait and a merge hold: both consolidate on the item ──"
+SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_DEMAND=1 SO_VISIT_DEMAND=1
+have "the visit demand is closed" 'gate resolve d-v' "$SOGC"
+have "…and the wait is re-stated on the item (refreshing the merge hold)" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
 
 echo "── a conversation wait AND an explicit merge hold: both demands discharge ──"
 # A sitting that both waits on the operator (visit demand) and pauses the merge

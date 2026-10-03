@@ -208,10 +208,11 @@ The loop, every visit:
    prevent. Re-read it. If it stays unreadable, hold the sitting and mail the
    witness `HELP:`, and do not `drain-ack` it and do not work it.
 
-   **`BEGAN=recheck`** — no key, but the item still carries an open demand.
-   That demand is a hold's own trace. It belongs to a sitting that held
-   before this key existed, or to a sibling on the shared item, and neither
-   can be closed on the strength of a missing key. Fall through to step 2 and
+   **`BEGAN=recheck`** — no key, but an open demand still gates the item or
+   this visit (a PR-anchor conversation files its demand on the visit). That
+   demand is a hold's own trace. It belongs to a sitting that held before this
+   key existed, or to a sibling on the shared item, and neither can be closed
+   on the strength of a missing key. Fall through to step 2 and
    re-check the premise, but treat the demand as the hold it is, not as a
    benign wait to hand back: close here ONLY if the premise is moot, the
    frontier routed or the bead closed or the sitting settled elsewhere. A
@@ -219,8 +220,8 @@ The loop, every visit:
    which re-files the demand and stamps `gc.hold_demand`, so the next restart
    reads it as `yes`.
 
-   **`BEGAN=no`** — the visit read cleanly, carries no key, and its item
-   holds no open demand, so nothing here earned a hold: fall through to step 2
+   **`BEGAN=no`** — the visit read cleanly, carries no key, and no open demand
+   gates it or its item, so nothing here earned a hold: fall through to step 2
    and re-check the premise. A visit whose premise died between filing and
    claiming closes there, and its benign exits still apply, an open PR on the
    operator's own review queue or a known acceptable state, because no hold of

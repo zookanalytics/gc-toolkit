@@ -20,18 +20,23 @@
 #      never persisted.
 # Then, where the item is still unanchored, it transitions to `held` so the
 # anchor readers drop it while a person owes an answer. To pause the merge of an
-# anchored item a sitting takes the documented opt-in step — a demand on the
-# anchor — which the merge sweep already honors; by default it does not.
+# anchored item a sitting passes --hold-merge, the opt-in that files a second
+# demand on the anchor — the blocks edge the merge sweep already honors; by
+# default it does not.
 #
 # The item is the visit's stall_root, else the subject; the writers (gc-helm.sh,
 # lifecycle.sh) are SEARCHED for on the candidate roots, never assumed, because
 # $GC_RIG_ROOT is the rig that imported this agent and may hold no assets/.
 #
 # Inputs:
-#   $1       the one decision or input needed (≤140 chars); the takeaway reads
-#            "holding — <this>" and the demand reads "<this>"
-#   VISIT    the visit bead reaching its hold (environment)
-#   SUBJECT  its continuation group, the item fallback (environment)
+#   $1           the one decision or input needed (≤140 chars); the takeaway
+#                reads "holding — <this>" and the demand reads "<this>"
+#   --hold-merge pause the PR merge too: file a SECOND demand on the anchor
+#                ($ITEM), the opt-in merge hold. A no-op on an unanchored item,
+#                whose single demand already gates it. Fails closed like the
+#                conversation demand — if the merge hold does not land, exit 1.
+#   VISIT        the visit bead reaching its hold (environment)
+#   SUBJECT      its continuation group, the item fallback (environment)
 # Exit: 0 the hold is real and stamped — post the framing; 1 a gate failed —
 # do NOT post the framing, raise the failure in the thread; 2 usage.
 set -u
@@ -44,7 +49,18 @@ set -u
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-NEED="${1:-${HOLD_NEED:-}}"
+# One positional (the need) plus the optional --hold-merge flag, in any order.
+# The need is a sentence, never a flag, so the first non-flag argument is it.
+HOLD_MERGE=""
+NEED=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --hold-merge) HOLD_MERGE=1 ;;
+    *)            [ -n "$NEED" ] || NEED="$1" ;;
+  esac
+  shift
+done
+NEED="${NEED:-${HOLD_NEED:-}}"
 VISIT="${VISIT:-}"
 SUBJECT="${SUBJECT:-}"
 
@@ -84,7 +100,13 @@ case "$STATE" in
   pre_open_gate|pull_request|merged) GATED="$VISIT" ;;
   *)                                 GATED="$ITEM" ;;
 esac
-"$HELM" takeaway "$ITEM" "holding — $NEED" --by converse
+# The "holding — …" headline is a gc.takeaway hold marker (lifecycle.toml
+# [holds]), so it must sit on the SAME bead the demand's blocks edge lands on,
+# or doctor/check-wait-is-an-edge reports it UNEDGED. That bead is $GATED: the
+# visit for a PR anchor (whose merge keeps moving, so the anchor must read as
+# holding nothing), the item otherwise. Stamping the anchor would both strand an
+# unedged marker and tell the board the anchor is holding while its merge runs.
+"$HELM" takeaway "$GATED" "holding — $NEED" --by converse
 # A hold IS a demand: the operator owes an answer before the conversation can
 # conclude. File it as a bead and let the edge carry the wait — on the VISIT for
 # a proven PR anchor, on $ITEM otherwise (the fail-closed default resolved above).
@@ -136,6 +158,27 @@ if [ "$STAMPED" != "$DEMAND" ]; then
   exit 1
 fi
 # <<< hold-demand-stamp-gate
+# >>> hold-merge-opt-in
+# --hold-merge pauses the PR merge. The conversation demand above gates the
+# VISIT, so by default the anchor keeps moving; this files the SECOND demand, on
+# $ITEM (the anchor), the blocks edge merge.sh / pr-facts.sh / pre-open-rebase.sh
+# honor via gc.demand_for=<anchor>. The step-7 sign-off discharges it by finding
+# the demand on $ITEM, so it needs no other marker. It is meaningful only when
+# the conversation gated the visit: on an unanchored item the single demand
+# already gates the item, so the flag is a no-op. Same fail-closed discipline as
+# the conversation demand — a requested merge hold that did not land must not be
+# framed as held.
+if [ -n "$HOLD_MERGE" ] && [ "$GATED" = "$VISIT" ]; then
+  MERGE_OUT=$("$HELM" demand "$ITEM" "$NEED" --by converse)
+  MERGE_RC=$?
+  MERGE_DEMAND=$(printf '%s\n' "$MERGE_OUT" | awk '/^demand /{print $2; exit}')
+  if [ "$MERGE_RC" -ne 0 ] || [ -z "$MERGE_DEMAND" ]; then
+    echo "NO MERGE-HOLD DEMAND FILED on $ITEM (status $MERGE_RC). --hold-merge was asked for, so the conversation wait stands but the MERGE is NOT held."
+    echo "The verb printed its reason and repair command on stderr. Repair it, then re-run; or raise it in the thread and do NOT describe the merge as held."
+    exit 1
+  fi
+fi
+# <<< hold-merge-opt-in
 if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER on any candidate root — the demand gates the item and keeps it blocked, but no 'held' lifecycle marker is recorded"
 elif [ "$STATE" = "unanchored" ]; then
   "$LC" transition "$ITEM" --to held --route human \

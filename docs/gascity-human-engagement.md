@@ -538,17 +538,23 @@ the gate as `gc.gate_visit=<visit>` at filing time and `gate-visit-sweep.toml`
 files no second visit for it.
 
 When the sitting decides the merge must wait on the operator — the PR should not
-land until this is settled — it takes one explicit step: a second demand filed
-against the ANCHOR (`gc-helm.sh demand <anchor> "<why the merge waits>"`). That
-is the same `blocks` edge the merge sweep already honors — `merge.sh` holds on
-any open dep-edge blocker of the anchor, and `pr-facts.sh` and
-`pre-open-rebase.sh` read the anchor as held by matching `gc.demand_for=<anchor>`
-— so it pauses the PR with no change to any of them. The conversation demand on
-the visit never matches `gc.demand_for=<anchor>`, which is why the default no
-longer freezes the merge. A shepherd sitting simply omits the step, and the PR
-stays on the merge track. The sign-off (`converse-signoff.sh`) discharges
-whichever demands the sitting filed: the visit demand always, the anchor demand
-only when the explicit hold was taken.
+land until this is settled — it takes one explicit step: `--hold-merge` on
+`converse-hold.sh`, which files a second demand against the ANCHOR. That is the
+same `blocks` edge the merge sweep already honors — `merge.sh` holds on any open
+dep-edge blocker of the anchor, and `pr-facts.sh` and `pre-open-rebase.sh` read
+the anchor as held by matching `gc.demand_for=<anchor>` — so it pauses the PR
+with no change to any of them. The conversation demand on the visit never matches
+`gc.demand_for=<anchor>`, which is why the default no longer freezes the merge. A
+shepherd sitting simply omits the flag, and the PR stays on the merge track. The
+sign-off (`converse-signoff.sh`) discharges whichever demands the sitting filed:
+the visit demand always, the anchor demand only when the explicit hold was taken.
+
+A cut-short sign-off (`--ruled no`) is the one other time the merge waits. The
+conversation wait cannot ride the closing visit — a demand left on a closed visit
+is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
+— so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
+the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
+abandoned question is answered or the demand is resolved.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that

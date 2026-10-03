@@ -41,21 +41,25 @@ when read cold off the board. The same step sets `gc.hold_demand` on this
 visit, the trace step 1's `action=hold` arm reads to tell a real hold
 from a claim that died before step 2.
 
-**To pause the merge, take the explicit step — by default a conversation
-does not.** The hold above leaves a PR free to land while you talk, which
-is the shepherd case a conversation opened to help a stuck PR wants. When
-the sitting instead decides the merge must wait on the operator — the PR
-should not land until this is settled — file a second demand against the
-ANCHOR, which the merge sweep already honors. The anchor is the visit's
-`stall_root`, or `$SUBJECT` when it names none; it is the same bead the
-step-7 sign-off discharges, so resolve it the way the hold does:
+**To pause the merge, pass `--hold-merge` — by default a conversation does
+not.** The hold above leaves a PR free to land while you talk, which is the
+shepherd case a conversation opened to help a stuck PR wants. When the sitting
+instead decides the merge must wait on the operator — the PR should not land
+until this is settled — add the flag to the same call:
+```bash
+if VISIT="$VISIT" SUBJECT="$SUBJECT" \
+     "$CONV/converse-hold.sh" --hold-merge "<the one decision or input needed, ≤140 chars>"; then
+  : # the hold is real and the merge is held — post the framing below
+else
+  # the conversation hold or the merge hold did not land — do NOT frame.
+  exit 1
+fi
 ```
-ANCHOR=$(gc bd show "$VISIT" --json | jq -r '.[0].metadata.stall_root // ""')
-<the resolved gc-helm.sh path> demand "${ANCHOR:-$SUBJECT}" "<why the merge waits, ≤140 chars>"
-```
-Omit it and the PR keeps moving; the step-7 sign-off discharges whichever
-demands you filed. Write the resolved path, not the variable, as with the
-close-out below.
+It files a second demand on the anchor — the `blocks` edge the merge sweep
+already honors — and fails the hold closed if that demand does not land, so a
+framing never claims a merge hold it did not take. Omit the flag and the PR
+keeps moving. Either way the step-7 sign-off discharges whichever demands you
+filed.
 
 **The takeaway is the sentence; `held` is the state.** Where `$ITEM`
 already carries an anchor state the held transition is skipped, and
