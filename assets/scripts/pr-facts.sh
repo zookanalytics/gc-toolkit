@@ -827,7 +827,7 @@ while IFS= read -r row; do
       *) short_oid=$(printf '%.8s' "$merge_oid") ;;
     esac
     if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
-         --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --set "merged_sha=$merge_oid" \
          --unset merge_record_failures \
          --append-notes "Merged to $target at $short_oid (recorded by pr-facts)"; then
       recorded=$((recorded + 1))

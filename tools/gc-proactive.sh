@@ -259,7 +259,10 @@ cmd_demand() {
         # agent.toml work_query writes. Mirrors the polecat probe, pinned to
         # the proactive target.
         local target db
-        target="$(resolve_pool_target "${1:-}")"
+        # resolve_pool_target dies (with the "set GC_RIG or pass <rig>/<base>"
+        # guidance) on an unset GC_RIG; fail the demand query closed rather than
+        # query with an empty route that matches nothing.
+        target="$(resolve_pool_target "${1:-}")" || return 1
         db="$(rig_beads_db)"
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         r="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.routed_to=$target" --unassigned \
@@ -403,6 +406,17 @@ cmd_scan() {
         ''|*[!0-9]*) die "GC_PROACTIVE_SLING_CAP must be a non-negative integer (got '$SLING_CAP')" ;;
     esac
 
+    # A --sling sweep routes to the proactive pool, so resolve that target ONCE
+    # up front and fail the whole sweep closed when it cannot. resolve_pool_target
+    # dies on an unset GC_RIG; the per-bead cmd_sling re-resolves inside the loop's
+    # condition below, where set -e is disabled and that die cannot abort — so
+    # without this gate an unset GC_RIG surfaces the guidance once per candidate
+    # and then attempts `gc sling "" <bead>` each time. The subshell keeps die's
+    # exit local, so the guidance shows a single time; `|| return 1` stops the sweep.
+    if [ -n "$do_sling" ]; then
+        ( resolve_pool_target >/dev/null ) || return 1
+    fi
+
     local cands
     cands="$(scan_candidates)"
 
@@ -498,7 +512,12 @@ cmd_sling() {
     fi
 
     local target
-    target="$(resolve_pool_target)"
+    # resolve_pool_target emits the "set GC_RIG or pass <rig>/<base>" guidance and
+    # dies on an unset GC_RIG. Fail closed rather than sling an empty target that
+    # routes to nobody — this guards both a direct `sling` (where set -e would
+    # abort) and the cmd_scan loop's condition (where set -e is disabled, so the
+    # guard, not set -e, is what refuses the empty target).
+    target="$(resolve_pool_target)" || return 1
 
     # --on attaches the workflow to the existing bead and routes THAT bead;
     # --merge pins the path; --reassign hands a human-held bead over cleanly.

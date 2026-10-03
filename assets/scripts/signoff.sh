@@ -770,22 +770,39 @@ if [ -n "$POST_OPEN" ]; then
 else
   TITLE="Rework branch $BRANCH: address pre-open signoff findings"
 fi
-# One review bead owns at most one rework child. This path is fully re-runnable
-# — close_review is its last write, and every exit-2 above it (work-order
-# verify, an unproven pour) leaves the review OPEN with a child already filed
-# and its blocks edge already hung. A re-pool then re-enters here, so a create
-# keyed to the same review mints a SECOND child for one finding: the dispatched
-# one lands, the other never dispatches yet still holds a merge-hold edge no
-# close cancels. Adopt the open child that already answers this review instead.
-# The key is exact — a genuine next round is a new review bead with a different
-# source_review_bead — so subsequent reworks are untouched, and the adopt reads
-# the same down/blocks walk the adopt path reads. An unreadable walk yields
-# no adopted child and falls through to create.
-FIX_BEAD=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
-  | jq -r --arg r "$REVIEW_BEAD" '
-      [ .[]? | select(((.metadata.source_review_bead // "") == $r)
-                       and (((.status // "open") | ascii_downcase) != "closed")) ]
-      | sort_by(.created_at // .id) | (.[0].id // empty)' 2>/dev/null)
+# One review bead owns at most one rework child. This path is fully re-runnable:
+# close_review is its last write, and every exit-2 above it (work-order verify,
+# an unproven pour) leaves the review OPEN with a child already filed. A re-pool
+# re-enters here, so a create keyed to the same review mints a SECOND child for
+# one finding — one dispatches and lands, the other is a duplicate a human must
+# reap. Adopt the open child that already answers this review instead.
+#
+# Discover it by the source_review_bead it carries, not by the anchor's blocks
+# edge. The child is created and stamped (below) BEFORE its blocks edge is hung,
+# so a prior run that filed and stamped the child but exited before hanging the
+# edge leaves an orphan no anchor-edge walk can see, and the create arm mints a
+# second child. source_review_bead is the exact key: it is this review bead's own
+# id, unique to one review of one anchor, and the only bead type stamped with it
+# is a rework child — so a match needs no wider scope, and a genuine next round is
+# a new review bead the key does not match. When more than one live child carries
+# the key, a prior pass filed one and died before dispatch while a retry filed and
+# dispatched another; a child stamped gc.execution_routed_to is in flight on the
+# branch, so prefer it over any inert sibling. Selecting the inert one by creation
+# order re-slings it and double-dispatches the molecule the routed child already
+# owns. Fail closed: an unreadable query cannot be told from "no prior child", and
+# a create on that ambiguity is the double-file this guard prevents, so leave the
+# review open for a retry instead.
+if PRIOR_CHILDREN=$(bd_list --metadata-field "source_review_bead=$REVIEW_BEAD" --status="$LIVE_STATUSES"); then
+  FIX_BEAD=$(printf '%s' "$PRIOR_CHILDREN" | jq -r --arg r "$REVIEW_BEAD" '
+      [ .[]? | select((.metadata.source_review_bead // "") == $r) ]
+      | sort_by(.created_at // .id) as $all
+      | ( ( [ $all[] | select((.metadata["gc.execution_routed_to"] // "") != "") ][0] )
+          // $all[0] )
+      | (.id // empty)' 2>/dev/null)
+else
+  warn "could not read prior rework children for review $REVIEW_BEAD (dedup query failed); review left open for a retry rather than risk a second child"
+  exit 2
+fi
 if [ -n "$FIX_BEAD" ]; then
   # A child that already read back a pour (gc.execution_routed_to stamped) is in
   # flight: only close_review was still owed. Re-stamping or re-slinging it would

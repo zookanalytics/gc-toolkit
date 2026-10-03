@@ -468,6 +468,24 @@ cmd_transition() {
     fi
   fi
 
+  # A transition into a closed state is a terminal land, and a landed bead
+  # carries no live objection: a rejection or a hold reason still on it now
+  # contradicts the record — a merged bead that still reads "do not merge".
+  # Clear every live-objection marker here, at the one writer every close
+  # passes through, so a caller or a field added later cannot reintroduce the
+  # divergence by listing some fields and forgetting others. Deduped against
+  # the caller's own --unset list so the clear is never written twice.
+  if is_closed_state "$TO"; then
+    local obj seen u
+    for obj in rejection_reason blocked_reason; do
+      seen=0
+      for u in ${UNSETS[@]+"${UNSETS[@]}"}; do
+        [ "$u" = "$obj" ] && { seen=1; break; }
+      done
+      [ "$seen" = 0 ] && UNSETS+=("$obj")
+    done
+  fi
+
   local ARGS=()
   if [ "$TO" = "unanchored" ]; then
     ARGS+=(--unset-metadata merge_result)

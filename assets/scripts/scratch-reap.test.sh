@@ -220,6 +220,81 @@ if [ -L "$ROOT/stale-link" ]; then bad "a stale loose symlink is unlinked"; else
 eq "$(stat -c %a "$GUARDED/f")" 400 "the target of a stray symlink keeps its mode"
 if exists "$GUARDED/f"; then ok "the target of a stray symlink survives"; else bad "the target of a stray symlink survives"; fi
 
+# --- targeted --session mode -----------------------------------------------
+# A caller retiring a named session reaps exactly that tree at once, found by
+# its id-named directory. The horizon is not consulted, so a tree well inside
+# it still goes, while its neighbours — same slug and other slugs — are whole.
+reset_root
+mk_session slug-s target 1
+mk_session slug-s neighbour 1
+mk_session slug-t elsewhere 1
+OUT="$(run --session target)"
+if exists "$ROOT/slug-s/target"; then bad "--session removes the named tree though it is inside the horizon"; else ok "--session removes the named tree though it is inside the horizon"; fi
+if exists "$ROOT/slug-s/neighbour/scratchpad/f"; then ok "--session leaves a same-slug neighbour untouched"; else bad "--session leaves a same-slug neighbour untouched"; fi
+if exists "$ROOT/slug-t/elsewhere/scratchpad/f"; then ok "--session leaves another slug untouched"; else bad "--session leaves another slug untouched"; fi
+has "$OUT" "reaped session target" "--session names the session it took"
+
+# The whole point of the mode: it overrides the running-process hold. The full
+# pass holds a session whose id is carried by a live process; --session is the
+# retiring session naming itself, and takes its tree anyway.
+reset_root
+mk_session slug-u live-xyz 1
+env CLAUDE_CODE_SESSION_ID=live-xyz sleep 25 &
+SLEEPER=$!
+run --session live-xyz > /dev/null
+kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
+if exists "$ROOT/slug-u/live-xyz"; then bad "--session reaps a session even while its process is live"; else ok "--session reaps a session even while its process is live"; fi
+
+# --session with no id is a usage error, not a reap of everything.
+OUT="$(run --session)"; RC=$?
+eq "$RC" 2 "--session with no id is refused"
+has "$OUT" "needs an id" "the no-id refusal says so"
+
+# A session with no tree is nothing to do, not an error, and touches nothing.
+reset_root
+mk_session slug-s keeper 1
+OUT="$(run --session absent)"; RC=$?
+eq "$RC" 0 "--session on an absent tree exits 0"
+has "$OUT" "nothing to reap" "--session on an absent tree says so"
+if exists "$ROOT/slug-s/keeper/scratchpad/f"; then ok "--session on an absent tree leaves the others whole"; else bad "--session on an absent tree leaves the others whole"; fi
+
+# The id names a directory for a recursive delete, so it must be a bare id: a
+# value carrying a path separator is refused before anything is touched.
+reset_root
+mk_session slug-s keeper 1
+OUT="$(run --session ../slug-s)"; RC=$?
+eq "$RC" 2 "--session refuses an id with a path separator"
+if exists "$ROOT/slug-s/keeper/scratchpad/f"; then ok "the refused --session deleted nothing"; else bad "the refused --session deleted nothing"; fi
+has "$OUT" "must match" "the refusal says why"
+
+# --dry-run plans the targeted reap and deletes nothing.
+reset_root
+mk_session slug-s target 1
+OUT="$(run --session target --dry-run)"
+if exists "$ROOT/slug-s/target/scratchpad/f"; then ok "--session --dry-run deletes nothing"; else bad "--session --dry-run deletes nothing"; fi
+has "$OUT" "DRY RUN" "--session --dry-run reports the plan"
+
+# A slug directory emptied of its last session by a targeted reap is pruned;
+# one that still holds a session is kept.
+reset_root
+mk_session slug-lone only 1
+mk_session slug-pair one 1
+mk_session slug-pair two 1
+run --session only > /dev/null
+if exists "$ROOT/slug-lone"; then bad "--session prunes a slug dir emptied of its last session"; else ok "--session prunes a slug dir emptied of its last session"; fi
+run --session one > /dev/null
+if exists "$ROOT/slug-pair/two/scratchpad/f"; then ok "--session keeps a slug dir that still holds a session"; else bad "--session keeps a slug dir that still holds a session"; fi
+
+# The targeted mode inherits the root rails: a root not named claude-<uid> is
+# refused before any delete, --session included.
+reset_root
+mk_session slug-s target 1
+NOT_SCRATCH2="$TMP/not-scratch2"; mkdir -p "$NOT_SCRATCH2/slug/target"; : > "$NOT_SCRATCH2/slug/target/keep"
+OUT="$(SCRATCH_REAP_ROOT="$NOT_SCRATCH2" run --session target)"; RC=$?
+eq "$RC" 2 "--session refuses a root not named claude-<uid>"
+if exists "$NOT_SCRATCH2/slug/target/keep"; then ok "the refused --session root is untouched"; else bad "the refused --session root is untouched"; fi
+has "$OUT" "refusing to reap" "the --session root refusal says so"
+
 echo
 echo "scratch-reap.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
