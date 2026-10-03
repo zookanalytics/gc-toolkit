@@ -124,6 +124,14 @@ store "[$(epic_bead E3 open '{"epic_hypothesis":"h","epic_ruling":""}')]"; : > "
 out=$("$SUT" check E3 2>/dev/null); rc=$?
 eq "$rc" 1 "epic with an empty ruling: exit 1"
 
+# 15b. A present-but-off-enum ruling ("pending", a typo) is not a ruling either —
+# the enum is persevere|pivot|close (docs/epics.md), so the gate still holds and
+# an epic cannot close "ruled" on a value that is not a ruling.
+store "[$(epic_bead E3off open '{"epic_hypothesis":"h","epic_ruling":"pending"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E3off 2>/dev/null); rc=$?
+eq "$rc" 1 "epic with an off-enum ruling ('pending'): exit 1"
+has "$out" "persevere/pivot/close" "the refusal names the allowed ruling set"
+
 # 16. A pre-stewardship epic (no hypothesis) is exempt — it predates the model.
 store "[$(epic_bead E3b open '{}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E3b 2>/dev/null); rc=$?
@@ -145,6 +153,18 @@ printf 'VE4|tracks|E4\n' > "$STUB_DEPS"
 out=$("$SUT" check E4 2>/dev/null); rc=$?
 eq "$rc" 1 "a ruled epic under an open visit is still held by the visit clause"
 has "$out" "VE4" "the visit clause names the visit, first refusal stops the set"
+
+# 20. A `gc bd:` notice line leading the probe's stdout must not break it: the
+# gate strips it like bead-context.sh. This probe runs for EVERY finalize, so
+# without the strip one notice line would error jq and fail every merge/close in
+# the rig closed — epics and plain work beads alike.
+store "[$(epic_bead EN open '{"epic_hypothesis":"h","epic_ruling":"persevere"}')]"; : > "$STUB_DEPS"
+out=$(STUB_SHOW_NOTICE=alpha "$SUT" check EN 2>/dev/null); rc=$?
+eq "$rc" 0 "ruled epic behind a gc bd: notice on stdout: exit 0 (notice stripped, not failed-closed)"
+store "[$(epic_bead EM open '{"epic_hypothesis":"h"}')]"; : > "$STUB_DEPS"
+out=$(STUB_SHOW_NOTICE=alpha "$SUT" check EM 2>/dev/null); rc=$?
+eq "$rc" 1 "unruled epic behind a gc bd: notice: still held"
+has "$out" "no valid epic_ruling" "the hold is the real refusal, not a probe-unreadable error"
 
 # 12. Usage.
 "$SUT" check >/dev/null 2>&1; eq "$?" 2 "check without a bead id: exit 2"

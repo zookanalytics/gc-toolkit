@@ -70,6 +70,13 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "an epic_ruling stamped EMPTY is not a ruling"
 has "$OUT" "E4" "the empty-ruling epic is named"
 
+# --- 3b. a present-but-off-enum ruling ("pending", a typo) is not a ruling: the
+# enum is persevere|pivot|close (docs/epics.md), so I14 reads it as unruled. ----
+store "$(epic E4off closed '{"epic_hypothesis":"for X","epic_ruling":"pending"}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an off-enum epic_ruling ('pending') reads as unruled"
+has "$OUT" "E4off" "the off-enum epic is named as an error"
+
 # --- 4. a disposed epic carries its own terminal state -----------------------
 store "$(epic E5 closed '{"epic_hypothesis":"for X","gc.superseded_by":"s-9"}')"
 OUT=$(run_check); RC=$?

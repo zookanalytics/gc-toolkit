@@ -38,6 +38,9 @@ child() { printf '{"id":"%s","issue_type":"task","status":"%s","metadata":{}}' "
 run_sut() { : > "$ESC_CALLS"; : > "$STUB_DEPS"; "$SUT" >/dev/null 2>&1; }
 esc_count() { wc -l < "$ESC_CALLS" | tr -d ' '; }
 esc_has()   { grep -qF "$(printf '%s\t%s\t%s' "$1" "$2" "$3")" "$ESC_CALLS"; }
+# esc_subj <mode> <epic>: did any <mode> call (file|retract) land on this epic,
+# whatever its key. Used to assert an arm filed NOTHING new across every key.
+esc_subj()  { grep -qF "$(printf '%s\t%s\t' "$1" "$2")" "$ESC_CALLS"; }
 
 FULL='{"epic_handle":"h","epic_hypothesis":"for X, Y, signal Z","epic_closure_condition":"3 checks","epic_indicators":"one"}'
 
@@ -47,38 +50,41 @@ run_sut
 eq "$(esc_count)" "1" "a hypothesis-less epic gets exactly one visit"
 if esc_has file E1 epic-floor; then ok "the visit is the floor visit on the epic"; else bad "expected a file/E1/epic-floor visit"; fi
 
-# --- 2. contract: hypothesis present but closure/indicators missing -----------
+# --- 2. contract: hypothesis present but closure/indicators missing. The floor
+# concern has cleared, so that visit is retracted in the same pass. -------------
 store "[$(epic E2 open '{"epic_hypothesis":"for X, Y, signal Z"}')]"
 run_sut
-eq "$(esc_count)" "1" "an epic with a floor but no rest-of-contract gets one visit"
-if esc_has file E2 epic-contract; then ok "the visit is the contract visit"; else bad "expected a file/E2/epic-contract visit"; fi
+if esc_has file E2 epic-contract; then ok "the contract visit is filed"; else bad "expected a file/E2/epic-contract visit"; fi
+if esc_has retract E2 epic-floor; then ok "the cleared floor visit is retracted"; else bad "expected a retract/E2/epic-floor call"; fi
 
-# --- 3. a fully-elaborated epic with no landed units is left alone ------------
+# --- 3. a fully-elaborated epic with no landed units owes no NEW visit; its now-
+# cleared floor and contract visits are retracted, and no ruling is filed. ------
 store "[$(epic E3 open "$FULL")]"
 run_sut
-eq "$(esc_count)" "0" "a complete-contract epic with work still in flight owes nothing"
+if esc_has retract E3 epic-floor; then ok "the cleared floor visit is retracted"; else bad "expected retract/E3/epic-floor"; fi
+if esc_has retract E3 epic-contract; then ok "the cleared contract visit is retracted"; else bad "expected retract/E3/epic-contract"; fi
+if esc_subj file E3; then bad "a complete-contract epic with work in flight owes no new visit"; else ok "no new visit is filed on a complete epic with work in flight"; fi
 
 # --- 4. ruling: every unit landed, no ruling -> the ruling visit fires --------
 store "[$(epic E4 open "$FULL"), $(child C1 closed), $(child C2 closed)]"
 : > "$ESC_CALLS"
 printf 'C1|parent-child|E4\nC2|parent-child|E4\n' > "$STUB_DEPS"
 "$SUT" >/dev/null 2>&1
-eq "$(esc_count)" "1" "an epic whose units have all landed gets one visit"
-if esc_has file E4 epic-ruling; then ok "the visit is the ruling visit"; else bad "expected a file/E4/epic-ruling visit"; fi
+if esc_has file E4 epic-ruling; then ok "the ruling visit fires when every unit has landed"; else bad "expected a file/E4/epic-ruling visit"; fi
 
 # --- 5. a unit still in flight: the ruling is not yet owed --------------------
 store "[$(epic E5 open "$FULL"), $(child C3 closed), $(child C4 open)]"
 : > "$ESC_CALLS"
 printf 'C3|parent-child|E5\nC4|parent-child|E5\n' > "$STUB_DEPS"
 "$SUT" >/dev/null 2>&1
-eq "$(esc_count)" "0" "an epic with a unit still open is not asked for a ruling"
+if esc_subj file E5; then bad "an epic with a unit still open must not be asked for a ruling"; else ok "an epic with a unit still open is not asked for a ruling"; fi
 
-# --- 6. a ruled (still-open) epic: the ruling visit is retracted, releasing the
-# finalize hold so the epic can close -----------------------------------------
+# --- 6. a ruled (still-open) epic: every visit it cleared is retracted, releasing
+# the finalize hold so the epic can close, and nothing new is filed. -----------
 store "[$(epic E6 open "$(printf '%s' "$FULL" | jq -c '. + {"epic_ruling":"persevere"}')")]"
 run_sut
-eq "$(esc_count)" "1" "a ruled epic makes exactly one escalate call"
-if esc_has retract E6 epic-ruling; then ok "the ruling visit is retracted once the ruling is recorded"; else bad "expected a retract/E6/epic-ruling call"; fi
+if esc_has retract E6 epic-ruling; then ok "the ruling visit is retracted once a valid ruling is recorded"; else bad "expected a retract/E6/epic-ruling call"; fi
+if esc_subj file E6; then bad "a fully ruled epic owes no new visit"; else ok "a fully ruled epic files nothing new"; fi
 
 # --- 7. a thin epic with landed units: floor is owed, ruling is NOT -----------
 # A ruling answers a hypothesis; without one, the floor arm owns the epic first.
@@ -94,6 +100,31 @@ if esc_has file E7 epic-ruling; then bad "ruling must not fire without a hypothe
 store "[$(epic E8 open '{}'), $(epic E9 open '{}')]"
 run_sut
 eq "$(esc_count)" "2" "each hypothesis-less epic gets its own floor visit"
+
+# --- 8a. the gate holds every non-closed epic, so an in_progress epic is audited
+# too — open-only would strand an in_progress epic whose units later all land. ---
+store "[$(epic EI in_progress '{}')]"
+run_sut
+if esc_has file EI epic-floor; then ok "an in_progress epic is audited (its floor is owed)"; else bad "expected the floor visit on an in_progress epic"; fi
+
+# --- 8b. a present-but-off-enum ruling ("pending", a typo) is not a ruling: the
+# arm does not retract, and files for a real one (persevere|pivot|close), matching
+# the finalize gate and the doctor backstop. ----------------------------------
+store "[$(epic EO open "$(printf '%s' "$FULL" | jq -c '. + {"epic_ruling":"pending"}')"), $(child C7 closed)]"
+: > "$ESC_CALLS"
+printf 'C7|parent-child|EO\n' > "$STUB_DEPS"
+"$SUT" >/dev/null 2>&1
+if esc_has file EO epic-ruling; then ok "an off-enum ruling still owes a ruling visit"; else bad "expected file/EO/epic-ruling for an off-enum ruling"; fi
+if esc_has retract EO epic-ruling; then bad "an off-enum ruling must not retract the ruling visit"; else ok "an off-enum ruling does not retract the ruling visit"; fi
+
+# --- 8c. an unreadable children probe is a counted failure, not a silent "no
+# ruling owed": the pass names it on stderr and exits non-zero. ----------------
+store "[$(epic EP open "$FULL")]"
+: > "$ESC_CALLS"
+ERRLOG="$TMP/err.log"
+STUB_DEP_GARBAGE=1 "$SUT" >/dev/null 2>"$ERRLOG"; RC=$?
+eq "$RC" "1" "a pass with an unreadable children probe exits non-zero"
+if grep -qF "children probe unreadable for EP" "$ERRLOG"; then ok "the unreadable children probe is named on stderr"; else bad "expected a 'children probe unreadable for EP' stderr line"; fi
 
 # --- 9. GC_RIG unset: a scope=rig order with no rig refuses -------------------
 RC=0; ( unset GC_RIG; "$SUT" >/dev/null 2>&1 ) || RC=$?

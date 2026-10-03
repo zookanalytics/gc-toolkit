@@ -135,7 +135,14 @@ clause_no_open_visit() {
 # untouched. FAIL CLOSED: an unreadable probe refuses.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
-    _fgr_raw=$(gc bd show "$_fgr_bead" --json 2>/dev/null) || {
+    # This probe runs for EVERY finalize (every merge.sh and bead-rehome.sh close,
+    # epic or not), so it must survive the two contaminants a `gc bd --json` read
+    # can carry (bead-context.sh): a leading `gc bd:` rig-store notice line on
+    # stdout, and raw C0 bytes. Strip the notice with `grep -a` (text mode, so a
+    # NUL in the bead's notes cannot flip grep to binary and drop the payload)
+    # BEFORE scrub removes the C0 bytes below. Without the strip, one notice line
+    # would error jq and fail every finalize in the rig closed.
+    _fgr_raw=$(gc bd show "$_fgr_bead" --json 2>/dev/null | grep -a -vE '^gc bd:') || {
         echo "epic-ruling probe unreadable ('gc bd show' failed) — refusing finalize on $_fgr_bead (fail-closed)"
         return 1
     }
@@ -159,10 +166,15 @@ clause_epic_ruling_recorded() {
     _fgr_disposed=$(printf '%s' "$_fgr_raw" | scrub \
         | jq -r '(.[0].metadata["gc.superseded_by"] // "") | tostring' 2>/dev/null)
     [ -n "$_fgr_disposed" ] && return 0
+    # The ruling must be one docs/epics.md defines (persevere|pivot|close). A
+    # present-but-off-enum value — a draft like "pending", a typo — is not a
+    # ruling, so the gate holds: otherwise an epic could close "ruled" on a value
+    # that is not a ruling, and the I14 doctor backstop would report OK. The same
+    # enum the steward's retract arm and doctor/check-epic-closed-implies-ruled use.
     _fgr_ruling=$(printf '%s' "$_fgr_raw" | scrub \
         | jq -r '(.[0].metadata.epic_ruling // "") | tostring' 2>/dev/null)
-    [ -n "$_fgr_ruling" ] && return 0
-    echo "held: epic $_fgr_bead carries a hypothesis but no epic_ruling — a stewarded epic closes by a recorded hypothesis ruling (persevere/pivot/close), not by its last unit merging (docs/epics.md)"
+    case "$_fgr_ruling" in persevere|pivot|close) return 0 ;; esac
+    echo "held: epic $_fgr_bead carries a hypothesis but no valid epic_ruling (found '${_fgr_ruling:-<none>}') — a stewarded epic closes by a recorded hypothesis ruling (persevere/pivot/close), not by its last unit merging (docs/epics.md)"
     return 1
 }
 

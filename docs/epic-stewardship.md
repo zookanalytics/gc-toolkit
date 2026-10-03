@@ -37,14 +37,16 @@ rhymes with. Not the invariant catalog or the finalize gate's full contract
 ## The audit
 
 `orders/epic-steward.toml` runs `assets/scripts/epic-steward.sh` on a cadence
-(`scope=rig`: an epic is a per-rig anchor). One pass enumerates every open
-`issue_type=epic` in the rig and runs three arms over each. Each arm detects
-whether the epic owes a particular decision and, when it does, files exactly one
-operator visit through `escalate.sh`, keyed by concern. `escalate.sh` dedups by
-(subject, key), so a visit that is already open is refreshed, not duplicated, and
-its `tracks` edge to the epic holds the epic's finalize until the conversation is
-answered. The judgment each visit asks for is the operator's; the pass only
-detects what is owed.
+(`scope=rig`: an epic is a per-rig anchor). One pass enumerates every non-closed
+`issue_type=epic` in the rig — `open` and `in_progress`, the same live set the
+finalize gate holds — and runs three arms over each. Each arm detects whether the
+epic owes a particular decision and, when it does, files exactly one operator
+visit through `escalate.sh`, keyed by concern; when the decision has since been
+made, it retracts the visit it filed. `escalate.sh` dedups by (subject, key), so
+a visit that is already open is refreshed, not duplicated, and its `tracks` edge
+to the epic holds the epic's finalize until the conversation is answered. The
+judgment each visit asks for is the operator's; the pass only detects what is
+owed.
 
 A per-rig flock serialises passes, so a long pass cannot overlap the next tick
 and race `escalate.sh`'s find-or-file read. The pass fails closed: with no usable
@@ -57,8 +59,8 @@ classified into it and cannot be judged complete. The floor arm files a visit
 asking the operator to draft and ratify the floor contract — a handle, a
 one-sentence hypothesis, and boundaries. This is the contract's own closure
 condition that "the city proposes a contract for an epic that lacks one"
-([epics.md](epics.md)). A rough hypothesis is enough; the arm goes quiet once one
-is recorded.
+([epics.md](epics.md)). A rough hypothesis is enough; once one is recorded the arm
+retracts any floor visit it filed.
 
 ### Rest of the contract
 
@@ -66,7 +68,8 @@ Once an epic has a hypothesis but is missing its closure condition
 (`epic_closure_condition`) or its leading indicators (`epic_indicators`), the
 contract arm files a visit asking for whichever is absent. The floor is enough to
 start work; the rest of the contract gives the epic an agreed test of done and an
-in-flight signal to steer by.
+in-flight signal to steer by. Once both are recorded the arm retracts the contract
+visit.
 
 ### Hypothesis ruling
 
@@ -138,9 +141,11 @@ which a short interval approximates until a dedicated create-time arm makes it
 exact. Tune the interval from `city.toml` `[[orders.overrides]]`, not the order
 file.
 
-- `EPIC_STEWARD_MAX_EPICS_PER_PASS` (default 50) bounds the epics one pass audits
-  so a rig with many epics cannot overrun the order timeout; the remainder is
-  audited next tick. A ceiling, not active pacing.
+A pass audits the whole live set — epics are a coarse per-rig anchor, so there is
+no per-pass cap; a cap taking the first N in a stable order would never advance to
+the rest. The order's own `timeout` and the single-flight flock bound how long one
+pass runs.
+
 - `EPIC_STEWARD_STATE_DIR` overrides where the per-rig flock lives (tests isolate
   it here).
 - `GC_ESCALATE_TOOL` overrides the `escalate.sh` path (tests capture visits here).
