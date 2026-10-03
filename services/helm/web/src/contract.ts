@@ -286,10 +286,12 @@ export interface Tile {
    */
   pr_branch_url: string;
   /**
-   * Who must act on this merge anchor next — `'working'`, `'needs-review'`, or
-   * `'needs-attention'` — the same status: taxonomy the GitHub PR list carries,
-   * so the board and the label read one vocabulary. `''` on a non-merge row, and
-   * on a closed (`DONE`) row, where the live vocabulary has no answer.
+   * This merge anchor's PR status. On a live anchor it is who must act next —
+   * `'working'`, `'needs-review'`, or `'needs-attention'` — the same status:
+   * taxonomy the GitHub PR list carries, so the board and the label read one
+   * vocabulary. On a closed (`DONE`) anchor it is the PR's resolved state,
+   * `'merged'` or `'closed'`, so a done row names how its PR ended. `''` on a
+   * non-merge row.
    */
   pr_phase: string;
   /**

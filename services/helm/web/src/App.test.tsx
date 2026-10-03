@@ -1274,6 +1274,22 @@ it('shows the PR phase beside the row', async () => {
   expect(within(row as HTMLElement).getByText('needs-review')).toBeTruthy();
 });
 
+// A resolved PR names its terminal state on the same chip, so a done row says how
+// its PR ended — merged or closed — rather than freezing on its last live phase.
+it('shows a resolved PR state on the chip', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-merged',
+    title: 'a row whose PR has merged',
+    pr_phase: 'merged',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a row whose PR has merged/)).toBeTruthy());
+
+  const row = rowFor(/a row whose PR has merged/);
+  const chip = within(row as HTMLElement).getByText('merged');
+  expect(chip.className).toContain('pr-phase--merged');
+});
+
 // An anchor at a human state carries merge_result and can carry no branch and no
 // number, and a cell that named an absence as an identity is the same failure
 // inverted.
