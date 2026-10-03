@@ -73,7 +73,9 @@ WISP_ROWS=$(
 # fresh (open) successor.
 WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
 WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
-for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
+printf '%s\n' "$WISP_IDS" | sed '1d' | while IFS= read -r extra; do
+  gc bd mol burn "$extra" --force
+done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='gc-toolkit.' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')

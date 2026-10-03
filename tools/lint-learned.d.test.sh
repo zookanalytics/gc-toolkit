@@ -783,6 +783,102 @@ FIX
 runbd "$TMP/lint-learned.d/other-detector.sh"
 eq "$RC" 0 "a file under lint-learned.d/ is skipped"
 
+echo "── formula-unquoted-for: what is a finding ──"
+
+# This detector is PATH-SCOPED to the agent-executed surfaces, so fixtures are
+# planted at paths that match that scope. The loop is spelled literally rather
+# than through a placeholder because this test file is not one of those paths —
+# the runner scanning the whole tree never scans it for this rule.
+DET_FUF="$HERE/lint-learned.d/formula-unquoted-for.sh"
+[ -x "$DET_FUF" ] || { echo "no detector at $DET_FUF"; exit 1; }
+runf() { OUT="$("$DET_FUF" "$@" 2>&1)"; RC=$?; }
+
+# Every in-scope surface is scanned: formula TOMLs, agent prompt templates
+# (top-level and under packs/), startup fragments, and the named docs runbook.
+mkdir -p "$TMP/formulas" "$TMP/agents/refinery" "$TMP/packs/k/agents/keeper" \
+         "$TMP/template-fragments" "$TMP/docs"
+for p in formulas/f.toml agents/refinery/prompt.template.md \
+         packs/k/agents/keeper/prompt.template.md \
+         template-fragments/frag.template.md \
+         docs/gascity-dispatch-containment.md; do
+    cat > "$TMP/$p" <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+```
+FIX
+done
+runf "$TMP/formulas/f.toml" "$TMP/agents/refinery/prompt.template.md" \
+     "$TMP/packs/k/agents/keeper/prompt.template.md" \
+     "$TMP/template-fragments/frag.template.md" \
+     "$TMP/docs/gascity-dispatch-containment.md"
+eq "$RC" 1 "an unquoted loop in any in-scope surface is a finding"
+has "$OUT" "formulas/f.toml:2:" "the formula TOML is scanned"
+has "$OUT" "agents/refinery/prompt.template.md:2:" "a top-level agent prompt is scanned"
+has "$OUT" "packs/k/agents/keeper/prompt.template.md:2:" "a pack agent prompt is scanned"
+has "$OUT" "template-fragments/frag.template.md:2:" "a startup fragment is scanned"
+has "$OUT" "docs/gascity-dispatch-containment.md:2:" "the named docs runbook is scanned"
+has "$OUT" "formula-unquoted-for" "the finding names the rule"
+
+# A command substitution list is the same defect as a bare variable: zsh does
+# not split either. (The burn-extra-wisps loop in the patrol prompts is this
+# shape.)
+cat > "$TMP/formulas/cmdsub.toml" <<'FIX'
+```bash
+for extra in $(printf '%s\n' "$IDS" | sed '1d'); do burn "$extra"; done
+```
+FIX
+runf "$TMP/formulas/cmdsub.toml"
+eq "$RC" 1 "an unquoted \$(cmd) list is a finding"
+has "$OUT" "cmdsub.toml:2:" "and reported where it opened"
+
+echo "── formula-unquoted-for: what is not ──"
+
+# A quoted list, zsh's explicit \${=VAR} split, and a literal list are all fine;
+# a loop outside a shell fence is prose, not executed.
+cat > "$TMP/formulas/clean.toml" <<'FIX'
+```bash
+for x in "$LIST"; do echo "$x"; done
+for x in ${=LIST}; do echo "$x"; done
+for x in a b c; do echo "$x"; done
+```
+```text
+for x in $LIST; do echo "$x"; done
+```
+not fenced at all: for x in $LIST; do echo "$x"; done
+FIX
+runf "$TMP/formulas/clean.toml"
+eq "$RC" 0 "quoted, \${=VAR}, literal, and unfenced loops are not findings"
+eq "$OUT" "" "and nothing is printed"
+
+# Scope excludes rendered and frozen trees even when they carry the defect: the
+# fix belongs in the source they render from or froze.
+mkdir -p "$TMP/specs/b/formulas" "$TMP/generated/seed-audit/agents/a" \
+         "$TMP/base-snapshots/x/formulas"
+for p in specs/b/formulas/f.toml \
+         generated/seed-audit/agents/a/prompt.template.md \
+         base-snapshots/x/formulas/f.toml; do
+    cat > "$TMP/$p" <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+```
+FIX
+done
+runf "$TMP/specs/b/formulas/f.toml" \
+     "$TMP/generated/seed-audit/agents/a/prompt.template.md" \
+     "$TMP/base-snapshots/x/formulas/f.toml"
+eq "$RC" 0 "specs/, generated/, and base-snapshots/ are excluded"
+
+# Docs are named one at a time, not matched by a docs/* glob — an ordinary doc
+# whose fenced example happens to hold an unquoted loop is illustrative, not a
+# runbook, and must not be flagged.
+cat > "$TMP/docs/other-doc.md" <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+```
+FIX
+runf "$TMP/docs/other-doc.md"
+eq "$RC" 0 "a doc not on the runbook list is not scanned"
+
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
