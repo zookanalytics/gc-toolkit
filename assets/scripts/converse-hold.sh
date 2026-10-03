@@ -181,6 +181,6 @@ fi
 # <<< hold-merge-opt-in
 if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER on any candidate root — the demand gates the item and keeps it blocked, but no 'held' lifecycle marker is recorded"
 elif [ "$STATE" = "unanchored" ]; then
-  "$LC" transition "$ITEM" --to held --route human \
-    || echo "HELD TRANSITION FAILED on $ITEM — the hold is prose-only; re-run it before you wait"
+  "$LC" transition "$GATED" --to held --route human \
+    || echo "HELD TRANSITION FAILED on $GATED — the hold is prose-only; re-run it before you wait"
 fi
