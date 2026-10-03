@@ -190,18 +190,43 @@ B
 # results depend on who ran it. Every invocation starts from a cleared set.
 gcenv() { env -u GC_SESSION_NAME -u GC_SESSION_ID -u GC_ALIAS -u GC_TRIGGER_BEAD_ID "$@"; }
 
+# This suite is hermetic and deterministic: a fixed fixture, a file-backed `gc`
+# stub, and the script. Nothing in a result varies between runs except the
+# host, and a saturated parallel run can starve a child of CPU long enough that
+# a signal kills it (seen as SIGTERM, exit 143). The suite sets no timeout of
+# its own and the script chooses its own exit codes, so a 128+signal code comes
+# from outside and is not a verdict the script reached; asserting it as a
+# refusal reddens a required check for a reason unrelated to the code. `invoke`
+# returns the script's own exit (0, 1, or 2) on the first try and retries only
+# a signal death (RC >= 128), on a re-run that reproduces the case exactly. It
+# drops the killed attempt's partial write first, so the sink reflects only an
+# attempt that ran to the end. A kill that outlasts every try is left as its
+# signal code, so a persistent one fails loudly instead of looping or passing.
+SCRIPT_TRIES=5
+invoke() {  # invoke [VAR=VALUE ...] -- <script args ...>; sets OUT and RC
+  local -a envv=()
+  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do envv+=("$1"); shift; done
+  [ "${1:-}" = "--" ] && shift
+  local try=1
+  while :; do
+    RC=0
+    OUT=$(gcenv "${envv[@]}" bash "$SCRIPT" "$@" 2>&1) || RC=$?
+    { [ "$RC" -lt 128 ] || [ "$try" -ge "$SCRIPT_TRIES" ]; } && break
+    try=$((try + 1))
+    : > "$FAKE_CLOSED"
+  done
+}
+
 run() {
   # run <args...>; sets OUT (stdout+stderr) and RC.
-  RC=0
-  OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" bash "$SCRIPT" "$@" 2>&1) || RC=$?
+  invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" -- "$@"
 }
 
 # --- 1. THE REGRESSION ANCHOR ------------------------------------------------
 # Stale GC_TRIGGER_BEAD_ID naming a live foreign bead, own bead present.
 reset_beads
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
-      bash "$SCRIPT" --step "$STEP" --outcome pass 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
+       -- --step "$STEP" --outcome pass
 eq "$RC" "0" "(STALE-ENV) a stale env id does not stop the close"
 has "$(cat "$FAKE_CLOSED")" "tk-9b3d8 pass" "(STALE-ENV) closed THIS session's bead for this step"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-dy6cn" "(STALE-ENV) the other session's bead was NOT closed"
@@ -221,9 +246,8 @@ tk-step1|$MINE|mol-feedback-distiller.load-and-gate|closed
 tk-step2|$MINE|mol-feedback-distiller.judge-and-cluster|in_progress
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-step1" \
-      bash "$SCRIPT" --step mol-feedback-distiller.judge-and-cluster 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-step1" \
+       -- --step mol-feedback-distiller.judge-and-cluster
 eq "$RC" "0" "(SELF-STALE) a stale id naming this session's OWN earlier step still resolves"
 has "$(cat "$FAKE_CLOSED")" "tk-step2 pass" "(SELF-STALE) closed the step actually being executed"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-step1" "(SELF-STALE) the already-closed step 1 was not re-closed"
@@ -328,8 +352,7 @@ tk-mine11||$FSTEP|open|root-mine|
 tk-old111|$MINE|$FSTEP|closed|root-old|
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" --bead tk-old111 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" -- --step "$FSTEP" --bead tk-old111
 eq "$RC" "2" "(HINT-NOT-A-ROOT) a closed hint from another molecule is not a close"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(HINT-NOT-A-ROOT) nothing was written"
 hasnt "$OUT" "nothing to do" "(HINT-NOT-A-ROOT) the false-green line is not emitted"
@@ -363,8 +386,7 @@ tk-mine11||$FSTEP|open|root-mine|
 tk-old222|$MINE|$FSTEP|in_progress|root-old|
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" -- --step "$FSTEP"
 eq "$RC" "2" "(ASSIGNEE-ONLY) a molecule named by the assignee alone does not authorize a close"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(ASSIGNEE-ONLY) nothing was written"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(ASSIGNEE-ONLY) the other molecule's live step was NOT closed"
@@ -374,8 +396,7 @@ has "$OUT" "still UNCLOSED" "(ASSIGNEE-ONLY) names the consequence"
 
 # (j) ...and the two independent sources both settle it, on the same store.
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" --root root-mine 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" -- --step "$FSTEP" --root root-mine
 eq "$RC" "0" "(ASSIGNEE-ONLY) --root closes the bead in the named molecule"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) it is our own bead that closes"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(ASSIGNEE-ONLY) the earlier molecule stays untouched"
@@ -398,8 +419,7 @@ tk-mine11|$MINE|$FSTEP|in_progress|root-mine|
 tk-oldsib|$MINE|mol-polecat-work.implement|open|root-old|
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" -- --step "$FSTEP"
 eq "$RC" "0" "(ASSIGNEE-ONLY) an assignee-derived molecule with no rival still closes"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) closed the bead for this step"
 
@@ -412,8 +432,7 @@ tk-their1|gc-toolkit__polecat-lx-other|$FSTEP|open|root-thm|
 tk-their2||$FSTEP|open|root-thn|lx-other
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" -- --step "$FSTEP"
 eq "$RC" "0" "(ASSIGNEE-ONLY) another session's live step is not a rival for ours"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) our own bead still closes"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-their" "(ASSIGNEE-ONLY) nothing of theirs was written"
@@ -426,8 +445,7 @@ tk-oldsib|$MINE|mol-polecat-work.implement|in_progress|root-old|
 tk-old111|$MINE|$FSTEP|closed|root-old|
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" -- --step "$FSTEP"
 eq "$RC" "2" "(ASSIGNEE-ONLY) a closed bead in an assignee-derived molecule is not a pass"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(ASSIGNEE-ONLY) nothing was written"
 hasnt "$OUT" "nothing to do" "(ASSIGNEE-ONLY) the false-green line is not emitted"
@@ -591,9 +609,8 @@ cat > "$FAKE_BEADS" <<B
 tk-solo2|$MINE|$STEP|open
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-solo2" \
-      FAKE_LIST_BLIND=1 bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-solo2" FAKE_LIST_BLIND=1 \
+       -- --step "$STEP"
 eq "$RC" "0" "(OPEN-ENV) the last-resort env path accepts a verified open bead"
 has "$(cat "$FAKE_CLOSED")" "tk-solo2 pass" "(OPEN-ENV) it closed the verified bead"
 
@@ -606,9 +623,8 @@ cat > "$FAKE_BEADS" <<B
 tk-blockd|$MINE|$STEP|blocked
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-blockd" \
-      bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-blockd" \
+       -- --step "$STEP"
 eq "$RC" "2" "(DIAG) an owned bead in an unexecutable status is still refused"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(DIAG) nothing was written"
 has "$OUT" "IS this session's bead for this step" "(DIAG) ownership is reported as proven"
@@ -639,9 +655,8 @@ has "$OUT" "ignoring the hint" "(HINT-BAD) the ignored hint is reported"
 # jq's inside/contains match substrings: a session named lx-zzk must NOT verify
 # as the owner of a bead assigned to ...lx-zzk9.
 reset_beads
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="gc-toolkit__polecat-lx-zzk" bash "$SCRIPT" \
-      --step "$STEP" --bead tk-9b3d8 2>&1) || RC=$?
+invoke GC_SESSION_NAME="gc-toolkit__polecat-lx-zzk" \
+       -- --step "$STEP" --bead tk-9b3d8
 eq "$RC" "2" "(SUBSTRING) a session whose name is a PREFIX of the owner is refused"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(SUBSTRING) nothing was written"
 
@@ -681,9 +696,8 @@ cat > "$FAKE_BEADS" <<B
 tk-solo1|$MINE|$STEP|in_progress
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-solo1" \
-      FAKE_LIST_BLIND=1 bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-solo1" FAKE_LIST_BLIND=1 \
+       -- --step "$STEP"
 eq "$RC" "0" "(ENV-OK) an env id that verifies is honoured"
 has "$(cat "$FAKE_CLOSED")" "tk-solo1 pass" "(ENV-OK) it closed the verified bead"
 
@@ -692,9 +706,8 @@ cat > "$FAKE_BEADS" <<B
 tk-dy6cn|gc-toolkit__polecat-lx-dq84|$OTHER_STEP|in_progress
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
-      bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
+       -- --step "$STEP"
 eq "$RC" "2" "(UNRESOLVABLE) no own bead anywhere is a refusal"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(UNRESOLVABLE) nothing was written"
 has "$OUT" "cannot identify this session's bead" "(UNRESOLVABLE) says what it could not do"
@@ -705,9 +718,8 @@ has "$OUT" "still UNCLOSED and will be re-offered" "(UNRESOLVABLE) names the con
 # unguarded `.[]` on an object is a jq error, and a swallowed jq error is
 # indistinguishable from "no bead found".
 reset_beads
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" FAKE_LIST_GARBAGE=1 \
-      bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" FAKE_LIST_GARBAGE=1 \
+       -- --step "$STEP"
 eq "$RC" "2" "(GARBAGE) a non-array listing is a refusal, not a crash"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(GARBAGE) nothing was written"
 
@@ -720,8 +732,7 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-nosuch" "(NO-SUCH-BEAD) the phantom id was nev
 
 # --- 10. control characters in bd's JSON -------------------------------------
 reset_beads
-RC=0
-OUT=$(gcenv GC_SESSION_NAME="$MINE" FAKE_CTRL=1 bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_SESSION_NAME="$MINE" FAKE_CTRL=1 -- --step "$STEP"
 eq "$RC" "0" "(CTRL) a raw control char in the payload does not break resolution"
 has "$(cat "$FAKE_CLOSED")" "tk-9b3d8 pass" "(CTRL) the right bead was still closed"
 
@@ -730,15 +741,13 @@ cat > "$FAKE_BEADS" <<B
 tk-alias|gc-toolkit/gc-toolkit.nux|$STEP|in_progress
 B
 : > "$FAKE_CLOSED"
-RC=0
-OUT=$(gcenv GC_ALIAS="gc-toolkit/gc-toolkit.nux" bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_ALIAS="gc-toolkit/gc-toolkit.nux" -- --step "$STEP"
 eq "$RC" "0" "(ALIAS) a bead assigned to the alias resolves"
 has "$(cat "$FAKE_CLOSED")" "tk-alias pass" "(ALIAS) closed the alias-assigned bead"
 
 # --- 12. no identity at all ---------------------------------------------------
 reset_beads
-RC=0
-OUT=$(gcenv GC_TRIGGER_BEAD_ID="tk-9b3d8" bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+invoke GC_TRIGGER_BEAD_ID="tk-9b3d8" -- --step "$STEP"
 eq "$RC" "2" "(NO-IDENTITY) an unidentifiable session refuses to close anything"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(NO-IDENTITY) nothing was written"
 has "$OUT" "cannot prove ownership" "(NO-IDENTITY) says why"

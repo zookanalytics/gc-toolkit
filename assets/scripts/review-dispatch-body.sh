@@ -102,12 +102,38 @@ fi
 # --- The check section: the concern this review verifies ----------------------
 # The generic method is pack content; a rig may extend it (below). Each arm
 # names what the check judges, never how many lanes read it (that is the
-# formula's question above).
+# formula's question above). A shared specialist stance precedes every
+# non-baseline arm, emitted once so no specialist skill or arm restates it;
+# correctness and triage are exempt, being the baseline that holds its own
+# stance in its own arm.
 echo
 echo "---"
 echo
 printf '## Check: `%s`\n' "$CHECK_NAME"
 echo
+case "$CHECK_NAME" in
+  correctness|triage) : ;;   # baseline: its own stance is in its arm, below
+  *)
+    cat <<'S'
+**The specialist stance.** Every specialist check holds it, so no check's skill
+or arm below restates it. You are the author's peer and the gatekeeper of the
+concern you own. You raise the bar on what the city ships; you do not wave a
+change through because its bead said to build it or its author worked hard.
+Enforce through findings and never edit: a gap is the author's to fix, and you
+touch the anchor only through `signoff.sh`. Correctness is the `correctness`
+check's on this same commit, not yours; a concern another check owns is noted in
+your verdict body and left to that check, never folded into your verdict. Read
+the reference docs your check stewards, at the reviewed commit, before you judge;
+a review that has not read what it holds the change to cannot hold it. File an
+issue this change did not cause as its own bead, independent drift in the docs
+you steward included. Judge fix-now versus follow-up, and name anything you defer
+in the verdict body, which is posted where the change lands. One `signoff.sh
+--review-bead <this bead> --verdict approve|request-changes` carries the verdict,
+exactly once; never `gh pr review`, because the city does not approve its own PRs.
+
+S
+    ;;
+esac
 case "$CHECK_NAME" in
   correctness)
     cat <<'M'
@@ -142,41 +168,32 @@ in two steps: the first reads the anchor and the diff and writes a
 `demo:capture`-format script, the second drives the browser from that script and
 records the narrated video. Judge what the recording proves, not what the diff
 claims. If no demo can be recorded, that is a finding against the change, not a
-reason to approve it. Correctness belongs to `correctness` on this same commit.
+reason to approve it.
 M
     ;;
   arch)
     cat <<'M'
-The Architect — active steward and gatekeeper of the repo's high-level
-architecture, holding this change accountable to architectural discipline rather
-than waving it through. Read the architecture reference docs before you judge:
-`docs/architecture.md` and the `docs/architecture/` directory it anchors — a
-review that has not read the architecture cannot hold a change to it.
-
-Judge whether the change leverages the existing architecture or works against
-its grain, and whether it moves the architecture — if so, whether that move is
-justified and reflected in the architecture docs in this same PR. The verdict is
-binary: approve when the change fits, request changes otherwise (a moved
-architecture whose matching doc update is not in the PR, or one a design fitting
-the current architecture would not have needed). Enforce; never edit — condition
-the verdict and file findings, and file the architectural issues this change did
-not cause as their own beads.
-
-Follow `skills/review-arch/SKILL.md` for the full method: the two verdicts, the
-out-of-scope findings, and what to defer and flag in the PR. Correctness is the
-`correctness` check's on this same commit.
+The Architect — steward and gatekeeper of the repo's high-level architecture.
+Read the architecture reference docs before you judge: `docs/architecture.md`
+and the `docs/architecture/` directory it anchors; a review that has not read
+the architecture cannot hold a change to it. Judge whether the change leverages
+the existing architecture or works against its grain, and whether it moves the
+architecture — if so, whether that move is justified and recorded in the
+architecture docs in this same PR. The verdict is binary: approve when the
+change fits, request changes otherwise (a moved architecture whose matching doc
+update is not in the PR, or a move a design fitting the current architecture
+would not have needed). `skills/review-arch/SKILL.md` carries the full method.
 M
     ;;
   pm)
     cat <<'M'
-`skills/review-pm/SKILL.md`. The product lens, held by a reviewer who is the
-author's peer, not their order-taker: judge whether the change is the right thing
-for the people the product serves — the outcome its anchor named, not a proxy —
-against the product goals (`docs/product-goals.md`, which names who they are), then
-whether the PR lets the operator decide. Push back when the diff does what its bead
-said but not what those people need. ENFORCE, never edit; drift you find in the
-product-goal docs is maintenance you FILE. Correctness is `correctness`'s on this
-same commit, and grading a recording is `demo`'s.
+`skills/review-pm/SKILL.md`. The product lens: judge whether the change is the
+right thing for the people the product serves — the outcome its anchor named,
+not a proxy — against the product goals (`docs/product-goals.md`, which names
+who they are), then whether the PR lets the operator decide. Push back when the
+diff does what its bead said but not what those people need. Grading a recording
+is `demo`'s; your only demo concern is a change the operator must watch to trust
+that the PR leaves unwatchable.
 M
     ;;
   *)

@@ -177,11 +177,29 @@ else
         elif [ "$m_t" -gt 0 ] && [ -z "$scan_out" ]; then
             scan_fail="find listed no files though $db/manifest is readable"
         fi
-        while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            t=$(mtime_of "$f")
-            if [ "$t" -gt "$newest_t" ]; then newest_t="$t"; newest="${f##*/}"; fi
-        done <<< "$scan_out"
+        # Buffer the scan through a CHECKED temp file, never a `<<<` here-string:
+        # bash backs a here-string with a temp it creates silently, so under disk
+        # pressure the redirect fails, the loop runs zero times, `newest` keeps
+        # its seeded manifest, and a chunk newer than the manifest reads OK
+        # unseen. A buffer whose creation and write are both checked turns that
+        # blackout into a scan_fail the arms below report.
+        scan_buf=""
+        if [ -z "$scan_fail" ]; then
+            scan_buf=$(mktemp "${TMPDIR:-/tmp}/gctk-deacon-backup-scan.XXXXXX" 2>/dev/null) || scan_buf=""
+            if [ -z "$scan_buf" ]; then
+                scan_fail="could not create a temp file to buffer the directory scan for $db (disk pressure?)"
+            elif ! printf '%s' "$scan_out" | awk 'NF { print }' > "$scan_buf"; then
+                scan_fail="could not buffer the directory scan for $db - temp file unwritable (disk pressure?)"
+            fi
+        fi
+        if [ -z "$scan_fail" ]; then
+            while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                t=$(mtime_of "$f")
+                if [ "$t" -gt "$newest_t" ]; then newest_t="$t"; newest="${f##*/}"; fi
+            done < "$scan_buf"
+        fi
+        [ -z "$scan_buf" ] || rm -f "$scan_buf"
         since=$(( NOW - newest_t ))
         age_h=$(( (NOW - m_t) / 3600 ))
         if [ -n "$scan_fail" ]; then

@@ -92,23 +92,63 @@ compose_member_summary() { # <convoy-id> <landed-json>
 
 # Owned-ness + member completion live only in `gc convoy list` (city-wide;
 # intersected with this rig's convoy ledger below).
-CONVOYS=$(gc convoy list --json 2>/dev/null)
-[ -n "$CONVOYS" ] || { echo "$PROG: convoy list unavailable"; exit 0; }
+CONVOYS=$(gc convoy list --json 2>/dev/null); convoys_rc=$?
+# A failed or empty read is a failure to ENUMERATE, not an empty city. Exit 0
+# here would let refinery-reconcile mark this arm clean and move on — the false
+# all-clear this guard class exists to prevent — so abort non-zero instead, and
+# the cadence logs and retries it next pass. (`gc convoy list` yields
+# `{"convoys":[]}` for a convoy-less city, which is non-empty, so a genuinely
+# empty city still passes this guard and stops at the CANDS gate below.)
+if [ "$convoys_rc" -ne 0 ] || [ -z "$CONVOYS" ]; then
+  echo "$PROG: could not list convoys (gc convoy list rc=$convoys_rc); that is a failure to ENUMERATE, not an empty city, so ABORTING non-zero rather than reporting a false all-clear (retries next pass)" >&2
+  exit 1
+fi
 CANDS=$(printf '%s' "$CONVOYS" | scrub | jq -r '
   .convoys[]?
   | select((.fields.target // "") | startswith("integration/"))
   | select(.progress.total > 0 and .progress.closed == .progress.total)
   | select(.owned == true)
-  | "\(.id)\t\(.fields.target)"' 2>/dev/null)
+  | "\(.id)\t\(.fields.target)"' 2>/dev/null); cands_rc=$?
+# A jq parse failure is could-not-enumerate, not "nothing matched": abort rather
+# than fall through to the empty-queue exit below and forge an all-clear.
+if [ "$cands_rc" -ne 0 ]; then
+  echo "$PROG: read the convoy list but could not render candidates (jq rc=$cands_rc); that is a failure to ENUMERATE, so ABORTING non-zero rather than reporting a false all-clear (retries next pass)" >&2
+  exit 1
+fi
 [ -n "$CANDS" ] || { echo "$PROG: no complete owned integration convoys"; exit 0; }
 
 RIG_CONVOYS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --type=convoy --status=open \
   --limit=0 --json 2>/dev/null | scrub | jq -r '.[].id' 2>/dev/null)
 
-graduated=0; skipped=0; held=0; vacuous=0
+# Feed the loop from an EXPLICIT, CHECKED temp file — never a `<<<` here-string.
+# bash backs a here-string with a temp file it creates implicitly; under disk
+# pressure that creation fails SILENTLY (this script is set -u, not set -e, so the
+# errored redirection does not abort), the loop runs ZERO times, and control falls
+# through to the summary below — printing "0 graduating, 0 skipped, 0 held, 0
+# vacuous" and exiting 0, indistinguishable from a healthy empty queue even though
+# the CANDS guard just proved the list non-empty. A checked temp file turns that
+# silent blackout into a non-zero abort the cadence logs and retries; a plain file
+# redirect keeps the loop in THIS shell, so the counters below survive.
+ROWS_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-convoy-graduate.XXXXXX" 2>/dev/null) || {
+  echo "$PROG: cannot create a temp file to enumerate graduation candidates (disk full?); this pass could NOT enumerate its work, so it is ABORTING non-zero rather than reporting a false-empty '0 graduating, 0 skipped, 0 held, 0 vacuous' queue (retries next pass)" >&2
+  exit 1
+}
+trap 'rm -f "$ROWS_FILE"' EXIT
+printf '%s\n' "$CANDS" > "$ROWS_FILE" || {
+  echo "$PROG: cannot write the candidate list to a temp file (disk full?); this pass could NOT enumerate its work, so it is ABORTING non-zero rather than reporting a false-empty queue (retries next pass)" >&2
+  exit 1
+}
+expected=$(grep -c . "$ROWS_FILE" 2>/dev/null || true)
+case "$expected" in ''|*[!0-9]*) expected=0 ;; esac
+
+graduated=0; skipped=0; held=0; vacuous=0; processed=0
 while IFS="$(printf '\t')" read -r cid ctarget; do
   [ -n "${cid:-}" ] || continue
-  # -F, here-string: convoy ids contain dots, and grep -q in a pipe SIGPIPEs.
+  processed=$((processed + 1))
+  # -F, here-string: convoy ids contain dots, and grep -q in a pipe SIGPIPEs. A
+  # disk-pressure <<< failure here reads empty and SKIPS this candidate — a
+  # counted, visible refusal, never a forged graduation — so unlike the main
+  # enumeration below it needs no checked-tempfile remedy.
   grep -qxF -- "$cid" <<< "$RIG_CONVOYS" || { skipped=$((skipped + 1)); continue; }
 
   if ! cmeta=$(convoy_meta "$cid"); then
@@ -185,7 +225,15 @@ while IFS="$(printf '\t')" read -r cid ctarget; do
     skipped=$((skipped + 1))
     echo "$PROG: $cid assign failed; retry next pass" >&2
   fi
-done <<< "$CANDS"
+done < "$ROWS_FILE"
+
+# A pass that could not read every candidate it enumerated must NOT print the
+# summary as though it finished — a short read would forge the same false
+# all-clear the checked temp file above exists to prevent.
+if [ "$processed" -ne "$expected" ]; then
+  echo "$PROG: enumerated only $processed of $expected graduation candidates — the work list was read short (disk pressure? a truncated temp file?); this pass is INCOMPLETE, so it is ABORTING non-zero rather than reporting '$graduated graduating, $skipped skipped, $held held, $vacuous vacuous' as a finished queue (retries next pass)" >&2
+  exit 1
+fi
 
 echo "$PROG: $graduated graduating, $skipped skipped, $held held, $vacuous vacuous"
 exit 0
