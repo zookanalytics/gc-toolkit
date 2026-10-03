@@ -189,21 +189,22 @@ eq "$PR_POSTURES" "$TOML_POSTURES" "postures match lifecycle.toml [posture]"
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration
 # downstream audits read (docs/component-model.md). A key these scripts write
-# but nothing registers is state no audit can account for. pr-dispose.sh is
-# covered alongside pr-facts.sh: it WRITES the disposition marker pr-facts only
-# reads, so a drift check scanning pr-facts alone would never see those writes.
+# but nothing registers is state no audit can account for. pr-dispose.sh and
+# demo-deliver.sh are covered alongside pr-facts.sh: each WRITES a key pr-facts
+# only reads — the PR-close disposition marker and artifact_url — so a drift
+# check scanning pr-facts alone would never see those writes.
 REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$ROOT/lifecycle/lifecycle.toml" \
   | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
 # pr-facts.sh writes anchor metadata through three flags: bd's --set-metadata,
 # and lifecycle.sh transition's --set and --set-dated. All three are state the
 # registry must declare, so the extraction reads every one — a key written only
 # through lifecycle would otherwise drift unseen.
-WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" \
+WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" "$HERE/demo-deliver.sh" \
   | sed -E 's/^--set(-metadata|-dated)? "?//; s/=$//' | sort -u)
-[ -n "$WRITTEN" ] && ok "metadata-key writes extracted" || bad "no metadata-key writes found in pr-facts.sh/pr-dispose.sh"
+[ -n "$WRITTEN" ] && ok "metadata-key writes extracted" || bad "no metadata-key writes found in pr-facts.sh/pr-dispose.sh/demo-deliver.sh"
 UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
   | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
-eq "$UNREGISTERED" "" "every metadata key pr-facts.sh and pr-dispose.sh write is registered in lifecycle.toml"
+eq "$UNREGISTERED" "" "every metadata key pr-facts.sh, pr-dispose.sh and demo-deliver.sh write is registered in lifecycle.toml"
 
 echo "# out-of-band merge is recorded"
 store "[$(anchor F1 10)]"
@@ -2319,6 +2320,31 @@ out=$(run)
 has "$(treply 59 T-59)" "KM1" "the reply names the earlier batch's bead"
 has "$(treply 59 T-59)" "KM2" "…and the later one"
 eq "$(tresolved 59 T-59)" "true" "…and the thread is resolved behind it"
+eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
+
+echo "# a thread two MIXED-form batches touched names each by its own landing form"
+# One batch's fix unit lands a commit; the other's lands an artifact (a demo
+# closed on attach, carrying artifact_url). The single reply must cite the commit
+# for the commit unit and the delivered URL for the artifact unit — never a commit
+# the demo never made, nor a demo the commit never was. Collapsing both to the
+# last record's form (the pre-fix bug) would claim one for the other.
+store "[$(anchor WX 60 "$(wb_meta rework:KC1)"), $(child KC1 open), $(child KA2 open)]"
+printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_60.json"
+threads 60 "$(one_thread 60)"
+out=$(run)
+bmut WX '.metadata += {"pr_comment_disposition":"rework:KA2","pr_comment_watermark":"200"}'
+threads 60 "$(tfile 60 | jq -c '.threads[0].comments.nodes += [
+  {"id":"NC-60b","databaseId":200,"author":{"login":"johnzook"},"body":"and this","reactionGroups":[]}]')"
+out=$(run)
+bmut KC1 '.status = "closed"'
+out=$(run)
+eq "$(treply 60 T-60)" "" "the thread waits while the artifact unit is still open"
+bmut KA2 '.status = "closed" | .metadata += {"artifact_url":"https://github.com/zook/gc-toolkit/pull/60#issuecomment-600"}'
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+has "$(treply 60 T-60)" "Addressed in sha-60 on this PR (KC1)" "the commit unit is cited by its landing commit"
+has "$(treply 60 T-60)" "issuecomment-600 (KA2)" "the artifact unit is cited by its delivered URL, not a commit"
+eq "$(tresolved 60 T-60)" "true" "the thread is resolved behind the one mixed-form reply"
 eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
 
 echo "# a batch with no bead of its own never holds a thread back"
