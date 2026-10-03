@@ -312,11 +312,10 @@ fixture "$(visit v-one sub r-alpha sess-1)"
 is "a lone sitting holds" "$(holder v-one sub)" "v-one"
 
 echo "── one subject, sittings in TWO stores: they still fold to one ──"
-# tk-d3dxec. The peer scan read only the claiming session's store, so two
-# sittings on one subject filed into different stores each saw only themselves,
-# both resolved HOLDER==VISIT, and the lowest-id tiebreak never ran — the
-# duplicate-sitting outcome. fix #1 unions the in_progress listing across every
-# rig's store, so the two see each other and collapse to the lowest id.
+# A subject's sittings can be filed into different rig stores. The peer scan
+# unions the in_progress listing across every rig's store before the lowest-id
+# tiebreak, so two sittings on one subject fold to the lowest id wherever each
+# was filed.
 rm -f "$FIXDIR"/*.json
 rigs r1 r2
 store r1 "$(visit v-one sub r-alpha sess-1)"
