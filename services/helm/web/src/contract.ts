@@ -288,7 +288,8 @@ export interface Tile {
   /**
    * Who must act on this merge anchor next — `'working'`, `'needs-review'`, or
    * `'needs-attention'` — the same status: taxonomy the GitHub PR list carries,
-   * so the board and the label read one vocabulary. `''` on a non-merge row.
+   * so the board and the label read one vocabulary. `''` on a non-merge row, and
+   * on a closed (`DONE`) row, where the live vocabulary has no answer.
    */
   pr_phase: string;
   /**

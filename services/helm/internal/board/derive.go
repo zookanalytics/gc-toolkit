@@ -1989,7 +1989,8 @@ const (
 // states — before the frontier SPEAKS that tri-state: on a live row the liveness
 // word leads the one-line summary, so the board's primary vocabulary is the state
 // rather than the roll-up. A closed row keeps its age phrase — the tri-state has
-// no live answer for it, so beadPhase left it empty and the prefix is skipped.
+// no live answer for it, so the terminal guard below leaves both fields empty and
+// the prefix is skipped.
 func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	reworkKids := make(map[string]int)
@@ -2010,6 +2011,16 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		if !ok {
 			continue
 		}
+		// A closed row is terminal: nobody must act on it next, so neither the PR
+		// round-trip axis (PRPhase) nor the per-bead liveness (Phase) carries a live
+		// tri-state. The guard is here, once, rather than inside prPhase and beadPhase
+		// apart, so both axes empty together on a closed row — no axis can be left
+		// deriving a live phase while another reads empty. Recorded axes (PRMachine)
+		// still travel on a closed row; only these derived "who acts next" tri-states
+		// go empty.
+		if !a.ClosedAt.IsZero() {
+			continue
+		}
 		kids := reworkKids[tiles[i].ID]
 		prP := prPhase(a, kids)
 		phase := beadPhase(a, f, kids)
@@ -2021,13 +2032,10 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		// both tri-states a live merge anchor carries — the PR-axis PRPhase behind
 		// the chip and the per-bead Phase the frontier speaks — so a row the machine
 		// calls blocked cannot read needs-attention on one and awaiting-review on the
-		// other. A closed row has no live Phase to lift, so its frontier keeps its
-		// age phrase.
+		// other.
 		if isBlocked(tiles[i].PRMachine) {
 			prP = PhaseNeedsAttention
-			if phase != "" {
-				phase = PhaseNeedsAttention
-			}
+			phase = PhaseNeedsAttention
 		}
 		tiles[i].PRPhase = prP
 		tiles[i].Phase = phase
@@ -2187,15 +2195,12 @@ func prPhase(a Anchor, openReworkKids int) string {
 	return string(prstatus.Derive(phaseFacts(a, Facts{}, openReworkKids)))
 }
 
-// beadPhase is the per-bead liveness for every LIVE row — the generalization of
+// beadPhase is the per-bead liveness for every live row — the generalization of
 // prPhase, applied to any bead through the same prstatus core so a merge anchor
-// and a plain bead name their state from one rule. A closed row is terminal and
-// carries no live tri-state, so it reads empty, the way prPhase reads empty off a
-// non-merge row.
+// and a plain bead name their state from one rule. Terminal-ness is not its
+// concern: [classifyPhases] guards a closed row once, for this axis and the PR
+// axis together, before calling either, so beadPhase derives unconditionally.
 func beadPhase(a Anchor, f Facts, openReworkKids int) string {
-	if !a.ClosedAt.IsZero() {
-		return ""
-	}
 	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
 }
 

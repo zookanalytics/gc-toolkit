@@ -2339,6 +2339,35 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	}
 }
 
+// A merged PR's anchor closes carrying its last pre-merge facts — posture still
+// approved, merge state frozen at CLEAN, never restamped MERGED — so
+// prstatus.Derive, reading only those live facts, still names it working. The
+// board must not paint that chip on a done row: a closed anchor needs nobody to
+// act, so its PR phase reads empty, the terminal guard the per-bead Phase already
+// got. This is the "merged PR on a DONE bead still shows WORKING" report; the
+// live twin, identical but open, proves closedness is the only thing emptying it.
+func TestClosedMergeAnchorHasNoPRPhase(t *testing.T) {
+	md := map[string]string{
+		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
+		mdPRMergeState: "CLEAN@" + headLive,
+	}
+	closed := mergeAnchor("tk-merged", md)
+	closed.ClosedAt = fixtureNow.Add(-24 * time.Hour)
+	live := mergeAnchor("tk-live", md) // identical facts, still open
+
+	b := BuildBoard([]Anchor{closed, live}, fixtureNow, false, nil, Facts{})
+
+	if got := mustTile(t, b, "tk-live").PRPhase; got != PhaseWorking {
+		t.Fatalf("test premise: the identical live anchor derives working; got %q", got)
+	}
+	if got := mustTile(t, b, "tk-merged").PRPhase; got != "" {
+		t.Errorf("a closed merge anchor carries no live PR phase; got %q (the DONE-bead-shows-WORKING bug)", got)
+	}
+	if got := mustTile(t, b, "tk-merged").Phase; got != "" {
+		t.Errorf("a closed row carries no per-bead phase either; got %q", got)
+	}
+}
+
 // A closed merge anchor is not a coverage gap either, and this is the half the
 // owed test cannot cover: the queue and the coverage sentence have to empty
 // together. The closed pass fills the DONE band with rows carrying the same
