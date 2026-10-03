@@ -42,7 +42,7 @@ esc_has()   { grep -qF "$(printf '%s\t%s\t%s' "$1" "$2" "$3")" "$ESC_CALLS"; }
 # whatever its key. Used to assert an arm filed NOTHING new across every key.
 esc_subj()  { grep -qF "$(printf '%s\t%s\t' "$1" "$2")" "$ESC_CALLS"; }
 
-FULL='{"epic_handle":"h","epic_hypothesis":"for X, Y, signal Z","epic_closure_condition":"3 checks","epic_indicators":"one"}'
+FULL='{"epic_handle":"h","epic_hypothesis":"for X, Y, signal Z","epic_boundaries":"not the neighbor","epic_closure_condition":"3 checks","epic_indicators":"one"}'
 
 # --- 1. floor: an epic with no recorded hypothesis gets one floor visit -------
 store "[$(epic E1 open '{}')]"
@@ -50,9 +50,25 @@ run_sut
 eq "$(esc_count)" "1" "a hypothesis-less epic gets exactly one visit"
 if esc_has file E1 epic-floor; then ok "the visit is the floor visit on the epic"; else bad "expected a file/E1/epic-floor visit"; fi
 
-# --- 2. contract: hypothesis present but closure/indicators missing. The floor
-# concern has cleared, so that visit is retracted in the same pass. -------------
-store "[$(epic E2 open '{"epic_hypothesis":"for X, Y, signal Z"}')]"
+# --- 1a. the floor is all three fields, not the hypothesis alone: an epic with a
+# hypothesis and handle but NO boundaries still owes its floor, so the floor visit
+# is filed and not retracted. Regression for the arm that cleared on a hypothesis
+# alone and never asked for the handle/boundaries the contract requires. --------
+store "[$(epic EPB open '{"epic_handle":"h","epic_hypothesis":"for X, Y, signal Z"}')]"
+run_sut
+if esc_has file EPB epic-floor; then ok "a hypothesis+handle epic missing boundaries still owes its floor"; else bad "expected a file/EPB/epic-floor visit"; fi
+if esc_has retract EPB epic-floor; then bad "a partial floor must not retract the floor visit"; else ok "a partial floor does not retract the floor visit"; fi
+
+# --- 1b. the same when the handle is the missing field: a hypothesis and
+# boundaries but NO handle still owes the floor. -------------------------------
+store "[$(epic EPH open '{"epic_hypothesis":"for X, Y, signal Z","epic_boundaries":"not the neighbor"}')]"
+run_sut
+if esc_has file EPH epic-floor; then ok "a hypothesis+boundaries epic missing a handle still owes its floor"; else bad "expected a file/EPH/epic-floor visit"; fi
+
+# --- 2. contract: a complete floor (handle, hypothesis, boundaries) but closure
+# and indicators missing. The floor concern has cleared, so that visit is
+# retracted in the same pass while the contract visit is filed. ----------------
+store "[$(epic E2 open '{"epic_handle":"h","epic_hypothesis":"for X, Y, signal Z","epic_boundaries":"not the neighbor"}')]"
 run_sut
 if esc_has file E2 epic-contract; then ok "the contract visit is filed"; else bad "expected a file/E2/epic-contract visit"; fi
 if esc_has retract E2 epic-floor; then ok "the cleared floor visit is retracted"; else bad "expected a retract/E2/epic-floor call"; fi
@@ -125,6 +141,18 @@ ERRLOG="$TMP/err.log"
 STUB_DEP_GARBAGE=1 "$SUT" >/dev/null 2>"$ERRLOG"; RC=$?
 eq "$RC" "1" "a pass with an unreadable children probe exits non-zero"
 if grep -qF "children probe unreadable for EP" "$ERRLOG"; then ok "the unreadable children probe is named on stderr"; else bad "expected a 'children probe unreadable for EP' stderr line"; fi
+
+# --- 8d. the gate is status-agnostic, so a blocked epic is audited too: the pass
+# enumerates every non-closed status, not just open,in_progress. open-only would
+# strand a blocked epic whose units later all land with no ruling visit filed. --
+store "[$(epic EBL blocked '{}')]"
+run_sut
+if esc_has file EBL epic-floor; then ok "a blocked epic is audited (its floor is owed)"; else bad "expected the floor visit on a blocked epic"; fi
+
+# --- 8e. and a deferred epic is audited too. ----------------------------------
+store "[$(epic EDF deferred '{}')]"
+run_sut
+if esc_has file EDF epic-floor; then ok "a deferred epic is audited (its floor is owed)"; else bad "expected the floor visit on a deferred epic"; fi
 
 # --- 9. GC_RIG unset: a scope=rig order with no rig refuses -------------------
 RC=0; ( unset GC_RIG; "$SUT" >/dev/null 2>&1 ) || RC=$?

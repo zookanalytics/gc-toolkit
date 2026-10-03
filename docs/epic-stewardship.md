@@ -38,11 +38,12 @@ rhymes with. Not the invariant catalog or the finalize gate's full contract
 
 `orders/epic-steward.toml` runs `assets/scripts/epic-steward.sh` on a cadence
 (`scope=rig`: an epic is a per-rig anchor). One pass enumerates every non-closed
-`issue_type=epic` in the rig — `open` and `in_progress`, the same live set the
-finalize gate holds — and runs three arms over each. Each arm detects whether the
-epic owes a particular decision and, when it does, files exactly one operator
-visit through `escalate.sh`, keyed by concern; when the decision has since been
-made, it retracts the visit it filed. `escalate.sh` dedups by (subject, key), so
+`issue_type=epic` in the rig — `open`, `in_progress`, `blocked`, and `deferred`,
+the same live set the finalize gate holds — and runs three arms over each. Each
+arm detects whether the epic owes a particular decision and, when it does, files
+exactly one operator visit through `escalate.sh`, keyed by concern; when the
+decision has since been made, it retracts the visit it filed. `escalate.sh`
+dedups by (subject, key), so
 a visit that is already open is refreshed, not duplicated, and its `tracks` edge
 to the epic holds the epic's finalize until the conversation is answered. The
 judgment each visit asks for is the operator's; the pass only detects what is
@@ -54,13 +55,14 @@ lock it runs no arm.
 
 ### Floor
 
-An epic with no recorded hypothesis (`epic_hypothesis` absent) cannot have work
-classified into it and cannot be judged complete. The floor arm files a visit
-asking the operator to draft and ratify the floor contract — a handle, a
-one-sentence hypothesis, and boundaries. This is the contract's own closure
+An epic whose floor contract is incomplete — missing any of its handle
+(`epic_handle`), its one-sentence hypothesis (`epic_hypothesis`), or its
+boundaries (`epic_boundaries`) — cannot have work classified into it and cannot
+be judged complete. The floor arm files a visit naming the missing field(s) and
+asking the operator to draft and ratify them. This is the contract's own closure
 condition that "the city proposes a contract for an epic that lacks one"
-([epics.md](epics.md)). A rough hypothesis is enough; once one is recorded the arm
-retracts any floor visit it filed.
+([epics.md](epics.md)). A rough hypothesis is enough to start; once all three
+floor fields are recorded the arm retracts any floor visit it filed.
 
 ### Rest of the contract
 
@@ -103,7 +105,7 @@ them; the steward, the finalize gate, and the doctor check read them.
 | Field | Meaning |
 |---|---|
 | `epic_handle` | the 3–5 word handle |
-| `epic_hypothesis` | the one-sentence hypothesis — its presence is the floor gate |
+| `epic_hypothesis` | the one-sentence hypothesis — a floor field, and the trigger for the finalize gate's ruling requirement |
 | `epic_boundaries` | the epic's boundaries |
 | `epic_closure_condition` | the 3–6 operator-runnable closure checks |
 | `epic_indicators` | the 1–3 leading indicators |

@@ -1,8 +1,8 @@
 # epic-steward — the cadence that gives the city its tendency to elaborate and
-# advance epics. One pass reads every open epic in the rig and, for each, files
-# the operator the decision that epic now owes: a floor contract for an epic
-# with no recorded hypothesis, the rest of the contract once the floor is set,
-# and a hypothesis ruling once the epic's units have all landed. A fourth arm —
+# advance epics. One pass reads every non-closed epic in the rig and, for each,
+# files the operator the decision that epic now owes: a floor contract for an
+# epic missing any of its floor fields, the rest of the contract once the floor
+# is set, and a hypothesis ruling once the units have all landed. A fourth arm —
 # a membership sweep for work that has drifted outside its epic — is deferred
 # (docs/epic-stewardship.md names the deferral). It is the second steward in the
 # pack after the refinery and wears the same shape — enumerate the stewarded
@@ -28,7 +28,7 @@
 # own epics. Single-flight is a per-rig flock the driver holds; `timeout` bounds
 # how long one wedged pass can hold it.
 [order]
-description = "Epic stewardship: audit every open epic and file the operator the floor contract, the rest of the contract, or the hypothesis ruling it owes"
+description = "Epic stewardship: audit every non-closed epic and file the operator the floor contract, the rest of the contract, or the hypothesis ruling it owes"
 trigger = "cooldown"
 interval = "1h"
 timeout = "300s"

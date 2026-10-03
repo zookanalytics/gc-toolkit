@@ -9,9 +9,10 @@
 # For each open epic the pass runs independent arms. Each files ONE deduped
 # operator visit (escalate.sh, keyed by concern) when the epic owes a decision
 # only the operator can make, and files nothing when it does not:
-#   floor     — no recorded hypothesis: the epic cannot be classified into or
-#               judged complete until it carries the floor contract (a handle, a
-#               one-sentence hypothesis, boundaries). Propose it for ratification.
+#   floor     — the floor contract is incomplete: until the epic carries all
+#               three floor fields (a handle, a one-sentence hypothesis,
+#               boundaries) work cannot be classified into it and it cannot be
+#               judged complete. Propose the missing fields for ratification.
 #   contract  — floor set but the closure condition or leading indicators are
 #               absent: propose the rest of the contract.
 #   ruling    — every unit has landed and no ruling is recorded: an epic closes
@@ -123,16 +124,26 @@ epic_ruling_valid() { case "${1:-}" in persevere|pivot|close) return 0 ;; *) ret
 # idempotent — escalate.sh reads no open visit as a no-op success — so an arm whose
 # concern was never raised retracts nothing.
 
-arm_floor() { # <epic> <hypothesis>
-  _a_epic="$1"; _a_hyp="$2"
-  if [ -n "$_a_hyp" ]; then
-    retract_visit "$_a_epic" "epic-floor" "a hypothesis is recorded; the floor contract is set"
+arm_floor() { # <epic> <handle> <hypothesis> <boundaries>
+  _a_epic="$1"; _a_handle="$2"; _a_hyp="$3"; _a_bnd="$4"
+  # The floor is all three fields docs/epics.md names — a handle, a hypothesis
+  # sentence, and boundaries — not the hypothesis alone: an epic needs every one
+  # to be read, classified into, and judged complete. Owe the floor until all
+  # three are recorded, so a hypothesis with no handle or boundaries is a partial
+  # floor still owed, not a set floor.
+  if [ -n "$_a_handle" ] && [ -n "$_a_hyp" ] && [ -n "$_a_bnd" ]; then
+    retract_visit "$_a_epic" "epic-floor" "the floor contract is recorded (a handle, a hypothesis, and boundaries)"
     return 0
   fi
+  # Name the fields still missing, so the visit asks for exactly what the floor owes.
+  _a_need=""
+  [ -z "$_a_handle" ] && _a_need="a 3-5 word handle (epic_handle)"
+  [ -z "$_a_hyp" ] && _a_need="${_a_need:+$_a_need, }a one-sentence hypothesis — for whom, what changes, the signal it worked — (epic_hypothesis)"
+  [ -z "$_a_bnd" ] && _a_need="${_a_need:+$_a_need, }its boundaries (epic_boundaries)"
   file_visit "$_a_epic" "epic-floor" \
-"This epic carries no recorded hypothesis, so work cannot be classified into it and it cannot be judged complete.
+"This epic's floor contract is incomplete — it still needs $_a_need. The floor (a handle, a hypothesis sentence, and boundaries) is what lets work be classified into the epic and the epic be read and judged complete.
 
-Draft and ratify its floor contract, then record it on the epic: a 3-5 word handle (epic_handle), a one-sentence hypothesis — for whom, what changes, the signal it worked — (epic_hypothesis), and its boundaries (epic_boundaries). A rough hypothesis is enough to start. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
+Draft and ratify the missing field(s) and record them on the epic. A rough hypothesis is enough to start. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
 }
 
 arm_contract() { # <epic> <hypothesis> <closure-condition> <indicators>
@@ -186,28 +197,31 @@ An epic closes by a ruling on its hypothesis — persevere, pivot, or close — 
 # --- main pass --------------------------------------------------------------
 
 # The gate holds every non-closed epic (finalize-gate.sh clause_epic_ruling_
-# recorded is status-agnostic), so the pass audits the same live set. Open-only
-# would miss an in_progress (or blocked/deferred) epic whose units all land: no
-# ruling visit would ever be filed and the gate would hold its close forever.
-EPICS_JSON=$(bd_list --type=epic --status=open,in_progress) || {
+# recorded is status-agnostic), so the pass audits the same live set: every
+# non-closed status (open, in_progress, blocked, deferred). A narrower set would
+# miss a blocked or deferred epic whose units all land — no ruling visit would
+# ever be filed and the gate would hold its close forever.
+EPICS_JSON=$(bd_list --type=epic --status=open,in_progress,blocked,deferred) || {
   echo "$PROG[$RIG]: could not read live epics (bd_list failed) — nothing stewarded this pass" >&2
   exit 1
 }
 
-# One jq emission reads every epic's id and the four contract fields the arms
+# One jq emission reads every epic's id and the six contract fields the arms
 # need, unit-separated (\037) so an empty field — the common case the arms detect
 # — keeps its column; a whitespace IFS would collapse a run of empties and
 # misalign the row. The arms take plain strings, so the pass spawns one jq, not
 # the ~7 per epic a re-parse-per-field loop did.
-while IFS=$'\037' read -r epic hyp clo ind ruling; do
+while IFS=$'\037' read -r epic handle hyp bnd clo ind ruling; do
   [ -n "$epic" ] || continue
   checked=$((checked + 1))
-  arm_floor    "$epic" "$hyp"
+  arm_floor    "$epic" "$handle" "$hyp" "$bnd"
   arm_contract "$epic" "$hyp" "$clo" "$ind"
   arm_ruling   "$epic" "$hyp" "$ruling"
 done < <(printf '%s' "$EPICS_JSON" | jq -r '
   .[] | [ (.id // "" | tostring),
+          (.metadata.epic_handle // "" | tostring),
           (.metadata.epic_hypothesis // "" | tostring),
+          (.metadata.epic_boundaries // "" | tostring),
           (.metadata.epic_closure_condition // "" | tostring),
           (.metadata.epic_indicators // "" | tostring),
           (.metadata.epic_ruling // "" | tostring) ]

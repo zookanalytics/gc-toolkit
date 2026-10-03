@@ -797,9 +797,10 @@ keys = [
 ]
 # epic_handle / epic_hypothesis / epic_boundaries — the elaboration floor
 #   (docs/epics.md): a 3-5 word handle, a one-sentence hypothesis, and the
-#   boundaries. epic-steward.sh's floor arm keys on epic_hypothesis — its absence
-#   is what makes an epic owe a floor contract. A rough hypothesis is enough;
-#   absent means the floor is unrecorded.
+#   boundaries. epic-steward.sh's floor arm owes a floor contract until all three
+#   are recorded, naming the ones still absent; a rough hypothesis is enough to
+#   start. epic_hypothesis is also the finalize gate's trigger — its presence is
+#   what brings an epic under the ruling requirement (clause_epic_ruling_recorded).
 # epic_closure_condition / epic_indicators — the rest of the contract (3-6
 #   closure checks, 1-3 leading indicators). epic-steward.sh's contract arm asks
 #   for whichever is absent once the floor is set. Absent means unrecorded.
