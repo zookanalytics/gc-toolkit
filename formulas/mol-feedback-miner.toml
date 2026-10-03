@@ -219,9 +219,11 @@ already covered.
 # with observation history.
 SEEN=$(gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json --limit=0 2>/dev/null | jq -r '.[] | select(.metadata.task_kind == "observation") | [(.metadata["obs.provenance"] // ""), (.metadata["obs.category"] // "")] | @tsv')
 
-# Per candidate; $CATEGORY is the slug derived in §3. A comment-sourced
-# candidate keys on its comment id; a review-body-sourced one on its review id.
-KEY="pr:${REPO_SLUG}#${N}:comment:${CID}"   # review body: pr:${REPO_SLUG}#${N}:review:${RID}
+# Per candidate; $CATEGORY is the slug derived in §3. SRC_KIND and SRC_ID name
+# the §2 source item: SRC_KIND is `comment` for an item from either comment
+# stream and `review` for a review body, and SRC_ID is that item's id. The key
+# carries SRC_KIND as its infix, so a comment id and a review id cannot collide.
+KEY="pr:${REPO_SLUG}#${N}:${SRC_KIND}:${SRC_ID}"
 PAIR=$(printf '%s\\t%s' "$KEY" "$CATEGORY")
 printf '%s\\n' "$SEEN" | grep -Fxq "$PAIR" && { echo "dedup: $KEY + $CATEGORY already recorded — skipping"; continue; }
 ```
@@ -232,8 +234,8 @@ Order candidates newest-first and file up to the cap. Each bead is closed at
 creation — an ephemeral record unit ("landed" means "recorded"): never
 routed, never assigned, never left open.
 
-For each surviving `(N, CID, USER, QUOTE, STATEMENT, NORM, CATEGORY,
-DIRECTIVE, SCOPE)`:
+For each surviving `(N, SRC_KIND, SRC_ID, USER, QUOTE, STATEMENT, NORM,
+CATEGORY, DIRECTIVE, SCOPE)`:
 
 ```bash
 BODY="## Statement
@@ -241,7 +243,7 @@ $STATEMENT
 
 ## Quote
 > $QUOTE
-— ${USER}, https://github.com/${REPO_SLUG}/pull/${N} (comment ${CID})
+— ${USER}, https://github.com/${REPO_SLUG}/pull/${N} (${SRC_KIND} ${SRC_ID})
 
 ## Proposed norm
 $NORM
