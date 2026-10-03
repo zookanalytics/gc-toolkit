@@ -123,6 +123,44 @@ out=$("$SUT" --target main 2>&1)
 has "$out" "graduating cv-k" "the convoy graduates"
 eq "$(meta cv-k pr_summary)" "Operator-written summary." "an existing summary is not overwritten by the seed"
 
+echo "# disk pressure: a failed mktemp aborts non-zero, never a false all-clear"
+# The CANDS guard proves the candidate list non-empty, so a loop that then runs
+# zero times can only be a silently-failed <<< temp file. The remedy routes the
+# loop through an explicit mktemp; force THAT to fail and the pass must abort
+# loudly rather than print "0 graduating, …" + exit 0. A failing mktemp binary on
+# PATH is the hermetic stand-in for a full disk (bash's own <<< temp file is
+# internal and cannot be stubbed, which is exactly why the remedy replaces it).
+convoys "{\"convoys\":[$(cv cv-df integration/df 1 1)]}"
+store "[$(cbead cv-df), $(landed w-df integration/df)]"
+mkdir -p "$TMP/failbin"
+cat > "$TMP/failbin/mktemp" <<'MK'
+#!/usr/bin/env bash
+echo "mktemp: failed to create file via template: Disk quota exceeded" >&2
+exit 1
+MK
+chmod +x "$TMP/failbin/mktemp"
+df_rc=0
+PATH="$TMP/failbin:$PATH" "$SUT" --target main >"$TMP/df.out" 2>"$TMP/df.err" || df_rc=$?
+eq "$([ "$df_rc" -ne 0 ] && echo nonzero || echo zero)" "nonzero" "a mktemp failure aborts the pass non-zero"
+# The forged summary would land on STDOUT; the abort announcement on STDERR. Check
+# each on its own stream, so the summary text quoted inside the abort message is
+# not mistaken for the summary line itself.
+hasnt "$(cat "$TMP/df.out")" "graduating" "no summary line reaches stdout under disk pressure"
+has "$(cat "$TMP/df.err")" "ABORTING non-zero" "…the blackout is announced on stderr"
+
+echo "# a failed/empty convoy list is could-not-enumerate, not an empty city"
+convoys ""
+out=$("$SUT" 2>&1); rc=$?
+eq "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)" "nonzero" "an unreadable convoy list aborts non-zero"
+has "$out" "could not list convoys" "…and says it could not enumerate"
+hasnt "$out" "graduating" "…never a forged summary"
+
+echo "# a malformed convoy list is could-not-enumerate at the jq render"
+convoys "this is not json"
+out=$("$SUT" 2>&1); rc=$?
+eq "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)" "nonzero" "a jq parse failure aborts non-zero"
+has "$out" "could not render candidates" "…and says it could not enumerate"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
