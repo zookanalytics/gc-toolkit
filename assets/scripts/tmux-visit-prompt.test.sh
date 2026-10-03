@@ -183,6 +183,37 @@ eq()   { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 has()  { [[ "$1" == *"$2"* ]] && ok "$3" || bad "$3 (in: $1)"; }
 hasnt() { [[ "$1" == *"$2"* ]] && bad "$3 (in: $1)" || ok "$3"; }
 
+# Everything the intake does runs on the tmux server, backgrounded (run-shell
+# -b): the calls log and the outcome say are written AFTER the driver returns.
+# Under the full parallel suite the host is oversubscribed, so that write can
+# lag any fixed post-press sleep — an immediate read then sees an empty log and
+# the assertion fails with an empty "(in: )" and a count of 0. So every
+# assertion on a backgrounded observable polls for that exact observable first,
+# through this one wall-clock-bounded helper. One budget in one place, so no
+# site re-derives the loop and drifts to one too short for the load. A genuinely
+# lost write still fails — after the wait, not racing it. The budget is generous
+# because the only cost of waiting too long is how late a real failure reports.
+WAIT_SECS="${GC_TMUX_TEST_WAIT_SECS:-30}"
+wait_for() {            # wait_for <predicate> [args…] — poll until it exits 0, or WAIT_SECS elapse
+    local _deadline=$(( SECONDS + WAIT_SECS ))
+    while :; do
+        "$@" && return 0
+        [ "$SECONDS" -ge "$_deadline" ] && return 1
+        sleep 0.1
+    done
+}
+# Predicates for wait_for; each re-reads its observable on every poll. A say is
+# a `display-message -d` (the handler's only operator channel); a call is one
+# gc-visit-open invocation the stub logs. msg_has reads the live server through
+# process substitution, never a pipe into grep -q, so a match is not lost to
+# SIGPIPE under `set -o pipefail`.
+calls_ge() { local n; n=$(grep -c '=== call ===' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }         # calls_ge N FILE
+says_ge()  { local n; n=$(grep -c 'display-message .*-d ' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; } # says_ge N FILE
+lines_ge() { local n; n=$(grep -c '' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }                      # lines_ge N FILE
+has_file() { [ -f "$1" ]; }
+no_file()  { [ ! -f "$1" ]; }
+msg_has()  { grep -q "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); }
+
 [ -f "$SCRIPT" ] && ok "tmux-visit-prompt.sh present" || { bad "missing at $SCRIPT"; exit 1; }
 [ -x "$SCRIPT" ] && ok "tmux-visit-prompt.sh executable" || bad "tmux-visit-prompt.sh not executable"
 
@@ -337,7 +368,10 @@ chmod +x "$TMP/bin/gc"
 # the handler, wait for the backgrounded half to report. Returns the handler's
 # exit code; the tmux, gum and gc-visit-open call logs are left in
 # $TMUX_CALLS / $GUM_CALLS / $CALLS. Set EXPECT_SAY=0 for the paths that
-# deliberately say nothing, so the poll below does not burn its full budget.
+# deliberately say nothing, so the wait below does not burn its full budget; set
+# PREPOPUP_SAYS=N for a path that says N times in the foreground before the popup
+# (the draft-dir fallback warning), so the wait skips past them to the intake's
+# own outcome say.
 run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     local cfg="$1" topic="$2" rc=0
     export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux.log" GUM_CALLS="$TMP/gum.log"
@@ -355,13 +389,14 @@ run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     # HANDLER_PATH replaces that prefix outright for the one case that needs a
     # PATH with no gum on it at all.
     PATH="${HANDLER_PATH:-$TMP/gumbin:$TMP/bin:$PATH}" sh "$SCRIPT" "$cfg" || rc=$?
-    # The outcome is reported from a background subshell; poll for it rather
-    # than sleeping a guessed interval.
+    # The outcome say comes from the background subshell, AFTER it writes the
+    # calls log, so waiting for it is what lets a caller read a complete calls
+    # log. A path that emits a foreground say BEFORE the popup (the draft-dir
+    # fallback warning) sets PREPOPUP_SAYS to its count, so the wait lands on the
+    # intake's OWN say and not that warning — otherwise the warning satisfies the
+    # wait and the caller's read races the still-pending intake.
     if [ "${EXPECT_SAY:-1}" = 1 ]; then
-        for _ in $(seq 1 100); do
-            grep -q 'display-message .*-d ' "$TMUX_CALLS" && break
-            sleep 0.05
-        done
+        wait_for says_ge "$(( 1 + ${PREPOPUP_SAYS:-0} ))" "$TMUX_CALLS"
     fi
     return "$rc"
 }
@@ -691,7 +726,9 @@ if [ "$(id -u)" -eq 0 ]; then
 else
     UNWRITABLE="$TMP/nodraft"
     mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
-    DRAFT_DIR_OVERRIDE="$UNWRITABLE" run_handler "$CFG_OK" "a topic whose dir is read-only" || true
+    # The fallback warning says once before the popup, so declare it: the wait
+    # then lands on the intake's own say, past which the calls log is written.
+    PREPOPUP_SAYS=1 DRAFT_DIR_OVERRIDE="$UNWRITABLE" run_handler "$CFG_OK" "a topic whose dir is read-only" || true
     tcalls=$(cat "$TMP/tmux.log")
     has "$tcalls" "not writable" "DRAFTDIRFAIL: an unwritable draft dir is reported"
     has "$(cat "$TMP/calls.log")" "argv=[a topic whose dir is read-only]" \
@@ -719,7 +756,7 @@ FAKE_HOME="$TMP/fakehome"; mkdir -p "$FAKE_HOME"
     unset GC_VISIT_DRAFT_DIR GC_PACK_STATE_DIR XDG_STATE_HOME
     : > "$TMUX_CALLS"
     PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
-    for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
+    wait_for says_ge 1 "$TMUX_CALLS"
 )
 ddpath=$(sed -n "s/.*> '\([^']*\)'.*/\1/p" "$TMP/tmux-dd.log" | head -1)
 case "$ddpath" in "$FAKE_HOME"/.local/state/gc/visit-drafts/draft-*)
@@ -756,7 +793,10 @@ else
         export GC_VISIT_DRAFT_DIR="$NOWRITE"
         : > "$TMUX_CALLS"; : > "$CALLS"
         PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
-        for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
+        # The unwritable dir says once in the foreground (the fallback warning)
+        # before the intake backgrounds, so wait for its own say — the second —
+        # or the calls-log read below races the still-pending intake.
+        wait_for says_ge 2 "$TMUX_CALLS"
     )
     chmod 700 "$NOWRITE"
     [ -e "$SHAREDTMP/draft-unrelated" ] \
@@ -789,21 +829,12 @@ rm -f "$INDICATOR_PATH"
     : > "$TMUX_CALLS"
     PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_SLOW"
 )
-seen=0
-for _ in $(seq 1 40); do
-    [ -f "$INDICATOR_PATH" ] && { seen=1; break; }
-    sleep 0.05
-done
-[ "$seen" -eq 1 ] \
+wait_for has_file "$INDICATOR_PATH" \
     && ok "INDICATOR: the in-flight slot is written while the intake runs" \
     || bad "INDICATOR: no indicator at $INDICATOR_PATH while the intake ran"
-for _ in $(seq 1 100); do
-    [ -f "$INDICATOR_PATH" ] || break
-    sleep 0.05
-done
-[ -f "$INDICATOR_PATH" ] \
-    && { bad "INDICATOR: the slot was not cleared when the intake finished"; rm -f "$INDICATOR_PATH"; } \
-    || ok "INDICATOR: the slot is cleared when the intake finishes"
+wait_for no_file "$INDICATOR_PATH" \
+    && ok "INDICATOR: the slot is cleared when the intake finishes" \
+    || { bad "INDICATOR: the slot was not cleared when the intake finished"; rm -f "$INDICATOR_PATH"; }
 
 # (TIMEOUT)
 CFG_HANG="$TMP/cfg-hang"; mkcfg "$CFG_HANG" '#!/bin/sh
@@ -943,30 +974,16 @@ if [ -n "$LIVE_TERM" ]; then
 
     : > "$LIVE_CALLS"
     press "$HOSTILE" "$MULTI" "third one's here; yes"
-    # Each press backgrounds its intake on the tmux server (run-shell -b), so
-    # the calls log is written AFTER press() returns. The full parallel suite
-    # loads the host, so those intakes are starved and the last one is still
-    # mid-write when a fixed post-press sleep expires. An immediate read then
-    # sees an empty log, and every assertion below fails with an empty
-    # "(in: )" and a count of 0. Wait for the three calls to land before
-    # reading. A genuinely lost press still fails, now after the wait rather
-    # than racing it.
-    for _ in $(seq 1 100); do
-        [ "$(grep -c '=== call ===' "$LIVE_CALLS" 2>/dev/null)" -ge 3 ] && break
-        sleep 0.1
-    done
+    # Three presses, so wait for three calls to land before reading them.
+    wait_for calls_ge 3 "$LIVE_CALLS"
     live=$(cat "$LIVE_CALLS" 2>/dev/null)
 
     has "$live" "argv=[$HOSTILE]" "ROUNDTRIP: apostrophe, semicolon and quotes survive a real key press"
     has "$live" "argv=[$MULTI]" "MULTILINE: a paragraph typed into the popup arrives whole"
     has "$live" "argv=[third one's here; yes]" "THREE: the third press lands"
     eq "$(grep -c '=== call ===' <<< "$live")" "3" "THREE: three presses, three independent invocations"
-    # The outcome say is emitted by the same backgrounded intake, after its
-    # calls-log write, so it reaches show-messages later still. Poll for it too.
-    for _ in $(seq 1 100); do
-        grep -q 'visit tk-vis01 filed' < <(tmux -L "$SOCKET" show-messages 2>/dev/null) && break
-        sleep 0.1
-    done
+    # The outcome say lands after the calls-log write, so wait for it separately.
+    wait_for msg_has 'visit tk-vis01 filed'
     msgs=$(tmux -L "$SOCKET" show-messages 2>/dev/null || true)
     has "$msgs" "visit tk-vis01 filed" "ROUNDTRIP: the outcome reaches the operator's client"
 
@@ -1055,6 +1072,10 @@ sleep 5'
     GC_TMUX_SOCKET="$SOCKET" sh "$BINDINGS" "$NOFREEZE_CFG" >/dev/null 2>&1
     : > "$TMP/nofreeze.log"
     press "first slow topic" "second while first runs"
+    # Each intake appends its start timestamp as its first action, backgrounded
+    # on the tmux server, so the second append can lag this read under load.
+    # Wait for both lines before counting them.
+    wait_for lines_ge 2 "$TMP/nofreeze.log"
     mapfile -t starts < "$TMP/nofreeze.log"
     if [ "${#starts[@]}" -eq 2 ]; then
         gap=$(( starts[1] - starts[0] ))
