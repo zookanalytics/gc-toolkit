@@ -22,14 +22,19 @@
 PRS_MARK_OPEN="<!-- gc:pr-summary -->"
 PRS_MARK_CLOSE="<!-- /gc:pr-summary -->"
 
-# The lanes a check_set declares, one per line. Same drop list merge.sh's
-# lanes_of applies, so publishing and merging judge one anchor by one rule:
-# none/off is the gateless-by-choice sentinel, and approval is evidenced by an
-# external GitHub review, which cannot exist before the PR does. The drop test
-# is case-insensitive; what survives keeps its case, because it names a lane.
-gates_of() { # <check_set>
-  printf '%s' "${1:-}" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' \
-    | grep -Eiv '^(none|off|approval)$'
+# review-checks.sh resolves beside this library. The render asks it for the
+# anchor's gates by phase — the one resolver that knows none/off are the gateless
+# sentinels and approval is a merge rule, not a lane — so publishing and merging
+# judge one anchor by one rule.
+_prs_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd 2>/dev/null)" || _prs_lib_dir="."
+PRS_REVIEW_CHECKS="${GC_REVIEW_CHECKS:-$_prs_lib_dir/review-checks.sh}"
+
+# The open-as-draft gates only, one per line: the checks that run against the open
+# PR before it is surfaced for review.
+prs_draft_gates() { # <check_set> <head_oid>
+  [ -x "$PRS_REVIEW_CHECKS" ] || return 0
+  "$PRS_REVIEW_CHECKS" --resolve --check-set "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null \
+    | awk -F'\t' '$2 == "open-as-draft" { print $1 }'
   return 0
 }
 
@@ -60,7 +65,7 @@ strip_summary_heading() { # <text>
 compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> [<mode>]
   local summary="$1" desc="$2" id="$3" branch="$4" target="$5" checkset="$6" head_oid="$7" sup_num="$8" sup_head="$9"
   local mode="${10:-open}"
-  local greened
+  local greened draftg
   # A standing banner leads the region when the base is an integration branch, so a
   # reviewer reads it before the diff: approving mints this phase into
   # integration/<convoy-id> and main does not move, the broader review running at
@@ -87,7 +92,15 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
   fi
   echo; echo "## Refinery handoff"; echo
   printf -- '- Issue: `%s`\n- Source branch: `%s`\n- Target: `%s`\n' "$id" "$branch" "$target"
-  greened=$(gates_of "$checkset" | paste -sd, -)
+  # One resolver fork for both phase bands rather than one each: `--through
+  # open-as-draft --with-phase` names every gate up to the draft stage tagged with
+  # its phase, and the two bands are partitioned here — the pre-open gates signed
+  # off before the PR opened, the open-as-draft gates that run against the open PR.
+  local phased=""
+  [ -x "$PRS_REVIEW_CHECKS" ] && phased=$("$PRS_REVIEW_CHECKS" --resolve \
+    --check-set "$checkset" --through open-as-draft --with-phase --at "$head_oid" 2>/dev/null)
+  greened=$(printf '%s\n' "$phased" | awk -F'\t' '$2 == "pre-open" { print $1 }' | paste -sd, -)
+  draftg=$(printf '%s\n' "$phased" | awk -F'\t' '$2 == "open-as-draft" { print $1 }' | paste -sd, -)
   if [ "$mode" = refresh ]; then
     if [ -n "$greened" ]; then
       printf -- '- Head `%.8s`; gates `%s`; see the PR checks for current status.\n' "$head_oid" "$greened"
@@ -101,6 +114,7 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
       printf -- '- Anchor declares no pre-open gate (`check_set=%s`); opened at `%.8s`.\n' "$checkset" "$head_oid"
     fi
   fi
+  [ -n "$draftg" ] && printf -- '- Draft-stage gates `%s` run against the open PR before it is marked ready for review.\n' "$draftg"
   [ -n "$sup_num" ] && printf -- '- Supersedes #%s (closed unmerged at `%.8s`); re-implemented and re-gated at `%.8s`.\n' \
     "$sup_num" "$sup_head" "$head_oid"
   return 0

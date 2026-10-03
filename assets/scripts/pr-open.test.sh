@@ -24,7 +24,7 @@ harness_init
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/pr-summary-region.sh" "$HERE/lifecycle.sh" \
-  "$HERE/lane-state.sh" "$HERE/finding.sh"
+  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
 SUT="$SD/pr-open.sh"
 
 pre() { # id branch extra-json [check_set]  (4th arg empty = no check_set key)
@@ -253,9 +253,11 @@ echo "sha-b2" > "$GH_DIR/head_polecat_b2"
 out=$("$SUT" 2>&1)
 has "$out" "lane 'correctness' does not derive green" "a lane short of green holds the open"
 eq "$(meta B2 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
-# The gate check is row-only (green is a state of the lane, not the head), so
-# it is judged before the head fetch: a held anchor pays no network call.
-hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an ungreen gate holds before the head is ever fetched"
+# The pre-open gate SET is resolved at the REVIEWED head — the same index the body
+# render and gate-ensure dispatch read — so the head is fetched before the lanes
+# are judged. The lane's green itself stays row-only (--no-remote): a commit
+# landing on the branch does not move it.
+has "$(cat "$STUB_GH_LOG")" "commits/" "the head is fetched to resolve the gate at the reviewed head"
 
 # The whole of the 211: a green lane is green however far the branch has moved
 # since the verdict, so the head the PR opens at is not the gate's business.
@@ -280,7 +282,7 @@ out=$("$SUT" 2>&1)
 has "$out" "lane 'triage' does not derive green" "the unbacked second lane holds"
 eq "$(meta B3 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR is published past an unanswered gate"
-hasnt "$(cat "$STUB_GH_LOG")" "commits/" "…and the head was never fetched to decide it"
+has "$(cat "$STUB_GH_LOG")" "commits/" "…the head is fetched to resolve the gate at the reviewed head"
 
 echo "# an empty check_set is never the gateless opt-out"
 store "[$(pre B4 polecat/b4 '' '')]"
@@ -529,6 +531,110 @@ inewbody=$(jq -r '.body' "$GH_DIR/pr_view_93.json")
 has "$inewbody" "[!IMPORTANT]" "the refreshed body carries the checkpoint banner"
 has "$inewbody" 'integration/tk-5kk1zh' "…naming the integration base"
 has "$(pv_labels 93)" "base: integration" "adoption also stamps the base: label"
+
+echo "# the phase model: an open-as-draft check opens the PR as a draft, and a later arm surfaces it"
+# A controlled index so the test does not depend on the live pack's review-checks.toml:
+# correctness reads the diff (pre-open), demo needs the preview (open-as-draft).
+DR_IDX="$TMP/draft-index.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.triage]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$DR_IDX"
+pr_anchor() { # id branch num check_set [opened_as_draft] [draft_readied]
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t","metadata":{"merge_result":"pull_request","branch":"%s","merged_target":"main","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","check_set":"%s"%s%s}}' \
+    "$1" "$2" "$3" "$3" "$4" \
+    "${5:+,\"opened_as_draft\":\"$5\"}" \
+    "${6:+,\"draft_readied\":\"$6\"}"
+}
+rev_lane() { # id anchor lane oid
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"approve","metadata":{"task_kind":"review","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","signoff_verdict":"approve"}}' \
+    "$1" "$2" "$3" "$4"
+}
+
+# create: the pre-open gate (correctness) is green and demo is open-as-draft, so
+# the PR opens as a DRAFT and the anchor records opened_as_draft at the flip — the
+# preview the demo needs can deploy, but it is not surfaced for review yet.
+store "[$(pre DR1 polecat/dr1 '' 'correctness,demo'), $(rev DR1)]"
+echo "sha-dr1" > "$GH_DIR/head_polecat_dr1"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/70"
+printf '%s' "$(prrow 70 OPEN polecat/dr1 sha-dr1 main)" > "$GH_DIR/pr_view_70.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "opened PR#70" "a demo-bearing anchor opens once its pre-open gate is green"
+eq "$(meta DR1 merge_result)" "pull_request" "the anchor flips to pull_request"
+has "$(cat "$STUB_GH_LOG")" "pr create --repo github.com/zook/gc-toolkit --base main --head polecat/dr1" "the create is pinned to origin"
+has "$(cat "$STUB_GH_LOG")" "--draft" "it opens as a draft because demo is open-as-draft"
+eq "$(meta DR1 opened_as_draft)" "sha-dr1" "the flip records opened_as_draft at the reviewed head"
+
+# draft -> ready: a draft the refinery opened (opened_as_draft set), every
+# open-as-draft gate green, is flipped out of draft AND records draft_readied.
+store "[$(pr_anchor DR2 polecat/dr2 71 'correctness,demo' sha-dr2), $(rev_lane rev-DR2-c DR2 correctness sha-dr2), $(rev_lane rev-DR2-d DR2 demo sha-dr2)]"
+printf '%s' "$(prrow 71 OPEN polecat/dr2 sha-dr2 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_71.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "flipped draft -> ready for review" "the draft is surfaced once its open-as-draft gates are green"
+has "$(cat "$STUB_GH_LOG")" "pr ready 71" "gh pr ready flips it out of draft"
+eq "$(meta DR2 draft_readied)" "sha-dr2" "the flip records draft_readied so the arm never re-reads it"
+
+# draft -> ready HOLDS while an open-as-draft gate is not yet green.
+store "[$(pr_anchor DR3 polecat/dr3 72 'correctness,demo' sha-dr3), $(rev_lane rev-DR3-c DR3 correctness sha-dr3)]"
+printf '%s' "$(prrow 72 OPEN polecat/dr3 sha-dr3 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_72.json"
+echo '[]' > "$GH_DIR/reviews_72.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr ready 72" "a draft whose open-as-draft gate is still ungreen stays a draft"
+
+# a check_set of only pre-open checks never opens a draft (the empty-phase collapse).
+store "[$(pre DR4 polecat/dr4 '' 'correctness,triage'), $(rev DR4), $(rev_lane rev-DR4-t DR4 triage sha-dr4)]"
+echo "sha-dr4" > "$GH_DIR/head_polecat_dr4"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/73"
+printf '%s' "$(prrow 73 OPEN polecat/dr4 sha-dr4 main)" > "$GH_DIR/pr_view_73.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "opened PR#73" "an all-pre-open anchor opens"
+hasnt "$(cat "$STUB_GH_LOG")" "--draft" "…and never as a draft — the empty-phase collapse"
+
+echo "# the draft-to-ready arm's cheap metadata prefilter — no PR read, no resolver fork per pass"
+# An anchor with no opened_as_draft opened ready; the arm must not even read its PR.
+store "[$(pr_anchor DR5 polecat/dr5 74 'correctness,demo'), $(rev_lane rev-DR5-c DR5 correctness sha-dr5), $(rev_lane rev-DR5-d DR5 demo sha-dr5)]"
+printf '%s' "$(prrow 74 OPEN polecat/dr5 sha-dr5 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_74.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr view 74" "an opened-ready anchor (no opened_as_draft) is skipped before any PR read"
+hasnt "$(cat "$STUB_GH_LOG")" "pr ready 74" "…and never flipped"
+
+# An already-readied anchor (draft_readied set) is skipped before any PR read —
+# which is also what keeps the arm off a PR an operator re-drafted after readying.
+store "[$(pr_anchor DR6 polecat/dr6 75 'correctness,demo' sha-dr6 sha-dr6), $(rev_lane rev-DR6-c DR6 correctness sha-dr6), $(rev_lane rev-DR6-d DR6 demo sha-dr6)]"
+printf '%s' "$(prrow 75 OPEN polecat/dr6 sha-dr6 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_75.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr view 75" "a readied anchor (draft_readied set) is skipped — an operator's re-draft is never re-flipped"
+hasnt "$(cat "$STUB_GH_LOG")" "pr ready 75" "…and never flipped"
+
+echo "# the draft-to-ready arm respects operator holds, must-fix findings, and PR state"
+# A held draft is the operator's: never surfaced, even with every gate green.
+store "[$(pr_anchor DR7 polecat/dr7 76 'correctness,demo' sha-dr7 | jq -c '.metadata.merge_hold="true"'), $(rev_lane rev-DR7-c DR7 correctness sha-dr7), $(rev_lane rev-DR7-d DR7 demo sha-dr7)]"
+printf '%s' "$(prrow 76 OPEN polecat/dr7 sha-dr7 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_76.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "held (merge_hold" "a held draft is not surfaced"
+hasnt "$(cat "$STUB_GH_LOG")" "pr ready 76" "…gh pr ready is never called on a held draft"
+
+# A draft with an open must-fix finding is not surfaced over work the city has
+# ruled must change, even with every open-as-draft gate green.
+store "[$(pr_anchor DR8 polecat/dr8 77 'correctness,demo' sha-dr8), $(rev_lane rev-DR8-c DR8 correctness sha-dr8), $(rev_lane rev-DR8-d DR8 demo sha-dr8), $(finding fnd-dr8 DR8 must-fix demo)]"
+printf '%s' "$(prrow 77 OPEN polecat/dr8 sha-dr8 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_77.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "open must-fix finding" "a draft with an open must-fix finding is not surfaced"
+hasnt "$(cat "$STUB_GH_LOG")" "pr ready 77" "…gh pr ready is never called over an open must-fix"
+
+# A PR already out of draft (surfaced externally, or adopted ready) records
+# draft_readied so the arm stops reading it every pass, and is not re-flipped.
+store "[$(pr_anchor DR9 polecat/dr9 78 'correctness,demo' sha-dr9), $(rev_lane rev-DR9-c DR9 correctness sha-dr9), $(rev_lane rev-DR9-d DR9 demo sha-dr9)]"
+printf '%s' "$(prrow 78 OPEN polecat/dr9 sha-dr9 main)" > "$GH_DIR/pr_view_78.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(meta DR9 draft_readied)" "sha-dr9" "an already-ready draft records draft_readied"
+hasnt "$(cat "$STUB_GH_LOG")" "pr ready 78" "…and is not re-flipped"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
