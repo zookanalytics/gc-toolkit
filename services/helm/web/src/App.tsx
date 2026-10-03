@@ -655,6 +655,16 @@ function AnchorRow({
             />
           </>
         )}
+        {/* The card behind the Accept — the Proposal and Decision-needed an
+            operator weighs — folded into a disclosure so the row stays a
+            one-line scan until opened at the decision point. The wire carries it
+            only on an acceptable row, so its presence is the gate. */}
+        {tile.recommendation && (
+          <details className="recommendation">
+            <summary>recommendation</summary>
+            <pre>{tile.recommendation}</pre>
+          </details>
+        )}
       </td>
       <td>{tile.section === 'done' ? '' : owedSince(tile)}</td>
     </tr>

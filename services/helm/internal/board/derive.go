@@ -1837,6 +1837,11 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	if rf := a.Metadata[mdRecommendedFormula]; rf != "" && a.Metadata["task_kind"] != wrapperVisit && unengagedVisit(a.ID, f.Sittings) {
 		t.Acceptable = true
 		t.AcceptFormula = rf
+		// The reasoning behind the recommendation lives in the subject's notes.
+		// Carry it only here, where Accept is offered, so the wire stays lean on
+		// every other row. TrimSpace, not collapseWS: the card's section
+		// structure is the content, not whitespace to fold away.
+		t.Recommendation = nilIfEmpty(strings.TrimSpace(a.Notes))
 	}
 
 	// The band is a function of the finished tile, so the visit fold can re-run
