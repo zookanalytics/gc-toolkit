@@ -133,15 +133,35 @@ TWO_STUCK='[
 eq "$(printf '%s' "$(run "$TWO_STUCK")" | grep -c . || true)" "2" \
    "two stuck handoffs escalate once each"
 
-# Nothing to assert on a broken or empty read.
+# THE BUG: a raw control byte in a bead string (here a stuck handoff's title)
+# aborts jq on the whole array and silently blinded this monitor. The
+# control-byte strip rescues the parse, so the stuck handoff still escalates and
+# the read is never mistaken for unreadable.
+CTL="$(printf 'x\001y')"
+CTRL_STUCK='[{"id":"tk-ctl","updated_at":"'"$OLD1"'","title":"handoff '"$CTL"'","metadata":{}}]'
+CESC="$(run "$CTRL_STUCK")"
+has "$CESC" "--subject tk-ctl" "a raw control byte in the queue does not blind the stuck-handoff read"
+has "$CESC" "--key witness-refinery-queue" "the rescued read escalates the stuck handoff normally"
+hasnt "$(out)" "unreadable" "a control byte is stripped, not treated as unreadable"
+
+# An empty queue is a valid array with nothing stuck: no escalation.
 eq "$(run '[]')" "" "an empty queue escalates nothing"
 has "$(out)" "no stuck handoffs" "an empty queue is reported apart from an unreadable one"
-eq "$(run 'warning: config drift
-[]')" "" "an unparseable listing escalates nothing"
-eq "$(run '{"error":"store unavailable"}')" "" "an error object escalates nothing"
-eq "$(run 'null')" "" "a null listing escalates nothing"
-eq "$(run '' '' 1)" "" "a failed listing escalates nothing"
-has "$(out)" "unreadable" "a failed listing reports why it is silent"
+
+# A genuinely unreadable queue — not a JSON array even after the control-byte
+# strip, or a failed listing — escalates the BLIND MONITOR loudly, under its own
+# key and naming no stuck bead. The old silent stderr log was the defect.
+blind() {
+  local esc; esc="$(run "$@")"
+  has "$esc" "--key witness-refinery-queue-unreadable" "unreadable read escalates the blind monitor"
+  hasnt "$esc" "--subject tk-" "the blind-monitor escalation names no stuck bead"
+}
+blind 'warning: config drift
+[]'
+blind '{"error":"store unavailable"}'
+blind 'null'
+blind '' '' 1
+has "$(out)" "unreadable" "a failed listing still reports it is unreadable"
 
 # unset GC_RIG still names the refinery in the message, with no leading slash.
 URIG="$(GC_RIG_OVERRIDE= run "$STUCK_ONE")"
@@ -153,8 +173,8 @@ hasnt "$URIG" "/gc-toolkit.refinery" "unset GC_RIG emits no leading slash"
 for PRELUDE in 'set -e' 'set -euo pipefail'; do
   has "$(run "$STUCK_ONE" '' 0 "$PRELUDE")" "--subject tk-stuck" \
      "$PRELUDE: a stuck handoff still escalates"
-  eq "$(run '' '' 1 "$PRELUDE")" "" \
-     "$PRELUDE: a failed listing escalates nothing"
+  has "$(run '' '' 1 "$PRELUDE")" "--key witness-refinery-queue-unreadable" \
+     "$PRELUDE: a failed listing escalates the blind monitor"
   has "$(out)" "unreadable" "$PRELUDE: a failed listing still reaches the diagnostic"
   eq "$(run '[]' '' 0 "$PRELUDE")" "" \
      "$PRELUDE: an empty queue escalates nothing"
