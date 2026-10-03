@@ -179,6 +179,48 @@ armed past the reconcile window, or one armed at a non-open status the pass can
 never dispatch — a dispatch silently not firing, surfaced before a human has to
 notice it days later.
 
+## The resolved-by consumer (`until`)
+
+A `blocks` edge says "X must land before me": when X closes the dependent
+becomes ready and is still fully owed. An `until` edge says the other thing —
+"X resolves me" — and the same reconcile pass acts on it. Once a bead's own
+`until` targets have all closed, the pass disposes the bead through
+`assets/scripts/bead-rehome.sh`, so the close carries a successor pointer
+(`gc.superseded_by`) instead of the bead re-entering triage as fresh work. A
+wait whose named cause has landed is closed, not re-derived by hand.
+
+`until` is not a blocking type, so an `until` edge alone does not hold a bead
+out of `bd ready`. To make a bead both wait for X and be disposed when X lands,
+wire both: a `blocks` edge for the wait and an `until` edge for the resolution.
+`bead-rehome` drops the `blocks` wait edge to the successor on its way to the
+close, so the pair needs no separate teardown.
+
+The pass acts only on an OPEN, UNASSIGNED bead: a non-`open` status is a
+deliberate hold and an assignee is a live worker, both left alone. It disposes
+only when EVERY `until` target has closed — a target still open, or one the
+status read cannot resolve, leaves the bead waiting, never disposed on a guess.
+ONLY `until` disposes: a `blocks` edge is never a dispose trigger, so the common
+sequencing edge ("land A before B", where B is still owed after A) is never
+auto-closed.
+
+When the close is held — an open visit tracking the bead, or another open
+blocker — `bead-rehome` records the successor pointer and refuses the close
+rather than forcing it, leaving an open, pointed, findable bead that a later
+pass retries once the hold clears. Enumeration is fail-closed the way the
+dispatch half is: an unreadable store leaves every until-gated bead for the next
+pass rather than reading "none owed". The same-store limit below holds for an
+`until` target as much as for a `blocks` blocker — one in another rig is not seen
+here.
+
+The same three checks that keep the dispatch half honest cover this half too.
+The positive control and `check-cadence-live` (I10) are shared — this is the
+same order on the same cadence. `doctor/check-until-resolved-owed` is the
+resolved-by mirror of `check-armed-dispatch-owed`: it flags an open, unassigned
+bead whose `until` targets have all closed and that no open `blocks` blocker
+still holds, yet that has stayed undisposed past the reconcile window — the
+disposition silently not firing, surfaced before the bead drifts back into a
+triage sitting.
+
 ## What this does not do
 
 It does not make `gc sling` itself dependency-aware, and it does not give
@@ -190,12 +232,6 @@ the call site.
 
 The layer analysis behind that split, and what each `gc`-side direction
 would take, is in `specs/tk-y0ygs/layer-determination.md`.
-
-It also does not close a bead its blocker resolved. "X must land before
-me" and "X resolves me" are different claims, and only the first has a
-consumer today; the second is tracked on `tk-4dksv`. The two are the same
-shape — an edge nothing acts on — and this order is the natural host for
-that consumer when it is built.
 
 A blocker in another store holds nothing here either. `bd` resolves a
 dependency id within one store, so a `blocks` edge naming a bead in
