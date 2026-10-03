@@ -622,6 +622,30 @@ tr.drilled {
   white-space: pre-wrap;
 }
 
+/* The first-reaction card folded under an AnchorRow's Accept. Mirrors the drill
+   description disclosure: a muted one-word summary, the card in a wrapped,
+   scrollable pre so a long recommendation never widens the column. */
+.recommendation {
+  font-size: 0.8125rem;
+  margin-top: 0.25rem;
+}
+
+.recommendation > summary {
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.recommendation pre {
+  background: rgb(128 128 128 / 12%);
+  border-radius: 3px;
+  margin: 0.25rem 0 0;
+  max-height: 20rem;
+  max-width: 48rem;
+  overflow: auto;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+}
+
 .drill-activity ol {
   font-size: 0.8125rem;
   list-style: none;

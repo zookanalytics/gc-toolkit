@@ -64,6 +64,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     section: 'active',
     acceptable: false,
     accept_formula: '',
+    recommendation: null,
     ...over,
   };
 }
@@ -854,6 +855,53 @@ it('renders Accept on an acceptable member row and not on a discuss-only one', a
 
   const plain = rowFor(/a discuss-only gate/);
   expect(within(plain as HTMLElement).queryByRole('button', { name: /accept/i })).toBeNull();
+});
+
+// The first-reaction card rides the acceptable row: its Proposal and
+// Decision-needed are one disclosure away from the Accept button, so the
+// decision point shows WHY, not only the one-line needs. A row the wire gives no
+// recommendation carries no disclosure.
+it('folds the first-reaction recommendation under an acceptable row', async () => {
+  serve([
+    tile({ id: 'tk-root', kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
+    tile({
+      id: 'tk-rec',
+      kind: 'gate',
+      title: 'a recommendation to accept',
+      severity: 'ELEVATED',
+      section: 'gate',
+      group_root: 'tk-root',
+      acceptable: true,
+      accept_formula: 'mol-polecat-work',
+      needs: 'recommend: fix the thing',
+      recommendation: '## Proposal\nFix the thing.\n\n## Decision needed\nAccept or redirect the scope.',
+    }),
+    tile({
+      id: 'tk-plain',
+      kind: 'gate',
+      title: 'a discuss-only gate',
+      severity: 'ELEVATED',
+      section: 'gate',
+      group_root: 'tk-root',
+      acceptable: true,
+      accept_formula: 'mol-polecat-work',
+      needs: "let's talk it through",
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a recommendation to accept/)).toBeTruthy());
+
+  const rec = rowFor(/a recommendation to accept/) as HTMLElement;
+  // The disclosure is labelled and holds the card body, so one open at the
+  // decision point reveals the Proposal and the Decision needed.
+  expect(within(rec).getByText('recommendation')).toBeTruthy();
+  expect(within(rec).getByText(/Decision needed/)).toBeTruthy();
+  expect(within(rec).getByText(/Accept or redirect the scope/)).toBeTruthy();
+
+  // An acceptable row the wire gave no recommendation shows the Accept button
+  // but no card disclosure — the field's presence is the only gate.
+  const plain = rowFor(/a discuss-only gate/) as HTMLElement;
+  expect(within(plain).queryByText('recommendation')).toBeNull();
 });
 
 // A single-item family that is itself a recommendation renders as a plain loose

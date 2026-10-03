@@ -3235,3 +3235,48 @@ func TestDemandFoldYieldsToLiveWork(t *testing.T) {
 		t.Errorf("the demand's ask becomes the subject's needs: %q", idle.Needs)
 	}
 }
+
+// A recommendation row carries the first-reaction card to the operator's accept
+// point. When a subject is acceptable — a recommended formula plus an open,
+// un-engaged visit — its notes (the Proposal and Decision-needed an operator
+// weighs) reach the wire as Tile.Recommendation, trimmed but with the card's
+// section structure intact. Off an acceptable row the field stays null, so the
+// wire never carries every bead's notes.
+func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
+	const card = "## Proposal\nDo the thing.\n\n## Decision needed\nAccept or redirect."
+	subject := func(id string) Anchor {
+		return Anchor{
+			ID: id, Title: id, Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata: map[string]string{"gc.recommended_formula": "mol-polecat-work"},
+			Notes:    "\n\n" + card + "\n\n",
+		}
+	}
+	openVisit := func(id string) Facts {
+		return Facts{Sittings: []Sitting{{Subject: id, Status: "open"}}}
+	}
+
+	// Acceptable row: the card reaches the wire, trimmed, structure intact.
+	tile := computeTile(subject("tk-rec"), fixtureNow, openVisit("tk-rec"))
+	if !tile.Acceptable {
+		t.Fatal("precondition: a recommended formula + open un-engaged visit is acceptable")
+	}
+	if tile.Recommendation == nil {
+		t.Fatal("an acceptable row carries its first-reaction card as recommendation")
+	}
+	if *tile.Recommendation != card {
+		t.Errorf("recommendation is the notes, trimmed, card structure intact:\n got %q\nwant %q", *tile.Recommendation, card)
+	}
+
+	// Same notes, but no open visit → not acceptable → no card on the wire.
+	if got := computeTile(subject("tk-rec"), fixtureNow, Facts{}).Recommendation; got != nil {
+		t.Errorf("off an acceptable row the wire carries no card: got %q", *got)
+	}
+
+	// Acceptable, but whitespace-only notes → null, never an empty string.
+	empty := subject("tk-rec")
+	empty.Notes = "   \n"
+	if got := computeTile(empty, fixtureNow, openVisit("tk-rec")).Recommendation; got != nil {
+		t.Errorf("whitespace-only notes is null, not an empty recommendation: got %q", *got)
+	}
+}

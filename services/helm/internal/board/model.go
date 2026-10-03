@@ -126,6 +126,15 @@ type Anchor struct {
 	TakeawayAt string `json:"takeaway_at,omitempty"`
 	TakeawayBy string `json:"takeaway_by,omitempty"`
 
+	// Notes carries the bead's notes field so a recommendation row can spend the
+	// first-reaction card (Understanding / Found / Proposal / Decision needed)
+	// the disposition wrote there. The takeaway is one frozen line; the card is
+	// the reasoning and the options behind it, which is what an operator needs to
+	// Accept or redirect. It reaches the wire only as Tile.Recommendation, and
+	// only on an acceptable row — computeTile reads it beside the accept
+	// affordance.
+	Notes string `json:"notes,omitempty"`
+
 	// WaitingOn is the ids this bead depends on by a `blocks` edge, and
 	// WaitingOnClosed the subset of those the source found already closed.
 	//
@@ -490,6 +499,14 @@ type Tile struct {
 	// Empty on a terminal (closed) row, where the live vocabulary has no answer,
 	// the same not-applicable empty PRPhase leaves off a non-merge row.
 	Phase string `json:"phase"`
+
+	// Recommendation is the first-reaction card from the subject bead's notes —
+	// the Proposal and Decision-needed sections an operator weighs to Accept or
+	// redirect — carried verbatim so the decision point shows WHY, not only the
+	// one-line takeaway that reaches Needs. Null-when-absent like the takeaway
+	// triple, and non-null exactly on an acceptable row (see computeTile): the
+	// accept affordance and the reasoning behind it ride the wire together.
+	Recommendation *string `json:"recommendation"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

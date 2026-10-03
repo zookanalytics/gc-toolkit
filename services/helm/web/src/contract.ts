@@ -310,6 +310,13 @@ export interface Tile {
    * not-applicable empty `pr_phase` uses off a non-merge row.
    */
   phase: string;
+  /**
+   * The first-reaction card from the subject bead's notes — Proposal and
+   * Decision-needed included — so the Accept decision shows WHY, not only the
+   * one-line `takeaway` folded into `needs`. `null`, not absent, when there is
+   * none; non-null exactly on an `acceptable` row.
+   */
+  recommendation: string | null;
 }
 
 /**

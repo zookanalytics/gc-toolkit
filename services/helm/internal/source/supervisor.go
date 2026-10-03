@@ -712,19 +712,23 @@ func anchorCandidate(b apiBead) bool {
 func (s *SupervisorSource) metadataAnchorFor(g *gatherState, b apiBead, md map[string]string, kind string, children []board.Child) board.Anchor {
 	rig, prefix := g.rigOf(b.ID)
 	return board.Anchor{
-		ID:             b.ID,
-		Title:          b.Title,
-		Kind:           kind,
-		Source:         kind,
-		Rig:            rig,
-		Prefix:         prefix,
-		Priority:       b.Priority,
-		Description:    b.Description,
-		Metadata:       md,
-		Children:       children,
-		Takeaway:       md["gc.takeaway"],
-		TakeawayAt:     md["gc.takeaway_at"],
-		TakeawayBy:     md["gc.takeaway_by"],
+		ID:          b.ID,
+		Title:       b.Title,
+		Kind:        kind,
+		Source:      kind,
+		Rig:         rig,
+		Prefix:      prefix,
+		Priority:    b.Priority,
+		Description: b.Description,
+		Metadata:    md,
+		Children:    children,
+		Takeaway:    md["gc.takeaway"],
+		TakeawayAt:  md["gc.takeaway_at"],
+		TakeawayBy:  md["gc.takeaway_by"],
+		// Notes is absent: this backend's apiBead does not decode it, so a
+		// recommendation row served from the supervisor fallback carries no card.
+		// The primary BeadsSource reads it; this is the same degraded-read shape
+		// as WaitingUnknown below.
 		WaitingUnknown: true,
 	}
 }

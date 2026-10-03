@@ -997,6 +997,9 @@ func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
 		Takeaway:   md["gc.takeaway"],
 		TakeawayAt: md["gc.takeaway_at"],
 		TakeawayBy: md["gc.takeaway_by"],
+		// The first-reaction card the disposition wrote; spent as the tile's
+		// recommendation on an acceptable row.
+		Notes: iss.Notes,
 	}
 }
 
