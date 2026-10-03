@@ -49,17 +49,9 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # captures the calls without a live store.
 ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
 
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
-
 # bd-lib supplies bd_list / bd_json, the consolidated store readers the lint rule
-# requires in scope (it carries its own scrub; the block above is for the direct
-# dep-list read below).
+# requires in scope. Every store read in this pass goes through them, so they
+# carry the only scrub it needs and it defines none of its own.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || {
   echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
@@ -84,10 +76,13 @@ if ! flock -n 9; then
   exit 0
 fi
 
-# Bound the work one pass does so a rig with many epics cannot overrun the order
-# timeout; the remainder is audited next tick. A ceiling, not active pacing.
-MAX_EPICS="${EPIC_STEWARD_MAX_EPICS_PER_PASS:-50}"
-
+# No per-pass epic cap. Epics are a coarse per-rig anchor (few per rig), the pass
+# is one jq emission plus a deduped visit only per owed decision, and the order's
+# own timeout and the single-flight flock already bound how long one pass runs. A
+# cap that took the first N in a stable listing order would never advance: epics
+# past N would be audited on no tick, so one could reach "all units landed" and
+# sit held forever with no ruling visit ever filed. The pass audits the whole
+# live set instead.
 filed=0
 checked=0
 failed=0
@@ -113,28 +108,41 @@ retract_visit() {
   "$ESCALATE" --retract --subject "$_es_epic" --key "$_es_key" --message "$_es_msg" >/dev/null 2>&1 || true
 }
 
-meta_field() { # <metadata-json> <key>
-  printf '%s' "$1" | jq -r --arg k "$2" '(.[$k] // "") | tostring' 2>/dev/null
-}
+# epic_ruling_valid <value> — true only for a ruling docs/epics.md defines:
+# persevere, pivot, or close. Empty, a draft ("pending"), or a typo is not a
+# ruling, so the epic is not yet ruled. The same enum the finalize gate and the
+# doctor check (I14) apply; the three readers stay in step, and an off-enum value
+# never makes this arm stop asking while the gate still holds the close.
+epic_ruling_valid() { case "${1:-}" in persevere|pivot|close) return 0 ;; *) return 1 ;; esac; }
 
 # --- arms -------------------------------------------------------------------
+# Each arm takes the epic id and the plain contract strings the pass already read.
+# All three wear the same shape: when the concern is OWED, file one deduped visit;
+# when it has CLEARED, retract the visit the arm would have filed, so a visit never
+# outlives the condition that justified it (orders/epic-steward.toml). retract is
+# idempotent — escalate.sh reads no open visit as a no-op success — so an arm whose
+# concern was never raised retracts nothing.
 
-arm_floor() { # <epic> <metadata-json>
-  _a_epic="$1"; _a_meta="$2"
-  [ -n "$(meta_field "$_a_meta" epic_hypothesis)" ] && return 0
+arm_floor() { # <epic> <hypothesis>
+  _a_epic="$1"; _a_hyp="$2"
+  if [ -n "$_a_hyp" ]; then
+    retract_visit "$_a_epic" "epic-floor" "a hypothesis is recorded; the floor contract is set"
+    return 0
+  fi
   file_visit "$_a_epic" "epic-floor" \
 "This epic carries no recorded hypothesis, so work cannot be classified into it and it cannot be judged complete.
 
 Draft and ratify its floor contract, then record it on the epic: a 3-5 word handle (epic_handle), a one-sentence hypothesis — for whom, what changes, the signal it worked — (epic_hypothesis), and its boundaries (epic_boundaries). A rough hypothesis is enough to start. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
 }
 
-arm_contract() { # <epic> <metadata-json>
-  _a_epic="$1"; _a_meta="$2"
+arm_contract() { # <epic> <hypothesis> <closure-condition> <indicators>
+  _a_epic="$1"; _a_hyp="$2"; _a_clo="$3"; _a_ind="$4"
   # No floor yet: arm_floor owns that; a contract presupposes a hypothesis.
-  [ -n "$(meta_field "$_a_meta" epic_hypothesis)" ] || return 0
-  _a_clo=$(meta_field "$_a_meta" epic_closure_condition)
-  _a_ind=$(meta_field "$_a_meta" epic_indicators)
-  [ -n "$_a_clo" ] && [ -n "$_a_ind" ] && return 0
+  [ -n "$_a_hyp" ] || return 0
+  if [ -n "$_a_clo" ] && [ -n "$_a_ind" ]; then
+    retract_visit "$_a_epic" "epic-contract" "the contract is complete; a closure condition and leading indicators are recorded"
+    return 0
+  fi
   _a_need=""
   [ -z "$_a_clo" ] && _a_need="a closure condition (epic_closure_condition: 3-6 operator-runnable checks that each fail today)"
   [ -z "$_a_ind" ] && _a_need="${_a_need:+$_a_need and }1-3 leading indicators (epic_indicators)"
@@ -144,18 +152,27 @@ arm_contract() { # <epic> <metadata-json>
 Fill in the rest of the contract on the epic. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
 }
 
-arm_ruling() { # <epic> <metadata-json>
-  _a_epic="$1"; _a_meta="$2"
+arm_ruling() { # <epic> <hypothesis> <ruling>
+  _a_epic="$1"; _a_hyp="$2"; _a_ruling="$3"
   # A ruling answers a hypothesis; without one, arm_floor owns the epic first.
-  [ -n "$(meta_field "$_a_meta" epic_hypothesis)" ] || return 0
-  if [ -n "$(meta_field "$_a_meta" epic_ruling)" ]; then
+  [ -n "$_a_hyp" ] || return 0
+  if epic_ruling_valid "$_a_ruling"; then
     # Ruled: release any ruling visit still holding the epic's finalize.
-    retract_visit "$_a_epic" "epic-ruling" "hypothesis ruled ($(meta_field "$_a_meta" epic_ruling)); the epic may close"
+    retract_visit "$_a_epic" "epic-ruling" "hypothesis ruled ($_a_ruling); the epic may close"
     return 0
   fi
   # The epic's units are its children; they point at it (incoming parent-child).
-  _a_kids=$(gc bd dep list "$_a_epic" --direction=up -t parent-child --json 2>/dev/null | scrub)
-  printf '%s' "$_a_kids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  _a_kids=$(bd_json dep list "$_a_epic" --direction=up -t parent-child)
+  if ! printf '%s' "$_a_kids" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    # An unreadable children probe is not "no ruling owed": count it a failure so
+    # the summary says so and the order exits non-zero, rather than the ruling arm
+    # going silently dark on a persistent breakage (flag drift, store permission)
+    # that only the doctor backstop would catch, and only after a hand-close. The
+    # pass still continues — the next tick retries the whole set.
+    echo "$PROG[$RIG]: children probe unreadable for $_a_epic — ruling arm skipped it this pass" >&2
+    failed=$((failed + 1))
+    return 0
+  fi
   _a_total=$(printf '%s' "$_a_kids" | jq 'length' 2>/dev/null)
   [ "${_a_total:-0}" -gt 0 ] 2>/dev/null || return 0        # no units yet
   _a_unlanded=$(printf '%s' "$_a_kids" | jq '[ .[] | select((.status // "") != "closed") ] | length' 2>/dev/null)
@@ -168,20 +185,33 @@ An epic closes by a ruling on its hypothesis — persevere, pivot, or close — 
 
 # --- main pass --------------------------------------------------------------
 
-EPICS_JSON=$(bd_list --type=epic --status=open) || {
-  echo "$PROG[$RIG]: could not read open epics (bd_list failed) — nothing stewarded this pass" >&2
+# The gate holds every non-closed epic (finalize-gate.sh clause_epic_ruling_
+# recorded is status-agnostic), so the pass audits the same live set. Open-only
+# would miss an in_progress (or blocked/deferred) epic whose units all land: no
+# ruling visit would ever be filed and the gate would hold its close forever.
+EPICS_JSON=$(bd_list --type=epic --status=open,in_progress) || {
+  echo "$PROG[$RIG]: could not read live epics (bd_list failed) — nothing stewarded this pass" >&2
   exit 1
 }
 
-while IFS= read -r epic; do
+# One jq emission reads every epic's id and the four contract fields the arms
+# need, unit-separated (\037) so an empty field — the common case the arms detect
+# — keeps its column; a whitespace IFS would collapse a run of empties and
+# misalign the row. The arms take plain strings, so the pass spawns one jq, not
+# the ~7 per epic a re-parse-per-field loop did.
+while IFS=$'\037' read -r epic hyp clo ind ruling; do
   [ -n "$epic" ] || continue
   checked=$((checked + 1))
-  meta=$(printf '%s' "$EPICS_JSON" | jq -c --arg id "$epic" '(.[] | select(.id == $id) | .metadata) // {}' 2>/dev/null)
-  [ -n "$meta" ] || meta='{}'
-  arm_floor    "$epic" "$meta"
-  arm_contract "$epic" "$meta"
-  arm_ruling   "$epic" "$meta"
-done < <(printf '%s' "$EPICS_JSON" | jq -r '.[].id' 2>/dev/null | head -n "$MAX_EPICS")
+  arm_floor    "$epic" "$hyp"
+  arm_contract "$epic" "$hyp" "$clo" "$ind"
+  arm_ruling   "$epic" "$hyp" "$ruling"
+done < <(printf '%s' "$EPICS_JSON" | jq -r '
+  .[] | [ (.id // "" | tostring),
+          (.metadata.epic_hypothesis // "" | tostring),
+          (.metadata.epic_closure_condition // "" | tostring),
+          (.metadata.epic_indicators // "" | tostring),
+          (.metadata.epic_ruling // "" | tostring) ]
+      | join("\u001f")' 2>/dev/null)
 
-echo "$PROG[$RIG]: checked $checked open epic(s), filed or refreshed $filed visit(s), $failed escalate failure(s)"
+echo "$PROG[$RIG]: checked $checked live epic(s), filed or refreshed $filed visit(s), $failed failure(s)"
 [ "$failed" -eq 0 ]

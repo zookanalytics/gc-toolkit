@@ -114,7 +114,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | ((($m.epic_ruling // "") | tostring)) as $ruling
         | ((($m.epic_hypothesis // "") | tostring)) as $hyp
         | ((($m["gc.superseded_by"] // "") | tostring)) as $disposed
-        | (if $ruling != "" then "ruled"
+        # "ruled" only for a ruling docs/epics.md defines (persevere|pivot|close);
+        # an off-enum value — "pending", a typo — is not a ruling and reads as
+        # unruled, the same enum the finalize gate and the steward enforce.
+        | (if ($ruling == "persevere" or $ruling == "pivot" or $ruling == "close") then "ruled"
            elif $disposed != "" then "exempt-disposed"
            elif $hyp != "" then "unruled"
            else "exempt-legacy" end) as $verdict
