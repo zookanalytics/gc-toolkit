@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/pr-facts.sh — external PR facts, no merge
 # authority. Covers: recording an out-of-band merge (never with an empty
-# merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
+# merged_sha); abandoned (+ escalate); retargeted (+ escalate, check markers
 # cleared, human-routed); BLOCKED -> escalate only an unresolved-thread block
 # (merge-blocked-threads, read from reviewThreads because reviewDecision is
 # masked while threads are open; no guess when the read fails, and an operator
@@ -453,7 +453,7 @@ out=$(run)
 has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
 eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
-eq "$(meta F3 'check.correctness')" "<absent>" "the pre-retarget gate marker is cleared"
+eq "$(meta F3 'check.correctness')" "<absent>" "the pre-retarget check marker is cleared"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
 
 echo "# CONFLICTING -> one rework child per head"
@@ -1065,7 +1065,7 @@ has "$out" "marker did not persist; NOT dismissing" "an unrecorded marker fails 
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and the dismissal is withheld"
 
 echo "# posture: an anchor blocked on a human approval says so"
-# The sl-bgmuy/PR#552 fixture: gate green at the live head, nothing in flight,
+# The sl-bgmuy/PR#552 fixture: check green at the live head, nothing in flight,
 # and by the pack's old accounting indistinguishable from an anchor progressing.
 store "[$(anchor S1 50)]"
 printf '%s' "$(prview 50 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_50.json"
@@ -2481,7 +2481,7 @@ eq "$(reacted 51 NC-51)" "false" "…and NOTHING was written back"
 echo "# a review posted under our OWN login leaves unresolved threads arm 7 never routes"
 # The gap: an outside review agent (or an operator-run review) posts findings on a
 # green PR under the automation's own login. arm 7 counts only other logins, so it
-# routes nothing; the gate stays green, and until this backstop nothing flagged it.
+# routes nothing; the check stays green, and until this backstop nothing flagged it.
 store "[$(anchor UT1 60)]"
 printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
 printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null}]' > "$GH_DIR/comments_60.json"

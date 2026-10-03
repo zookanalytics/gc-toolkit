@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/signoff.sh — the single gate-verdict writer.
+# Hermetic test for assets/scripts/signoff.sh — the single check-verdict writer.
 # Stubbed gc/gh/git; no live city, Dolt, network, or PRs. The posted artifact
 # carries the anchor link; --approve is NEVER used. A verdict records a lane
 # state and binds to no commit, so the reviewed oid reaches the artifact and the
@@ -691,7 +691,7 @@ reset "$ANCHOR_PR"
 printf 'tk-anc\n' > "$STUB_UPD_FAIL"
 out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 2 "a marker that does not stick exits 2"
-eq "$(status rv-1)" "in_progress" "the review bead is NOT closed over an unrecorded gate"
+eq "$(status rv-1)" "in_progress" "the review bead is NOT closed over an unrecorded check"
 
 echo "# a signoff_verdict that does not read back on close is caught, not shipped"
 reset "$ANCHOR_PR"
