@@ -117,6 +117,14 @@ has "$OUT" "NOT checked" "the warning says the store was skipped"
 printf 'not json' > "$TMP/stores/alpha.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unparseable store listing warns"
+# A VALID {"error":...} object is bd's shape when a query does not resolve
+# (bead-context.sh) — unreadable, not "no epics". `.[]?` would iterate the object
+# and the downstream `//` swallow the index error, yielding zero rows at exit 0 and
+# a false OK; the type guard makes jq error so the store lands in warnings.
+printf '{"error":"ledger unavailable"}' > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a store answering with an {error} object warns, never passes"
+has "$OUT" "NOT checked" "the error-object store is named as not checked"
 
 # --- 8. offline-safe: the check never calls gh -------------------------------
 if grep -qE '(^|[^a-z])gh[[:space:]]' < <(grep -vE '^[[:space:]]*#' "$CHECK"); then

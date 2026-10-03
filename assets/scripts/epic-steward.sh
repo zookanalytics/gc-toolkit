@@ -56,26 +56,29 @@ ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || {
   echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# single-flight.sh carries the per-rig pass lock and its stall detection, shared
+# with refinery-reconcile so the two single-flight copies cannot drift.
+# shellcheck source=single-flight.sh
+. "${GC_SINGLE_FLIGHT:-$SCRIPTS_DIR/single-flight.sh}" || {
+  echo "$PROG: cannot source single-flight.sh beside this script" >&2; exit 1; }
 
 # Per-rig single-flight. A pass re-files nothing — escalate.sh dedups by
 # (subject, key) — but a long pass must not overlap the next tick, so one flock
 # serialises passes per rig. Fail closed: no usable lock, no pass, because an
 # unguarded pair of passes racing escalate.sh's find-or-file read could file a
-# duplicate before either sees the other's visit.
+# duplicate before either sees the other's visit. A holder older than the stall
+# bound is a wedged pass, reported (exit 1) rather than skipped silently each tick.
 RIG_KEY="$(printf '%s' "$RIG" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
 case "$RIG_KEY" in ''|.|..) RIG_KEY=rig ;; esac
 STATE_DIR="${EPIC_STEWARD_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/epic-steward}/$RIG_KEY"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
-LOCK="$STATE_DIR/pass.lock"
-if ! command -v flock >/dev/null 2>&1 || ! ( : >> "$LOCK" ) 2>/dev/null; then
-  echo "$PROG[$RIG]: single-flight UNGUARDED (no usable flock at $LOCK) — refusing to run any arm" >&2
-  exit 1
-fi
-exec 9>>"$LOCK" || { echo "$PROG[$RIG]: cannot open $LOCK" >&2; exit 1; }
-if ! flock -n 9; then
-  echo "$PROG[$RIG]: a pass is already in flight — skipping this tick"
-  exit 0
-fi
+single_flight_acquire "$STATE_DIR" "${EPIC_STEWARD_LOCK_STALL_SECS:-900}"
+case "$SF_STATUS" in
+  held) : ;;
+  inflight) echo "$PROG[$RIG]: $SF_MSG" ; exit 0 ;;
+  stalled)  echo "$PROG[$RIG]: $SF_MSG" >&2 ; exit 1 ;;
+  unguarded) echo "$PROG[$RIG]: single-flight UNGUARDED ($SF_MSG) — refusing to run any arm" >&2 ; exit 1 ;;
+esac
 
 # No per-pass epic cap. Epics are a coarse per-rig anchor (few per rig), the pass
 # is one jq emission plus a deduped visit only per owed decision, and the order's
@@ -91,9 +94,12 @@ failed=0
 # file_visit <epic> <key> <message> — one deduped operator visit. escalate.sh
 # files it, or refreshes the open one, and exits 0 either way; its tracks edge to
 # the epic is what holds the epic's finalize until the conversation is answered.
+# escalate.sh (which runs gc bd create/update) reads from /dev/null: both visit
+# helpers run inside the main while-read loop, and an escalate child that read
+# stdin would consume the loop's remaining epic rows and skip them this pass.
 file_visit() {
   _es_epic="$1"; _es_key="$2"; _es_msg="$3"
-  if "$ESCALATE" --subject "$_es_epic" --key "$_es_key" --message "$_es_msg" >/dev/null 2>&1; then
+  if "$ESCALATE" --subject "$_es_epic" --key "$_es_key" --message "$_es_msg" </dev/null >/dev/null 2>&1; then
     filed=$((filed + 1))
   else
     echo "$PROG[$RIG]: escalate.sh failed to file '$_es_key' on $_es_epic" >&2
@@ -106,7 +112,7 @@ file_visit() {
 # no-op success, so this is safe to call every pass.
 retract_visit() {
   _es_epic="$1"; _es_key="$2"; _es_msg="$3"
-  "$ESCALATE" --retract --subject "$_es_epic" --key "$_es_key" --message "$_es_msg" >/dev/null 2>&1 || true
+  "$ESCALATE" --retract --subject "$_es_epic" --key "$_es_key" --message "$_es_msg" </dev/null >/dev/null 2>&1 || true
 }
 
 # epic_ruling_valid <value> — true only for a ruling docs/epics.md defines:
@@ -124,49 +130,49 @@ epic_ruling_valid() { case "${1:-}" in persevere|pivot|close) return 0 ;; *) ret
 # idempotent — escalate.sh reads no open visit as a no-op success — so an arm whose
 # concern was never raised retracts nothing.
 
-arm_floor() { # <epic> <handle> <hypothesis> <boundaries>
+arm_floor() { # <epic> <has-handle> <has-hypothesis> <has-boundaries>  (presence flags)
   _a_epic="$1"; _a_handle="$2"; _a_hyp="$3"; _a_bnd="$4"
   # The floor is all three fields docs/epics.md names — a handle, a hypothesis
   # sentence, and boundaries — not the hypothesis alone: an epic needs every one
   # to be read, classified into, and judged complete. Owe the floor until all
   # three are recorded, so a hypothesis with no handle or boundaries is a partial
   # floor still owed, not a set floor.
-  if [ -n "$_a_handle" ] && [ -n "$_a_hyp" ] && [ -n "$_a_bnd" ]; then
+  if [ "$_a_handle" = true ] && [ "$_a_hyp" = true ] && [ "$_a_bnd" = true ]; then
     retract_visit "$_a_epic" "epic-floor" "the floor contract is recorded (a handle, a hypothesis, and boundaries)"
     return 0
   fi
   # Name the fields still missing, so the visit asks for exactly what the floor owes.
   _a_need=""
-  [ -z "$_a_handle" ] && _a_need="a 3-5 word handle (epic_handle)"
-  [ -z "$_a_hyp" ] && _a_need="${_a_need:+$_a_need, }a one-sentence hypothesis — for whom, what changes, the signal it worked — (epic_hypothesis)"
-  [ -z "$_a_bnd" ] && _a_need="${_a_need:+$_a_need, }its boundaries (epic_boundaries)"
+  [ "$_a_handle" = true ] || _a_need="a 3-5 word handle (epic_handle)"
+  [ "$_a_hyp" = true ] || _a_need="${_a_need:+$_a_need, }a one-sentence hypothesis — for whom, what changes, the signal it worked — (epic_hypothesis)"
+  [ "$_a_bnd" = true ] || _a_need="${_a_need:+$_a_need, }its boundaries (epic_boundaries)"
   file_visit "$_a_epic" "epic-floor" \
 "This epic's floor contract is incomplete — it still needs $_a_need. The floor (a handle, a hypothesis sentence, and boundaries) is what lets work be classified into the epic and the epic be read and judged complete.
 
 Draft and ratify the missing field(s) and record them on the epic. A rough hypothesis is enough to start. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
 }
 
-arm_contract() { # <epic> <hypothesis> <closure-condition> <indicators>
+arm_contract() { # <epic> <has-hypothesis> <has-closure> <has-indicators>  (presence flags)
   _a_epic="$1"; _a_hyp="$2"; _a_clo="$3"; _a_ind="$4"
   # No floor yet: arm_floor owns that; a contract presupposes a hypothesis.
-  [ -n "$_a_hyp" ] || return 0
-  if [ -n "$_a_clo" ] && [ -n "$_a_ind" ]; then
+  [ "$_a_hyp" = true ] || return 0
+  if [ "$_a_clo" = true ] && [ "$_a_ind" = true ]; then
     retract_visit "$_a_epic" "epic-contract" "the contract is complete; a closure condition and leading indicators are recorded"
     return 0
   fi
   _a_need=""
-  [ -z "$_a_clo" ] && _a_need="a closure condition (epic_closure_condition: 3-6 operator-runnable checks that each fail today)"
-  [ -z "$_a_ind" ] && _a_need="${_a_need:+$_a_need and }1-3 leading indicators (epic_indicators)"
+  [ "$_a_clo" = true ] || _a_need="a closure condition (epic_closure_condition: 3-6 operator-runnable checks that each fail today)"
+  [ "$_a_ind" = true ] || _a_need="${_a_need:+$_a_need and }1-3 leading indicators (epic_indicators)"
   file_visit "$_a_epic" "epic-contract" \
 "This epic has a hypothesis but is missing $_a_need, so it has no agreed test of done and no in-flight signal to steer by.
 
 Fill in the rest of the contract on the epic. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
 }
 
-arm_ruling() { # <epic> <hypothesis> <ruling>
+arm_ruling() { # <epic> <has-hypothesis> <ruling>  (presence flag, then the enum value)
   _a_epic="$1"; _a_hyp="$2"; _a_ruling="$3"
   # A ruling answers a hypothesis; without one, arm_floor owns the epic first.
-  [ -n "$_a_hyp" ] || return 0
+  [ "$_a_hyp" = true ] || return 0
   if epic_ruling_valid "$_a_ruling"; then
     # Ruled: release any ruling visit still holding the epic's finalize.
     retract_visit "$_a_epic" "epic-ruling" "hypothesis ruled ($_a_ruling); the epic may close"
@@ -186,6 +192,19 @@ arm_ruling() { # <epic> <hypothesis> <ruling>
   fi
   _a_total=$(printf '%s' "$_a_kids" | jq 'length' 2>/dev/null)
   [ "${_a_total:-0}" -gt 0 ] 2>/dev/null || return 0        # no units yet
+  # A child in another rig's store comes back from dep list without an embedded
+  # status (bead-context.sh resolves those via bead-store.sh; this pass does not).
+  # (.status // "") would read it as unlanded forever, so a complete epic with one
+  # cross-store unit could never reach "all landed" and never get a ruling visit.
+  # A status-less child is unknown, not landed and not in flight: count it a
+  # failure (as the unreadable-probe branch above does) so the summary says the
+  # arm could not judge this epic, rather than silently miscounting it.
+  _a_unknown=$(printf '%s' "$_a_kids" | jq '[ .[] | select((.status // null) == null) ] | length' 2>/dev/null)
+  if [ "${_a_unknown:-0}" -gt 0 ] 2>/dev/null; then
+    echo "$PROG[$RIG]: $_a_epic has ${_a_unknown} unit(s) with no embedded status (cross-store?) — ruling arm cannot judge completeness this pass" >&2
+    failed=$((failed + 1))
+    return 0
+  fi
   _a_unlanded=$(printf '%s' "$_a_kids" | jq '[ .[] | select((.status // "") != "closed") ] | length' 2>/dev/null)
   [ "${_a_unlanded:-1}" -eq 0 ] 2>/dev/null || return 0     # units still in flight
   file_visit "$_a_epic" "epic-ruling" \
@@ -206,11 +225,15 @@ EPICS_JSON=$(bd_list --type=epic --status=open,in_progress,blocked,deferred) || 
   exit 1
 }
 
-# One jq emission reads every epic's id and the six contract fields the arms
-# need, unit-separated (\037) so an empty field — the common case the arms detect
-# — keeps its column; a whitespace IFS would collapse a run of empties and
-# misalign the row. The arms take plain strings, so the pass spawns one jq, not
-# the ~7 per epic a re-parse-per-field loop did.
+# One jq emission reads every epic's id, a presence flag for each of the five
+# fields the arms only test for presence, and the ruling enum (the one field an
+# arm reads by value). Fields are unit-separated (\037) so an empty column is
+# kept, not collapsed by a whitespace IFS. Presence is emitted as a boolean, not
+# the raw text: a metadata value may hold a newline (epic_closure_condition is a
+# multi-line list), and jq -r decodes the JSON \n to a real newline that would
+# split one epic across several `read` rows and misalign every column. A boolean
+# and the newline-stripped ruling cannot carry one. The arms take these flags, so
+# the pass spawns one jq, not the ~7 per epic a re-parse-per-field loop did.
 while IFS=$'\037' read -r epic handle hyp bnd clo ind ruling; do
   [ -n "$epic" ] || continue
   checked=$((checked + 1))
@@ -218,13 +241,14 @@ while IFS=$'\037' read -r epic handle hyp bnd clo ind ruling; do
   arm_contract "$epic" "$hyp" "$clo" "$ind"
   arm_ruling   "$epic" "$hyp" "$ruling"
 done < <(printf '%s' "$EPICS_JSON" | jq -r '
+  def present: (. // "" | tostring | length > 0);
   .[] | [ (.id // "" | tostring),
-          (.metadata.epic_handle // "" | tostring),
-          (.metadata.epic_hypothesis // "" | tostring),
-          (.metadata.epic_boundaries // "" | tostring),
-          (.metadata.epic_closure_condition // "" | tostring),
-          (.metadata.epic_indicators // "" | tostring),
-          (.metadata.epic_ruling // "" | tostring) ]
+          (.metadata.epic_handle           | present | tostring),
+          (.metadata.epic_hypothesis       | present | tostring),
+          (.metadata.epic_boundaries       | present | tostring),
+          (.metadata.epic_closure_condition | present | tostring),
+          (.metadata.epic_indicators       | present | tostring),
+          (.metadata.epic_ruling // "" | tostring | gsub("[\\n\\r]"; " ")) ]
       | join("\u001f")' 2>/dev/null)
 
 echo "$PROG[$RIG]: checked $checked live epic(s), filed or refreshed $filed visit(s), $failed failure(s)"

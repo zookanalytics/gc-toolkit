@@ -48,13 +48,13 @@ set -u
 
 PROG="finalize-gate"
 
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
+# bd-lib.sh supplies the guarded store readers bd_json / bd_list: one place strips
+# the `gc bd:` rig-store notice and the C0 bytes a `gc bd --json` read can carry,
+# so every probe here inherits that defence instead of each re-deriving it. Resolve
+# it beside this file, which works whether finalize-gate is run or sourced.
+_fg_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_fg_dir/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # clause_no_open_visit <bead-id> — prints a one-line refusal reason and returns 1
 # when an OPEN visit covers the bead, or when a probe fails closed; prints nothing
@@ -64,14 +64,17 @@ scrub() { tr -d '\000-\037'; }
 clause_no_open_visit() {
     _fgv_bead="$1"
 
-    # PROBE 1 — the subject's incoming tracks edges.
-    _fgv_raw=$(gc bd dep list "$_fgv_bead" --direction=up -t tracks --json 2>/dev/null) || {
-        echo "open-visit probe unreadable ('gc bd dep list' failed) — refusing finalize on $_fgv_bead (fail-closed)"
+    # PROBE 1 — the subject's incoming tracks edges. bd_json strips the notice and
+    # the C0 bytes; empty output is an unreadable read (bd_json cannot signal a
+    # non-zero rc through its scrub), and `error` on a non-array aborts jq non-zero
+    # — both read as fail-closed, since an all-clear is only a clean array naming
+    # no open visit.
+    _fgv_raw=$(bd_json dep list "$_fgv_bead" --direction=up -t tracks)
+    [ -n "$_fgv_raw" ] || {
+        echo "open-visit probe unreadable (incoming tracks edges) — refusing finalize on $_fgv_bead (fail-closed)"
         return 1
     }
-    # `error` on a non-array aborts jq non-zero, read below as unreadable — an
-    # all-clear is only a clean array that named no open visit.
-    _fgv_hit=$(printf '%s' "$_fgv_raw" | scrub \
+    _fgv_hit=$(printf '%s' "$_fgv_raw" \
         | jq -r '
             if type != "array" then error("not an array")
             else [ .[]?
@@ -91,12 +94,14 @@ clause_no_open_visit() {
     # subject whose tracks edge has not landed. A truncated page could hide one, so
     # the whole set is read (--limit 0) and the stamp re-checked in jq rather than
     # trusted from the server-side filter.
-    _fgv_stamped=$(gc bd list --status open,in_progress \
-        --metadata-field "gc.continuation_group=$_fgv_bead" --limit 0 --json 2>/dev/null) || {
+    # bd_list reads the whole set (--limit 0) and returns non-zero on an
+    # unreadable or non-array answer, so its own guard is the fail-closed path.
+    _fgv_stamped=$(bd_list --status open,in_progress \
+        --metadata-field "gc.continuation_group=$_fgv_bead") || {
         echo "open-visit probe unreadable ('gc bd list' failed) — refusing finalize on $_fgv_bead (fail-closed)"
         return 1
     }
-    _fgv_cands=$(printf '%s' "$_fgv_stamped" | scrub \
+    _fgv_cands=$(printf '%s' "$_fgv_stamped" \
         | jq -r --arg s "$_fgv_bead" '
             if type != "array" then error("not an array")
             else ( .[]?
@@ -112,8 +117,7 @@ clause_no_open_visit() {
         # The stamp is the fallback only for a visit with no tracks edge; a stamped
         # visit that has one is covered by that edge (PROBE 1's domain). An
         # unreadable edge probe is treated as no edge — holding, fail-closed.
-        _fgv_edge=$(gc bd dep list "$_fgv_v" --direction=down -t tracks --json 2>/dev/null \
-            | scrub \
+        _fgv_edge=$(bd_json dep list "$_fgv_v" --direction=down -t tracks \
             | jq -r 'if type != "array" then "unreadable" elif length > 0 then "yes" else "no" end' 2>/dev/null)
         if [ "$_fgv_edge" != "yes" ]; then
             echo "held by open visit $_fgv_v — its subject $_fgv_bead owes a conversation before finalize (covered by gc.continuation_group; tracks edge not yet written)"
@@ -136,43 +140,45 @@ clause_no_open_visit() {
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     # This probe runs for EVERY finalize (every merge.sh and bead-rehome.sh close,
-    # epic or not), so it must survive the two contaminants a `gc bd --json` read
-    # can carry (bead-context.sh): a leading `gc bd:` rig-store notice line on
-    # stdout, and raw C0 bytes. Strip the notice with `grep -a` (text mode, so a
-    # NUL in the bead's notes cannot flip grep to binary and drop the payload)
-    # BEFORE scrub removes the C0 bytes below. Without the strip, one notice line
-    # would error jq and fail every finalize in the rig closed.
-    _fgr_raw=$(gc bd show "$_fgr_bead" --json 2>/dev/null | grep -a -vE '^gc bd:') || {
+    # epic or not). bd_json carries the strip of the `gc bd:` rig-store notice and
+    # the C0 scrub a `gc bd --json` read needs (bead-context.sh); empty output is an
+    # unreadable read (bd_json cannot signal a non-zero rc through its scrub), read
+    # here as fail-closed — the act this guards cannot be taken back.
+    _fgr_raw=$(bd_json show "$_fgr_bead")
+    [ -n "$_fgr_raw" ] || {
         echo "epic-ruling probe unreadable ('gc bd show' failed) — refusing finalize on $_fgr_bead (fail-closed)"
         return 1
     }
-    # A non-array (bd returns an object when nothing resolves) is unreadable, not
-    # an all-clear — the act this guards cannot be taken back.
-    _fgr_type=$(printf '%s' "$_fgr_raw" | scrub \
-        | jq -r 'if type != "array" then error("not an array")
-                 else (.[0].issue_type // .[0].type // "") end' 2>/dev/null) || {
-        echo "epic-ruling probe unreadable (type filter failed) — refusing finalize on $_fgr_bead (fail-closed)"
+    # One jq emission reads the four fields the clause needs, unit-separated (\037).
+    # A non-array (bd returns an object when nothing resolves) aborts jq non-zero,
+    # read as unreadable. The hypothesis is emitted as a presence flag, not its
+    # text: a value may hold a newline that jq -r would decode to a real newline
+    # and split the read across lines, dropping the ruling and falsely holding; the
+    # disposition and ruling are id/enum values with any newline stripped likewise.
+    _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r '
+        if type != "array" then error("not an array")
+        else [ (.[0].issue_type // .[0].type // ""),
+               (.[0].metadata.epic_hypothesis // "" | tostring | length > 0 | tostring),
+               (.[0].metadata["gc.superseded_by"] // "" | tostring | gsub("[\\n\\r]"; " ")),
+               (.[0].metadata.epic_ruling // "" | tostring | gsub("[\\n\\r]"; " ")) ]
+             | join("\u001f") end' 2>/dev/null) || {
+        echo "epic-ruling probe unreadable (field read failed) — refusing finalize on $_fgr_bead (fail-closed)"
         return 1
     }
+    IFS=$'\037' read -r _fgr_type _fgr_hashyp _fgr_disposed _fgr_ruling <<< "$_fgr_fields"
     [ "$_fgr_type" = "epic" ] || return 0   # not an epic: this clause does not apply
     # The same rule doctor/check-epic-closed-implies-ruled (I14) applies: an epic
     # is held only once it has entered stewardship (carries a hypothesis) and is
     # neither ruled nor disposed. An epic that never carried a hypothesis predates
     # the model, and a disposition pointer (bead-rehome's gc.superseded_by) is a
     # recorded terminal reason — both pass.
-    _fgr_hyp=$(printf '%s' "$_fgr_raw" | scrub \
-        | jq -r '(.[0].metadata.epic_hypothesis // "") | tostring' 2>/dev/null)
-    [ -n "$_fgr_hyp" ] || return 0
-    _fgr_disposed=$(printf '%s' "$_fgr_raw" | scrub \
-        | jq -r '(.[0].metadata["gc.superseded_by"] // "") | tostring' 2>/dev/null)
+    [ "$_fgr_hashyp" = true ] || return 0
     [ -n "$_fgr_disposed" ] && return 0
     # The ruling must be one docs/epics.md defines (persevere|pivot|close). A
     # present-but-off-enum value — a draft like "pending", a typo — is not a
     # ruling, so the gate holds: otherwise an epic could close "ruled" on a value
     # that is not a ruling, and the I14 doctor backstop would report OK. The same
     # enum the steward's retract arm and doctor/check-epic-closed-implies-ruled use.
-    _fgr_ruling=$(printf '%s' "$_fgr_raw" | scrub \
-        | jq -r '(.[0].metadata.epic_ruling // "") | tostring' 2>/dev/null)
     case "$_fgr_ruling" in persevere|pivot|close) return 0 ;; esac
     echo "held: epic $_fgr_bead carries a hypothesis but no valid epic_ruling (found '${_fgr_ruling:-<none>}') — a stewarded epic closes by a recorded hypothesis ruling (persevere/pivot/close), not by its last unit merging (docs/epics.md)"
     return 1

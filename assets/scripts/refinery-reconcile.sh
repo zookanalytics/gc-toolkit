@@ -49,6 +49,11 @@ RIG_HEAD="$(git -C "$RIG_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unk
 # rig's own root has no assets/scripts at all.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 
+# single-flight.sh carries the per-rig pass lock (flock on fd 9) and its stall
+# detection, shared with epic-steward so the two single-flight copies cannot drift.
+# shellcheck source=single-flight.sh
+. "${GC_SINGLE_FLIGHT:-$SCRIPTS_DIR/single-flight.sh}" || { echo "$PROG: cannot source single-flight.sh beside this script" >&2; exit 1; }
+
 # Refinery identity by discovery; FIX/REVIEW pools share its binding prefix so
 # a rename cannot split them.
 resolve_refinery() {
@@ -137,63 +142,37 @@ mark_merge() { # <phase>
     && mv -f "$MERGE_MARK.tmp" "$MERGE_MARK" 2>/dev/null || true
 }
 
-# Two merge.sh writers against one rig's anchors is the failure this cadence
-# must never produce, and the controller's open-tracking gate does not prevent
-# it: the watchdog closes tracking beads at 2m, well inside the order's timeout,
-# and an un-gated tracking bead is a second dispatch. This flock depends on no
-# bead surviving. The arms inherit fd 9, so the lock is held for exactly as
-# long as a writer is live and the kernel releases it on any exit, SIGKILL
-# included.
-LOCK="$STATE_DIR/pass.lock"
-HOLDER="$STATE_DIR/pass.holder"
-# A holder older than this is not a slow pass: the driver is gone and an arm
-# still owns the fd. Merges have stopped, so it is reported, not skipped over.
+# Two merge.sh writers against one rig's anchors is the failure this cadence must
+# never produce, and the controller's open-tracking gate does not prevent it: the
+# watchdog closes tracking beads at 2m, well inside the order's timeout, and an
+# un-gated tracking bead is a second dispatch. single-flight.sh's flock depends on
+# no bead surviving. The lock IS the whole of single-flight, so an unavailable one
+# leaves nothing serialising the arms and the pass is refused rather than run
+# unguarded; a holder older than LOCK_STALL_SECS is a wedged pass, reported rather
+# than skipped silently every tick. The order timeout is kept below this bound (a
+# live pass always finishes first), so a holder past it is a driver that is gone.
 LOCK_STALL_SECS="${REFINERY_RECONCILE_LOCK_STALL_SECS:-900}"
-lock_unguarded=""
-lock_held=0
-if ! command -v flock >/dev/null 2>&1; then
-  lock_unguarded="flock not found on PATH"
-elif ! ( : >> "$LOCK" ) 2>/dev/null; then
-  lock_unguarded="cannot create $LOCK"
-else
-  exec 9>>"$LOCK" || lock_unguarded="cannot open $LOCK"
-  if [ -z "$lock_unguarded" ] && flock -n 9; then
-    lock_held=1
-    printf '%s %s\n' "$$" "$(date -u +%s)" > "$HOLDER" 2>/dev/null || true
-  fi
-fi
-
-if [ -z "$lock_unguarded" ] && [ "$lock_held" = 0 ]; then
-  held_pid=""; held_since=""; elapsed=""
-  [ -r "$HOLDER" ] && read -r held_pid held_since < "$HOLDER"
-  case "$held_since" in
-    ''|*[!0-9]*) ;;
-    *) elapsed=$(( $(date -u +%s) - held_since )) ;;
-  esac
-  who="pid ${held_pid:-unknown}"
-  [ -n "$elapsed" ] && who="$who, ${elapsed}s elapsed"
-  if [ -n "$elapsed" ] && [ "$elapsed" -gt "$LOCK_STALL_SECS" ]; then
-    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s STALLED: pass lock held %ss (%s)\n' \
-      "$TICK" "$RIG" "$elapsed" "$who" >> "$LOG_SINK"
-    echo "${PROG}[$RIG]: pass lock held ${elapsed}s (> ${LOCK_STALL_SECS}s) by $who — the cadence is wedged and nothing is landing"
+single_flight_acquire "$STATE_DIR" "$LOCK_STALL_SECS"
+case "$SF_STATUS" in
+  held) : ;;
+  inflight)
+    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s SKIPPED: pass already in flight (%s)\n' \
+      "$TICK" "$RIG" "$SF_HOLDER_INFO" >> "$LOG_SINK"
+    echo "${PROG}[$RIG]: $SF_MSG"
+    exit 0 ;;
+  stalled)
+    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s STALLED: %s\n' \
+      "$TICK" "$RIG" "$SF_MSG" >> "$LOG_SINK"
+    echo "${PROG}[$RIG]: $SF_MSG"
     echo "${PROG}[$RIG]: pass log: $LOG"
-    exit 1
-  fi
-  [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s SKIPPED: pass already in flight (%s)\n' \
-    "$TICK" "$RIG" "$who" >> "$LOG_SINK"
-  echo "${PROG}[$RIG]: a pass is already in flight ($who) — skipping this tick"
-  exit 0
-fi
-# The lock is the whole of single-flight, so an unavailable one leaves nothing
-# serialising the arms. Running them anyway is the second merge.sh writer this
-# driver exists to prevent.
-if [ -n "$lock_unguarded" ]; then
-  [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s UNGUARDED: %s; no arm ran\n' \
-    "$TICK" "$RIG" "$lock_unguarded" >> "$LOG_SINK"
-  echo "${PROG}[$RIG]: single-flight UNGUARDED ($lock_unguarded) — refusing to run any arm without the pass lock"
-  echo "${PROG}[$RIG]: pass log: $LOG"
-  exit 1
-fi
+    exit 1 ;;
+  unguarded)
+    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s UNGUARDED: %s; no arm ran\n' \
+      "$TICK" "$RIG" "$SF_MSG" >> "$LOG_SINK"
+    echo "${PROG}[$RIG]: single-flight UNGUARDED ($SF_MSG) — refusing to run any arm without the pass lock"
+    echo "${PROG}[$RIG]: pass log: $LOG"
+    exit 1 ;;
+esac
 
 # The controller keeps combined output only on a non-zero exit, so the log is
 # where a healthy pass is readable and the exit code is the alarm. The header

@@ -34,6 +34,9 @@ SD="$TMP/scripts"
 mkdir -p "$SD"
 cp "$RUNNER" "$SD/refinery-reconcile.sh"
 chmod +x "$SD/refinery-reconcile.sh"
+# The runner sources single-flight.sh (the per-rig pass lock) by sibling path at
+# startup, so it must sit beside the SUT for every invocation below.
+cp "$HERE/single-flight.sh" "$SD/single-flight.sh"
 mkarm() { # <name> [rc]
   cat > "$SD/$1" <<ARM
 #!/usr/bin/env bash

@@ -79,11 +79,13 @@ mk_sut_dir() { # <dir> <file>...
   mkdir -p "$d"
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
-  # bd-lib.sh is the shared bead-store read library many SUTs source by sibling
-  # path; copy it beside them so that source resolves in the private dir. It sits
-  # beside this harness, so it is found whatever the SUT's own directory is.
-  local lib; lib="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/bd-lib.sh"
-  [ -f "$lib" ] && cp "$lib" "$d/"
+  # bd-lib.sh and single-flight.sh are shared libraries many SUTs source by sibling
+  # path; copy them beside the SUT so that source resolves in the private dir. They
+  # sit beside this harness, so they are found whatever the SUT's own directory is.
+  local here; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  local lib; for lib in bd-lib.sh single-flight.sh; do
+    [ -f "$here/$lib" ] && cp "$here/$lib" "$d/"
+  done
 }
 
 _write_gc_stub() {

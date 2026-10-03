@@ -50,8 +50,11 @@ judgment each visit asks for is the operator's; the pass only detects what is
 owed.
 
 A per-rig flock serialises passes, so a long pass cannot overlap the next tick
-and race `escalate.sh`'s find-or-file read. The pass fails closed: with no usable
-lock it runs no arm.
+and race `escalate.sh`'s find-or-file read. The lock lives in the shared
+`assets/scripts/single-flight.sh`, so this order and the refinery's reconcile
+cadence hold their passes the same way. The pass fails closed: with no usable
+lock it runs no arm, and a lock held past the stall bound is reported as a wedged
+pass rather than skipped silently every tick.
 
 ### Floor
 
@@ -150,4 +153,6 @@ pass runs.
 
 - `EPIC_STEWARD_STATE_DIR` overrides where the per-rig flock lives (tests isolate
   it here).
+- `EPIC_STEWARD_LOCK_STALL_SECS` overrides the age past which a held lock reads as
+  a wedged pass rather than a slow one (default 900).
 - `GC_ESCALATE_TOOL` overrides the `escalate.sh` path (tests capture visits here).

@@ -107,8 +107,13 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # (there is no ruling to expect of an epic the stewardship contract never
     # reached), so it is exempt, which also keeps this a forward regression
     # detector: a store of pre-stewardship epics reports clean.
+    # bd returns an {"error":...} object when a query does not resolve
+    # (bead-context.sh). Iterating it with `.[]?` would yield zero rows at exit 0
+    # and report the store OK; `error` on a non-array aborts jq non-zero, caught
+    # below as "NOT checked" — an all-clear is only a clean array.
     rows=$(printf '%s' "$raw" | scrub | jq -r '
-        .[]? | select(((.status // "") | tostring) == "closed")
+        (if type != "array" then error("not an array") else .[] end)
+        | select(((.status // "") | tostring) == "closed")
         | (.metadata // {}) as $m
         | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id
         | ((($m.epic_ruling // "") | tostring)) as $ruling

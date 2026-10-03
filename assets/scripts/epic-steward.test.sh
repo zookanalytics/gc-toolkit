@@ -35,6 +35,9 @@ export GC_ESCALATE_TOOL="$BIN/escalate.sh" ESC_CALLS="$TMP/esc.log"
 
 epic()  { printf '{"id":"%s","issue_type":"epic","status":"%s","title":"an epic","metadata":%s}' "$1" "$2" "$3"; }
 child() { printf '{"id":"%s","issue_type":"task","status":"%s","metadata":{}}' "$1" "$2"; }
+# A child with NO status field — the shape a cross-store dependency comes back as
+# (bead-context.sh resolves those from their own store; this pass does not).
+child_nostatus() { printf '{"id":"%s","issue_type":"task","metadata":{}}' "$1"; }
 run_sut() { : > "$ESC_CALLS"; : > "$STUB_DEPS"; "$SUT" >/dev/null 2>&1; }
 esc_count() { wc -l < "$ESC_CALLS" | tr -d ' '; }
 esc_has()   { grep -qF "$(printf '%s\t%s\t%s' "$1" "$2" "$3")" "$ESC_CALLS"; }
@@ -154,6 +157,30 @@ store "[$(epic EDF deferred '{}')]"
 run_sut
 if esc_has file EDF epic-floor; then ok "a deferred epic is audited (its floor is owed)"; else bad "expected the floor visit on a deferred epic"; fi
 
+# --- 8f. a multi-line contract value must not split one epic across read rows.
+# epic_closure_condition is a multi-line list (3-6 checks); jq -r decodes its JSON
+# \n to a real newline. The pass emits presence flags, not the raw text, so this
+# complete epic is read as ONE row: its cleared floor/contract visits are retracted
+# and NOTHING is filed — no contract visit on a truncated first row, no bogus floor
+# visit on a continuation line read as an epic id. --------------------------------
+store "[$(epic EML open '{"epic_handle":"h","epic_hypothesis":"hyp","epic_boundaries":"b","epic_closure_condition":"check 1\ncheck 2\ncheck 3","epic_indicators":"i"}')]"
+run_sut
+if grep -q "$(printf '^file\t')" "$ESC_CALLS"; then bad "a multi-line contract value split the row and filed a visit"; else ok "a multi-line contract value files no visit (row not split)"; fi
+if esc_has retract EML epic-contract; then ok "the complete multi-line epic is read as one row (contract retracted)"; else bad "expected retract/EML/epic-contract"; fi
+
+# --- 8g. a cross-store unit (no embedded status) cannot be judged landed: it is
+# counted a failure and named, not silently read as in-flight forever. Before this
+# guard (.status // "") read the status-less child as unlanded, so a complete epic
+# with one cross-store unit could never reach "all landed" and never be ruled. ----
+store "[$(epic EXS open "$FULL"), $(child_nostatus CXS)]"
+: > "$ESC_CALLS"
+printf 'CXS|parent-child|EXS\n' > "$STUB_DEPS"
+ERRLOG2="$TMP/err2.log"
+"$SUT" >/dev/null 2>"$ERRLOG2"; RC=$?
+eq "$RC" "1" "a cross-store unit with no status makes the pass exit non-zero"
+if grep -qF "no embedded status" "$ERRLOG2" && grep -qF "EXS" "$ERRLOG2"; then ok "the status-less unit is named on stderr"; else bad "expected a 'no embedded status' stderr line naming EXS"; fi
+if esc_has file EXS epic-ruling; then bad "a status-less unit must not yield a ruling visit"; else ok "no ruling visit is filed when a unit's status is unknown"; fi
+
 # --- 9. GC_RIG unset: a scope=rig order with no rig refuses -------------------
 RC=0; ( unset GC_RIG; "$SUT" >/dev/null 2>&1 ) || RC=$?
 eq "$RC" "2" "the driver exits 2 when GC_RIG is unset"
@@ -168,6 +195,23 @@ flock -n 8
 flock -u 8; exec 8>&-
 eq "$RC" "0" "a tick that finds a pass in flight exits 0 (skip, not error)"
 eq "$(esc_count)" "0" "the skipped tick files nothing"
+
+# --- 10b. a lock held past the stall bound is reported (exit 1), not skipped
+# silently every tick: the stall detection the shared single-flight helper brings.
+# A holder timestamp of 1 (1970) is older than any bound, so a wedged pass surfaces.
+mkdir -p "$TMP/state/alpha"
+store "[$(epic EA2 open '{}')]"
+: > "$ESC_CALLS"
+exec 8>"$TMP/state/alpha/pass.lock"
+flock -n 8
+printf '999999 1\n' > "$TMP/state/alpha/pass.holder"
+STALLERR="$TMP/stall-err.log"
+EPIC_STEWARD_LOCK_STALL_SECS=60 "$SUT" >/dev/null 2>"$STALLERR"; RC=$?
+flock -u 8; exec 8>&-
+rm -f "$TMP/state/alpha/pass.holder"
+eq "$RC" "1" "a holder older than the stall bound fails the pass (reported, not skipped)"
+if grep -qF "wedged" "$STALLERR"; then ok "the wedged pass is named on stderr"; else bad "expected a 'wedged' stderr line"; fi
+eq "$(esc_count)" "0" "the wedged tick files nothing"
 
 echo
 echo "epic-steward: $PASS passed, $FAIL failed"
