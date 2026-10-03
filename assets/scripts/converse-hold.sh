@@ -63,21 +63,31 @@ done
 [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
 # Resolve the lifecycle writer and read $ITEM's state up front: it decides what
 # the conversation demand gates. An anchored item (a PR anchor) must not have its
-# merge frozen, so the wait gates the VISIT and the anchor keeps moving; only a
-# pre-PR (unanchored) item takes the demand itself, because its `held` marker
-# needs that edge. With no lifecycle writer the state cannot be read, so the
-# demand defaults to the visit — the side that never freezes an anchor.
+# merge frozen, so the wait gates the VISIT and the anchor keeps moving. A pre-PR
+# (unanchored) item takes the demand itself, because its `held` marker needs that
+# edge.
 LC=""
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
 done
 STATE=""
 [ -n "$LC" ] && STATE=$("$LC" state "$ITEM" 2>/dev/null)
-if [ "$STATE" = "unanchored" ]; then GATED="$ITEM"; else GATED="$VISIT"; fi
+# Gate the VISIT only when $ITEM is PROVABLY anchored — a readable PR-anchor state
+# (on the merge track, or already merged), where a demand on the item would freeze
+# a live merge or land on a closed bead. Every other state gates the ITEM, the
+# fail-closed side: unanchored and the pre-PR off-ramps need the demand edge to
+# stay blocked. A state that could not be read leaves STATE empty — lifecycle.sh
+# prints nothing and exits non-zero on an unreadable or undeclared item, and a
+# missing writer never sets it — so an empty STATE gates the ITEM and never
+# silently frees a pre-PR hold to keep moving while a person owes an answer.
+case "$STATE" in
+  pre_open_gate|pull_request|merged) GATED="$VISIT" ;;
+  *)                                 GATED="$ITEM" ;;
+esac
 "$HELM" takeaway "$ITEM" "holding — $NEED" --by converse
 # A hold IS a demand: the operator owes an answer before the conversation can
 # conclude. File it as a bead and let the edge carry the wait — on the VISIT for
-# an anchored item, on $ITEM itself only when it is pre-PR (unanchored).
+# a proven PR anchor, on $ITEM otherwise (the fail-closed default resolved above).
 # >>> hold-demand-gate
 # A pipeline answers its LAST command's status, so the demand call stays
 # unpiped and its status is read on its own line. That exit is the only
@@ -126,7 +136,7 @@ if [ "$STAMPED" != "$DEMAND" ]; then
   exit 1
 fi
 # <<< hold-demand-stamp-gate
-if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER on any candidate root — this hold records prose and no state"
+if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER on any candidate root — the demand gates the item and keeps it blocked, but no 'held' lifecycle marker is recorded"
 elif [ "$STATE" = "unanchored" ]; then
   "$LC" transition "$ITEM" --to held --route human \
     || echo "HELD TRANSITION FAILED on $ITEM — the hold is prose-only; re-run it before you wait"

@@ -98,11 +98,15 @@ HELM
     chmod +x "$1/assets/scripts/gc-helm.sh"
 }
 # a lifecycle.sh under PACK: state -> $STUB_STATE (default unanchored), transition
-# logs and exits $STUB_LC_RC (default 0).
+# logs and exits $STUB_LC_RC (default 0). STUB_STATE_RC models the real `state`'s
+# failure shape — an unreadable or undeclared item prints NOTHING and exits
+# non-zero — so the suite can prove the gate fails closed when the read fails.
 cat >"$PACK/assets/scripts/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
 case "${1:-}" in
-    state)      printf '%s\n' "${STUB_STATE:-unanchored}" ;;
+    state)
+        if [ "${STUB_STATE_RC:-0}" != "0" ]; then exit "$STUB_STATE_RC"; fi
+        printf '%s\n' "${STUB_STATE:-unanchored}" ;;
     transition) printf 'lc %s\n' "$*" >>"$HLOG"; exit "${STUB_LC_RC:-0}" ;;
     *) exit 2 ;;
 esac
@@ -185,7 +189,9 @@ echo "── the lifecycle transition is conditioned on the item being unanchore
 run STUB_STATE=unanchored
 has "an unanchored item is transitioned to held" "lc transition item-x --to held" "$(calls)"
 run STUB_STATE=held
-hasnt "an item already anchored is not transitioned again" "lc transition" "$(calls)"
+hasnt "a non-unanchored state is not transitioned to held" "lc transition" "$(calls)"
+has "a pre-PR off-ramp (held) is not a PR anchor, so it fails closed to the ITEM" "demand item-x" "$(calls)"
+hasnt "…so the demand never gates the visit" "demand v-x" "$(calls)"
 
 echo "── an anchored item: the conversation demand gates the VISIT, not the item ──"
 # A conversation about a PR anchor must not freeze the merge (operator ruling):
@@ -203,6 +209,30 @@ has "the takeaway headline still lands on the item" "helm[RIG] takeaway item-x h
 # even if that hygiene write is refused.
 run STUB_STATE=pull_request STAMP_RC=0
 is "an anchored hold proceeds regardless of the gate_visit stamp outcome" "$(verdict)" "held"
+# The whole PR-anchor set gates the visit, not just pull_request: a pre-open-gate
+# anchor has a live merge to protect, and a merged anchor is a closed bead a
+# demand cannot land on.
+run STUB_STATE=pre_open_gate
+has "a pre-open-gate anchor gates the visit" "demand v-x" "$(calls)"
+hasnt "…never the item" "demand item-x" "$(calls)"
+run STUB_STATE=merged
+has "a merged (closed) anchor gates the visit" "demand v-x" "$(calls)"
+hasnt "…never a demand on the closed item" "demand item-x" "$(calls)"
+
+echo "── fail closed: an unreadable or missing lifecycle state gates the ITEM ──"
+# The gate switches to the visit only for a PROVEN PR-anchor state. A state that
+# cannot be read must fail closed to the item — defaulting to the visit would drop
+# a pre-PR item's blocking edge and let it keep moving while a person owes an
+# answer (the regression this rework closes).
+run STUB_STATE_RC=2
+is "a failed state read still lets the hold proceed" "$(verdict)" "held"
+has "…with the demand on the ITEM (fail closed)" "demand item-x" "$(calls)"
+hasnt "…and never on the visit" "demand v-x" "$(calls)"
+hasnt "…and no held transition on an unprovable state" "lc transition" "$(calls)"
+run GC_RIG_ROOT="$FOREIGN"
+has "a missing lifecycle writer still finds the demand writer" "helm[CITY]" "$(calls)"
+has "…and with no state readable, the demand fails closed to the ITEM" "helm[CITY] demand item-x need X --by converse" "$(calls)"
+hasnt "…never the visit" "demand v-x" "$(calls)"
 
 echo "── the writers are searched for on the candidate roots, not assumed ──"
 run
