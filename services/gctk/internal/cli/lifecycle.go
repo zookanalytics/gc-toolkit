@@ -376,7 +376,12 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	client := gcbd.New()
-	bead := client.Show(id)
+	// This read governs the write: --expect's compare-and-swap, edge legality,
+	// the dated-value resolution, and the idle-skip below all decide from it, and
+	// nothing re-checks the backing store at write time. So it takes the
+	// authoritative path, not the daemon's cache — a stale read would let --expect
+	// pass against an old state and then stamp one the real state forbids.
+	bead := client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to transition blind\n", prog, id)
 		return 2
@@ -700,7 +705,11 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	client := gcbd.New()
-	bead := client.Show(id)
+	// This read governs the write: reopen proceeds only when the bead is closed on
+	// a non-closed merge_result, and nothing re-checks that at write time. So it
+	// takes the authoritative path, not the daemon's cache — a stale read could
+	// show a non-closed state and reopen a bead already legitimately closed.
+	bead := client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to reopen blind\n", prog, id)
 		return 2
