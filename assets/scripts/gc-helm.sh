@@ -2356,13 +2356,13 @@ accept_resolve_demands() {
 }
 
 # accept_demand_refused <subject> <formula> — the refusal when the subject's
-# demand did not resolve after a landed dispatch. The visit stays, so a re-run of
-# accept resumes at the resolve without dispatching again.
+# demand did not resolve after a landed dispatch. Nothing is dismissed, so a
+# re-run of accept resumes at the resolve without dispatching again.
 accept_demand_refused() {
     if [ "$ACCEPT_DEMANDS_LEFT" = "unreadable" ]; then
-        echo "$PROG: accept: dispatched $2 at $1, but could not read its demands to resolve the human gate that put it to the operator. NOT dismissing its visit: re-run accept once the store answers, and it resumes here without dispatching again." >&2
+        echo "$PROG: accept: dispatched $2 at $1, but could not read its demands to resolve the human gate that put it to the operator, so accept stops before dismissing anything. Re-run accept once the store answers; it resumes here without dispatching again." >&2
     else
-        echo "$PROG: accept: dispatched $2 at $1, but its human gate $ACCEPT_DEMANDS_LEFT is still open, so the dispatched work stays blocked on it. NOT dismissing its visit: resolve the gate (gc bd gate resolve <id> --reason \"accepted\"), or re-run accept, which resumes here without dispatching again." >&2
+        echo "$PROG: accept: dispatched $2 at $1, but its human gate $ACCEPT_DEMANDS_LEFT is still open, so the dispatched work stays blocked on it and accept stops before dismissing anything. Resolve the gate (gc bd gate resolve <id> --reason \"accepted\"), or re-run accept, which resumes here without dispatching again." >&2
     fi
     exit 4
 }
