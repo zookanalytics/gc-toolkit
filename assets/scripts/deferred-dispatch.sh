@@ -248,11 +248,21 @@ cmd_arm() {
 
     echo "$PROG: armed $bead -> $target${reason:+ ($reason)}"
 
-    # Asked the SAME question reconcile dispatches on — are the bead's own
-    # blocks edges all closed? — so the hint and the pass agree. The bead is open
-    # here (refused above otherwise), so an all-clear means the next pass slings
-    # it whether or not a blocked ancestor keeps it out of `bd --ready`.
-    if own_blocks_cleared "$bead"; then
+    # The hint asks the same in-store question reconcile dispatches on: are the
+    # bead's own `blocks` edges all closed? The bead is open here (refused above
+    # otherwise), so an all-clear means the next pass slings it whether or not a
+    # blocked ancestor keeps it out of `bd --ready`. But bd resolves dependencies
+    # within a single store, so a `blocks` edge to a bead in another rig holds
+    # nothing here: own_blocks_cleared and `bd list --ready` both miss it, and the
+    # next pass slings the arm while that blocker is still open. `bd list --id`
+    # renders the raw edge even when its target has no in-store row, so name any
+    # unresolvable blocker rather than let the "no open blocker" hint stand on it.
+    # This is the one place a human is here to redirect the sequencing.
+    local unresolved=""
+    unresolved="$(own_blocks_unresolved_ids "$bead")" || unresolved=""
+    if [ -n "$unresolved" ]; then
+        echo "$PROG: warning: $bead has a 'blocks' edge to $unresolved, which has no row in this store. bd resolves dependencies within a single store, so this cross-rig or external blocker does not hold the arm: reconcile will dispatch $bead with $unresolved still open. Sequence it by hand if that ordering matters." >&2
+    elif own_blocks_cleared "$bead"; then
         echo "$PROG: note: $bead has no open blocker right now — the next reconcile pass will dispatch it"
     fi
     if [ -n "$assignee" ]; then
@@ -311,6 +321,41 @@ own_blocks_cleared() { # id -> rc 0 if every own `blocks` edge is closed
         '[ .[] | select(.dependency_type == "blocks") | select(.status != "closed") ] | length' 2>/dev/null)"
     case "$open_blk" in ''|*[!0-9]*) return 1 ;; esac
     [ "$open_blk" -eq 0 ]
+}
+
+# A `blocks` edge whose target has no row in THIS store — a cross-rig or external
+# blocker. bd resolves dependencies within a single store, so such an edge is
+# absent from `bd dep list` and from `bd show`'s resolved `dependencies` (so
+# own_blocks_cleared and `bd list --ready` never see it), yet `bd list --id`
+# still renders the raw edge. This names the difference: the ids a bead's own
+# `blocks` edges point at that resolve to no row in this store. Echoes them
+# comma-joined in edge order, or nothing. Returns non-zero only when an
+# enumeration read fails, so a read failure never reads as "no cross-store
+# blocker" and lets the arm's "no open blocker" hint stand on a guess.
+own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
+    local id="$1" edges blocker_ids blk_raw present
+    edges="$(bd_ list --id "$id" --json 2>/dev/null)" || return 1
+    printf '%s' "$edges" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    blocker_ids="$(printf '%s' "$edges" | scrub | jq -r --arg id "$id" '
+        [ .[] | select(.id == $id) | (.dependencies // [])[]
+          | select(.type == "blocks") | .depends_on_id ]
+        | unique | join(",")' 2>/dev/null)" || return 1
+    [ -n "$blocker_ids" ] || return 0
+    # Resolve the blocker ids in THIS store. The hidden bead classes a `blocks`
+    # edge can name (gate/infra/template) are asked for, exactly as
+    # resolve_own_cleared does, so a hidden-but-present blocker is not mistaken
+    # for a missing one; `--id` silently drops an id with no row, so a blocker
+    # still absent from the result is one with no in-store row.
+    blk_raw="$(bd_ list --id "$blocker_ids" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null)" || return 1
+    printf '%s' "$blk_raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    present="$(printf '%s' "$blk_raw" | scrub | jq -c '[ .[]?.id ]' 2>/dev/null)" || return 1
+    [ -n "$present" ] || present='[]'
+    printf '%s' "$edges" | scrub | jq -r --arg id "$id" --argjson present "$present" '
+        [ .[] | select(.id == $id) | (.dependencies // [])[]
+          | select(.type == "blocks") | .depends_on_id ]
+        | unique
+        | map(select(. as $b | ($present | index($b)) | not))
+        | join(",")' 2>/dev/null
 }
 
 # The own-blockers-clear gate (the second-chance dispatch gate), resolved for a

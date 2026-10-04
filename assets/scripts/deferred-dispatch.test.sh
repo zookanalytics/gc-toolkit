@@ -193,10 +193,20 @@ case "${1:-}" in
       # _deps models the bead's own edges. Absent it, a not-ready bead stands in
       # for the common "waiting on its own open blocker" case and a ready one for
       # "no blockers left", so the pre-existing fixtures stay honest with no _deps.
+      # When _deps IS set, real bd hides an edge whose target has no row in this
+      # store (cross-repo/external): it warns on stderr and omits it from the
+      # array, so `bd dep list <bead>` returns [] for a bead whose only blocker is
+      # cross-store. Model that, so own_blocks_cleared reads such a bead as cleared
+      # exactly as it does live — the misleading "no open blocker" hint this
+      # finding is about.
       jq -c --arg id "$depid" '
-        [ .[] | select(.id == $id) ] | .[0] as $b
-        | ($b._deps //
-            (if ($b._ready // false) then [] else [{"id":"_synthetic_blocker","dependency_type":"blocks","status":"open"}] end))' "$STORE"
+        . as $store
+        | [ .[] | select(.id == $id) ] | .[0] as $b
+        | if ($b._deps == null) then
+            (if ($b._ready // false) then [] else [{"id":"_synthetic_blocker","dependency_type":"blocks","status":"open"}] end)
+          else
+            [ $b._deps[] | select(.id as $t | ($store | any(.[]; .id == $t))) ]
+          end' "$STORE"
     fi
     ;;
   *) echo "bd stub: unsupported '${1:-}'" >&2; exit 2 ;;
@@ -283,6 +293,32 @@ has "$out" "no open blocker right now" "arm on an unblocked bead warns it will d
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":false}]'
 out="$("$SUT" arm b-1 --target rig/pool 2>&1)"
 hasnt "$out" "no open blocker right now" "arm on a BLOCKED bead does not claim it will dispatch immediately"
+
+echo "# arm warns on a cross-store blocker it cannot resolve"
+# bd resolves dependencies within one store, so a `blocks` edge to a bead in
+# another rig (here sl-x, which has no row in this store) holds nothing: bd
+# reports the bead ready (_ready) and own_blocks_cleared, reading the same store,
+# sees no blocker. Without naming it, arm's own hint says "no open blocker right
+# now" while the blocker is open — the contradiction this finding is about. arm
+# must name the unresolvable blocker instead, the one place a human can redirect
+# the sequencing.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"sl-x","dependency_type":"blocks","status":"open"}]}]'
+out="$("$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm still records the dispatch on a cross-store-blocked bead"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the dispatch record is written"
+has "$out" "sl-x" "arm names the unresolvable cross-store blocker"
+has "$out" "no row in this store" "arm says why that blocker holds nothing here"
+hasnt "$out" "no open blocker right now" "arm does NOT claim the cross-store-blocked bead is unblocked"
+
+echo "# arm does not mistake an in-store blocker for a cross-store one"
+# b-0 has a row in this store, so its edge resolves: no cross-store warning, and
+# because the blocker is open the bead is correctly held, not announced ready.
+store '[{"id":"b-0","status":"open","assignee":"","metadata":{},"notes":"","_ready":true},
+        {"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks","status":"open"}]}]'
+out="$("$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm exits 0 with an in-store blocker"
+hasnt "$out" "no row in this store" "an in-store blocker triggers no cross-store warning"
+hasnt "$out" "no open blocker right now" "and the in-store-blocked bead is not announced ready"
 
 echo "# arm accepts the doctor-flagged shape"
 # gc.execution_routed_to is provenance, not a live queue, so a blocked bead
