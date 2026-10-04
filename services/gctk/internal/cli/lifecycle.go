@@ -587,8 +587,10 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Re-read and verify every written field; a write that reported success but
-	// did not land must never be reported as a transition.
-	bead = client.Show(id)
+	// did not land must never be reported as a transition. The read-back must
+	// observe the write just made and must carry the appended notes, so it uses
+	// the authoritative path, never the daemon's cached, notes-less read.
+	bead = client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s %s -> %s written but the read-back failed; UNVERIFIED\n", prog, id, cur, o.to)
 		return 2
@@ -728,8 +730,9 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// Same read-back discipline as transition: verify status flipped and
-	// merge_result stayed put before reporting the repair.
-	bead = client.Show(id)
+	// merge_result stayed put before reporting the repair. Authoritative read,
+	// not the daemon's cache, so the just-written flip is observed.
+	bead = client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s reopen written but the read-back failed; UNVERIFIED\n", prog, id)
 		return 2
