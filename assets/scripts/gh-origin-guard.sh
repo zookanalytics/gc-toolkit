@@ -101,6 +101,51 @@ origin_of() {
     norm_repo "$_u"
 }
 
+# Resolve the repository a `gh api` endpoint writes to. gh reads the repository
+# straight from the endpoint path, so this is the api analogue of repo_from_url.
+# The endpoint is a REST path (`repos/OWNER/REPO/...`), a leading-slash path, or
+# a full URL; $2 is the host gh would use for a relative path. Prints one of:
+#   host/owner/repo   a concrete repos/OWNER/REPO path — the resolved target
+#   @placeholder      a repos path using {owner}/{repo}; gh fills it from the
+#                     working directory or GH_REPO, so the caller resolves it there
+#   @malformed        a repos/ path with no concrete owner and name — unresolvable,
+#                     refused the way an unresolved porcelain target is
+#   @nonrepos         any other endpoint; it names no repository and is left alone
+# An api URL carries the api host (api.github.com, or HOST/api/v3 for an
+# enterprise forge); both are mapped back to the forge host that a remote names,
+# so the comparison is against the same identity origin_of produces.
+api_endpoint_target() { # api_endpoint_target <endpoint> <effective-host>
+    _ep=$(printf '%s' "${1:-}" | tr -d '[:space:]')
+    [ -n "$_ep" ] || { printf '@nonrepos'; return 0; }
+    case "$_ep" in
+        *://*)
+            _rest=${_ep#*://}
+            _host=$(printf '%s' "${_rest%%/*}" | tr 'A-Z' 'a-z')
+            _path=${_rest#*/}
+            [ "$_path" = "$_rest" ] && _path=""
+            case "$_host" in api.github.com) _host=github.com ;; esac
+            case "$_path" in api/v3/*) _path=${_path#api/v3/} ;; esac
+            ;;
+        *)
+            _path=${_ep#/}
+            _host=$(printf '%s' "${2:-github.com}" | tr 'A-Z' 'a-z')
+            ;;
+    esac
+    _path=${_path%%\?*}
+    case "$_path" in
+        repos/*) : ;;
+        *) printf '@nonrepos'; return 0 ;;
+    esac
+    _owner=$(printf '%s' "$_path" | cut -d/ -f2)
+    _name=$(printf '%s' "$_path" | cut -d/ -f3)
+    case "$_owner/$_name" in
+        *'{'*|*'}'*) printf '@placeholder'; return 0 ;;
+    esac
+    { [ -n "$_owner" ] && [ -n "$_name" ]; } || { printf '@malformed'; return 0; }
+    _t=$(norm_repo "$_host/$_owner/$_name")
+    [ -n "$_t" ] && printf '%s' "$_t" || printf '@malformed'
+}
+
 # The repositories a write may land on, one per line.
 #
 # $GC_RIG_ROOT is authoritative and narrow: a rig agent is measured against its
@@ -195,7 +240,7 @@ function note_cd(i) {
     if (i + 1 > ntok) { cdspec = "?"; return }
     note_cd_val(T[i + 1])
 }
-function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop) {
+function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, method, haveparams, endpoint, apihost, p, t, M, ep) {
     if (ntok == 0) return
     i = 1; inl = ""; inlhost = ""
     # Leading assignments and command wrappers sit in front of the real command.
@@ -308,8 +353,50 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop) {
     if (noun == "issue" && verb == "new") verb = "create"
     if (noun == "pr" && verb == "new") verb = "create"
     key = noun "/" verb
-    # Exactly the verbs the ruling names. `gh api` reaches the same endpoints
-    # and is deliberately not covered.
+    # `gh api` reaches the same REST write endpoints the porcelain verbs do, so
+    # it is guarded too. The method is explicit via -X/--method, else POST when a
+    # field or body is added (-f/-F/--field/--raw-field/--input) and GET
+    # otherwise, the way gh resolves it. Only a writing method is guarded; the
+    # target is the endpoint, read by the shell verdict. graphql and a
+    # methodless/endpointless call are left alone — the first because its
+    # repository lives in the query, the second because gh rejects it.
+    if (noun == "api") {
+        method = ""; haveparams = 0; endpoint = ""; apihost = ""
+        p = i + 1
+        while (p <= ntok) {
+            t = T[p]
+            if (t == "-X" || t == "--method") { if (p < ntok) method = T[p + 1]; p += 2; continue }
+            if (t ~ /^--method=/) { method = substr(t, 10); p++; continue }
+            if (t ~ /^-X=/)       { method = substr(t, 4);  p++; continue }
+            if (t ~ /^-X./)       { method = substr(t, 3);  p++; continue }
+            if (t == "--hostname") { if (p < ntok) apihost = T[p + 1]; p += 2; continue }
+            if (t ~ /^--hostname=/) { apihost = substr(t, 12); p++; continue }
+            if (t == "-f" || t == "--raw-field" || t == "-F" ||
+                t == "--field" || t == "--input") { haveparams = 1; p += 2; continue }
+            if (t ~ /^--raw-field=/ || t ~ /^--field=/ || t ~ /^--input=/) { haveparams = 1; p++; continue }
+            if (t ~ /^-f./ || t ~ /^-F./) { haveparams = 1; p++; continue }
+            if (t == "-H" || t == "--header" || t == "-q" || t == "--jq" ||
+                t == "-t" || t == "--template" || t == "--cache" ||
+                t == "-p" || t == "--preview") { p += 2; continue }
+            if (t ~ /^--header=/ || t ~ /^--jq=/ || t ~ /^--template=/ ||
+                t ~ /^--cache=/ || t ~ /^--preview=/ ||
+                t ~ /^-H./ || t ~ /^-q./ || t ~ /^-t./ || t ~ /^-p./) { p++; continue }
+            if (substr(t, 1, 1) == "-") { p++; continue }
+            if (endpoint == "") endpoint = t
+            p++
+        }
+        M = toupper(method)
+        if (M == "") { if (haveparams) M = "POST"; else M = "GET" }
+        if (M != "POST" && M != "PATCH" && M != "PUT" && M != "DELETE") return
+        if (endpoint == "") return
+        ep = tolower(endpoint)
+        if (ep == "graphql" || ep ~ /\/graphql$/ || ep ~ /^graphql\?/ || ep ~ /\/graphql\?/) return
+        verb = M; repo = ""; urlop = ""
+        if (apihost != "") inlhost = apihost
+        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint
+        return
+    }
+    # Exactly the verbs the ruling names, for the porcelain path.
     if (key != "issue/create" && key != "issue/comment" &&
         key != "pr/create" && key != "pr/comment" && key != "pr/review") return
     # issue comment, pr comment and pr review take a `<number> | <url>` operand
@@ -343,7 +430,7 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop) {
             if (j < ntok) { repo = T[j + 1]; j++ }
         }
     }
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint
 }
 function reset(   k) { for (k = 1; k <= ntok; k++) delete T[k]; ntok = 0 }
 BEGIN { SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); BT = sprintf("%c", 96) }
@@ -410,7 +497,7 @@ ALLOWED=$(allowed_origins)
 OWNED=$(printf '%s' "$ALLOWED" | paste -sd, - 2>/dev/null)
 
 NOUN=""; VERB=""; TARGET=""; REFUSE=""
-while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval _urlop; do
+while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval _urlop _endpoint; do
     [ -n "${_noun:-}" ] || continue
 
     # Where this call would actually run, after any cd ahead of it.
@@ -439,32 +526,58 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
     fi
     [ -n "$_eff_host" ] || _eff_host=github.com
 
-    # A `<url>` operand on issue/pr comment or pr review names the repository
-    # itself; gh writes there whatever --repo says, so it is resolved first.
-    _url_target=""
-    [ -n "${_urlop:-}" ] && _url_target=$(repo_from_url "$_urlop")
-    if [ -n "${_url_target:-}" ]; then
-        _target=$_url_target
-    elif [ -n "${_flag:-}" ]; then
-        _target=$(norm_repo "$_flag" "$_eff_host")
-    elif [ -n "${_inline:-}" ]; then
-        _target=$(norm_repo "$_inline" "$_eff_host")
-    elif [ "${_ghset:-0}" = "1" ]; then
-        # An export earlier on the line is what gh sees, overriding any ambient
-        # GH_REPO. An emptied or unset one leaves no target, so it resolves
-        # against the working directory just as gh would.
-        if [ -n "${_ghval:-}" ]; then
-            _target=$(norm_repo "$_ghval" "$_eff_host")
+    # `gh api` names its repository in the endpoint, not in --repo, so it is
+    # resolved on its own terms. An endpoint that names no repository is left
+    # alone; one with {owner}/{repo} placeholders is filled from GH_REPO or the
+    # working directory the way gh fills them; a repos path with no concrete
+    # owner and name resolves to nothing and is refused.
+    if [ "$_noun" = "api" ]; then
+        _api=$(api_endpoint_target "${_endpoint:-}" "$_eff_host")
+        case "$_api" in
+            @nonrepos) continue ;;
+            @malformed) _target="" ;;
+            @placeholder)
+                if [ -n "${_inline:-}" ]; then
+                    _target=$(norm_repo "$_inline" "$_eff_host")
+                elif [ "${_ghset:-0}" = "1" ] && [ -n "${_ghval:-}" ]; then
+                    _target=$(norm_repo "$_ghval" "$_eff_host")
+                elif [ "${_ghset:-0}" = "1" ]; then
+                    _target=$(origin_of "$_base")
+                elif [ -n "${GH_REPO:-}" ]; then
+                    _target=$(norm_repo "$GH_REPO" "$_eff_host")
+                else
+                    _target=$(origin_of "$_base")
+                fi ;;
+            *) _target=$_api ;;
+        esac
+    else
+        # A `<url>` operand on issue/pr comment or pr review names the repository
+        # itself; gh writes there whatever --repo says, so it is resolved first.
+        _url_target=""
+        [ -n "${_urlop:-}" ] && _url_target=$(repo_from_url "$_urlop")
+        if [ -n "${_url_target:-}" ]; then
+            _target=$_url_target
+        elif [ -n "${_flag:-}" ]; then
+            _target=$(norm_repo "$_flag" "$_eff_host")
+        elif [ -n "${_inline:-}" ]; then
+            _target=$(norm_repo "$_inline" "$_eff_host")
+        elif [ "${_ghset:-0}" = "1" ]; then
+            # An export earlier on the line is what gh sees, overriding any ambient
+            # GH_REPO. An emptied or unset one leaves no target, so it resolves
+            # against the working directory just as gh would.
+            if [ -n "${_ghval:-}" ]; then
+                _target=$(norm_repo "$_ghval" "$_eff_host")
+            else
+                _target=$(origin_of "$_base")
+            fi
+        elif [ -n "${GH_REPO:-}" ]; then
+            _target=$(norm_repo "$GH_REPO" "$_eff_host")
         else
+            # No explicit target: gh resolves against the working directory's
+            # remote, so the guard resolves the same way rather than waving the
+            # call through.
             _target=$(origin_of "$_base")
         fi
-    elif [ -n "${GH_REPO:-}" ]; then
-        _target=$(norm_repo "$GH_REPO" "$_eff_host")
-    else
-        # No explicit target: gh resolves against the working directory's
-        # remote, so the guard resolves the same way rather than waving the
-        # call through.
-        _target=$(origin_of "$_base")
     fi
 
     if [ -n "${ALLOWED:-}" ] && [ -n "${_target:-}" ] \
@@ -490,6 +603,18 @@ to land on a repository we own is treated as landing on someone else's.
 Run it from a checkout whose \`origin\` remote is the rig's repository, or hand
 the operator the exact command to send. Bead $PREPARE_PATH_BEAD carries the
 prepare-a-command path."
+fi
+
+if [ -z "${TARGET:-}" ] && [ "$NOUN" = "api" ]; then
+    deny "gh-origin-guard: refused \`gh api $VERB\`.
+
+This call writes, but its endpoint names no repository that resolves: a
+\`repos/OWNER/REPO\` path carries no concrete owner and name, or a
+\`{owner}/{repo}\` endpoint was run outside a checkout of one of ours. The
+repositories this session may write to are: $OWNED.
+
+Name the repository in the endpoint (\`repos/OWNER/REPO/...\`), or hand the
+operator the exact command. Bead $PREPARE_PATH_BEAD carries that path."
 fi
 
 if [ -z "${TARGET:-}" ]; then

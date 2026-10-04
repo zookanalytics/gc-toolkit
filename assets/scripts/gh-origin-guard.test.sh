@@ -49,6 +49,10 @@
 #   (22) `gh issue new` and `gh pr new`, gh's aliases for create, are guarded
 #   (23) wrapper options (`time -p`, `command --`, `exec -l`) still reach the
 #        wrapped write; `command -v gh` is a lookup and stays unguarded
+#   (25) `gh api` with a writing method (POST/PATCH/PUT/DELETE, explicit via -X
+#        or implicit when fields are added) is guarded off the endpoint path;
+#        GET and graphql are left alone, and an endpoint naming no repository is
+#        out of the guard's domain
 
 set -u
 
@@ -399,6 +403,41 @@ denied "continuation before pr review"        "$RIG" 'gh pr \
 review 12 --repo get-convex/agent --approve'
 allowed "continuation into an own write"      "$RIG" 'gh issue \
 create --repo zookanalytics/gc-toolkit --title x'
+
+# --- (25) gh api writes reach the same REST endpoints --------------------
+# `gh api` with a writing method reaches issue/PR/comment creation the porcelain
+# verbs cover. The method is explicit via -X/--method, else POST when fields are
+# added and GET otherwise, the way gh resolves it. The repository is read from
+# the endpoint path, not --repo. Reads and graphql stay untouched, and an
+# endpoint that names no repository is out of the guard's domain.
+echo "  -- gh api writes"
+denied  "api POST issue at third party"          "$RIG" "gh api -X POST repos/get-convex/agent/issues -f title=x"
+denied  "api --method POST at third party"       "$RIG" "gh api --method POST repos/get-convex/agent/issues"
+allowed "api POST issue at own origin"           "$RIG" "gh api -X POST repos/zookanalytics/gc-toolkit/issues -f title=x"
+# gh switches to POST when fields are added, so a fielded call with no -X writes.
+denied  "api implicit POST (fields) third party" "$RIG" "gh api repos/get-convex/agent/issues -f title=x"
+# An explicit GET keeps a fielded call a read, the way --method GET does in gh.
+allowed "api explicit GET with fields"           "$RIG" "gh api --method GET repos/get-convex/agent/issues -f per_page=1"
+denied  "api DELETE a third-party repo"          "$RIG" "gh api -X DELETE repos/get-convex/agent"
+denied  "api PATCH a third-party issue"          "$RIG" "gh api -X PATCH repos/get-convex/agent/issues/1 -f state=closed"
+allowed "api PATCH own issue"                     "$RIG" "gh api -X PATCH repos/zookanalytics/gc-toolkit/issues/1 -f state=closed"
+# A leading slash and a full REST URL name the same repository; the api host
+# (api.github.com, or HOST/api/v3) maps back to the forge host a remote names.
+denied  "api POST leading-slash third party"     "$RIG" "gh api -X POST /repos/get-convex/agent/issues"
+denied  "api POST full-url third party"          "$RIG" "gh api -X POST https://api.github.com/repos/get-convex/agent/issues"
+allowed "api POST full-url own origin"           "$RIG" "gh api -X POST https://api.github.com/repos/zookanalytics/gc-toolkit/issues"
+# {owner}/{repo} placeholders are filled from the working directory, the way gh
+# fills them, so the same command writes wherever the cwd belongs.
+allowed "api placeholder from own cwd"           "$RIG" "gh api -X POST repos/{owner}/{repo}/issues -f title=x"
+denied  "api placeholder from third-party cwd"   "$SANDBOX/third" "gh api -X POST repos/{owner}/{repo}/issues -f title=x"
+# --hostname chooses the forge an unqualified endpoint resolves on.
+denied  "api --hostname to another forge"        "$RIG" "gh api --hostname gitlab.example.com -X POST repos/zookanalytics/gc-toolkit/issues"
+# A writing method whose endpoint names no repos/OWNER/REPO path resolves to
+# nothing and is refused; graphql and non-repo endpoints are left alone.
+denied  "api POST a malformed repos path"        "$RIG" "gh api -X POST repos/zookanalytics"
+allowed "api graphql mutation is left alone"     "$RIG" "gh api graphql -f query=mutation{x}"
+allowed "api POST to a non-repo endpoint"        "$RIG" "gh api -X POST gists -f files=x"
+allowed "api GET own repo detail is a read"      "$RIG" "gh api repos/zookanalytics/gc-toolkit"
 
 # --- (14) everything else stays silent -----------------------------------
 echo "  -- non-events"
