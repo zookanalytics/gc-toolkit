@@ -282,11 +282,12 @@ comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 issue_comment_watermark_key = "pr_issue_comment_watermark"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
-# child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
-# the merge until it closes — the child through a blocks edge, the visit through
-# the pr_number stamp merge.sh's in-flight-holder probe reads. A visit takes no
-# blocks edge: escalate.sh files it depending on its subject, so an edge back
-# would be a cycle.
+# child, whatever holds the anchor) or "visit:<bead-id>" (nowhere to route work:
+# no fix pool, or the PR head branch unresolved). Either holds the merge until it
+# closes — the child through a blocks edge, the visit through the pr_number stamp
+# merge.sh's in-flight-holder probe reads. A visit takes no blocks edge:
+# escalate.sh files it depending on its subject, so an edge back would be a
+# cycle.
 disposition_key = "pr_comment_disposition"
 
 [machine_axis]
@@ -707,8 +708,10 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads: a rebase_hold on any bead naming a branch stops
 # pre-open-rebase.sh, pr-open.sh, pr-facts.sh and convoy-graduate.sh from
-# rebasing or dispatching it, and tracking_only opts a PR out of merge.sh's
-# in-flight-holder count. The pack never writes or clears either.
+# rebasing or dispatching it, save the one dispatch pr-facts.sh files whatever
+# holds the anchor: a review-feedback batch's rework child, which brings the
+# branch current by merge as it answers. tracking_only opts a PR out of
+# merge.sh's in-flight-holder count. The pack never writes or clears either.
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.

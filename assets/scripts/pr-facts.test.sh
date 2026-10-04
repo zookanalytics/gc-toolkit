@@ -21,11 +21,11 @@
 # merge.sh for that pass);
 # Also covers the POSTURE record and the comment watermark: the declared
 # vocabulary, posture pinned to the live head and written only on change, an
-# unanswered comment routing to a fix-pool child or (under a human hold) to a
-# visit, the watermark advancing only after both that child's mode and its route
-# read back, a comment above the mark re-firing while one below it stays
-# answered, and the reads that record nothing rather than clear a standing
-# `commented`.
+# unanswered comment routing to a fix-pool child whatever holds the anchor, or to
+# a visit when there is nowhere to route work, the watermark advancing only after
+# both that child's mode and its route read back, a comment above the mark
+# re-firing while one below it stays answered, and the reads that record nothing
+# rather than clear a standing `commented`.
 # Also covers the validation pass such a batch ensures: a live check_name=human
 # task_kind=validation bead anchored to the PR (the lane the validator rules,
 # never the whole check_set — a multi-lane anchor still gets one human-lane pass)
@@ -36,9 +36,9 @@
 # adopted by title when a prior stamp dropped. Opening it
 # fails closed: a pass that did not record the shape the validator consumes
 # (anchor_bead, check_name=human, the head pin) or an unattachable blocks edge
-# holds the batch unwatermarked to retry. A capped anchor
-# keeps its park (retired on signoff.sh's side, not here) and its feedback goes to
-# the person; a verdict the city posted itself and a rework hand-back are not
+# holds the batch unwatermarked to retry. A held anchor keeps its hold and its
+# feedback still becomes a routed rework child, the fix unit a must-fix ruling
+# attaches to; a verdict the city posted itself and a rework hand-back are not
 # feedback and open no pass.
 # Write-back: EYES on a routed comment, one threaded reply naming the landing
 # commit, resolve behind it; idempotent across passes; nothing for a comment no
@@ -584,24 +584,46 @@ out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "an operator's own hold still vetoes the dispatch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 
-echo "# …and a held + CONFLICTING anchor DEFERS fresh operator comments — the cap-park carve-out is gone (F5e successor)"
-# The merge_hold skip above continues past the whole loop body, so the feedback
-# arm never runs: a fresh operator comment on a held+conflicting PR is left
-# unwatermarked and unrouted until the hold lifts. The retired cap park
-# (merge_hold=signoff_cap) had a carve-out that still routed it to the person
-# holding the anchor; every truthy merge_hold now defers it, and the five
-# migrated parks are exactly merge_hold=true.
+echo "# …but a held + CONFLICTING anchor that owes feedback routes it to a rework child, filing no merge-in"
+# A hold defers the stale-base merge-in, never the feedback. An anchor that owes
+# feedback skips the CONFLICTING arm, so neither the hold nor any other skip guard
+# there reaches it, and the feedback arm's prepare_mode=merge child brings the
+# branch current as it answers. The hold itself is left standing.
 store "[$(anchor F5e 91 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 91 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_91.json"
 echo '[]' > "$GH_DIR/reviews_91.json"
 printf '[{"id":9101,"user":{"login":"human1"},"body":"please rebase and address this"}]' > "$GH_DIR/comments_91.json"
+: > "$STUB_ESC_LOG"
 out=$(run)
-has "$out" "a hold is set (operator gate); no rework dispatched" "the held+conflicting anchor dispatches no rework"
-eq "$(meta F5e pr_comment_disposition)" "<absent>" "…the fresh operator comment gets no disposition"
-eq "$(meta F5e pr_comment_watermark)" "<absent>" "…the comment stays unwatermarked, deferred until the hold lifts"
-eq "$(vpass_id F5e)" "<none>" "…and no validation pass is opened for it"
+hasnt "$out" "a hold is set (operator gate); no rework dispatched" "the hold does not skip an anchor that owes feedback"
+DISP="$(meta F5e pr_comment_disposition)"
+has "$DISP" "rework:" "…the fresh operator comment routes to a rework child"
+F5FIX="${DISP#rework:}"
+eq "$(meta "$F5FIX" 'gc.routed_to')" "$FIX" "…routed to the fix pool"
+eq "$(meta "$F5FIX" prepare_mode)" "merge" "…brought current by merge, so it resolves the conflict as it answers"
+grep -qxF "$F5FIX|blocks|F5e" "$STUB_DEPS" && ok "…and it blocks the anchor, so the merge waits for it" || bad "the feedback child does not block the held anchor"
+eq "$(meta F5e pr_comment_watermark)" "9101" "…the comment is watermarked, not deferred until the hold lifts"
+hasnt "$(vpass_id F5e)" "<none>" "…a validation pass is opened for it"
+eq "$(cat "$STUB_ESC_LOG")" "" "…no visit is filed"
+eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))] | length' "$STUB_STORE")" "0" "…and NO stale-base merge-in child is filed under the hold"
 eq "$(meta F5e merge_hold)" "true" "…the operator's hold is left standing"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child of any kind is minted"
+
+echo "# …and a live demand on a CONFLICTING anchor that owes feedback routes it the same way"
+# The demand reaches the CONFLICTING arm twice, through anchor_decision_held and
+# as a foreign blocks-blocker of the anchor. An anchor that owes feedback meets
+# neither.
+store "[$(anchor F5f 201),$(demand F5f)]"
+gc bd dep dm-F5f --blocks F5f >/dev/null 2>&1
+printf '%s' "$(prview 201 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_201.json"
+echo '[]' > "$GH_DIR/reviews_201.json"
+printf '[{"id":20101,"user":{"login":"human1"},"body":"address this"}]' > "$GH_DIR/comments_201.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+hasnt "$out" "an open demand holds it" "the demand guard does not skip an anchor that owes feedback"
+hasnt "$out" "the anchor is held by" "…nor does the demand's gate, read as a foreign blocker"
+has "$(meta F5f pr_comment_disposition)" "rework:" "…the feedback routes to a rework child"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and no visit is filed"
+eq "$(bstatus dm-F5f)" "open" "…while the demand is left standing for its sitting"
 
 echo "# …and so does an armed re-dispatch: the anchor is parked, waiting to re-offer when ready (tk-79ffoh)"
 # gc.dispatch_when_ready is deferred-dispatch's arm marker. While it is set the
@@ -1381,21 +1403,25 @@ out=$(STUB_SELF_LOGIN="" run); rc=$?
 eq "$rc" 0 "the full pass exits 0"
 has "$out" "not current" "…while still reporting the count"
 
-echo "# a sitting still waiting on a person gets the comments, not the fix pool"
+echo "# a sitting still waiting on a person does not keep the comments from the fix pool"
+# A live demand gates the merge; the feedback is still answered, by a child that
+# is the fix unit a must-fix ruling on the batch's findings attaches to.
 store "[$(anchor H1 44 ',"gc.takeaway":"holding — needs a ruling"'),$(demand H1)]"
 printf '%s' "$(prview 44 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_44.json"
 echo '[]' > "$GH_DIR/reviews_44.json"
 printf '[{"id":8001,"user":{"login":"human1"},"body":"this is wrong"}]' > "$GH_DIR/comments_44.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "--key pr-comments.44.0.8001" "the visit key names the exact batch"
-has "$(cat "$STUB_ESC_LOG")" "a sitting is holding it for an operator ruling" "…and why no work could be routed"
-eq "$(meta H1 pr_comment_disposition)" "visit:new-3" "the choice is recorded, and it is the visit"
-eq "$(meta H1 pr_comment_watermark)" "8001" "the comment IS dispositioned — it went to a named party"
-eq "$(meta new-3 task_kind)" "visit" "the visit was really filed"
-eq "$(meta new-3 pr_number)" "44" "the visit carries the PR, which is what holds the merge"
-hasnt "$(grep -F '|blocks|H1' "$STUB_DEPS" || true)" "new-3" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "no work was routed under the human's decision"
+eq "$(cat "$STUB_ESC_LOG")" "" "a live demand does not choose a visit"
+DISP="$(meta H1 pr_comment_disposition)"
+has "$DISP" "rework:" "the comments become a rework child"
+H1FIX="${DISP#rework:}"
+eq "$(meta H1 pr_comment_watermark)" "8001" "the comment IS dispositioned"
+eq "$(meta "$H1FIX" task_kind)" "rework" "…the child carries the rework role marker"
+eq "$(meta "$H1FIX" 'gc.routed_to')" "$FIX" "…and is routed to the fix pool"
+grep -qxF "$H1FIX|blocks|H1" "$STUB_DEPS" && ok "…blocking the anchor, so the merge waits for it" || bad "the feedback child does not block the demand-held anchor"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+eq "$(bstatus dm-H1)" "open" "…while the demand is left standing for its sitting"
 
 echo "# …while a takeaway whose sitting ENDED holds nothing: the comments become work"
 store "[$(anchor H2 45 ',"gc.takeaway":"routed — nothing further needed here"'),$(demand H2 closed)]"
@@ -1408,47 +1434,51 @@ eq "$(meta H2 pr_comment_disposition)" "rework:new-3" "a closed demand is a sitt
 eq "$(cat "$STUB_ESC_LOG")" "" "…and no visit is filed"
 eq "$(meta H2 'gc.takeaway')" "routed — nothing further needed here" "…while the sitting's record is left alone"
 
-echo "# …and so does rebase_hold: a child told to answer comments may rewrite the branch"
+echo "# …and so does rebase_hold: the freeze defers the stale-base merge-in, never the feedback"
 store "[$(anchor H5 54 ',"rebase_hold":"true"')]"
 printf '%s' "$(prview 54 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_54.json"
 echo '[]' > "$GH_DIR/reviews_54.json"
 printf '[{"id":8400,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_54.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "rebase_hold freezes the branch" "an operator branch freeze routes to the human, not the pool"
-eq "$(meta H5 pr_comment_disposition)" "visit:new-2" "…and the visit is what is recorded"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work dispatched against the frozen branch"
+eq "$(cat "$STUB_ESC_LOG")" "" "a branch freeze does not choose a visit"
+has "$(meta H5 pr_comment_disposition)" "rework:" "…the feedback routes to a rework child"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+eq "$(meta H5 rebase_hold)" "true" "…while the freeze is left standing"
 
-echo "# …and so does an armed re-dispatch: feedback goes to a visit, never a rework on a superseded branch (tk-79ffoh)"
+echo "# …and so does an armed re-dispatch: the feedback child holds the anchor, so the re-pour waits for it"
 store "[$(anchor FA2 76 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]"
 printf '%s' "$(prview 76 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_76.json"
 echo '[]' > "$GH_DIR/reviews_76.json"
 printf '[{"id":8600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_76.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "the anchor is armed to re-dispatch when ready" "an armed anchor routes feedback to the human, not the pool"
-has "$(meta FA2 pr_comment_disposition)" "visit:" "…and the visit is what is recorded, not a rework"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no rework dispatched against the superseded branch"
+eq "$(cat "$STUB_ESC_LOG")" "" "an armed anchor does not choose a visit"
+DISP="$(meta FA2 pr_comment_disposition)"
+has "$DISP" "rework:" "…the feedback routes to a rework child"
+grep -qxF "${DISP#rework:}|blocks|FA2" "$STUB_DEPS" && ok "…which blocks the anchor, keeping the armed re-dispatch out of bd ready until it lands" || bad "the feedback child does not block the armed anchor"
+eq "$(meta FA2 'gc.dispatch_when_ready')" "rig/gc-toolkit.polecat" "…while the arm is left standing"
 
 echo "# …a visit that did not take the stamp is NOT watermarked past"
-store "[$(anchor H4 53 ',"gc.routed_to":"human"')]"
+store "[$(anchor H4 53)]"
 printf '%s' "$(prview 53 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_53.json"
 echo '[]' > "$GH_DIR/reviews_53.json"
 printf '[{"id":8300,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_53.json"
-out=$(STUB_DROP_KEYS="new-2:pr_number" run)
+out=$(STUB_DROP_KEYS="new-2:pr_number" "$SUT" --review-pool "$REV" 2>&1)   # no --fix-pool: the visit case
 has "$out" "did not record pr_number=53; NOT watermarking" "an unheld visit fails closed"
 eq "$(meta H4 pr_comment_watermark)" "<absent>" "…the mark never moved past an unheld comment"
 eq "$(meta_pinned H4 pr_posture)" "commented@sha-53" "…and the posture still holds the merge"
 
-echo "# …so does an anchor already routed to a human, and one with no fix pool"
-store "[$(anchor H2 47 ',"gc.routed_to":"human"')]"
+echo "# …so does an anchor already routed to a human; one with no fix pool goes to a visit"
+store "[$(anchor H6 47 ',"gc.routed_to":"human"')]"
 printf '%s' "$(prview 47 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_47.json"
 echo '[]' > "$GH_DIR/reviews_47.json"
 printf '[{"id":8100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_47.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "already routed to a human" "a human-routed anchor gets a visit"
-eq "$(meta H2 pr_comment_disposition)" "visit:new-2" "…and the visit is what is recorded"
+eq "$(cat "$STUB_ESC_LOG")" "" "a human-routed anchor does not choose a visit"
+has "$(meta H6 pr_comment_disposition)" "rework:" "…its feedback becomes a rework child"
+eq "$(meta H6 'gc.routed_to')" "human" "…and the anchor's own route is left alone"
 store "[$(anchor H3 48)]"
 printf '%s' "$(prview 48 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_48.json"
 echo '[]' > "$GH_DIR/reviews_48.json"
@@ -1456,7 +1486,65 @@ printf '[{"id":8200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 : > "$STUB_ESC_LOG"
 out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
+has "$(cat "$STUB_ESC_LOG")" "--key pr-comments.48.0.8200" "…under a visit key naming the exact batch"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
+eq "$(meta new-2 task_kind)" "visit" "the visit was really filed"
+eq "$(meta new-2 pr_number)" "48" "the visit carries the PR, which is what holds the merge"
+hasnt "$(grep -F '|blocks|H3' "$STUB_DEPS" || true)" "new-2" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
+
+echo "# under every hold, a must-fix human finding gets a routed fix unit that blocks the anchor"
+# A hold gates the merge or a dispatch whose only work is bringing the branch
+# current; it never chooses the vehicle for feedback. Each hold below leaves the
+# batch a routed rework child blocking the anchor, conflicting or not, and a
+# must-fix ruling on the batch's finding (the real finding.sh) hangs its
+# close-ordering edge on that child. Without the child the finding would hold the
+# merge with nothing acting on it.
+# The fix-unit-to-finding edge joins two new-N ids, which every later case
+# reuses, so each row starts from the edges that stood before the matrix and the
+# matrix leaves them as it found them.
+hv=0
+hv_deps="$TMP/deps.before-hold-matrix"
+cp "$STUB_DEPS" "$hv_deps"
+for hv_state in "BLOCKED MERGEABLE" "DIRTY CONFLICTING"; do
+  for hv_hold in merge_hold rebase_hold human demand armed; do
+    cp "$hv_deps" "$STUB_DEPS"
+    hv=$((hv + 1)); A="HV$hv"; P=$((210 + hv))
+    case "$hv_hold" in
+      merge_hold)  store "[$(anchor "$A" "$P" ',"merge_hold":"true"')]" ;;
+      rebase_hold) store "[$(anchor "$A" "$P" ',"rebase_hold":"true"')]" ;;
+      human)       store "[$(anchor "$A" "$P" ',"gc.routed_to":"human"')]" ;;
+      armed)       store "[$(anchor "$A" "$P" ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]" ;;
+      demand)      store "[$(anchor "$A" "$P"),$(demand "$A")]"
+                   gc bd dep "dm-$A" --blocks "$A" >/dev/null 2>&1 ;;
+    esac
+    L="[$hv_hold, ${hv_state% *}]"
+    printf '%s' "$(prview "$P" OPEN $hv_state)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_$P.json"
+    echo '[]' > "$GH_DIR/reviews_$P.json"
+    printf '[{"id":%s,"user":{"login":"human1"},"body":"this must change before it lands"}]' "$((P * 100))" > "$GH_DIR/comments_$P.json"
+    : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
+    out=$(run)
+    DISP="$(meta "$A" pr_comment_disposition)"
+    has "$DISP" "rework:" "$L the batch routes to a rework child"
+    HFIX="${DISP#rework:}"
+    eq "$(meta "$HFIX" 'gc.routed_to')" "$FIX" "$L …routed to the fix pool"
+    grep -qxF "$HFIX|blocks|$A" "$STUB_DEPS" && ok "$L …blocking the anchor" || bad "$L the rework child does not block the anchor"
+    eq "$(cat "$STUB_ESC_LOG")" "" "$L …and no visit is filed"
+    HFID=$(jq -r --arg a "$A" '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == $a) | .id ] | .[0] // "<none>"' "$STUB_STORE")
+    hasnt "$HFID" "<none>" "$L …the objection is filed as a finding"
+    grep -qxF "$HFIX|blocks|$HFID" "$STUB_DEPS" && bad "$L the child already blocks the unvalidated finding at dispatch" || ok "$L …which the child does not block before it is ruled"
+    "$SD/finding.sh" set-disposition --finding "$HFID" --anchor "$A" --disposition must-fix >/dev/null 2>&1
+    eq "$(meta "$HFID" 'finding.disposition')" "must-fix" "$L …which the validator rules must-fix"
+    grep -qxF "$HFIX|blocks|$HFID" "$STUB_DEPS" && ok "$L …and the ruling hangs it on the batch's own fix unit" || bad "$L the must-fix finding was not hung on the batch's fix unit"
+    case "$hv_hold" in
+      merge_hold)  eq "$(meta "$A" merge_hold)" "true" "$L …the hold is left standing" ;;
+      rebase_hold) eq "$(meta "$A" rebase_hold)" "true" "$L …the freeze is left standing" ;;
+      human)       eq "$(meta "$A" 'gc.routed_to')" "human" "$L …the human route is left standing" ;;
+      armed)       eq "$(meta "$A" 'gc.dispatch_when_ready')" "rig/gc-toolkit.polecat" "$L …the arm is left standing" ;;
+      demand)      eq "$(bstatus "dm-$A")" "open" "$L …the demand is left standing" ;;
+    esac
+  done
+done
+cp "$hv_deps" "$STUB_DEPS"
 
 # --- operator feedback opens a validation pass on the anchor --------------------
 # A human feedback batch is review the branch has never been answered against, so
@@ -1588,7 +1676,7 @@ eq "$(meta orph-72 anchor_bead)" "Vo" "…now carrying the anchor open_validatio
 
 echo "# a held anchor: the batch opens a pass but does NOT lift the operator's hold"
 # An operator's own hold is theirs to lift, so this arm never touches it; it
-# stays, and the comments go to the person holding it.
+# stays, and the comments still become work.
 store "[$(anchor Vc 73 "$HELD_STATE")]"
 printf '%s' "$(prview 73 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_73.json"
 echo '[]' > "$GH_DIR/reviews_73.json"
@@ -1598,7 +1686,7 @@ hasnt "$(vpass_id Vc)" "<none>" "the batch still opens a validation pass"
 eq "$(meta Vc merge_hold)" "true" "…but the operator's hold is left standing — this arm does not touch it"
 eq "$(meta Vc 'gc.routed_to')" "human" "…nor the human route"
 eq "$(meta Vc signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
-eq "$(meta Vc pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it, not to work"
+has "$(meta Vc pr_comment_disposition)" "rework:" "…and the comments still become a rework child: a hold does not choose the visit"
 
 echo "# a verdict the city posted itself is not feedback, and opens no pass"
 # Identity, not shape: signoff.sh posts its verdicts under the city's own login
@@ -1820,7 +1908,7 @@ eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "…and the veto st
 echo "# …and a CHANGES_REQUESTED veto opens a validation pass like any other feedback"
 # A veto is review the branch has never been answered against, the same as a
 # comment batch, so it opens a pass. It does not touch an operator's own hold,
-# so a held anchor keeps its hold and the veto goes to the person holding it.
+# so a held anchor keeps its hold, and the veto still becomes a rework child.
 HELDCR=',"merge_hold":"true","gc.routed_to":"human","blocked_reason":"held for the operator to review"'
 store "[$(anchor PB 56 "$HELDCR")]"
 printf '%s' "$(prview 56 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_56.json"
@@ -1831,7 +1919,7 @@ hasnt "$(vpass_id PB)" "<none>" "the veto opens a validation pass"
 eq "$(meta PB signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
 eq "$(meta PB merge_hold)" "true" "…the operator's hold is left standing"
 eq "$(meta PB 'gc.routed_to')" "human" "…with the human route"
-eq "$(meta PB pr_comment_disposition)" "visit:new-2" "…so the objection goes to the person holding it (the pass is opened after, as new-3)"
+has "$(meta PB pr_comment_disposition)" "rework:" "…and the objection still becomes a rework child"
 
 echo "# …a review DISMISSED before it routed is never filed"
 # A dismissal moves the review out of COMMENTED and CHANGES_REQUESTED both, so
@@ -2706,7 +2794,7 @@ echo "# …and an armed re-dispatch files no red-check rework either — the bra
 # GH_DIR fixtures outlive the per-case store reset, so PR#75's feedback batch
 # from upthread is still present; clear it so this case exercises the red-check
 # arm alone. Feedback on an armed anchor is FA2's case, where it routes to a
-# visit and opens a validation pass that this plain new- count would catch.
+# rework child and opens a validation pass that this plain new- count would catch.
 rm -f "$GH_DIR/comments_75.json" "$GH_DIR/reviews_75.json"
 store "[$(anchor FA3 75 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]"
 printf '%s' "$(prview 75 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_75.json"
@@ -2980,16 +3068,17 @@ has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "the fix pool is woken"
 eq "$(vpass_id RC1)" "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | .id ][0] // "<none>"' "$STUB_STORE")" \
   "the batch opens its validation pass here too, exactly as the full arm does"
 
-echo "# …a human hold routes the same batch to a visit, early (the full arm's choice)"
+echo "# …a held anchor routes the same batch to a rework child, early (the full arm's choice)"
 store "[$(anchor RC2 67 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 67 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_67.json"
 echo '[]' > "$GH_DIR/reviews_67.json"
 printf '[{"id":6701,"user":{"login":"human1"},"body":"hmm"}]' > "$GH_DIR/comments_67.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run_route)
-eq "$(meta RC2 pr_comment_disposition | sed 's/visit:.*/visit/')" "visit" "a held anchor's feedback goes to a visit, on the early tick"
-has "$(cat "$STUB_ESC_LOG")" "merge_hold is set" "…and the visit records why no work could be routed"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work routed under the hold"
+has "$(meta RC2 pr_comment_disposition)" "rework:" "a held anchor's feedback becomes a rework child, on the early tick"
+eq "$(cat "$STUB_ESC_LOG")" "" "…no visit is filed"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…the fix pool is woken"
+eq "$(meta RC2 merge_hold)" "true" "…and the hold is left standing"
 
 echo "# …route-comments-only does NOT run the write-back sweep (the full pass owns it)"
 store "[$(anchor RC3 68 "$(wb_meta rework:KX)"), $(child KX open)]"
