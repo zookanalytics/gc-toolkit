@@ -114,6 +114,35 @@ run_sut subject.sh
 if ( cd "$TMP" && PATH="$STUB" "$BASH_BIN" "$SUT" ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 2 ] && ok "not a repo: structural error (exit 2)" || bad "not a repo: expected 2, got $rc"
 
+# --- I: an extensionless shell script (shell shebang) is recognized. ---------
+# A real shell script need not end in .sh — assets/hooks/pre-commit is the live
+# example, `#!/usr/bin/env bash`. lint.sh must hand it to shellcheck-run.sh, or
+# the refinery reports a clean shell lint on a hook that was never checked.
+make_wrapper 0; make_go 0; : > "$TMP/wrapper.log"
+printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/hook-noext"
+run_sut hook-noext
+[ "$rc" -eq 0 ] && ok "shebang shell file: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "shebang shell file: expected 0, got $rc"; }
+grep -q 'hook-noext' "$TMP/wrapper.log" \
+  && ok "shebang shell file: shellcheck-run.sh received it" \
+  || bad "shebang shell file: dropped — shellcheck-run.sh never saw it"
+grep -qi 'no shell files given' "$TMP/out" \
+  && bad "shebang shell file: reported as skipped" \
+  || ok "shebang shell file: not reported as skipped"
+
+# --- J: an extensionless non-shell script is still dropped. ------------------
+# The predicate admits only shells shellcheck can lint; a python shebang handed
+# to shellcheck would turn a clean run into a spurious finding, so it drops out.
+make_wrapper 0; make_go 0; : > "$TMP/wrapper.log"
+printf '#!/usr/bin/env python3\nprint("hi")\n' > "$REPO/script-noext"
+run_sut script-noext
+[ "$rc" -eq 0 ] && ok "non-shell shebang: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "non-shell shebang: expected 0, got $rc"; }
+grep -q 'script-noext' "$TMP/wrapper.log" \
+  && bad "non-shell shebang: wrongly linted as shell" \
+  || ok "non-shell shebang: dropped, not linted"
+grep -qi 'no shell files given' "$TMP/out" \
+  && ok "non-shell shebang: reported skipped" \
+  || bad "non-shell shebang: not reported skipped"
+
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

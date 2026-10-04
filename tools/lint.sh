@@ -23,8 +23,10 @@
 # finding, never a silent pass, the same contract shellcheck-run.sh enforces.
 #
 # Usage: lint.sh [FILE ...]
-#   FILE ...  shell files to lint; non-.sh paths and missing files drop out. With
-#             none given no shell file is linted, and go vet still runs.
+#   FILE ...  files to lint; the shell scripts among them — a .sh suffix or a
+#             shell shebang (sh, bash, dash, ksh) — are shellchecked, and the
+#             rest drop out. With no shell file given none is linted, and go vet
+#             still runs.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
@@ -54,12 +56,40 @@ fi
 fail=0
 summary=()
 
-# ── Shell: shellcheck over the given *.sh files ──────────────────────────────
+# ── Shell: shellcheck over the given shell files ─────────────────────────────
+# A file is shell if its path ends in .sh, or its shebang names one of the
+# shells the linter handles (sh, bash, dash, ksh, including the `env <shell>`
+# form). The suffix alone misses the repo's extensionless scripts —
+# assets/hooks/pre-commit is `#!/usr/bin/env bash` — and skipping one hands the
+# refinery a clean shell lint that shellcheck-run.sh would have run on it, the
+# gap the fail-closed contract forbids.
+is_shell_file() {
+  local f=$1 line body interp rest shell
+  [ -f "$f" ] || return 1
+  case "$f" in
+    *.sh) return 0 ;;
+  esac
+  IFS= read -r line < "$f" 2>/dev/null || return 1
+  case "$line" in
+    '#!'*) ;;
+    *) return 1 ;;
+  esac
+  # Interpreter is the first word after #!; for `env <shell>` it is the second.
+  body=${line#"#!"}
+  read -r interp rest <<<"$body"
+  case "$interp" in
+    */env|env) shell=${rest%% *} ;;
+    *) shell=${interp##*/} ;;
+  esac
+  case "$shell" in
+    sh|bash|dash|ksh) return 0 ;;
+  esac
+  return 1
+}
+
 shell_files=()
 for f in "$@"; do
-  case "$f" in
-    *.sh) [ -f "$f" ] && shell_files+=("$f") ;;
-  esac
+  is_shell_file "$f" && shell_files+=("$f")
 done
 
 if [ "${#shell_files[@]}" -eq 0 ]; then
