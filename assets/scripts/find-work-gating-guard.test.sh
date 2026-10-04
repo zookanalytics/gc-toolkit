@@ -144,12 +144,12 @@ case "$(select_err)" in
   *) bad "(2b) skipped anchor must be flagged on stderr" "got '$(select_err)'" ;;
 esac
 
-# (3) STARVATION REGRESSION. A parked anchor sorts ahead of real work. With the
-#     old --limit=1 the filter would see only the anchor and report no work,
-#     idling a refinery whose queue is non-empty — trading a false positive for
-#     a false negative. The widened window is what makes the filter safe.
+# (3) STARVATION REGRESSION. A parked anchor sorts ahead of real work. A
+#     1-row window would see only the anchor and report no work, idling a
+#     refinery whose queue is non-empty — trading a false positive for a false
+#     negative. Fetching the whole set client-side is what makes the filter safe.
 printf 'tk-anchor|pull_request\ntk-real|-\n' > "$FAKE_ROWS"
-eq "$(select_work)" "tk-real" "(3) real work behind a parked anchor is still found (limit > 1)"
+eq "$(select_work)" "tk-real" "(3) real work behind a parked anchor is still found (unbounded window)"
 
 # (4) The pre-open sub-state is equally a gating anchor.
 printf 'tk-pre|pre_open_gate\n' > "$FAKE_ROWS"
@@ -205,16 +205,28 @@ eq "$(select_work)" "tk-realold" "(7d) oldest UNPARKED handoff wins; an older pa
 printf 'tk-p2old|-|2026-01-01T00:00:00Z|2\ntk-p1new|-|2026-03-03T00:00:00Z|1\ntk-p1old|-|2026-02-02T00:00:00Z|1\n' > "$FAKE_ROWS"
 eq "$(select_work)" "tk-p1old" "(7e) highest priority first, oldest within the band"
 
-echo "── 2. the query keeps a window wide enough for the filter ──"
+# (7f) Priority preemption must survive the whole queue, not just a window of it.
+#      bd sorts server-side on one field, so a bounded created-ordered window
+#      returns only the oldest rows and truncates a newer higher-priority handoff
+#      off before the client-side sort ever sees it. The rows are oldest-first,
+#      as bd returns created-ascending, with a batch of older P2s larger than any
+#      plausible bounded window and a newer P1 last; the P1 must still win. The
+#      stub honors --limit over file order, so any regression to a bounded
+#      created window truncates tk-p1win off and this fails.
+{ for ((i = 1; i <= 30; i++)); do printf -v d '%02d' "$i"; printf 'tk-p2-%s|-|2026-01-%sT00:00:00Z|2\n' "$d" "$d"; done
+  printf 'tk-p1win|-|2026-06-01T00:00:00Z|1\n'; } > "$FAKE_ROWS"
+eq "$(select_work)" "tk-p1win" "(7f) a newer high-priority handoff past a full created-ordered window still wins (unbounded)"
+
+echo "── 2. the query fetches the whole candidate set (unbounded window) ──"
 QUERY="$(grep -m1 'gc bd list' "$TMP/select.sh")"
+# A bounded window on one sort key can truncate off the bead the client-side
+# (priority, created) sort should pick, because bd sorts server-side on one
+# field only. --limit=0 fetches every candidate so the sort below sees them all.
 case "$QUERY" in
-  *--limit=1\ *|*--limit=1) bad "(8) listing limit must exceed 1" "client-side filter over a 1-row window starves" ;;
-  *--limit=*) ok "(8) listing limit exceeds 1 (filter cannot starve the queue)" ;;
+  *--limit=0*) ok "(8) listing window is unbounded (--limit=0): no candidate is truncated before the client-side sort" ;;
+  *--limit=1\ *|*--limit=1) bad "(8) unbounded window required (--limit=0)" "--limit=1: a client-side filter over a 1-row window starves" ;;
+  *--limit=*) bad "(8) unbounded window required (--limit=0)" "a bounded window can truncate off a higher-priority handoff the sort should pick; got: $QUERY" ;;
   *) bad "(8) listing carries an explicit --limit" "none found in: $QUERY" ;;
-esac
-case "$QUERY" in
-  *--sort\ created\ --reverse*) ok "(8b) listing fetches oldest-created first (window holds the longest-waiting handoff)" ;;
-  *) bad "(8b) listing must order oldest-created first (--sort created --reverse)" "got: $QUERY" ;;
 esac
 case "$QUERY" in
   *--assignee=\$GC_AGENT*) ok "(9) listing still scopes to this refinery's assignee" ;;
