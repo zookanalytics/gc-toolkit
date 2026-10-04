@@ -258,7 +258,10 @@ type Tile struct {
 	Open    int `json:"open"`
 	// InProgress is the RAW status count — honestly 0 for a slung bead, whose
 	// work never leaves status=open. InProgressLive is the count that answers
-	// "is anything actually moving", under both mechanisms.
+	// "is anything actually moving": a child the city is working (claimed by a
+	// live owner, or covered by a live workflow) PLUS a live workflow over the
+	// anchor's OWN bead — the common sling shape, where the work bead is the
+	// anchor and its molecule stands over it rather than under a child.
 	InProgress int `json:"in_progress"`
 	Assigned   int `json:"assigned"`
 
@@ -267,8 +270,9 @@ type Tile struct {
 	DeadOwner      bool `json:"dead_owner"`
 
 	// InFlight is the part of InProgressLive attributable to a live graph.v2
-	// workflow rather than to a claimed child, surfaced so the join can be
-	// audited without re-deriving it.
+	// workflow rather than to a claimed child — a child the workflow carries, or
+	// the anchor's own bead when a workflow stands over it — surfaced so the join
+	// can be audited without re-deriving it. Equal to len(InFlightHeads).
 	InFlight      int      `json:"in_flight"`
 	InFlightHeads []string `json:"in_flight_heads"`
 
