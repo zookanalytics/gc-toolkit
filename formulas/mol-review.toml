@@ -170,7 +170,13 @@ so they run against exactly what you reviewed:
 Run it as ONE shell: the trap is what removes the worktree, and it fires
 when that shell exits.
 ```bash
-REPO=$(git rev-parse --show-toplevel)
+# >>> review-worktree-add
+# The review worktree belongs to the rig's checkout, named by path so the
+# session's cwd cannot pick the repo. An empty root would let `git -C ""`
+# follow cwd, so an unresolvable rig fails closed.
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
 REVIEW_WT=$(mktemp -d "${TMPDIR:-/tmp}/gc-review-$REVIEW_BEAD.XXXXXX")
 # The trap owns the teardown, so every exit reaches it — a failing suite, a
 # timeout, an interrupt. A worktree left behind keeps its registration too,
@@ -182,8 +188,9 @@ review_wt_rm() {
   git -C "$REPO" worktree prune
 }
 trap review_wt_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
+git -C "$REPO" worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
 cd "$REVIEW_WT"
+# <<< review-worktree-add
 # run the suites the diff touches; record real pass/fail counts
 ```
 A failing suite is not automatically a finding: check whether it fails on the
