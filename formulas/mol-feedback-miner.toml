@@ -257,7 +257,7 @@ BEAD=$(gc bd create "obs: ${STATEMENT_ONE_LINE} (pr:${REPO_SLUG}#${N})" -t task 
 
 # Non-atomic create→update: a crash between the two leaves an observation
 # without its provenance stamp, invisible to dedup. Accepted — low probability.
-gc bd update "$BEAD" --set-metadata task_kind=observation --set-metadata obs.category="$CATEGORY" --set-metadata obs.scope="$SCOPE" --set-metadata obs.source=miner --set-metadata obs.directive="$DIRECTIVE" --set-metadata obs.provenance="$KEY" --set-metadata gc.outcome=recorded --status=closed
+gc bd update "$BEAD" --set-metadata task_kind=observation --set-metadata obs.category="$CATEGORY" --set-metadata obs.scope="$SCOPE" --set-metadata obs.source=miner --set-metadata obs.directive="$DIRECTIVE" --set-metadata obs.provenance="$KEY" --set-metadata gc.outcome=recorded --set-metadata gc.work_outcome=no-op --status=closed
 echo "filed observation $BEAD ($KEY)"
 ```
 

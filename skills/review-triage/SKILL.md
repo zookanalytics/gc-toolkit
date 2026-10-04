@@ -120,7 +120,7 @@ gc bd update "$OBS" --set-metadata task_kind=observation \
   --set-metadata "obs.scope=repo:${GC_RIG:-unknown}" \
   --set-metadata obs.source=self --set-metadata obs.directive=standing \
   --set-metadata "obs.provenance=bead:$ANCHOR:turn:$(date -u +%Y-%m-%d)" \
-  --set-metadata gc.outcome=recorded --status=closed
+  --set-metadata gc.outcome=recorded --set-metadata gc.work_outcome=no-op --status=closed
 ```
 
 ## What triage never does
