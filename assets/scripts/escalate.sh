@@ -123,6 +123,48 @@ if [ -z "${GC_RIG:-}" ] && [ -n "$POOL_ARG" ] && [ "$POOL_RIG" != "$POOL_ARG" ];
   warn "GC_RIG unset; adopting rig '$POOL_RIG' from --pool so the visit lands in the store that pool reads"
 fi
 
+# >>> subject-class
+# Whether --subject is a durable bead decides the dedup identity below and, on
+# the board route, whether a store can be derived from the subject at all.
+# Resolved once here, so every path agrees:
+#   durable   — escalation-rig.sh (bead-store.sh) resolves exactly one rig: a
+#               real bead id whose store is known.
+#   ephemeral — a *-wisp-* id (its prefix resolves, but the wisp is burned and
+#               re-poured every cycle, so it names no durable subject), OR a
+#               subject bead-store proves is no placeable bead at all
+#               (escalation-rig exit 1: no <prefix>-<id> shape, or a prefix the
+#               readable rig set does not carry). A bare literal fallback with no
+#               bead-id shape lands here. Both get key-alone dedup on the
+#               standing triage subject below: a tracks edge to a non-bead fails,
+#               and a sitting's outcome written to one has nowhere to land.
+#   unproven  — escalation-rig exit 3: a bead-shaped id whose store could not be
+#               read (unreadable rig set, or a prefix two rigs carry). It may be
+#               a real bead, so it is NOT bucketed as ephemeral; the board-route
+#               block fails closed on it.
+# The *-wisp-* glob is checked FIRST because a wisp's own prefix (lx-, tk-) does
+# resolve to a rig, so resolvability alone would miscall it durable.
+ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
+SUBJECT_RIG=""; subj_rig_why=""
+case "$SUBJECT" in
+  *-wisp-*) SUBJECT_CLASS=ephemeral ;;
+  *)
+    if [ -x "$ESC_RIG_SH" ]; then
+      SUBJECT_RIG=$("$ESC_RIG_SH" "$SUBJECT" 2>"${TMPDIR:-/tmp}/escalate-rig.$$"); esc_rc=$?
+      subj_rig_why=$(tr '\n' ' ' < "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+      rm -f "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null || true
+    else
+      esc_rc=3; subj_rig_why="cannot execute $ESC_RIG_SH"
+    fi
+    case "$esc_rc" in
+      0) SUBJECT_CLASS=durable ;;
+      1) SUBJECT_CLASS=ephemeral; SUBJECT_RIG="" ;;
+      *) SUBJECT_CLASS=unproven; SUBJECT_RIG="" ;;
+    esac
+    ;;
+esac
+SUBJECT_IS_EPHEMERAL=0; [ "$SUBJECT_CLASS" = ephemeral ] && SUBJECT_IS_EPHEMERAL=1
+# <<< subject-class
+
 # The default route is `human` (the retired converse pool's replacement; set in
 # the gate-visit block below): the visit parks on the helm board, which is not a
 # pool name that selects a store. So unlike a rig-qualified --pool, the default
@@ -132,37 +174,34 @@ fi
 # in a store the subject's board never reads, invisible to the operator and
 # severed from the subject: the silent mute this script exists to end.
 #
-# So on the board route the store is proven from the subject itself, through
-# escalation-rig.sh (bead-store.sh): the one prefix->rig derivation the
-# destructive gates and the deacon's own escalations already use, which refuses
-# a prefix no rig carries, one two rigs carry, and an unreadable rig set, each
-# with its own reason on stderr. GC_RIG unset: bind the derived rig. GC_RIG set:
-# it must be the subject's rig, or the caller's pin is the wrong store (a stale
-# export, a typo) and nothing is filed. A subject whose store cannot be derived
-# (an ephemeral id with no rig prefix) is filed under the caller's GC_RIG as
-# before — there is nothing to disprove it with.
-if [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; then
-  ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
-  subj_rig=""
-  if [ -x "$ESC_RIG_SH" ]; then
-    subj_rig=$("$ESC_RIG_SH" "$SUBJECT" 2>"${TMPDIR:-/tmp}/escalate-rig.$$") || subj_rig=""
-    subj_rig_why=$(tr '\n' ' ' < "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
-    rm -f "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null || true
-  else
-    subj_rig_why="cannot execute $ESC_RIG_SH"
-  fi
-  if [ -z "${GC_RIG:-}" ]; then
-    if [ -n "$subj_rig" ]; then
-      export GC_RIG="$subj_rig"
-      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$subj_rig' from subject '$SUBJECT' so the visit lands in the store the subject lives in, not the caller's ambient store"
-    else
-      warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would land on the wrong board and its tracks edge would never reach the subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
+# So on the board route the store is proven from the subject itself, through the
+# class resolved above (escalation-rig.sh / bead-store.sh — the one prefix->rig
+# derivation the destructive gates and the deacon's escalations also use).
+# GC_RIG unset: bind the derived rig. GC_RIG set: it must be the subject's rig,
+# or the caller's pin is the wrong store (a stale export, a typo) and nothing is
+# filed. This runs only for a DURABLE or UNPROVEN subject — an ephemeral one
+# names no store to derive, so it is left to the triage redirect below, which
+# files on the standing subject in the ambient store. Refusing an ephemeral
+# subject here would drop it whenever GC_RIG is unset — the silent mute the
+# empty-identity escalation itself exists to report.
+if { [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; } && [ "$SUBJECT_CLASS" != ephemeral ]; then
+  if [ "$SUBJECT_CLASS" = durable ]; then
+    if [ -z "${GC_RIG:-}" ]; then
+      export GC_RIG="$SUBJECT_RIG"
+      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$SUBJECT_RIG' from subject '$SUBJECT' so the visit lands in the store the subject lives in, not the caller's ambient store"
+    elif [ "$SUBJECT_RIG" != "$GC_RIG" ]; then
+      warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$SUBJECT_RIG' — nothing filed. On the board route the visit must land in the subject's own store or its board never shows it and its tracks edge never reaches the subject; 'gc bd' would not refuse an unbound GC_RIG, only warn and file elsewhere. Re-run with GC_RIG=$SUBJECT_RIG (or unset, to derive it)."
       exit 1
     fi
-  elif [ -n "$subj_rig" ] && [ "$subj_rig" != "$GC_RIG" ]; then
-    warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$subj_rig' — nothing filed. On the board route the visit must land in the subject's own store or its board never shows it and its tracks edge never reaches the subject; 'gc bd' would not refuse an unbound GC_RIG, only warn and file elsewhere. Re-run with GC_RIG=$subj_rig (or unset, to derive it)."
+  elif [ -z "${GC_RIG:-}" ]; then
+    # Unproven: a bead-shaped subject whose store could not be read. It may be a
+    # real bead, so filing in the ambient store would risk the wrong board and a
+    # severed tracks edge — fail closed. (A subject PROVEN to be no bead is
+    # ephemeral, handled by the redirect below, never here.)
+    warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would land on the wrong board and its tracks edge would never reach the subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
     exit 1
   fi
+  # Unproven with GC_RIG set: file under the pin — nothing here can disprove it.
 fi
 
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -287,10 +326,8 @@ POOL_NAME="${POOL_ARG:-human}"
 #
 # An unreadable listing files anyway — a duplicate visit is a bounded nuisance,
 # a silent mute is the failure this replaces.
-case "$SUBJECT" in
-  *-wisp-*) SUBJECT_IS_EPHEMERAL=1 ;;
-  *)        SUBJECT_IS_EPHEMERAL=0 ;;
-esac
+# SUBJECT_IS_EPHEMERAL was resolved in the subject-class block above (a wisp, or
+# a subject proven to name no placeable bead).
 if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
   DEDUP_SCOPE="[$KEY]"
   OPEN_ROW=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" --limit=20 \

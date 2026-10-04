@@ -52,9 +52,13 @@ run sl-abc12
 eq "$OUT" "signal-loom" "a signal-loom bead resolves to signal-loom"
 
 # Fail closed: every unresolved shape refuses with empty stdout, so a caller
-# binding GC_RIG=$(...) gets nothing to bind rather than a guess.
+# binding GC_RIG=$(...) gets nothing to bind rather than a guess. The exit code
+# then says WHICH refusal it is — 1 for a subject that names no placeable bead
+# (an unknown prefix, or no prefix segment at all), 3 for a bead-shaped id whose
+# store could not be read (an unreadable rig set, or a prefix two rigs carry) —
+# so escalate.sh can bucket the first as ephemeral and fail closed on the second.
 run zz-abc12
-eq "$RC" "1" "an unknown prefix refuses (rc)"
+eq "$RC" "1" "an unknown prefix is a proven no-such-bead (exit 1)"
 eq "$OUT" "" "  ... printing no rig to stdout"
 has "$ERR" "no rig carries the prefix 'zz'" "  ... and naming the prefix it could not place"
 
@@ -64,12 +68,12 @@ eq "$OUT" "" "  ... printing no rig to stdout"
 
 STUB_RIGS='{"rigs":[{"name":"one","prefix":"dup","path":"/a"},{"name":"two","prefix":"dup","path":"/b"}]}' \
   run dup-abc12
-eq "$RC" "1" "a prefix two rigs carry refuses rather than picking one"
+eq "$RC" "3" "a prefix two rigs carry is unproven (exit 3), not a proven no-such-bead"
 eq "$OUT" "" "  ... printing no rig to stdout"
 has "$ERR" "carried by 2 rigs" "  ... and saying how many carry it"
 
 STUB_RIGS_FAIL=1 run tk-3y6toq
-eq "$RC" "1" "an unreadable rig list refuses"
+eq "$RC" "3" "an unreadable rig list is unproven (exit 3), a store that could not be read"
 eq "$OUT" "" "  ... printing no rig to stdout"
 has "$ERR" "could not read" "  ... reported apart from 'no such prefix', which has a different repair"
 

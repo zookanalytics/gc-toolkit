@@ -230,15 +230,22 @@ eq "$(meta vis-1 gc.routed_to)" "human" "routed to the board"
 has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "the create runs under the derived rig, not the ambient store"
 has "$out" "deriving rig 'gc-toolkit'" "and says which store it pinned"
 
-echo "# a rig-less board-route caller whose subject resolves to no rig REFUSES"
-# Fail before filing: a visit written to the ambient store lands on the wrong
-# board and severs the tracks edge — the silent mute escalate exists to end.
+echo "# a board-route caller whose subject names no placeable bead redirects it to triage"
+# zz-a is a bead-shaped id whose prefix no readable rig carries: escalation-rig
+# PROVES it is no bead (exit 1), distinct from a store it merely could not read.
+# There is no durable subject to scope a visit to and a tracks edge to it would
+# fail, so it is ephemeral. The old path refused outright with GC_RIG unset,
+# dropping the escalation; now it files on the standing triage subject in the
+# ambient store — a duplicate-or-ambient visit beats a silent mute.
 reset
 out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "an unresolvable subject prefix on the board route exits 1"
-eq "$(visits)" "0" "and files nothing"
-has "$out" "could not be proven" "and says the store could not be proven"
-has "$out" "no rig carries the prefix 'zz'" "with escalation-rig's reason (an unknown prefix, not an unreadable rig set)"
+eq "$rc" 0 "a proven-no-bead subject files rather than refusing"
+eq "$(visits)" "2" "the standing triage subject is minted alongside the visit"
+eq "$(meta vis-1 task_kind)" "triage-subject" "the minted bead is the standing triage subject"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on the triage subject, not zz-a"
+eq "$(meta vis-2 escalation_raised_by)" "zz-a" "and zz-a survives as provenance"
+hasnt "$(cat "$STUB_DEPS")" "|zz-a|" "no tracks edge is wired to the non-bead subject"
+has "$out" "is ephemeral and cannot receive" "the redirect is announced"
 
 echo "# a rig-less board-route caller REFUSES when the rig set is unreadable"
 reset
@@ -247,13 +254,26 @@ eq "$rc" 1 "an unreadable rig set on the board route exits 1 (fail closed)"
 eq "$(visits)" "0" "and files nothing"
 has "$out" "could not read" "and says the rig set was unreadable, not that the prefix is unknown"
 
-echo "# a board-route caller whose subject has no rig prefix keeps its own GC_RIG"
-# An ephemeral or prefix-less subject cannot disprove the caller's pin, so the
-# pinned store files as before.
+echo "# the empty-identity fallback subject ('refinery') redirects to triage, never drops"
+# mol-refinery-patrol's validate-identity step escalates with
+# --subject "${GC_SESSION_ID:-refinery}"; with GC_SESSION_ID empty the literal
+# "refinery" is no bead at all (no <prefix>-<id> shape). Filing a visit on it
+# severed its tracks edge, and on the board route with GC_RIG unset the old path
+# dropped the escalation outright — the exact silent mute this very escalation
+# exists to report. It is ephemeral now: redirected onto the standing triage
+# subject, under the pinned store or, failing that, the ambient one.
 reset
-out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key k1 --message m 2>&1); rc=$?
-eq "$rc" 0 "a prefix-less subject under a pinned GC_RIG still files"
-eq "$(visits)" "1" "the visit exists"
+out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 0 "a bare non-bead subject files"
+eq "$(visits)" "2" "redirected onto a freshly-minted triage subject"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on the triage subject, not 'refinery'"
+hasnt "$(cat "$STUB_DEPS")" "|refinery|" "and no tracks edge is wired to the non-bead literal"
+
+reset
+out=$(env -u GC_RIG "$SUT" --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 0 "and with GC_RIG unset it still files — the empty-identity drop is closed"
+eq "$(visits)" "2" "on the standing triage subject in the ambient store"
+eq "$(meta vis-2 escalation_raised_by)" "refinery" "the fallback literal survives as provenance"
 
 echo "# an unroutable --pool is refused before anything is created"
 # A --pool that names no live agent is refused BEFORE anything is created: a
