@@ -1,0 +1,1 @@
+description = "Work-bead description delivery is shipped (overlays/work-context/) and wired (overlay_dir) onto the polecat pool, so the description a filer writes can't silently stop reaching the worker (tk-osf13)"
