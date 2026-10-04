@@ -72,7 +72,7 @@ formulas/mol-first-reaction.toml
 formulas/mol-polecat-work.toml
 7a5b5124424aaf70ed942438892ebc136d4ac4e140b85e37f2bb948c2869fde0
 formulas/mol-refinery-patrol.toml
-55a6b55ae20e02a0f48b4c7b5e1e8eea67801d2cd704f78aeb4d8ca422afae1d
+e4f7006b48e51a7cca43118a6a11c1d88623834f948bb51fb9d4b1d2b6c4fe51
 formulas/mol-review-quorum-signoff.toml
 5754a2a98abc5ef77e05093a9f223311d287afd986dc7983d7623f217c3e8ba8
 formulas/mol-review.toml
@@ -98,7 +98,7 @@ d5b13c84ac7c9665a11ec44aa4276f3f72864f3f94ca7260dd6976806ef595bf
 packs/gascity-keeper/formulas/mol-upstream-gc-rebase-rework.toml
 b4ae8ff150bf52f5f136cac177ab675d5cb4be74ae06567423635be6ee0052a5
 packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml
-77f6c67924b447e3d40645f08a0c0617c7498a56d8a1487dd8ac133aeecd422a
+785c736a076369bef1dede688e9f2946ba6ab88954f667545db925f6280dc2a2
 packs/gascity-keeper/formulas/mol-upstream-gc-sync.toml
 11ed96195bbd58381b68b89e7c182bef9e534f440c4d961dcf8f5303359f104b
 packs/gascity-keeper/pack.toml
