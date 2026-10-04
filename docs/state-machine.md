@@ -594,7 +594,7 @@ review's result set.
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
-- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 10): a duplicate
+- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 11): a duplicate
   dispatch a polecat diagnosed and parked has no other way out, since polecats
   never close work beads. The arm closes it through `bead-rehome.sh --kind
   duplicate` only when the named successor resolves and is closed or shipped
@@ -664,3 +664,18 @@ pool; a child a worker still holds (`in_progress`) or one an operator froze
 (`rebase_hold`) is left alone, and its hold then keeps the anchor open until it
 resolves. A close with no recorded disposition still transitions to `abandoned`
 and files the rework-or-close visit.
+
+That consummation reaches only the branch-carrying children. The rest of the
+machine review scaffolding carries no branch — the validation pass and the
+finding beads — and each still holds a `blocks` edge on the anchor, directly or
+on a rework that does, so an open one leaves a disposed anchor stuck with
+nothing in the close path reaching it. The cadence's `scaffolding-sweep.sh`
+(arm 10) does reach them: it closes every `task_kind=validation|finding|rework`
+bead whose `anchor_bead` names a disposed, non-merged anchor (`gc.superseded_by`
+or `gc.pr_close_disposition_kind` present) as `gc.outcome=moot`, findings before
+the reworks they block, so the anchor is left with no machine scaffolding
+holding its close. It never touches `task_kind=review` (`review-sweep.sh`'s) or
+`task_kind=visit`: a disposed PR does not moot the human conversation about why
+it closed, and `finalize-gate.sh` holds the anchor's own close while a visit is
+open. Clearing the machine side is what lets that close land once the human side
+is done.
