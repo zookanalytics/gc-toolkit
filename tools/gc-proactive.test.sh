@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down
-# and the fail-closed-on-unset-GC_RIG sweep guard.
+# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down,
+# the fail-closed-on-unset-GC_RIG sweep guard, and the scan's drop of a bead a
+# live workflow already drives (INFLIGHT-*).
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -114,6 +115,58 @@ OUT="$(env -u GC_RIG bash "$SCRIPT" sling tk-a 2>&1)"; RC=$?
 set -e
 [ "$RC" -ne 0 ] && ok "(SLING-FAILCLOSED) sling exits non-zero when GC_RIG is unset" || bad "(SLING-FAILCLOSED) sling exited 0 with no rig context (got $RC)"
 hasnt "$OUT" "would sling" "(SLING-FAILCLOSED) …nothing dispatched"
+
+# --- a bead a live workflow already drives is not offered -----------------
+# roots.json and convoys.json stand in for the two reads scan_drop_inflight
+# takes. tk-live is tracked by a convoy that a live workflow root names, so gc
+# sling would refuse it. tk-done's convoy is named only by a closed root (its
+# workflow ended), tk-orphan's convoy by no root at all, and tk-fresh has no
+# convoy. Only tk-live leaves the page. tk-live is the oldest, so it ranks first,
+# and with a cap of one the slot shows which bead the sweep spends it on.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-live",   "issue_type":"task", "description":"queued for a reaction", "title":"live",   "created_at":"2026-01-01T00:00:00Z", "metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.proactive"}},
+  {"id":"tk-done",   "issue_type":"task", "description":"its workflow ended",    "title":"done",   "created_at":"2026-01-02T00:00:00Z", "metadata":{}},
+  {"id":"tk-orphan", "issue_type":"task", "description":"its pour never landed", "title":"orphan", "created_at":"2026-01-03T00:00:00Z", "metadata":{}},
+  {"id":"tk-fresh",  "issue_type":"task", "description":"never slung",           "title":"fresh",  "created_at":"2026-01-04T00:00:00Z", "metadata":{}}
+]
+JSON
+cat > "$TMP/roots.json" <<'JSON'
+[
+  {"id":"tk-root-live", "status":"in_progress", "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv-live"}},
+  {"id":"tk-root-done", "status":"closed",      "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv-done"}}
+]
+JSON
+cat > "$TMP/convoys.json" <<'JSON'
+[
+  {"id":"tk-cv-live",   "issue_type":"convoy", "dependencies":[{"type":"tracks","depends_on_id":"tk-live"}]},
+  {"id":"tk-cv-done",   "issue_type":"convoy", "dependencies":[{"type":"tracks","depends_on_id":"tk-done"}]},
+  {"id":"tk-cv-orphan", "issue_type":"convoy", "dependencies":[{"type":"tracks","depends_on_id":"tk-orphan"}]}
+]
+JSON
+cat > "$TMP/beads.json" <<'JSON'
+{"tk-live": {"metadata":{}}, "tk-done": {"metadata":{}}, "tk-orphan": {"metadata":{}}, "tk-fresh": {"metadata":{}}}
+JSON
+
+echo "# scan drops a bead a live workflow already drives, keeps the rest"
+OUT="$(bash "$SCRIPT" scan --json 2>"$TMP/scan.err")"
+ERR="$(cat "$TMP/scan.err")"
+IDS="$(printf '%s' "$OUT" | jq -r '.[].id' | sort | tr '\n' ' ')"
+hasnt "$IDS" "tk-live" "(INFLIGHT-DROP) a bead tracked by a convoy a live root names is not a candidate"
+has "$IDS" "tk-done" "(INFLIGHT-KEEP) …a bead whose workflow root is closed still is"
+has "$IDS" "tk-orphan" "(INFLIGHT-KEEP) …so is a bead whose convoy no root names"
+has "$IDS" "tk-fresh" "(INFLIGHT-KEEP) …and a bead no convoy tracks"
+has "$ERR" "1 candidate(s) already have a live workflow" "(INFLIGHT-DROP) …and the sweep says how many it left out"
+
+echo "# the sling slot goes to a bead with no live workflow"
+OUT="$(GC_PROACTIVE_SLING_CAP=1 bash "$SCRIPT" scan --sling 2>&1)"
+hasnt "$OUT" "at tk-live" "(INFLIGHT-SLING) the in-flight bead is never slung"
+has "$OUT" "would sling mol-first-reaction at tk-done" "(INFLIGHT-SLING) …the cap's one slot goes to the next candidate"
+
+echo "# an unreadable workflow read drops nothing"
+printf 'not json' > "$TMP/roots.json"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-live" "(INFLIGHT-FAILOPEN) with the roots unreadable, the bead stays a candidate (gc sling's own check still refuses it)"
 
 echo
 echo "gc-proactive stand-down: $PASS passed, $FAIL failed"

@@ -349,12 +349,54 @@ scan_precision_filter() {
     '
 }
 
+# scan_drop_inflight — from a candidate array on stdin, drop each bead that
+# already has a live workflow: a non-closed workflow root names an input convoy
+# that tracks it. A pour moves the bead's route to gc.execution_routed_to, so
+# the "not routed" clause above cannot see one. gc sling refuses a second
+# workflow on such a bead, but only after minting the new pour's input convoy,
+# which it closes again in a separate write, so a sling the order deadline
+# kills between the two leaves that convoy open with nothing naming it. A
+# refused sling spends none of SLING_CAP either, so offering these beads spends
+# the sweep's time on refusals before it reaches the beads below them. Both
+# reads are taken once per sweep. A read that fails drops nothing, which leaves
+# the sling's own refusal as the guard.
+scan_drop_inflight() {
+    local cands roots convoys inflight kept dropped db
+    cands="$(cat)"
+    if [ -n "$FIXTURE" ]; then
+        roots="$(cat "$FIXTURE/roots.json" 2>/dev/null || true)"
+        convoys="$(cat "$FIXTURE/convoys.json" 2>/dev/null || true)"
+    else
+        db="$(rig_beads_db)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        roots="$(gc bd list ${db:+--db "$db"} --has-metadata-key gc.input_convoy_id \
+                    --include-ephemeral --json --limit 0 2>/dev/null || true)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        convoys="$(gc bd list ${db:+--db "$db"} --type=convoy --json --limit 0 2>/dev/null || true)"
+    fi
+    inflight="$(jq -cn --slurpfile r <(printf '%s' "$roots") --slurpfile c <(printf '%s' "$convoys") '
+        def rows($s): if ($s | length) == 1 and ($s[0] | type) == "array" then $s[0] else [] end;
+        ([ rows($r)[] | select((.status // "") != "closed")
+           | select((.metadata["gc.kind"] // "") == "workflow")
+           | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique) as $live
+        | [ rows($c)[] | select(.id as $id | ($live | index($id)) != null)
+            | .dependencies[]? | select(((.type // .dependency_type) // "") == "tracks")
+            | (.depends_on_id // "") | select(. != "") ] | unique' 2>/dev/null || printf '[]')"
+    kept="$(printf '%s' "$cands" | jq -c --argjson skip "$inflight" \
+        'map(select(.id as $i | ($skip | index($i)) == null))')"
+    dropped=$(( $(printf '%s' "$cands" | jq 'length') - $(printf '%s' "$kept" | jq 'length') ))
+    if [ "$dropped" -gt 0 ]; then
+        log "$PROG: scan: $dropped candidate(s) already have a live workflow; not offered (gc sling would refuse them)"
+    fi
+    printf '%s' "$kept"
+}
+
 scan_candidates() {
     local ranked
     if [ -n "$FIXTURE" ]; then
         local raw='[]'
         if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        ranked="$(printf '%s' "$raw" | scan_precision_filter | board_rank)"
+        ranked="$(printf '%s' "$raw" | scan_precision_filter | scan_drop_inflight | board_rank)"
     else
         # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
         # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
@@ -379,10 +421,10 @@ scan_candidates() {
                     --sort oldest --limit 0 2>/dev/null || true)"
         [ -n "$movable" ] || movable='[]'
 
-        # Union the two sources, apply the shared precision filter, then rank by
-        # board weight.
+        # Union the two sources, apply the shared precision filter, drop the
+        # beads a workflow is already driving, then rank by board weight.
         ranked="$(jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
-            | scan_precision_filter | board_rank)"
+            | scan_precision_filter | scan_drop_inflight | board_rank)"
     fi
 
     # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and
