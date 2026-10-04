@@ -19,7 +19,7 @@
 #             and is not superseded (gc.outcome is not superseded); OR, for a
 #             legacy bead written before the verdict stamp, carries no
 #             signoff_verdict with gc.outcome=recorded; OR the anchor's pr_number
-#             has an APPROVED GitHub review (an approval names no gate, so it
+#             has an APPROVED GitHub review (an approval names no check, so it
 #             backs every lane).
 #             The reviewed_oid clause guards a local backing bead: a recorded
 #             verdict naming no reviewed commit is a stale or legacy row, so it

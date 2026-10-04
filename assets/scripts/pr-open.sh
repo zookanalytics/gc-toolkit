@@ -40,7 +40,7 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # disagree), and finding reads the anchor's open must-fix findings.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
-# The single writer of the workflow-owned PR labels. A PR is born gate-green with
+# The single writer of the workflow-owned PR labels. A PR is born check-green with
 # no review yet, so its initial status is needs-review; reconcile derives that (and
 # self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
 # on an integration-targeted checkpoint, the PR-list counterpart to the body banner.
@@ -370,7 +370,7 @@ while IFS= read -r row; do
   # it is judged before the head fetch below: a held anchor pays no head fetch,
   # and no PR is published over work the city has already ruled must change.
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
-  # Empty is never the gateless opt-out: that is the 'none' sentinel. Empty
+  # Empty is never the checkless opt-out: that is the 'none' sentinel. Empty
   # means never normalized, and gate-ensure — arm 1 of this same pass — stamps
   # the declared default. Publishing under it would open the PR ungated.
   if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
@@ -405,7 +405,7 @@ GATES
     held=$((held + 1)); continue
   fi
 
-  # Every check_set gate reads green — the only cases left need the live head:
+  # Every check_set check reads green — the only cases left need the live head:
   # what the PR is opened at, and (below) whether a dead PR was closed at
   # exactly this commit.
   HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
@@ -462,7 +462,7 @@ GATES
   fi
   PR_NUMBER=$(printf '%s' "$CREATED_URL" | sed -n 's#.*/pull/\([0-9][0-9]*\)$#\1#p')
   # Read the created PR back BY NUMBER and certify it; refuse a moved head — the
-  # contract is that a PR is gate-green at birth.
+  # contract is that a PR is check-green at birth.
   NEW_JSON=$(gh pr view "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
     --json number,url,state,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository 2>/dev/null)
   if [ -z "$NEW_JSON" ] || ! certify_row "$id" "$NEW_JSON" "$branch" "$target" "$PR_NUMBER"; then
@@ -486,14 +486,14 @@ GATES
       --body "$(printf 'Pre-open signoff (comment-only — not an approval):\n\n%s' "$VERDICT")" >/dev/null 2>&1 || true
   else
     gh pr comment "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
-      --body "Pre-open gates signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
+      --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
   fi
   [ -n "$SUP_NUM" ] && gh pr comment "$SUP_NUM" --repo "$ORIGIN_REPO_Q" \
     --body "Superseded by #$PR_NUMBER: branch \`$branch\` was re-implemented and re-gated at \`${head_oid:0:8}\`." >/dev/null 2>&1 || true
 
   if flip "$id" "$CERT_URL" "$CERT_NUM" "$target"; then
     opened=$((opened + 1))
-    # Born gate-green: seed the initial status label (and its group). Best-effort
+    # Born check-green: seed the initial status label (and its group). Best-effort
     # — a label failure never unwinds an opened PR; pr-facts.sh reconciles it.
     "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$CERT_NUM" \
       --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true

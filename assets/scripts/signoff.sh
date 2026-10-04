@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# signoff.sh — the single writer of gate verdicts (component-model I7: one
+# signoff.sh — the single writer of check verdicts (component-model I7: one
 # audited writer for check.<gate> markers). Run once by the review agent after
 # mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
@@ -33,7 +33,7 @@
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
 # Exit: 0 recorded, or refused-as-superseded with the review closed for a fresh
 #       dispatch · 1 refused, no verdict written · 2 a write did not read back
-#       (the review bead is left open so the gate stays owed).
+#       (the review bead is left open so the check stays owed).
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -149,7 +149,7 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # will not take a finding costs that finding, never the rework dispatch the
 # merge is held by, so a failure warns and the caller proceeds. The reviewer's
 # prose verdict is still the fix unit's rejection_reason and the review bead's
-# notes; the beads are the queryable record the validator and gate readers use.
+# notes; the beads are the queryable record the validator and check readers use.
 file_findings() { # <anchor> <lane> <findings-file>
   local anchor="$1" lane="$2" ff="$3" obj locus message fid
   [ -n "$ff" ] && [ -r "$ff" ] || return 0
@@ -177,7 +177,7 @@ stamp_anchor() { # <key> <value> [note]: write, read back, exit 2 when it did no
   gc bd update "$ANCHOR" "${args[@]}" >/dev/null 2>&1 || true
   local got; got=$(row_meta "$(bd_json show "$ANCHOR")" "$1")
   if [ "$got" != "$2" ]; then
-    warn "$1 did not read back on anchor $ANCHOR (got '${got:-}', want '$2'); review bead left OPEN so the gate stays owed"
+    warn "$1 did not read back on anchor $ANCHOR (got '${got:-}', want '$2'); review bead left OPEN so the check stays owed"
     exit 2
   fi
 }
@@ -189,7 +189,7 @@ is_rows "$REVIEW_ROW" || { warn "review bead $REVIEW_BEAD does not resolve; noth
 # the dispatch it answers was already recorded, or retired unjudged.
 REVIEW_STATUS=$(printf '%s' "$REVIEW_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
 if [ "$REVIEW_STATUS" = "closed" ]; then
-  warn "review bead $REVIEW_BEAD is already closed (gc.outcome='$(row_meta "$REVIEW_ROW" gc.outcome)'); refusing — a retired dispatch records no verdict. Nothing written; re-dispatch the gate if it is still owed."
+  warn "review bead $REVIEW_BEAD is already closed (gc.outcome='$(row_meta "$REVIEW_ROW" gc.outcome)'); refusing — a retired dispatch records no verdict. Nothing written; re-dispatch the check if it is still owed."
   exit 1
 fi
 CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
@@ -202,7 +202,7 @@ if [ -n "$ADD_GATES" ]; then
   [ "$CHECK_NAME" = "$TRIAGE_GATE" ] || { warn "only the '$TRIAGE_GATE' check may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1; }
 fi
 
-# The anchor the gate lands on: the durable anchor_bead stamp first, the
+# The anchor the check lands on: the durable anchor_bead stamp first, the
 # blocks edge second. Unresolvable is a refusal — a verdict with nowhere to
 # record its marker must not write anything.
 ANCHOR=$(row_meta "$REVIEW_ROW" anchor_bead)
@@ -210,7 +210,7 @@ if [ -z "$ANCHOR" ]; then
   ANCHOR=$(bd_json dep list "$REVIEW_BEAD" --direction=up -t blocks \
     | jq -r 'if type == "array" then (.[0].id // "") else "" end' 2>/dev/null)
 fi
-[ -n "$ANCHOR" ] || { warn "no anchor resolves for $REVIEW_BEAD (no metadata.anchor_bead, no blocks edge); refusing — the gate has nowhere to land"; exit 1; }
+[ -n "$ANCHOR" ] || { warn "no anchor resolves for $REVIEW_BEAD (no metadata.anchor_bead, no blocks edge); refusing — the check has nowhere to land"; exit 1; }
 ANCHOR_ROW=$(bd_json show "$ANCHOR")
 is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
 
@@ -344,7 +344,7 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
 fi
 
 # The artifact body. It always names the anchor and the exact commit judged,
-# so the posted comment is traceable back to the gate it satisfied.
+# so the posted comment is traceable back to the check it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
 trap 'rm -f "$BODY_FILE" "${INDEX_FILE:-}"' EXIT
 if [ -n "$NOTES_FILE" ]; then
@@ -554,7 +554,7 @@ dismiss_superseded() {
       continue
     fi
     gh api --hostname "$PR_HOST" -X PUT "repos/$PR_REPO/pulls/$PR_NUMBER/reviews/$rid/dismissals" \
-      -f message="Superseded by the re-gate at $REVIEWED_OID: the $CHECK_NAME gate is green at the live head. Approval remains external." \
+      -f message="Superseded by the re-gate at $REVIEWED_OID: the $CHECK_NAME check is green at the live head. Approval remains external." \
       -f event=DISMISS >/dev/null 2>&1 \
       || warn "could not dismiss superseded review $rid on PR#$PR_NUMBER; the next round retries"
   done

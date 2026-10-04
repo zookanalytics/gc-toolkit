@@ -201,7 +201,7 @@ anchor_row() { # live {status, meta}; empty = unreadable, never an all-default r
 }
 
 # The declared lanes a check_set names, one per line, dropping the non-lane
-# tokens: none/off is gateless by choice, and approval is met by an external
+# tokens: none/off is checkless by choice, and approval is met by an external
 # GitHub review, not a lane derivation. The same drop list pr-open.sh applies,
 # so publishing and merging judge one anchor by one rule. The drop is
 # case-insensitive; what survives keeps its case, addressing a metadata key.
@@ -229,7 +229,7 @@ REPO_Q_DEF='
 # holds on and never reads as all-green. The derivation is the shared one every
 # reader uses: a lane greens from its own local approve-review bead, or, when it
 # has none, from an operator's GitHub approval on the anchor's PR (an approval
-# names no gate, so it backs every lane). The lane is compared to no head: green
+# names no check, so it backs every lane). The lane is compared to no head: green
 # is a state of the lane, and a commit landing on the branch neither clears it
 # nor buys a review. The head-bound human approval the merge separately requires
 # is the approval gate below, armed only for the check_sets that name it.
@@ -410,7 +410,7 @@ while IFS= read -r row; do
   aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
 
   # --- validate, in order -------------------------------------------------------
-  # Empty/absent check_set is NEVER "no gates": the declared gateless opt-out is
+  # Empty/absent check_set is NEVER "no checks": the declared checkless opt-out is
   # the 'none' sentinel; empty means never normalized (gate-ensure stamps the
   # default). Fail closed rather than merge ungated.
   if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
@@ -621,7 +621,7 @@ while IFS= read -r row; do
     fi
     approver=$(printf '%s' "$rstate" | jq -r '.approver // ""')
     if [ -z "$approver" ]; then
-      # Every declared gate is green at the live head and no pool-routed blocker
+      # Every declared check is green at the live head and no pool-routed blocker
       # is open: the cadence is done and the pull request is waiting on a person.
       # That is `settled`, and the approval clause of the owed rule is what makes
       # the row the operator's rather than nobody's.
@@ -668,7 +668,7 @@ while IFS= read -r row; do
       fi
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
     BLOCKED)
-      # Branch protection holds a PR whose city-side gates (checked above) are
+      # Branch protection holds a PR whose city-side checks (checked above) are
       # all green. The blocking condition is read from the branch's own rules:
       # an unresolved review thread is the gate only where thread resolution is
       # required (required_review_thread_resolution), otherwise a missing
