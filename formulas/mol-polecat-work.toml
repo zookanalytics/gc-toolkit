@@ -85,8 +85,7 @@ printf '%s' "$WORK_BEAD_JSON" | jq '.[0].metadata'  # Check for existing metadat
 Two dispatch surfaces can reach one work bead — this workflow, and a direct
 pool route left on the bead itself. When both fire, two workers set up the same
 branch and one silently destroys the other's commits. Before touching the
-workspace, prove that the bead is neither in flight nor already completed
-elsewhere:
+workspace, prove that the bead is neither in flight nor already finished:
 
 ```bash
 # >>> load-context-duplicate-dispatch-hold
@@ -125,12 +124,20 @@ case "$WORK_OWNER" in
         DONE_ELSEWHERE="already handed off or merged ($WORK_STATUS, held by $WORK_OWNER); another dispatch carried it to completion" ;;
     esac ;;
 esac
-# A merge_result stamp means a PR or merge already exists for THIS bead — fresh
+# Two finished shapes get past the owner check above as work to build. A
+# merge_result stamp means a PR or merge already exists for THIS bead — fresh
 # work is its own anchor — and it outlives a cleared assignee, so a bead the
-# handoff left unowned would otherwise sail its open PR through the arms above.
+# handoff left unowned would otherwise sail its open PR through. A closed bead
+# is finished whoever holds it. A close that lands after the pour, such as a
+# duplicate or a no-work close, can leave the assignee empty with no
+# merge_result.
 if [ "$OWNER_LIVE" = "0" ] && [ -z "$DONE_ELSEWHERE" ]; then
   WORK_MERGE_RESULT=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
-  [ -n "$WORK_MERGE_RESULT" ] && DONE_ELSEWHERE="already carrying merge_result=$WORK_MERGE_RESULT; a PR or merge exists for this bead"
+  if [ -n "$WORK_MERGE_RESULT" ]; then
+    DONE_ELSEWHERE="already carrying merge_result=$WORK_MERGE_RESULT; a PR or merge exists for this bead"
+  elif [ "$WORK_STATUS" = "closed" ]; then
+    DONE_ELSEWHERE="already closed; its work is done or was ruled unnecessary"
+  fi
 fi
 if [ "$OWNER_LIVE" != "0" ] || [ -n "$DONE_ELSEWHERE" ]; then
   SCRIPTS=""
@@ -139,17 +146,18 @@ if [ "$OWNER_LIVE" != "0" ] || [ -n "$DONE_ELSEWHERE" ]; then
   done
   : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
   if [ -n "$DONE_ELSEWHERE" ]; then
-    # FINISHED, not a live conflict: a PR or merge already exists for this bead
-    # (a completed hand-off, or a merge_result stamp), so the work has landed or
-    # is landing with the refinery and no human has a decision to make. This
-    # reaches a polecat two ways — a redundant dispatch the refinery already
-    # carried past, or a lease-expiry re-offer of THIS molecule's own
-    # load-context after its own work finished — and both are husks. Quiesce the
-    # molecule and drain; do NOT escalate. A human visit here answers nothing and
-    # is what stranded finished work: molecule-hold.sh is one-way and
-    # dead-molecule-dispose.sh refuses a live root, so a false hold behind a
-    # visit had no way back. molecule-hold.sh never touches the work bead, so the
-    # refinery keeps it and its PR proceeds.
+    # FINISHED, not a live conflict: the bead is closed, handed off, or carries
+    # a merge_result, so its work has landed, is landing with the refinery, or
+    # was ruled unnecessary, and no human has a decision to make. This reaches a
+    # polecat three ways — a redundant dispatch the refinery already carried
+    # past, a lease-expiry re-offer of THIS molecule's own load-context after its
+    # own work finished, or a pour whose work bead closed before this claim —
+    # and all three are husks. Quiesce the molecule and drain; do NOT escalate.
+    # A human visit here answers nothing and is what stranded finished work:
+    # molecule-hold.sh is one-way and dead-molecule-dispose.sh refuses a live
+    # root, so a false hold behind a visit had no way back. molecule-hold.sh
+    # never touches the work bead, so a closed bead stays closed and the
+    # refinery keeps a handed-off one while its PR proceeds.
     DUP_REASON="$DONE_ELSEWHERE"
     gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused (work finished; quiesced without escalation): $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
     if "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch (work finished): $WORK_BEAD_ID $DUP_REASON"; then
@@ -195,14 +203,15 @@ that sweep.
 
 The two arms dispose of two different situations and drain differently.
 
-A FINISHED bead — a completed hand-off or a `merge_result` — is not a live
-conflict. A PR or merge already exists for it, so the work has landed or is
-landing with the refinery and no human has a decision to make. The arm quiesces
-the molecule and drains with no escalation; the drain is conditional on the hold
-alone. A human visit here answers nothing, and it is what stranded finished
-work with no way back — `molecule-hold.sh` is one-way and
+A FINISHED bead — closed, a completed hand-off, or carrying a `merge_result` —
+is not a live conflict. Its work has landed, is landing with the refinery, or
+was ruled unnecessary by whoever closed it, so no human has a decision to make.
+The arm quiesces the molecule and drains with no escalation; the drain is
+conditional on the hold alone. A human visit here answers nothing, and it is
+what stranded finished work with no way back — `molecule-hold.sh` is one-way and
 `dead-molecule-dispose.sh` refuses a live root. `molecule-hold.sh` never touches
-the work bead, so the refinery keeps the bead and its PR proceeds.
+the work bead, so a closed bead stays closed and a handed-off bead stays with
+the refinery while its PR proceeds.
 
 A LIVE conflict — in flight under a foreign owner still present in `gc session
 list --state all` — is two dispatches building at once, a routing anomaly a
@@ -233,9 +242,9 @@ Owner liveness gates the in-flight case only: an idle pool worker between
 claims looks identical to an abandoned one, so an `in_progress` bead is a
 conflict only while its owner is present in `gc session list --state all` — a
 crashed owner leaves the work yours to take, and only a session absent from
-that list is safely gone. A bead already handed off (open or closed under a
-foreign assignee) or carrying a `merge_result` is finished rather than in
-flight, and holds regardless of any session's liveness.
+that list is safely gone. A bead that is closed, already handed off (open
+under a foreign assignee), or carrying a `merge_result` is finished rather than
+in flight, and holds regardless of its assignee or any session's liveness.
 
 **4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
 

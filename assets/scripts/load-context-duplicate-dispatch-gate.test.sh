@@ -15,14 +15,17 @@
 #      from `gc session list`, so the work is ours to take over).
 #   2. FINISHED — quiesces WITHOUT escalation when a foreign assignee holds the
 #      bead open or closed (the refinery handoff leaves it open+assigned; a merge
-#      closes it), or when the bead carries a merge_result stamp even with the
-#      assignee cleared (a PR/merge already exists for it). A finished bead is not
-#      a live conflict — the work is with the refinery and no human has a decision
-#      to make — so the arm holds and drains but files no visit. A human gate here
-#      is what stranded finished work: it reaches a polecat both as a redundant
-#      dispatch and as a lease-expiry re-offer of the SAME molecule's own
-#      load-context after its work finished. The in-flight liveness arm covers
-#      neither, since an open bead under the refinery is finished, not in flight.
+#      closes it), when the bead carries a merge_result stamp even with the
+#      assignee cleared (a PR/merge already exists for it), or when the bead is
+#      closed under an empty or own assignee (a close that lands between the pour
+#      and this claim, such as a duplicate, stamps no merge_result). A finished
+#      bead is not a live conflict — its work landed, is landing with the
+#      refinery, or was ruled unnecessary, and no human has a decision to make —
+#      so the arm holds and drains but files no visit. A human gate here is what
+#      stranded finished work: it reaches a polecat both as a redundant dispatch
+#      and as a lease-expiry re-offer of the SAME molecule's own load-context
+#      after its work finished. The in-flight liveness arm covers neither, since
+#      an open bead under the refinery is finished, not in flight.
 #   3. IN-FLIGHT — escalates and holds when a foreign owner is live: two
 #      dispatches building at once is a routing anomaly a human must adjudicate.
 #   4. FAIL CLOSED — on the in-flight arm, escalate failure records no release
@@ -196,6 +199,27 @@ eq "$(run '[{"status":"open","assignee":"","metadata":{"merge_result":"pull_requ
    "1|UPDATE;HOLD;DRAIN;" \
    "merge_result set with assignee cleared: quiesces silently — a PR already exists for the bead"
 
+# A closed bead is finished whoever holds it, including the shape a close
+# between the pour and this claim leaves: an empty assignee and no
+# merge_result. The closed rework child carries the branch it would rebuild.
+eq "$(run '[{"status":"closed","assignee":"","metadata":{}}]')" \
+   "1|UPDATE;HOLD;DRAIN;" \
+   "closed and unowned, no merge_result: quiesces silently, drains, exits 1 — no escalation"
+
+eq "$(run '[{"status":"closed","metadata":{}}]')" \
+   "1|UPDATE;HOLD;DRAIN;" \
+   "closed with assignee absent entirely: quiesces silently"
+
+eq "$(run '[{"status":"closed","assignee":"","metadata":{"branch":"integration/feature","gc.superseded_by":"tk-twin"}}]')" \
+   "1|UPDATE;HOLD;DRAIN;" \
+   "closed rework child superseded by a twin (branch set, no merge_result): quiesces silently"
+
+for self in "$SELF_NAME" "$SELF_ID" "$SELF_AGENT" "$SELF_ALIAS"; do
+  eq "$(run "[{\"status\":\"closed\",\"assignee\":\"$self\",\"metadata\":{}}]")" \
+     "1|UPDATE;HOLD;DRAIN;" \
+     "closed under this session's own identity '$self': quiesces silently"
+done
+
 # --- 3. In-flight under a LIVE foreign owner (the original case). -------------
 
 eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
@@ -226,6 +250,13 @@ run '[{"status":"open","assignee":"","metadata":{"merge_result":"pull_request"}}
 has "$(cat "$TMP/hold")" 'merge_result=pull_request' "merge_result: hold reason names the stamp"
 eq  "$(cat "$TMP/esc")"  '' "merge_result: no escalation filed"
 
+# FINISHED (closed): the note and the hold reason name the close; no escalation.
+run '[{"status":"closed","assignee":"","metadata":{}}]' >/dev/null
+has "$(cat "$TMP/update")" 'already closed' "closed: note names the close"
+has "$(cat "$TMP/update")" 'quiesced without escalation' "closed: note records the silent quiesce"
+has "$(cat "$TMP/hold")"   'already closed' "closed: hold reason names the close"
+eq  "$(cat "$TMP/esc")"    '' "closed: no escalation filed — a closed bead needs no human"
+
 # LIVE conflict: the escalation names the live owner and uses the
 # duplicate-dispatch key; the hold reason names the live owner.
 FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
@@ -255,6 +286,10 @@ eq "$out" "1|UPDATE;ESCALATE;HOLD;" \
 out="$(FAKE_HOLD_RC=1 run "[{\"status\":\"open\",\"assignee\":\"$REFINERY\",\"metadata\":{}}]")"
 eq "$out" "1|UPDATE;HOLD;" \
    "finished hold fails: does not drain, files no escalation"
+
+out="$(FAKE_HOLD_RC=1 run '[{"status":"closed","assignee":"","metadata":{}}]')"
+eq "$out" "1|UPDATE;HOLD;" \
+   "closed hold fails: does not drain, files no escalation"
 
 # --- Summary. -----------------------------------------------------------------
 echo "----"
