@@ -260,15 +260,15 @@ cmd_arm() {
     # This is the one place a human is here to redirect the sequencing.
     #
     # own_blocks_unresolved_ids reports three outcomes and the hint turns on all
-    # three. A non-zero rc is an enumeration that could not read the raw edges:
-    # the cross-store check is unproven, so the "no open blocker" all-clear must
-    # not stand on it, any more than it may stand on a named cross-store blocker.
-    # A non-empty stdout names an unresolvable blocker. An empty stdout with rc 0
-    # is a proven absence, the only outcome that earns the in-store all-clear.
+    # three. A non-zero rc means the bead's edges were not read: the cross-store
+    # check is unproven, so the "no open blocker" all-clear must not stand on it,
+    # any more than it may stand on a named cross-store blocker. A non-empty
+    # stdout names an unresolvable blocker. An empty stdout with rc 0 is a proven
+    # absence, the only outcome that earns the in-store all-clear.
     local unresolved="" unresolved_rc=0
     unresolved="$(own_blocks_unresolved_ids "$bead")" || unresolved_rc=$?
     if [ "$unresolved_rc" -ne 0 ]; then
-        echo "$PROG: warning: $bead — could not enumerate its 'blocks' edges to check for a cross-store blocker (the read failed), so whether reconcile will dispatch it with an unresolved blocker still open is unproven. Check its blockers by hand if the ordering matters." >&2
+        echo "$PROG: warning: $bead — could not enumerate its 'blocks' edges to check for a cross-store blocker, so whether reconcile will dispatch it with such a blocker still open is unproven. Check its blockers by hand if the ordering matters." >&2
     elif [ -n "$unresolved" ]; then
         echo "$PROG: warning: $bead has a 'blocks' edge to $unresolved, which has no row in this store. bd resolves dependencies within a single store, so this cross-rig or external blocker does not hold the arm: reconcile will dispatch $bead with $unresolved still open. Sequence it by hand if that ordering matters." >&2
     elif own_blocks_cleared "$bead"; then
@@ -332,38 +332,37 @@ own_blocks_cleared() { # id -> rc 0 if every own `blocks` edge is closed
     [ "$open_blk" -eq 0 ]
 }
 
-# A `blocks` edge whose target has no row in THIS store — a cross-rig or external
-# blocker. bd resolves dependencies within a single store, so such an edge is
-# absent from `bd dep list` and from `bd show`'s resolved `dependencies` (so
-# own_blocks_cleared and `bd list --ready` never see it), yet `bd list --id`
-# still renders the raw edge. This names the difference: the ids a bead's own
-# `blocks` edges point at that resolve to no row in this store. Echoes them
-# comma-joined in edge order, or nothing. Returns non-zero only when an
-# enumeration read fails, so a read failure never reads as "no cross-store
-# blocker" and lets the arm's "no open blocker" hint stand on a guess.
+# A `blocks` edge whose target has no row in the bead's own store — a cross-rig
+# or external blocker. bd resolves dependencies within a single store, so `bd dep
+# list` leaves such an edge out of its array (warning on stderr), as do `bd
+# show`'s resolved `dependencies` and `bd list --ready`; own_blocks_cleared never
+# sees it. `bd list --id` still renders the raw edge. This names the difference:
+# the ids the bead's raw `blocks` edges point at that `bd dep list` does not
+# resolve. Both reads name only the bead's own id, so `gc bd` answers both from
+# the store that holds the bead whether or not --db pins one. A read naming a
+# blocker id would not be safe unpinned: `gc bd` routes it to the store that
+# holds the blocker, which finds the row and reports a cross-store blocker as
+# present. `bd dep list` resolves an in-store gate blocker that a default listing
+# hides, so such a blocker is not mistaken for a missing one. Echoes the ids
+# comma-joined, or nothing. Returns non-zero when either read fails or the
+# listing carries no row for the bead, so an edge set that was never read cannot
+# pass for "no cross-store blocker".
 own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
-    local id="$1" edges blocker_ids blk_raw present
-    edges="$(bd_ list --id "$id" --json 2>/dev/null)" || return 1
-    printf '%s' "$edges" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-    blocker_ids="$(printf '%s' "$edges" | scrub | jq -r --arg id "$id" '
+    local id="$1" edges raw_ids deps
+    edges="$(bd_ list --id "$id" --brief --json 2>/dev/null)" || return 1
+    printf '%s' "$edges" | scrub | jq -e --arg id "$id" 'type == "array" and any(.[]; .id == $id)' >/dev/null 2>&1 || return 1
+    raw_ids="$(printf '%s' "$edges" | scrub | jq -c --arg id "$id" '
         [ .[] | select(.id == $id) | (.dependencies // [])[]
           | select(.type == "blocks") | .depends_on_id ]
-        | unique | join(",")' 2>/dev/null)" || return 1
-    [ -n "$blocker_ids" ] || return 0
-    # Resolve the blocker ids in THIS store. The hidden bead classes a `blocks`
-    # edge can name (gate/infra/template) are asked for, exactly as
-    # resolve_own_cleared does, so a hidden-but-present blocker is not mistaken
-    # for a missing one; `--id` silently drops an id with no row, so a blocker
-    # still absent from the result is one with no in-store row.
-    blk_raw="$(bd_ list --id "$blocker_ids" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null)" || return 1
-    printf '%s' "$blk_raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-    present="$(printf '%s' "$blk_raw" | scrub | jq -c '[ .[]?.id ]' 2>/dev/null)" || return 1
-    [ -n "$present" ] || present='[]'
-    printf '%s' "$edges" | scrub | jq -r --arg id "$id" --argjson present "$present" '
-        [ .[] | select(.id == $id) | (.dependencies // [])[]
-          | select(.type == "blocks") | .depends_on_id ]
-        | unique
-        | map(select(. as $b | ($present | index($b)) | not))
+        | unique' 2>/dev/null)" || return 1
+    [ -n "$raw_ids" ] || return 1
+    [ "$raw_ids" != "[]" ] || return 0
+    deps="$(bd_ dep list "$id" --json 2>/dev/null)" || return 1
+    printf '%s' "$deps" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    printf '%s' "$deps" | scrub | jq -r --argjson raw "$raw_ids" '
+        [ .[] | select(.dependency_type == "blocks") | .id ] as $resolved
+        | $raw
+        | map(select(. as $b | ($resolved | index($b)) | not))
         | join(",")' 2>/dev/null
 }
 
