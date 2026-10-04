@@ -73,6 +73,11 @@ case "$sub" in
     printf '{"id":"tk-subj-new"}\n'; exit 0 ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$GC_CALLS"; exit 0 ;;
+  "session list")
+    # The holder-liveness read. GC_SESSION_FAIL = an outage (unreadable list).
+    [ -n "${GC_SESSION_FAIL:-}" ] && exit 1
+    if [ -n "${FAKE_SESSIONS:-}" ] && [ -f "${FAKE_SESSIONS:-}" ]; then cat "$FAKE_SESSIONS"; else printf '{"sessions":[]}\n'; fi
+    exit 0 ;;
 esac
 exit 0
 GC
@@ -209,6 +214,16 @@ cat > "$TMP/widen.json" <<'JSON'
 ]
 JSON
 export FAKE_READY="$TMP/ready.json" FAKE_LIVE="$TMP/live.json" FAKE_WIDEN="$TMP/widen.json"
+
+# The holder-liveness session set: lx-live-1 is listed (a visit it holds still
+# converses); a session absent from this set (e.g. lx-dead-9) is a gone sitting.
+# The existing visits above are all UNCLAIMED, so they cover regardless of this.
+cat > "$TMP/sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"testrig__conv-lx-live-1","agent_name":"testrig/testrig.tk-livevisit"}
+]}
+JSON
+export FAKE_SESSIONS="$TMP/sessions.json"
 
 # bd show fixtures: the worked-via-convoy and landed-husk chains.
 printf '%s\n' '[{"id":"conv-live","issue_type":"convoy","dependencies":[{"id":"c-worked","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-live.json"
@@ -635,6 +650,40 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── holder liveness gates the conversing class (readable session list) ──"
+# Two visits track two ready subjects: one held by a live session (lx-live-1 is
+# in FAKE_SESSIONS), one by a gone session (lx-dead-9 is not). A third subject is
+# a visit bead left in the ready set by that gone session. The live-held subject
+# stays covered; the dead-held subject and the stranded visit bead return to the
+# census. Self-contained fixtures — the suite above clobbers the shared ones.
+cat > "$TMP/hl-ready.json" <<'JSON'
+[
+  {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+]
+JSON
+cat > "$TMP/hl-live.json" <<'JSON'
+[
+  {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-live","status":"in_progress","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+]
+JSON
+printf '[]\n' > "$TMP/hl-widen.json"
+FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
+case ",$BL," in *",hl-live-subj,"*) bad "live-held visit over-surfaces" "hl-live-subj surfaced though lx-live-1 is alive" ;; *) ok "a live-held visit keeps its subject out of the census" ;; esac
+case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held visit returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
+case ",$BL," in *",hl-ready-deadvisit,"*) ok "a visit stranded ready by a gone session surfaces (arm 1)" ;; *) bad "stranded visit bead hidden" "hl-ready-deadvisit stayed conversing (baseline: $BL)" ;; esac
+
+echo "── an unreadable session list keeps every visit covering (unprovable death) ──"
+GC_SESSION_FAIL=1 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BLF="$(cat "$BASELINE_FILE" 2>/dev/null)"
+for hidden in hl-dead-subj hl-ready-deadvisit hl-live-subj; do
+  case ",$BLF," in *",$hidden,"*) bad "fail-open surfaced $hidden" "an unreadable session list must hide nothing new (baseline: $BLF)" ;; *) ok "unreadable session list → $hidden keeps covering" ;; esac
+done
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"
