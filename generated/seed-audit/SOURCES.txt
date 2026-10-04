@@ -92,7 +92,7 @@ packs/gascity-keeper/agents/keeper/PROVENANCE.md
 packs/gascity-keeper/agents/keeper/agent.toml
 e03ff8554313e0215b60392d145a521f1ec991ba32fd2e7ad100aff2eaab8f96
 packs/gascity-keeper/agents/keeper/prompt.template.md
-e7ccf97fca84d3ab3df732932a39d15c96c389ddb9596624e99e13fdace4d83c
+2867e1fe591b40e01e464867261d78e484b5b04f533a94dca86d6fdc81145df7
 packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml
 d5b13c84ac7c9665a11ec44aa4276f3f72864f3f94ca7260dd6976806ef595bf
 packs/gascity-keeper/formulas/mol-upstream-gc-rebase-rework.toml
@@ -132,7 +132,7 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 4cc4ec151e31b86d2d38f6d435d98361cc710274c5a1a884c23d45bbde434d69
 template-fragments/polecat-doctrine.template.md
-fc78ee4c74edaee62dc5e011f7d7a2d18a3a8c4c495ab751d2b236f97f8a4ab0
+6a9b024749456f8d536ffa021ba3eeedbc84d9e3c9f2340e15830ddf75b7c75c
 template-fragments/scratch-reclaim.template.md
 f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
