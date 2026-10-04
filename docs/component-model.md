@@ -154,14 +154,20 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I12** | A bead's kind is `metadata.task_kind`, and no reader decides a kind from a label ([what kind of bead this is](#what-kind-of-bead-this-is)). Where a reader narrows a listing with `-l <kind>` it re-filters on `task_kind`, and every writer of that kind sets the label — a narrowing on a label some writer omits returns a quietly short answer. | **UNCHECKED** (tk-0i90x5). The reader half is held by construction and by test: every kind branch in the pack reads `task_kind`, and `learning-recurrence.test.sh` pins the one script that narrows by label against a bead carrying the label without the kind. The writer half — for each kind a reader narrows on, no live bead carries the `task_kind` without the label — is the check that does not exist; only `observation` is narrowed on by a reader today, and it is clean at filing, so the check would ship as a forward regression detector. |
 | **I13** | Every started workflow root is still advancing or reachable: an in_progress `gc.kind=workflow` root whose owning session is gone and whose work has not landed does not sit behind an executable frontier that is unclaimable — unrouted AND unowned — which no pool can be offered and no orphan recovery reaches. | `doctor/check-root-advancing` (tk-d12vam): a graph.v2 molecule runs its continuation-group steps inline in one pool session, and those steps carry no owner and no route by construction, so a drain landing mid-molecule strands them past both recovery paths — the witness's orphan recovery keys on an assignee, and no route means no pool is offered them. Reported STRANDED (error) only when all four hold, each a distinct healthy shape it must not report: SILENT (root or any member, a close included, untouched past the bound — default 120m, `GC_DOCTOR_ROOT_STALL_MINUTES`); UNHELD (no live session behind the root's `gc.session_name` or any member's assignee, `gc.session_id` or `gc.session_name` — the affinity slot a restart reuses counts, so a live slot exempts); STARTED (at least one step has closed, so it moved then stopped, AND its input convoy is still open, since a convoy closes when its one work bead lands); UNCLAIMABLE (a non-empty executable frontier — the `bd ready` members minus the inert `workflow`/`scope`/`spec` topology kinds poured alongside steps — every member unassigned AND carrying neither `gc.routed_to` nor `gc.execution_routed_to`, so the execution route a recovery fix stamps reads as reachable). A non-empty `gc.takeaway` or `hold_reason` on the root or a member is a note. It is the root-level complement to I8 (closed roots) and I11 (claimed or routed steps), neither of which fires here. Fails toward silence: an unread roster declines the run, and an unread store, convoy or closed-step listing leaves that unit unjudged rather than flagged. |
 
-Ten further checks guard structure that is not an anchor invariant:
+Eleven further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
 reaches the hook with its stdin intact, the hook's own measurement reads the
 context size a transcript carries, and no refinery's git-op defer guard has
-been latched past a bound), `doctor/check-wisp-cascade-intact` (every bead
+been latched past a bound), `doctor/check-cycle-recycle-hook` (the cycle-recycle
+Stop hook and its no-consent doctrine name the same roles: every agent carrying
+`overlay_dir = "overlays/cycle-recycle"` injects the `heartbeat-no-consent-ui`
+fragment and every agent injecting it carries the overlay, so no role recycles
+with nothing telling it not to prompt and none holds that doctrine while the hook
+never recycles it; static, reads `pack.toml` and the resolved agent prompts),
+`doctor/check-wisp-cascade-intact` (every bead
 store's schema enforces the wisp auxiliary cascade — the constraint both
 removes a deleted wisp's auxiliary rows on the bulk delete path and refuses a
 write naming a wisp that does not exist, so a store without it accumulates
@@ -200,12 +206,12 @@ open unassigned task/bug/defect there — unrouted or routed to a pool — is
 marooned by construction; the operator-queue decisions routed to human, daily
 digests, and doctor and tech-debt advisories that legitimately live there are
 exempt).
-An eleventh non-invariant check, `doctor/check-demo-toolchain`, reports readiness
+A twelfth non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, a Chromium
 build, ffmpeg, and `OPENAI_API_KEY` — is resolvable, warn-only, so a demo
 session learns before it captures whether the clip will narrate or degrade to a
 silent, captioned one.
-That is the whole set: **23 checks — 22 asserting a live structural property
+That is the whole set: **24 checks — 23 asserting a live structural property
 and one reporting toolchain readiness** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
