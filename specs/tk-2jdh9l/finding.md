@@ -1,6 +1,6 @@
 ---
 name: Keyless closed visits — are they an escalate.sh bypass?
-description: Investigation of the 312 closed gc-toolkit visits carrying no escalation_key — which paths file them, whether any should route through escalate.sh, and the moot/benign rate tk-x3elmf could not measure. Conclusion for tk-2jdh9l.
+description: Investigation of the closed gc-toolkit visits carrying no escalation_key — which paths file them, whether any should route through escalate.sh, and the moot/benign rate tk-x3elmf could not measure. Conclusion for tk-2jdh9l.
 ---
 
 # Keyless closed visits are the intended visit family, not an escalate.sh bypass
@@ -27,33 +27,45 @@ is a volume source worth gating. tk-x3elmf left this set's moot/benign rate unkn
 
 ## Measurement
 
-Store-wide, closed visits (`--limit 0`, so not capped at the default page — the
-split-off's "100" was that cap):
+As of 2026-10-04T17:30Z, from the local gc-toolkit store
+(`gc bd list --status closed --limit 0`, where `--limit 0` lifts the default
+page cap — the split-off's "100" was that cap). These counts are a point-in-time
+snapshot: the store grows as visits close, so a rerun returns larger absolute
+counts. The load-bearing quantity is the moot/benign **rate**, which holds across
+snapshots.
 
 | population | count | moot+benign | rate |
 |---|---|---|---|
-| all closed visits | 886 | — | — |
-| keyless (no `escalation_key`) | 312 | 30 | **9.6%** |
-| keyed (`escalate.sh`) | 574 | 298 | **51.9%** |
+| all closed visits | 906 | — | — |
+| keyless (no `escalation_key`) | 320 | 32 | **10.0%** |
+| keyed (`escalate.sh`) | 586 | 306 | **52.2%** |
 
-Keyless outcomes are dominated by real dispositions: routed 51, settled 49, ruled
-39, disposed 22 — moot is only 28, benign 2. Keyed outcomes are dominated by moot
-220 + benign 78 (+ unrecorded 109).
+Keyless outcomes are dominated by real dispositions — routed 51, settled 50,
+ruled 43, disposed 22, and a long tail of smaller ones; moot (30) and benign (2)
+together are just 32. Keyed outcomes, by contrast, are dominated by moot 228 and
+benign 78 (plus 109 unrecorded).
 
-Reproduce (the preface prints to stderr, so a bare pipe to jq is clean):
+Reproduce — this reruns against the **live** store and returns the current
+counts, which sit at or above the snapshot above rather than reproducing it; the
+stable quantity to compare across runs is the moot/benign rate. (The rig preface
+prints to stderr, so a bare pipe to jq is clean.)
 
 ```bash
 gc bd list --status closed --limit 0 --json \
   | jq '[.[] | select((.metadata.task_kind // "")=="visit")]
-        | {keyless:[.[]|select((.metadata.escalation_key // "")=="")]|length,
+        | {total: length,
+           keyless:[.[]|select((.metadata.escalation_key // "")=="")]|length,
            keyless_mootbenign:[.[]|select((.metadata.escalation_key // "")=="")
              |select(((.metadata["gc.outcome"]//"")|ascii_downcase)|.=="moot" or .=="benign")]|length,
-           keyed:[.[]|select((.metadata.escalation_key // "")!="")]|length}'
+           keyed:[.[]|select((.metadata.escalation_key // "")!="")]|length,
+           keyed_mootbenign:[.[]|select((.metadata.escalation_key // "")!="")
+             |select(((.metadata["gc.outcome"]//"")|ascii_downcase)|.=="moot" or .=="benign")]|length}'
 ```
 
-Keyless filers (by `created_by` role): operator board picks 142, proactive pool
-77, `order:gate-visit-sweep` 28, witness 12, polecat 10, mayor 8, converse ~15,
-the rest in ones and twos. By month created: Aug 86, Sep 207, Oct 19.
+Keyless filers (by `created_by` role, same snapshot): operator board picks 142,
+proactive pool 82, `order:gate-visit-sweep` 28, converse ~16, witness 12, polecat
+~10, mayor 8, mechanik 6, furiosa 5, the rest in ones and twos. By month created:
+Aug 86, Sep 212, Oct 22.
 
 ## The two visit families (the structural fact)
 
