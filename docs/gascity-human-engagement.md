@@ -540,6 +540,25 @@ skips assigned demands on purpose — and neither does a gate whose gated bead
 is no longer open, which the sweep names on stderr until it is resolved by
 hand.
 
+### Two visit channels: keyless conversation, keyed escalation
+
+A visit reaches a person two ways. Both file through the one `gate-visit`
+snippet — `assets/scripts/gate-visit.test.sh` holds every copy to the same
+invariants — and one path adds an `escalation_key` for the dedup it needs.
+
+A **conversation visit** is keyless. `gc-helm.sh open` (an operator board
+pick), `mol-visit`, `mol-first-reaction`, `mol-validate-close` and
+`mol-feedback-distiller` each file one visit per subject and dedup on
+`gc.continuation_group`: the subject is the key, and a second open visit on the
+same bead is refused. The gate sweep above adds `gc.gate_visit` on the gate for
+the same end. An **escalation visit** is keyed: `assets/scripts/escalate.sh`
+stamps `escalation_key`, keeps exactly one open visit per situation key, and
+carries a verdict window that declines to re-raise a situation a person already
+ruled moot or benign. That machinery is for a recurring escalation that is not
+one-per-subject — an agent hitting the same blocker, or a cross-subject bucket.
+A one-per-subject conversation has no such repeat to collapse, so it carries no
+key; a keyless visit is gated by its subject, not ungated.
+
 ### A conversation does not freeze its subject; a merge hold is an opt-in
 
 What the conversation demand gates is the choice that keeps a sitting from
