@@ -186,6 +186,13 @@ eval "$BLOCK"
 TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$ROOT/lifecycle/lifecycle.toml" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' ')
 eq "$PR_POSTURES" "$TOML_POSTURES" "postures match lifecycle.toml [posture]"
 
+echo "# conversation vocabulary drift against lifecycle.toml"
+CBLOCK="$(awk '/# >>> pr-conversation-vocabulary/{f=1;next} /# <<< pr-conversation-vocabulary/{f=0} f' "$HERE/pr-facts.sh")"
+[ -n "$CBLOCK" ] && ok "conversation-vocabulary block extracted" || bad "conversation-vocabulary markers missing"
+eval "$CBLOCK"
+TOML_CONVERSATIONS=$(sed -n 's/^conversations = \[\(.*\)\]/\1/p' "$ROOT/lifecycle/lifecycle.toml" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' ')
+eq "$PR_CONVERSATIONS" "$TOML_CONVERSATIONS" "conversations match lifecycle.toml [conversation]"
+
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration
 # downstream audits read (docs/component-model.md). A key these scripts write
@@ -1148,6 +1155,79 @@ hasnt "$out" "could not filter retired reviews" "…and so does the dismissal fi
 has "$out" "routed to rework:new-2" "the oversized batch routes like any other"
 eq "$(meta BIG pr_comment_watermark)" "7009" "the watermark advances to the last comment in the oversized batch"
 eq "$(meta BIG pr_comment_disposition)" "rework:new-2" "…and the disposition records on the anchor"
+
+echo "# conversation axis — quiet: no human utterance in any of the three spaces"
+store "[$(anchor CQ 70)]"
+printf '%s' "$(prview 70 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_70.json"
+echo '[]' > "$GH_DIR/comments_70.json"
+echo '[]' > "$GH_DIR/reviews_70.json"
+echo '[]' > "$GH_DIR/issue_comments_70.json"
+out=$(run)
+eq "$(meta_pinned CQ pr.conversation)" "quiet@sha-70" "nothing said reads quiet, pinned to the head"
+
+echo "# conversation axis — outstanding: a human utterance sits above its space's watermark"
+store "[$(anchor CO 71)]"
+printf '%s' "$(prview 71 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_71.json"
+printf '[{"id":7100,"user":{"login":"human1"},"body":"please fix"}]' > "$GH_DIR/comments_71.json"
+out=$(run)
+eq "$(meta_pinned CO pr.conversation)" "outstanding@sha-71" "an utterance above the mark reads outstanding"
+
+echo "# conversation axis — a recorded outstanding with no newer signal is carried, never collapsed to quiet"
+# watermark caught up (unanswered = 0) and no disposition is set, but a position
+# was recorded outstanding at an OLDER head: the carry must re-stamp it to the
+# live head. Seeding the live head would skip the write (have_cvh = want_c), so
+# the assertion would pass whether the script carried outstanding or derived
+# nothing — the old head forces the write, so it also catches a derive-nothing.
+store "[$(anchor CI 72 ',"pr_comment_watermark":"7200","pr.conversation":"outstanding@sha-OLD@2026-08-20T00:00:00Z"')]"
+printf '%s' "$(prview 72 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_72.json"
+printf '[{"id":7200,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_72.json"
+out=$(run)
+eq "$(meta_pinned CI pr.conversation)" "outstanding@sha-72" "a carried outstanding re-stamps to the live head, never collapsing to quiet"
+has "$out" "conversation outstanding@sha-72" "the carry is written this pass, not a vacuous no-op over the seed"
+
+echo "# conversation axis — answered: the routed fix unit has CLOSED (its branch landed), not merely a head move"
+# A rework child covered the batch and has since closed, which is the city's reply
+# landing on the branch. outstanding was recorded at an older head; the close —
+# read off the disposition's child — is what promotes it to answered.
+store "[$(anchor CA 73 ',"pr_comment_watermark":"7300","pr_comment_disposition":"rework:new-CAchild","pr.conversation":"outstanding@sha-OLD@2026-08-20T00:00:00Z"'), $(child new-CAchild polecat/x73 '' closed)]"
+printf '%s' "$(prview 73 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_73.json"
+printf '[{"id":7300,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_73.json"
+out=$(run)
+eq "$(meta_pinned CA pr.conversation)" "answered@sha-73" "the routed fix unit closed (its branch landed) reads answered"
+
+echo "# conversation axis — a head move with the fix unit still OPEN is NOT answered (a merge-in of main is not the city's reply)"
+# The misread this guards: the head moved off the recorded outstanding, but the
+# rework child covering the batch is still open — a merge-in of the base or an
+# operator push, not the city answering — so it holds outstanding, never a false
+# answered toward the quiet end.
+store "[$(anchor CM 75 ',"pr_comment_watermark":"7500","pr_comment_disposition":"rework:new-CMchild","pr.conversation":"outstanding@sha-OLD@2026-08-20T00:00:00Z"'), $(child new-CMchild polecat/x75 '' open)]"
+printf '%s' "$(prview 75 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_75.json"
+printf '[{"id":7500,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_75.json"
+out=$(run)
+eq "$(meta_pinned CM pr.conversation)" "outstanding@sha-75" "the head moved but the routed child is still open — stays outstanding"
+
+echo "# conversation axis — outstanding re-derives from the live disposition even with NO prior pr.conversation key"
+# The watermark advanced and the disposition recorded together (one transition),
+# but pr.conversation was never written. The live routed child is head-independent
+# evidence the batch is outstanding, so a dropped conversation write does not fall
+# the board to unknown — the hole a failed write would otherwise leave.
+store "[$(anchor CD 76 ',"pr_comment_watermark":"7600","pr_comment_disposition":"rework:new-CDchild"'), $(child new-CDchild polecat/x76 '' open)]"
+printf '%s' "$(prview 76 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_76.json"
+printf '[{"id":7600,"user":{"login":"human1"},"body":"historical"}]' > "$GH_DIR/comments_76.json"
+out=$(run)
+eq "$(meta_pinned CD pr.conversation)" "outstanding@sha-76" "a live routed disposition re-derives outstanding with no prior key"
+
+echo "# conversation axis — a caught-up anchor with NO disposition and no prior position reads unknown, never a false outstanding"
+# A rollout-era anchor: the comment watermark already covers the only utterance
+# (unanswered = 0), no pr.conversation key was ever recorded, and — unlike CD
+# above — nothing was routed, so there is no disposition to re-derive outstanding
+# from. Nothing sits above a watermark and no fix unit is in flight, so the
+# position stays unrecorded; the board renders an unrecorded position as unknown.
+store "[$(anchor CU 74 ',"pr_comment_watermark":"7400"')]"
+printf '%s' "$(prview 74 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_74.json"
+printf '[{"id":7400,"user":{"login":"human1"},"body":"historical"}]' > "$GH_DIR/comments_74.json"
+out=$(run)
+eq "$(meta CU pr.conversation)" "<absent>" "a caught-up anchor with no prior position records nothing, reading unknown on the board"
 
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"

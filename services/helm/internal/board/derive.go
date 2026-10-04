@@ -999,11 +999,18 @@ const (
 	// [Anchor.WaitingUnknown] already applies to an unreadable edge set.
 	AxisUnknown = "unknown"
 
-	// ConversationUnknown is what every row reads today. The other values all
-	// resolve to acknowledgement watermarks that do not exist yet, and a guess
-	// resolves to silence, which is the one answer that tells the operator to
-	// stop looking.
-	ConversationUnknown = AxisUnknown
+	// The conversation axis. quiet, outstanding and answered are read off the
+	// position pr-facts.sh records against the acknowledgement watermarks;
+	// asking is the demand edge, with no key of its own; covered waits on a
+	// comment-to-bead link nothing records yet and is not among them.
+	// ConversationUnknown is a rendered value, never a fallback to the quiet
+	// end: an unread axis and a clear one are not interchangeable, and only the
+	// gather can tell them apart.
+	ConversationQuiet       = "quiet"
+	ConversationOutstanding = "outstanding"
+	ConversationAnswered    = "answered"
+	ConversationAsking      = "asking"
+	ConversationUnknown     = AxisUnknown
 
 	ApprovalRequired    = "required"
 	ApprovalMet         = "met"
@@ -1018,6 +1025,7 @@ const (
 	// mdPRMachineReason names why a `blocked` machine verdict cannot merge. It is
 	// plain, not dated, and read only while pr.machine is MachineBlocked.
 	mdPRMachineReason = "pr.machine_reason"
+	mdPRConversation  = "pr.conversation"
 	mdPRPosture       = "pr_posture"
 	mdPRNumber        = "pr_number"
 	mdPRURL           = "pr_url"
@@ -1276,8 +1284,9 @@ type PRCoverage struct {
 	// recorded. A missing key is a fact about the city, not an all-clear.
 	MachineUnknown int
 	// ConversationUnknown is the rows whose exchange with the operator cannot
-	// be read. In this phase that is every row: the values depend on
-	// acknowledgement watermarks nothing records yet.
+	// be read: the cadence has not recorded a position, or the one it recorded
+	// is pinned to a head that is no longer live. A missing key is a fact about
+	// the city, not an all-clear.
 	ConversationUnknown int
 	// ApprovalUnanswered is the SETTLED rows whose approval clause could not be
 	// read. Those are the rows where the question "is GitHub holding this for a
@@ -1314,7 +1323,14 @@ func Coverage(tiles []Tile) PRCoverage {
 		if t.PRMachine == AxisUnknown {
 			c.MachineUnknown++
 		}
-		if t.PRConversation == AxisUnknown {
+		// The conversation pins to the pr.machine head for its currency check, so
+		// a row whose machine is itself unknown ALSO reads an unknown conversation
+		// — the check cannot run without a resolved machine head. Counting it here
+		// too would report the same gap on both axes and blame the conversation
+		// for one that is the machine reference's; MachineUnknown already carries
+		// it. Count the conversation only where the machine is known, so it names
+		// a real, standalone conversation gap.
+		if t.PRMachine != AxisUnknown && t.PRConversation == AxisUnknown {
 			c.ConversationUnknown++
 		}
 		if t.PRMachine == MachineSettled && t.PRApproval == AxisUnknown {
@@ -1333,18 +1349,55 @@ func prNumber(a Anchor) int {
 	return n
 }
 
-// prConversation is where the exchange with the operator stands. Every merge
-// anchor reads `unknown` in this phase: `outstanding`, `covered` and `answered`
-// all resolve to acknowledgement watermarks nothing records yet, and building
-// them before those land means guessing. Every failed guess resolves to
-// "nothing has been said", which is the one answer that tells the operator to
-// stop looking. The field ships now so the wire contract does not change shape
-// when the watermarks do land.
-func prConversation(a Anchor) string {
+func knownConversation(v string) bool {
+	return v == ConversationQuiet || v == ConversationOutstanding || v == ConversationAnswered
+}
+
+// prConversation is where the exchange with the operator stands.
+//
+// asking IS the demand edge, with no key of its own, and it renders wherever
+// the edge is there — ahead of the recorded position, because a formed question
+// waiting on an answer is the more specific state. Below that, the position is
+// read off pr.conversation, which pr-facts.sh records against the acknowledgement
+// watermarks and the routing disposition: quiet when no human has spoken (and on
+// a pre-open gate, which has no PR to speak on), outstanding while a human
+// utterance sits unanswered or a routed fix unit has yet to close, answered once
+// that fix unit closes — a rework child landing, a visit resolved — so the reply
+// is there to look at, not on a bare head move. covered is not among them — it
+// waits on a comment-to-bead link nothing records yet, and an utterance the city
+// is working reads the coarser outstanding rather than collapsing into quiet.
+//
+// The recorded value is current only at the head the cadence last resolved,
+// which the board learns from pr.machine rather than by asking GitHub — the same
+// currency check [prApproval] makes. A value pinned to any other head was read
+// before the branch moved on and reads unknown, which is a rendered value and
+// never a fallback to quiet.
+func prConversation(a Anchor, ask *Blocker) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	return ConversationUnknown
+	if ask != nil {
+		return ConversationAsking
+	}
+	// A pre-open gate has no PR yet — nothing can have been said on a pull request
+	// that does not exist — so its conversation is quiet, not unknown. pr-facts.sh
+	// records the conversation only for an open, non-draft PR, so a pre-open
+	// anchor never writes one; counting its absence as unknown would hang the
+	// empty-queue all-clear on a row that cannot carry the axis. The signal is the
+	// merge_result, not a missing pr_number: an open pull_request anchor whose
+	// number has not been read back yet is a real PR with a real (if briefly
+	// unrecorded) conversation, and reads unknown until the cadence records it.
+	if a.Metadata[mdMergeResult] == mergeResultPreOpenGate {
+		return ConversationQuiet
+	}
+	value, head, _, ok := splitDated(a.Metadata[mdPRConversation])
+	if !ok || !knownConversation(value) {
+		return ConversationUnknown
+	}
+	if _, machineHead, _, machineOK := splitDated(a.Metadata[mdPRMachine]); !machineOK || head != machineHead {
+		return ConversationUnknown
+	}
+	return value
 }
 
 // prFrontier identifies the pull request and says how long the turn has been
@@ -1825,7 +1878,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		PRURL:          a.Metadata[mdPRURL],
 		PRBranch:       prBranch(a),
 		PRMachine:      machine,
-		PRConversation: prConversation(a),
+		PRConversation: prConversation(a, ask),
 		PRApproval:     approval,
 		PROwedSince:    owedSince,
 	}
