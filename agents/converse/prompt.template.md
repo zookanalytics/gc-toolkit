@@ -239,10 +239,12 @@ The loop, every visit:
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
-   stamps `gc.outcome=folded` and its board-visible reason, and closes:
+   moves this visit's merge-hold keys (`pr_number`, `pr_url`, `anchor_bead`) to
+   `$HOLDER` so a PR's merge stays held after this visit closes, stamps
+   `gc.outcome=folded` and its board-visible reason, and closes:
    ```bash
    "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
-     --outcome folded --reason "folded into $HOLDER"
+     --into "$HOLDER" --outcome folded --reason "folded into $HOLDER"
    ```
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
