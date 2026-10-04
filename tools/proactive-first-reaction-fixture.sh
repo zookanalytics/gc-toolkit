@@ -252,8 +252,8 @@ has "work_query strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"
     "$(extract_toml_block work_query)"
 
 echo "── scale_check is the same demand in COUNT form (agent.toml) ──"
-# The reconciler's pool SPAWN decision runs scale_check, NOT work_query
-# (tk-8j2g1). It must mirror the demand query in COUNT form — same route and
+# The reconciler's pool SPAWN decision runs scale_check, NOT work_query.
+# It must mirror the demand query in COUNT form — same route and
 # filters, 0 when there is nothing — so a spawn always finds work to claim.
 SC_RAW="$(extract_toml_block scale_check)"
 SC="$(printf '%s\n' "$SC_RAW" | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"

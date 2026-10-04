@@ -339,7 +339,7 @@ write_status() { # <kind> [detail]
 }
 
 # Build inputs: *.go, go.mod/go.sum (explicit — `-name '*.go'` misses them,
-# and a dependency-only bump must still rebuild, tk-ohdex), and web/dist
+# and a dependency-only bump must still rebuild), and web/dist
 # (go:embed). Scanned across $MOD and every local module it replaces in, so a
 # sibling-only edit is seen as newer. node_modules pruned.
 newer_than_binary() {
@@ -451,7 +451,7 @@ GOTMP="${GC_HELM_GOTMP:-/var/tmp/gotmp}"
 mkdir -p "$GOTMP"
 
 # Bound $GOTMP (a killed build strands ~300MB per go-link dir on the root
-# fs — 33G once, tk-m18ml): reclaim dead-pid run.<pid> dirs on sight, and
+# fs — 33G once): reclaim dead-pid run.<pid> dirs on sight, and
 # anything else a day old. A concurrent build's scratch is fresh AND alive.
 for gotmp_entry in "$GOTMP"/run.*; do
     [ -d "$gotmp_entry" ] || continue          # no match: the glob itself

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic tests for the helm build/start split (tk-9tbbk.2) and the
-# build-scratch bounding that came before it (tk-m18ml).
+# Hermetic tests for the helm build/start split and the
+# build-scratch bounding that came before it.
 #
 # THE SPLIT. gc-helm-svc.sh used to build the binary and then exec it. The
 # supervisor allows a proxy_process 5s to answer its health probe
@@ -15,13 +15,13 @@
 # that the launcher cannot build, and that the builder still does everything the
 # launcher used to do correctly.
 #
-# THE READABILITY GATE (tk-00o34c). `find -newer` cannot see a binary going
+# THE READABILITY GATE. `find -newer` cannot see a binary going
 # stale against its DEPENDENCY: what helm-svc can read is fixed by the beads
 # library it embedded, and the store's schema moves under it on a `bd` upgrade.
 # The gate also asks `helm-svc probe`, spends `ok` only on a passing one, and
 # refuses to rebuild a binary whose library a rebuild would not move.
 #
-# THE SCRATCH BOUNDING (inherited, tk-m18ml). The build pointed TMPDIR/GOTMPDIR
+# THE SCRATCH BOUNDING (inherited). The build pointed TMPDIR/GOTMPDIR
 # at a shared /var/tmp/gotmp that nothing ever emptied; one post-reboot rebuild
 # storm stranded 222 dirs (33G) and filled the root fs. Each invocation now
 # builds in $GOTMP/run.<pid> and deletes it on every exit path, and sweeps both
@@ -43,10 +43,10 @@
 #   (BUILD)       builds and publishes when the binary is missing
 #   (REBUILD)     rebuilds when a source is newer than the binary
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
-#   (GOMOD)       a go.mod-only change still counts as newer (tk-ohdex)
+#   (GOMOD)       a go.mod-only change still counts as newer
 #   (DEPMOD)      a change in a local replace-dep (services/gctk) forces a rebuild
 #
-#   readability — the second staleness axis (tk-00o34c)
+#   readability — the second staleness axis
 #   (READABLE)    a current binary that can read the stores reports ok, builds nothing
 #   (SKEW)        sources unchanged + store schema moved -> it REBUILDS
 #   (STUCK)       a rebuild that cannot fix it never writes ok, and exits non-zero
@@ -459,7 +459,7 @@ present "$RECORD" "(REBUILD) the toolchain WAS invoked for a newer source"
 run_svc --socket /run/helm.sock
 has "$OUT" "helm-svc-stub ran:" "(REBUILD) the freshly built binary replaced the cached one"
 
-# --- case: go.mod-only change still counts (tk-ohdex) -------------------------
+# --- case: go.mod-only change still counts -------------------------
 fixture
 cache_binary
 touch "$ROOT/services/helm/go.mod"
@@ -497,7 +497,7 @@ eq "$RC" 0 "(DEPMOD) exits 0"
 present "$RECORD" "(DEPMOD) a services/gctk source change forces a helm rebuild"
 
 # ==============================================================================
-# READABILITY — the second staleness axis (tk-00o34c)
+# READABILITY — the second staleness axis
 # ==============================================================================
 SKEW_MSG="schema version mismatch: database is at v66, binary knows up to v65 (1 migration ahead)"
 
@@ -1130,7 +1130,7 @@ eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
 # STATIC GUARDS
 # ==============================================================================
 
-# The regression that caused the tk-m18ml incident is pointing the toolchain
+# The regression this guards against is pointing the toolchain
 # straight at the shared, unbounded $GOTMP. Whatever else the build line grows,
 # it must hand the toolchain a dir this invocation owns and deletes.
 if grep -qE '(TMPDIR|GOTMPDIR)="\$GOTMP"' "$BUILD"; then

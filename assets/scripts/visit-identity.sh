@@ -16,8 +16,8 @@
 # gives {dependency_type, id}; `gc bd list` gives {type, depends_on_id}. The defs
 # accept both, so one predicate serves every caller regardless of its source.
 #
-# stall_root is not part of this identity: no script writes it, and the ruling
-# (tk-fhlqce, converse tk-s9hkev) keeps it advisory. The sweeps read it for a
+# stall_root is not part of this identity: no script writes it, and a ruling
+# keeps it advisory. The sweeps read it for a
 # separate liveness question (workflow-root membership), never for coverage.
 #
 # Usage follows the in-variable jq convention (bead-context.sh $ADV): prepend the

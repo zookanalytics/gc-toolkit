@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # liveness-sweep-precheck.test.sh — the sweep's mechanical half decides without
-# an agent session, and can only ever decide "nothing" from good reads
-# (bead tk-7h51d).
+# an agent session, and can only ever decide "nothing" from good reads.
 #
 # The script under test is the `check` of a condition-triggered order, so its
 # whole contract is its EXIT CODE: 0 runs the agent pass, non-zero does not.
@@ -170,7 +169,7 @@ cat > "$FIX/live.json" <<'JSON'
 JSON
 
 # WIDEN is every OTHER non-closed status. f-blocked-child is the live case
-# tk-dhue in miniature: a blocked child still names its parent's wait, and it is
+# in miniature: a blocked child still names its parent's wait, and it is
 # absent from LIVE, so an edge check resolved against LIVE alone would misfile
 # the parent as unnamed.
 cat > "$FIX/widen.json" <<'JSON'
@@ -233,7 +232,7 @@ hasnt ",$SURV," ",f-routed," "gc.routed_to non-empty is excluded (class 1)"
 hasnt ",$SURV," ",f-visit," "task_kind=visit is excluded (class 3)"
 hasnt ",$SURV," ",f-subject," "task_kind=triage-subject is excluded (class 4a)"
 hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)"
-# bead tk-d6ddn: the same class-3 exclusion, on a visit that named its subject
+# the same class-3 exclusion, on a visit that named its subject
 # ONLY through the tracks edge because the gc.continuation_group stamp landed
 # empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
 # runs, and the sweep files a SECOND visit on a subject converse still holds.
@@ -259,7 +258,7 @@ has ",$SURV," ",f-worked," "a convoy-worked bead is NOT excluded locally — tha
 
 # 2i-a resolves against the NOT-CLOSED set, not the open one. Re-run with the
 # only live child BLOCKED (it lives in WIDEN, absent from LIVE): the parent must
-# still be excluded, or the live case tk-dhue returns.
+# still be excluded, or the live case returns.
 echo "── 'still alive' means NOT CLOSED, never 'present in the open listing' ──"
 cp "$FIX/live.json" "$TMP/live.bak"
 cp "$FIX/ready.json" "$TMP/ready.bak"
@@ -300,7 +299,7 @@ cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 
-# The su-ab9je shape at the SUBJECT level (bead tk-d6ddn). The sitting is live
+# The su-ab9je shape at the SUBJECT level. The sitting is live
 # and held, but its gc.continuation_group stamp landed empty, so only the tracks
 # edge names f-subject. Read on the stamp alone this is "no visit", and the
 # precheck greenlights a pass that files a SECOND visit on a subject converse is

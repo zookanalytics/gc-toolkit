@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # liveness-sweep-precheck.sh — decide, mechanically and cheaply, whether one
-# liveness-sweep pass has anything to say (bead tk-7h51d). It is the `check`
+# liveness-sweep pass has anything to say. It is the `check`
 # of the condition order orders/liveness-sweep.toml: exit 0 = run the pass,
 # non-zero = do not.
 # ITS CONDITION IS A STRICT SUBSET of liveness-sweep.sh's classification:
@@ -215,7 +215,7 @@ bd_read() { # bd_read <outfile> <subcommand> <flags...>
 }
 
 # The same three reads liveness-sweep.sh takes. WIDEN carries every non-closed
-# status LIVE omits: "still alive" means NOT CLOSED (live case tk-dhue).
+# status LIVE omits: "still alive" means NOT CLOSED.
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
 READS_OK=1
 READ_FAIL=""

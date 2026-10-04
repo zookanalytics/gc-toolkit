@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for the pre-existing-failure dedup probe in
-# mol-refinery-patrol.toml's `handle-failures` step (tk-277aj).
+# mol-refinery-patrol.toml's `handle-failures` step.
 #
 # The step's third branch ("if pre-existing on target") must find an already-filed
 # bug for the same failure and NOT file another. The pre-fix instruction probed

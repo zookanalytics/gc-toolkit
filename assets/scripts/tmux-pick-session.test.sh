@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for tmux-pick-session.sh — the `prefix + S` session picker (tk-5xy1wp).
+# Test for tmux-pick-session.sh — the `prefix + S` session picker.
 #
 # HERMETIC only. The picker's classification block is pure data-in, data-out:
 # a tmux session roster goes in, a display-menu argv comes out. The suite

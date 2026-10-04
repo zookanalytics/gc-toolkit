@@ -30,7 +30,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The one definition of what subject a visit covers, shared with gc-helm.sh,
 # converse-fold.sh and gate-visit-sweep.sh. Exposes $VISIT_IDENTITY_JQ. The
 # stall_root reads below are a SEPARATE liveness question (workflow-root
-# membership), kept per the tk-fhlqce ruling, not part of this identity.
+# membership), kept deliberately, not part of this identity.
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
@@ -330,8 +330,8 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   # stall_root visits: a SEPARATE liveness question from coverage — a stalled
   # sitting parked on a workflow ROOT keeps the ready steps under that root off
   # the unnamed agenda (consumed at the gc.root_bead_id arm below). Nothing
-  # writes stall_root today, so this set is inert; it is kept per the tk-fhlqce
-  # ruling until an edge is proven to cover the same stalled-workflow visits.
+  # writes stall_root today, so this set is inert; it is kept until an edge is
+  # proven to cover the same stalled-workflow visits.
   | ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata.stall_root // empty) | select(. != "") ]) as $rootvisits

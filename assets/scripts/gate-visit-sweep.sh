@@ -126,7 +126,7 @@ while IFS=$'\t' read -r gate_id gated title; do
 
     # A visit already standing for the gated bead. visit_covers is the shared
     # identity test (tracks edge, gc.continuation_group fallback). The stall_root
-    # arm is retained as an advisory liveness read per the tk-fhlqce ruling:
+    # arm is retained as an advisory liveness read:
     # nothing writes stall_root today, so it is inert, and its removal (once the
     # edge is proven to cover the same visits) is tracked as a follow-up.
     visit=$(printf '%s' "$LIVE_RAW" | jq -r --arg s "$gated" "$VISIT_IDENTITY_JQ"'

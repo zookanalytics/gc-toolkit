@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # work-context-hook.test.sh — hermetic test for the shipped PostToolUse hook
-# overlays/work-context/.claude/hooks/work-context.sh (tk-osf13).
+# overlays/work-context/.claude/hooks/work-context.sh.
 #
 # The hook injects a work bead's description into the polecat's context right
 # after the bead is claimed, because upstream mol-polecat-work reads the bead

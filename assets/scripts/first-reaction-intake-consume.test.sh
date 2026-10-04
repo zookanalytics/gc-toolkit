@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for mol-first-reaction.toml's live-intake consume block
-# (tk-amc65l.1 / tk-lefs8h).
+# Hermetic test for mol-first-reaction.toml's live-intake consume block.
 #
 # A direct pour of a subject marked gc.reaction_owned=1 records the reaction
 # (gc.proactive_reaction=1, the permanent proof) and consumes the one-shot intake

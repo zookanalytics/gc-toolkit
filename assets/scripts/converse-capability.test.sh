@@ -3,7 +3,7 @@
 # (converse-capability.sh). rig_carries_converse reads the import-resolved roster
 # `gc agent list --json` reports, keyed on rig NAME; it never globs a checkout.
 #
-# The regression this pins (tk-353e79): a rig that obtains converse by IMPORTING
+# The regression this pins: a rig that obtains converse by IMPORTING
 # the pack carries no agents/converse-* under its own checkout, yet the roster
 # registers <rig>/gc-toolkit.converse. A checkout glob refuses every such rig; the
 # roster affirms it. The predicate must agree with the roster — so a rig PRESENT

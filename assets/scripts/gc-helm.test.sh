@@ -45,7 +45,7 @@ mkdir -p "$TMP/bin"
 #                                                       replaces the escape route
 #   s-quiet  quiet   : no pins                       -> reaped (an open step is
 #                                                       still open, so it blocks)
-#   s-nonmol contract: another formula's graph.v2 step -> reaped too (tk-q5r65)
+#   s-nonmol contract: another formula's graph.v2 step -> reaped too
 #   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
 #   s-other  scope   : a different molecule's step   -> untouched
 #   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
@@ -484,7 +484,7 @@ reaped s-held && ok "(REAP BLOCKED) a status=blocked held step is enumerated and
   || bad "(REAP BLOCKED) the blocked held step was missed by the reap (out: $OUT)"
 
 # (CONTRACT) a graph.v2 step of ANOTHER formula, under the husk root, is reaped
-# too — selection is by contract (gc.step_ref), not formula name (tk-q5r65).
+# too — selection is by contract (gc.step_ref), not formula name.
 reaped s-nonmol && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the husk anchor is reaped" \
   || bad "(CONTRACT) graph.v2 step of another formula must be reaped (out: $OUT)"
 
@@ -569,7 +569,7 @@ QDANGER="$(printf '%s\n' "$QBLOCK" | grep -v 'bd list --status' | grep -E 'bd cl
 
 if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 
-# ── takeaway --waiting-on: the wait as a GRAPH EDGE (tk-2plde) ────────────────
+# ── takeaway --waiting-on: the wait as a GRAPH EDGE ────────────────
 # --waiting-on writes `subject depends on <work bead>` as a `blocks` edge
 # beside the prose, which is what the board re-asks. Covered:
 #   (EDGE)      one flag, one edge, depends-on direction
@@ -622,7 +622,7 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
 
-# ── takeaway --waiting-on: a LANDED rider on the SUBJECT's own branch (tk-4banho)
+# ── takeaway --waiting-on: a LANDED rider on the SUBJECT's own branch
 # A landed rider both rode A's branch (X.branch == A.branch) and has already put
 # its work there, proven by a post-push state: X closed (merged), or handed off
 # to the refinery. Then A's own merge is what lands X, and an edge would gate
@@ -1427,7 +1427,7 @@ grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
   && ok "(DELEGFOLD) …so the quiesce a fold still needs survives the refusal" \
   || bad "(DELEGFOLD) the quiesce was lost: $(cat "$TMP/updates")"
 
-# ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
+# ── takeaway length: the ≤140 cap, ENFORCED ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
 # whitespace collapse, before every side effect.
 T140="$(printf 'x%.0s' {1..140})"

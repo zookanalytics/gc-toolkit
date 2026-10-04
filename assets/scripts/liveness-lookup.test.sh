@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for the witness-patrol LIVENESS LOOKUP normalization (tk-opfsi).
+# Hermetic test for the witness-patrol LIVENESS LOOKUP normalization.
 #
 # THE BUG: mol-witness-patrol's recover-orphaned-beads resolved a bead's assignee
 # against the session liveness map by EXACT key lookup:
@@ -17,7 +17,7 @@
 # "the owning session is gone and will never come back" — for a session that is
 # active and running. Confirmed firing on gc-z0vi2.1 (status=open, owner active);
 # containment held only because the witness agent noticed by judgment. Unlike the
-# sibling orphan-sweep.sh path (tk-2l13a), this step enumerates `open` beads too,
+# sibling orphan-sweep.sh path, this step enumerates `open` beads too,
 # so the exposure was live, not latent.
 #
 # THE FIX: keep the exact lookup as the authoritative first pass, then retry ONCE

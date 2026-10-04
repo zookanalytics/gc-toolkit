@@ -15,7 +15,7 @@
 # converse and the proactive worker (takeaway), converse (demand), operators
 # by hand.
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
-# unenumerable — each failure names its own operator move, tk-lzdty),
+# unenumerable — each failure names its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route or a takeaway disposition that will not stamp),
 # 5 react no-op: the subject already carries a first reaction, so nothing was
@@ -261,7 +261,7 @@ sitting_is_gone() {
 # Sets RIGS (JSON array of {name,path,prefix,suspended,running}); exits 3 with a per-cause
 # sentence otherwise. Each failure names its own operator move because for a
 # non-CLI caller (the web board's open button) the code plus the sentence is
-# the whole signal (tk-lzdty).
+# the whole signal.
 RIGS=""
 rigs_count() {
     # jq emits nothing on empty input; normalize so arithmetic never throws.
@@ -1685,7 +1685,7 @@ verify_subject() {
 # continuation group, parked on the helm board via `gc.routed_to=human` (the
 # canonical gate-visit lines, formulas/mol-visit.toml). One open visit per
 # subject; the subject must RESOLVE first so a typo cannot manufacture a
-# visit (tk-ujwvt). --reason is the short title tail, --body the brief the
+# visit. --reason is the short title tail, --body the brief the
 # converse session reads at claim time — callers with their own origin
 # (gc-visit-open.sh) pass both rather than misreporting the board wording.
 cmd_open() {
