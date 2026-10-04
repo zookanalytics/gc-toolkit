@@ -16,6 +16,8 @@
 // cheap. Their Go originals are openResponse and openErrorBody in
 // internal/server/open.go.
 
+import { SVC_WRITE_HEADERS } from '../svcWrite';
+
 /** Document-relative, for the same reason the board read is (see App.tsx): the
  *  app is served under a runtime-city-named prefix, so an absolute '/helm/open'
  *  would address the supervisor root and 404. */
@@ -95,7 +97,7 @@ export async function openConversation(bead: string, signal?: AbortSignal): Prom
     res = await fetch(OPEN_URL, {
       method: 'POST',
       signal,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: SVC_WRITE_HEADERS,
       body: JSON.stringify({ bead }),
     });
   } catch (cause) {
