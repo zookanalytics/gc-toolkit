@@ -56,5 +56,20 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
 
+# The gc bd dep stub mirrors real bd's blocks orientation. Real `dep add
+# <blocked> <blocker> --type blocks` makes the SECOND operand the blocker — the
+# documented `dep add Y X` equals `dep X --blocks Y`. A stub that stored the add
+# source-first lets a reversed dep-add read back as the intended edge and pass,
+# so the orientation is pinned here.
+store '[{"id":"tk-blk","status":"open","assignee":"","title":"b","notes":"","metadata":{}},{"id":"tk-kd","status":"open","assignee":"","title":"k","notes":"","metadata":{}}]'
+down_blockers() { gc bd dep list "$1" --direction=down -t blocks --json | jq -r '.[].id' | tr '\n' ' '; }
+: > "$STUB_DEPS"
+gc bd dep add tk-kd tk-blk --type blocks
+has " $(down_blockers tk-kd) " " tk-blk " "dep add <blocked> <blocker> --type blocks: the second operand is the blocker"
+hasnt " $(down_blockers tk-blk) " " tk-kd " "...not the reverse — the first operand is the blocked, never a blocker"
+: > "$STUB_DEPS"
+gc bd dep tk-blk --blocks tk-kd
+has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> lands the same orientation as the dep add form"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
