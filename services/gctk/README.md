@@ -27,9 +27,10 @@ compiled package keeps them from diverging.
 | Subcommand | Replaces | State |
 |---|---|---|
 | `lifecycle` | `assets/scripts/lifecycle.sh` | ported; the script remains as the fallback |
+| `merge` | `assets/scripts/merge.sh` | ported; the script remains as the fallback |
 | `pr-status` | `pr-status-label.sh`'s `derive_value` | ported; no fallback — the label is left unchanged when the binary is absent or stale |
 
-Still shell: `gate-ensure`, `pr-open`, `merge`, `pr-facts`, `convoy-graduate`,
+Still shell: `gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
 `signoff`. The spec's port order is `lifecycle` first (everything else calls
 it), then `merge`, then the rest — one subcommand per PR.
 
@@ -144,6 +145,7 @@ scripts is the contract; improving on them silently is how a port diverges.
 ```bash
 cd services/gctk && go test ./...          # the units
 bash assets/scripts/lifecycle.test.sh      # the acceptance bar, both arms
+bash assets/scripts/merge.test.sh          # the acceptance bar, both arms
 ```
 
 The shell suite builds the binary itself and fails if it cannot: a run that
