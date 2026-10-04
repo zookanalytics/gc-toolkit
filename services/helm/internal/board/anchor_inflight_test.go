@@ -8,10 +8,11 @@ import "testing"
 // pours a molecule whose root and steps carry the live session. internal/source
 // keys Facts.Inflight by the convoy MEMBER — the work bead, which is the anchor's
 // own id — so the in-progress bead is a molecule STEP reached through the convoy,
-// never a direct child. rollUp scans only an anchor's children, so before the
-// anchor-self fold an anchor in this shape read in_progress_live=0 and, with any
-// idle child, banded HIGH/stranded: a healthy in-flight anchor reported as the
-// alarm case.
+// never a direct child. rollUp adds that bead to the live-work heads, so the
+// counts, the band, the stranded test, the frontier and NEEDS all see it. An
+// anchor whose own live work went uncounted would read in_progress_live=0 and,
+// with any idle child, band HIGH/stranded and ask for an assignment it already
+// has: a healthy in-flight anchor reported as the alarm case.
 func TestAnchorOwnWorkflowCounts(t *testing.T) {
 	live := liveOwners("gc-toolkit__polecat-lx-1")
 	live.Inflight = map[string][]string{"tk-work": {"gc-toolkit__polecat-lx-1"}}
@@ -38,6 +39,12 @@ func TestAnchorOwnWorkflowCounts(t *testing.T) {
 		if tl.Stranded || tl.Severity == SevHigh {
 			t.Errorf("an anchor the city is working is not stranded/HIGH: sev=%s stranded=%v", tl.Severity, tl.Stranded)
 		}
+		// FRONTIER and NEEDS read the same count as the band, so neither asks for an
+		// assignment the anchor already has.
+		if tl.Frontier != "working · 1 open · 1 in flight" || tl.Needs != "in flight" {
+			t.Errorf("every column reads the anchor's own live work: frontier=%q needs=%q (want %q, %q)",
+				tl.Frontier, tl.Needs, "working · 1 open · 1 in flight", "in flight")
+		}
 	})
 
 	// The guard the fold must not weaken: liveness is re-derived at derive time, so
@@ -51,6 +58,9 @@ func TestAnchorOwnWorkflowCounts(t *testing.T) {
 		tl := BuildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]
 		if tl.InProgressLive != 0 || !tl.Stranded {
 			t.Errorf("a drained molecule over the anchor stops counting and strands: in_progress_live=%d stranded=%v", tl.InProgressLive, tl.Stranded)
+		}
+		if tl.Needs != "decomposed, idle — assign or visit" {
+			t.Errorf("a stranded anchor asks for an assignment: needs=%q", tl.Needs)
 		}
 	})
 }

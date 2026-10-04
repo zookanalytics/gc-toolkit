@@ -118,8 +118,8 @@ func (f Facts) anchorInFlight(a Anchor) int {
 }
 
 // rollup is every count and id-list the derivation reads off an anchor's
-// children — the block of `as $…` bindings in the middle of gc-helm.sh's jq
-// pass, computed once so the branches below can all read from it.
+// children and its own live work, computed once so the branches below can all
+// read from it.
 type rollup struct {
 	mTotal     int
 	nClosed    int
@@ -127,9 +127,11 @@ type rollup struct {
 	inProgress int // RAW status count; 0 for a slung bead by construction
 	assigned   int
 
-	// liveHeads is the union of the two ways a child can be demonstrably
-	// moving: claimed by a live session, OR covered by a live workflow. Unioned
-	// by id, so a child matched both ways is counted once.
+	// liveHeads is every bead of this anchor that is demonstrably moving: a
+	// child claimed by a live session or covered by a live workflow, and the
+	// anchor's own bead when a live workflow stands over it. Unioned by id, so a
+	// child matched both ways is counted once. Its length is the live-work count
+	// that the band, the frontier, NEEDS and the stranded test all read.
 	liveHeads []string
 	// deadOwnerHeads is claimed, owner dead, AND no live workflow behind it.
 	// The workflow clause matters: a re-dispatched bead can carry a stale
@@ -148,8 +150,13 @@ type rollup struct {
 	parkedHeads []string
 }
 
-// rollUp derives every child-derived quantity for one anchor.
-func rollUp(children []Child, f Facts) rollup {
+// rollUp derives every child-derived quantity for one anchor, and adds the
+// anchor's own bead to the live-work heads when a live workflow stands over it
+// ([Facts.anchorInFlight]). That is the common sling shape: the anchor is itself
+// the slung work bead and its molecule stands over it rather than under a
+// child, so a scan of the children alone cannot see it.
+func rollUp(a Anchor, f Facts) rollup {
+	children := a.Children
 	r := rollup{
 		mTotal:         len(children),
 		liveHeads:      []string{},
@@ -185,6 +192,10 @@ func rollUp(children []Child, f Facts) rollup {
 		if c.Status == "in_progress" && !f.ownerLive(c.Assignee) && !wf {
 			r.deadOwnerHeads = append(r.deadOwnerHeads, c.ID)
 		}
+	}
+	if f.anchorInFlight(a) > 0 {
+		r.liveHeads = append(r.liveHeads, a.ID)
+		r.inFlightHeads = append(r.inFlightHeads, a.ID)
 	}
 
 	// Second pass: openHeads subtracts liveHeads, which is only complete once
@@ -622,7 +633,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, selfInFlight int, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledGate bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledGate bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -630,10 +641,7 @@ func severity(a Anchor, r rollup, selfInFlight int, held bool, stale int, dispDu
 		return SevDone
 	}
 	var sev0 Severity
-	// Live work is a child covered by a workflow or a live claim (r.liveHeads),
-	// OR a live workflow over the anchor's OWN bead (selfInFlight) — the common
-	// sling shape, which rollUp cannot see because it scans children only.
-	inProgressLive := len(r.liveHeads) + selfInFlight
+	inProgressLive := len(r.liveHeads)
 	switch {
 	case a.Source == "unowned":
 		sev0 = SevHigh
@@ -727,9 +735,9 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, selfInFlight int, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
-	inProgressLive := len(r.liveHeads) + selfInFlight
+	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	parked := len(r.parkedHeads)
 	deadSfx := ""
@@ -1678,14 +1686,7 @@ func classifySection(t Tile) string {
 // generation instant, shared by every tile so one board never mixes staleness
 // measured against two different clock reads.
 func computeTile(a Anchor, now time.Time, f Facts) Tile {
-	r := rollUp(a.Children, f)
-	// selfInFlight is the anchor's OWN live-work count: 1 when a live graph.v2
-	// workflow stands over the anchor bead itself — Facts.Inflight keyed by the
-	// anchor's own id, the common sling shape where a work bead is slung with its
-	// molecule — else 0. rollUp sees only children, so without this the self case
-	// is invisible; it is folded into the live-work counts and the stranded test
-	// below, and the parked and human-gated lifts read the same signal.
-	selfInFlight := f.anchorInFlight(a)
+	r := rollUp(a, f)
 	held := f.Visits[a.ID]
 	stale := staleDays(a.UpdatedAt, now)
 	closedDays := staleDays(a.ClosedAt, now)
@@ -1703,7 +1704,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	// through the same [Facts.wfLive] join every other in-flight signal uses, so a
 	// molecule that has since drained stops counting at once.
 	parkedInFlight := a.Source == "parked" &&
-		prstatus.Derive(prstatus.Facts{InFlightCount: selfInFlight}) == prstatus.Working
+		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
 	// A human-gated row — a decision, or a bead routed to the operator — that the
 	// city is actively working reads as in-flight, not an operator gate: a live
 	// molecule over the bead itself falsifies "no agent will take this until a
@@ -1715,7 +1716,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	// PARENT whose CHILDREN are in flight is banded by its roll-up, and rolling a
 	// child's state up to its parent is aggregation (tk-ikpyzn.6), not this slice.
 	humanGatedInFlight := humanGated(a) && !isRuled && !isRuledInFlight &&
-		prstatus.Derive(prstatus.Facts{InFlightCount: selfInFlight}) == prstatus.Working
+		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
@@ -1743,7 +1744,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		}
 	}
 
-	sev := severity(a, r, selfInFlight, held, stale, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalled)
+	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalled)
 	w := weight(r, a.Priority, xrefs)
 
 	// Tile.Takeaway is where a row's ruling rides the wire (board.go: "the ruling
@@ -1758,17 +1759,6 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	tileTakeaway, tileTakeawayAt, tileTakeawayBy := takeaway, a.TakeawayAt, a.TakeawayBy
 	if !a.ClosedAt.IsZero() && isDemand(a) && a.Metadata[mdTakeawaySettled] == "" {
 		tileTakeaway, tileTakeawayAt, tileTakeawayBy = "", "", ""
-	}
-
-	// Fold the anchor's own in-flight bead into the live-work counts. InFlightHeads
-	// lists the beads a live workflow carries so the join can be audited; when the
-	// anchor's own bead is one, its id joins the child heads, kept sorted for a
-	// stable wire.
-	inProgressLive := len(r.liveHeads) + selfInFlight
-	inFlightHeads := r.inFlightHeads
-	if selfInFlight > 0 {
-		inFlightHeads = append(append([]string{}, r.inFlightHeads...), a.ID)
-		sort.Strings(inFlightHeads)
 	}
 
 	t := Tile{
@@ -1800,12 +1790,12 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		InProgress: r.inProgress,
 		Assigned:   r.assigned,
 
-		InProgressLive: inProgressLive,
+		InProgressLive: len(r.liveHeads),
 		InProgressDead: len(r.deadOwnerHeads),
 		DeadOwner:      len(r.deadOwnerHeads) > 0,
 
-		InFlight:      len(inFlightHeads),
-		InFlightHeads: inFlightHeads,
+		InFlight:      len(r.inFlightHeads),
+		InFlightHeads: r.inFlightHeads,
 
 		Owned: a.Owned,
 
@@ -1815,7 +1805,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		// slung work still in flight — the gate is discharged and open children
 		// under it are ordinary idle work again, so the exemption ends exactly
 		// where the band's does.
-		Stranded: r.mTotal > 0 && r.idle() > 0 && inProgressLive == 0 && !held &&
+		Stranded: r.mTotal > 0 && r.idle() > 0 && len(r.liveHeads) == 0 && !held &&
 			!(humanGated(a) && !isRuled && !isRuledInFlight),
 		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
 			a.Source != "human" && a.Source != "parked" && a.Source != "merge" &&
@@ -1839,7 +1829,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, selfInFlight, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
 		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stalledReason),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
