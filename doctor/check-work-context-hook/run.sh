@@ -39,15 +39,17 @@ errors=()
 if [ ! -s "$hook" ]; then
     errors+=("missing or empty hook script: overlays/work-context/.claude/hooks/work-context.sh")
 else
-    grep -q 'GC_TEMPLATE' "$hook" \
-        || errors+=("hook script does not gate on GC_TEMPLATE (GC_AGENT is the pool name, not the role — pool polecats are named after people)")
-    grep -q 'gc convoy status' "$hook" \
-        || errors+=("hook script does not resolve the work bead through 'gc convoy status' (a claimed formula step is not the work bead)")
-    # Every assertion below scores CODE, not prose. This script's own header
-    # explains each trap by name, so a comment-inclusive grep would score the
-    # explanation of the fix as the fix — the exact way a negative assertion
-    # goes vacuously green.
+    # Every assertion scores CODE, not prose. This check's header and the hook's
+    # own comments name each trap — and the GC_TEMPLATE role gate — in words, so
+    # a comment-inclusive grep would score the explanation of a fix as the fix:
+    # the check would stay green after the operative line was mutated and only
+    # its comment left behind, the exact way a negative assertion goes vacuously
+    # green. Strip comments once, score the remainder.
     code="$(grep -vE '^[[:space:]]*#' "$hook")"
+    printf '%s' "$code" | grep -qE '[$][{]?GC_TEMPLATE' \
+        || errors+=("hook script does not read the role from GC_TEMPLATE in code (GC_AGENT is the pool name, not the role — pool polecats are named after people); a comment that merely mentions GC_TEMPLATE does not count")
+    printf '%s' "$code" | grep -q 'gc convoy status' \
+        || errors+=("hook script does not resolve the work bead through 'gc convoy status' (a claimed formula step is not the work bead)")
     printf '%s' "$code" | grep -q 'hookEventName.*PostToolUse' \
         || errors+=("hook script does not emit hookEventName=PostToolUse (the only event that fires AFTER the claim in the same turn)")
     printf '%s' "$code" | grep -q 'additionalContext' \
@@ -85,13 +87,22 @@ elif ! jq -e '
     errors+=("overlay settings.json does not register a PostToolUse hook that matches Bash and invokes work-context.sh")
 fi
 
-# 3. pack.toml wires the overlay onto the polecat patch. Pure-bash TOML parsing
-#    is brittle, so assert the literal wiring line is present.
+# 3. pack.toml wires the overlay onto the POLECAT patch specifically. A literal
+#    grep proves only that some agent carries the line, so a pack.toml that moved
+#    the overlay onto another agent's patch would read green while no polecat
+#    session ever stages the hook. Walk the [[patches.agent]] blocks and require
+#    that the block named "polecat" is the one carrying the work-context overlay.
 if [ ! -f "$pack" ]; then
     errors+=("missing pack.toml")
-else
-    grep -q 'overlay_dir = "overlays/work-context"' "$pack" \
-        || errors+=("pack.toml does not wire overlay_dir=overlays/work-context onto any agent patch — the hook ships but never stages")
+elif ! awk '
+      function finalize() { if (inblock && name == "polecat" && has) found = 1; inblock = 0; name = ""; has = 0 }
+      /^[[:space:]]*\[\[patches\.agent\]\]/ { finalize(); inblock = 1; next }
+      /^[[:space:]]*\[/                     { finalize(); next }
+      inblock && /^[[:space:]]*name[[:space:]]*=/        { if (match($0, /"[^"]*"/)) name = substr($0, RSTART + 1, RLENGTH - 2); next }
+      inblock && /^[[:space:]]*overlay_dir[[:space:]]*=[[:space:]]*"overlays\/work-context"/ { has = 1; next }
+      END { finalize(); exit (found ? 0 : 1) }
+    ' "$pack"; then
+    errors+=("pack.toml does not wire overlay_dir=overlays/work-context onto the polecat agent patch — another agent carrying it does not stage the hook into polecat sessions")
 fi
 
 # 4. The hermetic test stays shipped: it is the only thing that can tell

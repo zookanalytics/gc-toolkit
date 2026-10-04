@@ -30,6 +30,10 @@
 #   (11) the PostToolUse hook no longer invokes work-context.sh -> ERROR
 #   (12) pack.toml loses the overlay_dir wiring -> ERROR (ships but never stages)
 #   (13) hermetic test deleted -> ERROR
+#   (14) only the GC_TEMPLATE code line is mutated, its comment kept -> ERROR
+#        (vacuous-green guard: the role gate's assertion scores code, not prose)
+#   (15) overlay_dir moved off the polecat patch onto another agent -> ERROR
+#        (the wiring assertion must be scoped to the polecat patch)
 
 set -u
 
@@ -87,6 +91,10 @@ set_json() { # set_json <dir> <jq-program>
 none()          { :; }
 rm_hook()       { rm -f "$1/$HOOK_REL"; }
 drop_template() { sed -i 's/GC_TEMPLATE/GC_AGENTNAME/g' "$1/$HOOK_REL"; }
+# Mutate ONLY the operative role-gate line and leave the header comment that
+# names GC_TEMPLATE intact — the real-world way the gate silently breaks. A
+# comment-inclusive grep stays green; the check strips comments, so this ERRORs.
+drop_template_code() { sed -i 's@template="${GC_TEMPLATE:-}"@template="${GC_AGENT:-}"@' "$1/$HOOK_REL"; }
 drop_unescape() { sed -i "s@| sed 's/\\\\\\\\\"/\"/g')\"@)\"@" "$1/$HOOK_REL"; }
 use_cut()       { sed -i 's@| head -c "$limit")@| cut -c 1-"$limit")@' "$1/$HOOK_REL"; }
 unexec()        { chmod -x "$1/$HOOK_REL"; }
@@ -95,6 +103,19 @@ drop_post()     { set_json "$1" 'del(.hooks.PostToolUse)'; }
 drop_matcher()  { set_json "$1" '.hooks.PostToolUse[0].matcher = "Edit"'; }
 drop_invoke()   { set_json "$1" '.hooks.PostToolUse[0].hooks[0].command = "true"'; }
 drop_wiring()   { sed -i 's@overlay_dir = "overlays/work-context"@# removed@' "$1/pack.toml"; }
+# Relocate the work-context overlay off the polecat patch and onto the refinery
+# patch, swapping the two values so the pack stays well-formed and the literal
+# overlay_dir line survives in the file. A whole-file grep stays green; a
+# polecat-scoped check must ERROR.
+move_wiring()   {
+    awk '
+      /^[[:space:]]*\[/ { blk = "" }
+      /^[[:space:]]*name[[:space:]]*=/ { if (match($0, /"[^"]*"/)) blk = substr($0, RSTART + 1, RLENGTH - 2) }
+      blk == "polecat"  && /overlay_dir = "overlays\/work-context"/  { sub(/work-context/, "cycle-recycle") }
+      blk == "refinery" && /overlay_dir = "overlays\/cycle-recycle"/ { sub(/cycle-recycle/, "work-context") }
+      { print }
+    ' "$1/pack.toml" > "$1/pack.toml.tmp" && mv "$1/pack.toml.tmp" "$1/pack.toml"
+}
 rm_test()       { rm -f "$1/assets/scripts/work-context-hook.test.sh"; }
 # Prose survives, code line does not: the hook's header comment still names
 # `additionalContext` (and PostToolUse), so a comment-inclusive scan would stay
@@ -107,6 +128,7 @@ run_check "pristine shipped artifacts pass"        0 none
 echo "── hook script ──"
 run_check "hook deleted"                           2 rm_hook
 run_check "GC_TEMPLATE gate removed"               2 drop_template
+run_check "GC_TEMPLATE code line mutated, comment kept" 2 drop_template_code
 run_check "tojson unescape removed"                2 drop_unescape
 run_check "capped with cut -c (per-line)"          2 use_cut
 run_check "hook not executable"                    2 unexec
@@ -118,6 +140,7 @@ run_check "PostToolUse registration removed"       2 drop_post
 run_check "PostToolUse matcher flipped off Bash (PreToolUse Bash remains)" 2 drop_matcher
 run_check "PostToolUse hook no longer invokes work-context.sh" 2 drop_invoke
 run_check "pack.toml overlay_dir removed"          2 drop_wiring
+run_check "overlay_dir moved off the polecat patch"    2 move_wiring
 run_check "hermetic test deleted"                  2 rm_test
 
 echo
