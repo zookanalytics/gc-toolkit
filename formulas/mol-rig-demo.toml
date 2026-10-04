@@ -173,12 +173,36 @@ done
 : "${SCRIPTS:?rig-demo-capture.sh not found in the pack}"
 ```
 
-**1. Resolve the app target.** Exactly one of `serve_dir` / `serve_cmd` /
-`base_url` is given. A relative `serve_dir` resolves against the `rig_name`
-checkout, because the app being demoed is that rig's:
+**1. Resolve the app target.** One of `serve_dir` / `serve_cmd` / `base_url`
+names how the rig's app is reached, and the pour must set exactly one. Count the
+three raw pour vars and fail closed unless the count is one: selecting one by
+precedence when several are set captures a convincing video of the wrong app
+target instead of refusing the ambiguous pour. A relative `serve_dir` resolves
+against the `rig_name` checkout, because the app being demoed is that rig's:
 ```bash
 RIG_PATH=$(gc rig list --json | tr -d '\\000-\\037' | jq -r --arg r "{{rig_name}}" '.rigs[]? | objects | select(.name == $r) | .path // empty' | head -n1)
 SERVE_DIR="{{serve_dir}}"
+SERVE_CMD="{{serve_cmd}}"
+BASE_URL="{{base_url}}"
+TARGETS=0
+[ -n "$SERVE_DIR" ] && TARGETS=$((TARGETS + 1))
+[ -n "$SERVE_CMD" ] && TARGETS=$((TARGETS + 1))
+[ -n "$BASE_URL" ] && TARGETS=$((TARGETS + 1))
+if [ "$TARGETS" -ne 1 ]; then
+  HOLD=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { HOLD="$c/assets/scripts"; break; }
+  done
+  : "${HOLD:?molecule-hold.sh and escalate.sh not found in the pack}"
+  gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: malformed pour; $TARGETS of serve_dir/serve_cmd/base_url set, need exactly one."
+  if ! "$HOLD/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-app-target --message "mol-rig-demo on $REQUEST_BEAD got $TARGETS of serve_dir / serve_cmd / base_url (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'), and exactly one names how the rig's app is reached. Held at capture; nothing was captured or closed. Re-pour with a single app target."; then
+    echo "escalate.sh recorded no release path; NOT holding or draining." >&2
+  elif "$HOLD/molecule-hold.sh" --step "mol-rig-demo.capture" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "malformed pour: $TARGETS of serve_dir/serve_cmd/base_url set, need exactly one"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining." >&2
+  fi
+  exit 1
+fi
 case "$SERVE_DIR" in
   "" ) : ;;
   /* ) : ;;
@@ -200,8 +224,8 @@ capture, and fails closed if no MP4 appears:
 ```bash
 set -- --script "$SCRIPT_PATH" --output "$OUT" --mode "{{capture_mode}}" --port "{{serve_port}}"
 if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR"
-elif [ -n "{{serve_cmd}}" ]; then set -- "$@" --serve "{{serve_cmd}}" --cwd "${RIG_PATH:-$(pwd)}"
-else set -- "$@" --base-url "{{base_url}}"
+elif [ -n "$SERVE_CMD" ]; then set -- "$@" --serve "$SERVE_CMD" --cwd "${RIG_PATH:-$(pwd)}"
+else set -- "$@" --base-url "$BASE_URL"
 fi
 [ "{{narrate}}" = "false" ] && set -- "$@" --no-narrate
 if ! "$SCRIPTS/rig-demo-capture.sh" "$@"; then
@@ -210,7 +234,7 @@ if ! "$SCRIPTS/rig-demo-capture.sh" "$@"; then
   done
   : "${HOLD:?molecule-hold.sh and escalate.sh not found in the pack}"
   gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: capture failed for {{rig_name}} from $SCRIPT_PATH."
-  if ! "$HOLD/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-capture-failed --message "mol-rig-demo could not capture a clip of {{rig_name}} from $SCRIPT_PATH (serve_dir='$SERVE_DIR' serve_cmd='{{serve_cmd}}' base_url='{{base_url}}'). The engine or the app did not produce an MP4; a human must check the app target and the demo toolchain (doctor/check-demo-toolchain). Held at capture."; then
+  if ! "$HOLD/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-capture-failed --message "mol-rig-demo could not capture a clip of {{rig_name}} from $SCRIPT_PATH (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'). The engine or the app did not produce an MP4; a human must check the app target and the demo toolchain (doctor/check-demo-toolchain). Held at capture."; then
     echo "escalate.sh recorded no release path; NOT holding or draining." >&2
   elif "$HOLD/molecule-hold.sh" --step "mol-rig-demo.capture" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "capture of {{rig_name}} failed to produce an MP4; check the app target and the demo toolchain"; then
     gc runtime drain-ack
