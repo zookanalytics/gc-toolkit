@@ -31,7 +31,8 @@
 #       the kind where nothing carries the work forward is where dropping the
 #       pointer looks reasonable, and it is exactly as unreadable there;
 #   (r) a task_kind=visit origin also records gc.outcome (= the kind) and
-#       gc.outcome_reason (= the close reason), so the board can report it;
+#       gc.outcome_reason (= the close reason), so the board can report it,
+#       plus gc.work_outcome=no-op for the work-record gate the close runs;
 #   (s) a non-visit origin records NO gc.outcome — the field is a sitting's;
 #   (t) an outcome the visit already carries is the sitting's own word and is
 #       never overwritten;
@@ -447,6 +448,7 @@ eq "$(field alpha status al-visit1)" closed "the visit is closed"
 eq "$(field alpha m.gc.outcome al-visit1)" not-needed "gc.outcome records the kind as the sitting's outcome"
 has "$(field alpha m.gc.outcome_reason al-visit1)" "not needed, per bt-vsucc1 in rig:beta" "gc.outcome_reason carries the close reason as the headline"
 has "$(field alpha m.gc.outcome_reason al-visit1)" "premise fixed by bt-vsucc1" "the headline carries the note too"
+eq "$(field alpha m.gc.work_outcome al-visit1)" no-op "gc.work_outcome records no-op, since a visit ships no commit"
 
 # --- (s) a non-visit origin records NO outcome (the field is visit-only) ---
 # gc.outcome is a sitting's column; a work bead or task carries its disposition

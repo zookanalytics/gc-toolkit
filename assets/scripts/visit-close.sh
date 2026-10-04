@@ -68,11 +68,13 @@ fi
 
 # Stamp the board keys, then read both back, repairing once. A store can exit 0
 # on a --set-metadata that wrote nothing, so the readback is the proof.
-# gc.work_outcome=no-op rides the same write: a visit ships no commit of its own
-# (the work it routes lands on other beads, each with its own outcome), so no-op
-# is the honest value for the close-time work-record gate, where shipped would
-# only trip the gate's work_commit arm. It needs no separate readback — the same
-# atomic update carries it, so if the board keys landed it did too.
+# gc.work_outcome=no-op rides the stamp and its repair. A visit ships no commit of
+# its own (the work it routes lands on other beads, each with its own outcome), so
+# no-op is the honest value for the work-record gate `gc bd close` runs; shipped
+# would fail that gate's work_commit and work_branch checks instead. It is not
+# read back and does not gate the close: the gate only warns, so a dropped value
+# costs the ledger one field, while holding the visit open over it would strand
+# a sitting the board can otherwise report.
 gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1 || true
 if [ "$(meta_now "$VISIT" gc.outcome)" != "$OUTCOME" ] || [ "$(meta_now "$VISIT" gc.outcome_reason)" != "$REASON" ]; then
   gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1 || true

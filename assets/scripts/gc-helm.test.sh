@@ -1556,6 +1556,15 @@ else
     bad "(DISMISS-OUTCOME) the visit closes with no outcome, invisible to every reader of finished sittings (got: ${VU:-<no update on v-HELD>})"
 fi
 
+# (DISMISS-WORK-OUTCOME) the same pre-close stamp records gc.work_outcome=no-op,
+# the value the work-record gate in `gc bd close` wants for a bead that ships no
+# commit, which a visit never does.
+if grep -q 'gc.work_outcome=no-op' <<< "$VU"; then
+    ok "(DISMISS-WORK-OUTCOME) the closed visit is stamped gc.work_outcome=no-op"
+else
+    bad "(DISMISS-WORK-OUTCOME) the visit closes with no work outcome, failing the close's work-record gate (got: ${VU:-<no update on v-HELD>})"
+fi
+
 # (DISMISS-NOSUBJECT) dismiss ends the sitting and writes NOTHING to the
 # subject: the DONE band the closed anchor lands in carries no per-row state,
 # so its row leaves only by ageing out of the window. The only write is the

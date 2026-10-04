@@ -10,6 +10,9 @@
 # gc.outcome = the kind, gc.outcome_reason = that close reason — verified before
 # the close, because a closed visit with no gc.outcome is a sitting the board
 # cannot report and no re-run reaches it (doctor/check-visit-outcome-recorded).
+# The same write carries gc.work_outcome=no-op for the work-record gate the close
+# runs, since a visit ships no commit of its own; that gate only warns, so the
+# value is not read back and does not gate the close.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
 # outcome when the visit lacks one.
 # Also drops an origin->successor `blocks` wait edge on the way: `bd close`
@@ -215,7 +218,7 @@ if [ -n "$DRY_RUN" ]; then
         CLOSE_PLAN="$REASON"
     fi
     STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
-    [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason>"
+    [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason> gc.work_outcome=no-op"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
     else
@@ -236,7 +239,8 @@ STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
             --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
 if [ -n "$STAMP_OUTCOME" ]; then
     STAMP_META+=(--set-metadata gc.outcome="$KIND" \
-                 --set-metadata gc.outcome_reason="$REASON")
+                 --set-metadata gc.outcome_reason="$REASON" \
+                 --set-metadata gc.work_outcome=no-op)
 fi
 bd_at "$ORIGIN_PATH" update "$ORIGIN" "${STAMP_META[@]}" >/dev/null 2>&1 || true
 
@@ -259,7 +263,8 @@ if [ -n "$STAMP_OUTCOME" ]; then
     if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
         bd_at "$ORIGIN_PATH" update "$ORIGIN" \
             --set-metadata gc.outcome="$KIND" \
-            --set-metadata gc.outcome_reason="$REASON" >/dev/null 2>&1 || true
+            --set-metadata gc.outcome_reason="$REASON" \
+            --set-metadata gc.work_outcome=no-op >/dev/null 2>&1 || true
         CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
         GOT_OUTCOME=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
         GOT_OUTCOME_REASON=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome_reason"] // empty' 2>/dev/null || true)

@@ -2,7 +2,8 @@
 # visit-close.test.sh — the shared guarded visit close (assets/scripts/visit-close.sh):
 # it appends the reading to the subject when one is named, stamps gc.outcome and
 # gc.outcome_reason on the visit, reads BOTH back, and only then closes — with the
-# reason as the bead's close_reason. A missing field, a stamp that will not read
+# reason as the bead's close_reason. The stamp also carries gc.work_outcome=no-op
+# for the work-record gate the close runs. A missing field, a stamp that will not read
 # back, and a close that does not take are each refused with a distinct exit code.
 #
 # Hermetic: stubs gc, reads the repo only; no city, no network.
@@ -82,6 +83,9 @@ has "the reading is appended to the subject" \
     'update tk-sub --append-notes visit v-x closed moot: premise died, subject already closed' "$LOG"
 has "the outcome word is stamped" 'set-metadata gc.outcome=moot' "$LOG"
 has "the board-visible reason is stamped" 'set-metadata gc.outcome_reason=premise died, subject already closed' "$LOG"
+has "the work-record outcome is stamped no-op (a visit ships no commit)" 'set-metadata gc.work_outcome=no-op' "$LOG"
+is "the work-record outcome lands before the close the gate checks" \
+    "$(grep -m1 -e 'gc.work_outcome=no-op' -e '^close ' "$LOG" | cut -d' ' -f1)" "update"
 has "the close carries outcome+reason as its close_reason" \
     'close v-x --reason moot: premise died, subject already closed' "$LOG"
 
