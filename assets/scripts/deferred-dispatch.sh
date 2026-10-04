@@ -258,9 +258,18 @@ cmd_arm() {
     # renders the raw edge even when its target has no in-store row, so name any
     # unresolvable blocker rather than let the "no open blocker" hint stand on it.
     # This is the one place a human is here to redirect the sequencing.
-    local unresolved=""
-    unresolved="$(own_blocks_unresolved_ids "$bead")" || unresolved=""
-    if [ -n "$unresolved" ]; then
+    #
+    # own_blocks_unresolved_ids reports three outcomes and the hint turns on all
+    # three. A non-zero rc is an enumeration that could not read the raw edges:
+    # the cross-store check is unproven, so the "no open blocker" all-clear must
+    # not stand on it, any more than it may stand on a named cross-store blocker.
+    # A non-empty stdout names an unresolvable blocker. An empty stdout with rc 0
+    # is a proven absence, the only outcome that earns the in-store all-clear.
+    local unresolved="" unresolved_rc=0
+    unresolved="$(own_blocks_unresolved_ids "$bead")" || unresolved_rc=$?
+    if [ "$unresolved_rc" -ne 0 ]; then
+        echo "$PROG: warning: $bead — could not enumerate its 'blocks' edges to check for a cross-store blocker (the read failed), so whether reconcile will dispatch it with an unresolved blocker still open is unproven. Check its blockers by hand if the ordering matters." >&2
+    elif [ -n "$unresolved" ]; then
         echo "$PROG: warning: $bead has a 'blocks' edge to $unresolved, which has no row in this store. bd resolves dependencies within a single store, so this cross-rig or external blocker does not hold the arm: reconcile will dispatch $bead with $unresolved still open. Sequence it by hand if that ordering matters." >&2
     elif own_blocks_cleared "$bead"; then
         echo "$PROG: note: $bead has no open blocker right now — the next reconcile pass will dispatch it"

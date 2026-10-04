@@ -320,6 +320,20 @@ eq "$rc" 0 "arm exits 0 with an in-store blocker"
 hasnt "$out" "no row in this store" "an in-store blocker triggers no cross-store warning"
 hasnt "$out" "no open blocker right now" "and the in-store-blocked bead is not announced ready"
 
+echo "# arm does not announce 'no blocker' when the cross-store enumeration itself fails"
+# own_blocks_unresolved_ids fails closed (non-zero) when its own `bd list --id`
+# read fails, while dep list still reads the bead cleared (no in-store blocker,
+# _ready true). cmd_arm must not collapse that enumeration failure into "no
+# cross-store blocker": the check is unproven, so the immediate-dispatch hint
+# must not stand on it. Without the three-state read, the buggy path prints the
+# all-clear here, so the two trailing assertions discriminate the fix.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
+out="$(STUB_BD_LIST_FAIL=1 "$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm still records the dispatch when the cross-store probe read fails"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the dispatch record is written"
+hasnt "$out" "no open blocker right now" "arm does NOT announce an unblocked bead when the cross-store check could not be proven"
+has "$out" "could not enumerate" "arm warns the cross-store check could not be proven"
+
 echo "# arm accepts the doctor-flagged shape"
 # gc.execution_routed_to is provenance, not a live queue, so a blocked bead
 # carrying only it is the exact shape doctor/check-blocked-work-armed flags and
