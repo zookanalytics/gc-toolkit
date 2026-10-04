@@ -184,7 +184,15 @@ review_wt_rm() {
 trap review_wt_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 git worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
 cd "$REVIEW_WT"
-# run the suites the diff touches; record real pass/fail counts
+# Keep this review claim's lease in the future across the suites: a claim's
+# lease has a fixed five-minute TTL and a suite can outlive it, so a live
+# reviewer whose lease expired reads to a lease consumer like a dead one.
+# Refresh $REVIEW_BEAD through the keepalive while each suite runs (best-effort
+# — an unresolved wrapper runs the command plain and never fails it).
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+hb() { if [ -n "$LHB" ]; then "$LHB" "$REVIEW_BEAD" -- "$@"; else "$@"; fi; }
+# run the suites the diff touches through hb, e.g. `hb bash -c '<suite>'`;
+# record real pass/fail counts
 ```
 A failing suite is not automatically a finding: check whether it fails on the
 base too. A pre-existing failure belongs in the verdict as context, not as
