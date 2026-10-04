@@ -258,8 +258,10 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # A visit covers its subject (and is itself conversing) only while the sitting
 # holding it is live. This pass is mechanical but reads sessions here — the one
 # liveness source the pack trusts (mol-witness-patrol, dead-molecule-dispose):
-# a holder GONE from the session list is dead; a holder still listed, in any
-# state, is live. $LIVE_SESSIONS_JSON is every name a listed session carries
+# a holder GONE from the session list is dead, and so is one still listed in a
+# terminal state — archived or closed, the dead states helm's ownerLive keys on
+# (services/helm/internal/board/derive.go); a holder listed in any other state
+# is live. $LIVE_SESSIONS_JSON is every name a LIVE listed session carries
 # (id, session_name, alias, name, agent_name); a claim writes one of assignee /
 # gc.session_id / gc.session_name. An UNCLAIMED visit names no holder and always
 # covers — it is a pending escalation, not a dead sitting. On an unreadable list
@@ -271,7 +273,7 @@ LIVENESS_KNOWN=false
 SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
 if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/dev/null 2>&1; then
     LIVE_SESSIONS_JSON=$(printf '%s' "$SESS_RAW" \
-        | jq -c '[ (.sessions // [])[]? | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
+        | jq -c '[ (.sessions // [])[]? | select((.state // "") as $s | ($s != "archived") and ($s != "closed")) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
     if printf '%s' "$LIVE_SESSIONS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
         LIVENESS_KNOWN=true
     else

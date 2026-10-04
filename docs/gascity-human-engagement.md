@@ -859,9 +859,10 @@ waiting. The close never runs. Two nets catch what the missing close would
 otherwise strand. When the same session re-claims the visit, `action=finish`
 performs the close (below). When the session is gone and no re-claim reaches it,
 `assets/scripts/liveness-sweep.sh` is the backstop: it counts a visit as
-`conversing` only while its holder session is still listed, so a visit stranded
-by a dead session returns its subject to the unnamed-wait census rather than
-masking it.
+`conversing` only while its holder session is listed in a live state, so a
+visit stranded by a dead session — one gone from the session list, or lingering
+in it as archived or closed — returns its subject to the unnamed-wait census
+rather than masking it.
 
 `action=finish` is keyed on the stamp. Every path that writes `gc.outcome`
 closes the visit immediately after it, so a `task_kind=visit` still open

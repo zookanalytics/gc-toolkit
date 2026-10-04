@@ -267,7 +267,9 @@ fi
 # bead the sweep would report is dropped here and never reaches a pass.
 # Live sitting identities, for the holder-liveness gate the SURVIVORS jq applies
 # to visits (mirrors liveness-sweep.sh). A holder GONE from the session list is
-# dead; one still listed is live; an UNCLAIMED visit has none and still covers.
+# dead, and so is one still listed in a terminal state (archived/closed, helm's
+# ownerLive dead states); one listed in any other state is live; an UNCLAIMED
+# visit has none and still covers.
 # Fail CLOSED here: on an unreadable list LIVENESS_KNOWN is false, so a claimed
 # visit reads not-live, its subject is not excluded, and the pass runs rather
 # than risking a skipped report.
@@ -276,7 +278,7 @@ LIVENESS_KNOWN=false
 SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
 if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/dev/null 2>&1; then
     LIVE_SESSIONS_JSON=$(printf '%s' "$SESS_RAW" \
-        | jq -c '[ (.sessions // [])[]? | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
+        | jq -c '[ (.sessions // [])[]? | select((.state // "") as $s | ($s != "archived") and ($s != "closed")) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
     if printf '%s' "$LIVE_SESSIONS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
         LIVENESS_KNOWN=true
     else
