@@ -66,11 +66,16 @@ if [ -n "$SUBJECT" ]; then
     || echo "visit-close: could not append the reading to $SUBJECT — continuing to the visit stamp" >&2
 fi
 
-# Stamp both keys, then read both back, repairing once. A store can exit 0 on a
-# --set-metadata that wrote nothing, so the readback is the proof.
-gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" >/dev/null 2>&1 || true
+# Stamp the board keys, then read both back, repairing once. A store can exit 0
+# on a --set-metadata that wrote nothing, so the readback is the proof.
+# gc.work_outcome=no-op rides the same write: a visit ships no commit of its own
+# (the work it routes lands on other beads, each with its own outcome), so no-op
+# is the honest value for the close-time work-record gate, where shipped would
+# only trip the gate's work_commit arm. It needs no separate readback — the same
+# atomic update carries it, so if the board keys landed it did too.
+gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1 || true
 if [ "$(meta_now "$VISIT" gc.outcome)" != "$OUTCOME" ] || [ "$(meta_now "$VISIT" gc.outcome_reason)" != "$REASON" ]; then
-  gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" >/dev/null 2>&1 || true
+  gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1 || true
 fi
 GOT_O=$(meta_now "$VISIT" gc.outcome)
 GOT_R=$(meta_now "$VISIT" gc.outcome_reason)
