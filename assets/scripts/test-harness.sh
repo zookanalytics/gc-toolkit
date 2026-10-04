@@ -352,7 +352,16 @@ case "$verb" in
           case "$1" in --type=*) ty="${1#--type=}" ;; --type) shift; ty="${1:-}" ;; esac
           shift || true
         done
-        printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D" ;;
+        # Real bd reads `dep add <blocked> <blocker> --type blocks` with the
+        # SECOND operand as the blocker — `dep add Y X` is the documented
+        # equivalent of `dep X --blocks Y`. Stored rows are blocker-first
+        # ("A|blocks|B" = A blocks B), so a blocks add swaps its operands to match;
+        # every other edge type keeps the source-first orientation.
+        if [ "$ty" = "blocks" ]; then
+          printf '%s|%s|%s\n' "$b" "$ty" "$a" >> "$D"
+        else
+          printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D"
+        fi ;;
       remove|rm)
         # gc bd dep remove <issue> <depends-on>: drop the edge with that
         # orientation, whatever its type. Real bd prints ✓ and exits 0 even for
