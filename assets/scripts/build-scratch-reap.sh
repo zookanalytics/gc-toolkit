@@ -177,15 +177,27 @@ for root in "${SCAN_ROOTS[@]}"; do
     while IFS= read -r -d '' entry; do
         [ -e "$entry" ] || continue
         base="${entry##*/}"
-        pid=""; form=""
+        pid=""; suf=""; form=""
         case "$base" in
             .pnpm-store|node-compile-cache) log "keep (rebuild-cost cache): $entry"; KEPT_N=$((KEPT_N + 1)); continue ;;
-            gct-[0-9]*) pid="${base#gct-}"; pid="${pid%%-*}"; form=pid ;;
-            gct[0-9]*)  pid="${base#gct}";  pid="${pid%%-*}"; form=pid ;;
-            run.[0-9]*) pid="${base#run.}"; pid="${pid%%-*}"; form=pid ;;
+            # gc.test per-run trees. The owned shapes are gct<pid>-<n> and
+            # gct-<pid>-<n>: a numeric pid AND a numeric run-counter <n>, the
+            # -<n> suffix required. The scan covers broad roots (/tmp, /var/tmp),
+            # so a name that is merely gct plus a pid, with no -<n>, is some other
+            # user's path and reaping it on a dead pid would delete an unrelated
+            # directory. Parse the whole name here; the shape is validated below.
+            gct-[0-9]*-[0-9]*) rest="${base#gct-}"; pid="${rest%%-*}"; suf="${rest#*-}"; form=pid ;;
+            gct[0-9]*-[0-9]*)  rest="${base#gct}";  pid="${rest%%-*}"; suf="${rest#*-}"; form=pid ;;
+            # Go scratch: run.<pid>, the raw numeric pid with no suffix (GOTMP/run.$$).
+            run.[0-9]*) pid="${base#run.}"; form=pid ;;
             go-build*|go-link*|gctk-*) form=holder ;;
-            *) log "skip (unrecognized): $entry"; continue ;;   # e.g. gctfoo-1, run.bogus
+            *) log "skip (unrecognized): $entry"; continue ;;   # e.g. gctfoo-1, gct<pid> with no -<n>, run.bogus
         esac
+        # The gct run-counter <n> must be numeric; a non-numeric or multi-dash
+        # suffix (set only for the gct forms, empty otherwise) only resembles
+        # the shape and is not ours to reap. The pid is held to the same bar by
+        # pid_is_dead below, which keeps an unparseable pid rather than reaping.
+        case "$suf" in *[!0-9]*) log "skip (run-counter not numeric): $entry"; continue ;; esac
         # Must be our own scratch. A path we do not own is not ours to reclaim,
         # and bounding to our uid is also what keeps an empty lsof result
         # trustworthy: we can always read our own trees, so a path missing from

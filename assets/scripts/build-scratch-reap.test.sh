@@ -37,6 +37,7 @@ live_pid() { local p; sleep 300 </dev/null >/dev/null 2>&1 & p=$!; HOLDERS+=("$p
 hold_open() { ( exec 9>"$1"; exec sleep 300 ) </dev/null >/dev/null 2>&1 & HOLDERS+=("$!"); }
 
 DEAD1="$(dead_pid)"; DEAD2="$(dead_pid)"; DEAD3="$(dead_pid)"; DEADH="$(dead_pid)"
+DEADN1="$(dead_pid)"; DEADN2="$(dead_pid)"; DEADN3="$(dead_pid)"; DEADN4="$(dead_pid)"
 LIVE1="$(live_pid)"; LIVERUN="$(live_pid)"
 
 # --- dead scratch: must be reaped ---
@@ -62,6 +63,15 @@ mkdir -p "$ROOT/gctfoo-1"                   # gct but not a pid form, not gctk
 mkdir -p "$ROOT/run.bogus"                  # run. but non-numeric
 mkdir -p "$ROOT/.pnpm-store"; : >"$ROOT/.pnpm-store/pkg"   # rebuild-cost cache
 mkdir -p "$ROOT/unrelated-dir"              # matches no pattern
+
+# --- near-misses of the owned pid forms: dead pid, no holder, so ONLY the
+#     name-form gate stands between these and a wrongful remove. The owned
+#     shapes are gct<pid>-<n>, gct-<pid>-<n>, run.<pid>; a bare gct<pid>, or a
+#     non-numeric/extra-dash run-counter, is an unrelated user path. ---
+mkdir -p "$ROOT/gct${DEADN1}";              : >"$ROOT/gct${DEADN1}/f"    # gct<pid>, no -<n>
+mkdir -p "$ROOT/gct-${DEADN2}";             : >"$ROOT/gct-${DEADN2}/f"   # gct-<pid>, no -<n>
+mkdir -p "$ROOT/gct${DEADN3}-7x";           : >"$ROOT/gct${DEADN3}-7x/f" # <n> not numeric
+mkdir -p "$ROOT/run.${DEADN4}-9";           : >"$ROOT/run.${DEADN4}-9/f" # run. owns no -<n>
 
 sleep 0.3   # let holders open their fds
 
@@ -94,6 +104,10 @@ kept "$ROOT/gctfoo-1"             "keeps a gct name that is not a pid form"
 kept "$ROOT/run.bogus"            "keeps run.<non-numeric>"
 kept "$ROOT/.pnpm-store"          "keeps the rebuild-cost cache .pnpm-store"
 kept "$ROOT/unrelated-dir"        "keeps a dir matching no pattern"
+kept "$ROOT/gct${DEADN1}"         "keeps gct<pid> with no -<n> suffix (not an owned form)"
+kept "$ROOT/gct-${DEADN2}"        "keeps gct-<pid> with no -<n> suffix (not an owned form)"
+kept "$ROOT/gct${DEADN3}-7x"      "keeps gct<pid>-<n> whose run-counter is non-numeric"
+kept "$ROOT/run.${DEADN4}-9"      "keeps run.<pid>-<n> (run owns no -<n> suffix)"
 
 # --- refuses to reap when lsof cannot be trusted ---
 FAKEBIN="$TMP/fakebin"; mkdir -p "$FAKEBIN"
