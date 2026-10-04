@@ -819,24 +819,62 @@ fi
 # its stuck-handoff escalation is premise-moot: retract the open visit through
 # escalate.sh --retract (which closes it moot via visit-close.sh, stamping
 # gc.outcome) rather than leaving it open for a bare close that records no
-# outcome. Gated on a queue that read AND parsed as an array ($STUCK_N set): an
-# unreadable or unparseable queue is not proof a handoff resolved, and an
-# empty-set fallback there would withdraw every live escalation. Only a visit
-# whose group is exactly the handoff bead id is retracted; a legacy group
-# carrying extra tokens (a malformed-subject filing) is left for repair.
+# outcome.
+#
+# Absence from the queue listing makes a handoff a candidate, never proof that it
+# left. A listing under a wrong address, from the wrong store, or cut short is
+# still a readable array, and it omits handoffs that never moved. So each
+# candidate is read by id, and its visit is retracted only when that read shows
+# the handoff closed, carrying a merge_result, or assigned to something other
+# than a refinery. The assignee is compared by role, the address with its rig
+# qualifier and binding prefix stripped (resolve-route.sh's role), so an address
+# this cycle got wrong cannot make a still-assigned handoff read as reassigned.
+# bd drops an id it cannot resolve and still exits 0, so each candidate is judged
+# by its own row, and a candidate with no row is left open, as is one still
+# assigned to a refinery.
+#
+# The candidate pass runs only after a queue read that parsed as an array
+# ($STUCK_N set); a failed queue read leaves every visit as it is until a later
+# cycle reads the queue. Only a visit whose group is exactly the handoff bead id
+# is a candidate; a legacy group carrying extra tokens (a malformed-subject
+# filing) is left for repair.
 if [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
-  RESOLVED=$(gc bd list --status=open,in_progress --has-metadata-key=escalation_key --json --limit=0 2>/dev/null | tr -d '[:cntrl:]' | jq -r --argjson q "$QUEUE_IDS_JSON" 'if type == "array" then (.[] | select((.metadata.escalation_key // "") == "witness-refinery-queue") | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "") as $g | select($g | test("^[A-Za-z0-9._-]+$")) | select(($q | index($g)) == null) | $g) else empty end' 2>/dev/null)
-  if [ -n "$RESOLVED" ]; then
+  CANDIDATES=$(gc bd list --status=open,in_progress --has-metadata-key=escalation_key --json --limit=0 2>/dev/null | tr -d '[:cntrl:]' | jq -c --argjson q "$QUEUE_IDS_JSON" 'if type == "array" then [ .[] | select((.metadata.escalation_key // "") == "witness-refinery-queue") | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "") as $g | select($g | test("^[A-Za-z0-9._-]+$")) | select(($q | index($g)) == null) | $g ] else [] end' 2>/dev/null) || CANDIDATES=""
+  CANDIDATE_IDS=$(printf '%s' "$CANDIDATES" | jq -r 'if type == "array" then join(",") else empty end' 2>/dev/null) || CANDIDATE_IDS=""
+  if [ -n "$CANDIDATE_IDS" ]; then
     SCRIPTS=""
     for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
       [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
     done
     : "${SCRIPTS:?escalate.sh not found in the pack}"
-    printf '%s' "$RESOLVED" | while IFS= read -r RSUBJ || [ -n "$RSUBJ" ]; do
+    # One read for every candidate, closed ones included.
+    HANDOFFS=$(gc bd list --id="$CANDIDATE_IDS" --all --json --limit=0 2>/dev/null | tr -d '[:cntrl:]') || HANDOFFS=""
+    printf '%s' "$CANDIDATES" | jq -r '.[]' | while IFS= read -r RSUBJ || [ -n "$RSUBJ" ]; do
       [ -n "$RSUBJ" ] || continue
-      "$SCRIPTS/escalate.sh" --retract --subject "$RSUBJ" --key witness-refinery-queue --message "Refinery handoff $RSUBJ has left the refinery queue (merged, closed, or reassigned); it is no longer sitting unprepared, so the stuck-handoff escalation is moot." || echo "check-refinery: retract failed for $RSUBJ" >&2
+      # "left <reading>" or "stays <reading>"; empty when the read returned no
+      # row for this candidate or did not parse.
+      VERDICT=$(printf '%s' "$HANDOFFS" | jq -r --arg id "$RSUBJ" --arg r "$REFINERY" '
+        def role: sub("^.*/"; "") | sub("^.*[.]"; "");
+        if type != "array" then empty else
+          ([ .[] | select((.id // "") == $id) ] | .[0]) as $b
+          | ($b.assignee // "") as $who
+          | if $b == null then empty
+            elif ($b.status // "") == "closed" then "left is closed"
+            elif ($b.metadata.merge_result // "") != "" then "left carries merge_result=" + ($b.metadata.merge_result | tostring)
+            elif $who == "" then "left is unassigned"
+            elif ($who | role) != ($r | role) then "left is assigned to " + $who + ", not a refinery"
+            else "stays assigned to " + $who + " (status " + ($b.status // "unknown") + ")" end
+        end' 2>/dev/null) || VERDICT=""
+      case "$VERDICT" in
+        "left "*)
+          "$SCRIPTS/escalate.sh" --retract --subject "$RSUBJ" --key witness-refinery-queue --message "Refinery handoff $RSUBJ ${VERDICT#left }, so it has left the refinery queue and is no longer sitting unprepared; the stuck-handoff escalation is moot." || echo "check-refinery: retract failed for $RSUBJ" >&2 ;;
+        "stays "*)
+          echo "check-refinery: $RSUBJ is missing from the queue listing but is still unprepared and ${VERDICT#stays }; its escalation stays open" >&2 ;;
+        *)
+          echo "check-refinery: could not read handoff $RSUBJ; its escalation stays open" >&2 ;;
+      esac
     done
   fi
 fi
@@ -847,12 +885,14 @@ subject, so each stuck bead gets its own visit and a churning queue files none.
 A stuck bead reaches a human through a re-derived visit rather than a nudge whose
 count goes stale. A queue that will not parse even after the control-byte strip
 escalates once under its own key, so a blinded monitor is surfaced rather than
-silently trusted. The counterpart retract closes the loop: when a readable queue
-no longer carries a handoff an open visit still escalates, the "sat unprepared"
-premise is gone, so the visit is retracted moot through escalate.sh --retract
-(guarded by visit-close.sh, which stamps gc.outcome) instead of lingering open
-for a bare close that records none. Close this step and continue to
-next-iteration."""
+silently trusted. The counterpart retract closes the loop. A handoff an open
+visit escalates that the queue listing no longer carries is read by id, and the
+visit is retracted moot through escalate.sh --retract (guarded by
+visit-close.sh, which stamps gc.outcome) only when that read shows the handoff
+closed, prepared, or assigned away from the refinery. A listing that omits a
+handoff still sitting with the refinery, as a wrong address does, withdraws
+nothing, and a handoff that cannot be read keeps its visit. Close this step and
+continue to next-iteration."""
 
 [[steps]]
 id = "next-iteration"
