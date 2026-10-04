@@ -711,6 +711,43 @@ UTGATES
 }
 # <<< unengaged-threads-body
 
+# >>> answered-threads-body
+# The comment path reads "unanswered" off max_c exceeding the comment watermark,
+# and that watermark advances only when arm 7 routes (the lifecycle transition
+# below). A comment answered by any other path — a sitting that replies in-thread
+# and resolves the thread, an operator who resolves it by hand — never moves the
+# watermark, so it reads unanswered on every pass and files a visit carrying
+# pr_number that holds the merge. A resolved review thread is the answered signal
+# GitHub keeps whoever acted, and this script already reads it elsewhere.
+# Resolution, not a bare reply, is the signal: the unengaged arm below counts
+# exactly the UNRESOLVED threads a reply of ours left open, so reading a reply here
+# would only move the hold from this arm to that one. Only inline comments sit on a
+# thread; a review body and a Conversation comment carry none and stay on the mark.
+ANSWERED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{isResolved comments(first:100){nodes{databaseId}}}}}}}'
+# The inline-comment databaseIds that sit on a resolved thread, as a JSON array on
+# stdout. Non-zero without output when the thread connection could not be read, so
+# a failed read leaves the batch counted unfiltered rather than dropping an
+# objection — the direction live_comments fails in too.
+answered_comment_ids() { # <pr-number>
+  local num="$1" raw
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$ANSWERED_THREADS_QUERY" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$num" 2>/dev/null) || return 1
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | scrub | jq -sc '
+    ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
+    | if ($rt | length) == 0 then error("no reviewThreads in response")
+      else [ $rt[].nodes[]?
+             | select((.isResolved // false) == true)
+             | (.comments.nodes // [])[] | (.databaseId // empty) ]
+           | unique
+      end' 2>/dev/null || return 1
+}
+# <<< answered-threads-body
+
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
   exit 1
@@ -1009,7 +1046,7 @@ CHILDREN_EOF
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
   posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
-  revs_raw=""; cmts_raw=""; cmts_live=""; icmts_raw=""
+  revs_raw=""; cmts_raw=""; cmts_live=""; cmts_open=""; icmts_raw=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
@@ -1053,6 +1090,29 @@ CHILDREN_EOF
         echo "$PROG: $id — PR#$num could not filter retired reviews out of the comment list; counting it unfiltered" >&2
         cmts_live="$cmts_raw"
       fi
+      # Drop inline comments that sit on a resolved review thread, so feedback
+      # answered off the watermark stops reading as unanswered and holding the
+      # merge. The thread read runs only when a comment sits above the watermark
+      # (where the comment path would otherwise fire), and a read that cannot
+      # answer leaves the batch unfiltered: an unreadable read never drops an
+      # objection. cmts_live stays whole for unengaged_holds, which reads it below.
+      cmts_open="$cmts_live"
+      raw_max_c=$(printf '%s' "$cmts_live" | jq -r --arg self "$SELF_LOGIN" '
+        [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
+      case "$raw_max_c" in ''|*[!0-9]*) raw_max_c=0 ;; esac
+      if [ "$raw_max_c" -gt "$cwm" ]; then
+        if ans_ids=$(answered_comment_ids "$num"); then
+          cmts_filtered=$(printf '%s' "$cmts_live" | jq -c --argjson ans "$ans_ids" '
+            [ .[] | select(.id as $i | ($ans | index($i)) == null) ]' 2>/dev/null)
+          if [ -n "$cmts_filtered" ]; then
+            cmts_open="$cmts_filtered"
+          else
+            echo "$PROG: $id — PR#$num could not drop answered comments; counting the batch unfiltered" >&2
+          fi
+        else
+          echo "$PROG: $id — PR#$num review-thread resolution unreadable; counting the comment batch unfiltered" >&2
+        fi
+      fi
       # A review with an empty body carries only its inline comments, which the
       # comment read below already sees; counting it here would leave a posture
       # no comment id can ever answer. CHANGES_REQUESTED counts beside
@@ -1065,7 +1125,7 @@ CHILDREN_EOF
           | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
           | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
           | (.id // 0) ] | max // 0' 2>/dev/null)
-      max_c=$(printf '%s' "$cmts_live" | jq -r --arg self "$SELF_LOGIN" '
+      max_c=$(printf '%s' "$cmts_open" | jq -r --arg self "$SELF_LOGIN" '
         [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
       # An issue comment carries no review state and no inline path; every one
       # under a login other than ours is feedback the loop has to answer, the
@@ -1555,7 +1615,7 @@ REAP_EOF
       # comment gets the wider key.
       CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c)"
       [ "$max_i" -gt 0 ] && CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c, issue $max_i)"
-      CBODY=$(feedback_body "$revs_raw" "$cmts_live" "$rwm" "$cwm" "$icmts_raw" "$iwm")
+      CBODY=$(feedback_body "$revs_raw" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm")
       [ -n "$CBODY" ] || CBODY="Unanswered review feedback on PR#$num (through review $max_r, comment $max_c, issue $max_i). The bodies could not be rendered; read them at $live_url."
       CBODY="## Unanswered review feedback on PR#$num
 
@@ -1882,7 +1942,7 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num finding tool not found ($FINDING); NOT watermarking (the batch has no findings for the validator to rule)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    if ! frecs=$(feedback_findings "$revs_raw" "$cmts_live" "$rwm" "$cwm" "$icmts_raw" "$iwm") \
+    if ! frecs=$(feedback_findings "$revs_raw" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm") \
        || ! printf '%s' "$frecs" | jq -e 'type == "array"' >/dev/null 2>&1; then
       echo "$PROG: WARN $id — PR#$num could not render the feedback findings; NOT watermarking (retry next pass)" >&2
       skipped=$((skipped + 1)); continue

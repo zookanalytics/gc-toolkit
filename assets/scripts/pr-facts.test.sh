@@ -1131,6 +1131,51 @@ eq "$(meta P1 pr_comment_watermark)" "5009" "the watermark advanced past it"
 eq "$(meta P1 pr_comment_disposition)" "rework:new-5" "the new batch got its own child (the first batch took new-2, its pass new-3, its finding new-4)"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
 
+echo "# a comment answered elsewhere (its thread resolved) is NOT unanswered — no false merge hold (tk-91ftmj)"
+# The watermark advances only when THIS script routes, so a comment a sitting
+# answered in-thread and resolved never moves it; without a path-independent read
+# it reads unanswered forever and files a visit carrying pr_number that holds the
+# merge. A resolved review thread is that path-independent "answered" signal.
+store "[$(anchor AE1 170)]"
+printf '%s' "$(prview 170 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_170.json"
+echo '[]' > "$GH_DIR/reviews_170.json"
+printf '[{"id":5001,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":3}]' > "$GH_DIR/comments_170.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-170","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-170","databaseId":5001,"author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_170.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+eq "$(meta_pinned AE1 pr_posture)" "review_required@sha-170" "a resolved-thread comment falls back to the standing posture, not commented"
+hasnt "$out" "routed to rework" "the answered comment routes nothing"
+eq "$(meta AE1 pr_comment_disposition)" "<absent>" "…and no disposition is recorded"
+eq "$(meta AE1 pr_comment_watermark)" "<absent>" "…and the watermark does not advance"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…nor is the fix pool woken"
+
+echo "# a resolved comment is dropped even when a higher-id unresolved one remains (tk-91ftmj)"
+# The filter is per-comment, not all-or-nothing: the resolved comment (higher id)
+# is dropped while the unresolved one still routes, so the watermark stops at the
+# unresolved id — proof the higher resolved id was not counted.
+store "[$(anchor AE2 171)]"
+printf '%s' "$(prview 171 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_171.json"
+echo '[]' > "$GH_DIR/reviews_171.json"
+printf '[{"id":5101,"user":{"login":"human1"},"body":"still open","path":"a.sh","line":1},{"id":5109,"user":{"login":"human1"},"body":"answered","path":"b.sh","line":2}]' > "$GH_DIR/comments_171.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-171a","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171a","databaseId":5101,"author":{"login":"human1"},"body":"still open","reactionGroups":[]}]}},{"id":"T-171b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171b","databaseId":5109,"author":{"login":"human1"},"body":"answered","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_171.json"
+out=$(run)
+eq "$(meta_pinned AE2 pr_posture)" "commented@sha-171" "the unresolved comment still makes the PR commented"
+has "$out" "routed to rework" "…and it routes"
+eq "$(meta AE2 pr_comment_watermark)" "5101" "the watermark stops at the unresolved comment; the higher resolved id was dropped"
+
+echo "# a thread read that fails counts the batch unfiltered — a failed read never drops an objection (tk-91ftmj)"
+# The thread IS resolved, so a successful read would drop the comment; the forced
+# read failure must fall back to counting it, never to silently answering it.
+store "[$(anchor AE3 172)]"
+printf '%s' "$(prview 172 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_172.json"
+echo '[]' > "$GH_DIR/reviews_172.json"
+printf '[{"id":5201,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1}]' > "$GH_DIR/comments_172.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-172","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-172","databaseId":5201,"author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_172.json"
+out=$(STUB_GQL_READ_FAIL=1 run)
+has "$out" "review-thread resolution unreadable" "the failed read is reported"
+has "$out" "routed to rework" "…and the comment is counted unfiltered and routes — never dropped on a failed read"
+eq "$(meta AE3 pr_comment_watermark)" "5201" "…and the watermark advances"
+
 echo "# a feedback batch past the OS per-argument limit still renders"
 # tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
 # per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as
