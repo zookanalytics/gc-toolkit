@@ -82,8 +82,9 @@ func (f Facts) ownerLive(assignee string) bool {
 	return st != "archived" && st != "closed"
 }
 
-// wfLive answers gc-helm.sh's `def wf_live($id)`: is this child covered by a
-// LIVE graph.v2 workflow?
+// wfLive reports whether a LIVE graph.v2 workflow stands over the bead the
+// caller names, which may be an anchor's child, a review or rework blocking the
+// anchor, or the anchor's own bead.
 //
 // `gc sling` leaves the work bead at status=open/assignee=null and puts the
 // in-flight state on the workflow, so this is the only way a polecat
@@ -93,8 +94,8 @@ func (f Facts) ownerLive(assignee string) bool {
 // polecat that drained since must stop counting at once — otherwise the fix
 // trades a false "stranded" for a false "in flight", the worse lie on a board
 // whose job is to say what needs a human.
-func (f Facts) wfLive(childID string) bool {
-	for _, name := range f.Inflight[childID] {
+func (f Facts) wfLive(beadID string) bool {
+	for _, name := range f.Inflight[beadID] {
 		if f.ownerLive(name) {
 			return true
 		}

@@ -632,10 +632,17 @@ func (s Sitting) Headline() string {
 type Facts struct {
 	// Visits holds the ids of anchors an open visit bead names.
 	Visits map[string]bool
-	// Inflight maps a WORK-BEAD id — an anchor's CHILD, not the anchor — to the
-	// session names of the live graph.v2 workflows standing over it. The gather
-	// resolves each live workflow root through its input convoy to that
-	// convoy's single tracked member, and that member is the key.
+	// Inflight maps a work-bead id to the session names of the live graph.v2
+	// workflows standing over it. The gather resolves each live workflow root
+	// through its input convoy, and the key is that convoy's single tracked
+	// member. The gather does not know which beads are anchors, so a key is
+	// whatever bead the sling tracked. The board looks up three kinds of id:
+	// an anchor's child ([rollUp]), a review or rework bead blocking a merge
+	// anchor ([liveReviewOrRework]), and the anchor's own bead
+	// ([Facts.anchorInFlight]). The anchor's own bead is the key when the anchor
+	// is itself the slung work bead and its molecule stands over it rather than
+	// under a child. [Facts.wfLive] re-checks each session's liveness at derive
+	// time.
 	Inflight map[string][]string
 	// OwnerState maps a session name AND its alias to that session's state, so
 	// a child's assignee can be resolved whichever form it was written in.
