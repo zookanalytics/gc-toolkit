@@ -103,7 +103,32 @@ eq "$RC" "0" "overlay_dir before name still pairs with the stanza; a commented o
 has "$OUT" "refinery" "the correctly-parsed carrier is in the set"
 hasnt "$OUT" "finding(s)" "the decoy comment adds no phantom carrier"
 
-# --- 9. fail-closed: no pack.toml warns, never passes ------------------------
+# --- 9. a commented-out fragment call is NOT an injection --------------------
+# A Go-template comment {{/* ... */}} is never rendered, so a prompt that only
+# comments out the call injects nothing. The scan must match a live {{ template
+# ... }} action, not the bare token inside a comment, or a recycled role that
+# lost the doctrine still reads as covered (fail-open).
+reset
+patch refinery "overlays/cycle-recycle"
+mkdir -p "$P/agents/refinery"; : > "$P/agents/refinery/agent.toml"
+printf '# prompt\n{{/* template "heartbeat-no-consent-ui" . */}}\n' > "$P/agents/refinery/prompt.template.md"
+OUT=$(run); RC=$?
+eq "$RC" "2" "a commented-out {{/* template ... */}} call does not count as an injection"
+has "$OUT" "\"refinery\" carries overlay_dir" "the role whose only call is commented out is flagged overlay-only"
+has "$OUT" "injects no" "the finding says the fragment is missing"
+
+# --- 10. a trim-marker action still counts as an injection -------------------
+# The matcher accepts {{- template ... }} and {{template ...}}, so anchoring to
+# the delimiter does not reject the live forms it must still find.
+reset
+patch refinery "overlays/cycle-recycle"
+mkdir -p "$P/agents/refinery"; : > "$P/agents/refinery/agent.toml"
+printf '# prompt\n{{- template "heartbeat-no-consent-ui" . }}\n' > "$P/agents/refinery/prompt.template.md"
+OUT=$(run); RC=$?
+eq "$RC" "0" "a {{- template ... }} trim-marker call counts as an injection"
+has "$OUT" "refinery" "the trim-marker injector is in the set"
+
+# --- 11. fail-closed: no pack.toml warns, never passes -----------------------
 rm -rf "$P"; mkdir -p "$P"
 OUT=$(run); RC=$?
 eq "$RC" "1" "a missing pack.toml warns rather than passing"

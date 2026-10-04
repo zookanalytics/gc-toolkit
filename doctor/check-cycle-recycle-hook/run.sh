@@ -65,7 +65,11 @@ for adir in "$dir"/agents/*/; do
     tmpl=""
     [ -f "$toml" ] && tmpl=$(sed -n 's/^[[:space:]]*prompt_template[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$toml" | head -1)
     if [ -n "$tmpl" ]; then tmpl_path="$dir/$tmpl"; else tmpl_path="$adir/prompt.template.md"; fi
-    if [ -f "$tmpl_path" ] && grep -qE "template[[:space:]]+\"$FRAGMENT\"" "$tmpl_path"; then
+    # Match a LIVE template action — {{ template "..." }}, {{- template ... }},
+    # {{template ...}} — not the bare token. A Go-template comment
+    # {{/* template "..." */}} is never rendered, so a commented-out call injects
+    # nothing; anchoring to the {{ delimiter keeps it from reading as an injection.
+    if [ -f "$tmpl_path" ] && grep -qE "\{\{-?[[:space:]]*template[[:space:]]+\"$FRAGMENT\"" "$tmpl_path"; then
         frag_roles="$frag_roles$role
 "
     fi
