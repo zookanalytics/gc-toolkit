@@ -33,18 +33,15 @@ bash -n "$GUARD" \
   && ok "guard is executable (ttyd execs it directly)" \
   || bad "guard is not executable — ttyd could not spawn it"
 
-# Lint the guard through shellcheck-run.sh, which uses the host binary or the
-# pinned shellcheck container and exits 3 when neither is available. A linter
-# that could not run is a VISIBLE skip, never a silent pass that reads as clean.
+# Lint the guard through shellcheck-run.sh, the one fail-closed runner: it runs
+# the host shellcheck and exits non-zero when none is on PATH. A linter that
+# could not run fails here — both a real finding and a missing linter are a
+# failure, never a silent pass that reads as clean.
 if "$HERE/shellcheck-run.sh" "$GUARD"; then
   ok "guard is shellcheck-clean"
 else
   rc=$?
-  if [ "$rc" -eq 3 ]; then
-    echo "skip - shellcheck unavailable (no host binary, no podman image); guard not linted this run"
-  else
-    bad "guard has shellcheck findings (shellcheck-run exit $rc)"
-  fi
+  bad "guard failed shell lint (shellcheck-run.sh exit $rc); a missing linter fails here too, never a silent pass"
 fi
 
 # --- The stub `gc`. ----------------------------------------------------------

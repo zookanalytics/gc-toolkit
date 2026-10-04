@@ -17,17 +17,16 @@ correctness bar is two static checks:
 - `bash -n <file>` for syntax.
 - shellcheck for lint, run through `assets/scripts/shellcheck-run.sh <files>`.
 
-`shellcheck-run.sh` is the single way to run shellcheck here. It uses a host
-`shellcheck` when one is on PATH and otherwise the pinned `koalaman/shellcheck`
-image under podman, at `warning` severity. Run it rather than probing
-`command -v shellcheck` yourself: the review host need not carry the binary, a
-bare probe then finds nothing, and the lint silently does not happen.
+`shellcheck-run.sh` is the single way to run shellcheck here. It runs the host
+`shellcheck` at `warning` severity. Run it rather than probing
+`command -v shellcheck` yourself: a bare probe that finds nothing lets the lint
+silently not happen while the review still reads clean.
 
 ## An unrunnable linter is a finding, not a pass
 
-`shellcheck-run.sh` exits non-zero (3) when no runner is available — no host
-binary and no usable podman image. A review that could not run shellcheck has
-not met the shell correctness bar. Raise it as a finding and withhold the pass.
+`shellcheck-run.sh` exits non-zero (3) when no `shellcheck` is on PATH. A review
+that could not run shellcheck has not met the shell correctness bar. Raise it as
+a finding and withhold the pass.
 Clearing a shell change because the linter was unavailable is the failure this
 extension exists to prevent.
 
