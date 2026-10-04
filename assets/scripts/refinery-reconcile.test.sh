@@ -3,8 +3,8 @@
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
 # the arm ORDER (gate-ensure, pr-facts --posture-only, pr-facts
 # --route-comments-only, merge, pre-open-rebase, pr-open, pr-facts,
-# convoy-graduate, review-sweep, duplicate-sweep, pr-stack) — merge runs AHEAD of
-# pre-open-rebase and pr-open, whose per-anchor GitHub round-trips over the
+# convoy-graduate, review-sweep, scaffolding-sweep, duplicate-sweep, pr-stack) — merge
+# runs AHEAD of pre-open-rebase and pr-open, whose per-anchor GitHub round-trips over the
 # pre_open_gate backlog would otherwise starve it of the pass budget; its only
 # same-pass interlocks run before it — the posture arm, which merge.sh reads off
 # the bead and would otherwise read one written a pass ago, and the feedback arm,
