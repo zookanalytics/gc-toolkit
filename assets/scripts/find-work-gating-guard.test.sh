@@ -97,15 +97,22 @@ out=""; n=0
 # newline bug: a raw C0 byte inside a JSON string, which is invalid JSON.
 notes=""
 [ "${FAKE_BD_CTRL:-0}" = "1" ] && notes=$(printf ',"notes":"para one\npara two"')
-while IFS='|' read -r id mr; do
+# Rows are `id|merge_result|created_at|priority`; the last two are optional, so
+# the id|merge_result fixtures above still parse. created_at and priority are
+# top-level fields on a bd row (merge_result is under metadata), matching bd.
+while IFS='|' read -r id mr created prio; do
   [ -n "$id" ] || continue
   [ "$lim" -gt 0 ] && [ "$n" -ge "$lim" ] && break
   n=$((n + 1))
   if [ "$mr" = "-" ]; then
-    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s"}%s}' "$id" "$id" "$notes")
+    meta=$(printf '"branch":"polecat/%s"' "$id")
   else
-    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s","merge_result":"%s"}%s}' "$id" "$id" "$mr" "$notes")
+    meta=$(printf '"branch":"polecat/%s","merge_result":"%s"' "$id" "$mr")
   fi
+  extra=""
+  [ -n "$created" ] && extra="$extra,$(printf '"created_at":"%s"' "$created")"
+  [ -n "$prio" ] && extra="$extra,$(printf '"priority":%s' "$prio")"
+  obj=$(printf '{"id":"%s","metadata":{%s}%s%s}' "$id" "$meta" "$extra" "$notes")
   if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
 done < "$FAKE_ROWS"
 printf '[%s]\n' "$out"
@@ -180,12 +187,34 @@ jq -e . "$TMP/ctrl.json" >/dev/null 2>&1 \
 eq "$(FAKE_BD_CTRL=1 bash "$TMP/run-select.sh" 2>/dev/null)" "tk-plain" \
    "(7b) a raw control byte in a note does not hide the work (scrubbed before jq)"
 
+echo "── 1b. the oldest-waiting handoff is served first ──"
+
+# (7c) Oldest-created wins. The rows are listed newest-first, as bd returns them
+#      before the sort, so picking the oldest proves the client-side sort runs —
+#      file order alone would hand back the newest.
+printf 'tk-new|-|2026-03-03T00:00:00Z\ntk-mid|-|2026-02-02T00:00:00Z\ntk-old|-|2026-01-01T00:00:00Z\n' > "$FAKE_ROWS"
+eq "$(select_work)" "tk-old" "(7c) oldest-created handoff is selected, not the newest"
+
+# (7d) A parked anchor is excluded even when it is the oldest row; the oldest
+#      UNPARKED handoff wins.
+printf 'tk-anchor|pull_request|2026-01-01T00:00:00Z\ntk-realnew|-|2026-03-03T00:00:00Z\ntk-realold|-|2026-02-02T00:00:00Z\n' > "$FAKE_ROWS"
+eq "$(select_work)" "tk-realold" "(7d) oldest UNPARKED handoff wins; an older parked anchor is skipped"
+
+# (7e) Priority preempts age across bands, but within a band the oldest wins: a
+#      newer P1 beats an older P2, and the older P1 beats the newer P1.
+printf 'tk-p2old|-|2026-01-01T00:00:00Z|2\ntk-p1new|-|2026-03-03T00:00:00Z|1\ntk-p1old|-|2026-02-02T00:00:00Z|1\n' > "$FAKE_ROWS"
+eq "$(select_work)" "tk-p1old" "(7e) highest priority first, oldest within the band"
+
 echo "── 2. the query keeps a window wide enough for the filter ──"
 QUERY="$(grep -m1 'gc bd list' "$TMP/select.sh")"
 case "$QUERY" in
   *--limit=1\ *|*--limit=1) bad "(8) listing limit must exceed 1" "client-side filter over a 1-row window starves" ;;
   *--limit=*) ok "(8) listing limit exceeds 1 (filter cannot starve the queue)" ;;
   *) bad "(8) listing carries an explicit --limit" "none found in: $QUERY" ;;
+esac
+case "$QUERY" in
+  *--sort\ created\ --reverse*) ok "(8b) listing fetches oldest-created first (window holds the longest-waiting handoff)" ;;
+  *) bad "(8b) listing must order oldest-created first (--sort created --reverse)" "got: $QUERY" ;;
 esac
 case "$QUERY" in
   *--assignee=\$GC_AGENT*) ok "(9) listing still scopes to this refinery's assignee" ;;
