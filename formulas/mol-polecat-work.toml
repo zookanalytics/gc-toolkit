@@ -394,8 +394,16 @@ CONVOY_TARGETS=$(printf '%s' "$GUARD_JSON" | jq -r --arg base "{{base_branch}}" 
     end' 2>/dev/null)
 if [ -n "$CONVOY_TARGETS" ]; then
   GUARD_POOL=$(printf '%s' "$GUARD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // "<pool>"' 2>/dev/null)
+  GUARD_ROOT=$(gc bd list --metadata-field "gc.input_convoy_id={{convoy_id}}" --json 2>/dev/null | jq -r '
+    if type == "array" then
+      [ .[] | select(.status != "closed")
+        | select((.metadata // {}) | .["gc.kind"] == "workflow" or .["gc.formula_contract"] == "graph.v2")
+        | .id ]
+    else [] end
+    | if length == 1 then .[0] else empty end' 2>/dev/null)
+  [ -n "$GUARD_ROOT" ] || GUARD_ROOT="<the open workflow root whose gc.input_convoy_id is {{convoy_id}}>"
   GUARD_STAKE="This work would branch from {{base_branch}} and land there, but it belongs to a convoy that lands on $CONVOY_TARGETS, so that branch would never receive it"
-  GUARD_RELEASE="stamp the landing branch on the bead (gc bd update $WORK_BEAD_ID --set-metadata target=<branch>, naming the convoy branch, or {{base_branch}} if that base was deliberate), retire this molecule (gc workflow delete-source $WORK_BEAD_ID --apply), and re-sling the bead (gc sling ${GUARD_POOL:-<pool>} $WORK_BEAD_ID), which then branches from its own target"
+  GUARD_RELEASE="stamp the landing branch on the bead (gc bd update $WORK_BEAD_ID --set-metadata target=<branch>, naming the convoy branch, or {{base_branch}} if that base was deliberate), retire this molecule (gc convoy delete $GUARD_ROOT --force, which closes its root and steps and leaves the work bead open), and re-sling the bead (gc sling ${GUARD_POOL:-<pool>} $WORK_BEAD_ID), which then branches from its own target"
   gc bd update "$WORK_BEAD_ID" --append-notes "Convoy target guard: $GUARD_STAKE. Held at workspace-setup before any worktree was poured. To release, $GUARD_RELEASE."
   SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
   : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
@@ -418,6 +426,14 @@ its target does not count. An unreadable bead passes with a warning, because
 the hold writes to the same store the read just failed on. The visit names the
 release: stamp the landing branch as the bead's `target`, retire this
 molecule, and re-sling the bead, which then pours from its own target.
+
+The retire is `gc convoy delete <root> --force`, naming the root this block
+finds through the input convoy that launched the molecule. It closes the root
+and every step under it and leaves the work bead open. `delete-source` cannot
+retire it: it matches roots on `gc.source_bead_id`, which a root poured from an
+input convoy does not carry, so it reports `already_clean` and the root stays
+live. Sling then refuses the re-sling, because the bead already has a live
+workflow.
 
 **2. Worktree — reuse or create.** Reuse `metadata.work_dir` when the
 directory still exists; otherwise create one scoped to the BEAD (not the
