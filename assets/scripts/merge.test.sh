@@ -5,7 +5,9 @@
 # (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, approval arms + veto,
 # CLEAN/UNSTABLE handling, BLOCKED naming its cause from reviewThreads +
-# reviewDecision); the recorded pr_posture hold, read off the anchor;
+# reviewDecision, an UNKNOWN merge state read again a bounded number of times so
+# one pass lands every approved clean PR); the recorded pr_posture hold, read off
+# the anchor;
 # identity refusals (fork, url/branch mismatch); the record for a PR already
 # merged and the live anchor identity both it and the merge stand on;
 # the terminal full-authorization re-read; the loud non-zero exit when the
@@ -1061,6 +1063,91 @@ printf '%s' "$(prview 99 OPEN DIRTY)" > "$GH_DIR/pr_view_99.json"
 echo '[]' > "$GH_DIR/reviews_99.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed merge-in in flight is the city's move, not a wedge"
+
+# GitHub computes mergeability lazily. A merge moves the base under every sibling,
+# and each sibling's first read after it answers UNKNOWN while the computation that
+# read started runs. pr_view_<n>.queue/ scripts that first read; the fixture is the
+# computed answer every later read gets.
+unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
+unknown_first() { # num
+  mkdir -p "$GH_DIR/pr_view_$1.queue"
+  printf '%s' "$(prview "$1" OPEN UNKNOWN)" > "$GH_DIR/pr_view_$1.queue/1.json"
+}
+pinned_reads() { # num: reads of the pinned field set, re-reads included
+  grep -c "^pr view $1 --repo github.com/zook/gc-toolkit --json state,isDraft," "$STUB_GH_LOG" || true
+}
+
+echo "# one pass lands every approved clean PR, though each sibling first reads UNKNOWN after a merge"
+store "[$(anchor RR1 130), $(rev RR1), $(anchor RR2 131), $(rev RR2), $(anchor RR3 132), $(rev RR3)]"
+: > "$STUB_DEPS"
+for n in 130 131 132; do
+  printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
+  echo '[]' > "$GH_DIR/reviews_$n.json"
+done
+unknown_first 131; unknown_first 132
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: 3 merged," "the pass lands all three, not only the first"
+for a in RR1 RR2 RR3; do eq "$(bstatus "$a")" "closed" "$a closed on its merge"; done
+has "$out" "PR#131 answered UNKNOWN on the pinned read and CLEAN on re-read 1" "a sibling's computed CLEAN comes from the re-read"
+eq "$(pinned_reads 131)" "2" "the first re-read finds the state computed and the sibling reads no further"
+eq "$(pinned_reads 130)" "1" "a PR whose pinned read is already computed is not re-read"
+
+echo "# an UNKNOWN that stays UNKNOWN is read a bounded number of times, then held settled"
+store "[$(anchor RR4 133), $(rev RR4)]"
+printf '%s' "$(prview 133 OPEN UNKNOWN)" > "$GH_DIR/pr_view_133.json"
+echo '[]' > "$GH_DIR/reviews_133.json"
+# A sleep that records its argument and returns at once, so the suite pins the
+# wait schedule without spending it.
+mkdir -p "$TMP/sleepbin"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/sleep.log" > "$TMP/sleepbin/sleep"
+chmod +x "$TMP/sleepbin/sleep"; : > "$TMP/sleep.log"
+: > "$STUB_GH_LOG"
+out=$(PATH="$TMP/sleepbin:$PATH" "$SUT" 2>&1)
+has "$out" "not mergeable yet (mergeStateStatus='UNKNOWN' after 3 re-read(s)); merge held" "a state still UNKNOWN after the last re-read holds for the pass"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+eq "$(pinned RR4)" "settled@sha-133" "…and records settled, like any unready state that owes a person nothing"
+eq "$(pinned_reads 133)" "4" "the pinned read plus the default three re-reads"
+eq "$(tr '\n' ' ' < "$TMP/sleep.log")" "5 5 " "the first re-read goes out at once and each later one waits the default 5s"
+
+echo "# MERGE_STATE_REREADS=0 turns the re-read off"
+store "[$(anchor RR5 134), $(rev RR5)]"
+printf '%s' "$(prview 134 OPEN CLEAN)" > "$GH_DIR/pr_view_134.json"
+unknown_first 134
+echo '[]' > "$GH_DIR/reviews_134.json"
+: > "$STUB_GH_LOG"
+out=$(MERGE_STATE_REREADS=0 "$SUT" 2>&1)
+has "$out" "not mergeable yet (mergeStateStatus='UNKNOWN'); merge held" "with no re-reads the pinned UNKNOWN holds for the pass"
+eq "$(pinned_reads 134)" "1" "…on the pinned read alone"
+
+echo "# a re-read that finds the head moved holds: the gates passed a different commit"
+store "[$(anchor RR6 135), $(rev RR6)]"
+printf '%s' "$(prview 135 OPEN CLEAN)" | jq -c '.headRefOid = "sha-135-pushed"' > "$GH_DIR/pr_view_135.json"
+unknown_first 135
+echo '[]' > "$GH_DIR/reviews_135.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#135 moved between the pinned read and re-read 1 of its UNKNOWN merge state; merge held" "a head that moved between the reads holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged on a head the gates never validated"
+
+echo "# a re-read that computes DIRTY keeps DIRTY's handling"
+store "[$(anchor RR7 136), $(rev RR7)]"
+printf '%s' "$(prview 136 OPEN DIRTY)" > "$GH_DIR/pr_view_136.json"
+unknown_first 136
+echo '[]' > "$GH_DIR/reviews_136.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned RR7)" "blocked@sha-136" "the computed DIRTY records blocked, as a pinned DIRTY does"
+has "$(reason RR7)" "conflicts" "…and the reason names the conflict"
+
+echo "# a re-read that computes BLOCKED names its cause from the re-read, not the pinned read"
+store "[$(anchor RR8 137), $(rev RR8)]"
+printf '%s' "$(prview 137 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_137.json"
+mkdir -p "$GH_DIR/pr_view_137.queue"
+printf '%s' "$(prview 137 OPEN UNKNOWN)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_137.queue/1.json"
+echo '[]' > "$GH_DIR/reviews_137.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned RR8)" "settled@sha-137" "the re-read's REVIEW_REQUIRED makes it the approval wait, not a rule nobody named"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

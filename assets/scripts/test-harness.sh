@@ -407,12 +407,21 @@ case "$sub" in
       view)
         n="${1:-}"; shift || true
         f="$G/pr_view_$n.json"
+        # pr_view_<n>.queue/ answers reads ahead of the fixture: each read takes
+        # the first file there in glob order and removes it, and the fixture
+        # answers once the queue is empty. That scripts a PR whose answer changes
+        # between two reads, the way GitHub's lazily computed merge state does.
+        qf=""
+        for qf in "$G/pr_view_$n.queue"/*.json; do break; done
+        if [ -f "$qf" ]; then f="$qf"; else qf=""; fi
         [ -s "$f" ] || { echo "gh: no such pr" >&2; exit 1; }
         # Honour -q/--jq like real gh, so a caller reading one field (e.g.
         # `--json labels -q '.labels[].name'`) gets that field, not the whole row.
         vq=""
         while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; vq="${1:-}" ;; esac; shift || true; done
-        if [ -n "$vq" ]; then jq -r "$vq" "$f"; else cat "$f"; fi ;;
+        if [ -n "$vq" ]; then jq -r "$vq" "$f"; else cat "$f"; fi; vrc=$?
+        [ -z "$qf" ] || rm -f "$qf"
+        exit "$vrc" ;;
       list)
         br=""
         while [ $# -gt 0 ]; do

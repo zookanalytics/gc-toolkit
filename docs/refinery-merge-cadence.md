@@ -126,6 +126,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    (`docs/finalize-gate.md`), re-asserted in the terminal re-read because a visit
    filed mid-pass does not move the head.
 
+   GitHub computes a PR's mergeability lazily. The first read after the PR's
+   base moves answers `UNKNOWN` and starts the computation, which finishes in a
+   few seconds, and a PR nobody reads stays `UNKNOWN`. Every merge this arm makes
+   moves the base under each later candidate on that base, so their pinned reads
+   answer `UNKNOWN`. The arm reads such a PR again before deciding it, up to
+   `MERGE_STATE_REREADS` (default 3) times. The first re-read goes out
+   immediately, and each later one waits `MERGE_STATE_REREAD_SECS` (default 5).
+   The computed state is judged exactly as a pinned one is, so `BEHIND` and
+   `DIRTY` keep their handling. A re-read may differ from the pinned read only in
+   `mergeStateStatus`, `mergeable` and `reviewDecision`. Any other difference
+   means the PR moved under the gates that passed it, and the merge holds. A
+   state still `UNKNOWN` after the last re-read holds for the pass and records
+   `settled`. The re-read belongs to the CLEAN check, the last in the validation
+   order above, so only a candidate every earlier check cleared pays for it.
+   Every read comes after the latest merge of the pass, because the arm merges
+   only at the end of an anchor's turn.
+
    Landing and recording are two writes, and a pass killed between them leaves
    an anchor saying `pull_request` over a PR already on the target branch.
    This arm records that PR rather than leaving it to pr-facts: the arms are

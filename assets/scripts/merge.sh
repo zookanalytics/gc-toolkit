@@ -20,7 +20,8 @@
 # CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
 # child or open must-fix finding (metadata keys naming this PR AND dependency
 # edges, the finding held by its own blocks edge; unreadable holds);
-# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
+# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only; an UNKNOWN,
+# which is GitHub still computing it, read again a bounded number of times);
 # generated/seed-audit current at the MERGE RESULT (its inputs re-hashed in the
 # tree `git merge-tree` writes, so a render clobbered by a base that moved holds
 # and escalates rather than landing). The FULL
@@ -69,6 +70,20 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 # Where the freshness probe parks the two commits it needs. Its own namespace,
 # so nothing here can move a branch or a remote-tracking ref.
 GATE_REF="refs/gc-toolkit/merge-gate"
+# The pinned read's field set. The re-read of an UNKNOWN merge state asks for the
+# same set, so the two answers compare field for field.
+PR_FIELDS="state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
+# GitHub computes a PR's mergeability lazily. The first read after the PR's base
+# moves answers UNKNOWN and starts the computation. A merge this arm makes moves
+# the base under every later candidate on that base, so their pinned reads answer
+# UNKNOWN, and a later read is the one that decides them. MERGE_STATE_REREADS
+# bounds how many more reads an UNKNOWN gets before the merge is held for the
+# pass. The first re-read goes out at once, because the pinned read already
+# started the computation; each later one waits MERGE_STATE_REREAD_SECS.
+MERGE_STATE_REREADS="${MERGE_STATE_REREADS:-3}"
+MERGE_STATE_REREAD_SECS="${MERGE_STATE_REREAD_SECS:-5}"
+case "$MERGE_STATE_REREADS" in ''|*[!0-9]*) MERGE_STATE_REREADS=3 ;; esac
+case "$MERGE_STATE_REREAD_SECS" in ''|*[!0-9]*) MERGE_STATE_REREAD_SECS=5 ;; esac
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -276,6 +291,35 @@ required_contexts_for() { # <branch>
 }
 # <<< required-contexts-for
 
+# Read <pr-number> again while its merge state answers UNKNOWN, at most
+# MERGE_STATE_REREADS times, and set REREADS to the number of reads made. Returns
+# 0 once a read answers a computed state, with PR_JSON and merge_state replaced by
+# that read. Returns 2 when a read shows the PR moved under the gates that already
+# passed it: every pinned field other than the three mergeability facts
+# (mergeStateStatus, mergeable, reviewDecision) was validated above, so a change
+# in any of them makes this a different PR from the one those gates passed.
+# Returns 1 when every read still answered UNKNOWN or could not be read.
+reread_merge_state() { # <pr-number>
+  local n="$1" again same ms
+  REREADS=0
+  while [ "$REREADS" -lt "$MERGE_STATE_REREADS" ]; do
+    [ "$REREADS" -gt 0 ] && sleep "$MERGE_STATE_REREAD_SECS"
+    REREADS=$((REREADS + 1))
+    again=$(gh pr view "$n" --repo "$ORIGIN_REPO_Q" --json "$PR_FIELDS" 2>/dev/null)
+    [ -n "$again" ] || continue
+    same=$(jq -n --argjson a "$PR_JSON" --argjson b "$again" '
+      def pinned: del(.mergeStateStatus, .mergeable, .reviewDecision);
+      ($a | pinned) == ($b | pinned)' 2>/dev/null) || continue
+    [ "$same" = "true" ] || return 2
+    ms=$(printf '%s' "$again" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
+    case "$ms" in
+      ""|UNKNOWN) ;;
+      *) PR_JSON="$again"; merge_state="$ms"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than merging on a partial view" >&2
   exit 1
@@ -291,8 +335,7 @@ while IFS= read -r row; do
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
 
   # --- pinned PR read --------------------------------------------------------
-  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
-    --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url 2>/dev/null)
+  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json "$PR_FIELDS" 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "$PROG: PR#$num view failed; merge held (anchor $id, retry next pass)"
     held=$((held + 1)); continue
@@ -631,6 +674,22 @@ while IFS= read -r row; do
     fi
   fi
 
+  # --- UNKNOWN: GitHub has not computed this PR against its current base -------
+  # The pinned read started that computation, so read it again before deciding.
+  # Every read here comes after the latest merge this pass made, because merges
+  # happen only at the end of an iteration. A computed answer is judged below like
+  # any pinned one, so BEHIND and DIRTY keep their own handling.
+  unknown_note=""
+  if [ "$merge_state" = "UNKNOWN" ] && [ "$MERGE_STATE_REREADS" -gt 0 ]; then
+    reread_merge_state "$num"; rr=$?
+    case "$rr" in
+      0) echo "$PROG: PR#$num answered UNKNOWN on the pinned read and $merge_state on re-read $REREADS (anchor $id)" ;;
+      2) echo "$PROG: PR#$num moved between the pinned read and re-read $REREADS of its UNKNOWN merge state; merge held (anchor $id)"
+         held=$((held + 1)); continue ;;
+      *) unknown_note=" after $REREADS re-read(s)" ;;
+    esac
+  fi
+
   # --- mergeStateStatus: CLEAN, or UNSTABLE decided on required contexts only ----
   case "$merge_state" in
     CLEAN) : ;;
@@ -734,7 +793,7 @@ while IFS= read -r row; do
       else
         record_machine "$id" "settled" "$head_oid" "$aroute"
       fi
-      echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'); merge held (anchor $id)"
+      echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'$unknown_note); merge held (anchor $id)"
       held=$((held + 1)); continue ;;
   esac
   if [ -z "$head_oid" ]; then
