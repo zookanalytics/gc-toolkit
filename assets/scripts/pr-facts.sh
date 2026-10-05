@@ -1149,11 +1149,11 @@ CHILDREN_EOF
 
   # merge.sh reads posture off the bead and never asks GitHub, so the record has
   # to be no older than the merge arm that reads it. --posture-only is the
-  # earliest pre-merge pass: it writes the posture and stops here.
+  # pre-merge pass: it writes the posture and stops here.
   # --route-comments-only runs on into the feedback-routing arm below (and stops
-  # after it), so operator feedback is picked up before merge too rather than
-  # waiting for the full pass at the tail; every other dispatch arm is the full
-  # pass's, after merge.
+  # after it), so operator feedback is picked up ahead of the slow arms rather
+  # than waiting for the full pass at the tail; every other dispatch arm is the
+  # full pass's.
   [ "$POSTURE_ONLY" != 1 ] || continue
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
@@ -2828,11 +2828,11 @@ if [ "$POSTURE_ONLY" = 1 ]; then
   # pass runs after merge, where the same rc would gate nothing.
   [ "$unpostured" -eq 0 ] || exit 1
 elif [ "$ROUTE_ONLY" = 1 ]; then
-  # The early feedback arm, run right after the posture arm and before merge, so
-  # operator feedback is routed on the same tick the posture is stamped instead of
-  # waiting for the full pass at the tail. Its rc holds nothing: routing is
-  # best-effort and the full pass re-runs it idempotently, so refinery-reconcile
-  # reports a non-zero but never holds merge on it.
+  # The early feedback arm, run after merge and pr-open and ahead of the slow
+  # arms, so operator feedback is routed on the tick the posture is stamped
+  # instead of waiting for the full pass at the tail. Its rc holds nothing:
+  # routing is best-effort and the full pass re-runs it idempotently, so
+  # refinery-reconcile reports a non-zero but never holds merge on it.
   echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
 else
   echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"

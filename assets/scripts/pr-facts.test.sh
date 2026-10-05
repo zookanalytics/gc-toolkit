@@ -2949,11 +2949,10 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "tracked as a follow-up for after the merge" "…the dismiss message names the deferral"
 
-# ---- --route-comments-only: route operator feedback early, before merge --------
-# The tk-8qtkvv divergence: --posture-only stamps commented/changes_requested on
-# the cheap pre-merge tick, but routing lived only in the full arm at the pass
-# TAIL (after merge). A pass the timeout killed in between left the feedback
-# stamped-as-seen yet unrouted for hours. This mode routes on the early tick too:
+# ---- --route-comments-only: route operator feedback early in the pass ----------
+# --posture-only stamps commented/changes_requested on the pre-merge tick, and
+# the full arm routes only at the pass TAIL. A pass the timeout killed in between
+# would leave the feedback stamped-as-seen yet unrouted. This mode routes early:
 # it does the SAME routing the full arm does, then stops — no write-back sweep,
 # no MERGED/CLOSED reconciliation, none of the non-feedback arms.
 # The `new-N` bead counter is high this late in the run, so the child id is read

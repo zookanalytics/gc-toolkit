@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-open — arm 6 of the merge cadence: pre_open_gate -> pull_request.
+# pr-open — arm 3 of the merge cadence: pre_open_gate -> pull_request.
 # For each pre_open_gate anchor: adopt an existing OPEN or MERGED PR for the
 # branch (never open a twin) — an OPEN PR's body is first refreshed from the
 # anchor's current pr_summary, so a rework's restamp reaches the published merge
@@ -371,8 +371,8 @@ while IFS= read -r row; do
   # and no PR is published over work the city has already ruled must change.
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   # Empty is never the checkless opt-out: that is the 'none' sentinel. Empty
-  # means never normalized, and gate-ensure — arm 1 of this same pass — stamps
-  # the declared default. Publishing under it would open the PR ungated.
+  # means never normalized, and gate-ensure stamps the declared default when it
+  # reaches the anchor. Publishing under it would open the PR ungated.
   if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
     echo "$PROG: $id branch '$branch' has no normalized check_set (empty is never the 'none' opt-out); no PR opened — gate-ensure stamps the default"
     held=$((held + 1)); continue

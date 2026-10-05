@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge — arm 4 of the merge cadence: the single writer of merged truth.
+# merge — arm 2 of the merge cadence: the single writer of merged truth.
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
 # repo, not a fork), live anchor re-read (still open, still gating on
 # pull_request, still naming this PR by number, url and head branch), then
@@ -33,6 +33,10 @@
 # failing is bounded rather than retried forever: record-failure-cap.sh counts
 # the failures on the anchor and escalates past the cap, so a cause no later
 # pass can clear reaches a person instead of one stderr line per pass.
+# Visit order: anchors whose PR can land this pass (CLEAN or UNSTABLE, or
+# APPROVED with its merge state not yet computed) or has left the open list are
+# visited first and never paced; --deadline and --cursor pace the rest through a
+# rotation (pace-lib.sh).
 # Caller: refinery-reconcile.sh, with BEADS_ACTOR projected to the refinery
 # identity.
 set -u
@@ -69,6 +73,21 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 # Where the freshness probe parks the two commits it needs. Its own namespace,
 # so nothing here can move a branch or a remote-tracking ref.
 GATE_REF="refs/gc-toolkit/merge-gate"
+
+# --deadline <epoch-secs> and --cursor <file> pace the anchors that cannot land
+# this pass (see the visit order below); the ones that can are never paced.
+DEADLINE=""; CURSOR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --deadline) DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)   CURSOR="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$DEADLINE" in
+  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
+            DEADLINE="" ;;
+esac
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -194,6 +213,8 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
 anchor_row() { # live {status, meta}; empty = unreadable, never an all-default row
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -c '.[0] | select(. != null) | select(.metadata != null)
@@ -282,12 +303,67 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
+# --- visit order: what can land this pass first, the rest in rotation ---------
+# This arm's cost grows with the PR set, and the pass that runs it has a budget,
+# so a deadline or a kill can stop it part-way. What it must never defer is a
+# landing. An anchor whose PR GitHub reports CLEAN or UNSTABLE (the only states
+# the merge below proceeds on), or APPROVED with its merge state not yet
+# computed (GitHub recomputes every PR's after a squash moves the base), or
+# whose PR is no longer open (merged, which owes the record, or closed), is
+# visited first, and the deadline never stops that group. The rest cannot merge
+# this pass (BLOCKED, BEHIND, DIRTY, or unapproved), so a visit there refreshes
+# a verdict and nothing lands; they are visited in id order after the cursor,
+# wrapping (pace-lib.sh), until the deadline. One `gh pr list` answers every
+# PR's state. When it cannot be read, every anchor joins the first group and
+# the pass is not paced at all.
+landing_rows=$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+rest_rows=""
+OPEN_STATES=$(gh pr list --repo "$ORIGIN_REPO_Q" --state open --limit 1000 \
+  --json number,mergeStateStatus,reviewDecision 2>/dev/null | scrub)
+if printf '%s' "$OPEN_STATES" | jq -e 'type == "array"' >/dev/null 2>&1 \
+   && split_rows=$(printf '%s' "$ANCHORS" | jq -r --argjson open "$OPEN_STATES" '
+        ($open | map({key: (.number | tostring), value: .}) | from_entries) as $pr
+        | .[] | ((.metadata.pr_number // "") | tostring) as $n
+        | ($pr[$n].mergeStateStatus // "") as $ms
+        | (if ($pr | has($n) | not) or $ms == "CLEAN" or $ms == "UNSTABLE"
+              or (($ms == "UNKNOWN" or $ms == "") and $pr[$n].reviewDecision == "APPROVED")
+           then "landing" else "rest" end) + "\t" + tojson' 2>/dev/null); then
+  landing_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "landing" { print $2 }')
+  rest_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "rest" { print $2 }' | pace_order "$CURSOR")
+else
+  echo "$PROG: WARN open-PR states unreadable; every anchor is visited this pass, unpaced" >&2
+fi
+landing_n=$(printf '%s' "$landing_rows" | awk 'NF { n++ } END { print n + 0 }')
+rest_n=$(printf '%s' "$rest_rows" | awk 'NF { n++ } END { print n + 0 }')
+cursor_warned=0
+cursor_note() { # <anchor-id> — record the paced anchor this pass last finished
+  pace_note "$CURSOR" "$1" && return 0
+  [ "$cursor_warned" = 1 ] \
+    || echo "$PROG: WARN cannot record progress in $CURSOR; the next pass starts the rotation over" >&2
+  cursor_warned=1
+}
+
 merged=0; recovered=0; held=0; skipped=0; record_failed=0
-while IFS= read -r row; do
-  [ -n "${row:-}" ] || continue
+rest_visited=0; finished=""; resume_at=""
+while IFS= read -r tagged; do
+  [ -n "${tagged:-}" ] || continue
+  group="${tagged%%$'\t'*}"
+  row="${tagged#*$'\t'}"
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
   [ -n "$id" ] || continue
+  # Pacing applies to the rest group alone. The previous paced anchor is
+  # recorded before this one starts, so a pass the deadline stops here, or a
+  # kill interrupts below, resumes at this anchor. One is always visited.
+  if [ "$group" = rest ]; then
+    [ -n "$finished" ] && cursor_note "$finished"
+    if [ "$rest_visited" -gt 0 ] && pace_spent "$DEADLINE"; then
+      resume_at="$id"
+      break
+    fi
+    rest_visited=$((rest_visited + 1))
+    finished="$id"
+  fi
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
 
   # --- pinned PR read --------------------------------------------------------
@@ -887,9 +963,16 @@ $sa_out" >/dev/null 2>&1 || true
     [ -x "$RECORD_CAP" ] && "$RECORD_CAP" "$id" "$num" "$merge_oid" "${target:-$base}" || true
   fi
 done <<ROWS_EOF
-$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s\n' "$landing_rows" | awk 'NF { print "landing\t" $0 }')
+$(printf '%s\n' "$rest_rows" | awk 'NF { print "rest\t" $0 }')
 ROWS_EOF
+[ -n "$finished" ] && cursor_note "$finished"
 
+if [ -n "$resume_at" ]; then
+  echo "$PROG: visited $landing_n landing-first and $rest_visited of $rest_n other anchors before the deadline; the next pass resumes at $resume_at"
+else
+  echo "$PROG: visited $landing_n landing-first and $rest_visited of $rest_n other anchors"
+fi
 echo "$PROG: $merged merged, $recovered recovered, $held held, $skipped skipped, $record_failed record-failed"
 [ "$record_failed" -eq 0 ] || exit 1
 exit 0

@@ -307,7 +307,7 @@ city executes, with nothing unplaced and no row carrying any other value.
 **The placement rule.** A component belongs to the workflow whose product it
 advances, not the one whose name it carries. `mol-refinery-patrol` is merge
 because what it produces is merge decisions. `gate-ensure.sh` is review even
-though it runs as arm 1 of the merge cadence, because what it produces is a
+though it runs as arm 6 of the merge cadence, because what it produces is a
 raisable check and a routed review bead. Patrol is the workflow whose product
 is a fleet that can still run the other five.
 
@@ -325,7 +325,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
-| `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
+| `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
 | `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up `discovered-from` the anchor and closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |

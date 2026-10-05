@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
-# the arm ORDER (gate-ensure, pr-facts --posture-only, pr-facts
-# --route-comments-only, merge, pre-open-rebase, pr-open, pr-facts,
-# convoy-graduate, review-sweep, scaffolding-sweep, duplicate-sweep, pr-stack) — merge
-# runs AHEAD of pre-open-rebase and pr-open, whose per-anchor GitHub round-trips over the
-# pre_open_gate backlog would otherwise starve it of the pass budget; its only
-# same-pass interlocks run before it — the posture arm, which merge.sh reads off
-# the bead and would otherwise read one written a pass ago, and the feedback arm,
-# so a pass killed at the tail has still routed operator feedback;
-# the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
-# merge because the same pass must not fail the order; a non-zero posture arm holds it too,
-# because merge.sh validates the posture that arm records), exercised by
-# extracting and executing the marked block against stubs; BEADS_ACTOR /
-# GC_AGENT projections scoped to their arms; a failing arm not skipping the
-# arms after it; the exit-1 failure report; the per-rig pass lock (one merge.sh
-# writer across two overlapping ticks, a wedged holder reported rather than
-# skipped over, an unobtainable lock refusing the pass before any arm); a
-# killed pass leaving its partial output in pass.log; and the invariant binding
-# the order timeout to the controller's tracking-sweep window.
+# the arm ORDER (pr-facts --posture-only, merge, pr-open, pr-facts
+# --route-comments-only, pre-open-rebase, gate-ensure, pr-facts,
+# convoy-graduate, review-sweep, scaffolding-sweep, duplicate-sweep, pr-stack) —
+# merge runs right behind its one same-pass interlock, the posture arm, which
+# merge.sh reads off the bead and would otherwise read one written a pass ago,
+# and pr-open right behind merge, so no arm whose cost grows with the gating set
+# can spend the pass budget before either runs; a gate-ensure that never returns
+# leaves both already run; gate-ensure handed a deadline from
+# REFINERY_RECONCILE_GATE_BUDGET_SECS and a cursor in the pass state dir, and
+# its rc=3 reported without holding or failing anything; the
+# posture-gates-merge interlock (a non-zero posture arm HOLDS merge.sh in the
+# same pass, because merge.sh validates the posture that arm records),
+# exercised by extracting and executing the marked block against stubs;
+# BEADS_ACTOR / GC_AGENT projections scoped to their arms; a failing arm not
+# skipping the arms after it; the exit-1 failure report; per-arm start and
+# elapsed lines in pass.log; the per-rig pass lock (one merge.sh writer across
+# two overlapping ticks, a wedged holder reported rather than skipped over, an
+# unobtainable lock refusing the pass before any arm); a killed pass leaving its
+# partial output in pass.log; and the invariant binding the order timeout to the
+# controller's tracking-sweep window.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,15 +64,26 @@ for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convo
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-eq "$order" "gate-ensure.sh,pr-facts.sh,pr-facts.sh,merge.sh,pre-open-rebase.sh,pr-open.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,scaffolding-sweep.sh,duplicate-sweep.sh,pr-stack.sh" "the arms ran in the load-bearing order (posture + feedback before merge, merge ahead of pre-open-rebase and pr-open, full pr-facts after)"
+eq "$order" "pr-facts.sh,merge.sh,pr-open.sh,pr-facts.sh,pre-open-rebase.sh,gate-ensure.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,scaffolding-sweep.sh,duplicate-sweep.sh,pr-stack.sh" "the arms ran in the load-bearing order (posture, then merge, then pr-open, ahead of every arm whose cost grows with the gating set)"
 dup_line=$(grep '^duplicate-sweep' "$ARM_LOG")
 has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTOR=<refinery>"
 # pr-stack writes PR bodies and no bead, so it carries neither projection: an
 # identity it does not need is authority it must not be able to spend.
 stack_line=$(grep '^pr-stack' "$ARM_LOG")
 eq "$stack_line" "pr-stack.sh|||" "pr-stack ran last, unprojected and with no args"
-has "$(grep '^gate-ensure' "$ARM_LOG")" "--default correctness,triage --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat --validate-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review, fix AND validate pools"
-hasnt "$(grep '^gate-ensure' "$ARM_LOG")" "--review-formula" "gate-ensure gets no --review-formula by default (the two-lane quorum pilot is opt-in)"
+gate_line=$(grep '^gate-ensure' "$ARM_LOG")
+has "$gate_line" "--default correctness,triage --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat --validate-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review, fix AND validate pools"
+hasnt "$gate_line" "--review-formula" "gate-ensure gets no --review-formula by default (the two-lane quorum pilot is opt-in)"
+has "$gate_line" "--cursor $TMP/state/myrig/gate-ensure.cursor" "gate-ensure resumes from a cursor kept in the rig's pass state dir"
+# The deadline is the pass clock plus the budget, read from argv; the default
+# budget is 300s, so it lands within a few seconds of now+300.
+dl=$(printf '%s' "$gate_line" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
+now=$(date -u +%s)
+if [ -n "$dl" ] && [ "$dl" -ge $((now + 300 - 30)) ] && [ "$dl" -le $((now + 300)) ]; then
+  ok "gate-ensure got a deadline the default 300s budget past its start"
+else
+  bad "gate-ensure deadline '${dl:-<none>}' is not ~300s past now ($now)"
+fi
 has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--fix-pool myrig/gc-toolkit.polecat" "pre-open-rebase got the derived fix pool"
 case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
   *"|myrig/gc-toolkit.refinery|"*) bad "pre-open-rebase must NOT inherit BEADS_ACTOR (it closes nothing)" ;;
@@ -78,6 +91,14 @@ case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
 esac
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
+has "$merge_line" "--cursor $TMP/state/myrig/merge.cursor" "merge resumes its paced PRs from a cursor kept in the rig's pass state dir"
+dl=$(printf '%s' "$merge_line" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
+now=$(date -u +%s)
+if [ -n "$dl" ] && [ "$dl" -ge $((now + 120 - 30)) ] && [ "$dl" -le $((now + 120)) ]; then
+  ok "merge got a deadline the default 120s budget past its start"
+else
+  bad "merge deadline '${dl:-<none>}' is not ~120s past now ($now)"
+fi
 # The full pr-facts arm: --fix-pool and no pre-merge mode flag (the posture arm
 # carries neither, the feedback arm carries --route-comments-only).
 facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool' | grep -v -- '--route-comments-only')
@@ -87,62 +108,113 @@ hasnt "$facts_line" "--review-pool" "…and no review pool: it dispatches no rev
 has "$facts_line" "|myrig/gc-toolkit.refinery|" "pr-facts ran as BEADS_ACTOR=<refinery>"
 
 # merge.sh reads pr_posture off the bead and never asks GitHub, so a posture
-# written by the pass BEFORE it cannot see a comment that arrived since.
+# written by the pass BEFORE it cannot see a comment that arrived since. The
+# posture arm runs first and merge immediately after it, so nothing widens the
+# window in which a new comment goes unseen.
 posture_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--posture-only')
 eq "$(printf '%s\n' "$posture_line" | wc -l | tr -d ' ')" 1 "the posture arm ran exactly once"
 has "$posture_line" "|myrig/gc-toolkit.refinery|" "the posture arm ran as BEADS_ACTOR=<refinery>"
 hasnt "$posture_line" "--fix-pool" "the posture arm dispatches nothing, so it takes no pools"
-posture_at=$(grep -n '^pr-facts.*--posture-only' "$ARM_LOG" | head -1 | cut -d: -f1)
-merge_at=$(grep -n '^merge.sh' "$ARM_LOG" | head -1 | cut -d: -f1)
-[ -n "$posture_at" ] && [ -n "$merge_at" ] && [ "$posture_at" -lt "$merge_at" ] \
-  && ok "posture is recorded BEFORE merge reads it" \
-  || bad "posture arm did not run before merge (posture=$posture_at merge=$merge_at)"
-
-# The early feedback arm routes operator feedback before merge, so a pass killed
-# at the tail (before the full pr-facts arm) has still picked it up. It carries a
-# fix pool (it dispatches rework children) but the --route-comments-only flag.
+at() { grep -n "^$1" "$ARM_LOG" | head -1 | cut -d: -f1; }
+posture_at=$(at 'pr-facts.*--posture-only')
+merge_at=$(at 'merge.sh')
+propen_at=$(at 'pr-open')
+route_at=$(at 'pr-facts.*--route-comments-only')
+preopen_at=$(at 'pre-open-rebase')
+gate_at=$(at 'gate-ensure')
+eq "$posture_at,$merge_at" "1,2" "the posture is recorded first and merge reads it next, with no arm between them"
+# pr-open sits right behind merge: a PR opened this pass is never landable on
+# the same tick, so the order costs no landing, and no slower arm can keep a
+# green branch from reaching the operator.
+eq "$propen_at" 3 "pr-open runs right behind merge"
+# gate-ensure visits every gating anchor, so its cost grows with the set merge
+# and pr-open drain; behind both, its cost can no longer stop them.
+[ -n "$gate_at" ] && [ "$gate_at" -gt "$propen_at" ] && [ "$gate_at" -gt "$merge_at" ] \
+  && ok "gate-ensure runs after merge and pr-open" \
+  || bad "gate-ensure did not run after merge and pr-open (gate=$gate_at merge=$merge_at propen=$propen_at)"
+# The early feedback arm routes operator feedback ahead of gate-ensure and the
+# full pr-facts arm, so a pass killed in either has still picked it up. It
+# carries a fix pool (it dispatches rework children) but the
+# --route-comments-only flag.
 route_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--route-comments-only')
 eq "$(printf '%s\n' "$route_line" | wc -l | tr -d ' ')" 1 "the feedback arm ran exactly once"
 has "$route_line" "--fix-pool myrig/gc-toolkit.polecat" "the feedback arm got the derived fix pool"
 has "$route_line" "|myrig/gc-toolkit.refinery|" "the feedback arm ran as BEADS_ACTOR=<refinery>"
-route_at=$(grep -n '^pr-facts.*--route-comments-only' "$ARM_LOG" | head -1 | cut -d: -f1)
-[ -n "$posture_at" ] && [ -n "$route_at" ] && [ "$posture_at" -lt "$route_at" ] \
-  && ok "the feedback arm runs after the posture arm" \
-  || bad "feedback arm did not run after posture (posture=$posture_at route=$route_at)"
-[ -n "$route_at" ] && [ -n "$merge_at" ] && [ "$route_at" -lt "$merge_at" ] \
-  && ok "the feedback arm routes BEFORE merge (a tail-killed pass has still picked feedback up)" \
-  || bad "feedback arm did not run before merge (route=$route_at merge=$merge_at)"
-# merge runs AHEAD of pre-open-rebase and pr-open — those two iterate the
-# pre_open_gate backlog with a GitHub round-trip per anchor, and a grown held
-# backlog let their cost consume the whole 600s budget before merge was reached,
-# so approved CLEAN PRs never landed. This ordering is the fix: gate-ensure and
-# posture are merge's only same-pass interlocks, so nothing merge does not need
-# may sit between them and it.
-preopen_at=$(grep -n '^pre-open-rebase' "$ARM_LOG" | head -1 | cut -d: -f1)
-propen_at=$(grep -n '^pr-open' "$ARM_LOG" | head -1 | cut -d: -f1)
-[ -n "$merge_at" ] && [ -n "$preopen_at" ] && [ "$merge_at" -lt "$preopen_at" ] \
-  && ok "merge runs BEFORE pre-open-rebase (not starved by the pre_open_gate backlog)" \
-  || bad "merge did not run before pre-open-rebase (merge=$merge_at preopen=$preopen_at)"
-[ -n "$merge_at" ] && [ -n "$propen_at" ] && [ "$merge_at" -lt "$propen_at" ] \
-  && ok "merge runs BEFORE pr-open (not starved by the pre_open_gate backlog)" \
-  || bad "merge did not run before pr-open (merge=$merge_at propen=$propen_at)"
+[ -n "$route_at" ] && [ -n "$gate_at" ] && [ "$route_at" -lt "$gate_at" ] \
+  && ok "the feedback arm routes BEFORE gate-ensure (a pass killed there has still picked feedback up)" \
+  || bad "feedback arm did not run before gate-ensure (route=$route_at gate=$gate_at)"
+# pre-open-rebase observes the pre_open_gate anchors pr-open left where they
+# were; an anchor pr-open flipped is the CONFLICTING arm's.
+[ -n "$preopen_at" ] && [ "$preopen_at" -gt "$propen_at" ] \
+  && ok "pre-open-rebase runs after pr-open" \
+  || bad "pre-open-rebase did not run after pr-open (preopen=$preopen_at propen=$propen_at)"
 grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
 has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
 has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
-gate_line=$(grep '^gate-ensure' "$ARM_LOG")
 case "$gate_line" in
   *"|myrig/gc-toolkit.refinery|"*) bad "gate-ensure must NOT inherit BEADS_ACTOR (projection is scoped to the closing arms)" ;;
   *) ok "identity projections are scoped, not process-wide" ;;
 esac
 
-echo "# gate-ensure rc=3 HOLDS merge.sh without failing the order"
+echo "# each arm is bracketed in pass.log by its start and its elapsed time"
+PASSLOG0="$TMP/state/myrig/pass.log"
+grep -qE '^-- \(1\) pr-posture \(started [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\)$' "$PASSLOG0" \
+  && ok "an arm's start line carries its start time" \
+  || bad "no timed start line for the posture arm in pass.log"
+grep -qE '^-- \(6\) gate-ensure: done in [0-9]+s \(rc=0\)$' "$PASSLOG0" \
+  && ok "an arm's done line carries its elapsed seconds and rc" \
+  || bad "no elapsed line for gate-ensure in pass.log"
+grep -qE '^END [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z \([0-9]+s\)$' "$PASSLOG0" \
+  && ok "the END line carries the pass's elapsed seconds" \
+  || bad "the END line carries no pass elapsed time"
+
+echo "# REFINERY_RECONCILE_MERGE_BUDGET_SECS sets merge's deadline; 0 runs it unbounded"
+: > "$ARM_LOG"
+REFINERY_RECONCILE_MERGE_BUDGET_SECS=40 drive > /dev/null
+dl=$(grep '^merge.sh' "$ARM_LOG" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
+now=$(date -u +%s)
+[ -n "$dl" ] && [ "$dl" -ge $((now + 40 - 30)) ] && [ "$dl" -le $((now + 40)) ] \
+  && ok "a 40s budget puts merge's deadline 40s past its start" \
+  || bad "a 40s budget gave merge deadline '${dl:-<none>}' (now $now)"
+: > "$ARM_LOG"
+REFINERY_RECONCILE_MERGE_BUDGET_SECS=0 drive > /dev/null
+ml=$(grep '^merge.sh' "$ARM_LOG")
+hasnt "$ml" "--deadline" "a 0 budget hands merge no deadline"
+has "$ml" "--cursor " "…and it still resumes from its cursor"
+
+echo "# REFINERY_RECONCILE_GATE_BUDGET_SECS sets gate-ensure's deadline; 0 runs it unbounded"
+: > "$ARM_LOG"
+REFINERY_RECONCILE_GATE_BUDGET_SECS=45 drive > /dev/null
+dl=$(grep '^gate-ensure' "$ARM_LOG" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
+now=$(date -u +%s)
+[ -n "$dl" ] && [ "$dl" -ge $((now + 45 - 30)) ] && [ "$dl" -le $((now + 45)) ] \
+  && ok "a 45s budget puts the deadline 45s past gate-ensure's start" \
+  || bad "a 45s budget gave deadline '${dl:-<none>}' (now $now)"
+: > "$ARM_LOG"
+REFINERY_RECONCILE_GATE_BUDGET_SECS=0 drive > /dev/null
+gl=$(grep '^gate-ensure' "$ARM_LOG")
+hasnt "$gl" "--deadline" "a 0 budget hands gate-ensure no deadline"
+has "$gl" "--cursor " "…and it still resumes from its cursor"
+: > "$ARM_LOG"
+REFINERY_RECONCILE_GATE_BUDGET_SECS=soon drive > /dev/null
+dl=$(grep '^gate-ensure' "$ARM_LOG" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
+now=$(date -u +%s)
+[ -n "$dl" ] && [ "$dl" -ge $((now + 300 - 30)) ] && [ "$dl" -le $((now + 300)) ] \
+  && ok "an unparseable budget falls back to the 300s default" \
+  || bad "an unparseable budget gave deadline '${dl:-<none>}' (now $now)"
+
+echo "# gate-ensure rc=3 is reported, and holds and fails nothing"
+# merge has already run when gate-ensure does, and merge.sh and pr-open.sh each
+# hold an anchor with no check_set on their own read, so the rc is a report.
 mkarm gate-ensure.sh 3
 : > "$ARM_LOG"
 out=$(drive); rc=$?
-eq "$rc" 0 "the designed hold does not fail the order"
-has "$out" "merge.sh HELD this pass" "the hold is reported"
-if grep -q '^merge.sh' "$ARM_LOG"; then bad "merge.sh RAN despite an unsafe gate-ensure"; else ok "merge.sh did not run"; fi
-grep -q '^pr-facts' "$ARM_LOG" && ok "pr-facts still ran (arms are independent)" || bad "pr-facts was skipped by the hold"
+eq "$rc" 0 "an unsafe gate-ensure does not fail the order"
+has "$out" "gate-ensure UNSAFE (rc=3)" "the unsafe rc is reported"
+hasnt "$out" "merge.sh HELD" "…and holds no merge"
+grep -q '^merge.sh' "$ARM_LOG" && ok "merge.sh ran" || bad "merge.sh did not run"
+grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG" && ok "pr-facts still ran (arms are independent)" || bad "pr-facts was skipped"
+mkarm gate-ensure.sh
 
 echo "# a non-zero posture arm HOLDS merge.sh — merge validates what it records"
 # merge.sh reads pr_posture off the bead and never asks GitHub, so an anchor the
@@ -210,17 +282,18 @@ while [ ! -f "${GATE_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i +
 ARM
   chmod +x "$SD/gate-ensure.sh"
 }
-# A pre-open-rebase that blocks until released — a post-merge backlog arm that
-# does not return within the pass, used to prove merge already ran ahead of it.
-mkblocking_preopen() {
-  cat > "$SD/pre-open-rebase.sh" <<'ARM'
+# A pr-facts whose posture arm blocks until released (its other modes record and
+# return), so a pass can be caught before it has decided its merge tail.
+mkblocking_posture() {
+  cat > "$SD/pr-facts.sh" <<'ARM'
 #!/usr/bin/env bash
-printf '%s|%s|%s|%s\n' "pre-open-rebase.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
-: > "${PREOPEN_STARTED:?}"
+printf '%s|%s|%s|%s\n' "pr-facts.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
+case "$*" in *--posture-only*) : ;; *) exit 0 ;; esac
+: > "${POSTURE_STARTED:?}"
 i=0
-while [ ! -f "${PREOPEN_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
+while [ ! -f "${POSTURE_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
 ARM
-  chmod +x "$SD/pre-open-rebase.sh"
+  chmod +x "$SD/pr-facts.sh"
 }
 await() { # <file> — bounded wait for a sentinel to appear
   local i=0
@@ -238,34 +311,33 @@ await_lock_free() {
   return 1
 }
 export GATE_STARTED="$TMP/gate-started" GATE_RELEASE="$TMP/gate-release"
-export PREOPEN_STARTED="$TMP/preopen-started" PREOPEN_RELEASE="$TMP/preopen-release"
+export POSTURE_STARTED="$TMP/posture-started" POSTURE_RELEASE="$TMP/posture-release"
 
-echo "# merge reaches its arm before a slow pre_open_gate-backlog arm spends the budget"
-# The landing stall this ordering fixes: pre-open-rebase and pr-open iterate the
-# pre_open_gate backlog with a GitHub round-trip per anchor, and a grown backlog
-# spent the whole 600s pass budget before merge ran, so approved CLEAN PRs never
-# landed. With merge ahead of them, a pass whose budget is exhausted inside those
-# arms has already merged. Model the worst case — a backlog arm that does not
-# return within the pass — by blocking pre-open-rebase and proving merge already
-# ran while pr-open (the other backlog arm) has not.
-for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
-mkblocking_preopen
-rm -f "$PREOPEN_STARTED" "$PREOPEN_RELEASE"
+echo "# a gate-ensure that never returns leaves merge and pr-open already run"
+# gate-ensure visits every gating anchor, so its cost grows with the set that
+# only merge drains and only pr-open advances. Model the worst case, a
+# gate-ensure that does not return within the pass, and prove both already ran
+# while the full pr-facts arm behind it has not.
+for a in pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+mkblocking_gate
+rm -f "$GATE_STARTED" "$GATE_RELEASE"
 : > "$ARM_LOG"
 drive > /dev/null 2>&1 &
-dP=$!
-if await "$PREOPEN_STARTED"; then
+dG=$!
+if await "$GATE_STARTED"; then
   grep -q '^merge.sh' "$ARM_LOG" \
-    && ok "merge ran before the blocked backlog arm — a budget spent there cannot starve it" \
-    || bad "merge had NOT run when pre-open-rebase blocked — merge is still behind the backlog arm"
-  if grep -q '^pr-open' "$ARM_LOG"; then bad "pr-open ran before the blocked pre-open-rebase (order wrong)"; else ok "pr-open has not run — the backlog arms sit after merge"; fi
-  : > "$PREOPEN_RELEASE"
-  wait "$dP"
+    && ok "merge ran before the blocked gate-ensure — a budget spent there cannot starve it" \
+    || bad "merge had NOT run when gate-ensure blocked — merge is still behind it"
+  grep -q '^pr-open' "$ARM_LOG" \
+    && ok "pr-open ran before the blocked gate-ensure — a green branch still reaches the operator" \
+    || bad "pr-open had NOT run when gate-ensure blocked"
+  if grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG"; then bad "the full pr-facts arm ran ahead of gate-ensure (order wrong)"; else ok "the full pr-facts arm sits behind gate-ensure"; fi
+  : > "$GATE_RELEASE"
+  wait "$dG"
 else
-  bad "the pass never reached its pre-open-rebase arm (fixture wedged)"
-  : > "$PREOPEN_RELEASE"; wait "$dP" 2>/dev/null
+  bad "the pass never reached its gate-ensure arm (fixture wedged)"
+  : > "$GATE_RELEASE"; wait "$dG" 2>/dev/null
 fi
-mkarm pre-open-rebase.sh   # restore the non-blocking stub for the tests below
 
 echo "# the per-rig pass lock, not the tracking bead, is the single-flight"
 LOCK_PROVEN=0
@@ -292,26 +364,35 @@ else
   : > "$GATE_RELEASE"; wait "$d1" 2>/dev/null
 fi
 
-echo "# a pass killed mid-run leaves its partial output behind"
-rm -f "$PASSLOG" "$MARK" "$GATE_STARTED" "$GATE_RELEASE"
+echo "# a pass killed before its merge decision leaves its partial output behind"
+await_lock_free || bad "the lock test's pass never released the lock"
+mkarm gate-ensure.sh
+mkblocking_posture
+rm -f "$PASSLOG" "$MARK" "$POSTURE_STARTED" "$POSTURE_RELEASE"
 : > "$ARM_LOG"
 # Launch the driver directly, not through the drive() function. Backgrounding a
 # function forks a wrapper subshell, so $! names the wrapper and `kill` below
-# would leave the real driver orphaned — and the GATE_RELEASE written right after
-# the kill would then let that orphan run on to `decided`, defeating this very
-# check. A backgrounded simple command makes $! the driver, so the kill lands.
+# would leave the real driver orphaned — and the POSTURE_RELEASE written right
+# after the kill would then let that orphan run on to `decided`, defeating this
+# very check. A backgrounded simple command makes $! the driver, so the kill
+# lands.
 GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" > /dev/null 2>&1 &
 d2=$!
-if await "$GATE_STARTED"; then
+if await "$POSTURE_STARTED"; then
   kill -9 "$d2" 2>/dev/null
-  : > "$GATE_RELEASE"
   wait "$d2" 2>/dev/null
+  # Read the log before releasing the arm: the posture arm runs in a subshell
+  # that outlives the killed driver, and once released it would log its own
+  # done line, which is the very line this case asserts is absent.
   grep -q '^=== .*rig=myrig' "$PASSLOG" \
     && ok "the killed pass left its header in pass.log" \
     || bad "the killed pass left no header — an overrun is invisible again"
-  grep -q '^-- (1) gate-ensure' "$PASSLOG" \
-    && ok "…and the arm it died in" \
+  grep -q '^-- (1) pr-posture (started ' "$PASSLOG" \
+    && ok "…and the start of the arm it died in" \
     || bad "…but not the arm it died in"
+  grep -q '^-- (1) pr-posture: done' "$PASSLOG" \
+    && bad "the arm the pass died in logged a done line" \
+    || ok "…with no done line, so the arm it died in is legible"
   grep -q '^END ' "$PASSLOG" \
     && bad "the killed pass wrote an END line — a kill is indistinguishable from a clean exit" \
     || ok "no END line, so the kill is legible as an unfinished pass"
@@ -324,9 +405,35 @@ if await "$GATE_STARTED"; then
     started|reached) ok "the killed pass left its merge-decision marker at a pre-decision phase ('$kph')" ;;
     *) bad "the killed pass left its marker at '${kph:-<empty>}', not a pre-decision phase — it was not caught before deciding its tail" ;;
   esac
+  : > "$POSTURE_RELEASE"
+else
+  bad "the pass to be killed never reached its posture arm (fixture wedged)"
+  : > "$POSTURE_RELEASE"; wait "$d2" 2>/dev/null
+fi
+mkarm pr-facts.sh
+
+echo "# a pass killed in gate-ensure has already decided its merge tail"
+await_lock_free || bad "the posture-killed pass's arm never released the lock"
+mkblocking_gate
+rm -f "$PASSLOG" "$MARK" "$GATE_STARTED" "$GATE_RELEASE"
+: > "$ARM_LOG"
+GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" > /dev/null 2>&1 &
+d4=$!
+if await "$GATE_STARTED"; then
+  kill -9 "$d4" 2>/dev/null
+  wait "$d4" 2>/dev/null
+  read -r gph _ < "$MARK" 2>/dev/null || gph=""
+  eq "$gph" "decided" "a pass killed in gate-ensure left its marker at 'decided' — no dropped merge tail to report"
+  grep -q '^-- (2) merge: done in [0-9]*s (rc=0)$' "$PASSLOG" \
+    && ok "…and the merge arm's done line is in pass.log" \
+    || bad "the merge arm left no done line before the kill"
+  grep -q '^-- (6) gate-ensure (started ' "$PASSLOG" \
+    && ok "…and gate-ensure's start line names the arm the pass died in" \
+    || bad "gate-ensure left no start line"
+  : > "$GATE_RELEASE"
 else
   bad "the pass to be killed never reached its gate-ensure arm (fixture wedged)"
-  : > "$GATE_RELEASE"; wait "$d2" 2>/dev/null
+  : > "$GATE_RELEASE"; wait "$d4" 2>/dev/null
 fi
 
 echo "# the merge-decision marker tracks a clean pass to 'decided', and the report runs at pass start"
@@ -428,15 +535,13 @@ else
 fi
 
 echo "# the marked interlock block executes standalone against stubs"
-GATE="$(awk '/# >>> heal-gates-merge/{f=1;next} /# <<< heal-gates-merge/{f=0} f' "$RUNNER")"
-[ -n "$GATE" ] && ok "heal-gates-merge block extracted" || bad "heal-gates-merge markers missing"
+GATE="$(awk '/# >>> posture-gates-merge/{f=1;next} /# <<< posture-gates-merge/{f=0} f' "$RUNNER")"
+[ -n "$GATE" ] && ok "posture-gates-merge block extracted" || bad "posture-gates-merge markers missing"
 hasnt "$GATE" '{{' "the block is template-free (executable verbatim)"
+hasnt "$GATE" 'gate-ensure.sh' "gate-ensure is outside the block: merge needs nothing it writes in the same pass"
 GSD="$TMP/gsd"; mkdir -p "$GSD"
-printf '#!/usr/bin/env bash\nexit 3\n' > "$GSD/gate-ensure.sh"
-# The block runs gate-ensure, the two pre-merge pr-facts modes and merge; pr-open
-# and pre-open-rebase are outside it now (they run after merge), so it stubs
-# neither. pr-facts is invoked twice in the block — --posture-only, then
-# --route-comments-only — so the stub records a token per mode.
+# The block runs the posture arm and merge, and nothing else; the stub records a
+# token per pr-facts mode so an arm that crept into the block would show.
 cat > "$GSD/pr-facts.sh" <<'PF'
 #!/usr/bin/env bash
 case "$*" in
@@ -454,35 +559,21 @@ export BLOCK_SENTINEL="$TMP/block-order"; : > "$BLOCK_SENTINEL"
 export MARK_LOG="$TMP/mark-log"; : > "$MARK_LOG"
 {
   printf 'set -u\nSCRIPTS_DIR=%q\nLOG_SINK=""\nNOTED=""\nFAILED=""\n' "$GSD"
-  printf 'AGENT=%q\nCHECK_SET_DEFAULT=%q\nREVIEW_POOL=%q\nFIX_POOL=%q\nVALIDATE_POOL=%q\n' \
-    'myrig/gc-toolkit.refinery' correctness 'myrig/p-correctness' 'myrig/p' 'myrig/p'
+  printf 'AGENT=%q\nSTATE_DIR=%q\nMERGE_BUDGET_SECS=120\n' 'myrig/gc-toolkit.refinery' "$TMP/gsd-state"
   printf 'MARK_LOG=%q\nmark_merge() { printf "%%s\\n" "$1" >> "$MARK_LOG"; }\n' "$MARK_LOG"
   printf '%s\n' "$GATE"
   printf 'echo "MERGE_HELD=$MERGE_HELD"\n'
 } > "$TMP/gaterun.sh"
 : > "$MARK_LOG"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
-[ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite rc=3" || ok "(block) rc=3 held merge.sh"
-has "$gout" "MERGE_HELD=1" "(block) the hold flag is set"
-eq "$(paste -sd, - < "$MARK_LOG")" "held" "(block) a held merge marks the decision 'held', not a drop"
-# Recording a fact is not a dispatch: a held merge still gets a fresh posture,
-# so the pass that finally merges is not reading a stale one. The feedback arm
-# runs under the hold too — routing operator feedback does not wait on merge.
-has "$(cat "$BLOCK_SENTINEL")" "posture" "(block) the posture arm runs even when merge is HELD"
-has "$(cat "$BLOCK_SENTINEL")" "feedback" "(block) the feedback arm runs even when merge is HELD"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/gate-ensure.sh"
-: > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"; : > "$MARK_LOG"
-gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
-[ -s "$MERGE_SENTINEL" ] && ok "(block) a clean gate-ensure lets merge.sh run" || bad "(block) merge.sh did not run after a clean gate-ensure"
+[ -s "$MERGE_SENTINEL" ] && ok "(block) a recorded posture lets merge.sh run" || bad "(block) merge.sh did not run after a recorded posture"
 has "$gout" "MERGE_HELD=0" "(block) the hold flag is clear"
-eq "$(paste -sd, - < "$BLOCK_SENTINEL")" "posture,feedback,merge" "(block) posture and feedback both run, in that order, before merge reads posture"
+eq "$(paste -sd, - < "$BLOCK_SENTINEL")" "posture,merge" "(block) the posture is recorded, then merge reads it, with nothing between them"
 eq "$(paste -sd, - < "$MARK_LOG")" "reached,decided" "(block) a run marks 'reached' before merge and 'decided' after"
 
-# The posture arm's rc is the second half of the same interlock: merge.sh
-# validates the posture this arm records, so an arm that could not record one
-# must not be followed by a merge in the same pass.
-# Only the posture arm fails here; the feedback arm exits 0, so the hold under
-# test is unambiguously the posture arm's.
+# The posture arm's rc is the interlock: merge.sh validates the posture this arm
+# records, so an arm that could not record one must not be followed by a merge
+# in the same pass.
 cat > "$GSD/pr-facts.sh" <<'PF'
 #!/usr/bin/env bash
 case "$*" in

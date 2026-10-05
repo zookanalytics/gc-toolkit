@@ -1062,6 +1062,69 @@ echo '[]' > "$GH_DIR/reviews_99.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed merge-in in flight is the city's move, not a wedge"
 
+echo "# landing first: a PR that can land, or has left the open list, is visited first and never paced"
+# PC9's PR is CLEAN in the open-PR list, so it can land this pass; PD5's PR is
+# not in that list (it merged out of band and owes its record). PB1 and PB2's
+# PRs are BLOCKED, so a visit there only refreshes a verdict. The ids sort the
+# two groups the other way round, so the order the visits take is the order
+# the arm chose. A deadline of epoch 1 has always passed, so exactly one of the
+# paced anchors is visited per pass.
+store "[$(anchor PB1 51), $(anchor PB2 52), $(anchor PC9 61), $(rev PC9), $(anchor PD5 70)]"
+printf '%s' "$(prview 51 OPEN BLOCKED)" > "$GH_DIR/pr_view_51.json"
+printf '%s' "$(prview 52 OPEN BLOCKED)" > "$GH_DIR/pr_view_52.json"
+printf '%s' "$(prview 61 OPEN CLEAN)" > "$GH_DIR/pr_view_61.json"
+printf '%s' "$(prview 70 MERGED CLEAN)" > "$GH_DIR/pr_view_70.json"
+for n in 51 52 61; do echo '[]' > "$GH_DIR/reviews_$n.json"; done
+echo '[{"number":51,"mergeStateStatus":"BLOCKED"},{"number":52,"mergeStateStatus":"BLOCKED"},{"number":61,"mergeStateStatus":"CLEAN"}]' > "$GH_DIR/pr_list_.json"
+MCUR="$TMP/merge.cursor"; rm -f "$MCUR"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$MCUR" 2>&1); rc=$?
+eq "$rc" 0 "a paced pass exits 0"
+views=$(grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -)
+eq "$views" "61,70,51" "the landing group (CLEAN, then left the open list) is visited before any paced anchor, and one paced anchor follows"
+has "$out" "merged + recorded PC9" "the CLEAN PR landed although the deadline had passed"
+has "$out" "recovered PD5" "the PR that left the open list got its record although the deadline had passed"
+has "$out" "visited 2 landing-first and 1 of 2 other anchors before the deadline; the next pass resumes at PB2" "the pass names its pacing and where the next pass resumes"
+eq "$(cat "$MCUR" 2>/dev/null)" "PB1" "the cursor records the paced anchor the pass finished"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$MCUR" 2>&1)
+views=$(grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -)
+eq "$views" "52" "the next pass resumes the paced rotation after the cursor"
+has "$out" "the next pass resumes at PB1" "…and wraps past the highest id"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline "$(( $(date +%s) + 600 ))" --cursor "$MCUR" 2>&1)
+has "$out" "visited 0 landing-first and 2 of 2 other anchors" "a deadline that has not passed visits every paced anchor"
+hasnt "$out" "resumes at" "…and names no resume point"
+
+echo "# an approved PR whose merge state is not yet computed is landing-first; an unapproved one is paced"
+# GitHub recomputes every PR's merge state after a squash moves the base, so an
+# approved PR can read UNKNOWN on the pass after a sibling landed. It is still
+# visited first; an UNKNOWN PR nobody approved cannot land and is paced.
+store "[$(anchor PU1 91), $(anchor PU2 92), $(anchor PU3 93)]"
+for n in 91 92 93; do printf '%s' "$(prview "$n" OPEN UNKNOWN)" > "$GH_DIR/pr_view_$n.json"; echo '[]' > "$GH_DIR/reviews_$n.json"; done
+echo '[{"number":91,"mergeStateStatus":"UNKNOWN","reviewDecision":"REVIEW_REQUIRED"},{"number":92,"mergeStateStatus":"UNKNOWN","reviewDecision":"REVIEW_REQUIRED"},{"number":93,"mergeStateStatus":"UNKNOWN","reviewDecision":"APPROVED"}]' > "$GH_DIR/pr_list_.json"
+rm -f "$MCUR"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$MCUR" 2>&1)
+views=$(grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -)
+eq "$views" "93,91" "the approved PR is visited first and one unapproved PR follows under the passed deadline"
+has "$out" "visited 1 landing-first and 1 of 2 other anchors before the deadline" "…the approved PR counted landing-first, the unapproved ones paced"
+has "$(cat "$STUB_GH_LOG")" "--json number,mergeStateStatus,reviewDecision" "the one list call reads the merge state and the review decision"
+rm -f "$GH_DIR/pr_list_.json"
+
+echo "# an unreadable open-PR list leaves the pass unpaced"
+store "[$(anchor PE1 81), $(anchor PE2 82)]"
+printf '%s' "$(prview 81 OPEN BLOCKED)" > "$GH_DIR/pr_view_81.json"
+printf '%s' "$(prview 82 OPEN BLOCKED)" > "$GH_DIR/pr_view_82.json"
+for n in 81 82; do echo '[]' > "$GH_DIR/reviews_$n.json"; done
+printf 'not json' > "$GH_DIR/pr_list_.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$MCUR" 2>&1)
+has "$out" "open-PR states unreadable" "the unreadable list is reported"
+has "$out" "visited 2 landing-first and 0 of 0 other anchors" "…and every anchor is visited, the deadline notwithstanding"
+has "$(cat "$STUB_GH_LOG")" "pr view 82" "…the last one included"
+rm -f "$GH_DIR/pr_list_.json"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

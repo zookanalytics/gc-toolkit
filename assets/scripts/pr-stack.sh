@@ -292,8 +292,8 @@ while IFS=$'\t' read -r id branch num; do
 
   # (a) gc:pr-summary — a pull_request anchor. A rework restamps the anchor summary
   # and no earlier arm republishes it once open, so bring the region current when it
-  # is behind. Scoped to pull_request: a pre_open_gate anchor is arm 6's to refresh
-  # as it adopts and flips, and this is the layer arm 6 cannot reach once the anchor
+  # is behind. Scoped to pull_request: a pre_open_gate anchor is arm 3's to refresh
+  # as it adopts and flips, and this is the layer arm 3 cannot reach once the anchor
   # has left that state. A change folds into CUR so the branch-beads pass below reads
   # it and both land in one edit.
   anchor_row=$(printf '%s' "$ANCHORS" | jq -c --arg id "$id" 'map(select(.id == $id)) | .[0] // empty' 2>/dev/null)

@@ -39,7 +39,8 @@ needs-attention tri-state that `pr-status-label.sh` and the helm board share
 lives in gctk, and it has no shell fallback (see below).
 
 `refinery-reconcile.sh` stays a thin shell driver: identity discovery, arm
-ordering, the rc=3 interlock. The cadence has to remain readable as a script.
+ordering, the posture interlock, the arm budgets. The cadence has to remain
+readable as a script.
 
 ## Subprocess seams, not a linked library
 

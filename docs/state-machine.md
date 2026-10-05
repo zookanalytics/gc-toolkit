@@ -134,8 +134,8 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | checks armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 6) | every marker-bearing check in `check_set` reads `green` |
-| pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 3) | every marker-bearing check in `check_set` reads `green` |
+| pull_request → merged | `merge.sh` (cadence arm 2) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 7) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |

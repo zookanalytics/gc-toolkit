@@ -81,11 +81,15 @@ mk_sut_dir() { # <dir> <file>...
   mkdir -p "$d"
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
-  # bd-lib.sh is the shared bead-store read library many SUTs source by sibling
-  # path; copy it beside them so that source resolves in the private dir. It sits
-  # beside this harness, so it is found whatever the SUT's own directory is.
-  local lib; lib="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/bd-lib.sh"
-  [ -f "$lib" ] && cp "$lib" "$d/"
+  # bd-lib.sh (the shared bead-store reads) and pace-lib.sh (the cadence arms'
+  # visit order and time budget) are libraries SUTs source by sibling path; copy
+  # them beside the SUT so that source resolves in the private dir. They sit
+  # beside this harness, so they are found whatever the SUT's own directory is.
+  local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh"; do
+    [ -f "$lib" ] && cp "$lib" "$d/"
+  done
+  return 0
 }
 
 _write_gc_stub() {

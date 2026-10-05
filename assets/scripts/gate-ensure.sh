@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gate-ensure — arm 1 of the merge cadence; caller: refinery-reconcile.sh.
+# gate-ensure — arm 6 of the merge cadence; caller: refinery-reconcile.sh.
 # An anchor carrying gc.pr_close_disposition_kind is disposed — pr-dispose.sh stamped
 # it when the PR was withdrawn or superseded, and pr-facts.sh consummates the terminal
 # close — and is skipped whole: its lane is moot, so a review or validator dispatched
@@ -46,11 +46,21 @@
 # carrying gc.execution_routed_to was poured by a prior pass) and holds, like an
 # armed check with no --review-pool, when no --validate-pool is given.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>]
-#       [--validate-pool <pool>] [--review-formula <name>] [--sling-var k=v ...].
+#       [--validate-pool <pool>] [--review-formula <name>] [--sling-var k=v ...]
+#       [--deadline <epoch-secs>] [--cursor <file>].
 #       The formula defaults to mol-review; --sling-var forwards formula vars
 #       verbatim to the pour.
-# Exits: 0 (a dispatch failure leaves the check armed, merge HELD); 3 = an
-# anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
+#       --deadline stops the pass from starting another anchor once the clock
+#       reaches it. One anchor is always visited, so a pass started past its
+#       deadline still makes progress. --cursor names the file holding the last
+#       anchor this arm finished: a pass visits anchors in id order starting
+#       after that one, wrapping, and records each anchor as it finishes it. A
+#       pass the deadline stopped, or a kill interrupted, therefore resumes
+#       where it left off rather than revisiting the same anchors first.
+# Exits: 0 (a dispatch failure leaves the check armed, so merge.sh holds the
+# lane); 3 = an anchor not made safe (unreadable enumeration or an unpersisted
+# check_set stamp). merge.sh holds an anchor whose check_set is empty on its own
+# read, so 3 reports a store fault and guards nothing on its own.
 set -u
 
 PROG="gate-ensure"
@@ -73,6 +83,8 @@ FIX_POOL=""
 # k=v). Empty on the default mol-review path; the caller passes the two-lane
 # quorum pilot's lane config when --review-formula fans out.
 SLING_VARS=()
+DEADLINE=""
+CURSOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --default)        DEFAULT_CHECK_SET="${2:-correctness,triage}"; shift 2 ;;
@@ -81,9 +93,15 @@ while [ $# -gt 0 ]; do
     --fix-pool)       FIX_POOL="${2:-}"; shift 2 ;;
     --review-formula) REVIEW_FORMULA="${2:-mol-review}"; shift 2 ;;
     --sling-var)      SLING_VARS+=("${2:-}"); shift 2 ;;
+    --deadline)       DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)         CURSOR="${2:-}"; shift 2 ;;
     *) shift ;;
   esac
 done
+case "$DEADLINE" in
+  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
+            DEADLINE="" ;;
+esac
 # Pre-build the repeatable --var args once; every review dispatched this pass
 # reuses them. The +"${..[@]}" guard keeps set -u happy on the empty default.
 SLING_VAR_ARGS=()
@@ -142,6 +160,8 @@ live_head_for() { # <branch> -> sha, or nothing when unanswerable
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # The step/root reads below must see closed rows too: a spent chain is
@@ -472,7 +492,7 @@ is_oid() { # <string>
 ROWS=""
 for MR in pre_open_gate pull_request; do
   if ! RAW=$(bd_list --status=open --metadata-field merge_result="$MR"); then
-    echo "$PROG: the '$MR' gating enumeration is unreadable; cannot vouch that every visible anchor is gated — holding merge for the pass (rc=$UNSAFE_RC)" >&2
+    echo "$PROG: the '$MR' gating enumeration is unreadable; cannot vouch that every visible anchor is gated (rc=$UNSAFE_RC)" >&2
     exit "$UNSAFE_RC"
   fi
   [ "$RAW" = "[]" ] && continue
@@ -481,12 +501,35 @@ for MR in pre_open_gate pull_request; do
 "
 done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
+total=$(printf '%s' "$ROWS" | awk 'NF { n++ } END { print n + 0 }')
+
+# --- visit order: id order, starting after the anchor the last pass finished ---
+# The deadline can stop a pass part-way, so the visits rotate (pace-lib.sh):
+# every gating anchor is reached within a bounded number of passes.
+ROWS=$(printf '%s' "$ROWS" | pace_order "$CURSOR")
+cursor_warned=0
+cursor_note() { # <anchor-id> — record the anchor this pass last finished
+  pace_note "$CURSOR" "$1" && return 0
+  [ "$cursor_warned" = 1 ] \
+    || echo "$PROG: WARN cannot record progress in $CURSOR; the next pass starts the rotation over" >&2
+  cursor_warned=1
+}
 
 stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
+visited=0; finished=""; resume_at=""
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   [ -n "$id" ] || continue
+  # The previous anchor is recorded before this one starts, so a pass the
+  # deadline stops here, or a kill interrupts below, resumes at this anchor.
+  [ -n "$finished" ] && cursor_note "$finished"
+  if [ "$visited" -gt 0 ] && pace_spent "$DEADLINE"; then
+    resume_at="$id"
+    break
+  fi
+  visited=$((visited + 1))
+  finished="$id"
   # A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind when its PR
   # was withdrawn or superseded — still enumerates here (open, merge_result set) until
   # pr-facts.sh's terminal close lands, but its lane is moot: a review or validator
@@ -518,8 +561,8 @@ while IFS= read -r row; do
     got=$(gc bd show "$id" --json 2>/dev/null | scrub \
       | jq -r '.[0].metadata.check_set // empty' 2>/dev/null)
     if [ "$got" != "$DEFAULT_CHECK_SET" ]; then
-      # Visible to merge.sh and still ungated: the one condition that must hold
-      # the merge for the whole pass.
+      # Visible to merge.sh with no check_set. merge.sh and pr-open.sh each hold
+      # an anchor in that state on their own read; the rc reports the fault.
       echo "$PROG: $id check_set stamp did NOT persist (have '${got:-<empty>}'); anchor is visible and UNGATED" >&2
       unsafe=$((unsafe + 1)); continue
     fi
@@ -977,10 +1020,16 @@ GATES
 done <<ROWS_EOF
 $ROWS
 ROWS_EOF
+[ -n "$finished" ] && cursor_note "$finished"
 
+if [ -n "$resume_at" ]; then
+  echo "$PROG: visited $visited of $total gating anchors before the deadline; the next pass resumes at $resume_at"
+else
+  echo "$PROG: visited $visited of $total gating anchors"
+fi
 echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
-  echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh and still ungated; exiting rc=$UNSAFE_RC so the driver holds merge.sh this pass" >&2
+  echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh with no check_set; merge.sh holds each on its own read; exiting rc=$UNSAFE_RC" >&2
   exit "$UNSAFE_RC"
 fi
 exit 0
