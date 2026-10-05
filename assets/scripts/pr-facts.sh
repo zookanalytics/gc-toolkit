@@ -321,8 +321,11 @@ WB_MARKER="<!-- gc-writeback -->"
 # outstanding comment in a single pass. It holds the batch's replies and
 # resolves back with the comments it defers, since a thread answered before its
 # comment is acknowledged claims the city acted on something it never showed it
-# had picked up.
-WB_REACT_CAP=50
+# had picked up. PR_FACTS_REACT_CAP overrides the cap. Anything but a positive
+# integer written without a leading zero keeps 50, because a cap of 0 would
+# hold every batch's answers forever.
+WB_REACT_CAP="${PR_FACTS_REACT_CAP:-50}"
+case "$WB_REACT_CAP" in *[!0-9]*|0*) WB_REACT_CAP=50 ;; esac
 # <<< pr-writeback-contract
 
 gh_graphql() { # <query> [gh -f/-F args...]; non-zero = "could not tell"

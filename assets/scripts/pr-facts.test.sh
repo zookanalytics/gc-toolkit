@@ -48,6 +48,11 @@
 # and the answers held back whenever a pass cannot finish the batch's pickup
 # reactions, whether the cap or a failed write left them owing, or a comment in
 # the thread sits above the mark with no batch covering it yet.
+#
+# The sections run in the parts declared below, each wrapped in an `if part`
+# block. tools/run-tests.sh runs each part as its own run under its own
+# timeout; run directly, the file runs every part in order.
+# run-tests-parts: reconcile posture feedback writeback checks
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -150,6 +155,7 @@ export STUB_REHOME_LOG="$TMP/rehome.log"; : > "$STUB_REHOME_LOG"
 SUT="$SD/pr-facts.sh"
 FIX="rig/gc-toolkit.polecat"; REV="rig/gc-toolkit.polecat-codex"
 run() { "$SUT" --fix-pool "$FIX" --review-pool "$REV" 2>&1; }
+run_posture() { "$SUT" --posture-only 2>&1; }
 
 anchor() { # id num extra [branch]
   printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"correctness","check.correctness":"green"%s}}' \
@@ -178,6 +184,18 @@ child() { # id branch [extra-metadata] [status] [assignee]
 }
 
 ROOT="$(cd "$HERE/../.." && pwd)"
+
+# ==== part reconcile: merged, closed, retargeted and conflicting PRs ====
+if part reconcile; then
+
+echo "# every section sits inside a part"
+# A run executes only its own part's block, so a section outside every block
+# would run once per part. Blocks open with `if part <name>; then` and close
+# with `fi # part <name>`, both at the start of a line.
+OUTSIDE=$(awk '/^if part [A-Za-z0-9_-]+; then$/ { inside = 1; next }
+               /^fi # part [A-Za-z0-9_-]+$/ { inside = 0; next }
+               /^echo "# / && !inside { print NR ": " $0 }' "$HERE/pr-facts.test.sh")
+eq "$OUTSIDE" "" "no section header sits outside a part"
 
 echo "# posture vocabulary drift against lifecycle.toml"
 BLOCK="$(awk '/# >>> pr-posture-vocabulary/{f=1;next} /# <<< pr-posture-vocabulary/{f=0} f' "$HERE/pr-facts.sh")"
@@ -942,6 +960,12 @@ hasnt "$out" "filed re-review" "no re-review child is filed"
 hasnt "$out" "is stale" "…and nothing here calls a moved head stale"
 hasnt "$(cat "$STUB_GC_LOG")" "--on mol-review" "…and no review formula is poured from this arm"
 
+fi # part reconcile
+
+# ==== part posture: BLOCKED, dismissals, the posture record, the comment
+# watermark, --posture-only and a sitting's hold ====
+if part posture; then
+
 echo "# BLOCKED on unresolved threads (thread resolution required): merge-blocked-threads"
 store "[$(anchor B1 35)]"
 printf '%s' "$(prview 35 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_35.json"
@@ -1300,7 +1324,6 @@ echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
 # runs AFTER merge, so a comment that arrived since the last pass would be
 # invisible to the merge it should have held. This mode closes that window: it
 # records, and dispatches nothing.
-run_posture() { "$SUT" --posture-only 2>&1; }
 store "[$(anchor PO1 60)]"
 printf '%s' "$(prview 60 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
 echo '[]' > "$GH_DIR/reviews_60.json"
@@ -1457,6 +1480,12 @@ printf '[{"id":8200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
+
+fi # part posture
+
+# ==== part feedback: validation passes, review bodies, CHANGES_REQUESTED and
+# the reads that record nothing ====
+if part feedback; then
 
 # --- operator feedback opens a validation pass on the anchor --------------------
 # A human feedback batch is review the branch has never been answered against, so
@@ -1936,6 +1965,11 @@ echo "# unreadable enumeration fails loudly"
 out=$(STUB_LIST_FAIL=1 run); rc=$?
 eq "$rc" 1 "an unreadable enumeration exits non-zero"
 
+fi # part feedback
+
+# These helpers sit outside every part: parts writeback and checks both use
+# them, and child() here replaces the rework-child helper above for the rest of
+# the file, in every run.
 # ---- PR write-back: acknowledge on pickup, reply and resolve on landing -------
 # STUB_SELF_LOGIN is gc-city-bot, so "johnzook" is the operator throughout.
 # A write-back fixture states the WHOLE PR, not just its review threads. The
@@ -1974,6 +2008,9 @@ bmut() { # <id> <jq-expression over that bead>
   local t="$TMP/bmut.json"
   jq -c --arg id "$1" "[ .[] | if .id == \$id then $2 else . end ]" "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"
 }
+
+# ==== part writeback: acknowledge, reply and resolve on the PR ====
+if part writeback; then
 
 echo "# a comment that produced a rework bead is acknowledged in the same pass"
 store "[$(anchor W1 40 "$(wb_meta rework:K1)"), $(child K1 open)]"
@@ -2412,27 +2449,45 @@ eq "$(tresolved 50 T-50)" "false" "…and the thread is left unresolved"
 echo "# over the reaction cap, the batch's answers wait for the acknowledgements"
 # The pickup reaction is what tells the operator their comment was seen. A
 # thread replied to and resolved while the cap left its comment unacknowledged
-# answers a comment the city never showed it picked up.
+# answers a comment the city never showed it picked up. PR_FACTS_REACT_CAP sets
+# the cap low, so six threads cross it.
 store "[$(anchor WJ 56 "$(wb_meta rework:KJ)"), $(child KJ closed)]"
 printf '%s' "$(prview 56 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_56.json"
-threads 56 "$(jq -cn '{reviews: [], threads: [ range(60) | {
+threads 56 "$(jq -cn '{reviews: [], threads: [ range(6) | {
   id: ("T-56-" + tostring), isResolved: false, viewerCanResolve: true,
   comments: {nodes: [{id: ("NC-56-" + tostring), databaseId: 100,
     author: {login: "johnzook"}, body: "please fix", reactionGroups: []}]}} ]}')"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
-out=$(run)
-has "$out" "has 60 comments awaiting a pickup reaction" "the cap is reported"
-eq "$(gh_since "$mark" | grep -c '^REACT')" "50" "exactly the capped 50 acknowledgements land"
+out=$(PR_FACTS_REACT_CAP=5 run)
+has "$out" "has 6 comments awaiting a pickup reaction; acknowledging 5 this pass" "the cap is reported"
+eq "$(gh_since "$mark" | grep -c '^REACT')" "5" "exactly the capped 5 acknowledgements land"
 has "$out" "nothing replied or resolved this pass" "the answers are deferred with them"
 hasnt "$(gh_since "$mark")" "REPLY" "no thread is answered over an unacknowledged comment"
 hasnt "$(gh_since "$mark")" "RESOLVE" "…and none is resolved"
 
 echo "# …and the pass that finishes the acknowledgements answers every thread"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
-out=$(run)
-eq "$(gh_since "$mark" | grep -c '^REACT')" "10" "the comments the cap held over are acknowledged"
-eq "$(gh_since "$mark" | grep -c '^REPLY')" "60" "every thread in the batch gets its reply"
-eq "$(gh_since "$mark" | grep -c '^RESOLVE')" "60" "…and is resolved behind it"
+out=$(PR_FACTS_REACT_CAP=5 run)
+eq "$(gh_since "$mark" | grep -c '^REACT')" "1" "the comment the cap held over is acknowledged"
+eq "$(gh_since "$mark" | grep -c '^REPLY')" "6" "every thread in the batch gets its reply"
+eq "$(gh_since "$mark" | grep -c '^RESOLVE')" "6" "…and is resolved behind it"
+
+echo "# a reaction cap override that is not a positive integer keeps the default cap"
+# A cap of 0 would hold every batch's answers forever, so an override that is
+# not a positive integer falls back to the default, and one comment is
+# acknowledged and answered in a single pass.
+store "[$(anchor WJ0 80 "$(wb_meta rework:KJ0)"), $(child KJ0 closed)]"
+printf '%s' "$(prview 80 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_80.json"
+threads 80 "$(one_thread 80)"
+out=$(PR_FACTS_REACT_CAP=0 run)
+eq "$(reacted 80 NC-80)" "true" "a zero override still acknowledges the comment"
+eq "$(tresolved 80 T-80)" "true" "…and the thread is answered behind it"
+store "[$(anchor WJ1 81 "$(wb_meta rework:KJ1)"), $(child KJ1 closed)]"
+printf '%s' "$(prview 81 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_81.json"
+threads 81 "$(one_thread 81)"
+out=$(PR_FACTS_REACT_CAP=five run)
+eq "$(reacted 81 NC-81)" "true" "a non-numeric override still acknowledges the comment"
+eq "$(tresolved 81 T-81)" "true" "…and the thread is answered behind it"
 
 echo "# a pickup reaction that failed to land holds the answer back too"
 store "[$(anchor WK 57 "$(wb_meta rework:KK)"), $(child KK closed)]"
@@ -2543,6 +2598,12 @@ out=$(STUB_GQL_READ_FAIL=1 run_posture); rc=$?
 eq "$rc" 1 "…and the pre-merge posture pass holds the merge (posture uncurrent, exits non-zero)"
 has "$out" "posture is not current" "…naming the anchor merge must not read this pass"
 eq "$(meta UT5 pr_posture)" "<absent>" "…recording no review_required posture merge.sh would clear against"
+
+fi # part writeback
+
+# ==== part checks: merge-hold order, the Conversation tab, red required checks,
+# self-heal, review re-requests and the route-comments-only pass ====
+if part checks; then
 
 echo "# ORDER: the merge-hold is set in the PRE-MERGE posture pass, not after merge"
 # refinery-reconcile runs pr-facts --posture-only, then merge.sh, then the full
@@ -3073,6 +3134,8 @@ run >/dev/null 2>&1          # the branch-dedup probe refetches (invalidated) an
 unset GC_RECONCILE_BD_CACHE
 twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
+
+fi # part checks
 
 echo
 echo "passed: $PASS  failed: $FAIL"
