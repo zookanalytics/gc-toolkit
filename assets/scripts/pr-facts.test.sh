@@ -2829,8 +2829,10 @@ eq "$(bstatus RW6)" "open" "the child is left open"
 # The arm routes a fixer only at a GENUINE code failure. A required check that
 # timed out, was cancelled, failed to start, or is a deploy-type platform is a
 # non-code cause — a code-fix polecat would fix nothing — so the anchor is
-# parked to a human (gc.routed_to=human, the stand-down the arm already honors)
-# and a pr-fix-noncode visit is filed. no_rework counts only new REWORK children:
+# parked to a human (gc.routed_to=human, the stand-down the arm already honors,
+# with the takeaway the board shows as what the person owes, both in one
+# lifecycle.sh update) and a pr-fix-noncode visit is filed. A park whose write
+# does not read back files no visit. no_rework counts only new REWORK children:
 # the escalate stub mints the visit as a new- bead too, which is not a dispatch.
 no_rework() { jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE"; }
 
@@ -2838,13 +2840,25 @@ echo "# a TIMED_OUT required check parks to a human and dispatches no fixer"
 printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
 store "[$(anchor NC1 110)]"
 printf '%s' "$(prview 110 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"TIMED_OUT"}]')" > "$GH_DIR/pr_view_110.json"
-: > "$STUB_ESC_LOG"
+: > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "non-code cause; parked to human" "the timeout is named a non-code cause and parked"
 eq "$(meta NC1 'gc.routed_to')" "human" "the anchor is parked to a human"
+has "$(meta NC1 'gc.takeaway')" "PR#110 has a required check failing for a non-code cause" "…with a takeaway naming what the person owes"
+eq "$(meta NC1 'gc.takeaway_settled')" "" "…left unsettled, because a person still owes it"
+eq "$(grep '^bd update NC1 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#110' || true)" "1" "…written in the same update as the route"
 eq "$(no_rework)" "0" "no fixer is dispatched at a non-code failure"
 has "$(cat "$STUB_ESC_LOG")" "--subject NC1 --key pr-fix-noncode.110" "a non-code park files its visit"
 eq "$(meta NC1 merge_result)" "pull_request" "the anchor keeps gating (the merge still waits)"
+
+echo "# …a park whose route does not read back files no visit and retries next pass"
+store "[$(anchor NC6 115)]"
+printf '%s' "$(prview 115 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"TIMED_OUT"}]')" > "$GH_DIR/pr_view_115.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_DROP_KEYS="NC6:gc.routed_to" run)
+has "$out" "parking the anchor to human did not land (retry next pass)" "a write that reported success without landing the route is not a park"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.115" "…so no visit is filed for a park that did not happen"
+eq "$(no_rework)" "0" "…and no fixer is dispatched either"
 
 echo "# …CANCELLED and STARTUP_FAILURE park the same way"
 store "[$(anchor NC2 111)]"
@@ -2909,13 +2923,21 @@ echo "# at the cap (3 prior red heads): the 4th still-red head parks to a human,
 reap_req
 store "[$(anchor CAP2 121),$(rwchild CK3 CAP2 121 "$CAPH1" closed),$(rwchild CK4 CAP2 121 "$CAPH2" closed),$(rwchild CK5 CAP2 121 "$CAPH3" closed)]"
 rcredview 121 "$CAPHX"
-: > "$STUB_ESC_LOG"
+: > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "reached the cap (3)" "the arm names the cap it hit"
 eq "$(meta CAP2 'gc.routed_to')" "human" "the stuck anchor is parked to a human"
+has "$(meta CAP2 'gc.takeaway')" "PR#121 is still red after 3 auto-fix attempts" "…with a takeaway naming the PR and the attempts it drew"
+eq "$(grep '^bd update CAP2 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#121' || true)" "1" "…written in the same update as the route"
 eq "$(no_rework)" "0" "…and no fourth fixer is dispatched"
 has "$(cat "$STUB_ESC_LOG")" "--subject CAP2 --key pr-fix-capped.121" "…and the cap park files its visit"
 eq "$(meta CAP2 merge_result)" "pull_request" "…while the anchor keeps gating"
+
+echo "# …nothing lowers the count: a person clearing the route on a still-red PR sees it parked again"
+jq -c 'map(if .id == "CAP2" then .metadata["gc.routed_to"] = "" else . end)' "$STUB_STORE" > "$TMP/cap2.json" && mv "$TMP/cap2.json" "$STUB_STORE"
+out=$(run)
+eq "$(meta CAP2 'gc.routed_to')" "human" "the next red pass parks the anchor again"
+eq "$(no_rework)" "0" "…and still dispatches no fixer"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# …the cap counts DISTINCT heads: three children at ONE prior head is one attempt, not three"

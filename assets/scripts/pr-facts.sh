@@ -2107,9 +2107,11 @@ GATES
   # to a human instead of dispatching another. The non-code exclusion keeps a
   # code-fixer off a failure no code change can clear — a timeout, a
   # cancellation, a startup failure, an action-required gate, or a deploy/preview
-  # platform (matched by name) — which is likewise parked. Both parks reuse the
-  # stand-down this arm already honors, gc.routed_to=human, so the next pass
-  # stands the anchor down on its own and the fixer is never re-offered.
+  # platform (matched by name) — which is likewise parked. Both parks write the
+  # stand-down this arm already honors, gc.routed_to=human, through lifecycle.sh
+  # in one update with the takeaway the board shows as what the person owes, so
+  # the next pass stands the anchor down on its own and the fixer is never
+  # re-offered.
   RC_FIX_ATTEMPT_CAP=3
   RC_DEPLOY_CHECK_RE="vercel|netlify|deploy"
   case "$merge_state" in
@@ -2183,7 +2185,9 @@ GATES
               # action-required, or a deploy-type check). Park the anchor to a
               # human rather than send a polecat to fix nothing.
               rc_allnames=$(printf '%s' "$rc_fail_json" | jq -r 'map(.name) | join(" ")' 2>/dev/null)
-              if gc bd update "$id" --set-metadata gc.routed_to=human >/dev/null 2>&1; then
+              if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                   --route human \
+                   --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure, then clear gc.routed_to" >/dev/null; then
                 escalate "$id" "pr-fix-noncode.$num" \
                   "PR#$num ($live_url) has failing required check(s) ($rc_allnames) that are non-code causes — a timeout, cancellation, startup failure, or a deploy-type check — which no code change can fix. Parked to a human: re-run the check or fix the infrastructure, then clear gc.routed_to to re-engage the auto-fixer, or merge once it is green."
                 flagged=$((flagged + 1))
@@ -2237,7 +2241,9 @@ GATES
             # count is of PRIOR attempts. At the cap, stop churning fixers at a
             # stuck PR and park it to a human. A stranded child (rescued below) is
             # this head's attempt whose route failed to land, not a new one, so it
-            # is never capped.
+            # is never capped. Nothing lowers the count, so once an anchor reaches
+            # the cap every later red head parks it again, including the first
+            # pass after a person clears the route.
             rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" '
               [ .[] | select(.id != $id)
                 | ((.metadata.rejection_reason // "") | tostring)
@@ -2246,9 +2252,11 @@ GATES
               | unique | length' 2>/dev/null)
             case "$rc_attempts" in ''|*[!0-9]*) rc_attempts=0 ;; esac
             if [ -z "$rc_stranded" ] && [ "$rc_attempts" -ge "$RC_FIX_ATTEMPT_CAP" ]; then
-              if gc bd update "$id" --set-metadata gc.routed_to=human >/dev/null 2>&1; then
+              if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                   --route human \
+                   --takeaway "PR#$num is still red after $rc_attempts auto-fix attempts — fix the failing check by hand; no more fixers will be sent" >/dev/null; then
                 escalate "$id" "pr-fix-capped.$num" \
-                  "PR#$num ($live_url) has drawn $rc_attempts auto-fix attempts across successive red heads without reaching green on required check(s) ($rc_names); the attempt cap ($RC_FIX_ATTEMPT_CAP) is reached. Parked to a human rather than dispatch another fixer: take it over, then clear gc.routed_to to re-engage the auto-fixer, or merge once it is green."
+                  "PR#$num ($live_url) has drawn $rc_attempts auto-fix attempts across successive red heads without reaching green on required check(s) ($rc_names); the attempt cap ($RC_FIX_ATTEMPT_CAP) is reached. Parked to a human rather than dispatch another fixer: take it over and fix the check(s) by hand, or merge once it is green. No further fixer is dispatched for this PR, so clearing gc.routed_to while it is still red parks it again."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num red-check fix attempts ($rc_attempts) reached the cap ($RC_FIX_ATTEMPT_CAP); parked to human (no new fixer dispatched)"
               else
