@@ -906,23 +906,24 @@ Empty means this is not that case and the run falls through to the branch
 gate. The block refuses the arm when a diff exists, so a run that merely
 forgot to commit cannot park itself as store work.
 
-The release is the one the halt arm writes: open, unassigned, route cleared.
-That shape can be undone from outside. The gc runtime's detached-handoff
-orphan sweep (`isDetachedHandoffOrphanCandidate`,
-`cmd/gc/pool_detached_orphan_sweep.go` in gascity) re-stamps the pool route on
-a bead that is open and unassigned, carries no route of either kind, no
-`gc.kind` and no `merge_result`, and still holds `gc.work_branch` and a
-session back-reference from its claim. This arm leaves exactly that bead, and
-`gc.work_branch` is why it matches: `hookClaimIdentityPatch` in
-`cmd_hook_claim.go` stamps that key at CLAIM time from the worker's own
-checkout, so it stands on a run that produced nothing to merge. The fix for
-that belongs in the runtime. Do not pick a route value here to dodge the
-predicate and do not re-clear the route in a loop; until the runtime changes,
-a bead released by this arm can come back.
+The release is the one the halt arm writes: open, unassigned, route cleared,
+and the claim's session pins `gc.session_id` and `gc.session_name` removed.
+A claim through `gc hook` stamps the claiming session's pins on the bead it
+claims (`hookClaimIdentityPatch` in `cmd_hook_claim.go`), so a work bead routed
+straight to a pool carries them. The gc runtime's detached-handoff orphan
+sweep (`isDetachedHandoffOrphanCandidate`,
+`cmd/gc/pool_detached_orphan_sweep.go` in gascity) restores the pool route on
+an open, unassigned, unrouted bead only when the bead carries a `branch` record
+and a session pin, and it recovers the route from the pin. This bead keeps the
+`branch` that workspace-setup recorded when it cut the branch. The witness's
+orphan scan resolves a bead's owner from the same pins, so once this session
+closes, a pin left in place makes the released bead read as orphaned pool
+work, and the witness runs its recovery on it. With the pins removed, neither
+the sweep nor the witness acts on the bead, whichever path claimed it.
 
-A bead that comes back carries the note. A claim on one already stamped
-`halt_reason=store_only`, whose notes name what was filed, is this arm's own
-release returning: re-take the arm, do not redo the work.
+A claim on a bead already stamped `halt_reason=store_only`, whose notes name
+what was filed, is this arm's own release offered again: re-take the arm, do
+not redo the work.
 
 The three writes are separate on purpose. A `gc bd update` that changes the
 assignee while you still hold the bead is refused by the claim guard, and the
@@ -951,7 +952,7 @@ if [ -n "$STORE_ONLY_RECORD" ]; then
     gc runtime drain-ack
     exit 1
   fi
-  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --set-metadata gc.routed_to="" --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
+  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
   gc bd update "$WORK_BEAD_ID" --status=open
   gc bd update "$WORK_BEAD_ID" --assignee=""
   # >>> submit-store-only-chain-close
@@ -1128,8 +1129,10 @@ if [ "$AUTO_PUSH" = "false" ]; then
   # which rolls back the batched metadata and notes with it. Metadata and notes
   # bypass the guard and clear the route first, --status=open is accepted from
   # the holder, and the assignee write lands once the bead is open — the same
-  # order the store-only arm releases a bead in.
-  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  # order the store-only arm releases a bead in. The first write also removes
+  # the session pins, for the reason step 0 gives: the runtime's orphan sweep
+  # and the witness both act on a released bead that still carries them.
+  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
   gc bd update "$WORK_BEAD_ID" --status=open
   gc bd update "$WORK_BEAD_ID" --assignee=""
   # >>> submit-halt-chain-close
