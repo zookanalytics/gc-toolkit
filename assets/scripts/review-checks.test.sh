@@ -198,12 +198,15 @@ has "no-index --with-phase tags demo pre-open, the phase it gates at" "$OUT" "de
 excludes "no-index --with-phase never tags a token merge" "$OUT" "	merge"
 
 # --at reads the index from a commit (git show), the path the cadence uses.
+# Fixture commits are unsigned: an operator's global commit.gpgsign would
+# otherwise need a signing agent this hermetic run does not have.
+commit_q() { git -C "$1" -c user.email=t@t.test -c user.name=t -c commit.gpgsign=false commit -q "${@:2}" >/dev/null 2>&1; }
 GITREPO="$TMP/gitrepo"; mkdir -p "$GITREPO"
 git -C "$GITREPO" init -q
 cp "$IDX" "$GITREPO/review-checks.toml"
 git -C "$GITREPO" add review-checks.toml
-git -C "$GITREPO" -c user.email=t@t.test -c user.name=t commit -q -m "index" >/dev/null 2>&1
-OID="$(git -C "$GITREPO" rev-parse HEAD 2>/dev/null)"
+commit_q "$GITREPO" -m "index"
+OID="$(git -C "$GITREPO" rev-parse --verify -q HEAD 2>/dev/null)"
 if [ -n "$OID" ]; then
   OUT="$(cd "$GITREPO" && "$SUT" --resolve --check-set "correctness,demo" --through pre-open --at "$OID" 2>/dev/null)"
   is       "--at git-show: correctness is pre-open" "$(count "$OUT")" "1"
@@ -226,7 +229,6 @@ is "env override set to a missing file forces the no-index fallback (both surviv
 # from origin by id and reads ITS index, never the working tree's. Two local repos
 # stand in for origin and the refinery's checkout; GC_RIG_ROOT is cleared so the
 # only repository consulted is the clone.
-commit_q() { git -C "$1" -c user.email=t@t.test -c user.name=t -c commit.gpgsign=false commit -q "${@:2}" >/dev/null 2>&1; }
 ORIGIN="$TMP/origin"; CLONE="$TMP/clone"
 mkdir -p "$ORIGIN" && git -C "$ORIGIN" init -q && cp "$IDX" "$ORIGIN/review-checks.toml" \
   && git -C "$ORIGIN" add review-checks.toml && commit_q "$ORIGIN" -m one \
@@ -234,7 +236,7 @@ mkdir -p "$ORIGIN" && git -C "$ORIGIN" init -q && cp "$IDX" "$ORIGIN/review-chec
 # The head moves on origin after the clone, and its index moves demo to pre-open.
 sed 's/^phase = "open-as-draft"$/phase = "pre-open"/' "$IDX" > "$ORIGIN/review-checks.toml"
 commit_q "$ORIGIN" -am two
-NEW="$(git -C "$ORIGIN" rev-parse HEAD 2>/dev/null)"
+NEW="$(git -C "$ORIGIN" rev-parse --verify -q HEAD 2>/dev/null)"
 if [ -n "$NEW" ] && [ -d "$CLONE/.git" ] && ! git -C "$CLONE" cat-file -e "$NEW^{commit}" 2>/dev/null; then
   OUT="$(cd "$CLONE" && env -u GC_RIG_ROOT "$SUT" --resolve --check-set "correctness,demo" --through pre-open --at "$NEW" 2>/dev/null)"; RC=$?
   is  "--at an unfetched head: exit 0" "$RC" "0"
@@ -247,7 +249,7 @@ if [ -n "$NEW" ] && [ -d "$CLONE/.git" ] && ! git -C "$CLONE" cat-file -e "$NEW^
   is "…emitting no gates" "$(count "$OUT")" "0"
   # A commit that carries no index of its own falls through to the working tree.
   git -C "$CLONE" rm -q review-checks.toml && commit_q "$CLONE" -m noindex
-  NOIDX="$(git -C "$CLONE" rev-parse HEAD)"
+  NOIDX="$(git -C "$CLONE" rev-parse --verify -q HEAD)"
   cp "$IDX" "$CLONE/review-checks.toml"
   OUT="$(cd "$CLONE" && env -u GC_RIG_ROOT "$SUT" --resolve --check-set "correctness,demo" --through pre-open --at "$NOIDX" 2>/dev/null)"; RC=$?
   is       "--at a commit with no index: exit 0" "$RC" "0"
