@@ -445,6 +445,23 @@ case "$IS_WORK_BEAD" in 1|0) ;; *) IS_WORK_BEAD=1 ;; esac
 # <<< salvage-scope-gate
 ```
 
+A source work bead that carries neither a worktree nor a branch never reached
+workspace-setup: its owner died before one was created. There is nothing to
+salvage and no branch to verify, so the salvage fall-through below would file a
+no-signal `witness-salvage-refused` and part 4 would read `unknown` off the
+empty branch and escalate `witness-branch-recovery-unknown` — a human branch
+recovery for a branch that never existed. Mark that case here so salvage and
+part 4 both skip it, and part 5 returns the bead to the pool the way it returns
+any source bead:
+```bash
+# >>> nothing-to-salvage-gate
+NOTHING_TO_SALVAGE=0
+if [ "$IS_WORK_BEAD" = "1" ] && [ -z "$WORKTREE" ] && [ -z "$BRANCH" ]; then
+  NOTHING_TO_SALVAGE=1
+fi
+# <<< nothing-to-salvage-gate
+```
+
 Before ANY salvage git write, assert work_dir is its OWN worktree root — a husk
 directory (worktree removed, dir survives) lets `cd` succeed while every git
 command resolves to the ENCLOSING repo, so `git add -A && git push` would
@@ -472,6 +489,8 @@ commits, while `unknown` must never be read as gone:
 ```bash
 if [ "$IS_WORK_BEAD" != "1" ]; then
   echo "not a work bead (a visit, a review, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
+elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then
+  echo "source work bead with no work_dir and no branch — never had a worktree; nothing to salvage, straight to disposal." >&2
 elif [ "$BRANCH_ON_ORIGIN" = "present" ]; then
   echo "branch already on origin — worktree disposable; skipping salvage." >&2
 elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" --owning-origin "$OWNING_ORIGIN_URL" --bead <bead>; then
@@ -491,8 +510,10 @@ When a work bead's worktree is a husk or gone and its branch is not on the ownin
 origin (or a guard refused), the work may be lost: file the refusal best-effort
 (`patrol-finding.sh --scope witness-findings --key witness-salvage-refused
 --about <bead> ...`) and fall through — recovery is load-bearing, the notice
-advisory. A visit, a review, or a graph.v2 step or root never reaches this
-branch; the scope gate has no worktree to lose for it and sent it to part 5.
+advisory. A source bead with neither a work_dir nor a branch is not that case:
+it never had a worktree, so the nothing-to-salvage arm skips it with no refusal
+to file. A visit, a review, or a graph.v2 step or root never reaches this branch
+either; the scope gate has no worktree to lose for it and sent it to part 5.
 
 **4. Verify before reset (work beads only).** A bead the scope gate marked
 not-a-work-bead has no branch to verify, so skip straight to part 5. For a work
@@ -503,15 +524,20 @@ read as unmerged; a branch it cannot freshly fetch (deleted upstream, network)
 is `unknown`, never a stale-ref discard:
 ```bash
 if [ "$IS_WORK_BEAD" = "1" ]; then
-  TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "main"')
-  BRANCH_MERGED=$("$BC" merged --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH" --target "$TARGET")
+  if [ "$NOTHING_TO_SALVAGE" = "1" ]; then
+    BRANCH_MERGED=skip   # never had a branch; nothing to verify, go to part 5
+  else
+    TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "main"')
+    BRANCH_MERGED=$("$BC" merged --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH" --target "$TARGET")
+  fi
 else
   BRANCH_MERGED=skip   # no branch by construction; nothing to verify, go to part 5
 fi
 ```
 `yes` — the work landed: escalate the observation, close the bead, clean the
 worktree. `no` — the work is unmerged: return it to the pool (step 5). `skip` —
-not a work bead, nothing to verify: go straight to part 5. `unknown` — no
+not a work bead, or a source bead that never had a worktree or branch (the
+nothing-to-salvage arm): nothing to verify, go straight to part 5. `unknown` — no
 context could answer authoritatively, so do NOT reset and do NOT report the work
 discardable; escalate (`--key witness-branch-recovery-unknown`) and leave the
 bead for a human.
