@@ -672,7 +672,8 @@ A conversation about a bead is a **visit** — a small child bead with
 no session. The operator draws one off the board and `gc-helm engage`
 spawns a manual `converse-<model>` sitting on demand, binds the visit to
 the session's runtime name so the session's own `gc hook --claim` adopts it
-with no pool routing, and attaches; `gc-helm dismiss` ends it. See
+with no pool routing, and attaches once the reconciler has started it;
+`gc-helm dismiss` ends it. See
 docs/architecture.md, "How agents exist and converse".
 
 ## Variant D — Patrol agents (overlay)
