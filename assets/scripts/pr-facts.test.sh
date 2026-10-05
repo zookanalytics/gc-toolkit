@@ -2949,15 +2949,17 @@ has "$out" "required check(s) failing (test); filed" "three children at one prio
 eq "$(meta CAP3 'gc.routed_to')" "" "…and does not park"
 rm -f "$GH_DIR/rules_main.json"
 
-# A worked child as the live flow leaves it. Resuming a rework unsets its
-# rejection_reason (mol-polecat-work's rejected-branch-resume block), so the head
-# it was sent to fix survives only in the title the arm minted it with.
+# A worked child as the live flow leaves it. Resuming a rework (mol-polecat-work's
+# rejected-branch-resume block) and the refinery's landed-on-branch close
+# (mol-refinery-patrol's one-anchor-per-pr-terminal) both unset its
+# rejection_reason, so the head it was sent to fix survives only in the title the
+# arm minted it with.
 rwchild_worked() { # id anchor num head
   printf '{"id":"%s","status":"closed","assignee":"rig/refinery","notes":"","issue_type":"task","title":"Fix failing required check(s) on PR#%s: required check red at head %s","metadata":{"task_kind":"rework","anchor_bead":"%s","branch":"polecat/x%s","prepare_mode":"merge","merge_strategy":"mr","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s"}}' \
     "$1" "$3" "$4" "$2" "$3" "$3" "$3"
 }
 
-echo "# …the cap counts a worked child by the head in its title, since resuming it cleared its rejection_reason"
+echo "# …the cap counts a worked child by the head in its title, since working it cleared its rejection_reason"
 reap_req
 store "[$(anchor CAP4 123),$(rwchild_worked CK9 CAP4 123 "$CAPH1"),$(rwchild_worked CK10 CAP4 123 "$CAPH2"),$(rwchild_worked CK11 CAP4 123 "$CAPH3")]"
 rcredview 123 "$CAPHX"

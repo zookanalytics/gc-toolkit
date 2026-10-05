@@ -2237,9 +2237,11 @@ GATES
             # Attempt cap. Each red-check child names the head it was sent to fix
             # twice: in the title it is minted with ("$RC_TITLE required check red
             # at head <oid>") and in its rejection_reason ("... at head <oid>").
-            # Resuming a rework unsets rejection_reason (mol-polecat-work's
-            # rejected-branch-resume block), so a child that has been worked keeps
-            # its head only in the title, and both are read. The distinct hex heads
+            # Two writers unset rejection_reason: resuming a rework
+            # (mol-polecat-work's rejected-branch-resume block) and the refinery's
+            # landed-on-branch close (mol-refinery-patrol's
+            # one-anchor-per-pr-terminal). A child that has been worked keeps its
+            # head only in the title, so both are read. The distinct hex heads
             # across this anchor's children (any status), less this head, are the
             # PRIOR attempts. At the cap, stop churning fixers at a stuck PR and
             # park it to a human. A stranded child (rescued below) is this head's
