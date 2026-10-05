@@ -19,15 +19,23 @@
 #
 # Phase ordering: pre-open < open-as-draft < ready-for-review < merge. A check
 # that reads only the diff is pre-open; one that needs the deployed preview is
-# open-as-draft. A check_set token declared in no readable index defaults to
-# pre-open (the backstop the dispatcher can act on) with a warning, never
-# dropped silently — merge alone would strand it (see the resolve loop).
+# open-as-draft. A check_set token the index does not declare takes pre-open
+# (the backstop the dispatcher can act on), never dropped silently — merge
+# alone would strand it (see the resolve loop). A declared check with no phase
+# also takes pre-open, with a warning. A declared phase outside the ordered set
+# is an index error: the resolve refuses it rather than guess a phase.
 #
-# Index resolution for --resolve: --file wins; else --at reads it from a commit
-# (git show <oid>:review-checks.toml, under the toplevel or GC_RIG_ROOT); else
-# the working-tree review-checks.toml. When NO index is readable, --resolve
-# falls back to the pre-phase behavior — every non-sentinel, non-approval token
-# gates every transition — so a readless pass never opens an ungated PR.
+# Index resolution for --resolve: --file wins; else GC_REVIEW_CHECKS_INDEX;
+# else --at reads the index a commit carries (git show <oid>:review-checks.toml
+# in the toplevel's or GC_RIG_ROOT's repository, fetching the commit from
+# origin when neither holds it); else the working-tree review-checks.toml. A
+# commit that carries no index falls through to the working tree. A commit
+# that no repository here holds or can fetch fails the resolve: another
+# tree's index never answers for that head. When no index is readable at all
+# (a repo that keeps none), every token is undeclared and takes pre-open, so
+# every non-sentinel, non-approval token gates every transition and a readless
+# pass never opens an ungated PR. The index text is read through pipes, never
+# a scratch file.
 #
 # The index declares mechanical facts only — a check's name, its method, its
 # purpose, its phase. When a check applies to a given diff is a judgment its
@@ -35,7 +43,9 @@
 # Callers: signoff.sh, skills/review-triage, pr-open.sh, merge.sh, gate-ensure.sh,
 # pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
 # review-checks.test.sh.
-# Exit: 0 ok · 1 no readable index, or --check not declared · 2 usage.
+# Exit: 0 ok · 1 no readable index or --check not declared (emit), or a --at
+# commit that cannot be read or a declared phase outside the ordered set
+# (resolve) · 2 usage.
 set -uo pipefail
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -102,48 +112,61 @@ parse_index() { # <file>
   ' "$1"
 }
 
-# Resolve an index file for --resolve: --file, else --at <oid> via git show
-# (toplevel then GC_RIG_ROOT, mirroring signoff.sh resolve_index), else the
-# working-tree review-checks.toml. Prints a readable path, or nothing. A caller
-# that gets nothing takes the no-index fallback.
-RESOLVED_TMP=""
-IDX=""
-cleanup() { [ -n "$RESOLVED_TMP" ] && rm -f "$RESOLVED_TMP"; }
-trap cleanup EXIT
-# Sets IDX to a readable index path (empty when none), and RESOLVED_TMP when it
-# created a temp blob. Called directly (not in $(...)) so the globals — and the
-# cleanup trap that reads them — land in this shell, never a lost subshell.
-resolve_index_file() {
-  IDX=""
-  if [ -n "$FILE" ]; then
-    [ -r "$FILE" ] && IDX="$FILE"
-    return
-  fi
-  # An explicit environment override, authoritative when set: readable → use it,
-  # unreadable → no index (the fallback), never a silent reach past it. It lets a
-  # hermetic test fix the index a cadence caller's --at would otherwise resolve
-  # from the live checkout.
-  if [ -n "${GC_REVIEW_CHECKS_INDEX:-}" ]; then
-    [ -r "$GC_REVIEW_CHECKS_INDEX" ] && IDX="$GC_REVIEW_CHECKS_INDEX"
-    return
-  fi
-  local root blob
-  if [ -n "$AT" ]; then
-    blob=$(mktemp "${TMPDIR:-/tmp}/gctk-review-checks-index.XXXXXX") || blob=""
-    if [ -n "$blob" ]; then
-      for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-        [ -n "$root" ] || continue
-        if git -C "$root" show "$AT:review-checks.toml" >"$blob" 2>/dev/null && [ -s "$blob" ]; then
-          RESOLVED_TMP="$blob"; IDX="$blob"; return
-        fi
-      done
-      rm -f "$blob"
-    fi
-  fi
+# The index text for --resolve and a name for where it came from; both stay empty
+# when no index is readable. The text travels through variables and pipes, never
+# a scratch file, so a full TMPDIR cannot turn a readable index into a missing one.
+IDX_TEXT=""; IDX_SRC=""
+# A full commit id, the only form worth asking origin for by name.
+is_oid() {
+  case "$1" in ""|*[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
+}
+read_index_file() { # <path> — 0 and IDX_TEXT/IDX_SRC set when it reads
+  local t
+  [ -r "$1" ] || return 1
+  t=$(cat "$1") || return 1
+  IDX_TEXT="$t"; IDX_SRC="$1"
+}
+# Sets IDX_TEXT/IDX_SRC from --file, else the GC_REVIEW_CHECKS_INDEX override,
+# else the commit --at names, else the working-tree file. Non-zero only when --at
+# names a commit that no repository here holds or can fetch: the caller asked for
+# that head's gates, and another tree's index is not an answer for it.
+resolve_index() {
+  local root at_repo="" t
+  local -a roots=() repos=()
+  if [ -n "$FILE" ]; then read_index_file "$FILE"; return 0; fi
+  # An explicit environment override, authoritative when set: readable, it is the
+  # index; unreadable, there is none (every token takes pre-open), never a silent
+  # reach past it. It lets a hermetic test fix the index a cadence caller's --at
+  # would otherwise resolve from the live checkout.
+  if [ -n "${GC_REVIEW_CHECKS_INDEX:-}" ]; then read_index_file "$GC_REVIEW_CHECKS_INDEX"; return 0; fi
   for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
     [ -n "$root" ] || continue
-    if [ -r "$root/review-checks.toml" ]; then IDX="$root/review-checks.toml"; return; fi
+    roots+=("$root")
+    git -C "$root" rev-parse --git-dir >/dev/null 2>&1 && repos+=("$root")
   done
+  if [ -n "$AT" ] && [ "${#repos[@]}" -gt 0 ]; then
+    for root in "${repos[@]}"; do
+      git -C "$root" cat-file -e "$AT^{commit}" 2>/dev/null && { at_repo="$root"; break; }
+    done
+    # A head pushed since this checkout last fetched is not here yet: fetch it by
+    # id, once, rather than read some other commit's index for it.
+    if [ -z "$at_repo" ] && is_oid "$AT"; then
+      for root in "${repos[@]}"; do
+        git -C "$root" fetch --quiet --no-tags --no-write-fetch-head origin "$AT" >/dev/null 2>&1 || continue
+        git -C "$root" cat-file -e "$AT^{commit}" 2>/dev/null && { at_repo="$root"; break; }
+      done
+    fi
+    [ -n "$at_repo" ] || return 1
+    if t=$(git -C "$at_repo" show "$AT:review-checks.toml" 2>/dev/null) && [ -n "$t" ]; then
+      IDX_TEXT="$t"; IDX_SRC="$AT:review-checks.toml"; return 0
+    fi
+    # The commit carries no index of its own: the working tree's stands in below.
+  fi
+  for root in ${roots[@]+"${roots[@]}"}; do
+    read_index_file "$root/review-checks.toml" && return 0
+  done
+  return 0
 }
 
 if [ "$MODE" = "resolve" ]; then
@@ -152,57 +175,62 @@ if [ "$MODE" = "resolve" ]; then
   THRU_RANK=$(phase_rank "$THROUGH")
   [ -n "$THRU_RANK" ] || { echo "review-checks: --through '$THROUGH' is not a phase (pre-open|open-as-draft|ready-for-review|merge)" >&2; exit 2; }
 
-  resolve_index_file
-  # name<TAB>phase map from the index, lowercased name for case-insensitive lookup.
-  PHASES=""
-  if [ -n "$IDX" ]; then
-    PHASES=$(parse_index "$IDX" | awk -F'\t' '{ n=tolower($1); print n "\t" $4 }')
+  if ! resolve_index; then
+    warn "commit '$AT' is in no repository here and could not be fetched from origin; the index at that head is unreadable"
+    exit 1
   fi
+  # name<TAB>phase from the index, the name lowercased for a case-insensitive lookup.
+  PHASES=""
+  [ -n "$IDX_TEXT" ] && PHASES=$(printf '%s\n' "$IDX_TEXT" | parse_index - | awk -F'\t' '{ print tolower($1) "\t" $4 }')
 
-  emit_one() { # <original-token> <phase-or-empty>
-    if [ -n "$WITH_PHASE" ]; then printf '%s\t%s\n' "$1" "${2:-merge}"; else printf '%s\n' "$1"; fi
+  emit_one() { # <original-token> <phase>
+    if [ -n "$WITH_PHASE" ]; then printf '%s\t%s\n' "$1" "$2"; else printf '%s\n' "$1"; fi
   }
 
   # Tokenize the check_set, preserving each token's original case (it names a
-  # lane), deduping on the lowercased form, dropping the three non-lanes.
+  # lane), deduping on the lowercased form, dropping the three non-lanes. The loop
+  # runs in this shell, so a malformed phase exits the resolve itself.
   seen=""
-  printf '%s\n' "$CHECK_SET" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' | while IFS= read -r tok || [ -n "$tok" ]; do
+  while IFS= read -r tok; do
     [ -n "$tok" ] || continue
     low=$(printf '%s' "$tok" | tr '[:upper:]' '[:lower:]')
     case "$low" in none|off|approval) continue ;; esac
     case " $seen " in *" $low "*) continue ;; esac
     seen="$seen $low"
-    if [ -z "$IDX" ]; then
-      # No readable index: fall back to the pre-phase behavior — every surviving
-      # token gates every transition. Preserves current behavior for a repo whose
-      # checks are all pre-open, and never opens an ungated PR.
-      emit_one "$tok" ""
+    row=$(printf '%s\n' "$PHASES" | awk -F'\t' -v n="$low" '$1 == n { print "y:" $2; exit }')
+    if [ -z "$row" ]; then
+      # Undeclared, including every token when there is no index at all: pre-open,
+      # the earliest phase and the one gate-ensure dispatches at every stage, so
+      # the token always has a path to its review rather than a merge-only gate
+      # that could hold the merge with no review ever produced. Pre-open gates
+      # every transition, so a live anchor still carrying a legacy token (e.g.
+      # `codex`) keeps gating the create and stays satisfiable. Never dropped
+      # silently. With no index, the one summary warning below covers every token.
+      [ -n "$IDX_SRC" ] && warn "check '$tok' is not declared in the index ($IDX_SRC); defaulting to pre-open"
+      emit_one "$tok" pre-open
       continue
     fi
-    ph=$(printf '%s' "$PHASES" | awk -F'\t' -v n="$low" '$1 == n { print $2; exit }')
-    declared=$(printf '%s' "$PHASES" | awk -F'\t' -v n="$low" '$1 == n { print "y"; exit }')
-    rank=$(phase_rank "$ph")
-    if [ -n "$rank" ]; then
-      [ "$rank" -le "$THRU_RANK" ] && emit_one "$tok" "$ph"
-    elif [ "$declared" = "y" ]; then
-      # Declared but unphased — an index predating the phase column. Before phases
-      # every declared check gated the create, so default to pre-open rather than
-      # open the PR ungated during the rollout window.
-      warn "check '$tok' is declared but carries no phase ($IDX); defaulting to pre-open"
-      emit_one "$tok" "pre-open"
-    else
-      # Undeclared token: default to pre-open — the earliest phase, the one
-      # gate-ensure dispatches at every stage, so the token always has a path
-      # to its review rather than a merge-only gate that could hold the merge
-      # with no review ever produced. Pre-open also matches the pre-phase
-      # behavior — every check_set token gated the create — so a live anchor
-      # still carrying a legacy token (e.g. `codex`) keeps gating the create
-      # and stays satisfiable. Never dropped silently.
-      warn "check '$tok' is declared in no readable index ($IDX); defaulting to pre-open"
-      emit_one "$tok" "pre-open"
+    ph="${row#y:}"
+    if [ -z "$ph" ]; then
+      # Declared with no phase key, the shape of an index written before the phase
+      # column: every declared check of that shape gated the create, so it takes
+      # pre-open rather than open the PR ungated.
+      warn "check '$tok' is declared with no phase ($IDX_SRC); defaulting to pre-open"
+      emit_one "$tok" pre-open
+      continue
     fi
-  done
-  if [ -z "$IDX" ]; then warn "no readable check index (--file/--at/working tree all failed); every non-sentinel token gates every transition"; fi
+    rank=$(phase_rank "$ph")
+    if [ -z "$rank" ]; then
+      # A phase value outside the ordered set (a misspelling, a wrong case) is an
+      # index error, not an absent phase: guessing pre-open would make a
+      # merge-phase check gate the create, and guessing merge would open the PR
+      # ungated. Refuse, and every caller holds its transition.
+      warn "check '$tok' declares phase '$ph', which is not a phase (pre-open|open-as-draft|ready-for-review|merge), in $IDX_SRC; fix the index"
+      exit 1
+    fi
+    if [ "$rank" -le "$THRU_RANK" ]; then emit_one "$tok" "$ph"; fi
+  done < <(printf '%s\n' "$CHECK_SET" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+  [ -n "$IDX_SRC" ] || warn "no readable check index (--file, GC_REVIEW_CHECKS_INDEX, --at and the working tree all came up empty); every non-sentinel token takes pre-open and gates every transition"
   exit 0
 fi
 
