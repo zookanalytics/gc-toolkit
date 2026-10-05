@@ -330,9 +330,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    rework dispatch that field names the TWIN's branch, so most verified no-op
    duplicates carry one. A bead somebody else owns — assigned,
    `in_progress`, a review bead, a step bead, or already pointed at a different
-   successor — is out of the population by construction. It runs after
-   review-sweep so a twin that arm 4 merged or arm 7 recorded on this pass is
-   disposable on the same tick.
+   successor — is out of the population by construction. A second pass needs
+   no marker: it closes a never-dispatched rework twin, an open rework child
+   for a review whose work a sibling child already carried and landed. The
+   twin blocks its anchor, so merge.sh and gate-ensure's quiescence hold the
+   anchor on work nothing will run, and no other arm closes it. The pass
+   proves the twin was never dispatched two ways: its metadata records no
+   route, deferred dispatch, claim, worktree, commit or outcome, and no convoy
+   tracks it, which is the edge every pour mints. It requires the review to be
+   closed, since close_review is signoff.sh's last write. It requires a sibling
+   naming the same review and anchor to have landed: dispatched, not itself
+   disposed or retired, and either closed with `rejection_reason` unset, which
+   the refinery's landing transition does, or recording
+   `work_outcome=shipped`. Closing the twin releases its blocks edge, and the
+   pass then stamps `duplicate_of` on it, so pr-stack.sh keeps it off the
+   branch's bead list. The arm runs after review-sweep so a twin that arm 4
+   merged or arm 7 recorded on this pass is disposable on the same tick.
 12. **pr-stack.sh** — keeps an open PR's body current with its anchor in both
    managed regions. No merge authority, and the only arm that writes no bead. A
    body is composed once, by arm 6, out of one anchor; then two things drift it,

@@ -379,11 +379,12 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # closes that, held by finalize-gate while a human visit is still owed.
 run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh || FAILED="${FAILED}scaffolding-sweep rc=$?; "
 
-# (11) duplicate-sweep: dispose of verified no-op duplicate dispatches. Late,
-# and after review-sweep, because the gate it re-verifies is a CLOSED
-# successor: a twin that arm 4 merged or arm 7 recorded this pass is
-# disposable on this tick rather than a minute later. BEADS_ACTOR projected —
-# the close it delegates to bead-rehome is attributed in the events table.
+# (11) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
+# never-dispatched rework twins whose same-review sibling landed. Late, and
+# after review-sweep, because the gate it re-verifies is a CLOSED successor: a
+# twin that arm 4 merged or arm 7 recorded this pass is disposable on this tick
+# rather than a minute later. BEADS_ACTOR projected — the close it delegates to
+# bead-rehome is attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(11) duplicate-sweep" duplicate-sweep.sh ) \
   || FAILED="${FAILED}duplicate-sweep rc=$?; "
