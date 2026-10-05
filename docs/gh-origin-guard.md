@@ -106,11 +106,17 @@ host a remote names. A full URL names its own host. Any other endpoint resolves
 on the forge `--hostname` names, or else on the host an unqualified owner/name
 is completed with.
 
-`{owner}` and `{repo}` placeholders are filled from the repository `GH_REPO`
-names, or else from the working directory's `origin`. gh fills them before it
-reads the host or the path, and the guard does the same. Only the owner and the
-name come from that repository. The host stays the one the endpoint names, and a
-concrete owner or name beside a placeholder stays in the target. So
+The method, the fields, and the endpoint are read from the flags the way gh
+parses them. A single-dash token is a run of shorthand flags, so `-iX POST` sets
+the method and `-iftitle=x` adds a field, just as `-i -X POST` and
+`-i -f title=x` do.
+
+`{owner}` and `{repo}` placeholders, and gh's older `:owner` and `:repo`
+spellings, are filled from the repository `GH_REPO` names, or else from the
+working directory's `origin`. gh fills them before it reads the host or the
+path, and the guard does the same. Only the owner and the name come from that
+repository. The host stays the one the endpoint names, and a concrete owner or
+name beside a placeholder stays in the target. So
 `https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues` run from our
 checkout is a write to `gitlab.example.com`, not to our origin, and
 `repos/someone/{repo}/issues` is a write to `someone`'s repository. An endpoint

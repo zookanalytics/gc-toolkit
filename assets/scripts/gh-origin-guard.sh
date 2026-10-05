@@ -105,7 +105,8 @@ origin_of() {
 # straight from the endpoint path, so this is the api analogue of repo_from_url.
 # The endpoint is a REST path (`repos/OWNER/REPO/...`), a leading-slash path, or
 # a full URL; $2 is the host gh would use for a relative path, and $3 is the
-# host/owner/name that fills {owner} and {repo}, or empty when none resolves.
+# host/owner/name that fills the owner and repo placeholders, or empty when none
+# resolves.
 # Prints one of:
 #   host/owner/repo   a repos/OWNER/REPO path — the resolved target
 #   @malformed        a repos/ path with no concrete owner and name, including a
@@ -118,15 +119,20 @@ origin_of() {
 api_endpoint_target() { # api_endpoint_target <endpoint> <effective-host> <fill-repo>
     # gh fills {owner} and {repo} across the whole endpoint before it reads a host
     # or a path from it, and takes only the owner and the name of the repository
-    # it fills from. Filling first and resolving the result the way a concrete
-    # endpoint resolves keeps the endpoint's own host, and any concrete owner or
-    # name standing beside a placeholder. The fill values come out of norm_repo,
-    # so they carry nothing sed would read as syntax.
+    # it fills from. It fills the older :owner and :repo spellings the same way
+    # wherever no letter, digit or underscore follows them. Filling first and
+    # resolving the result the way a concrete endpoint resolves keeps the
+    # endpoint's own host, and any concrete owner or name standing beside a
+    # placeholder. The fill values come out of norm_repo, so they carry nothing
+    # sed would read as syntax.
     _ep=${1:-}
     _fown=$(printf '%s' "${3:-}" | cut -d/ -f2)
     _fname=$(printf '%s' "${3:-}" | cut -d/ -f3)
     if [ -n "$_fown" ] && [ -n "$_fname" ]; then
-        _ep=$(printf '%s' "$_ep" | sed -e "s#{owner}#$_fown#g" -e "s#{repo}#$_fname#g")
+        _ep=$(printf '%s' "$_ep" | sed \
+            -e "s#{owner}#$_fown#g" -e "s#{repo}#$_fname#g" \
+            -e "s#:owner\([^0-9A-Za-z_]\)#$_fown\1#g" -e "s#:owner\$#$_fown#" \
+            -e "s#:repo\([^0-9A-Za-z_]\)#$_fname\1#g" -e "s#:repo\$#$_fname#")
     fi
     _ep=$(printf '%s' "$_ep" | tr -d '[:space:]')
     [ -n "$_ep" ] || { printf '@nonrepos'; return 0; }
@@ -249,6 +255,27 @@ function note_cd_val(a) {
 function note_cd(i) {
     if (i + 1 > ntok) { cdspec = "?"; return }
     note_cd_val(T[i + 1])
+}
+# gh parses a single-dash token as a run of shorthand flags. A boolean takes one
+# letter and the run goes on, so `-iX POST` sets the method and `-iftitle=x` adds
+# a field exactly as `-i -X POST` and `-i -f title=x` do. The first letter in
+# vals, the shorthands that take a value, ends the run: its value is the rest of
+# the token after an optional "=", or else the next token. Sets sflag to that
+# letter, or "" when the run holds none, and sval to its value, and returns how
+# many tokens the run used.
+function shortrun(t, nxt, vals,   s, c) {
+    sflag = ""; sval = ""
+    s = substr(t, 2)
+    while (s != "") {
+        c = substr(s, 1, 1); s = substr(s, 2)
+        if (index(vals, c) == 0) { if (substr(s, 1, 1) == "=") return 1; continue }
+        sflag = c
+        if (s ~ /^=./) { sval = substr(s, 2); return 1 }
+        if (s != "") { sval = s; return 1 }
+        sval = nxt
+        return 2
+    }
+    return 1
 }
 function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, method, haveparams, endpoint, apihost, p, t, M, ep) {
     if (ntok == 0) return
@@ -375,23 +402,23 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
         p = i + 1
         while (p <= ntok) {
             t = T[p]
-            if (t == "-X" || t == "--method") { if (p < ntok) method = T[p + 1]; p += 2; continue }
+            if (t == "--method") { if (p < ntok) method = T[p + 1]; p += 2; continue }
             if (t ~ /^--method=/) { method = substr(t, 10); p++; continue }
-            if (t ~ /^-X=/)       { method = substr(t, 4);  p++; continue }
-            if (t ~ /^-X./)       { method = substr(t, 3);  p++; continue }
             if (t == "--hostname") { if (p < ntok) apihost = T[p + 1]; p += 2; continue }
             if (t ~ /^--hostname=/) { apihost = substr(t, 12); p++; continue }
-            if (t == "-f" || t == "--raw-field" || t == "-F" ||
-                t == "--field" || t == "--input") { haveparams = 1; p += 2; continue }
+            if (t == "--raw-field" || t == "--field" || t == "--input") { haveparams = 1; p += 2; continue }
             if (t ~ /^--raw-field=/ || t ~ /^--field=/ || t ~ /^--input=/) { haveparams = 1; p++; continue }
-            if (t ~ /^-f./ || t ~ /^-F./) { haveparams = 1; p++; continue }
-            if (t == "-H" || t == "--header" || t == "-q" || t == "--jq" ||
-                t == "-t" || t == "--template" || t == "--cache" ||
-                t == "-p" || t == "--preview") { p += 2; continue }
-            if (t ~ /^--header=/ || t ~ /^--jq=/ || t ~ /^--template=/ ||
-                t ~ /^--cache=/ || t ~ /^--preview=/ ||
-                t ~ /^-H./ || t ~ /^-q./ || t ~ /^-t./ || t ~ /^-p./) { p++; continue }
-            if (substr(t, 1, 1) == "-") { p++; continue }
+            if (t == "--header" || t == "--jq" || t == "--template" ||
+                t == "--cache" || t == "--preview") { p += 2; continue }
+            if (substr(t, 1, 2) == "--") { p++; continue }
+            # -X carries the method, -f and -F a field, and -H, -q, -t and -p a
+            # value the verdict does not need; -i is the one boolean.
+            if (t ~ /^-./) {
+                p += shortrun(t, (p < ntok ? T[p + 1] : ""), "XfFHqtp")
+                if (sflag == "X") method = sval
+                if (sflag == "f" || sflag == "F") haveparams = 1
+                continue
+            }
             if (endpoint == "") endpoint = t
             p++
         }
@@ -539,12 +566,13 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
     # `gh api` names its repository in the endpoint, not in --repo, so it is
     # resolved on its own terms. An endpoint that names no repository is left
     # alone, and a repos path with no concrete owner and name resolves to
-    # nothing and is refused. {owner} and {repo} are filled from GH_REPO, else
-    # from the working directory's origin, in the order gh consults the two.
+    # nothing and is refused. The owner and repo placeholders are filled from
+    # GH_REPO, else from the working directory's origin, in the order gh
+    # consults the two.
     if [ "$_noun" = "api" ]; then
         _fill=""
         case "${_endpoint:-}" in
-            *'{owner}'*|*'{repo}'*)
+            *'{owner}'*|*'{repo}'*|*':owner'*|*':repo'*)
                 if [ -n "${_inline:-}" ]; then
                     _fill=$(norm_repo "$_inline" "$_eff_host")
                 elif [ "${_ghset:-0}" = "1" ] && [ -n "${_ghval:-}" ]; then

@@ -49,12 +49,15 @@
 #   (22) `gh issue new` and `gh pr new`, gh's aliases for create, are guarded
 #   (23) wrapper options (`time -p`, `command --`, `exec -l`) still reach the
 #        wrapped write; `command -v gh` is a lookup and stays unguarded
+#   (24) a backslash-newline is a line continuation, so a noun or verb split
+#        across lines is still read
 #   (25) `gh api` with a writing method (POST/PATCH/PUT/DELETE, explicit via -X
 #        or implicit when fields are added) is guarded off the endpoint path;
-#        {owner}/{repo} placeholders fill only the owner and name, so the host
-#        stays the endpoint's and a concrete owner or name beside one stays in
-#        the target; GET and graphql are left alone, and an endpoint naming no
-#        repository is out of the guard's domain
+#        a run of shorthand flags such as -iX POST is read the way gh reads it;
+#        {owner}/{repo} placeholders, and the older :owner/:repo, fill only the
+#        owner and name, so the host stays the endpoint's and a concrete owner
+#        or name beside one stays in the target; GET and graphql are left alone,
+#        and an endpoint naming no repository is out of the guard's domain
 
 set -u
 
@@ -423,6 +426,16 @@ allowed "api explicit GET with fields"           "$RIG" "gh api --method GET rep
 denied  "api DELETE a third-party repo"          "$RIG" "gh api -X DELETE repos/get-convex/agent"
 denied  "api PATCH a third-party issue"          "$RIG" "gh api -X PATCH repos/get-convex/agent/issues/1 -f state=closed"
 allowed "api PATCH own issue"                     "$RIG" "gh api -X PATCH repos/zookanalytics/gc-toolkit/issues/1 -f state=closed"
+# gh parses a single-dash token as a run of shorthand flags, so the boolean -i
+# can lead a run that sets the method or adds a field, and a value flag in the
+# run takes the next token as its value rather than leaving it as the endpoint.
+denied  "api -X=POST at third party"             "$RIG" "gh api -X=POST repos/get-convex/agent/issues"
+denied  "api -iX POST run at third party"        "$RIG" "gh api -iX POST repos/get-convex/agent/issues"
+denied  "api -iXPOST run at third party"         "$RIG" "gh api -iXPOST repos/get-convex/agent/issues"
+denied  "api -iftitle=x run implies POST"        "$RIG" "gh api -iftitle=x repos/get-convex/agent/issues"
+denied  "api -iH run keeps the endpoint"         "$RIG" "gh api -iH Accept:x -X PATCH repos/get-convex/agent/issues/1"
+allowed "api -iX POST run at own origin"         "$RIG" "gh api -iX POST repos/zookanalytics/gc-toolkit/issues"
+allowed "api -iX GET run with fields is a read"  "$RIG" "gh api -iX GET repos/get-convex/agent/issues -f per_page=1"
 # A leading slash and a full REST URL name the same repository; the api host
 # (api.github.com, or HOST/api/v3) maps back to the forge host a remote names.
 denied  "api POST leading-slash third party"     "$RIG" "gh api -X POST /repos/get-convex/agent/issues"
@@ -432,10 +445,14 @@ allowed "api POST full-url own origin"           "$RIG" "gh api -X POST https://
 # fills them, so the same command writes wherever the cwd belongs.
 allowed "api placeholder from own cwd"           "$RIG" "gh api -X POST repos/{owner}/{repo}/issues -f title=x"
 denied  "api placeholder from third-party cwd"   "$SANDBOX/third" "gh api -X POST repos/{owner}/{repo}/issues -f title=x"
+# gh fills the older :owner and :repo spellings the same way.
+allowed "api :owner/:repo from own cwd"          "$RIG" "gh api -X POST repos/:owner/:repo/issues -f title=x"
+denied  "api :owner/:repo from third-party cwd"  "$SANDBOX/third" "gh api -X POST repos/:owner/:repo/issues -f title=x"
+denied  "api concrete owner beside :repo"        "$RIG" "gh api -X POST repos/get-convex/:repo/issues -f title=x"
 # gh takes only the owner and the name from the repository it fills from. The
 # host is the one the endpoint names: a full URL's own host, else the forge
 # --hostname or GH_HOST selects. Filling the whole target from GH_REPO or the
-# cwd read a placeholder URL on another forge as our own origin.
+# cwd would read a placeholder URL on another forge as our own origin.
 denied  "api placeholder URL on another forge"   "$RIG" "gh api -X POST 'https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues' -f title=x"
 denied  "api placeholder URL, GH_REPO own"       "$RIG" "GH_REPO=zookanalytics/gc-toolkit gh api -X POST 'https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues' -f title=x"
 allowed "api placeholder URL on our forge"       "$RIG" "gh api -X POST 'https://api.github.com/repos/{owner}/{repo}/issues' -f title=x"
