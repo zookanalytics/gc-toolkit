@@ -30,15 +30,16 @@ kept()  { if [ -e "$1" ]; then ok "$2"; else bad "$2 (was removed: $1)"; fi; }
 #
 # A pid that is certainly dead: spawn a child and reap it. Linux allocates pids
 # sequentially, so a just-freed pid is not reused until the counter wraps.
-dead_pid() { local p; sleep 0.1 </dev/null >/dev/null 2>&1 & p=$!; wait "$p" 2>/dev/null || true; echo "$p"; }
-# A live pid held for the duration of the run.
-live_pid() { local p; sleep 300 </dev/null >/dev/null 2>&1 & p=$!; HOLDERS+=("$p"); echo "$p"; }
+dead_pid() { local p; ( exec sleep 0.1 ) </dev/null >/dev/null 2>&1 & p=$!; wait "$p" 2>/dev/null || true; echo "$p"; }
+# A live pid held for the duration of the run. It is read through a command
+# substitution, a subshell whose HOLDERS is a copy, so the caller registers it.
+live_pid() { local p; ( exec sleep 300 ) </dev/null >/dev/null 2>&1 & p=$!; echo "$p"; }
 # Open a file inside PATHARG and keep it open, so lsof reports a holder.
 hold_open() { ( exec 9>"$1"; exec sleep 300 ) </dev/null >/dev/null 2>&1 & HOLDERS+=("$!"); }
 
 DEAD1="$(dead_pid)"; DEAD2="$(dead_pid)"; DEAD3="$(dead_pid)"; DEADH="$(dead_pid)"
 DEADN1="$(dead_pid)"; DEADN2="$(dead_pid)"; DEADN3="$(dead_pid)"; DEADN4="$(dead_pid)"
-LIVE1="$(live_pid)"; LIVERUN="$(live_pid)"
+LIVE1="$(live_pid)"; LIVERUN="$(live_pid)"; HOLDERS+=("$LIVE1" "$LIVERUN")
 
 # --- dead scratch: must be reaped ---
 mkdir -p "$ROOT/gct${DEAD1}-111";           : >"$ROOT/gct${DEAD1}-111/f"
