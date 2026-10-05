@@ -7,7 +7,7 @@
 # a pane held open for a conversation is not reaped by a no-nudge drain.
 scope = "rig"
 provider = "claude"
-option_defaults = { model = "opus" }
+option_defaults = { model = "claude-opus-5-5" }
 # Share the converse role's prompt rather than carry a copy; a variant differs
 # from its siblings only in provider and model.
 prompt_template = "agents/converse/prompt.template.md"
