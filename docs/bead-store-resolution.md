@@ -169,17 +169,43 @@ dance by hand. It returns, and nothing outside this:
 and, each behind an opt-in flag so a caller pays only for what it needs:
 
 - **`--frontier`** — the blockers. A verdict over `ready | advancing | stuck`:
-  ready with no open blocker, else the worst open blocker's state. Each open
-  `blocks`-dep is named `{id, title, status, advance}` and the closed ones are a
-  count. `advance` is `advancing` when the blocker is itself moving — in
-  progress, or routed to a worker or pool — and `stuck` when it needs external
-  input: unrouted, parked, routed to the `human` gate, or of unknown status. It
-  reads each blocker's own row one level deep; a transitive walk drops in on the
-  same enum later.
+  ready with no open blocker, else the worst open blocker's `advance`. Each open
+  `blocks`-dep is named `{id, title, status, advance}`, plus `stuck_on {id, why}`
+  when it is stuck, and the closed ones are a count.
 - **`--horizon`** — the direct children. The epic-health snapshot
-  `{total, open, closed, advancing, stuck}`, with open children named
-  `{id, title, status, advance}` on the same enum and done children counted only,
-  so a hundred-story epic stays bounded.
+  `{total, open, closed, advancing, stuck}`, with open children named the same
+  way and done children counted only, so a hundred-story epic stays bounded.
+
+`advance` answers whether the city finishes that bead without a person, and it
+is transitive. A bead is `advancing` when its own state moves and every open
+blocker beneath it advances too. Its own state moves when it is in progress,
+routed to a worker or pool, assigned to an agent, a review, rework, validation
+or finding bead of the review cycle, armed for deferred dispatch, or a merge
+anchor the cadence will act on. Anything else is `stuck`, and `stuck_on` names
+the bead that stops it, with one of these reasons:
+
+| `why` | The bead that stops it |
+|---|---|
+| `human` | is routed or assigned to the `human` gate, is a decision, is a finding that needs the operator, or is an anchor parked in a human state |
+| `unrouted` | is open with no route, no arm and no assignee, so nothing picks it up |
+| `held` | is neither open nor in progress (blocked, deferred, pinned) |
+| `approval` | is a PR the cadence has settled, waiting on the operator's review (review required, or changes requested) |
+| `merge-hold` | carries an operator merge or rebase hold |
+| `wedged`, `merge-blocked` | is an anchor whose machine axis says no automated actor can move it |
+| `unread` | is an anchor whose machine axis, or whose PR posture at that axis's head, is not recorded |
+| `capped` | is armed, but its dispatch hit the sling-failure cap and went to a person |
+| `cycle` | waits, through its blockers, on itself |
+| `unknown` | could not be read, or lives in a store no rig carries |
+| `budget` | lies past where the walk stopped reading |
+
+So an armed bead takes its blockers' verdict, and a routed bead behind an orphan
+is stuck on the orphan. A merge anchor is judged by its recorded `pr.machine`
+and `pr_posture`, never by the route the merge cadence clears. An explicit
+`human` route outranks every moving state except in progress. A row read cannot
+see liveness. A claim or route whose session has died still reads advancing. A
+bead a poured molecule is working, whether its work bead or one of its inline
+steps, carries no route of its own, so it reads `unrouted` while that molecule
+runs.
 
 The converse opening opts into both, so its subject slice, the readiness verdict
 and the epic-health snapshot arrive from one call. A caller that only needs
@@ -192,7 +218,8 @@ context as one object; the default is a human-readable block. It reads only.
 
 The free-text body — descriptions, notes and comments, of the subject or of any
 listed bead — is never returned, and no blocker or child is carried beyond
-`{id, title, status, advance}`. That text is unbounded, and returning it
+`{id, title, status, advance}` and, when it is stuck, the `stuck_on {id, why}`
+that names its cause. That text is unbounded, and returning it
 proactively is the context bloat this tool exists to cut. So it complements `gc
 bd show <id>`, which the reader still runs for the one bead whose full body a
 decision turns on, and does not replace it.
@@ -212,7 +239,19 @@ carries no edge per story; `--horizon` lists the direct children by the
 
 The subject read passes `--brief-deps`, so a listed bead's body is never fetched
 to read its status, and a same-store closed blocker's status rides the edge at no
-extra cost — the common bulk on an epic. A read is spent only where a fact is
-missing: a cross-store blocker, whose store the subject's could not join, and
-each open blocker, whose live route decides its advance. A blocker whose store no
-rig carries reads unknown and fails the verdict closed, never landed.
+extra cost — the common bulk on an epic. `gc bd show` leaves out an edge whose far
+end lives in another rig's store, so the subject's own list row is read too, in
+the first level's batch, and its edges complete the subject's set. Each blocker
+the walk reads is a list row, `gc bd list --id … --all --brief`, which keeps
+every edge but embeds no status, so a blocker's closed edges come back in the
+next level's batch and drop out there. A child's row comes with the `--parent`
+listing, so only its blockers are read. A blocker whose store no rig carries
+reads unknown and fails the verdict closed, never landed.
+
+The walk reads level by level, with one read per store per level carrying every
+id that level needs. It stops descending at the first stuck bead on a branch,
+since nothing below can make that branch advance. The subject's own blockers are
+always read. Below them the walk stops descending once it has met 50 open beads
+(`--walk-budget <n>`), and it descends at most six levels. A closed row costs
+nothing against the budget. Anything the walk has not read when it stops reads
+stuck with `why=budget`.
