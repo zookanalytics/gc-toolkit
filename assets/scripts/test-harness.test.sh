@@ -38,9 +38,13 @@ for v in GC_RIG GC_CITY_PATH GC_CITY GC_AGENT GC_SESSION_NAME GC_SESSION_ID \
 done
 
 # The whole namespace, not just the names above: a variable a future city release
-# adds must be gone too, or the leak returns one release later.
-resid="$(compgen -v | grep -E '^(GC_|BEADS_)' || true)"
+# adds must be gone too, or the leak returns one release later. GC_NO_API is the
+# one deliberate exception. harness_init sets it, rather than inheriting it, to
+# pin the gctk read seam onto the stubbed gc the same way GCTK_BIN is pinned. The
+# sweep excludes it by exact name, and the assertion below proves the pin took.
+resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF GC_NO_API || true)"
 if [ -z "$resid" ]; then ok "no GC_/BEADS_ variable survives harness_init"; else bad "residual city vars: $resid"; fi
+eq "${GC_NO_API:-}" "1" "harness_init pins GC_NO_API=1 so a gctk read hits the stub, not the live daemon"
 
 # GCTK_* is out of scope: the port pin stays, and a pre-init build path is not
 # collateral — a blanket GC* unset would have taken GCTK_BUILT with it.

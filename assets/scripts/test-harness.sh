@@ -33,6 +33,12 @@ harness_init() {
   # exercise the port says so by overriding this after harness_init, the way
   # lifecycle.test.sh does for its second arm.
   export GCTK_BIN=none
+  # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
+  # bead reads prefer the running supervisor's API, and these suites run inside
+  # a live city whose supervisor is up, so left alone a read would answer from
+  # that live store instead of the stub. GC_NO_API=1 keeps every read on the
+  # `gc bd` subprocess the stub serves (services/gctk/internal/daemon).
+  export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_GC_LOG="$TMP/gc.log"
