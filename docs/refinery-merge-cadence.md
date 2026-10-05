@@ -283,6 +283,24 @@ the cadence — the arms run whether or not any refinery session is awake.
    reply, because no commit answered it. Idempotence is read back off GitHub,
    so a repeat pass writes nothing and a failed write is retried by the next
    one.
+   The same sweep carries each machine-lane finding ruled worth fixing
+   (`must-fix` or `deferred`) to the PR. A finding whose locus begins with a
+   file the diff touches becomes a file-level review comment on that file, and
+   any other locus becomes a Conversation comment. Once the finding closes, the
+   comment is answered with how it closed: the head that carries the fix and
+   the fix units that landed it, or the deferral's follow-up. The thread is then
+   resolved unless a human has written in it since, and a Conversation comment
+   is edited to carry the answer. A finding that closed before it was posted,
+   as a pre-open round's findings have, is posted with its answer already in
+   place. A human finding is never posted, because it already sits in its
+   raiser's own thread and is answered there. One store-wide read of the
+   findings serves the pass, and `finding.pr_comment` and `finding.pr_answered`
+   record each write, so an anchor whose findings are settled costs no GitHub
+   call; at most `WB_FINDING_CAP` posts and answers go out per pass. A posted
+   finding holds nothing, since a `must-fix` holds the merge through its own
+   `blocks` edge. The `<!-- gc-finding:` marker its comments carry keeps the
+   unengaged-thread and BLOCKED readers from taking the city's own thread for a
+   review to route or a block to escalate.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

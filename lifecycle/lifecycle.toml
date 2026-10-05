@@ -640,6 +640,17 @@ keys = [
   # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
   # pass does not answer the same thread twice.
   "finding.reply_posted",
+  # The GitHub databaseId of the comment pr-facts.sh's write-back posted to carry
+  # a machine finding ruled must-fix or deferred to its PR: a file-level review
+  # comment, or a Conversation comment when the locus names no file in the diff.
+  # Set once the post lands, so a later pass leaves the finding alone until it
+  # closes.
+  "finding.pr_comment",
+  # Set by the same write-back once a posted finding has closed and its comment
+  # carries the answer: `1` when it was answered, `gone` when the comment had been
+  # removed from the PR and nothing was left to answer. A finding carrying it
+  # costs the write-back no GitHub read.
+  "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection, the deferral
   # reason, and a --discovered-from edge to the anchor for provenance.

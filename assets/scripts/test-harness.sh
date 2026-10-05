@@ -485,13 +485,13 @@ case "$sub" in
       *) echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
     esac ;;
   api)
-    path=""; jqexpr=""; gqvars='{}'; gqquery=""
+    path=""; jqexpr=""; gqvars='{}'; gqquery=""; method=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --hostname) shift ;;
         --jq) shift; jqexpr="${1:-}" ;;
         --paginate) : ;;
-        -X) shift ;;
+        -X) method="${2:-}"; shift ;;
         -f|-F)
           kv="${2:-}"; shift
           k="${kv%%=*}"; v="${kv#*=}"
@@ -605,6 +605,74 @@ case "$sub" in
         *) echo "gh graphql stub: unsupported query" >&2; exit 2 ;;
       esac
     fi
+    # The REST comment writes, over the same PR fixtures the reads serve. A
+    # file-level review comment opens a thread in threads_<n>.json and joins the
+    # comments_<n>.json list; a Conversation comment joins .issue_comments and
+    # issue_comments_<n>.json; an edit rewrites one in place in both. Each write
+    # MUTATES what the next read serves, so a pass that posted twice shows two
+    # comments rather than looking idempotent. A new comment's databaseId is
+    # 9000 plus the fixture's comment count, clear of the ids the suites pick.
+    case "${method:-GET}:$path" in
+      POST:*/pulls/*/comments|POST:*/issues/*/comments)
+        case "$path" in
+          */pulls/*) kind="file"; n="${path##*/pulls/}"; [ "${STUB_FCOMMENT_RC:-0}" = "0" ] || exit "${STUB_FCOMMENT_RC:-0}" ;;
+          *) kind="issue"; n="${path##*/issues/}"; [ "${STUB_ICOMMENT_RC:-0}" = "0" ] || exit "${STUB_ICOMMENT_RC:-0}" ;;
+        esac
+        n="${n%%/*}"
+        f="$G/threads_$n.json"
+        [ -s "$f" ] || echo '{"reviews":[],"threads":[],"issue_comments":[]}' > "$f"
+        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
+        p=$(printf '%s' "$gqvars" | jq -r '.path // ""')
+        db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
+        t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+        if [ "$kind" = file ]; then
+          jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" '
+            .threads = ((.threads // []) + [{ id: "FT-\($n)-\($db)", isResolved: false, viewerCanResolve: true, path: $p,
+              comments: { nodes: [{ id: "FC-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }] } }])
+          ' "$f" > "$t" && mv "$t" "$f"
+          r="$G/comments_$n.json"
+          [ -s "$r" ] || echo '[]' > "$r"
+          jq -c --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" \
+            '. + [{ id: $db, user: {login: $self}, body: $b, path: $p, pull_request_review_id: null }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+          printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$(printf '%s' "$gqvars" | jq -r '.subject_type // ""')" \
+            "$(printf '%s' "$gqvars" | jq -r '.commit_id // ""')" >> "${STUB_GH_LOG:?}"
+        else
+          jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" '
+            .issue_comments = ((.issue_comments // []) + [{ id: "FI-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }])
+          ' "$f" > "$t" && mv "$t" "$f"
+          r="$G/issue_comments_$n.json"
+          [ -s "$r" ] || echo '[]' > "$r"
+          jq -c --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" \
+            '. + [{ id: $db, user: {login: $self}, body: $b }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+          printf 'ICOMMENT %s\n' "$n" >> "${STUB_GH_LOG:?}"
+        fi
+        out="{\"id\":$db}"
+        if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
+        exit 0 ;;
+      PATCH:*/issues/comments/*)
+        [ "${STUB_ICEDIT_RC:-0}" = "0" ] || exit "${STUB_ICEDIT_RC:-0}"
+        cid="${path##*/issues/comments/}"
+        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
+        hit=""
+        for cand in "$G"/threads_*.json; do
+          [ -s "$cand" ] || continue
+          jq -e --arg c "$cid" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c) ] | length > 0' "$cand" >/dev/null 2>&1 || continue
+          hit="$cand"; break
+        done
+        [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
+        t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
+        jq --arg c "$cid" --arg b "$b" '.issue_comments = ((.issue_comments // []) | map(if ((.databaseId // 0) | tostring) == $c then .body = $b else . end))' \
+          "$hit" > "$t" && mv "$t" "$hit"
+        n="${hit##*/threads_}"; n="${n%.json}"
+        r="$G/issue_comments_$n.json"
+        if [ -s "$r" ]; then
+          jq -c --arg c "$cid" --arg b "$b" 'map(if ((.id // 0) | tostring) == $c then .body = $b else . end)' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        fi
+        printf 'ICEDIT %s\n' "$cid" >> "${STUB_GH_LOG:?}"
+        out="{\"id\":$cid}"
+        if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
+        exit 0 ;;
+    esac
     out=""
     case "$path" in
       user) out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;
@@ -653,6 +721,13 @@ case "$sub" in
         # unreadable one on the output alone — only the exit code says which.
         [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
         case "$path" in *comments*) f="$G/comments_$n.json" ;; *) f="$G/reviews_$n.json" ;; esac
+        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
+      */pulls/*/files*)
+        # The files a PR's diff touches. An absent fixture is a diff naming no
+        # file; STUB_FILES_RC fails the read.
+        n="${path##*/pulls/}"; n="${n%%/*}"
+        [ -z "${STUB_FILES_RC:-}" ] || exit "$STUB_FILES_RC"
+        f="$G/files_$n.json"
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */issues/*/comments*)
         # The Conversation tab, a separate REST space from the /pulls comment
