@@ -90,7 +90,7 @@ case "${1:-}" in
       *) case "$title" in *"$STUB_CREATE_FAIL_MATCH"*) echo "bd: refused" >&2; exit 1 ;; esac ;;
     esac
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
-    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX")
+    tmp=$(mktemp "${STUB_TMP:-${TMPDIR:-/tmp}}/gctk-escalate-test.XXXXXX")
     # The real `gc bd create` stamps --metadata (a JSON object) into the bead
     # atomically with the create; model that so the create carries the identity
     # the same way, and a run whose follow-up writes are lost still leaves a
@@ -106,7 +106,7 @@ case "${1:-}" in
       "") : ;;
       *) case "$*" in *"$STUB_UPD_FAIL_MATCH"*) exit 1 ;; esac ;;
     esac
-    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX"); cp "$STORE" "$tmp"
+    tmp=$(mktemp "${STUB_TMP:-${TMPDIR:-/tmp}}/gctk-escalate-test.XXXXXX"); cp "$STORE" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
@@ -150,6 +150,9 @@ chmod +x "$BIN/visit-close.sh"
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
+# The stub keeps its scratch here, so a case that points the SUT's TMPDIR at a
+# missing directory breaks only the SUT's own temp files, not the stub store.
+export STUB_TMP="$TMP"
 export GC_ESCALATE_VISIT_CLOSE_TOOL="$BIN/visit-close.sh" STUB_VISIT_CLOSE_LOG="$TMP/visit-close.log"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
       STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL \
@@ -271,6 +274,19 @@ eq "$rc" 0 "with GC_RIG pinned it files under the pin"
 eq "$(visits)" "1" "one visit, and no triage subject minted"
 eq "$(meta vis-1 gc.continuation_group)" "tk-a" "the visit hangs on tk-a, not on the triage subject"
 has "$(cat "$STUB_DEPS")" "vis-1|tk-a|tracks" "and tracks tk-a"
+
+echo "# a stderr capture that cannot be opened proves nothing, so a real subject keeps its own dedup"
+# bash runs no command whose redirection it cannot open and reports exit 1, the
+# code escalation-rig gives a subject proven to name no bead. With TMPDIR missing,
+# tk-a is still classified by escalation-rig's own answer: deduped on tk-a, not on
+# the key alone, so an open visit for another subject under the same key does not
+# swallow it.
+reset '[{"id":"vis-o","status":"open","assignee":"","title":"visit: tk-other — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"k1","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
+out=$(TMPDIR="$TMP/no-such-tmpdir" "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "filing with an unusable TMPDIR exits 0"
+eq "$(visits)" "1" "a visit is filed for tk-a, not deduped against tk-other's under the same key"
+eq "$(meta vis-1 gc.continuation_group)" "tk-a" "on tk-a itself, not on the triage subject"
+has "$(cat "$STUB_DEPS")" "vis-1|tk-a|tracks" "and it tracks tk-a"
 
 echo "# the empty-identity fallback subject ('refinery') redirects to triage, never drops"
 # mol-refinery-patrol's validate-identity step escalates with

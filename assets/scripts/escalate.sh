@@ -152,9 +152,15 @@ case "$SUBJECT" in
   *-wisp-*) SUBJECT_CLASS=ephemeral ;;
   *)
     if [ -x "$ESC_RIG_SH" ]; then
-      SUBJECT_RIG=$("$ESC_RIG_SH" "$SUBJECT" 2>"${TMPDIR:-/tmp}/escalate-rig.$$"); esc_rc=$?
-      subj_rig_why=$(tr '\n' ' ' < "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
-      rm -f "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null || true
+      # bash runs no command whose redirection it cannot open and reports exit 1,
+      # which here would read as the proven no-bead answer. So the stderr file is
+      # made first, and without one only the reason is dropped, never the answer.
+      rig_err=$(mktemp "${TMPDIR:-/tmp}/escalate-rig.XXXXXX" 2>/dev/null) || rig_err=/dev/null
+      SUBJECT_RIG=$("$ESC_RIG_SH" "$SUBJECT" 2>"$rig_err"); esc_rc=$?
+      if [ "$rig_err" != /dev/null ]; then
+        subj_rig_why=$(tr '\n' ' ' < "$rig_err" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+        rm -f "$rig_err" 2>/dev/null || true
+      fi
     else
       esc_rc=3; subj_rig_why="cannot execute $ESC_RIG_SH"
     fi
