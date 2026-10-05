@@ -1,9 +1,17 @@
-// Package gcbd is the `gc bd` subprocess seam.
+// Package gcbd reads and writes beads for the cadence.
 //
-// gctk shells out to `gc` exactly as the shell scripts it replaces did, rather
-// than linking the beads library. That keeps the observability, the stub
-// surface and the permissions surface identical across the port: the same
-// invocations appear in the same logs, and the same test stubs serve them.
+// A bead READ (Show) goes through the running supervisor's pooled,
+// process-lifetime Dolt connection over HTTP and falls back to forking
+// `gc bd show` only when that daemon is unreachable, so a read on the healthy
+// path neither forks nor opens its own Dolt connection, and the cadence still
+// answers when the daemon is down. The daemon read is cached and carries no
+// notes, so a write's read-back verification — which must observe the write it
+// just made and must see appended notes — takes the authoritative ShowDirect
+// path instead. Writes (Update) and the Show fallback shell out to `gc`
+// exactly as the shell scripts do, which keeps the observability, the stub
+// surface and the permissions surface of those paths identical across the
+// port: the same invocations appear in the same logs, and the same test stubs
+// serve them.
 //
 // The accessors mirror the jq expressions the scripts used, including their
 // corners. `(.x // "") | tostring` treats BOTH null and false as absent, so a
@@ -15,8 +23,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
 )
 
 // Bead is one row of `gc bd show --json`, decoded far enough for the fields the
@@ -85,17 +101,85 @@ func (b *Bead) NotesString() string { return jqString(b.Notes) }
 // StatusLower returns `.status // "" | tostring | ascii_downcase`.
 func (b *Bead) StatusLower() string { return strings.ToLower(b.Status) }
 
-// Client runs `gc` subcommands. bin is the binary name resolved through PATH,
-// which is what puts the test stubs in the path of every call.
-type Client struct{ bin string }
+// daemonTimeout bounds one supervisor-API read. A loopback read from a pooled
+// connection answers in well under this even under load; the bound only caps a
+// wedged-but-listening daemon so a read falls back to `gc bd` rather than hang.
+const daemonTimeout = 5 * time.Second
 
-// New returns a Client bound to the `gc` on PATH.
-func New() *Client { return &Client{bin: "gc"} }
+// maxDaemonBody caps the response body a read will buffer, so a runaway payload
+// cannot exhaust memory. One bead is kilobytes; a megabyte is slack.
+const maxDaemonBody = 1 << 20
 
-// Show reads one bead. A bead that cannot be read — `gc` could not run, the
-// payload did not decode, or the id resolved to nothing — returns nil, and
-// every caller treats that as "refuse to act blind" rather than as an empty
-// bead.
+// Client reads and writes beads. bin is the `gc` binary resolved through PATH,
+// which is what puts the test stubs in the path of every subprocess call; the
+// write path and the Show fallback fork it. httpc/baseURL/city carry the
+// supervisor-API read path and are all empty when it is off (GC_NO_API, no city
+// in the environment, or no discoverable supervisor), in which case Show reads
+// straight through bin.
+type Client struct {
+	bin     string
+	httpc   *http.Client
+	baseURL string
+	city    string
+}
+
+// New returns a Client whose reads prefer the supervisor API when one is
+// discoverable and enabled, and whose writes and read fallback use the `gc` on
+// PATH. Discovery is config-only and does not touch the network; an unreachable
+// daemon shows up as a failed request at read time, which falls back.
+func New() *Client {
+	c := &Client{bin: "gc"}
+	if base, ok := daemon.BaseURL(); ok {
+		if city, ok := daemon.City(); ok {
+			c.baseURL = base
+			c.city = city
+			c.httpc = &http.Client{Timeout: daemonTimeout}
+		}
+	}
+	return c
+}
+
+// daemonConfigured reports whether the supervisor-API read path is wired. All
+// three fields move together in New, so any one of them being empty means the
+// path is off and Show goes straight to the subprocess.
+func (c *Client) daemonConfigured() bool {
+	return c.httpc != nil && c.baseURL != "" && c.city != ""
+}
+
+// Show reads one bead. A bead that cannot be read — no implementation could
+// answer, the payload did not decode, or the id resolved to nothing — returns
+// nil, and every caller treats that as "refuse to act blind" rather than as an
+// empty bead.
+//
+// The read prefers the supervisor API: a GET against the daemon's pooled Dolt
+// connection, which neither forks nor opens a connection of its own. Only a 200
+// that decodes to a bead is trusted; a non-200 (including a 404 miss), a
+// transport failure, or an undecodable body falls through to `gc bd show`, so
+// the daemon can only make the read faster, never change its answer — the
+// authoritative `gc bd` path decides whether a bead exists. When the daemon
+// read path is off entirely the read goes straight to that path.
+func (c *Client) Show(id string) *Bead {
+	if !c.daemonConfigured() {
+		return c.showViaExec(id)
+	}
+	b, reason := c.showViaDaemon(id)
+	if b != nil {
+		c.logRoute("show "+id, "api", "")
+		return b
+	}
+	c.logRoute("show "+id, "fallback", reason)
+	return c.showViaExec(id)
+}
+
+// ShowDirect reads one bead straight from `gc bd`, never the supervisor API.
+// Show routes cold reads through the daemon's cached connection, but a read
+// that verifies a write just made must observe that write and must carry the
+// bead's notes — the daemon's cache can lag a fresh write and its bead payload
+// omits notes entirely — so a verification read-back uses this authoritative
+// path. Same decode and fail-closed contract as Show's fallback arm.
+func (c *Client) ShowDirect(id string) *Bead { return c.showViaExec(id) }
+
+// showViaExec reads one bead by forking `gc bd show --json`.
 //
 // The exit status is NOT consulted: the shell it replaces reads
 // `gc bd show ... 2>/dev/null | scrub | jq -c '.[0] // empty'` with no
@@ -107,7 +191,7 @@ func New() *Client { return &Client{bin: "gc"} }
 // `bd show --json` answers with an ARRAY when any id resolves and an OBJECT
 // when none does, at rc=0 either way, so a non-array payload is a miss and not
 // a parse bug.
-func (c *Client) Show(id string) *Bead {
+func (c *Client) showViaExec(id string) *Bead {
 	cmd := exec.Command(c.bin, "bd", "show", id, "--json")
 	out, err := cmd.Output()
 	if err != nil {
@@ -123,6 +207,59 @@ func (c *Client) Show(id string) *Bead {
 		return nil
 	}
 	return &rows[0]
+}
+
+// showViaDaemon reads one bead over the supervisor API, returning the bead on a
+// trusted 200 or (nil, reason) on anything the caller should fall back from.
+// The daemon serves ONE bead object (where `gc bd show` prints a one-element
+// array), so the payload decodes directly into a Bead. Scrub and UseNumber run
+// here too, for the same control-byte and number-fidelity reasons the
+// subprocess path needs them. A 200 that decodes to a bead with no id is a miss
+// (a problem+json body slipped past the status check), not a bead.
+func (c *Client) showViaDaemon(id string) (*Bead, string) {
+	resp, err := c.httpc.Get(daemon.BeadURL(c.baseURL, c.city, id))
+	if err != nil {
+		return nil, "transport"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "status-" + strconv.Itoa(resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDaemonBody))
+	if err != nil {
+		return nil, "read"
+	}
+	dec := json.NewDecoder(bytes.NewReader(Scrub(body)))
+	dec.UseNumber()
+	var b Bead
+	if err := dec.Decode(&b); err != nil || b.ID == "" {
+		return nil, "decode"
+	}
+	return &b, ""
+}
+
+// logRoute emits one read-routing line to stderr when GC_DEBUG is on, the proof
+// an operator reads to confirm a read landed on the daemon (route=api) rather
+// than forking bd (route=fallback). Quiet by default so the stderr contract the
+// cadence callers read is unchanged, matching how `gc` gates its own route logs.
+func (c *Client) logRoute(what, route, reason string) {
+	if !gcDebug() {
+		return
+	}
+	if reason != "" {
+		fmt.Fprintf(os.Stderr, "gctk gcbd: %s route=%s reason=%s\n", what, route, reason)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "gctk gcbd: %s route=%s\n", what, route)
+}
+
+func gcDebug() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GC_DEBUG"))) {
+	case "", "0", "false", "no":
+		return false
+	default:
+		return true
+	}
 }
 
 // List runs `gc bd list <args>` and decodes the JSON array it prints. ok is

@@ -254,6 +254,33 @@ done < "$TMP/roots"
 HUSK_STEPS=$(jq -R . < "$HUSK_TMP" | jq -sc 'map(select(length > 0)) | unique')
 HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | unique')
 
+# --- live sitting identities: "conversing" requires a live holder -------------
+# A visit covers its subject (and is itself conversing) only while the sitting
+# holding it is live. This pass is mechanical but reads sessions here — the one
+# liveness source the pack trusts (mol-witness-patrol, dead-molecule-dispose):
+# a holder GONE from the session list is dead, and so is one still listed in a
+# terminal state — archived or closed, the dead states helm's ownerLive keys on
+# (services/helm/internal/board/derive.go); a holder listed in any other state
+# is live. $LIVE_SESSIONS_JSON is every name a LIVE listed session carries
+# (id, session_name, alias, name, agent_name); a claim writes one of assignee /
+# gc.session_id / gc.session_name. An UNCLAIMED visit names no holder and always
+# covers — it is a pending escalation, not a dead sitting. On an unreadable list
+# $LIVENESS_KNOWN stays false and the classifier keeps every visit covering: an
+# unprovable death is not a death, and the subject is still named by its open
+# visit meanwhile.
+LIVE_SESSIONS_JSON="[]"
+LIVENESS_KNOWN=false
+SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
+if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/dev/null 2>&1; then
+    LIVE_SESSIONS_JSON=$(printf '%s' "$SESS_RAW" \
+        | jq -c '[ (.sessions // [])[]? | select((.state // "") as $s | ($s != "archived") and ($s != "closed")) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
+    if printf '%s' "$LIVE_SESSIONS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        LIVENESS_KNOWN=true
+    else
+        LIVE_SESSIONS_JSON="[]"
+    fi
+fi
+
 # --- classify -----------------------------------------------------------------
 # One jq over the ready set: every drop is a NAMED class; the survivors are
 # the unnamed waits. Structural edges (2i) fold in from ALIVE — a parent is
@@ -279,7 +306,8 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # >>> classify
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
-      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" "$VISIT_IDENTITY_JQ"'
+      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" \
+      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
@@ -321,11 +349,24 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
         | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
     | ($gates | length) > 0
       and all($gates[]; ($m["check." + .] // "") == "green");
+  # A visit holder is live — or it has none, or liveness is unreadable. A claim
+  # writes one of assignee / gc.session_id / gc.session_name; $livesessions holds
+  # every name a listed (live) session carries. No holder is an UNCLAIMED visit,
+  # a pending escalation that still covers. $livenessknown false is an unreadable
+  # session list, where an unprovable death is not a death — keep covering.
+  def holder_live:
+    ([ (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "") ]
+     | map(select(. != ""))) as $holders
+    | if ($holders | length) == 0 then true
+      elif ($livenessknown | not) then true
+      else any($holders[]; . as $h | ($livesessions | index($h)) != null)
+      end;
   # Live-visit subjects: every subject a live visit covers by its shared identity
   # (tracks edge, gc.continuation_group fallback — the stamp alone has landed
   # empty on a live visit, su-ab9je). visit_identity_subjects is visit-identity.sh.
   ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
+     | select(holder_live)
      | visit_identity_subjects[] ]) as $convgroups
   # stall_root visits: a SEPARATE liveness question from coverage — a stalled
   # sitting parked on a workflow ROOT keeps the ready steps under that root off
@@ -359,7 +400,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif topology_kind then "topology"
          elif ((.metadata["gc.routed_to"] // "") != "") then "routed-and-claimable"
          elif (($worked | index($b.id)) != null) then "worked"
-         elif ((.metadata.task_kind // "") == "visit") then "conversing"
+         elif ((.metadata.task_kind // "") == "visit") and holder_live then "conversing"
          elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
          elif (($demanded | index($b.id)) != null) then "held-by-design"
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"

@@ -84,6 +84,14 @@ has "$(notes "$F3")" "the rewrite it needs lands in the next PR" "the deferral r
 # un-routed follow-up was the silent drop this whole change retires.
 eq "$(bstatus "$F3FU")" "open" "the follow-up stays open so reconcile can dispatch it"
 has "$(deps)" "tk-anc|blocks|$F3FU" "the anchor blocks the follow-up — it waits for the merge"
+# The gate must point anchor->follow-up, never the reverse. The reverse wires
+# the follow-up as the anchor's blocker, which holds the anchor merge and fails
+# edge_exists so the deferral cannot close. Assert the orientation through the
+# same down-blocker probe merge.sh and bd-ready run, not just the raw edge row:
+# the follow-up is blocked BY the anchor, and never blocks the anchor merge.
+has " $(probe_blockers "$F3FU") " " tk-anc " "the follow-up is blocked BY the anchor (anchor in its down-blockers) — bd holds it unready until the merge closes"
+hasnt " $(probe_blockers tk-anc) " " $F3FU " "the follow-up never blocks the anchor merge — the reversed edge would wrongly hold the anchor"
+hasnt "$(deps)" "$F3FU|blocks|tk-anc" "no reverse blocks edge: the follow-up is not wired as the anchor's blocker"
 eq "$(meta "$F3FU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "the follow-up is armed to the anchor's fix pool (derived from gc.execution_routed_to)"
 has "$(meta "$F3FU" 'gc.dispatch_when_ready_args')" "mol-polecat-work" "...to be re-poured through mol-polecat-work"
 

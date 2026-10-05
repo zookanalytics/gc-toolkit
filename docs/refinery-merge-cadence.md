@@ -223,7 +223,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
    rather than flip a managed body that may be stale. This adopt-time re-splice
    covers only the `pre_open_gate` window; once the anchor is `pull_request`,
-   republishing a rework's restamp is arm 11's job (`pr-stack.sh`), the anchor
+   republishing a rework's restamp is arm 12's job (`pr-stack.sh`), the anchor
    never returning to the state this arm scans (no `pull_request → pre_open_gate`
    lifecycle edge).
 7. **pr-facts.sh** — external facts only, no merge authority: PR merged
@@ -298,7 +298,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 1 and arm 7.
-10. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
+10. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
+   An anchor withdrawn won't-do or closed not-planned carries a disposition —
+   `gc.superseded_by` (the pointer `bead-rehome.sh` stamps) or
+   `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
+   machine review scaffolding does not close with it: the validation pass, the
+   finding beads, and the rework/fix-unit beads stay open, each holding a
+   `blocks` edge on the anchor or on a rework that blocks it, and each holding
+   gate-ensure's quiescence, so the disposed anchor stands stuck behind work that
+   will never land. Nothing else retires them on a disposal: `close-answered`
+   keys on a fix LANDING, and `review-sweep` on an anchor already closed. This
+   arm closes each `task_kind=validation|finding|rework` bead whose `anchor_bead`
+   names a disposed, non-merged anchor — `gc.outcome=moot`, the reason appended,
+   read back — findings before the reworks they block so a rework's close is not
+   refused the same pass. It leaves `task_kind=review` to review-sweep and
+   `task_kind=visit` to the human side, and never closes the anchor itself: that
+   is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh` while a human
+   visit is owed — which clearing the machine scaffolding here lets land once no
+   visit is. A merged anchor is a landing, never a disposal, and is skipped.
+11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
    waits for a human ruling, one bead at a time. This arm closes the ones that
@@ -315,7 +333,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 4 merged or arm 7 recorded on this pass is
    disposable on the same tick.
-11. **pr-stack.sh** — keeps an open PR's body current with its anchor in both
+12. **pr-stack.sh** — keeps an open PR's body current with its anchor in both
    managed regions. No merge authority, and the only arm that writes no bead. A
    body is composed once, by arm 6, out of one anchor; then two things drift it,
    and this arm lands both fixes in one body edit.

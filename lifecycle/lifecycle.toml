@@ -448,6 +448,9 @@ keys = [
 #   `direct`. `mr` is stamped by pr-facts.sh, signoff.sh, convoy-graduate.sh,
 #   pre-open-rebase.sh, mol-feedback-distiller.toml and mol-first-reaction.toml,
 #   and existing_pr forces the resolved mode up from `direct` at the refinery.
+#   A target under `polecat/` (another bead's per-bead PR head) carrying no PR of
+#   its own resolves the other way, from `mr` down to `direct`, so the branch
+#   folds onto that PR head instead of opening a nested PR against it.
 #   `pr` is written only by mol-refinery-patrol.toml, auto-promoting a bead whose
 #   direct push was rejected for branch protection into the PR pipeline. Read by
 #   mol-refinery-patrol.toml and signoff.sh. Never cleared. Enum `mr | pr | direct`.

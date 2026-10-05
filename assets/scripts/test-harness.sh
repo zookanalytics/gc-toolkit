@@ -33,6 +33,12 @@ harness_init() {
   # exercise the port says so by overriding this after harness_init, the way
   # lifecycle.test.sh does for its second arm.
   export GCTK_BIN=none
+  # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
+  # bead reads prefer the running supervisor's API, and these suites run inside
+  # a live city whose supervisor is up, so left alone a read would answer from
+  # that live store instead of the stub. GC_NO_API=1 keeps every read on the
+  # `gc bd` subprocess the stub serves (services/gctk/internal/daemon).
+  export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_GC_LOG="$TMP/gc.log"
@@ -352,7 +358,16 @@ case "$verb" in
           case "$1" in --type=*) ty="${1#--type=}" ;; --type) shift; ty="${1:-}" ;; esac
           shift || true
         done
-        printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D" ;;
+        # Real bd reads `dep add <blocked> <blocker> --type blocks` with the
+        # SECOND operand as the blocker — `dep add Y X` is the documented
+        # equivalent of `dep X --blocks Y`. Stored rows are blocker-first
+        # ("A|blocks|B" = A blocks B), so a blocks add swaps its operands to match;
+        # every other edge type keeps the source-first orientation.
+        if [ "$ty" = "blocks" ]; then
+          printf '%s|%s|%s\n' "$b" "$ty" "$a" >> "$D"
+        else
+          printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D"
+        fi ;;
       remove|rm)
         # gc bd dep remove <issue> <depends-on>: drop the edge with that
         # orientation, whatever its type. Real bd prints ✓ and exits 0 even for
