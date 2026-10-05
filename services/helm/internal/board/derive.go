@@ -1143,13 +1143,12 @@ func prMachine(a Anchor, blockers []Blocker) string {
 //	approved                                             -> met
 //	review_required, changes_requested, commented, none  -> required
 //
-// There is no `not_required` under the universal rule. A pull request on an
-// integration/* base, or in a repo with no required-review rule, reports
-// reviewDecision empty — posture `none` — which must still read as owing the
-// approval: mapping it to `not_required` rendered it green while merge.sh held it
-// every pass, the hole this closes. A pull request GitHub is blocking must never
-// render as one it will let through, and neither must one the city's own merge
-// rule is holding. (A posture read off reviewDecision can lag an approval merge.sh
+// No posture reads as needing no approval. A pull request on an integration/*
+// base, or in a repo with no required-review rule, reports reviewDecision empty —
+// posture `none` — and still owes the approval, because merge.sh holds it every
+// pass until one stands. A pull request GitHub is blocking must never render as
+// one it will let through, and neither must one the city's own merge rule is
+// holding. (A posture read off reviewDecision can lag an approval merge.sh
 // computes from the reviews list directly, so an approved PR on a rule-less base
 // reads `required` until the next merge pass lands it — conservative, and
 // transient.)

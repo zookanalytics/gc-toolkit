@@ -207,8 +207,7 @@ export interface Tile {
    * review stands at the live head — so only an approved row is `'met'` and every
    * other posture owes one. It is the city's rule, not GitHub's protection set,
    * so a pull request on an `integration/*` base or in a repo with no
-   * required-review rule reads `'required'` rather than the retired
-   * `'not_required'`.
+   * required-review rule reads `'required'` too.
    */
   pr_approval: string;
   /**

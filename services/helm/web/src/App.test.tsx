@@ -1422,7 +1422,7 @@ it('gives the all-clear when every PR position was readable', async () => {
       section: 'review',
       pr_machine: 'settled',
       pr_conversation: 'quiet',
-      pr_approval: 'not_required',
+      pr_approval: 'met',
       pr_owed_since: undefined,
       needs: 'green — waiting on the merge pass',
     }),

@@ -387,8 +387,7 @@ type Tile struct {
 	// merge rule (merge.sh holds every open PR until a non-city APPROVED review
 	// stands at the live head), so only `approved` is met and every other posture
 	// owes one — the field is the city's rule, not GitHub's protection set, so a
-	// PR on an integration/* base or in a rule-less repo still reads `required`
-	// rather than the retired `not_required` the gate-set reading used to emit.
+	// PR on an integration/* base or in a rule-less repo still reads `required`.
 	//
 	// A separate field rather than a fourth machine value, because a PR can
 	// need an approval while the cadence is still progressing, and folding the
