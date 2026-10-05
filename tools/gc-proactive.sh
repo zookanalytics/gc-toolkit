@@ -309,11 +309,12 @@ cmd_demand() {
 #   - top-level only — a parent-child CHILD carries the edge in its own
 #     .dependencies; a convoy's tracks edge lives on the convoy, so this
 #     catches parented beads, not every convoy member.
-# Plus a state predicate: not already reacted, not routed, has a description;
-# deduped by id. "Not already reacted" drops EITHER marker a completed reaction
-# leaves — gc.proactive_reaction (the release) and gc.first_reaction (the
-# dispose) — the same pair sling_first_reaction_guard refuses, so a reacted bead
-# is dropped here and never reaches the sling loop to spend a cap slot.
+# Plus a state predicate: not already reacted, not routed or armed, has a
+# description; deduped by id. "Not already reacted" drops EITHER marker a
+# completed reaction leaves — gc.proactive_reaction (the release) and
+# gc.first_reaction (the dispose) — the same pair sling_first_reaction_guard
+# refuses, so a reacted bead is dropped here and never reaches the sling loop
+# to spend a cap slot.
 #   - gc.reaction_owned — a live owner already owns reacting to this bead, so an
 #     autonomous first reaction would duplicate it. An operator engage (gc-helm
 #     engage --new-subject) is the setter today: it creates the subject marked,
@@ -322,6 +323,14 @@ cmd_demand() {
 #     here keeps a sweep from filing a SECOND visit for a conversation that
 #     already has one. sling_first_reaction_guard refuses it too, and
 #     mol-first-reaction consumes it if a direct pour reaches one.
+#   - gc.dispatch_when_ready — the bead is armed (deferred-dispatch.sh arm).
+#     Whoever armed it already decided its dispatch, and the deferred-dispatch
+#     order slings it once its own blockers close. Its reconcile pass reads no
+#     reaction marker and no route before it slings, so a reaction here only
+#     second-guesses the arm and can leave the bead dispatched twice. An arm is
+#     a dispatch path the way gc.routed_to is, so both are dropped. The same
+#     goes for an arm reconcile has stopped retrying at its failure cap: that
+#     bead waits on the visit the cap escalated, not on a first reaction.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -335,6 +344,7 @@ scan_precision_filter() {
             and ((.metadata["gc.first_reaction"] // "") == "")
             and ((.metadata["gc.reaction_owned"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
+            and ((.metadata["gc.dispatch_when_ready"] // "") == "")
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
             and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)

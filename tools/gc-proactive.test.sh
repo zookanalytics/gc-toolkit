@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down
-# and the fail-closed-on-unset-GC_RIG sweep guard.
+# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down,
+# the armed-bead drop, and the fail-closed-on-unset-GC_RIG sweep guard.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -82,6 +82,38 @@ OUT="$(bash "$SCRIPT" sling tk-plain 2>&1)"; RC=$?
 set -e
 eq "$RC" 0 "(SLING-GO) sling of an unmarked bead exits 0"
 has "$OUT" "would sling" "(SLING-GO) …and dispatches (fixture dry line)"
+
+# --- an armed bead is not a scan candidate --------------------------------
+# A bead armed with deferred-dispatch.sh arm already has its dispatch decided,
+# and the deferred-dispatch order slings it once its own blockers close. From
+# that close until the next reconcile pass the bead is ready, unassigned and
+# unrouted, so the arm is all that sets it apart from raw input. tk-armed
+# carries the record arm writes. tk-capped is an arm the reconcile pass stopped
+# retrying at its failure cap, which waits on the visit the cap filed. Both pass
+# every other clause (task type, a description, unrouted, no reaction or work
+# markers, top-level), beside one raw input.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-raw",    "issue_type":"task", "description":"a raw input bead",                  "title":"raw input",       "metadata":{}},
+  {"id":"tk-armed",  "issue_type":"task", "description":"a blocked follow-up armed by hand", "title":"armed follow-up", "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_by":"gc-toolkit/gc-toolkit.mechanik","gc.dispatch_when_ready_armed_at":"2026-10-01T00:00:00Z","gc.dispatch_when_ready_reason":"waits for tk-blocker to land"}},
+  {"id":"tk-capped", "issue_type":"task", "description":"an arm past its failure cap",       "title":"capped arm",      "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":3}}
+]
+JSON
+
+echo "# scan_precision_filter drops an armed bead, keeps a raw input"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-raw" "(ARMED-KEEP) a raw input beside the armed beads is still a candidate"
+hasnt "$IDS" "tk-armed" "(ARMED-DROP) an armed bead is not a scan candidate"
+hasnt "$IDS" "tk-capped" "(ARMED-DROP) …nor an arm the reconcile pass stopped retrying"
+
+echo "# a scan --sling sweep reacts to the raw input and never to an armed bead"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ARMED-SWEEP) the sweep exits 0"
+has "$OUT" "would sling mol-first-reaction at tk-raw" "(ARMED-SWEEP) the sweep slings a first reaction at the raw input"
+hasnt "$OUT" "tk-armed" "(ARMED-SWEEP) …and none at the armed bead"
+hasnt "$OUT" "tk-capped" "(ARMED-SWEEP) …nor at the capped arm"
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route
