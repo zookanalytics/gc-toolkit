@@ -75,7 +75,9 @@ formula, against a synthetic city — whenever a commit touches a renderer
 input (`agents/`, `template-fragments/`, `formulas/`, `packs/`, `pack.toml`,
 or the renderer itself). Nothing under `generated/` is hand-edited;
 `doctor/check-seed-audit-current` warns when the artifact is stale or absent,
-and `render-seed-audit.sh --check` verifies it exactly.
+and `render-seed-audit.sh --check` verifies it exactly. The same hook refuses a
+commit that stages a binary file under a `docs/` directory
+([docs/file-structure.md](docs/file-structure.md)).
 
 ## Docs
 

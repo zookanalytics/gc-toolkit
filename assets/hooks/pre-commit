@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Two jobs, in this order.
+#
+# Refuse a binary file under a docs/ directory. The staged paths go through
+# tools/lint-learned.d/docs-binary.sh, the detector tools/lint-learned.sh also
+# runs, so the commit fails here and the file never reaches a PR. Like the
+# render below, it reads each path's working-tree copy.
+#
 # Keep generated/seed-audit/ in step with the fragments it renders: a commit
 # touching a seed input regenerates the audit and stages it. A commit touching
 # no input pays one `git diff --cached --name-only`; one that does pays the
@@ -17,6 +24,34 @@
 
 set -uo pipefail
 
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# A detector that is gone was retired, so there is nothing to enforce. Once it
+# runs, any exit but 0 aborts the commit: 1 is a finding, and anything else
+# means the check could not run, which must not read as a pass.
+guard="$root/tools/lint-learned.d/docs-binary.sh"
+if [ -f "$guard" ]; then
+    paths=()
+    while IFS= read -r -d '' p; do
+        paths+=("$p")
+    done < <(git diff --cached --name-only -z --diff-filter=ACMR 2>/dev/null)
+    if [ "${#paths[@]}" -gt 0 ]; then
+        found="$(cd "$root" 2>/dev/null || exit 2; bash "$guard" "${paths[@]}" </dev/null)"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            [ -n "$found" ] && printf '%s\n' "$found" >&2
+            if [ "$rc" -eq 1 ]; then
+                printf 'pre-commit: commit refused: a binary file is staged under a docs/ directory.\n' >&2
+                printf 'pre-commit: move it under specs/<bead-id>/, or attach it to the PR with assets/scripts/demo-deliver.sh, then commit again.\n' >&2
+            else
+                printf 'pre-commit: the docs-binary check could not run (exit %s), so the commit is aborted.\n' "$rc" >&2
+                printf 'pre-commit: run it directly to see why: tools/lint-learned.d/docs-binary.sh <staged paths>\n' >&2
+            fi
+            exit 1
+        fi
+    fi
+fi
+
 # Inputs the artifact is a function of — kept in step with digest_inputs()
 # in render-seed-audit.sh. The renderer itself is on the list: it CARRIES
 # the synthetic city the prompts render against (tk-wchab).
@@ -28,7 +63,6 @@ staged="$(git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null)"
 touched="$(grep -E "$INPUT_RE" <<< "$staged")"
 [ -n "$touched" ] || exit 0
 
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 script="$root/assets/scripts/render-seed-audit.sh"
 # Absent = no renderer, nothing to do; NOT executable is different — every
 # invocation goes through bash so a mode bit cannot disable the upkeep loop.

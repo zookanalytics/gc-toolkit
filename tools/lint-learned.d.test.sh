@@ -8,7 +8,8 @@
 # every executable in lint-learned.d/ as a detector, so a test file in that
 # directory would be run as one.
 #
-# Covered: raw-bd-invocation, mktemp-untemplated, bd-helper-in-scope.
+# Covered: raw-bd-invocation, mktemp-untemplated, bd-helper-in-scope,
+# docs-binary.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -782,6 +783,108 @@ out=$(@J@ show "$1")
 FIX
 runbd "$TMP/lint-learned.d/other-detector.sh"
 eq "$RC" 0 "a file under lint-learned.d/ is skipped"
+
+# ── docs-binary ─────────────────────────────────────────────────────────
+#
+# The detector reads paths relative to the repository root, so every run
+# happens inside a fixture root. Fixture bytes are written at run time: a
+# binary committed here would be a finding against the tree itself.
+DET_DB="$HERE/lint-learned.d/docs-binary.sh"
+[ -x "$DET_DB" ] || { echo "no detector at $DET_DB"; exit 1; }
+DB="$TMP/docs-binary"
+mkdir -p "$DB"
+rundb() { OUT="$(cd "$DB" && "$DET_DB" "$@" 2>&1)"; RC=$?; }
+# put <path> <bytes> — write printf %b escapes as raw bytes under the root.
+put() { mkdir -p "$DB/$(dirname "$1")" && printf '%b' "$2" > "$DB/$1"; }
+PNG='\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'
+
+echo "── docs-binary: what is a finding ──"
+
+put docs/shot.png "$PNG"
+put services/helm/docs/screenshots/after.png "$PNG"
+put docs/specs/old.png "$PNG"
+rundb docs/shot.png services/helm/docs/screenshots/after.png docs/specs/old.png
+eq "$RC" 1 "an image in a docs tree exits 1"
+has "$OUT" "docs/shot.png:1:" "an image under the root docs/ is reported"
+has "$OUT" "services/helm/docs/screenshots/after.png:1:" "an image under a nested docs/ is reported"
+has "$OUT" "docs/specs/old.png:1:" "a specs/ directory inside docs/ is still docs"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 3 "one finding per file, and nothing else"
+has "$OUT" "docs-binary" "the finding names the rule"
+has "$OUT" "specs/<bead-id>/" "the finding names the committed home"
+has "$OUT" "demo-deliver.sh" "the finding names the uncommitted route"
+
+# Each test stands alone, so a broken arm cannot hide behind the other.
+put docs/notes.dat 'header\x00body'
+rundb docs/notes.dat
+eq "$RC" 1 "a NUL in the first 8000 bytes is binary whatever the extension"
+
+{ head -c 7999 /dev/zero | tr '\000' a; printf '\000tail'; } > "$DB/docs/edge.dat"
+rundb docs/edge.dat
+eq "$RC" 1 "a NUL at the 8000th byte is binary, as git reads it"
+
+put docs/report.PDF '%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n'
+rundb docs/report.PDF
+eq "$RC" 1 "a binary format's extension counts with no NUL, in any letter case"
+
+put "docs/my shot.png" "$PNG"
+rundb "docs/my shot.png"
+has "$OUT" "docs/my shot.png:1:" "a path with a space is reported whole"
+
+echo "── docs-binary: what is not ──"
+
+put specs/tk-x/screenshots/shot.png "$PNG"
+rundb specs/tk-x/screenshots/shot.png
+eq "$RC" 0 "a capture under specs/<bead-id>/ is in its home"
+
+put specs/tk-x/docs/shot.png "$PNG"
+rundb specs/tk-x/docs/shot.png
+eq "$RC" 0 "a docs/ directory inside specs/ is still specs"
+
+put assets/logo.png "$PNG"
+rundb assets/logo.png
+eq "$RC" 0 "a binary outside any docs tree is not this rule's"
+
+put docsite/shot.png "$PNG"
+put mydocs/shot.png "$PNG"
+put docs.png "$PNG"
+rundb docsite/shot.png mydocs/shot.png docs.png
+eq "$RC" 0 "only a directory named exactly docs opens a docs tree"
+
+put docs/guide.md '# Guide\n\nText that stays true.\n'
+put docs/diagram.svg '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>\n'
+put docs/empty.md ''
+rundb docs/guide.md docs/diagram.svg docs/empty.md
+eq "$RC" 0 "text, a text image, and an empty file are not binary"
+eq "$OUT" "" "a clean run prints nothing"
+
+{ head -c 9000 /dev/zero | tr '\000' a; printf 'tail\000'; } > "$DB/docs/late.txt"
+rundb docs/late.txt
+eq "$RC" 0 "a NUL past the first 8000 bytes leaves a file text, as git reads it"
+
+rundb docs/gone.png
+eq "$RC" 0 "a path that is not a file drops out"
+
+echo "── docs-binary: a file it cannot read ──"
+
+put docs/locked.dat 'header\x00body'
+put docs/locked.png "$PNG"
+chmod 000 "$DB/docs/locked.dat" "$DB/docs/locked.png"
+if [ -r "$DB/docs/locked.dat" ]; then
+    ok "skipped: this user can read a mode-000 file (root)"
+else
+    rundb docs/locked.dat
+    eq "$RC" 2 "an unreadable file whose bytes decide exits 2, not 0"
+    has "$OUT" "docs/locked.dat: cannot read" "and says which file it could not read"
+    rundb docs/locked.png
+    eq "$RC" 1 "an unreadable file with an image extension is still a finding"
+fi
+chmod 644 "$DB/docs/locked.dat" "$DB/docs/locked.png"
+
+echo "── docs-binary: the runner picks it up ──"
+
+OUT="$(cd "$DB" && "$HERE/lint-learned.sh" docs/shot.png 2>&1)"; RC=$?
+eq "$RC" 1 "lint-learned.sh fails on a binary in a docs tree"
+has "$OUT" "docs-binary.sh: 1 finding(s)" "and attributes it to this detector"
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"

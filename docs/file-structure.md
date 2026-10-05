@@ -85,6 +85,12 @@ Default layout is flat at `docs/<topic>.md`. Promote to
   someone owns keeping current; the raw research stays in `specs/`.
 - **Lineage is via git history.** `git blame` → commit → bead reference is the
   primary path; inline bead citation only where it helps the reader.
+- **Binaries never go in a docs tree.** A screenshot, image, PDF, or video
+  cannot be kept true by editing it, so it records one moment. Commit it under
+  `specs/<bead-id>/` with the work it shows, or attach it to the PR uncommitted
+  with `assets/scripts/demo-deliver.sh`. The rule covers a `docs/` directory at
+  any depth outside `specs/`. The pre-commit hook refuses such a file, and so
+  does `tools/lint-learned.sh`, through `tools/lint-learned.d/docs-binary.sh`.
 
 ## Inside `specs/`
 
