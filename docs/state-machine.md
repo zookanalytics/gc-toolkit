@@ -192,7 +192,11 @@ merges once every check, of every phase, reads green. An empty `check_set` is
 not the opt-out at any transition: it means never normalized, and gate-ensure
 stamps the default earlier in the same pass. A `check_set` whose checks are all
 `pre-open` (gc-toolkit today) opens its PR ready at once — the draft stage
-appears only when a check names a later phase.
+appears only when a check names a later phase. A name the index does not
+declare takes `pre-open`, and so does every name in a repo that keeps no index,
+so it gates every transition. A declared phase outside the four is an index
+error: every transition whose check_set names that check holds until the index
+is fixed.
 
 Each check is a **lane**, and its marker carries one bare state word — a state
 of the lane, never a claim about a commit:
