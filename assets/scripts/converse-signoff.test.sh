@@ -1817,6 +1817,66 @@ SOARGS=(--visit v-x --outcome "o — p" --ruled no);                run_so; eq "
 SOARGS=(--visit v-x --ruled no --still-owed z);                   run_so; eq "$SO_RC" "2" "a missing --outcome is refused"
 SOARGS=(--visit v-x --outcome "o — p" --ruled no --still-owed z --rework); run_so; eq "$SO_RC" "2" "--rework without --ruled yes is refused"
 
+# --rework files the ruling's rework child before anything else is written. Its
+# blocks edge then holds the merge before the discharge resolves a merge hold this
+# sitting took, and a filing that does not land stops the sign-off with every
+# demand still standing. The stub logs into SOGC beside the gate calls, so the
+# order of the two is read off one log.
+cat >"$SOPACK/assets/scripts/converse-rework.sh" <<'CR'
+#!/usr/bin/env bash
+printf 'REWORK: %s\n' "$*" >>"$SOGC"
+if [ "${SO_REWORK_RC:-0}" = 0 ]; then
+    echo "converse-rework: filed rework rw-1 on anchor item-x"
+else
+    echo "converse-rework: anchor item-x is merge_result='pre_open_gate', not pull_request" >&2
+fi
+exit "${SO_REWORK_RC:-0}"
+CR
+chmod +x "$SOPACK/assets/scripts/converse-rework.sh"
+
+echo "── --rework files the ruling's rework first, then the sign-off proceeds ──"
+SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
+run_so
+eq "$SO_RC" "0" "a sign-off whose rework filed exits 0"
+have "the rework is filed against the item, sourced by this visit" \
+     'REWORK: --anchor item-x --ruling-bead v-x --ruling approved' "$SOGC"
+have "…the discharge still resolves the merge hold" 'bd gate resolve d-x --reason approved' "$SOGC"
+so_rw=$(grep -n '^REWORK: ' "$SOGC" | head -1 | cut -d: -f1)
+so_gr=$(grep -n 'bd gate resolve d-x' "$SOGC" | head -1 | cut -d: -f1)
+if [ -n "$so_rw" ] && [ -n "$so_gr" ] && [ "$so_rw" -lt "$so_gr" ]; then
+    ok "…only after the rework's blocks edge holds the merge"
+else
+    bad "…only after the rework's blocks edge holds the merge" \
+        "rework@${so_rw:-none} resolve@${so_gr:-none} — a merge hold released before the rework files leaves the stale PR free to land"
+fi
+have "…and the PR-reminder close text names the filed rework" 'filed ruling-driven rework on item-x' "$SOGC"
+
+echo "── a rework that does not file stops the sign-off before any write ──"
+run_so SO_REWORK_RC=2
+eq "$SO_RC" "1" "a refused rework exits 1, so the sitting does not sign off"
+case "$SO_OUT" in *"REWORK NOT FILED on item-x"*"not pull_request"*) ok "…naming the item and why the rework refused" ;;
+                  *) bad "…naming the item and why the rework refused" "got: $SO_OUT" ;; esac
+case "$SO_OUT" in *"Do NOT post the sign-off or close the visit"*) ok "…and telling the sitting not to sign off or close" ;;
+                  *) bad "…and telling the sitting not to sign off or close" "got: $SO_OUT" ;; esac
+so_rest=$(grep -v '^REWORK: ' "$SOGC")
+if [ -z "$so_rest" ]; then ok "…no demand resolved and no close text stashed, so a merge hold still holds"
+else bad "…no demand resolved and no close text stashed, so a merge hold still holds" "found: $so_rest"; fi
+if [ -s "$SOLOG" ]; then bad "…and no takeaway or release written" "found: $(cat "$SOLOG")"
+else ok "…and no takeaway or release written"; fi
+
+echo "── a rework script that resolves nowhere stops the sign-off too ──"
+# The city root carries a takeaway writer but no converse-rework.sh, so a sign-off
+# that ran on past the missing script would reach that writer.
+run_so GC_RIG_ROOT="$SOFOR"
+eq "$SO_RC" "1" "a missing converse-rework.sh exits 1"
+case "$SO_OUT" in *"REWORK NOT FILED on item-x: no converse-rework.sh"*) ok "…and says the script resolved nowhere" ;;
+                  *) bad "…and says the script resolved nowhere" "got: $SO_OUT" ;; esac
+if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…and writes nothing" "found: $(cat "$SOLOG" "$SOGC")"
+else ok "…and writes nothing"; fi
+
+have "the settle skill gates the sign-off on the script's exit" \
+     'if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh"' "$SK_SETTLE"
+
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

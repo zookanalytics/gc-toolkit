@@ -35,6 +35,11 @@
 #   --rework (with --ruled yes): the ruling makes an already-published PR stale,
 #     so file the rework demand against the subject anchor — the review verdict's
 #     rework child, sourced by this visit — instead of only resolving the demand.
+#     The filing runs before every other write, and when it does not land
+#     nothing else is written.
+# Exit: 0 the sign-off may proceed, once any write it reports as failed is
+#   repaired; 1 --rework did not file and no trace was written — do NOT post
+#   the sign-off or close the visit; 2 usage, nothing written.
 set -u
 
 # >>> control-char-scrub
@@ -69,7 +74,7 @@ while [ $# -gt 0 ]; do
     --rework)     REWORK=1 ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
-    -h|--help)    sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            die "unknown argument '$1'" ;;
   esac
   shift
@@ -102,6 +107,43 @@ ITEM="${ITEM:-$SUBJECT}"
 TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
 DEMAND_TOPIC=()
 [ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
+# A ruling can make an already-published PR stale: it changes what the branch
+# must contain, while the PR still reads review-ready against a head that
+# predates it. --rework turns that ruling into the rework demand a review verdict
+# files — a fix unit that blocks the anchor and resumes its branch — sourced by
+# this visit instead of a verdict. It is the sitting's explicit opt-in, because
+# only the sitting knows a ruling's consequence reaches the open PR. The filing
+# is independent of the demand discharge below: a ruling with no prior hold
+# still needs its rework.
+# The filing runs before every other write and fails the sign-off closed. Filed
+# first, the child's blocks edge already holds the merge when the discharge
+# resolves a merge hold this sitting took, so the hold passes to the edge with no
+# gap in which the stale PR can land. A filing does not land when no script
+# resolves, or when converse-rework.sh exits non-zero, as it does for any filing
+# it refuses or cannot prove. Then the takeaway, the discharge and the release
+# stay unwritten, every demand this sitting filed still stands, and exit 1 tells
+# the sitting not to sign off or close the visit. A re-run starts clean, and
+# converse-rework.sh adopts a child an earlier attempt filed rather than minting
+# a second.
+REWORK_FILED=""
+if [ "$RULED" = yes ] && [ "$REWORK" = 1 ]; then
+  CR=""
+  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$cand/assets/scripts/converse-rework.sh" ] && { CR="$cand/assets/scripts/converse-rework.sh"; break; }
+  done
+  if [ -z "$CR" ]; then
+    REWORK_OUT="no converse-rework.sh on any candidate root"
+  elif REWORK_OUT=$("$CR" --anchor "$ITEM" --ruling-bead "$VISIT" --ruling "$RULING" 2>&1); then
+    echo "$REWORK_OUT"
+    REWORK_FILED=yes
+  fi
+  if [ -z "$REWORK_FILED" ]; then
+    echo "REWORK NOT FILED on $ITEM: $REWORK_OUT"
+    echo "Nothing is signed off: no takeaway, discharge or release was written, and every demand this sitting filed still stands. Do NOT post the sign-off or close the visit."
+    echo "Repair the cause and re-run this sign-off. If $ITEM is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
+    exit 1
+  fi
+fi
 HELM=""
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
@@ -227,32 +269,6 @@ done
 if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" = "held" ]; then
   "$LC" transition "$ITEM" --to unanchored --route "$ROUTE" \
     || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
-fi
-
-# A ruling can make an already-published PR stale: it changes what the branch
-# must contain, while the PR still reads review-ready against a head that
-# predates it. --rework turns that ruling into the rework demand a review verdict
-# files — a fix unit that blocks the anchor and resumes its branch — sourced by
-# this visit instead of a verdict. It is the sitting's explicit opt-in, because
-# only the sitting knows a ruling's consequence reaches the open PR.
-# converse-rework.sh refuses anything but an open-PR anchor, so a --rework on a
-# non-PR item is a loud no-op, not a bad child. The filing is independent of the
-# demand discharge above: a ruling with no prior hold still needs its rework.
-REWORK_FILED=""
-if [ "$RULED" = yes ] && [ "$REWORK" = 1 ]; then
-  CR=""
-  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$cand/assets/scripts/converse-rework.sh" ] && { CR="$cand/assets/scripts/converse-rework.sh"; break; }
-  done
-  if [ -z "$CR" ]; then
-    echo "NO converse-rework.sh on any candidate root — the ruling did NOT reach rework on $ITEM; file it by hand once the script resolves: converse-rework.sh --anchor $ITEM --ruling-bead $VISIT --ruling \"$RULING\""
-  elif REWORK_OUT=$("$CR" --anchor "$ITEM" --ruling-bead "$VISIT" --ruling "$RULING" 2>&1); then
-    echo "$REWORK_OUT"
-    REWORK_FILED=yes
-  else
-    echo "REWORK NOT FILED on $ITEM: $REWORK_OUT"
-    echo "  the ruling is recorded but the open PR is NOT held for rework; re-run: $CR --anchor $ITEM --ruling-bead $VISIT --ruling \"$RULING\""
-  fi
 fi
 
 # Stash what the visit's PR-reminder close will say, for the writer that runs
