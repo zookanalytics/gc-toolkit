@@ -22,9 +22,8 @@ tree can be registered in another repo's git dir and only the registry knows
 which. It reads the bead store of every repo it enumerates, opening each by
 path as `gc bd --db <repo>/.beads`. `gc bd --rig` resolves only the rigs
 `city.toml` declares, so the town's store answers to no rig name. It runs two
-passes in one budget: it
-removes the worktrees of closed beads, then drops the `polecat/<bead-id>`
-branches those worktrees leave behind.
+passes in one budget: it removes the worktrees of closed beads, then drops the
+`polecat/<bead-id>` branches those worktrees leave behind.
 
 A worktree is removed when all of these hold:
 
