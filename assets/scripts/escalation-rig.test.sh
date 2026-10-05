@@ -77,6 +77,19 @@ eq "$RC" "3" "an unreadable rig list is unproven (exit 3), a store that could no
 eq "$OUT" "" "  ... printing no rig to stdout"
 has "$ERR" "could not read" "  ... reported apart from 'no such prefix', which has a different repair"
 
+# Only bead-store.sh can prove a no. A helper that cannot be run asked no store,
+# so its refusal is unproven (3), never the proven no-such-bead (1) that
+# escalate.sh redirects onto the triage subject.
+GC_BEAD_STORE_TOOL="$TMP/no-such-bead-store.sh" run tk-3y6toq
+eq "$RC" "3" "a missing bead-store.sh is unproven (exit 3), not a proven no-such-bead"
+eq "$OUT" "" "  ... printing no rig to stdout"
+has "$ERR" "cannot execute" "  ... and saying the store helper could not be run"
+
+printf '#!/usr/bin/env bash\necho gc-toolkit\n' > "$TMP/bead-store-noexec.sh"
+GC_BEAD_STORE_TOOL="$TMP/bead-store-noexec.sh" run tk-3y6toq
+eq "$RC" "3" "a bead-store.sh that is not executable is unproven (exit 3) too"
+eq "$OUT" "" "  ... and nothing it would answer is read"
+
 run
 eq "$RC" "2" "no argument is a usage error"
 run tk-3y6toq extra

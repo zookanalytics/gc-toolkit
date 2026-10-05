@@ -254,6 +254,24 @@ eq "$rc" 1 "an unreadable rig set on the board route exits 1 (fail closed)"
 eq "$(visits)" "0" "and files nothing"
 has "$out" "could not read" "and says the rig set was unreadable, not that the prefix is unknown"
 
+echo "# a store helper that cannot run proves nothing, so a real subject is never redirected"
+# escalation-rig's exit 1 proves the subject names no bead, and that subject is
+# redirected onto the triage subject by --key alone. A bead-store.sh that cannot
+# be run asked no store, so tk-a may still be a real bead: the board route with
+# GC_RIG unset refuses, and a pinned GC_RIG files on tk-a itself.
+reset
+out=$(env -u GC_RIG GC_BEAD_STORE_TOOL="$TMP/no-such-bead-store.sh" "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unrunnable store helper on the board route exits 1 (fail closed)"
+eq "$(visits)" "0" "and files nothing, on the triage subject or anywhere else"
+has "$out" "cannot execute" "and the refusal says why the store is unproven"
+
+reset
+out=$(GC_RIG=gc-toolkit GC_BEAD_STORE_TOOL="$TMP/no-such-bead-store.sh" "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "with GC_RIG pinned it files under the pin"
+eq "$(visits)" "1" "one visit, and no triage subject minted"
+eq "$(meta vis-1 gc.continuation_group)" "tk-a" "the visit hangs on tk-a, not on the triage subject"
+has "$(cat "$STUB_DEPS")" "vis-1|tk-a|tracks" "and tracks tk-a"
+
 echo "# the empty-identity fallback subject ('refinery') redirects to triage, never drops"
 # mol-refinery-patrol's validate-identity step escalates with
 # --subject "${GC_SESSION_ID:-refinery}"; with GC_SESSION_ID empty the literal

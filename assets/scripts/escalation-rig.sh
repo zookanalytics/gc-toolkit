@@ -12,12 +12,14 @@
 # Anything but exactly one rig carrying that prefix is a refusal: a guessed
 # store files the visit where its subject cannot be reached, which reads as an
 # escalation nobody ever receives.
-# Exit (passed through from bead-store.sh): 0 resolved, rig name on stdout · 1
-# the subject names no placeable bead — no <prefix>-<id> shape, or a prefix the
-# readable rig set does not carry · 2 usage · 3 unproven — the rig set was
-# unreadable, or the prefix is carried by two rigs. A caller that only binds
-# GC_RIG treats 1 and 3 alike (nothing to bind); one that must act differently
-# on a non-bead subject than on an unreadable store reads them apart.
+# Exit: 0 resolved, rig name on stdout · 1 the subject names no placeable bead
+# — no <prefix>-<id> shape, or a prefix the readable rig set does not carry · 2
+# usage · 3 unproven — bead-store.sh could not be run, the rig set was
+# unreadable, or the prefix is carried by two rigs. 1 is a proof, so only
+# bead-store.sh's own answer may exit 1; a helper that cannot be run has proven
+# nothing and exits 3. A caller that only binds GC_RIG treats 1 and 3 alike
+# (nothing to bind); one that must act differently on a non-bead subject than
+# on an unreadable store reads them apart.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +41,7 @@ case "$BEAD" in -*) usage; exit 2 ;; esac
 
 [ -x "$BEAD_STORE" ] || {
   echo "escalation-rig: cannot execute $BEAD_STORE, so the store for $BEAD is unproven and nothing may be filed against it" >&2
-  exit 1
+  exit 3
 }
 
 # bead-store.sh separates a prefix no rig carries (exit 1) from a store it could

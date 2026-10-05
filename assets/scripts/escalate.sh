@@ -30,9 +30,9 @@
 # the store the visit lands in, so route and store cannot disagree; without
 # one, a rig-less caller has no store to reconcile an already-open visit's
 # rig-qualified route against, and refuses rather than guess. An
-# ephemeral --subject (a patrol wisp) is redirected onto this store's standing
-# triage subject, because the sitting that works the visit writes its outcome
-# and takeaway to the subject.
+# ephemeral --subject (a patrol wisp, or a subject proven to name no bead) is
+# redirected onto this store's standing triage subject, because the sitting
+# that works the visit writes its outcome and takeaway to the subject.
 # A CLOSED visit answers too: a situation a sitting closed `moot` or `benign`
 # is not re-filed for GC_ESCALATE_VERDICT_WINDOW seconds (default 86400, 0
 # disables), and each suppressed repeat is tallied on that visit.
@@ -63,11 +63,13 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              durable subject.
   --subject  the bead the escalation is about; the visit tracks it (required).
              A durable bead also narrows the dedup to that bead; an ephemeral
-             one (a patrol wisp) cannot, so there the key alone is the
-             identity, and the visit is filed on the standing triage subject
-             (task_kind=triage-subject, triage.scope=ephemeral-subject-findings)
-             instead — a wisp burns before a sitting can record anything to it.
-             The wisp rides the visit as escalation_raised_by
+             one (a patrol wisp, or a subject proven to name no bead) cannot,
+             so there the key alone is the identity, and the visit is filed on
+             the standing triage subject (task_kind=triage-subject,
+             triage.scope=ephemeral-subject-findings) instead — a wisp burns
+             before a sitting can record anything to it, and a non-bead has
+             nothing to record to. The subject rides the visit as
+             escalation_raised_by
   --key      names the SITUATION, not the wording: one open visit per key,
              narrowed to the subject when the subject is durable.
              [A-Za-z0-9._-] only (required). To keep two situations apart
@@ -137,9 +139,10 @@ fi
 #               bead-id shape lands here. Both get key-alone dedup on the
 #               standing triage subject below: a tracks edge to a non-bead fails,
 #               and a sitting's outcome written to one has nowhere to land.
-#   unproven  — escalation-rig exit 3: a bead-shaped id whose store could not be
-#               read (unreadable rig set, or a prefix two rigs carry). It may be
-#               a real bead, so it is NOT bucketed as ephemeral; the board-route
+#   unproven  — escalation-rig exit 3, or any code but 0 and 1: no store could
+#               be asked (the store helper could not run, the rig set was
+#               unreadable, or a prefix two rigs carry). The subject may be a
+#               real bead, so it is NOT bucketed as ephemeral; the board-route
 #               block fails closed on it.
 # The *-wisp-* glob is checked FIRST because a wisp's own prefix (lx-, tk-) does
 # resolve to a rig, so resolvability alone would miscall it durable.
@@ -194,8 +197,8 @@ if { [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; } && [ "$SUBJECT_CLASS" !=
       exit 1
     fi
   elif [ -z "${GC_RIG:-}" ]; then
-    # Unproven: a bead-shaped subject whose store could not be read. It may be a
-    # real bead, so filing in the ambient store would risk the wrong board and a
+    # Unproven: a subject whose store could not be asked. It may be a real
+    # bead, so filing in the ambient store would risk the wrong board and a
     # severed tracks edge — fail closed. (A subject PROVEN to be no bead is
     # ephemeral, handled by the redirect below, never here.)
     warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would land on the wrong board and its tracks edge would never reach the subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
