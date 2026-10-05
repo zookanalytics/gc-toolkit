@@ -205,7 +205,12 @@ The block prints one row per candidate, `<bead> <owner>`. The bead id is the
 `<bead>` the parts below act on, and the owner is the loop's `OWNER`. No rows
 means no candidates. A `did not parse` line means the listing itself failed,
 which is not a rig with nothing to recover: no candidate set exists this cycle,
-so skip the rest of this step and continue to check-refinery.
+and orphan recovery stays blind until the listing reads again. Skip the rest of
+this step and file it
+(`patrol-finding.sh --scope witness-findings --key witness-candidates-unreadable
+--title "witness orphan-candidate listing did not parse" --message "<the
+listing's stderr> ..."`), then continue to check-refinery. A cycle that fails
+the same way lands on that finding as another occurrence.
 
 A bead naming no owner in any of the three places is already in the pool's
 court, and it is the only thing host-bead-skip drops. Every OTHER owned bead
