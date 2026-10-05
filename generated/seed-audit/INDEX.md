@@ -82,7 +82,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 3,554 | 888 |
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
-| [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
+| [`mol-visit`](formulas/mol-visit.md) | `city` | 1,244 | 311 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,949 | 737 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was

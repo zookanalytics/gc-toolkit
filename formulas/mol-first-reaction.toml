@@ -493,31 +493,53 @@ done
 # >>> gate-visit
 # Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
 POOL="human"
-VISIT=$(gc bd create -t task --title "visit: $WORK_BEAD_ID — first reaction ready: accept or redirect" \
-  -d "First reaction ready on $WORK_BEAD_ID — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
-[ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-  || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
-gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
-  --set-metadata "gc.continuation_group=$WORK_BEAD_ID" \
-  --set-metadata "task_kind=visit"
-gc bd dep add "$VISIT" "$WORK_BEAD_ID" --type=tracks
-# tracks, NOT parent-child: parent-child transmits the subject's
-# blocked state to the visit, making it unclaimable.
-# Read the group stamp back and repair it from the subject if it landed
-# empty: it can land present-but-empty while every sibling stamp in the
-# same update lands, and an empty group disables converse's group-scoped
-# re-claim fence. Repair and warn, never exit — this block files the one
-# visit for its scope, and on a persistent miss the tracks edge still
-# carries the subject for guards that read the union.
-GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
-if [ "$GROUP_GOT" != "$WORK_BEAD_ID" ]; then
-  echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '$WORK_BEAD_ID' — repairing" >&2
-  gc bd update "$VISIT" --set-metadata "gc.continuation_group=$WORK_BEAD_ID" || true
+# One conversation visit per subject: a re-run of this exit block reuses the
+# conversation visit its first run filed, and files nothing. Coverage is
+# visit-identity.sh's rule (the tracks edge, else the group stamp). An
+# escalate.sh visit (escalation_key) closes on its own situation's terms, so it
+# never stands in for this one. A listing that does not read files anyway.
+VISIT=""
+VI=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -f "$c/assets/scripts/visit-identity.sh" ] && { VI="$c/assets/scripts/visit-identity.sh"; break; }
+done
+if [ -n "$VI" ] && . "$VI"; then
+  VISIT=$(gc bd list --status=open,in_progress --metadata-field task_kind=visit --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' \
+    | jq -r --arg s "$WORK_BEAD_ID" "$VISIT_IDENTITY_JQ"'if type == "array" then ([ .[]
+        | select((.metadata.task_kind // "") == "visit" and (.metadata.escalation_key // "") == "")
+        | select(.status == "open" or .status == "in_progress")
+        | select(visit_covers($s)) | .id ] | sort | .[0] // "") else "" end' 2>/dev/null || printf '')
+else
+  echo "gate-visit: warning: visit-identity.sh not found, so no open visit on $WORK_BEAD_ID can be matched — filing" >&2
+fi
+if [ -n "$VISIT" ]; then
+  echo "gate-visit: visit $VISIT is already open on $WORK_BEAD_ID — reusing it, not filing a second" >&2
+else
+  VISIT=$(gc bd create -t task --title "visit: $WORK_BEAD_ID — first reaction ready: accept or redirect" \
+    -d "First reaction ready on $WORK_BEAD_ID — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
+  [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
+    || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
+  gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
+    --set-metadata "gc.continuation_group=$WORK_BEAD_ID" \
+    --set-metadata "task_kind=visit"
+  gc bd dep add "$VISIT" "$WORK_BEAD_ID" --type=tracks
+  # tracks, NOT parent-child: parent-child transmits the subject's
+  # blocked state to the visit, making it unclaimable.
+  # Read the group stamp back and repair it from the subject if it landed
+  # empty: it can land present-but-empty while every sibling stamp in the
+  # same update lands, and an empty group disables converse's group-scoped
+  # re-claim fence. Repair and warn, never exit — this block files the one
+  # visit for its scope, and on a persistent miss the tracks edge still
+  # carries the subject for guards that read the union.
   GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
-  if [ "$GROUP_GOT" = "$WORK_BEAD_ID" ]; then
-    echo "gate-visit: the repair landed on $VISIT" >&2
-  else
-    echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union" >&2
+  if [ "$GROUP_GOT" != "$WORK_BEAD_ID" ]; then
+    echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '$WORK_BEAD_ID' — repairing" >&2
+    gc bd update "$VISIT" --set-metadata "gc.continuation_group=$WORK_BEAD_ID" || true
+    GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
+    if [ "$GROUP_GOT" = "$WORK_BEAD_ID" ]; then
+      echo "gate-visit: the repair landed on $VISIT" >&2
+    else
+      echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union" >&2
+    fi
   fi
 fi
 # <<< gate-visit
@@ -532,7 +554,8 @@ fi
 above exited zero. `first-reaction-dispose.sh` returns non-zero when the route
 never stamped or the wait never became a `blocks` edge, and a bead in that
 state is neither routed nor held, so closing over it strands the subject. Fix
-what its message names and re-run the exit block first.
+what its message names and re-run the exit block first. The re-run reuses the
+visit the first run filed, so the subject still has one visit.
 
 The reaction session is one-shot — it ends here. This is the terminal graph
 step, so it still closes its own step bead: that is how a graph.v2 step

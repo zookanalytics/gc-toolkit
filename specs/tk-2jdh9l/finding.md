@@ -1,149 +1,182 @@
 ---
-name: Keyless closed visits — are they an escalate.sh bypass?
-description: Investigation of the closed gc-toolkit visits carrying no escalation_key — which paths file them, whether any should route through escalate.sh, and the moot/benign rate tk-x3elmf could not measure. Conclusion for tk-2jdh9l.
+name: Keyless visits need one open visit per subject, not escalate.sh
+description: Investigation of the closed gc-toolkit visits carrying no escalation_key — which paths file them, whether any should route through escalate.sh, their moot/benign rate — and the duplicate-visit defect it found in the formula copies of the gate-visit block, fixed alongside. Conclusion for tk-2jdh9l.
 ---
 
-# Keyless closed visits are the intended visit family, not an escalate.sh bypass
+# Keyless visits need one open visit per subject, not escalate.sh
 
 ## Bottom line
 
-The closed visits with no `escalation_key` are the pack's conversation-and-board
-visit family (the shared `gate-visit` snippet), deliberately separate from
-`escalate.sh`'s keyed escalation path and adopted as the human-gate resolution
-model in #655. They are keyless on purpose: each is one-per-subject, deduped by
-`gc.continuation_group`. No producer should route through `escalate.sh`, and none
-is an ungated volume source.
+The closed visits with no `escalation_key` come from the conversation channel,
+the keyless copies of the shared `gate-visit` snippet. They are not an
+`escalate.sh` bypass, and routing them through `escalate.sh` would not help.
+What its verdict window catches is a situation re-filed after a person ruled it
+moot or benign, and keyless visits are almost never re-filed that way.
 
-The premise behind the split-off worry inverts under measurement: the keyless
-population's moot/benign rate is **~10%**, while the `escalate.sh`-keyed population
-runs **~52%**. The noise lives in the keyed population, not the keyless one.
+The filing-time gate a conversation visit does need is one open visit per
+subject, and only `gc-helm.sh open` had it. The four formula copies, in
+`mol-visit`, `mol-first-reaction`, `mol-validate-close` and
+`mol-feedback-distiller`, filed without looking. A step that ran twice therefore
+filed two visits. `mol-first-reaction` did this on three subjects. Each subject
+was held on one visit of its pair, and the other would go on asking after the
+first was answered. A sitting had closed one extra as a duplicate; the other two
+were folded into their twins on 2026-10-05.
 
-## The question (tk-2jdh9l, split from tk-x3elmf)
+The fix ships with this finding. Every formula copy now reuses the conversation
+visit already open on its subject before it files, and never reuses an
+escalation visit. `assets/scripts/gate-visit.test.sh` executes every formula
+copy against both cases.
+
+## The question
 
 tk-x3elmf added a verdict window to `escalate.sh` and measured only the keyed
-visits. This bead asks, of the closed visits carrying no `escalation_key`: which
-paths file them, whether each should route through `escalate.sh`, and whether any
-is a volume source worth gating. tk-x3elmf left this set's moot/benign rate unknown.
+visits. This bead asks, of the closed visits carrying no `escalation_key`, which
+paths file them, whether each should route through `escalate.sh`, and whether
+any is a volume source worth gating.
+
+## Who files keyless visits
+
+Six places create a `task_kind=visit` bead, and each is a marked copy of the
+`gate-visit` snippet. Only `escalate.sh`'s copy stamps `escalation_key`.
+
+| filer | reached by | open-visit check at filing, before this change |
+|---|---|---|
+| `gc-helm.sh open` | operator board picks, `gate-visit-sweep`, `gc-visit-open.sh` | folds into any visit open on the subject; `engage` asking for a new visit passes `--allow-duplicate` |
+| `mol-first-reaction` | the ruling and recommend exits | none |
+| `mol-validate-close` | a proposed close that did not validate | none |
+| `mol-visit` | "I want to talk about this", and converse filing a visit on another subject | none |
+| `mol-feedback-distiller` | a contested learning rule | prose only ("skip if one is already open") |
+| `escalate.sh` (keyed) | an agent escalating | one open visit per subject and key, plus the verdict window |
+
+Keyless visits by filer, open and closed, read from the titles that name one:
+first reaction 128, the board's default "operator pick" 92, `gate-visit-sweep`
+29 and validate-close 4. The other 132 carry free-text titles, from `gc-helm.sh
+open` with a reason, from `mol-visit`, and from producers since retired.
+
+Nothing that renders or measures visits reads `escalation_key` apart from
+`escalate.sh` itself. `services/` and `doctor/` carry no reference to it, and
+`check-visit-outcome-recorded` scans every `task_kind=visit` bead.
 
 ## Measurement
 
-As of 2026-10-04T17:30Z, from the local gc-toolkit store
-(`gc bd list --status closed --limit 0`, where `--limit 0` lifts the default
-page cap — the split-off's "100" was that cap). These counts are a point-in-time
-snapshot: the store grows as visits close, so a rerun returns larger absolute
-counts. The load-bearing quantity is the moot/benign **rate**, which holds across
-snapshots.
+As of 2026-10-05T17:52Z, from the gc-toolkit store (`gc bd list --status closed
+--metadata-field task_kind=visit --limit 0`). The counts grow as visits close,
+so the rates are what compares across runs.
 
-| population | count | moot+benign | rate |
+| population | closed | moot+benign | rate |
 |---|---|---|---|
-| all closed visits | 906 | — | — |
-| keyless (no `escalation_key`) | 320 | 32 | **10.0%** |
-| keyed (`escalate.sh`) | 586 | 306 | **52.2%** |
+| keyless | 321 | 33 | 10.3% |
+| keyed (`escalate.sh`) | 642 | 360 | 56.1% |
 
-Keyless outcomes are dominated by real dispositions — routed 51, settled 50,
-ruled 43, disposed 22, and a long tail of smaller ones; moot (30) and benign (2)
-together are just 32. Keyed outcomes, by contrast, are dominated by moot 228 and
-benign 78 (plus 109 unrecorded).
+**Re-filed after a verdict, the only case a verdict window catches.** Of 385
+keyless visits (321 closed, 64 open), 10 were filed after the subject's most
+recent closed visit was ruled moot or benign, and 5 of those inside the 24-hour
+default window. Two of the five were operator board picks, which a window must
+not mute. Two followed a moot verdict on a keyed escalation, which had asked a
+different question about the same subject. One came from a witness producer
+that no longer exists. A keyless verdict window would have had nothing live to
+catch.
 
-Reproduce — this reruns against the **live** store and returns the current
-counts, which sit at or above the snapshot above rather than reproducing it; the
-stable quantity to compare across runs is the moot/benign rate. (The rig preface
-prints to stderr, so a bare pipe to jq is clean.)
+**`gate-visit-sweep`'s moot share.** 17 of its 28 closed visits read moot, and
+all 28 were filed before 2026-09-21. Twelve of the 17 were closed in one
+stale-visit sweep that day (tk-hexkmx): visits left open after their gate, a
+since-retired signoff-cap gate, or their subject had closed. Four more were
+closes `converse-claim` completed after a sitting stamped moot. The sweep has
+filed one visit since. This is a one-time cleanup of a retired gate type, not a
+live noise source.
+
+## The defect: filing without looking
+
+Subjects that held two keyless visits open at once:
+
+| subject | visits, in filing order | filed | held on | the extra |
+|---|---|---|---|---|
+| tk-crwixa | tk-v55jpc, tk-g83dov | 2026-09-24 15:14Z and 15:19Z, both by the proactive-1 pool | tk-g83dov | tk-v55jpc open 11 days, folded into tk-g83dov 2026-10-05 |
+| tk-kv146i | tk-hby3e0, tk-6hxc2s | 2026-09-18 17:25Z and 17:34Z, both by the proactive-2 pool | tk-6hxc2s | tk-hby3e0 open 17 days, folded into tk-6hxc2s 2026-10-05 |
+| tk-88j8wj | tk-26mgvz, tk-3x9n6i | 2026-10-04 12:49Z and 12:53Z, two sessions | tk-26mgvz | tk-3x9n6i closed `duplicate` by a sitting the same day |
+
+All three are `mol-first-reaction`'s "first reaction ready" visit. The first
+filing in each pair completed: tk-v55jpc, tk-hby3e0 and tk-26mgvz each carry all
+three stamps and a tracks edge, and tk-v55jpc's edge landed ten seconds after
+its create. On tk-crwixa and tk-kv146i the reaction's disposition was stamped
+after the second visit, which is the shape of the exit block running twice. The
+formula tells the worker to re-run that block when `first-reaction-dispose.sh`
+fails, and a step re-offered to a second session runs it again too. The block
+filed whenever it ran.
+
+The board folds both visits onto the subject's row. When the operator answers
+the held one, the other keeps the subject showing as owed with the same ask.
+
+## The fix
+
+- Each formula copy of the `gate-visit` block lists the open and in_progress
+  `task_kind=visit` beads and keeps the conversation visits, those with no
+  `escalation_key`, that cover the subject. Coverage is `visit-identity.sh`'s
+  `visit_covers`: the tracks edge, else the `gc.continuation_group` stamp. The
+  block reuses the lowest id, the tiebreak converse's fold also uses, and files
+  only when none matches.
+- An escalation visit is never reused. `escalate.sh --retract` closes one as
+  moot when its own situation clears, and the formula's question would close
+  with it, unasked.
+- A listing that does not read files anyway, and so does a block that cannot
+  find `visit-identity.sh`, which also warns. A second visit is a bounded
+  nuisance, and a visit never filed asks nobody.
+- `gate-visit.test.sh` runs the canonical copy against eleven listing shapes and
+  runs every formula copy against the reuse case and the escalation case. The
+  suite fails on each of these mutants: main's four copies, and in a single copy
+  dropping the escalation filter, the status filter, the `task_kind` check, the
+  tracks-edge coverage, the lowest-id choice, or the reuse branch.
+- A read-only run of the lookup against the live store found tk-g83dov for
+  tk-crwixa, tk-6hxc2s for tk-kv146i and tk-26mgvz for tk-88j8wj, each the visit
+  its subject is held on. It found nothing for tk-c22a1q and tk-p9549d, which
+  have only escalation visits open.
+
+PR #1043 (tk-q8fkah), in flight, moves `mol-first-reaction` from filing a visit
+to filing a human gate, which `gate-visit-sweep` then turns into a visit through
+`gc-helm.sh open`. That removes the copy where every duplicate came from. The
+reuse check covers it until then, and the other three copies after.
+
+## Not changed, and why
+
+- **No keyless filer routes through `escalate.sh`.** Its key collapses a
+  recurring situation across subjects, and its window mutes a re-filed one. A
+  conversation visit is one per subject, and the measurement above shows almost
+  no re-filing for a window to mute.
+- **`dead-molecule-dispose.sh` reads only keyed visits in its open-escalation
+  guard, and that is correct.** The guard refuses to dispose a dead molecule
+  while an open escalation visit tracks its root or work bead, because that
+  visit is the release path of a held molecule. A `molecule-hold.sh` hold that
+  waits on a person is always filed behind an `escalate.sh` visit, in the polecat
+  doctrine and in every such hold in `mol-polecat-work` and `mol-validate`. The
+  holds that wait on no person, a finished duplicate dispatch or blockers with a
+  re-dispatch armed, file no visit. A keyless visit is never a hold's release
+  path, and it outlives the molecule: the dispose closes only the root and its
+  step beads, so a first-reaction visit and the subject's hold on it stay intact.
+- **The create in the formula copies is still two writes**, a create and then
+  the stamps. tk-6t09b8 tracks making it one write, and tk-vxw40 tracks the same
+  for `gc-helm.sh open`. A visit whose stamps never landed has no
+  `gc.routed_to`, so it never reaches the board. A re-run past it files one
+  visit the operator sees, not a second.
+
+## Reproduce
+
+Rates by population. This reads the live store, so the counts sit at or above
+the snapshot above.
 
 ```bash
-gc bd list --status closed --limit 0 --json \
-  | jq '[.[] | select((.metadata.task_kind // "")=="visit")]
-        | {total: length,
-           keyless:[.[]|select((.metadata.escalation_key // "")=="")]|length,
-           keyless_mootbenign:[.[]|select((.metadata.escalation_key // "")=="")
-             |select(((.metadata["gc.outcome"]//"")|ascii_downcase)|.=="moot" or .=="benign")]|length,
-           keyed:[.[]|select((.metadata.escalation_key // "")!="")]|length,
-           keyed_mootbenign:[.[]|select((.metadata.escalation_key // "")!="")
-             |select(((.metadata["gc.outcome"]//"")|ascii_downcase)|.=="moot" or .=="benign")]|length}'
+gc bd list --status closed --metadata-field task_kind=visit --limit 0 --json \
+  | jq 'def mb: ((.metadata["gc.outcome"] // "") | ascii_downcase) as $o | $o == "moot" or $o == "benign";
+        { keyless:    [.[] | select((.metadata.escalation_key // "") == "")] | length,
+          keyless_mb: [.[] | select((.metadata.escalation_key // "") == "") | select(mb)] | length,
+          keyed:      [.[] | select((.metadata.escalation_key // "") != "")] | length,
+          keyed_mb:   [.[] | select((.metadata.escalation_key // "") != "") | select(mb)] | length }'
 ```
 
-Keyless filers (by `created_by` role, same snapshot): operator board picks 142,
-proactive pool 82, `order:gate-visit-sweep` 28, converse ~16, witness 12, polecat
-~10, mayor 8, mechanik 6, furiosa 5, the rest in ones and twos. By month created:
-Aug 86, Sep 212, Oct 22.
+Subjects holding more than one open conversation visit:
 
-## The two visit families (the structural fact)
-
-There is one visit-filing snippet (`gate-visit`), copied verbatim into six
-canonical locations and guarded by `assets/scripts/gate-visit.test.sh`. Only
-`escalate.sh`'s copy adds `escalation_key`. Every other copy is keyless by
-construction — it stamps `gc.routed_to=human`, `gc.continuation_group=<subject>`,
-`task_kind=visit`, and a `tracks` edge, nothing more.
-
-- **Keyed (`escalate.sh`):** keeps exactly one open visit per *situation key* and
-  carries the verdict window that suppresses re-raising a situation a human already
-  ruled moot/benign (`escalate.sh:296-305,368-382`). This serves a *recurring*
-  escalation that is not one-per-subject — an agent that keeps hitting the same
-  blocker, a cross-subject bucket like `witness-refinery-queue`.
-- **Keyless (`gate-visit` family):** one conversation or decision per *subject*,
-  deduped by `gc.continuation_group` and by the snippet/`gc-helm.sh open` refusing
-  a second open visit on a bead. The subject is the key; there is no recurring
-  cross-subject situation to collapse and no re-raise to suppress.
-
-## Keyless producers, and why none routes through escalate.sh
-
-| producer | file | trigger / volume | dedup grain | route through escalate.sh? |
-|---|---|---|---|---|
-| `gc-helm.sh open` | `gc-helm.sh:1800` | operator board pick (142 "Zook Bot") | one open visit per bead, refused otherwise | **No** — this is the human filing *to* the agents; `escalate.sh` is an agent escalating *to* a human. Backwards. |
-| `mol-first-reaction` | `mol-first-reaction.toml:496` | per intake item, on the `proactive-scan-sling` cadence; the human-decision minority exit | once per bead (already-reacted guard `:111-123`), `continuation_group=<subject>` | **No** — it reacts once per bead, so there is no re-raise for a verdict window to catch; per-subject is the correct grain. |
-| `mol-validate-close` | `mol-validate-close.toml:128` | a proposed close that failed validation (downstream of first-reaction) | per subject | **No** — same per-subject grain. |
-| `mol-visit` | `mol-visit.toml:44` | on-demand "I want to talk about this" | per subject | **No** — a one-off conversation. |
-| `mol-feedback-distiller` | `mol-feedback-distiller.toml:541` | a contested learning rule (rare) | one live visit per contested pattern | **No** — already deduped per pattern. |
-
-`order:gate-visit-sweep` (28 visits, 61% moot) files through `gc-helm.sh open` and
-dedups via `gc.gate_visit` stamped on the gate — a sound, deliberate idempotence
-key (not `escalation_key`, and deliberately not "is a visit open now"; the script
-header explains why). Its high moot rate is the gate *clearing* — the human gate
-resolved by other means — which is success, the opposite of `escalate.sh`'s moot
-(a false-alarm blocker). The one apparent duplicate (two visits on `tk-mq9bvj`) was
-filed 20h apart, the second after the first had closed: the documented
-`unset gc.gate_visit` re-offer, not a dedup gap.
-
-Every keyless producer dedups at the per-subject grain, which is the right grain
-for a one-per-subject conversation or a once-per-bead decision. `escalation_key`
-adds the cross-subject collapse and the re-raise verdict window — machinery for a
-shape none of these producers has.
-
-## What keyless visits do not participate in
-
-Readers of `escalation_key`, and whether a keyless visit's absence from them matters:
-
-- `escalate.sh`'s own per-key dedup + verdict window (`:296-305,368-382`) — correctly
-  scoped to its own keys; not a global measurement with a gap.
-- `finding.sh:496` per-finding reuse — findings file *through* `escalate.sh`, so they
-  are keyed; not affected.
-- `pr-facts.sh:395,732` PR-situation lookup — not applicable to conversation/decision
-  visits.
-- `converse-fold.sh:76,92` fold topic — keyless visits fall back to folding by subject
-  (coarser), a graceful degradation, not a drop.
-- `dead-molecule-dispose.sh:326` GUARD 3 "every escalation answered" — refuses to
-  dispose a molecule while an *open keyed* visit tracks it. See follow-up below.
-- `mol-witness-patrol.toml:804` refinery-queue reconcile — keyed on its own
-  `witness-refinery-queue`; not a general reader.
-
-The Go board (`services/helm`, `services/gctk`) reads none of `escalation_key`; it
-keys visits on `task_kind` + `gc.continuation_group`, so keyless visits render on the
-board normally, and `check-visit-outcome-recorded` scans all closed visits, not a
-keyed subset. There is no shipped per-filer measurement blind to the keyless family.
-
-## Conclusion
-
-No code change is warranted to route a keyless producer through `escalate.sh` or to
-add gating: each producer already dedups at the correct (per-subject) grain, and the
-keyless population is lower-noise than the keyed one. The accompanying change states
-the two-family distinction in `docs/gascity-human-engagement.md`, which described the
-keyless gate→visit channel but never named the parallel keyed `escalate.sh` channel —
-the silence that let a keyless population read as an ungated bypass.
-
-## One follow-up candidate (out of scope here)
-
-`dead-molecule-dispose.sh` GUARD 3 protects only *keyed* open visits. Whether a
-keyless `mol-first-reaction` human-decision visit could be lost when its first-reaction
-molecule is disposed is worth a bounded check. It is plausibly safe — that visit parks
-the *subject* on the board (`gc.routed_to=human`) independent of the molecule's life —
-but the claim was not verified here and does not belong to this bead's question.
+```bash
+gc bd list --status open,in_progress --metadata-field task_kind=visit --limit 0 --json \
+  | jq -r '[.[] | select((.metadata.escalation_key // "") == "")]
+           | group_by(.metadata["gc.continuation_group"] // "") | map(select(length > 1))
+           | .[] | "\(.[0].metadata["gc.continuation_group"]): \(map(.id) | join(" "))"'
+```
