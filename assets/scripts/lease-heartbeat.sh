@@ -12,6 +12,13 @@
 # with <command>'s status; a heartbeat that fails or stalls never fails the
 # command — the lease is a best-effort liveness hint, not a gate.
 #
+# <bead-id> is the bead the holder's own `gc hook --claim` returned: the lease
+# is on that claim and nowhere else. A bead the holder has not claimed — an
+# open, unassigned bead, or an earlier step's claim that is already closed — is
+# refused by the store. The first failed heartbeat is reported once on stderr,
+# so a keepalive aimed at the wrong bead is visible to the holder rather than a
+# silent no-op. An empty <bead-id> runs the command plain and says so on stderr.
+#
 # HOLDER-ONLY, BY DESIGN: `gc bd heartbeat` is owner-only, and only the holding
 # session can refresh its own claim — heartbeatActorForOwnedClaim (gascity
 # cmd/gc/cmd_bd.go) overrides the heartbeat actor to the bead's assignee only
@@ -27,9 +34,17 @@ usage() { echo "usage: $PROG <bead-id> -- <command> [args...]" >&2; exit 2; }
 
 case "${1:-}" in -h|--help) echo "usage: $PROG <bead-id> -- <command> [args...]"; exit 0 ;; esac
 
-BEAD="${1:-}"; [ -n "$BEAD" ] || usage; shift
+[ "$#" -gt 0 ] || usage
+BEAD="$1"; shift
 [ "${1:-}" = "--" ] || usage; shift
 [ "$#" -gt 0 ] || usage
+
+# An unset claim id is the caller's slip, not the command's failure: run the
+# command without a keepalive rather than refusing to run it at all.
+if [ -z "$BEAD" ]; then
+    echo "$PROG: no bead id given, so no lease is refreshed; running the command plain" >&2
+    exec "$@"
+fi
 
 # Cadence under the fixed five-minute TTL (120s leaves a >2x margin); POLL is how
 # promptly the wrapper returns after the command exits. Both overridable, chiefly
@@ -41,14 +56,21 @@ HB_TIMEOUT="${LEASE_HEARTBEAT_HB_TIMEOUT:-15}"
 case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=120 ;; esac
 case "$POLL" in ''|*[!0-9]*) POLL=5 ;; esac
 
-# Bounded and silenced: a wedged store must not stall the wrapper after its
-# command has finished, and a refusal (no lease, a lost claim) must not surface
-# as a failure of the wrapped command.
+# Bounded, so a wedged store cannot stall the wrapper after its command has
+# finished. Only the first failure is reported, so a long run does not repeat
+# the same line every tick.
+HB_WARNED=""
 heartbeat() {
+    local out rc last
     if command -v timeout >/dev/null 2>&1; then
-        timeout "$HB_TIMEOUT" gc bd heartbeat "$BEAD" >/dev/null 2>&1 || true
+        out=$(timeout "$HB_TIMEOUT" gc bd heartbeat "$BEAD" 2>&1); rc=$?
     else
-        gc bd heartbeat "$BEAD" >/dev/null 2>&1 || true
+        out=$(gc bd heartbeat "$BEAD" 2>&1); rc=$?
+    fi
+    if [ "$rc" -ne 0 ] && [ -z "$HB_WARNED" ]; then
+        HB_WARNED=1
+        last=$(printf '%s\n' "$out" | tail -n 1)
+        echo "$PROG: heartbeat on $BEAD failed (exit $rc)${last:+: $last}; its lease is not being refreshed, and the command still runs" >&2
     fi
 }
 

@@ -505,13 +505,16 @@ already verified on the prior attempt. Close this step and proceed.
 far longer than a claim's five-minute lease TTL, so run it through the
 claim-lease keepalive: `assets/scripts/lease-heartbeat.sh` refreshes your claim
 every couple of minutes while the suite runs, so a live holder is not taken for
-a dead one. `CLAIMED_MAIN_BEAD` is the `bead_id` your `gc hook --claim --json`
-returned for this session. The keepalive is best-effort — an unresolved wrapper
-runs the command plain.
+a dead one. `CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim
+--json` returned for this step. The lease is on that step bead, and an earlier
+step's claim is already closed, so its id refreshes nothing. The keepalive is
+best-effort — an unresolved wrapper runs the command plain.
 ```bash
-CLAIMED_MAIN_BEAD="<the bead_id your gc hook --claim returned>"
+CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
+# >>> preflight-lease-keepalive
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
-hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_MAIN_BEAD" -- "$@"; else "$@"; fi; }
+hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
+# <<< preflight-lease-keepalive
 {{typecheck_command}}
 {{lint_command}}
 if [ -n "{{test_command}}" ]; then hb bash -c '{{test_command}}'; fi
@@ -835,8 +838,10 @@ lease expired reads, to any lease consumer, exactly like a dead one;
 of minutes while the command runs. It is best-effort — an unresolved wrapper, or
 a store that refuses the refresh, runs the command plain and never fails it.
 ```bash
+# >>> self-review-lease-keepalive
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_ITER_BEAD" -- "$@"; else "$@"; fi; }
+# <<< self-review-lease-keepalive
 if [ -n "{{affected_tests_command}}" ]; then
     hb bash -c '{{affected_tests_command}}'
 else

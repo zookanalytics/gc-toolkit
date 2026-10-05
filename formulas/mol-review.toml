@@ -144,8 +144,13 @@ id = "review"
 title = "Read the diff, run the tests, write the verdict body"
 needs = ["load-dispatch"]
 description = """
-Each block is its own shell, so re-derive the pins first:
+Each block is its own shell, so re-derive the pins first.
+`CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim --json` returned
+for this step: the review step bead, which carries the claim's lease.
+`REVIEW_BEAD` is the review bead the convoy tracks. It stays open and unassigned
+while this molecule runs, so it has no lease to refresh.
 ```bash
+CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$REVIEW_BEAD" ] || { echo "mol-review needs an input convoy with exactly one tracked member" >&2; exit 1; }
@@ -184,13 +189,15 @@ review_wt_rm() {
 trap review_wt_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 git worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
 cd "$REVIEW_WT"
+# >>> review-lease-keepalive
 # Keep this review claim's lease in the future across the suites: a claim's
 # lease has a fixed five-minute TTL and a suite can outlive it, so a live
 # reviewer whose lease expired reads to a lease consumer like a dead one.
-# Refresh $REVIEW_BEAD through the keepalive while each suite runs (best-effort
-# — an unresolved wrapper runs the command plain and never fails it).
+# Refresh $CLAIMED_STEP_BEAD_ID through the keepalive while each suite runs
+# (best-effort — an unresolved wrapper runs the command plain and never fails it).
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
-hb() { if [ -n "$LHB" ]; then "$LHB" "$REVIEW_BEAD" -- "$@"; else "$@"; fi; }
+hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
+# <<< review-lease-keepalive
 # run the suites the diff touches through hb, e.g. `hb bash -c '<suite>'`;
 # record real pass/fail counts
 ```

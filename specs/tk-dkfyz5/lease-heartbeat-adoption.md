@@ -1,6 +1,6 @@
 ---
 name: Claim-lease heartbeating — what shipped, and why nothing consumes the lease yet
-description: The record of tk-dkfyz5. Why the heartbeat is in-session (the primitive is holder-only), where it is wired, what it cannot cover, and the reconsideration of lease consumers that supersedes specs/tk-eotd6/lease-adoption.md's "nothing reads the lease".
+description: The record of tk-dkfyz5. Why the heartbeat is in-session (the primitive is holder-only), where it is wired and which claim each path refreshes, what it cannot cover, and the reconsideration of lease consumers that supersedes specs/tk-eotd6/lease-adoption.md's "nothing reads the lease".
 ---
 
 # Claim-lease heartbeating
@@ -51,14 +51,40 @@ It is wired into the pool `--claim` holders that run a long blocking test
 command, each targeting the bead its own `gc hook --claim` returned (the
 lease-bearing one):
 
-- `mol-polecat-work` `preflight-tests` — the base-branch pre-flight suite.
-- `mol-polecat-work` `self-review` — the affected-or-full suite on the branch.
-- `mol-review` `review` — the suites run at the reviewed commit.
+- `mol-polecat-work` `preflight-tests` — the base-branch pre-flight suite,
+  refreshing the preflight-tests step bead (`CLAIMED_STEP_BEAD_ID`).
+- `mol-polecat-work` `self-review` — the affected-or-full suite on the branch,
+  refreshing the iteration bead (`CLAIMED_ITER_BEAD`).
+- `mol-review` `review` — the suites run at the reviewed commit, refreshing the
+  review step bead (`CLAIMED_STEP_BEAD_ID`).
 
 Each resolves the wrapper from the pack and degrades to running the command
 plain if it cannot (best-effort). Where the rig declares no test command and
 the holder runs the repo's own quality gate, the step instructs wrapping that
 command the same way.
+
+### The target is the claim, never the subject
+
+The lease sits on the bead the holder's claim returned and on no other. The
+beads a step works *on* carry no lease the holder can refresh. The review bead
+a `mol-review` convoy tracks stays open and unassigned while its molecule runs.
+The work bead a `mol-polecat-work` molecule builds is open and unassigned while
+the polecat works it. An earlier step's claim is already closed by the time a
+later step runs. The store refuses a heartbeat on any of them ("issue not
+claimable"), and a keepalive aimed at one refreshes nothing while the real
+claim lapses. That is why each wired step names its own claim in a `CLAIMED_*`
+variable and hands that, not a pin it derived for the work.
+
+Two properties keep a mis-aimed keepalive from passing unnoticed:
+
+- The wrapper reports the first refused heartbeat on stderr, carrying the
+  store's reason, and stays quiet after that. An empty bead id runs the command
+  plain and says so. Neither fails the command.
+- `assets/scripts/lease-heartbeat.test.sh` extracts each formula's keepalive
+  region between its `# >>> <step>-lease-keepalive` markers and executes it with
+  every candidate id set to a distinct value. It asserts that the id handed to
+  the wrapper is the step's own claim, and that the variable carrying it is set
+  from that step's `gc hook --claim`.
 
 ### Deliberately not wired
 
