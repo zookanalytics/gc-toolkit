@@ -19,9 +19,12 @@ presents as a city with no work rather than as a disk alarm.
 `scope = "city"`, no LLM and no agent. It enumerates `git worktree list` over
 every rig repo and the town repo, because a worktree living under one rig's
 tree can be registered in another repo's git dir and only the registry knows
-which. It runs two passes in one budget: it removes the worktrees of closed
-beads, then drops the `polecat/<bead-id>` branches those worktrees leave
-behind.
+which. It reads the bead store of every repo it enumerates, opening each by
+path as `gc bd --db <repo>/.beads`. `gc bd --rig` resolves only the rigs
+`city.toml` declares, so the town's store answers to no rig name. It runs two
+passes in one budget: it
+removes the worktrees of closed beads, then drops the `polecat/<bead-id>`
+branches those worktrees leave behind.
 
 A worktree is removed when all of these hold:
 
@@ -187,8 +190,9 @@ approve.
 bead's close. `WORKTREE_REAP_BUDGET` (default 420s) bounds the pass; what it
 yields is reported as untaken and the next pass takes it.
 `WORKTREE_REAP_TAG_PREFIX` (default `archive/worktree`) names the pin
-namespace, and `WORKTREE_REAP_REPOS` overrides the rig list with explicit repo
-paths.
+namespace. `WORKTREE_REAP_REPOS` overrides the rig list with explicit repo
+paths, and then reads the ledger with no store selector, from whatever store
+`gc bd` resolves on its own.
 
 To restore a reaped worktree, read the tag and run the command in it:
 

@@ -53,14 +53,26 @@ export PATH="$BIN:$PATH"
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
-# A --rig <name> travels right after the top-level command group. Strip it,
-# keeping the group as $1 so the case key stays "<group> <sub>"; the captured
-# name lets bd statuses/list read a per-rig fixture (statuses.<rig>.json,
-# beads.<rig>.json) where a multi-store test writes one, and fall back to the
-# shared file otherwise. Single-store tests never pass --rig, so nothing here
-# changes for them.
+# A store selector travels right after the top-level command group. Strip it,
+# keeping the group as $1 so the case key stays "<group> <sub>", and resolve it
+# against the rig list the way the binary does: `--db <path>/.beads` reaches any
+# row's store, the HQ row's included, while `--rig <name>` reaches only a
+# declared rig, so the HQ row's name answers "not found". The resolved name lets
+# bd statuses/list read a per-rig fixture (statuses.<rig>.json, beads.<rig>.json)
+# where a multi-store test writes one, and fall back to the shared file
+# otherwise. Single-store tests pass no selector, so nothing here changes for
+# them.
 grp="${1:-}"; rig=""
-if [ "${2:-}" = "--rig" ]; then rig="${3:-}"; set -- "$grp" "${@:4}"; fi
+case "${2:-}" in
+  --db | --rig)
+    sel="$2"; val="${3:-}"; set -- "$grp" "${@:4}"
+    if [ "$sel" = "--db" ]; then
+      rig="$(jq -r --arg v "$val" '[.rigs[]? | select((.path + "/.beads") == $v)][0].name // empty' "${STUB_RIGS:-/dev/null}" 2>/dev/null)"
+    else
+      rig="$(jq -r --arg v "$val" '[.rigs[]? | select(.name == $v and (.hq // false) != true)][0].name // empty' "${STUB_RIGS:-/dev/null}" 2>/dev/null)"
+    fi
+    [ -n "$rig" ] || { echo "gc bd: $sel \"$val\" not found" >&2; exit 1; } ;;
+esac
 case "${1:-} ${2:-}" in
   "agent list")   cat "${STUB_AGENTS:?}" ;;
   "session list") cat "${STUB_SESSIONS:?}" ;;
@@ -712,6 +724,59 @@ OUT="$(WORKTREE_REAP_REPOS= run)"
 if git -C "$REPO2" show-ref --verify --quiet refs/heads/polecat/zz-bad; then ok "an unreadable store's branch family is held though its name-bead is closed and landed"; else bad "an unreadable store's branch family is held though its name-bead is closed and landed"; fi
 if git -C "$REPO" show-ref --verify --quiet refs/heads/polecat/zz-healthy; then bad "the healthy store's closed, landed branch is dropped in the same run"; else ok "the healthy store's closed, landed branch is dropped in the same run"; fi
 has "$OUT" "dropped 1 stale local branches" "only the healthy store's branch is dropped"
+unset STUB_RIGS
+
+# The HQ row in `gc rig list` is the city itself, and its store answers by path
+# alone: `gc bd --rig` resolves only declared rigs. Its beads count like any
+# rig's. A live city bead holds the tree and the branch it names, though a closed
+# rig bead names the same tree. A closed city bead makes the tree it names a
+# candidate, and the town repo's branch pass runs on the city store's answer. A
+# closed rig bead's tree is reaped in the same run, the take that proves the rig
+# store answered by path too.
+new_repo                                   # $REPO is rig "demo"
+git init -q -b main "$CITY"                # $CITY is the town repo, the HQ row
+git -C "$CITY" config user.email t@example.com
+git -C "$CITY" config user.name Test
+git -C "$CITY" config commit.gpgsign false
+git -C "$CITY" remote add origin https://github.com/zook/town.git
+echo seed > "$CITY/seed"; git -C "$CITY" add seed; git -C "$CITY" commit -qm seed
+jq -n --arg c "$CITY" --arg r "$REPO" \
+    '{rigs:[{name:"town",path:$c,hq:true},{name:"demo",path:$r,hq:false}]}' > "$TMP/rigs.json"
+export STUB_RIGS="$TMP/rigs.json"
+if gc bd --rig town statuses --json >/dev/null 2>&1; then
+    bad "the stub, like the binary, answers the HQ store by path alone"
+else ok "the stub, like the binary, answers the HQ store by path alone"; fi
+: > "$TMP/beads.town.json"; : > "$TMP/beads.demo.json"
+mk_wt "$REPO/wt/hq-path"    polecat/zz-hqpath
+mk_wt "$REPO/wt/hq-branch"  polecat/zz-hqbranch
+mk_wt "$REPO/wt/hq-closed"  polecat/lx-hqclosed
+mk_wt "$REPO/wt/rig-closed" polecat/zz-rigclosed
+bead_to "$TMP/beads.demo.json" zz-hqpath    closed 100 "$REPO/wt/hq-path"    polecat/zz-hqpath
+bead_to "$TMP/beads.town.json" lx-hqpath    open    "" "$REPO/wt/hq-path"    ""
+bead_to "$TMP/beads.demo.json" zz-hqbranch  closed 100 "$REPO/wt/hq-branch"  polecat/zz-hqbranch
+bead_to "$TMP/beads.town.json" lx-hqbranch  open    "" ""                    polecat/zz-hqbranch
+bead_to "$TMP/beads.town.json" lx-hqclosed  closed 100 "$REPO/wt/hq-closed"  polecat/lx-hqclosed
+bead_to "$TMP/beads.demo.json" zz-rigclosed closed 100 "$REPO/wt/rig-closed" polecat/zz-rigclosed
+# The town repo's branch family, both refs landed on its default branch: a
+# closed city bead's branch is the take, and a closed city bead's branch that a
+# live city child records is the keep.
+TOWN_TIP="$(git -C "$CITY" commit-tree "$(git -C "$CITY" rev-parse 'main^{tree}')" -p "$(git -C "$CITY" rev-parse main)" -m 'work in lx-towndrop')"
+git -C "$CITY" branch polecat/lx-towndrop "$TOWN_TIP"
+git -C "$CITY" branch polecat/lx-townheld main
+git -C "$CITY" update-ref refs/remotes/origin/main "$TOWN_TIP"
+git -C "$CITY" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+bead_to "$TMP/beads.town.json" lx-towndrop  closed 100 "" polecat/lx-towndrop
+bead_to "$TMP/beads.town.json" lx-townheld  closed 100 "" polecat/lx-townheld
+bead_to "$TMP/beads.town.json" lx-townchild open    "" "" polecat/lx-townheld
+OUT="$(WORKTREE_REAP_REPOS= run)"
+if exists "$REPO/wt/hq-path"; then ok "a live city bead on the path holds it, though a closed rig bead names it too"; else bad "a live city bead on the path holds it, though a closed rig bead names it too"; fi
+if exists "$REPO/wt/hq-branch"; then ok "a live city bead on the BRANCH holds it, though the path's own rig bead closed"; else bad "a live city bead on the BRANCH holds it, though the path's own rig bead closed"; fi
+if exists "$REPO/wt/hq-closed"; then bad "a tree only a closed city bead names is taken"; else ok "a tree only a closed city bead names is taken"; fi
+if exists "$REPO/wt/rig-closed"; then bad "a closed rig bead's tree is taken in the same run"; else ok "a closed rig bead's tree is taken in the same run"; fi
+has "$OUT" "removed 2 of" "only the two trees no live bead holds are reaped"
+if git -C "$CITY" show-ref --verify --quiet refs/heads/polecat/lx-towndrop; then bad "the town repo's branch pass drops a closed, landed city bead's branch"; else ok "the town repo's branch pass drops a closed, landed city bead's branch"; fi
+if git -C "$CITY" show-ref --verify --quiet refs/heads/polecat/lx-townheld; then ok "a live city bead's claim holds a closed, landed town branch"; else bad "a live city bead's claim holds a closed, landed town branch"; fi
+has "$OUT" "dropped 1 stale local branches" "only the unclaimed town branch is dropped"
 unset STUB_RIGS
 
 echo
