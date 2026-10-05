@@ -60,13 +60,14 @@ sync_worktree() {
 
 # A detached HEAD has no upstream, so the fast-forward never moves it, and the
 # agent would run that commit's files on every later start. It moves to the
-# remote default tip only when nothing can be lost: the tracked tree is clean
-# and HEAD is already an ancestor of the tip. It lands on its per-target branch,
-# tracking the default branch, so the next sync takes the fast-forward path.
-# That branch is reset only when the tip already contains it; when it holds
-# commits the tip lacks, or another worktree has it checked out, the worktree
-# is detached at the tip instead. A worktree that cannot move safely stays
-# where it is, and one stderr line names it and the reason.
+# remote default tip only when no commit or tracked change can be lost: the
+# tracked tree is clean and HEAD is already an ancestor of the tip. It lands on
+# its per-target branch, tracking the default branch, so the next sync takes
+# the fast-forward path. That branch is reset only when the tip already
+# contains it; when it holds commits the tip lacks, or another worktree has it
+# checked out, the worktree is detached at the tip instead. A worktree that
+# cannot move safely stays where it is, and one stderr line names it and the
+# reason.
 sync_detached() {
     DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || DEFAULT_REF=""
     if [ -z "$DEFAULT_REF" ]; then

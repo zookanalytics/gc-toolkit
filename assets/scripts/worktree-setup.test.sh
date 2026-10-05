@@ -56,7 +56,7 @@ RIG="$TMP/rig"; git clone -q "$TMP/remote.git" "$RIG"
 STAGE_PREFIX=".gascity-worktree-stage"
 run() { sh "$SCRIPT" "$RIG" "$1" "$2" ${3:+"$3"} >>"$TMP/run.log" 2>&1; }
 # stage dirs left in a parent, one basename per line
-stages() { ls -1a "$1" 2>/dev/null | grep -F "$STAGE_PREFIX" || true; }
+stages() { local d; for d in "$1/$STAGE_PREFIX"*; do [ -e "$d" ] || continue; echo "${d##*/}"; done; }
 # the --sync run's stderr alone; a non-zero exit is appended as "exit <rc>"
 sync_stderr() { { sh "$SCRIPT" "$RIG" "$1" "$2" --sync >/dev/null; } 2>&1 || echo "exit $?"; }
 # land one commit on the remote's main, as a merged PR would
