@@ -1,6 +1,6 @@
 ---
 name: Stale-branch triage — implementation decisions and divergences from the proposal
-description: Why the sweep is modeled on worktree-reap rather than the recover-stranded-branches.sh the proposal names, which of the proposal's premises were stale against the current pack, why only reachability earns a branch an unarchived delete, and why introducing the pack's first direct origin ref mutation is sound.
+description: Why the sweep is modeled on worktree-reap rather than the recover-stranded-branches.sh the proposal names, which of the proposal's premises were stale against the current pack, why only reachability earns a branch an unarchived delete, and why the sweep's direct origin writes (branch delete, archive tag) are sound.
 ---
 
 # Stale-branch triage: what was built, and where it departs from the proposal
@@ -70,18 +70,25 @@ content-equivalence proof could return them to a bare delete. That proof would
 check that the target holds the branch's exact content at every path the branch
 changed.
 
-## The novel capability: direct origin ref mutation
+## The novel capability: deleting and tagging origin refs
 
-The sweep is the pack's first script to mutate origin refs directly — delete a
-branch, push an annotated tag. The pack otherwise never writes origin except
-through `gh pr merge`, which lands commits and lets GitHub sign them. That
-convention is about commits reaching a protected ref: the "commits must have
-verified signatures" repository rule (GH013) fires on a pushed commit. A branch
-delete adds no commit, and an annotated tag object is not a commit, so neither is
-subject to it. The mutations go through the gh token the order is handed, via
-`gh api` — the same house style (`gh api --hostname … -X METHOD repos/…`) every
-other GitHub write in the pack uses, now reaching the git-data endpoints
-(`git/tags`, `git/refs`) for the first time.
+The sweep deletes origin branches and writes annotated tags to origin. The pack's
+other origin writes push or land a bead's own branch. Polecats and the witness
+push a branch with `git push`. The refinery pushes a prepared branch, and under
+the direct merge strategy it pushes to the target and deletes the branch of the
+bead it landed or rejected. `merge.sh` merges a PR through `gh pr merge`, which
+lands commits and lets GitHub sign them. So before the sweep, no component
+deleted a branch except the refinery, while landing or rejecting that branch's
+bead, and none wrote a tag to origin. `docs/authority-map.md` grants the sweep
+its power in a "Reclaim a stale origin branch" row: the evidence each delete and
+archive requires, and what the sweep may never do.
+
+The "commits must have verified signatures" repository rule (GH013) fires on a
+pushed commit. A branch delete adds no commit, and an annotated tag object is not
+a commit, so neither is subject to it. The writes go through the gh token the
+order is handed, via `gh api`, the form the pack's other REST writes take
+(`gh api --hostname … -X METHOD repos/…`, as in `pr-facts.sh`), here reaching
+the git-data endpoints (`git/tags`, `git/refs`).
 
 Safety rests on the same property as `worktree-reap`: the destructive act is
 reversible. A cold branch's tip is pinned by `archive/<branch>@<sha>` and the tag

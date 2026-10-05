@@ -14,8 +14,8 @@
 # a reclaim cadence, not a healer — it repairs no state a single-writer
 # transition should have kept; it disposes of refs no transition owns.
 #
-# It is the pack's first direct mutation of origin refs (branch delete, archive
-# tag), done through the same gh token the order is handed. The merge cadence's
+# Its origin writes (branch delete, archive tag) go through the gh token the
+# order is handed, under the grant in docs/authority-map.md. The merge cadence's
 # "GitHub signs merges" rule is about commits reaching a protected ref; a delete
 # and a tag add no commit, so neither is subject to it. See
 # docs/stale-branch-triage.md.

@@ -59,14 +59,14 @@ deleted against an archive that did not land.
 
 ## Mutating origin
 
-This is the pack's only direct mutation of origin refs. The merge cadence lands
-commits through `gh pr merge` and lets GitHub sign them, and nothing else writes
-origin. That rule is about commits reaching a protected ref: a branch delete adds
-no commit, and an annotated tag object is not a commit, so neither is subject to
-the signed-commit requirement. Both go through the gh token the order is handed,
-via `gh api` — the create-tag (`POST .../git/tags`), create-ref
-(`POST .../git/refs`), and delete-ref (`DELETE .../git/refs/heads/<branch>`)
-endpoints — the house style for every GitHub write in the pack.
+The sweep writes origin through the gh token the order is handed, with `gh api`
+against three git-data endpoints: create-tag (`POST .../git/tags`), create-ref
+(`POST .../git/refs`), and delete-ref (`DELETE .../git/refs/heads/<branch>`).
+[authority-map.md](authority-map.md) grants that power in its "Reclaim a stale
+origin branch" row, with the evidence each act requires and what the sweep may
+never do. A repository rule requiring verified signatures applies to commits. A
+branch delete adds no commit, and an annotated tag object is not a commit, so
+neither is subject to it.
 
 A delete re-reads the branch's origin tip immediately before acting and refuses
 unless it still matches the tip the pass classified. A commit that arrived after

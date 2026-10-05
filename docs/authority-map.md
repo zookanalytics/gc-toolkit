@@ -38,6 +38,12 @@ change, not an implementation detail — amend this table in the same PR.
 | File an escalation | `assets/scripts/escalate.sh` (the refinery's merge path, `mol-dog-shutdown-dance`, a blocked polecat, a patrol emergency) | one open visit per `escalation_key` | mail (there is no mayor); duplicate an open key; send a RECURRING observation here — the dedup window is one open visit, and closing it reopens the window |
 | Send a `gh` write to a repository outside the rig's own origin | the operator, pasting the command themselves | the command parked on an `upstream-send` bead: `gh_command`, quoted and re-split to the original argv, naming its target with an explicit `--repo` | be sent by an agent, however routed; be prepared with an implicit repository, a `--body-file`, or two targets — none of those survive the paste ([outbound-sends.md](outbound-sends.md)) |
 
+## Powers over origin refs
+
+| Power | Sole holder | Evidence required | May never |
+|---|---|---|---|
+| Reclaim a stale origin branch: delete it, or pin its tip with an annotated `archive/<branch>@<short-sha>` tag and then delete it | `assets/scripts/stale-branch-triage.sh` (the per-rig `stale-branch-triage` order) | the live-bead ledger (parsed as one list of bead rows), the open-PR list, origin's branch list, and the target branch (origin's default, or `STALE_BRANCH_TARGET`), all read before any write. Each branch is judged at the tip origin's branch list reports: no live bead names it in `metadata.branch` or `metadata.target`, no open PR heads it, and no protected name (`STALE_BRANCH_PROTECT`) matches it. A bare delete needs that tip reachable from the target. An archive needs the tip unreachable and committed at least `STALE_BRANCH_COLD_DAYS` days ago, and the tag read back on origin before the delete. Every delete re-reads origin's tip immediately before it, requires the judged tip, and reads the branch back gone | delete or archive the target branch, or a branch a live bead names or targets; delete or archive a branch an open PR heads or a protected name matches (a cold unmerged one is reported through `patrol-finding.sh` instead); delete an unreachable tip without an archive tag read back on origin; delete a branch whose tip moved after it was judged, or whose tip object did not fetch (also reported); write anything on a pass whose ledger, open-PR list, branch list, or target did not read; delete or move an archive tag; write a commit to origin |
+
 ## Powers over sessions
 
 | Power | Holder | Evidence required | May never |

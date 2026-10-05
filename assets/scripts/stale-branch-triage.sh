@@ -32,13 +32,12 @@
 # tracked form of "a session owns it", and a branch touched inside the horizon
 # is not abandoned.
 #
-# This is the pack's first direct mutation of origin refs. The merge cadence
-# lands commits through `gh pr merge` and lets GitHub sign them, and nothing
-# else writes origin; the signed-commit rule is about commits reaching a
-# protected ref. A branch delete adds no commit, and an annotated tag is not a
-# commit, so neither is subject to it. Both go through the gh token the order is
-# handed, via `gh api`, the house style for every GitHub write in the pack. The
-# rationale and the operator controls are in docs/stale-branch-triage.md.
+# Origin is written directly, through the gh token the order is handed, via
+# `gh api`: a branch delete, and an annotated tag. docs/authority-map.md grants
+# that power and names what the sweep may never do. A signed-commit rule applies
+# to commits; a branch delete adds no commit, and an annotated tag is not a
+# commit, so neither is subject to it. The rationale and the operator controls
+# are in docs/stale-branch-triage.md.
 #
 # Rails, after worktree-reap.sh: liveness is resolved first and fail-closed — an
 # unreadable ledger, PR list, or branch list sweeps nothing, because every
