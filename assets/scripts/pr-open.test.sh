@@ -478,6 +478,29 @@ hasnt "$tlog" "chore: fix(pr-open):" "…and no derived type is prepended to it"
 has "$tlog" "--title chore: Tidy the enumerate step (ttbare) --body-file" \
     "a bead with no issue_type falls back to chore"
 
+echo "# a title the create opened with is one pr-stack keeps"
+# Once a PR is open, pr-stack.sh composes its title from the anchor and edits a PR
+# whose title differs. Each create above, carried by its PR once the anchor reaches
+# pull_request, must already read current there, or every PR this arm opens is
+# retitled on the next pass.
+cp "$HERE/pr-stack.sh" "$SD/pr-stack.sh"
+agree_n=0
+while IFS=$'\t' read -r tid ttitle; do
+  [ -n "${tid:-}" ] || continue
+  agree_n=$((agree_n + 1)); anum=$((400 + agree_n))
+  jq --arg id "$tid" --arg n "$anum" \
+    'map(if .id == $id then .metadata.merge_result = "pull_request" | .metadata.pr_number = $n else . end)' \
+    "$STUB_STORE" > "$TMP/x" && mv "$TMP/x" "$STUB_STORE"
+  jq -n --argjson n "$anum" --arg b "polecat/$tid" --arg t "$ttitle" \
+    '{number: $n, state: "OPEN", headRefName: $b, headRefOid: "sha-agree", title: $t, body: ""}' \
+    > "$GH_DIR/pr_view_$anum.json"
+done < <(sed -n 's/.* --head polecat\/\([^ ]*\) --title \(.*\) --body-file .*/\1\t\2/p' <<<"$tlog")
+eq "$agree_n" "6" "every create's title was read off its logged create"
+: > "$STUB_GH_LOG"
+aout=$("$SD/pr-stack.sh" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "--title" "pr-stack finds every created title current and retitles none"
+has "$aout" "0 retitled" "…and reports none"
+
 # The label writer pr-open delegates to. It is absent from the SUT dir above, where
 # the reconcile/mark-base calls are best-effort and silently no-op without it (no
 # earlier case asserts a label). Installed now so the cases below exercise the real
