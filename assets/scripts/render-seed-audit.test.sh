@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# Tests for the two properties generated/seed-audit has to hold at a merge:
-# --check-merge refuses a merge whose result would land a stale artifact, and
-# the artifact's committed shape lets two branches that moved different inputs
-# merge at all. Real git, no stubs: both are questions about trees, and stubbing
-# git would leave the merge itself unexercised. Nothing here renders, so no
-# `gc`, no city and no network are involved; the fixture's own copy of the
-# renderer is only ever asked for a manifest.
+# Tests for the properties generated/seed-audit and its renderer have to hold.
+# Two are about the artifact at a merge: --check-merge refuses a merge whose
+# result would land a stale artifact, and the artifact's committed shape lets two
+# branches that moved different inputs merge at all. Real git, no stubs: both are
+# questions about trees, and stubbing git would leave the merge itself
+# unexercised. One is about the renderer: the gcq wrapper pins its working
+# directory so the render resolves the synthetic city and not one discovered from
+# the cwd it was invoked in. Nothing here renders, so no `gc`, no city and no
+# network are involved; the fixture's own copy of the renderer is only ever asked
+# for a manifest, and the hermeticity check reads the renderer's text.
 #
 # Covers: the clobber (a base that moved an input against a head whose render
 # predates it) with the offending input named; the current case; a merge result
 # carrying no audit; a head that widens the input set, which must be read under
 # ITS definition and not this checkout's; the delegation itself, asserted on the
 # argv the merged tree's renderer receives; the three cannot-tell exits
-# (unresolvable rev, missing manifest, conflicting merge); and the merge shape,
-# against a control carrying the repo-global line the manifest replaced.
+# (unresolvable rev, missing manifest, conflicting merge); the merge shape,
+# against a control carrying the repo-global line the manifest replaced; and the
+# gcq wrapper's cwd pin.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -205,6 +209,21 @@ else bad "adjacent inputs still collide — the artifact re-serializes the merge
 if two_branches control add_global_line; then
     bad "control: a repo-global digest line merged, so the case above proves nothing"
 else ok "control: the repo-global digest line these two never touched conflicts"; fi
+
+# ------------------------------------------------ the renderer's cwd hermeticity
+#
+# gcq is the one chokepoint every gc call passes through. `env -i` scrubs the
+# environment but not the working directory, and `gc` discovers a city by walking
+# up from cwd, so a render invoked from a worktree nested inside the live city
+# could resolve that city rather than the synthetic one. The wrapper pins cwd to
+# the synthetic city to close that path. This reads the wrapper's text rather than
+# rendering: proving the behavior needs a gc binary and a city this suite does
+# without, and a dropped pin is a text change the read catches.
+echo "# gcq pins cwd so the render cannot inherit a city from the caller's cwd"
+gcq_body="$(sed -n '/^gcq() {/,/^}/p' "$SUT")"
+has "$gcq_body" 'cd "$CITY"' "gcq runs gc from the synthetic city, not the invoking cwd"
+has "$gcq_body" 'env -i' "gcq still scrubs the environment"
+has "$gcq_body" 'gc --city "$CITY"' "gcq still names the synthetic city explicitly"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
