@@ -425,6 +425,27 @@ has "$out" "PR#240 body edit failed" "the failed edit is reported"
 hasnt "$out" "summary region refreshed" "…and no refresh is counted"
 eq "$(body 240)" "$before_v" "the body never changed"
 
+echo "# pacing: --deadline stops the walk after one PR and --cursor resumes after it"
+# Three single-bead anchors, enumerated out of id order. A deadline of epoch 1
+# has always passed, so a pass reads exactly one PR.
+store "[$(anchor S3 polecat/S3 33), $(anchor S1 polecat/S1 31), $(anchor S2 polecat/S2 32)]"
+pr 31 OPEN polecat/S1 "$OPENER_BODY"; pr 32 OPEN polecat/S2 "$OPENER_BODY"; pr 33 OPEN polecat/S3 "$OPENER_BODY"
+SCUR="$TMP/stack.cursor"; rm -f "$SCUR"
+views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$SCUR" 2>&1); rc=$?
+eq "$rc" 0 "a paced pass exits 0"
+eq "$(views)" "31" "a passed deadline reads the lowest id's PR and no other"
+has "$out" "visited 1 PRs before the deadline; the next pass resumes at S2" "…and names where the next pass resumes"
+eq "$(cat "$SCUR" 2>/dev/null)" "S1" "the cursor records the anchor finished"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$SCUR" 2>&1)
+eq "$(views)" "32" "the next pass resumes after the cursor"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(views)" "33,31,32" "with no pacing args every PR is read, in the enumerated order"
+has "$out" "visited 3 of 3 PRs" "…and the walk reports all three"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

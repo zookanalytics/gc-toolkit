@@ -3073,6 +3073,27 @@ unset GC_RECONCILE_BD_CACHE
 twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
 
+echo "# pacing: --deadline stops the per-anchor walk after one anchor and --cursor resumes after it"
+# Three clean OPEN PRs, enumerated out of id order. A deadline of epoch 1 has
+# always passed, so a paced pass reads exactly one PR; the posture-only mode
+# ignores the pacing pair, because merge.sh needs every posture current.
+store "[$(anchor PP3 83), $(anchor PP1 81), $(anchor PP2 82)]"
+for n in 81 82 83; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+PFCUR="$TMP/pr-facts.cursor"; rm -f "$PFCUR"
+pf_views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "81" "a passed deadline reads the lowest id's PR and no other"
+has "$out" "visited 1 of 3 PR anchors before the deadline; the next pass resumes at PP2" "…and names where the next pass resumes"
+eq "$(cat "$PFCUR" 2>/dev/null)" "PP1" "the cursor records the anchor finished"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "82" "the full mode resumes after the cursor the same way"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --posture-only --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "83,81,82" "the posture-only mode reads every PR, in the enumerated order, whatever pacing it is handed"
+hasnt "$out" "visited " "…and reports no pacing"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

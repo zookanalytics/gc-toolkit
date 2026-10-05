@@ -33,7 +33,9 @@
 # arm sees the branch first files, and the other stands down — a live child on
 # the branch already owns the rewrite, and a second would race it.
 #
-# Args: --fix-pool <pool>.
+# Args: --fix-pool <pool> [--deadline <epoch-secs>] [--cursor <file>]. The
+# pacing pair walks the anchors in a rotation and starts none past the deadline
+# (pace-lib.sh), so the next pass resumes where this one stopped.
 # Exits: 0, including where nothing could be observed; 1 only when the anchor
 # enumeration itself is unreadable, which is the one state that would otherwise
 # report a false all-clear. NOT set -e: anchors are independent.
@@ -48,13 +50,19 @@ PROG="pre-open-rebase"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-FIX_POOL=""
+FIX_POOL=""; DEADLINE=""; CURSOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool) FIX_POOL="${2:-}"; shift 2 ;;
+    --deadline) DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)   CURSOR="${2:-}"; shift 2 ;;
     *) shift ;;
   esac
 done
+case "$DEADLINE" in
+  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
+            DEADLINE="" ;;
+esac
 
 # Where the probe parks the branch tips it compares. Its own namespace, so
 # nothing here can move a branch or a remote-tracking ref; the same device
@@ -78,6 +86,8 @@ ALL_STATUSES="$LIVE_STATUSES,closed"
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
 
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
@@ -142,10 +152,15 @@ if ! git fetch --prune --quiet --no-tags origin "+refs/heads/*:$GATE_REF/heads/*
   exit 1
 fi
 
+total=$(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null)
 reworked=0; clean=0; held=0; skipped=0
+pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
+  if [ -n "$id" ]; then
+    pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
+  fi
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // empty')
   [ -n "$target" ] || target="$DEFAULT_BRANCH"
@@ -384,8 +399,14 @@ while IFS= read -r row; do
   reworked=$((reworked + 1))
   echo "$PROG: $id — '$branch' conflicts with '$target'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
 done <<ANCHORS_EOF
-$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR")
 ANCHORS_EOF
+pace_end
 
+if [ -n "$PACE_RESUME_AT" ]; then
+  echo "$PROG: visited $PACE_VISITED of ${total:-?} pre-open anchors before the deadline; the next pass resumes at $PACE_RESUME_AT"
+else
+  echo "$PROG: visited $PACE_VISITED of ${total:-?} pre-open anchors"
+fi
 echo "$PROG: reworked=$reworked clean=$clean held=$held skipped=$skipped"
 exit 0

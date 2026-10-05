@@ -20,6 +20,9 @@
 # gc:pr-summary markers), so an adoption re-splices a fresh region while keeping
 # text an operator or a later arm (pr-stack) added; the region writes its own
 # `## Summary` heading, so a stored pr_summary that repeats one is de-duplicated.
+# Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
+# anchors gate-ensure last recorded as settled are visited first, the rest in a
+# rotation, and no new anchor starts past the deadline.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
 
@@ -34,6 +37,20 @@ scrub() { tr -d '\000-\037'; }
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$SCRIPTS_DIR/pace-lib.sh" || { echo "$PROG: cannot source pace-lib.sh beside this script" >&2; exit 1; }
+DEADLINE=""; CURSOR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --deadline) DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)   CURSOR="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$DEADLINE" in
+  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
+            DEADLINE="" ;;
+esac
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The two shared readers of the review graph: lane-state derives a lane's green
 # state (the same helper merge.sh asks, so publishing and merging never
@@ -306,15 +323,40 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pre_open_gate) || 
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no pre-open anchors"; exit 0; }
 
+# --- visit order: the anchors most likely to open first, the rest in rotation --
+# The walk's cost grows with the pre-open set, so a deadline can stop it. An
+# anchor gate-ensure last recorded as settled (every lane green, nothing owed)
+# is visited first: opening one takes it out of this set, so a pass the
+# deadline stops still opened what it reached, and the next pass starts on the
+# rest of them. The settled mark only orders the walk; every anchor still meets
+# the full gate below. The others rotate after the cursor (pace-lib.sh).
+if split_rows=$(printf '%s' "$ANCHORS" | jq -r '
+      .[] | (if ((.metadata["pr.machine"] // "") | tostring | startswith("settled@"))
+             then "first" else "rest" end) + "\t" + tojson' 2>/dev/null); then
+  first_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "first" { print $2 }')
+  rest_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "rest" { print $2 }' | pace_order "$CURSOR")
+else
+  first_rows=""
+  rest_rows=$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+fi
+first_n=$(printf '%s' "$first_rows" | awk 'NF { n++ } END { print n + 0 }')
+rest_n=$(printf '%s' "$rest_rows" | awk 'NF { n++ } END { print n + 0 }')
+
 opened=0; flipped=0; held=0; skipped=0
 # The body file is removed after each create; the trap covers the window
 # a signal can land in, which is the whole `gh pr create` call.
 BODY=""
 trap 'rm -f "$BODY" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-while IFS= read -r row; do
-  [ -n "${row:-}" ] || continue
+pace_start "$CURSOR" "$DEADLINE"
+while IFS= read -r tagged; do
+  [ -n "${tagged:-}" ] || continue
+  group="${tagged%%$'\t'*}"
+  row="${tagged#*$'\t'}"
   id=$(printf '%s' "$row" | jq -r '.id // empty')
+  if [ -n "$id" ]; then
+    pace_visit "$group" "$id"; case $? in 1) continue ;; 2) break ;; esac
+  fi
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // empty')
   [ -n "$target" ] || target="main"
@@ -506,8 +548,18 @@ GATES
     skipped=$((skipped + 1))
   fi
 done <<ANCHORS_EOF
-$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s\n' "$first_rows" | awk 'NF { print "first\t" $0 }')
+$(printf '%s\n' "$rest_rows" | awk 'NF { print "rest\t" $0 }')
 ANCHORS_EOF
+pace_end
 
+paced="visited $PACE_VISITED of $((first_n + rest_n)) pre-open anchors ($first_n settled first)"
+if [ -n "$PACE_RESUME_AT" ]; then
+  echo "$PROG: $paced before the deadline; the next pass resumes at $PACE_RESUME_AT"
+elif [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
+  echo "$PROG: $paced before the deadline; $PACE_FIRST_SKIPPED settled anchors wait for the next pass"
+else
+  echo "$PROG: $paced"
+fi
 echo "$PROG: $opened opened, $flipped flipped, $held held, $skipped skipped"
 exit 0

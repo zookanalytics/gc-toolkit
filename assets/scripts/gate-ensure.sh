@@ -507,29 +507,14 @@ total=$(printf '%s' "$ROWS" | awk 'NF { n++ } END { print n + 0 }')
 # The deadline can stop a pass part-way, so the visits rotate (pace-lib.sh):
 # every gating anchor is reached within a bounded number of passes.
 ROWS=$(printf '%s' "$ROWS" | pace_order "$CURSOR")
-cursor_warned=0
-cursor_note() { # <anchor-id> — record the anchor this pass last finished
-  pace_note "$CURSOR" "$1" && return 0
-  [ "$cursor_warned" = 1 ] \
-    || echo "$PROG: WARN cannot record progress in $CURSOR; the next pass starts the rotation over" >&2
-  cursor_warned=1
-}
 
 stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
-visited=0; finished=""; resume_at=""
+pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   [ -n "$id" ] || continue
-  # The previous anchor is recorded before this one starts, so a pass the
-  # deadline stops here, or a kill interrupts below, resumes at this anchor.
-  [ -n "$finished" ] && cursor_note "$finished"
-  if [ "$visited" -gt 0 ] && pace_spent "$DEADLINE"; then
-    resume_at="$id"
-    break
-  fi
-  visited=$((visited + 1))
-  finished="$id"
+  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
   # A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind when its PR
   # was withdrawn or superseded — still enumerates here (open, merge_result set) until
   # pr-facts.sh's terminal close lands, but its lane is moot: a review or validator
@@ -1020,12 +1005,12 @@ GATES
 done <<ROWS_EOF
 $ROWS
 ROWS_EOF
-[ -n "$finished" ] && cursor_note "$finished"
+pace_end
 
-if [ -n "$resume_at" ]; then
-  echo "$PROG: visited $visited of $total gating anchors before the deadline; the next pass resumes at $resume_at"
+if [ -n "$PACE_RESUME_AT" ]; then
+  echo "$PROG: visited $PACE_VISITED of $total gating anchors before the deadline; the next pass resumes at $PACE_RESUME_AT"
 else
-  echo "$PROG: visited $visited of $total gating anchors"
+  echo "$PROG: visited $PACE_VISITED of $total gating anchors"
 fi
 echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then

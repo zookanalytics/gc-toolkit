@@ -335,16 +335,9 @@ else
 fi
 landing_n=$(printf '%s' "$landing_rows" | awk 'NF { n++ } END { print n + 0 }')
 rest_n=$(printf '%s' "$rest_rows" | awk 'NF { n++ } END { print n + 0 }')
-cursor_warned=0
-cursor_note() { # <anchor-id> — record the paced anchor this pass last finished
-  pace_note "$CURSOR" "$1" && return 0
-  [ "$cursor_warned" = 1 ] \
-    || echo "$PROG: WARN cannot record progress in $CURSOR; the next pass starts the rotation over" >&2
-  cursor_warned=1
-}
 
 merged=0; recovered=0; held=0; skipped=0; record_failed=0
-rest_visited=0; finished=""; resume_at=""
+pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r tagged; do
   [ -n "${tagged:-}" ] || continue
   group="${tagged%%$'\t'*}"
@@ -352,18 +345,7 @@ while IFS= read -r tagged; do
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
   [ -n "$id" ] || continue
-  # Pacing applies to the rest group alone. The previous paced anchor is
-  # recorded before this one starts, so a pass the deadline stops here, or a
-  # kill interrupts below, resumes at this anchor. One is always visited.
-  if [ "$group" = rest ]; then
-    [ -n "$finished" ] && cursor_note "$finished"
-    if [ "$rest_visited" -gt 0 ] && pace_spent "$DEADLINE"; then
-      resume_at="$id"
-      break
-    fi
-    rest_visited=$((rest_visited + 1))
-    finished="$id"
-  fi
+  pace_visit "$group" "$id"; case $? in 1) continue ;; 2) break ;; esac
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
 
   # --- pinned PR read --------------------------------------------------------
@@ -963,15 +945,15 @@ $sa_out" >/dev/null 2>&1 || true
     [ -x "$RECORD_CAP" ] && "$RECORD_CAP" "$id" "$num" "$merge_oid" "${target:-$base}" || true
   fi
 done <<ROWS_EOF
-$(printf '%s\n' "$landing_rows" | awk 'NF { print "landing\t" $0 }')
+$(printf '%s\n' "$landing_rows" | awk 'NF { print "exempt\t" $0 }')
 $(printf '%s\n' "$rest_rows" | awk 'NF { print "rest\t" $0 }')
 ROWS_EOF
-[ -n "$finished" ] && cursor_note "$finished"
+pace_end
 
-if [ -n "$resume_at" ]; then
-  echo "$PROG: visited $landing_n landing-first and $rest_visited of $rest_n other anchors before the deadline; the next pass resumes at $resume_at"
+if [ -n "$PACE_RESUME_AT" ]; then
+  echo "$PROG: visited $landing_n landing-first and $PACE_VISITED of $rest_n other anchors before the deadline; the next pass resumes at $PACE_RESUME_AT"
 else
-  echo "$PROG: visited $landing_n landing-first and $rest_visited of $rest_n other anchors"
+  echo "$PROG: visited $landing_n landing-first and $PACE_VISITED of $rest_n other anchors"
 fi
 echo "$PROG: $merged merged, $recovered recovered, $held held, $skipped skipped, $record_failed record-failed"
 [ "$record_failed" -eq 0 ] || exit 1

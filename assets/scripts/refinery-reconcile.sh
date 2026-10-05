@@ -9,14 +9,17 @@
 # attributed to it), pr-open, pr-facts --route-comments-only (route operator
 # feedback ahead of the slow arms, so a pass killed before the full arm has
 # still picked it up; BEADS_ACTOR projected), pre-open-rebase (the conflict
-# observer for anchors that have no PR yet), gate-ensure (time-budgeted, and
-# resumes where it stopped on the next pass), pr-facts (same projection),
-# convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
-# review-sweep (cleanup over closed anchors; no projection, no merge authority),
-# scaffolding-sweep (retires validation/finding/rework on a disposed anchor; no
-# projection, no merge authority), duplicate-sweep (BEADS_ACTOR projected: it
-# closes duplicate dispatches through bead-rehome; no merge authority), pr-stack
-# (PR bodies only — both managed regions; no projection, no merge authority).
+# observer for anchors that have no PR yet), gate-ensure, pr-facts (same
+# projection), convoy-graduate (GC_AGENT projected: graduation assigns the
+# convoy), review-sweep (cleanup over closed anchors; no projection, no merge
+# authority), scaffolding-sweep (retires validation/finding/rework on a disposed
+# anchor; no projection, no merge authority), duplicate-sweep (BEADS_ACTOR
+# projected: it closes duplicate dispatches through bead-rehome; no merge
+# authority), pr-stack (PR bodies only — both managed regions; no projection,
+# no merge authority).
+# Seven of them walk a set that grows with the queue and share the pass budget
+# (see PASS_BUDGET_SECS below): merge, pr-open, pr-feedback, pre-open-rebase,
+# gate-ensure, pr-facts and pr-stack.
 # Landing is the main way an anchor leaves the gating set, and pr-open is what
 # puts an anchor in front of the operator for the approval merge waits on. The
 # arms that iterate that set grow in cost with it, so one placed ahead of these
@@ -83,18 +86,21 @@ REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
 VALIDATE_POOL="${REFINERY_RECONCILE_VALIDATE_POOL:-$FIX_POOL}"
 CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness,triage}"
 INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
-# Two arms walk a set that grows with the queue, so each has a budget in seconds
-# (0 = unbounded). Past it the arm starts no new anchor, and the next pass
-# resumes after the last one it finished (a cursor in the state dir), so the
-# arms behind it always get their turn. merge's budget covers only the PRs that
-# cannot land this pass; one that can is never deferred (merge.sh). gate-ensure's
-# covers its whole walk of the gating set.
-MERGE_BUDGET_SECS="${REFINERY_RECONCILE_MERGE_BUDGET_SECS:-120}"
-case "$MERGE_BUDGET_SECS" in ''|*[!0-9]*) MERGE_BUDGET_SECS=120 ;; esac
-MERGE_BUDGET_SECS=$((10#$MERGE_BUDGET_SECS))
-GATE_BUDGET_SECS="${REFINERY_RECONCILE_GATE_BUDGET_SECS:-300}"
-case "$GATE_BUDGET_SECS" in ''|*[!0-9]*) GATE_BUDGET_SECS=300 ;; esac
-GATE_BUDGET_SECS=$((10#$GATE_BUDGET_SECS))
+# The pass budget, in seconds (0 = unpaced). Every arm that walks a set growing
+# with the queue is paced: past its deadline it starts no new anchor, and the
+# next pass resumes after the last one it finished (a cursor in the state dir).
+# Each paced arm's deadline is an equal share of the time the pass budget has
+# left when the arm starts, and never less than ARM_FLOOR_SECS, so an arm that
+# finishes early leaves its time to the arms behind it, and every arm runs on
+# every pass. The budget sits below the order's timeout, so a pass ends and
+# writes END instead of being killed. Two walks are never paced: the posture
+# record, which merge needs whole, and the PRs merge can land this pass.
+PASS_BUDGET_SECS="${REFINERY_RECONCILE_PASS_BUDGET_SECS:-420}"
+case "$PASS_BUDGET_SECS" in ''|*[!0-9]*) PASS_BUDGET_SECS=420 ;; esac
+PASS_BUDGET_SECS=$((10#$PASS_BUDGET_SECS))
+ARM_FLOOR_SECS="${REFINERY_RECONCILE_ARM_FLOOR_SECS:-20}"
+case "$ARM_FLOOR_SECS" in ''|*[!0-9]*) ARM_FLOOR_SECS=20 ;; esac
+ARM_FLOOR_SECS=$((10#$ARM_FLOOR_SECS))
 
 # Review dispatch formula (two-lane pilot). Default mol-review — the
 # single-agent lifecycle. Opt into the quorum by setting
@@ -255,8 +261,8 @@ fi
 # Extracted and EXECUTED by refinery-reconcile.test.sh against stub arms: a
 # posture arm that could not make every posture current must HOLD merge.sh in
 # the same pass. Keep it executable with only a prologue supplying SCRIPTS_DIR,
-# LOG_SINK, NOTED, FAILED, AGENT, STATE_DIR, MERGE_BUDGET_SECS and the
-# mark_merge helper (the merge-decision marker writer).
+# LOG_SINK, NOTED, FAILED, AGENT, STATE_DIR, PASS_T0, PASS_BUDGET_SECS,
+# ARM_FLOOR_SECS and the mark_merge helper (the merge-decision marker writer).
 note() { NOTED="${NOTED}$*"$'\n'; }
 log()  { [ -n "$LOG_SINK" ] && printf '%s\n' "$*" >> "$LOG_SINK"; return 0; }
 run_pass() { # <label> <script> [args...]
@@ -285,6 +291,22 @@ run_pass() { # <label> <script> [args...]
   log "-- $label: done in $(( $(date -u +%s) - t0 ))s (rc=$rc)"
   return "$rc"
 }
+# The paced arms, in pass order: merge, pr-open, pr-feedback, pre-open-rebase,
+# gate-ensure, pr-facts, pr-stack. pace_args hands the next one its cursor and
+# its share of what the pass budget has left, in PACE_ARGS.
+PACED_LEFT=7
+pace_args() { # <cursor-name>
+  local now share
+  now=$(date -u +%s)
+  PACE_ARGS=(--cursor "$STATE_DIR/$1.cursor")
+  if [ "$PASS_BUDGET_SECS" -gt 0 ]; then
+    share=$(( (PASS_T0 + PASS_BUDGET_SECS - now) / PACED_LEFT ))
+    [ "$share" -lt "$ARM_FLOOR_SECS" ] && share="$ARM_FLOOR_SECS"
+    PACE_ARGS+=(--deadline "$(( now + share ))")
+  fi
+  [ "$PACED_LEFT" -gt 1 ] && PACED_LEFT=$((PACED_LEFT - 1))
+  return 0
+}
 
 # (1) posture: merge.sh answers "is a human waiting on this?" off the bead and
 # never asks GitHub, so the posture it reads has to be written in THIS pass. It
@@ -303,8 +325,9 @@ if [ "$posture_rc" != 0 ]; then
 fi
 
 # (2) merge: runs the moment its one same-pass interlock, the posture record, is
-# done. It visits every PR that can land this pass first, and its budget paces
-# only the rest, so `decided` below means every landable PR was decided.
+# done. It visits every PR that can land this pass first, and its share of the
+# pass budget paces only the rest, so `decided` below means every landable PR
+# was decided.
 # BEADS_ACTOR projected in a subshell so its closes and records are attributed
 # to the refinery in the events log. The anchors it closes are detached in a
 # gating state and carry no assignee (mol-refinery-patrol clears it), and the
@@ -318,12 +341,9 @@ else
   # `reached` before merge, `decided` after: a pass killed between them leaves
   # `reached`, which the next pass reads as a merge arm that never finished.
   mark_merge reached
-  # The deadline counts from merge's own start, so the posture arm's time is
-  # not taken out of merge's budget.
-  MERGE_PACE_ARGS=(--cursor "$STATE_DIR/merge.cursor")
-  [ "$MERGE_BUDGET_SECS" -gt 0 ] && MERGE_PACE_ARGS+=(--deadline "$(( $(date -u +%s) + MERGE_BUDGET_SECS ))")
+  pace_args merge
   ( export BEADS_ACTOR="$AGENT"
-    run_pass "(2) merge" merge.sh "${MERGE_PACE_ARGS[@]}" ) || FAILED="${FAILED}merge rc=$?; "
+    run_pass "(2) merge" merge.sh "${PACE_ARGS[@]}" ) || FAILED="${FAILED}merge rc=$?; "
   mark_merge decided
 fi
 # <<< posture-gates-merge
@@ -333,7 +353,8 @@ fi
 # same tick, and merge reads none of this arm's output, so running after merge
 # costs no landing. Running ahead of every other arm means no slow one can keep
 # a green branch from reaching the operator.
-run_pass "(3) pr-open" pr-open.sh || FAILED="${FAILED}pr-open rc=$?; "
+pace_args pr-open
+run_pass "(3) pr-open" pr-open.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-open rc=$?; "
 
 # (4) pr-feedback: route operator PR feedback ahead of the slow arms. The full
 # pr-facts arm (arm 7) re-runs the same routing idempotently, but it sits
@@ -344,8 +365,9 @@ run_pass "(3) pr-open" pr-open.sh || FAILED="${FAILED}pr-open rc=$?; "
 # BEADS_ACTOR is projected so the children it dispatches are attributed to the
 # refinery, like the full arm. Its rc is reported and holds nothing: merge has
 # already run, and routing is not the posture interlock.
+pace_args pr-feedback
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(4) pr-feedback" pr-facts.sh --route-comments-only --fix-pool "$FIX_POOL" ) \
+  run_pass "(4) pr-feedback" pr-facts.sh --route-comments-only --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
   || FAILED="${FAILED}pr-feedback rc=$?; "
 
 # (5) pre-open-rebase: the conflict observer for the pre_open_gate anchors
@@ -355,24 +377,24 @@ run_pass "(3) pr-open" pr-open.sh || FAILED="${FAILED}pr-open rc=$?; "
 # whichever sees a conflict first files and the other stands down. Its failure
 # is not a merge hold — an anchor it could not observe is left exactly as this
 # cadence found it.
+pace_args pre-open-rebase
 run_pass "(5) pre-open-rebase" pre-open-rebase.sh \
-  --fix-pool "$FIX_POOL" || FAILED="${FAILED}pre-open-rebase rc=$?; "
+  --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" || FAILED="${FAILED}pre-open-rebase rc=$?; "
 
 # (6) gate-ensure: review dispatch. It visits every gating anchor, so it runs
-# under GATE_BUDGET_SECS: past the deadline it starts no new anchor, and its
-# cursor names the last anchor it finished, so the next pass resumes after it.
-# A slow gate-ensure therefore delays review dispatch for the anchors it has
-# not reached, and nothing else. Its rc=3 (an anchor whose check_set stamp did
+# under its share of the pass budget: past the deadline it starts no new anchor,
+# and its cursor names the last anchor it finished, so the next pass resumes
+# after it. A slow gate-ensure therefore delays review dispatch for the anchors
+# it has not reached, and nothing else. Its rc=3 (an anchor whose check_set stamp did
 # not persist, or an enumeration it could not read) is reported and fails
 # nothing: merge.sh and pr-open.sh each hold an anchor with no check_set on
 # their own read.
 GATE_UNSAFE_RC=3
-GATE_PACE_ARGS=(--cursor "$STATE_DIR/gate-ensure.cursor")
-[ "$GATE_BUDGET_SECS" -gt 0 ] && GATE_PACE_ARGS+=(--deadline "$(( $(date -u +%s) + GATE_BUDGET_SECS ))")
+pace_args gate-ensure
 gate_rc=0
 run_pass "(6) gate-ensure" gate-ensure.sh \
   --default "$CHECK_SET_DEFAULT" --review-pool "$REVIEW_POOL" \
-  --fix-pool "$FIX_POOL" --validate-pool "$VALIDATE_POOL" "${GATE_PACE_ARGS[@]}" \
+  --fix-pool "$FIX_POOL" --validate-pool "$VALIDATE_POOL" "${PACE_ARGS[@]}" \
   ${GATE_REVIEW_FORMULA_ARGS[@]+"${GATE_REVIEW_FORMULA_ARGS[@]}"} || gate_rc=$?
 if [ "$gate_rc" = "$GATE_UNSAFE_RC" ]; then
   note "gate-ensure UNSAFE (rc=$gate_rc) — an anchor has no check_set; merge.sh and pr-open.sh hold it on their own read"
@@ -380,9 +402,11 @@ elif [ "$gate_rc" != 0 ]; then
   FAILED="${FAILED}gate-ensure rc=$gate_rc; "
 fi
 
-# (7) pr-facts: same actor projection (it records closes too).
+# (7) pr-facts: same actor projection (it records closes too). Paced like the
+# arms ahead of it, so the arms behind it still get their turn.
+pace_args pr-facts
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" ) \
+  run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
   || FAILED="${FAILED}pr-facts rc=$?; "
 
 # (8) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the
@@ -427,7 +451,8 @@ run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh || FAILED="${FAILED}scaff
 # the ledger it reads, so the body names it on the same tick rather than a minute
 # later. It writes only PR bodies — no bead, no merge authority — so it runs
 # unprojected and its failure gates nothing.
-run_pass "(12) pr-stack" pr-stack.sh || FAILED="${FAILED}pr-stack rc=$?; "
+pace_args pr-stack
+run_pass "(12) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
 
 # The per-pass bd_list cache is this pass's; drop it so no later pass can read
 # these rows. A killed pass never reaches here and the next pass's rm-then-create

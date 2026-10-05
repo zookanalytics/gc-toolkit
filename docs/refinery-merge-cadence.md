@@ -34,7 +34,7 @@ which runs the arms in order and exits.
 | Working directory | the rig's own root, so `git remote get-url origin` resolves |
 | Environment | controller-built: `GC_RIG`, `GC_RIG_ROOT`, `BEADS_DIR`, `GC_BEADS_PREFIX`, `PACK_DIR`, `GC_PACK_STATE_DIR`, the Dolt projection, the `gh` token |
 | Timeout | `timeout = "600s"`, tunable per rig from city.toml `[[orders.overrides]]` — it bounds how long a wedged pass holds the per-rig lock. It must cover a whole pass at the slow end of host load and stay under the driver's `REFINERY_RECONCILE_LOCK_STALL_SECS`, and it does *not* fit inside the controller watchdog's 2m tracking-sweep window |
-| Arm budgets | `REFINERY_RECONCILE_MERGE_BUDGET_SECS` (120) paces merge's visits to PRs that cannot land this pass; `REFINERY_RECONCILE_GATE_BUDGET_SECS` (300) paces gate-ensure's walk of the gating set. Each counts from its arm's start, resumes from a cursor in the pass state dir, and is unbounded at 0. Set them per rig through the override's `env` |
+| Pass budget | `REFINERY_RECONCILE_PASS_BUDGET_SECS` (420, below the timeout; 0 = unpaced) is shared by the seven arms that walk a set growing with the queue: merge (its PRs that cannot land this pass), pr-open, pr-feedback, pre-open-rebase, gate-ensure, pr-facts and pr-stack. Each paced arm's deadline is an equal share of what the budget has left when it starts, never under `REFINERY_RECONCILE_ARM_FLOOR_SECS` (20), and it resumes from its cursor in the pass state dir. Set both per rig through the override's `env` |
 
 Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
 one `[order.env]` serves every registration. The refinery agent does not drive
@@ -78,12 +78,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    moves the base), or whose PR has left the open list (merged, which owes the
    record below, or closed), is visited first, and no budget stops that group.
    The rest cannot merge this pass (`BLOCKED`, `BEHIND`, `DIRTY`, or
-   unapproved), so a visit there refreshes a verdict and lands nothing. They are visited in id order starting after the last one a
-   pass finished (`merge.cursor` in the pass state dir), wrapping, until
-   `REFINERY_RECONCILE_MERGE_BUDGET_SECS` (120 by default; 0 = unbounded) runs
-   out, so every one is reached within a bounded number of passes. When the
-   list cannot be read, every anchor joins the first group and the arm is not
-   paced.
+   unapproved), so a visit there refreshes a verdict and lands nothing. They
+   are visited in id order starting after the last one a pass finished
+   (`merge.cursor` in the pass state dir), wrapping, until merge's share of the
+   pass budget runs out, so every one is reached within a bounded number of
+   passes. When the list cannot be read, every anchor joins the first group and
+   the arm is not paced.
 
    Per anchor: pinned `gh pr view`, identity gates
    (same repo, not a fork), re-read the anchor and check it still gates this
@@ -154,7 +154,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    pass, for the reasons merge does not. A pass that ends inside this arm still
    makes progress: an anchor it opened has left its domain, and an open
    interrupted before its record is adopted by the next pass rather than
-   opened twice. For each anchor whose
+   opened twice. It walks under its share of the pass budget: the anchors
+   gate-ensure last recorded as `settled` first (the mark only orders the walk;
+   each still meets the full gate), then the rest in a rotation, with at least
+   one of each visited every pass. For each anchor whose
    every marker-bearing check in `check_set` reads `green` (the same
    predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
    set is held, never read as ungated): adopt an existing PR for the branch or
@@ -195,7 +198,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    is reported but holds nothing: merge has already run, routing is not the
    posture interlock, and the full pass is the backstop. It runs ahead of
    gate-ensure, so a validation pass it opens is in place for gate-ensure to
-   dispatch a validator onto. The observability half is
+   dispatch a validator onto. It walks the PRs in a rotation under its share of
+   the pass budget. The observability half is
    `doctor/check-feedback-routing-owed`, which flags an anchor whose posture still
    says a human is waiting with no disposition past a window.
 5. **pre-open-rebase.sh** — the conflict observer for anchors that have no PR
@@ -209,8 +213,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    mirrors every branch on origin into `refs/gc-toolkit/pre-open-rebase/heads/*`
    — one round trip costs the same as 38, and this arm holds the pass lock while
    it runs — pruned, so a branch deleted on origin does not linger as a ref the
-   probe would believe. Per anchor it then requires both sides to resolve there
-   and probes `git merge-tree --write-tree`; a conflict files the same merge-in
+   probe would believe. It walks the anchors in a rotation under its share of
+   the pass budget, and per anchor requires both sides to resolve there and
+   probes `git merge-tree --write-tree`; a conflict files the same merge-in
    rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
    branch shape is brought current by merge, never rebase). An anchor pr-open
    flipped this pass carries a PR, where `mergeable` answers the question and
@@ -251,10 +256,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    — stop the PR moving and are caught by `liveness-sweep.sh`'s stale-gate pass,
    not a count on the check.
    It visits every gating anchor, so its cost grows with the set. It runs after
-   merge and pr-open and under `REFINERY_RECONCILE_GATE_BUDGET_SECS` (300 by
-   default; 0 = unbounded): it visits the anchors in id order starting after
-   the last one a pass finished (`gate-ensure.cursor` in the pass state dir),
-   wrapping, and starts no new anchor once the budget is spent. A slow walk
+   merge and pr-open and under its share of the pass budget: it visits the
+   anchors in id order starting after the last one a pass finished
+   (`gate-ensure.cursor` in the pass state dir), wrapping, and starts no new
+   anchor once its share is spent. A slow walk
    therefore delays review dispatch for the anchors it has not reached, and
    nothing else, and every anchor is reached within a bounded number of
    passes. Its rc=3 (an anchor whose `check_set` stamp did not persist, or an
@@ -318,7 +323,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    every later pass. A `visit:` disposition earns the reaction but never a
    reply, because no commit answered it. Idempotence is read back off GitHub,
    so a repeat pass writes nothing and a failed write is retried by the next
-   one.
+   one. The per-anchor walk runs in a rotation under the arm's share of the
+   pass budget; the write-back sweep reads only the anchors carrying a
+   disposition and is not paced.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
@@ -373,6 +380,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    managed regions. No merge authority, and the only arm that writes no bead. A
    body is composed once, by arm 3, out of one anchor; then two things drift it,
    and this arm lands both fixes in one body edit.
+
+   It walks the open PRs in a rotation under its share of the pass budget.
 
    The `gc:branch-beads` section: commits keep arriving on the branch after open
    — a fold, a rework or rebase hand-back, a stacked bead's own PR — and none of
@@ -485,8 +494,7 @@ how a pass ended:
 | `=== <ts> rig=<rig> refinery=<agent>` | a pass started |
 | `-- (<n>) <arm> (started <ts>)` | an arm started; its output follows |
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
-| `gate-ensure: visited <k> of <n> gating anchors` | how much of the gating set gate-ensure reached; `the next pass resumes at <id>` follows when its budget stopped it. `<n>` is the size of the set every walking arm's cost grows with |
-| `merge: visited <a> landing-first and <k> of <n> other anchors` | merge's visits: every PR that could land, then the paced rest; `the next pass resumes at <id>` follows when its budget stopped it |
+| `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |

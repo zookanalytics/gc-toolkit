@@ -8,9 +8,11 @@
 # merge.sh reads off the bead and would otherwise read one written a pass ago,
 # and pr-open right behind merge, so no arm whose cost grows with the gating set
 # can spend the pass budget before either runs; a gate-ensure that never returns
-# leaves both already run; gate-ensure handed a deadline from
-# REFINERY_RECONCILE_GATE_BUDGET_SECS and a cursor in the pass state dir, and
-# its rc=3 reported without holding or failing anything; the
+# leaves both already run; every paced arm handed a cursor in the pass state
+# dir and a deadline that is its share of what REFINERY_RECONCILE_PASS_BUDGET_SECS
+# has left, never under REFINERY_RECONCILE_ARM_FLOOR_SECS, while the posture arm
+# gets neither; gate-ensure's rc=3 reported without holding or failing anything;
+# the
 # posture-gates-merge interlock (a non-zero posture arm HOLDS merge.sh in the
 # same pass, because merge.sh validates the posture that arm records),
 # exercised by extracting and executing the marked block against stubs;
@@ -58,9 +60,21 @@ out=$(env -u GC_RIG "$SD/refinery-reconcile.sh" 2>&1); rc=$?
 eq "$rc" 2 "no GC_RIG exits 2"
 has "$out" "GC_RIG is unset" "…and says why"
 
+# A paced arm's deadline, as seconds past the pass start T0 the caller took.
+offset() { # <arm-line>
+  local dl
+  dl=$(printf '%s' "$1" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
+  if [ -n "$dl" ]; then echo $(( dl - T0 )); else echo none; fi
+}
+near() { # <offset> <want-secs> <label> — within 15s, for a loaded host
+  case "$1" in none|'') bad "$3 (no deadline)"; return 0 ;; esac
+  if [ "$1" -ge $(( $2 - 15 )) ] && [ "$1" -le $(( $2 + 15 )) ]; then ok "$3"; else bad "$3 (got ${1}s, want ~${2}s)"; fi
+}
+
 echo "# arms run in order with derived pools and scoped identities"
 for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
+T0=$(date -u +%s)
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
@@ -70,20 +84,30 @@ has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTO
 # pr-stack writes PR bodies and no bead, so it carries neither projection: an
 # identity it does not need is authority it must not be able to spend.
 stack_line=$(grep '^pr-stack' "$ARM_LOG")
-eq "$stack_line" "pr-stack.sh|||" "pr-stack ran last, unprojected and with no args"
+case "$stack_line" in
+  "pr-stack.sh|--cursor $TMP/state/myrig/pr-stack.cursor --deadline "*"||") ok "pr-stack ran last, unprojected, with only its pacing args" ;;
+  *) bad "pr-stack ran with more than its pacing args, or projected: $stack_line" ;;
+esac
 gate_line=$(grep '^gate-ensure' "$ARM_LOG")
 has "$gate_line" "--default correctness,triage --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat --validate-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review, fix AND validate pools"
 hasnt "$gate_line" "--review-formula" "gate-ensure gets no --review-formula by default (the two-lane quorum pilot is opt-in)"
-has "$gate_line" "--cursor $TMP/state/myrig/gate-ensure.cursor" "gate-ensure resumes from a cursor kept in the rig's pass state dir"
-# The deadline is the pass clock plus the budget, read from argv; the default
-# budget is 300s, so it lands within a few seconds of now+300.
-dl=$(printf '%s' "$gate_line" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
-now=$(date -u +%s)
-if [ -n "$dl" ] && [ "$dl" -ge $((now + 300 - 30)) ] && [ "$dl" -le $((now + 300)) ]; then
-  ok "gate-ensure got a deadline the default 300s budget past its start"
-else
-  bad "gate-ensure deadline '${dl:-<none>}' is not ~300s past now ($now)"
-fi
+# Every paced arm resumes from its own cursor in the rig's pass state dir, and
+# its deadline is its share of what the default 420s pass budget has left when
+# it starts. The stub arms return at once, so the seven shares are 420 over 7,
+# 6, 5 and so on, down to all of it for pr-stack.
+for pair in merge.sh:merge pr-open:pr-open "pr-facts.sh|--route-comments-only:pr-feedback" pre-open-rebase:pre-open-rebase gate-ensure:gate-ensure pr-stack:pr-stack; do
+  pat="${pair%%:*}"; name="${pair#*:}"
+  has "$(grep "^$pat" "$ARM_LOG")" "--cursor $TMP/state/myrig/$name.cursor" "$name resumes from its own cursor in the pass state dir"
+done
+full_facts=$(grep '^pr-facts' "$ARM_LOG" | grep -v -- '--posture-only' | grep -v -- '--route-comments-only')
+has "$full_facts" "--cursor $TMP/state/myrig/pr-facts.cursor" "pr-facts resumes from its own cursor in the pass state dir"
+near "$(offset "$(grep '^merge.sh' "$ARM_LOG")")" 60 "merge's deadline is a seventh of the 420s pass budget"
+near "$(offset "$(grep '^pr-open' "$ARM_LOG")")" 70 "pr-open gets a sixth of what is left"
+near "$(offset "$(grep '^pr-facts.sh|--route-comments-only' "$ARM_LOG")")" 84 "pr-feedback a fifth"
+near "$(offset "$(grep '^pre-open-rebase' "$ARM_LOG")")" 105 "pre-open-rebase a quarter"
+near "$(offset "$gate_line")" 140 "gate-ensure a third"
+near "$(offset "$full_facts")" 210 "pr-facts half"
+near "$(offset "$stack_line")" 420 "and pr-stack all that is left"
 has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--fix-pool myrig/gc-toolkit.polecat" "pre-open-rebase got the derived fix pool"
 case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
   *"|myrig/gc-toolkit.refinery|"*) bad "pre-open-rebase must NOT inherit BEADS_ACTOR (it closes nothing)" ;;
@@ -91,14 +115,6 @@ case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
 esac
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
-has "$merge_line" "--cursor $TMP/state/myrig/merge.cursor" "merge resumes its paced PRs from a cursor kept in the rig's pass state dir"
-dl=$(printf '%s' "$merge_line" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
-now=$(date -u +%s)
-if [ -n "$dl" ] && [ "$dl" -ge $((now + 120 - 30)) ] && [ "$dl" -le $((now + 120)) ]; then
-  ok "merge got a deadline the default 120s budget past its start"
-else
-  bad "merge deadline '${dl:-<none>}' is not ~120s past now ($now)"
-fi
 # The full pr-facts arm: --fix-pool and no pre-merge mode flag (the posture arm
 # carries neither, the feedback arm carries --route-comments-only).
 facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool' | grep -v -- '--route-comments-only')
@@ -115,6 +131,8 @@ posture_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--posture-only')
 eq "$(printf '%s\n' "$posture_line" | wc -l | tr -d ' ')" 1 "the posture arm ran exactly once"
 has "$posture_line" "|myrig/gc-toolkit.refinery|" "the posture arm ran as BEADS_ACTOR=<refinery>"
 hasnt "$posture_line" "--fix-pool" "the posture arm dispatches nothing, so it takes no pools"
+hasnt "$posture_line" "--deadline" "the posture arm is never paced: merge needs every posture current"
+hasnt "$posture_line" "--cursor" "…so it takes no cursor either"
 at() { grep -n "^$1" "$ARM_LOG" | head -1 | cut -d: -f1; }
 posture_at=$(at 'pr-facts.*--posture-only')
 merge_at=$(at 'merge.sh')
@@ -168,40 +186,30 @@ grep -qE '^END [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z \([0-9]+s\)$' "$PASSLOG0" \
   && ok "the END line carries the pass's elapsed seconds" \
   || bad "the END line carries no pass elapsed time"
 
-echo "# REFINERY_RECONCILE_MERGE_BUDGET_SECS sets merge's deadline; 0 runs it unbounded"
+echo "# REFINERY_RECONCILE_PASS_BUDGET_SECS scales every share; 0 unpaces; a spent budget leaves each arm the floor"
+: > "$ARM_LOG"; T0=$(date -u +%s)
+REFINERY_RECONCILE_PASS_BUDGET_SECS=700 drive > /dev/null
+near "$(offset "$(grep '^merge.sh' "$ARM_LOG")")" 100 "a 700s budget gives merge a seventh, 100s"
+near "$(offset "$(grep '^pr-stack' "$ARM_LOG")")" 700 "…and pr-stack what is left, 700s"
 : > "$ARM_LOG"
-REFINERY_RECONCILE_MERGE_BUDGET_SECS=40 drive > /dev/null
-dl=$(grep '^merge.sh' "$ARM_LOG" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
-now=$(date -u +%s)
-[ -n "$dl" ] && [ "$dl" -ge $((now + 40 - 30)) ] && [ "$dl" -le $((now + 40)) ] \
-  && ok "a 40s budget puts merge's deadline 40s past its start" \
-  || bad "a 40s budget gave merge deadline '${dl:-<none>}' (now $now)"
-: > "$ARM_LOG"
-REFINERY_RECONCILE_MERGE_BUDGET_SECS=0 drive > /dev/null
-ml=$(grep '^merge.sh' "$ARM_LOG")
-hasnt "$ml" "--deadline" "a 0 budget hands merge no deadline"
-has "$ml" "--cursor " "…and it still resumes from its cursor"
-
-echo "# REFINERY_RECONCILE_GATE_BUDGET_SECS sets gate-ensure's deadline; 0 runs it unbounded"
-: > "$ARM_LOG"
-REFINERY_RECONCILE_GATE_BUDGET_SECS=45 drive > /dev/null
-dl=$(grep '^gate-ensure' "$ARM_LOG" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
-now=$(date -u +%s)
-[ -n "$dl" ] && [ "$dl" -ge $((now + 45 - 30)) ] && [ "$dl" -le $((now + 45)) ] \
-  && ok "a 45s budget puts the deadline 45s past gate-ensure's start" \
-  || bad "a 45s budget gave deadline '${dl:-<none>}' (now $now)"
-: > "$ARM_LOG"
-REFINERY_RECONCILE_GATE_BUDGET_SECS=0 drive > /dev/null
-gl=$(grep '^gate-ensure' "$ARM_LOG")
-hasnt "$gl" "--deadline" "a 0 budget hands gate-ensure no deadline"
-has "$gl" "--cursor " "…and it still resumes from its cursor"
-: > "$ARM_LOG"
-REFINERY_RECONCILE_GATE_BUDGET_SECS=soon drive > /dev/null
-dl=$(grep '^gate-ensure' "$ARM_LOG" | sed -n 's/.*--deadline \([0-9][0-9]*\).*/\1/p')
-now=$(date -u +%s)
-[ -n "$dl" ] && [ "$dl" -ge $((now + 300 - 30)) ] && [ "$dl" -le $((now + 300)) ] \
-  && ok "an unparseable budget falls back to the 300s default" \
-  || bad "an unparseable budget gave deadline '${dl:-<none>}' (now $now)"
+REFINERY_RECONCILE_PASS_BUDGET_SECS=0 drive > /dev/null
+hasnt "$(cat "$ARM_LOG")" "--deadline" "a 0 budget hands no arm a deadline"
+eq "$(grep -c -- '--cursor ' "$ARM_LOG")" 7 "…and every paced arm still resumes from its cursor"
+: > "$ARM_LOG"; T0=$(date -u +%s)
+REFINERY_RECONCILE_PASS_BUDGET_SECS=1 drive > /dev/null
+near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 20 "a spent budget still gives a paced arm the 20s floor"
+near "$(offset "$(grep '^pr-stack' "$ARM_LOG")")" 20 "…the last one included"
+: > "$ARM_LOG"; T0=$(date -u +%s)
+REFINERY_RECONCILE_PASS_BUDGET_SECS=1 REFINERY_RECONCILE_ARM_FLOOR_SECS=200 drive > /dev/null
+near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 200 "REFINERY_RECONCILE_ARM_FLOOR_SECS sets the floor"
+: > "$ARM_LOG"; T0=$(date -u +%s)
+REFINERY_RECONCILE_PASS_BUDGET_SECS=soon drive > /dev/null
+near "$(offset "$(grep '^merge.sh' "$ARM_LOG")")" 60 "an unparseable budget falls back to the 420s default"
+# The shares divide among the arms that take one, so the count the driver
+# divides by must be the number of arms it paces.
+paced=$(grep -cE '^[[:space:]]*pace_args [a-z-]+$' "$RUNNER")
+lit=$(sed -n 's/^PACED_LEFT=\([0-9][0-9]*\)$/\1/p' "$RUNNER")
+eq "$paced" "$lit" "PACED_LEFT counts every pace_args call in the runner"
 
 echo "# gate-ensure rc=3 is reported, and holds and fails nothing"
 # merge has already run when gate-ensure does, and merge.sh and pr-open.sh each
@@ -559,7 +567,8 @@ export BLOCK_SENTINEL="$TMP/block-order"; : > "$BLOCK_SENTINEL"
 export MARK_LOG="$TMP/mark-log"; : > "$MARK_LOG"
 {
   printf 'set -u\nSCRIPTS_DIR=%q\nLOG_SINK=""\nNOTED=""\nFAILED=""\n' "$GSD"
-  printf 'AGENT=%q\nSTATE_DIR=%q\nMERGE_BUDGET_SECS=120\n' 'myrig/gc-toolkit.refinery' "$TMP/gsd-state"
+  printf 'AGENT=%q\nSTATE_DIR=%q\nPASS_T0=%s\nPASS_BUDGET_SECS=420\nARM_FLOOR_SECS=20\n' \
+    'myrig/gc-toolkit.refinery' "$TMP/gsd-state" "$(date -u +%s)"
   printf 'MARK_LOG=%q\nmark_merge() { printf "%%s\\n" "$1" >> "$MARK_LOG"; }\n' "$MARK_LOG"
   printf '%s\n' "$GATE"
   printf 'echo "MERGE_HELD=$MERGE_HELD"\n'
@@ -624,6 +633,18 @@ case "$STALL" in
        ok "timeout $to is inside the runner's ${STALL}s lock-stall bound"
      else
        bad "timeout $to is not below the runner's ${STALL}s lock-stall bound — a pass still running reads as a wedged one"
+     fi ;;
+esac
+# The pass budget is what the paced arms divide, so a pass that keeps to it ends
+# and writes END. At or above the timeout the controller kills it first, and the
+# arms the budget was meant to leave room for are cut off instead.
+PB=$(sed -n 's/^PASS_BUDGET_SECS="\${REFINERY_RECONCILE_PASS_BUDGET_SECS:-\([0-9][0-9]*\)}"$/\1/p' "$RUNNER")
+case "$PB" in
+  ''|*[!0-9]*) bad "PASS_BUDGET_SECS default is unreadable — it cannot be bounded against the timeout" ;;
+  *) if [ -n "$to_secs" ] && [ "$PB" -lt "$to_secs" ]; then
+       ok "the ${PB}s pass budget sits below the ${to} timeout"
+     else
+       bad "the ${PB}s pass budget is not below the ${to} timeout — the pass is killed before its paced arms end"
      fi ;;
 esac
 has "$o" 'scope = "rig"' "order is rig-scoped (single-flight per rig)"

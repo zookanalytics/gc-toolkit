@@ -93,23 +93,45 @@ gate-ensure, pr-facts, then the sweeps and pr-stack.
   landing or an open by one pass but never allow one early.
 - **pr-feedback moved behind pr-open.** Its rc never held anything, and merge
   already holds on the `commented@` posture it would route.
-- **gate-ensure runs under a budget with a resume cursor** (300s by default).
-  Without the cursor, a budget-stopped walk that restarted at the same anchor
-  would starve the tail of its list.
-- **merge visits landable PRs first and paces the rest** (120s by default).
-  The live sample showed merge's own cost (about 24s per PR) would keep
-  pr-open behind it and, under the shipped 600s, cut merge off at the same PR
-  every pass. One `gh pr list` (4s for 30 PRs) reads every open PR's
-  `mergeStateStatus` and `reviewDecision`. CLEAN or UNSTABLE PRs, approved PRs
-  whose merge state GitHub has not yet computed, and PRs that left the open
-  list (they owe a record) are never paced. The rest only refresh a verdict,
-  so they rotate.
-- **pr-open is not paced.** An anchor it opens leaves its domain, so even a
-  pass killed inside it makes progress, and an interrupted open is adopted on
-  the next pass rather than opened twice.
+- **Every arm that walks a set growing with the queue shares one pass budget**
+  (`REFINERY_RECONCILE_PASS_BUDGET_SECS`, 420s by default, below the 600s
+  timeout). That is merge's non-landable PRs, pr-open, pr-feedback,
+  pre-open-rebase, gate-ensure, pr-facts and pr-stack. Each arm's deadline is
+  an equal share of what the budget has left when it starts, never under a 20s
+  floor. Past it the arm starts no new anchor, and a cursor (pace-lib.sh)
+  resumes it in id order after the last anchor it finished. An arm that
+  finishes early leaves its time to the arms behind it, every arm runs on
+  every pass, and a pass stays short, so merge comes round again sooner.
+  Without the cursor, a stopped walk that restarted at the same anchor would
+  starve the tail of its list.
+- **merge visits landable PRs first and never paces them.** The live sample
+  showed merge's own cost (about 24s per PR) would otherwise keep pr-open
+  behind it and cut merge off at the same PR every pass. One `gh pr list` (4s
+  for 30 PRs) reads every open PR's `mergeStateStatus` and `reviewDecision`.
+  CLEAN or UNSTABLE PRs, approved PRs whose merge state GitHub has not yet
+  computed, and PRs that left the open list (they owe a record) are never
+  paced. The rest only refresh a verdict, so they rotate.
+- **pr-open visits the anchors gate-ensure last marked settled first**, then
+  rotates the rest, with one of each visited every pass. An anchor it opens
+  leaves its set, so a pass the budget stops still opened what it reached.
 - **pass.log carries each arm's start time, its elapsed seconds and rc, the
   pass's total, and how much of its set each paced arm covered.** A slowdown
   is then visible as a duration and a set size before it stops landing.
+
+## The mechanik note (2026-10-05T14:35Z)
+
+Two measurements were added to the bead after this work began.
+
+- **Landing is one PR per pass.** After a squash, GitHub reads the sibling PRs
+  as `UNKNOWN` until something asks again, and merge held them. tk-moje52c
+  re-reads an `UNKNOWN` merge state inside the merge arm, which is the direct
+  fix. Here, an approved `UNKNOWN` PR counts as landable, so it is visited
+  first rather than paced, and the pass budget keeps passes short, so merge
+  runs again sooner.
+- **pr-facts starved too** (its red-required-check auto-fix sat unrun from
+  2026-10-04T22:33Z). Every walking arm now shares the pass budget, so pr-facts
+  and the arms behind it run on every pass, however slow the arms ahead of
+  them are.
 
 ## Considered and not done
 
@@ -130,9 +152,10 @@ gate-ensure, pr-facts, then the sweeps and pr-stack.
 
 The bead's release condition, "gc-toolkit passes reach the merge arm inside the
 shipped 600s", holds once this lands: merge starts after the posture arm alone,
-about 160s at 33 PRs. A whole pass is still longer than 600s at the current
-backlog. pr-feedback (about 240s), gate-ensure (up to its budget), pr-facts,
-the sweeps and pr-stack all come after merge and pr-open, so dropping the
-override now would cut those arms off on most passes until the backlog drains.
-The `END <ts> (<s>s)` line now shows the pass length directly. "Passes end
-inside 600s" is the condition under which nothing is cut off.
+about 160s at 33 PRs. Whether a whole pass then fits 600s depends on the two
+walks that are never paced: the posture record (tk-93y5d53 tracks bounding it)
+and the landable PRs. At today's backlog that is an estimated 435s (the
+posture's measured 160s, plus about 25s for each of the 11 approved PRs merge
+visits first), past the 420s budget, so every paced arm gets only its 20s floor
+and a pass runs to about 600s. The `END <ts> (<s>s)` line shows the pass length directly. "Passes
+end inside 600s" is the condition under which nothing is cut off.

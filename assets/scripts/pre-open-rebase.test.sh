@@ -291,6 +291,20 @@ if [ -n "$TA" ] && [ -n "$TB" ]; then ok "both takeaway-hold-discriminator fence
 else bad "a takeaway-hold-discriminator fence is missing"; fi
 eq "$TB" "$TA" "the demand discriminator is a byte-identical copy of pr-facts.sh's"
 
+echo "# pacing: --deadline stops the walk after one anchor and --cursor resumes after it"
+# Three anchors on a branch that still merges, enumerated out of id order. A
+# deadline of epoch 1 has always passed, so a pass observes exactly one.
+reset "$(pre P3 polecat/tk-ok)" "$(pre P1 polecat/tk-ok)" "$(pre P2 polecat/tk-ok)"
+PCUR="$TMP/preopen.cursor"; rm -f "$PCUR"
+OUT=$(run --fix-pool "$POOL" --deadline 1 --cursor "$PCUR")
+has "$OUT" "visited 1 of 3 pre-open anchors before the deadline; the next pass resumes at P2" "a passed deadline observes the lowest id, then names where the next pass resumes"
+has "$OUT" "clean=1 " "…and only that one anchor was observed"
+eq "$(cat "$PCUR" 2>/dev/null)" "P1" "the cursor records the anchor finished"
+OUT=$(run --fix-pool "$POOL" --deadline 1 --cursor "$PCUR")
+has "$OUT" "the next pass resumes at P3" "the next pass resumes after the cursor"
+OUT=$(run --fix-pool "$POOL")
+has "$OUT" "visited 3 of 3 pre-open anchors" "with no pacing args every anchor is observed"
+has "$OUT" "clean=3 " "…all three"
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

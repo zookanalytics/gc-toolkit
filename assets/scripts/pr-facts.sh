@@ -94,7 +94,10 @@
 # posture and stop); --route-comments-only (the pre-merge arm that routes
 # operator feedback and stops after it, skipping the write-back sweep and every
 # non-feedback arm, so a pass killed before the full arm has still picked the
-# feedback up). Caller: refinery-reconcile.sh
+# feedback up); --deadline <epoch-secs> and --cursor <file> pace the per-anchor
+# walk of the feedback and full modes (pace-lib.sh): a rotation, with no new
+# anchor started past the deadline. The posture-only mode is never paced, because
+# merge.sh needs every posture current. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
 
@@ -131,15 +134,22 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
 
-FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0
+FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool)            FIX_POOL="${2:-}"; shift 2 ;;
     --posture-only)        POSTURE_ONLY=1; shift ;;
     --route-comments-only) ROUTE_ONLY=1; shift ;;
+    --deadline)            DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)              CURSOR="${2:-}"; shift 2 ;;
     *) shift ;;
   esac
 done
+case "$DEADLINE" in
+  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
+            DEADLINE="" ;;
+esac
+[ "$POSTURE_ONLY" = 1 ] && { DEADLINE=""; CURSOR=""; }
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -383,6 +393,8 @@ ALL_STATUSES="$LIVE_STATUSES,closed"
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -758,11 +770,13 @@ fi
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
 postured=0; answered=0; unpostured=0; reaped=0
+pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
   [ -n "$id" ] || continue
+  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // ""')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
@@ -2225,8 +2239,16 @@ GATES
       fi ;;
   esac
 done <<ROWS_EOF
-$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR")
 ROWS_EOF
+pace_end
+if [ -n "$CURSOR$DEADLINE" ]; then
+  if [ -n "$PACE_RESUME_AT" ]; then
+    echo "$PROG: visited $PACE_VISITED of $(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null) PR anchors before the deadline; the next pass resumes at $PACE_RESUME_AT"
+  else
+    echo "$PROG: visited $PACE_VISITED of $(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null) PR anchors"
+  fi
+fi
 
 
 # --- PR write-back: acknowledge on pickup, reply and resolve on landing --------
