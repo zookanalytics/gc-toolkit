@@ -514,16 +514,19 @@ sling_bead() { # id target args_json -> rc
 }
 
 # --- until: the resolved-by consumer -----------------------------------------
-# An `until` dep means "X resolves me" — the half the gate disposition wires
-# alongside a `blocks` wait ("X must land before me"): when the target closes the
-# dependent is disposed, not re-triaged as fresh work. This enumerates every
-# OPEN, UNASSIGNED bead carrying an `until` dep. A non-open status is a deliberate
-# hold and an assignee is a live worker; both are left alone (bead-rehome would
-# refuse their close anyway), so the attempt is skipped. The `until` edge carries
-# no metadata key to scope on, so enumeration is one whole-store list; until edges
-# are rare, so the per-candidate work below is usually zero. Fail closed: an
-# unreadable or non-array listing returns non-zero so the caller leaves the beads
-# for the next pass rather than reading "none" from a store it could not see.
+# An `until` dep means "X resolves me", where a `blocks` dep means "X must land
+# before me": when the target closes the dependent is disposed, not re-triaged as
+# fresh work. bd keeps one edge type per pair, so an `until` dep is never paired
+# with a `blocks` dep on the same target. This enumerates every OPEN, UNASSIGNED
+# bead carrying an `until` dep. A non-open status is a deliberate hold and an
+# assignee is a live worker; both are left alone, so the attempt is skipped. The
+# status filter is the only guard for a held bead: bd closes a blocked, deferred
+# or in_progress bead without complaint, and refuses only a foreign assignee.
+# The `until` edge carries no metadata key to scope on, so enumeration is one
+# whole-store list; until edges are rare, so the per-candidate work below is
+# usually zero. Fail closed: an unreadable or non-array listing returns non-zero
+# so the caller leaves the beads for the next pass rather than reading "none"
+# from a store it could not see.
 until_candidates() { # out_file -> "<id>\t<target_ids_csv>" per candidate; rc1 if unreadable
     local out="$1" all
     all="$(bd_ list --brief --json --limit 0 2>/dev/null)" || return 1

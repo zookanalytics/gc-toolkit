@@ -665,12 +665,11 @@ eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a malformed arg list leaves 
 has "$out" "malformed" "the malformed record is reported"
 
 # --- RECONCILE: the until resolved-by consumer -------------------------------
-# An `until` dep means "X resolves me", wired alongside a `blocks` wait so the
-# bead waits, then is DISPOSED (not re-triaged) when X closes. The same pass
-# disposes every open, unassigned bead whose own `until` targets have all closed,
-# through bead-rehome so the close carries a successor pointer. ONLY `until`
-# disposes — a `blocks` edge is sequencing and its target closing leaves the
-# dependent fully owed.
+# An `until` dep means "X resolves me": when X closes the bead is DISPOSED, not
+# re-triaged. The same pass disposes every open, unassigned bead whose own
+# `until` targets have all closed, through bead-rehome so the close carries a
+# successor pointer. ONLY `until` disposes — a `blocks` edge is sequencing and
+# its target closing leaves the dependent fully owed.
 echo "# until: dispose a resolved bead"
 store '[
  {"id":"g-1","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},

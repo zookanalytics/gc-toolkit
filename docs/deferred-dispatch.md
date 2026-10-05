@@ -189,11 +189,13 @@ becomes ready and is still fully owed. An `until` edge says the other thing —
 (`gc.superseded_by`) instead of the bead re-entering triage as fresh work. A
 wait whose named cause has landed is closed, not re-derived by hand.
 
-`until` is not a blocking type, so an `until` edge alone does not hold a bead
-out of `bd ready`. To make a bead both wait for X and be disposed when X lands,
-wire both: a `blocks` edge for the wait and an `until` edge for the resolution.
-`bead-rehome` drops the `blocks` wait edge to the successor on its way to the
-close, so the pair needs no separate teardown.
+`until` is not a blocking type, so an `until` edge does not hold a bead out of
+`bd ready`. bd also keeps one edge type per pair of beads: a bead cannot carry
+both a `blocks` edge and an `until` edge to the same X, and `bd dep add` refuses
+the second. So a bead that waits on X and is resolved by X carries only the
+`until` edge, and it reads as ready while X is open. The unnamed-wait census in
+`assets/scripts/liveness-sweep.sh` reads `bd ready` and has no arm for `until`,
+so it reports such a bead as an unnamed wait until X closes.
 
 The pass acts only on an OPEN, UNASSIGNED bead: a non-`open` status is a
 deliberate hold and an assignee is a live worker, both left alone. It disposes
@@ -212,9 +214,9 @@ pass rather than reading "none owed". The same-store limit below holds for an
 `until` target as much as for a `blocks` blocker — one in another rig is not seen
 here.
 
-The same three checks that keep the dispatch half honest cover this half too.
-The positive control and `check-cadence-live` (I10) are shared — this is the
-same order on the same cadence. `doctor/check-until-resolved-owed` is the
+Three checks cover this half too. Two are shared with the dispatch half,
+because this is the same order on the same cadence: the positive control and
+`check-cadence-live` (I10). `doctor/check-until-resolved-owed` is the
 resolved-by mirror of `check-armed-dispatch-owed`: it flags an open, unassigned
 bead whose `until` targets have all closed and that no open `blocks` blocker
 still holds, yet that has stayed undisposed past the reconcile window — the
