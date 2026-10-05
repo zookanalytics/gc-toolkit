@@ -1,4 +1,12 @@
+---
+name: Build and test scratch reclaim — tk-jp1fg5
+description: Why the build and test scratch that killed or crashed runs leave behind needs its own reaper, and why that reaper gates on a live holder and a dead pid rather than on age or size. The design record for the build-scratch-reap order.
+---
+
 # Build and test scratch reclaim
+
+Bead: `tk-jp1fg5`. It delivers `orders/build-scratch-reap.toml`,
+`assets/scripts/build-scratch-reap.sh`, and the script's co-located test.
 
 A build or test run writes scratch into the host's shared temp: the Go
 toolchain's `go-build*` and `go-link*` trees, the gascity `gc.test` binary's

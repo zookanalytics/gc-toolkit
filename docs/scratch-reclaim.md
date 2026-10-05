@@ -94,6 +94,6 @@ stays visible in the order log rather than only in the total.
 
 Scope is the harness scratch root. Other `/tmp` tenants are reclaimed
 elsewhere: build and test scratch left by killed or crashed runs is
-`build-scratch-reap.sh`'s (docs/build-scratch-reclaim.md), the worktrees of
-closed beads are `worktree-reap.sh`'s, and a horizon on `/tmp` as a whole is the
-host's policy, not the pack's.
+`build-scratch-reap.sh`'s, the worktrees of closed beads are
+`worktree-reap.sh`'s, and a horizon on `/tmp` as a whole is the host's policy,
+not the pack's.

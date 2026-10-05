@@ -42,7 +42,7 @@
 #      scratch roots the build scripts use), TMPDIR.
 # Exit: 0 reaped or nothing to do · 1 cannot verify holders (refused) · 2 usage.
 # Caller: the build-scratch-reap cooldown order (orders/build-scratch-reap.toml).
-# See docs/build-scratch-reclaim.md.
+# See specs/tk-jp1fg5/build-scratch-reap.md.
 set -euo pipefail
 
 PROG="${0##*/}"
