@@ -11,10 +11,11 @@
 # the close, because a closed visit with no gc.outcome is a sitting the board
 # cannot report and no re-run reaches it (doctor/check-visit-outcome-recorded).
 # The same write carries gc.work_outcome=no-op for the work-record gate the close
-# runs, since a visit ships no commit of its own; that gate only warns, so the
-# value is not read back and does not gate the close.
+# runs, on every visit, including one that already records its outcome: a visit
+# ships no commit of its own. That gate only warns, so the value is not read back
+# and does not gate the close.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
-# outcome when the visit lacks one.
+# outcome when the visit lacks one, and gc.work_outcome=no-op on any visit.
 # Also drops an origin->successor `blocks` wait edge on the way: `bd close`
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
@@ -205,7 +206,9 @@ REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 # the same way. The --kind IS the disposition, so it is the outcome word, and
 # $REASON is its headline. An outcome the visit already records is the sitting's
 # own word and is left untouched (a visit closed through visit-close.sh, then
-# re-homed, already carries the word it signed off with).
+# re-homed, already carries the word it signed off with). gc.work_outcome is not
+# part of that word. It is no-op on every visit, so it is stamped whether or not
+# the outcome is.
 ORIGIN_KIND=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // empty' 2>/dev/null || true)
 PRIOR_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
 STAMP_OUTCOME=""
@@ -218,7 +221,8 @@ if [ -n "$DRY_RUN" ]; then
         CLOSE_PLAN="$REASON"
     fi
     STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
-    [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason> gc.work_outcome=no-op"
+    [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason>"
+    [ "$ORIGIN_KIND" = "visit" ] && STAMP_PLAN="$STAMP_PLAN gc.work_outcome=no-op"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
     else
@@ -239,8 +243,10 @@ STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
             --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
 if [ -n "$STAMP_OUTCOME" ]; then
     STAMP_META+=(--set-metadata gc.outcome="$KIND" \
-                 --set-metadata gc.outcome_reason="$REASON" \
-                 --set-metadata gc.work_outcome=no-op)
+                 --set-metadata gc.outcome_reason="$REASON")
+fi
+if [ "$ORIGIN_KIND" = "visit" ]; then
+    STAMP_META+=(--set-metadata gc.work_outcome=no-op)
 fi
 bd_at "$ORIGIN_PATH" update "$ORIGIN" "${STAMP_META[@]}" >/dev/null 2>&1 || true
 

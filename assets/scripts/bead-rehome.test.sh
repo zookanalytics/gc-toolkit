@@ -35,12 +35,15 @@
 #       plus gc.work_outcome=no-op for the work-record gate the close runs;
 #   (s) a non-visit origin records NO gc.outcome — the field is a sitting's;
 #   (t) an outcome the visit already carries is the sitting's own word and is
-#       never overwritten;
+#       never overwritten, while gc.work_outcome=no-op still lands before the
+#       close;
 #   (u) an already-closed visit missing the outcome is repaired with it;
 #   (v) an outcome that does not read back refuses the close, the same way a
 #       dropped pointer does — a closed outcome-less visit is unreachable;
 #   (w) a dropped gc.outcome_reason refuses the close too — the board shows the
-#       reason as the sitting's headline, so an outcome without it is unreadable.
+#       reason as the sitting's headline, so an outcome without it is unreadable;
+#   (x) an already-closed visit that records its outcome is repaired with
+#       gc.work_outcome=no-op, and its outcome is left as it was.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -465,9 +468,20 @@ eq "$(field alpha m.gc.outcome al-task1)" "" "a non-visit origin gets no gc.outc
 mkbead alpha open al-visit2
 printf 'm.task_kind=visit\nm.gc.outcome=dismissed\n' >> "$TMP/rigs/alpha/.beads/al-visit2"
 mkbead beta open bt-vsucc2
+rc=0; run --origin al-visit2 --successor bt-vsucc2 --kind folded --dry-run || rc=$?
+has "$(cat "$TMP/out")" "gc.work_outcome=no-op" "--dry-run plans the work outcome for a visit that already has an outcome"
+case "$(cat "$TMP/out")" in
+    *"gc.outcome="*) bad "--dry-run plans no gc.outcome over the sitting's own word (got '$(cat "$TMP/out")')" ;;
+    *) ok "--dry-run plans no gc.outcome over the sitting's own word" ;;
+esac
 rc=0; run --origin al-visit2 --successor bt-vsucc2 --kind folded || rc=$?
 eq "$rc" 0 "a visit that already has an outcome still re-homes"
 eq "$(field alpha m.gc.outcome al-visit2)" dismissed "the sitting's own outcome word is not overwritten"
+# gc.work_outcome is not the sitting's word: a visit ships no commit, so the
+# work-record gate the close runs wants no-op whatever outcome it records.
+eq "$(field alpha m.gc.work_outcome al-visit2)" no-op "gc.work_outcome records no-op on a visit that already had an outcome"
+FIRST=$(grep -m1 -e '^m\.gc\.work_outcome=' -e '^status=closed$' "$TMP/rigs/alpha/.beads/al-visit2" || true)
+eq "${FIRST%%=*}" m.gc.work_outcome "gc.work_outcome lands before the close the work-record gate checks"
 
 # --- (u) an already-closed visit missing the outcome is repaired -----------
 # This is tk-iooouz's shape: bead-rehome closed the visit before this guard, so
@@ -479,6 +493,20 @@ rc=0; run --origin al-visit3 --successor bt-vsucc3 --kind duplicate || rc=$?
 eq "$rc" 0 "an already-closed visit missing the outcome is repaired"
 eq "$(field alpha status al-visit3)" closed "it stays closed"
 eq "$(field alpha m.gc.outcome al-visit3)" duplicate "the missing outcome is stamped on the closed visit"
+eq "$(field alpha m.gc.work_outcome al-visit3)" no-op "the repair stamps gc.work_outcome=no-op on the closed visit"
+
+# --- (x) a closed visit with an outcome still gains the work outcome -------
+# A visit closed with its outcome but without gc.work_outcome lacks the field
+# the work-record gate reads. The repair adds it and leaves the outcome alone.
+mkbead alpha closed al-visit6
+printf 'm.task_kind=visit\nm.gc.outcome=folded\nm.gc.outcome_reason=the sitting folded it\n' >> "$TMP/rigs/alpha/.beads/al-visit6"
+mkbead beta open bt-vsucc6
+rc=0; run --origin al-visit6 --successor bt-vsucc6 --kind folded || rc=$?
+eq "$rc" 0 "an already-closed visit with an outcome is repaired"
+eq "$(field alpha status al-visit6)" closed "it stays closed"
+eq "$(field alpha m.gc.work_outcome al-visit6)" no-op "the repair stamps gc.work_outcome=no-op beside the recorded outcome"
+eq "$(field alpha m.gc.outcome al-visit6)" folded "the recorded outcome word is untouched"
+eq "$(field alpha m.gc.outcome_reason al-visit6)" "the sitting folded it" "the recorded headline is untouched"
 
 # --- (v) an outcome that does not read back refuses the close --------------
 # The same permanence as the pointer: once the visit closes no re-run reaches
