@@ -2670,6 +2670,88 @@ grep -q 'cap is 140' <<< "$DERR" \
   || bad "(CAPREFRESH) refusal is silent: $DERR"
 printf '[]\n' > "$D_LIST"
 
+# ── demand --topic: one open demand per (gated bead, topic) ───────────────────
+# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
+# files a demand on it. Keyed on the gated bead alone, the second refreshes the
+# first's gate in place and overwrites the operator question it holds. --topic
+# scopes the demand to the sitting (its escalation_key), so each keeps its own.
+
+# (TOPICFILE) a fresh topic-scoped demand records its topic and a topic-scoped
+# recovery marker, so an unstamped orphan is later recoverable under that topic
+# alone rather than colliding with a sibling's on the same bucket.
+printf '[]\n' > "$D_LIST"
+printf 'tk-demTA\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick backend (finding A)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICFILE) a topic-scoped demand succeeds"
+grep -qE -- '--await-id=gc-demand:tk-kid:finding-a( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICFILE) …the gate's recovery marker carries the topic" \
+  || bad "(TOPICFILE) await-id is not topic-scoped: $(d_gate)"
+grep -q -- 'gc.demand_topic=finding-a' <<< "$(d_update)" \
+  && ok "(TOPICFILE) …and the demand records its topic" \
+  || bad "(TOPICFILE) gc.demand_topic missing: $(d_update)"
+grep -q -- 'gc.demand_for=tk-kid' <<< "$(d_update)" \
+  && ok "(TOPICFILE) …alongside the gated bead it blocks" \
+  || bad "(TOPICFILE) gc.demand_for missing: $(d_update)"
+
+# (TOPICISOLATE) two demands on ONE gated bead, one per topic. A re-state under
+# topic A refreshes only A's demand — never the sibling's, and files no new gate
+# — so a sitting on one bucket cannot overwrite another's operator question.
+printf '[{"id":"tk-demA","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-a"}},{"id":"tk-demB","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-b"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: pick backend (finding A, restated)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICISOLATE) a topic-scoped re-state succeeds beside a sibling demand on the same bead"
+eq "$(d_gate)" "" "(TOPICISOLATE) …without filing a second gate"
+grep -q '^bd update tk-demA ' <<< "$(d_update)" \
+  && ok "(TOPICISOLATE) …refreshing its own topic's demand" \
+  || bad "(TOPICISOLATE) topic A's demand was not refreshed: $(d_update)"
+grep -q '^bd update tk-demB ' <<< "$(d_update)" \
+  && bad "(TOPICISOLATE) the sibling topic's demand was overwritten: $(d_update)" \
+  || ok "(TOPICISOLATE) …and the sibling topic's demand is left untouched"
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-demA" \
+   "(TOPICISOLATE) …and it names topic A's demand"
+printf '[]\n' > "$D_LIST"
+
+# (TOPICNONE) a demand with no --topic keeps the pre-topic shape: a bare
+# gc-demand:<gated> marker and no gc.demand_topic key, so every other caller of
+# the verb is unchanged.
+printf 'tk-demNT\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend" --by converse
+eq "$DRC" "0" "(TOPICNONE) a demand with no topic succeeds"
+grep -qE -- '--await-id=gc-demand:tk-kid( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICNONE) …with a bare, topic-free recovery marker" \
+  || bad "(TOPICNONE) await-id is not the bare marker: $(d_gate)"
+grep -q -- 'gc.demand_topic' <<< "$(d_update)" \
+  && bad "(TOPICNONE) a gc.demand_topic key was written without a topic: $(d_update)" \
+  || ok "(TOPICNONE) …and no gc.demand_topic key is written"
+printf 'tk-dem1\n' > "$D_NEXTID"
+printf '[]\n' > "$D_LIST"
+
+# (TOPICRECOVERY) the topic variant of RECOVERYREAD/RECOVERYRETRY. A topic-scoped
+# create writes an unstamped orphan — its await_id carries the topic, but
+# gc.demand_topic is not stamped yet — then fails before returning its id. A later
+# retry under the SAME topic must adopt that orphan by its await_id and file no
+# second gate. The await_id already encodes the topic, so the adoption lookup keys
+# on it rather than on a gc.demand_topic the orphan does not carry; a lookup that
+# demanded gc.demand_topic here would miss the orphan and duplicate the gate.
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=lookup-fail
+printf 'tk-TOPICorphan\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recover later (finding A)" --by converse --topic finding-a
+eq "$DRC" "4" "(TOPICRECOVERY) a topic-scoped recovery read failure fails closed"
+eq "$(jq -r '.[0].await_id' "$D_LIST")" "gc-demand:tk-kid:finding-a" \
+   "(TOPICRECOVERY) the unstamped orphan retains the topic-scoped marker"
+rm "$D_LIST_FAIL"
+demand_run tk-kid "operator: recover later (finding A)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICRECOVERYRETRY) a later retry adopts the unstamped topic orphan"
+eq "$(d_gate)" "" "(TOPICRECOVERYRETRY) adoption creates no second gate"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(TOPICRECOVERYRETRY) adoption completes the stamp on the gated bead"
+grep -q -- 'gc.demand_topic=finding-a' <<< "$(d_update)" \
+  && ok "(TOPICRECOVERYRETRY) …recording the topic on the adopted gate" \
+  || bad "(TOPICRECOVERYRETRY) gc.demand_topic not stamped on adoption: $(d_update)"
+unset D_CREATE_MODE
+printf 'tk-dem1\n' > "$D_NEXTID"
+printf '[]\n' > "$D_LIST"
+
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
 # A trap is process-global: one installed inside a helper and left there
 # rewrites how every later line of the caller answers a signal, and outlives

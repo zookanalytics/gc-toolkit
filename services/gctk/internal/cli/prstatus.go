@@ -14,9 +14,10 @@ import (
 // working|needs-review|needs-attention and exits 0; 1 on a usage error; 2 when
 // a read did not resolve, so a caller leaves the label as-is rather than
 // flipping it blind — because pr-status-label.sh calls this in place of its own
-// shell and pr-status-label.test.sh is the acceptance bar. gctk reads the bead
-// by shelling out to `gc bd`, exactly as the script did, so the same test stubs
-// serve it.
+// shell and pr-status-label.test.sh is the acceptance bar. The anchor read goes
+// through gcbd.Show (daemon-first against the supervisor API, falling back to
+// `gc bd`); the in-flight set lists through `gc bd`. The cli tests pin GC_NO_API,
+// so both answer from the same `gc bd` stub the shell acceptance drives.
 //
 // The value is decided by prstatus.Derive, the package exported for the helm
 // board to derive the same per-bead state: one code path, so a bead's PR label

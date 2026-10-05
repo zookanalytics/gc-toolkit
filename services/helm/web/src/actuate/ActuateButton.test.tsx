@@ -56,6 +56,9 @@ describe('ActuateButton', () => {
       expect(call.url).toBe(`helm/${verb}`);
       expect(call.init?.method).toBe('POST');
       expect(JSON.parse(String(call.init?.body))).toEqual({ bead: BEAD_ID });
+      // The supervisor refuses a private-service mutation without X-GC-Request
+      // (403 "csrf: X-GC-Request header required"), so every write must carry it.
+      expect((call.init?.headers as Record<string, string>)?.['X-GC-Request']).toBe('true');
       unmount();
     }
   });

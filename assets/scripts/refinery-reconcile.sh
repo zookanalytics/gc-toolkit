@@ -12,9 +12,11 @@
 # conflict observer for anchors that have no PR yet), pr-open, pr-facts (same
 # projection), convoy-graduate (GC_AGENT projected: graduation assigns the
 # convoy), review-sweep (cleanup over closed anchors; no projection, no merge
-# authority), duplicate-sweep (BEADS_ACTOR projected: it closes duplicate
-# dispatches through bead-rehome; no merge authority), pr-stack (PR bodies only —
-# both managed regions; no projection, no merge authority).
+# authority), scaffolding-sweep (retires validation/finding/rework on a disposed
+# anchor; no projection, no merge authority), duplicate-sweep (BEADS_ACTOR
+# projected: it closes duplicate dispatches through bead-rehome; no merge
+# authority), pr-stack (PR bodies only — both managed regions; no projection, no
+# merge authority).
 # merge runs AHEAD of pre-open-rebase and pr-open on purpose: those two iterate
 # the pre_open_gate backlog with a GitHub round-trip per anchor, and once that
 # held backlog grew their cost consumed the whole pass budget before merge was
@@ -367,16 +369,26 @@ fi
 # them, and the residue this pass's merges create drains on the same tick.
 run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
 
-# (10) duplicate-sweep: dispose of verified no-op duplicate dispatches. Late,
+# (10) scaffolding-sweep: retire the machine review scaffolding
+# (validation/finding/rework) hung on an anchor once that anchor is DISPOSED, so
+# the disposed anchor can finalize instead of standing stuck behind scaffolding
+# that will never resolve. Late, beside review-sweep, because it keys on a
+# terminal disposition no earlier arm produces, and a disposal this pass is
+# cleaned on the same tick. No projection and no merge authority: it writes only
+# scaffolding beads, never the anchor — bead-rehome (via pr-facts' close arm)
+# closes that, held by finalize-gate while a human visit is still owed.
+run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh || FAILED="${FAILED}scaffolding-sweep rc=$?; "
+
+# (11) duplicate-sweep: dispose of verified no-op duplicate dispatches. Late,
 # and after review-sweep, because the gate it re-verifies is a CLOSED
 # successor: a twin that arm 4 merged or arm 7 recorded this pass is
 # disposable on this tick rather than a minute later. BEADS_ACTOR projected —
 # the close it delegates to bead-rehome is attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(10) duplicate-sweep" duplicate-sweep.sh ) \
+  run_pass "(11) duplicate-sweep" duplicate-sweep.sh ) \
   || FAILED="${FAILED}duplicate-sweep rc=$?; "
 
-# (11) pr-stack: bring each open PR's body current with its anchor in both managed
+# (12) pr-stack: bring each open PR's body current with its anchor in both managed
 # regions — re-render the beads-on-this-branch section, and refresh the pr-summary
 # region when a rework moved the anchor summary past the published one (pr-open
 # composes that region only at pre_open_gate, which an open anchor never re-enters).
@@ -384,7 +396,7 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # the ledger it reads, so the body names it on the same tick rather than a minute
 # later. It writes only PR bodies — no bead, no merge authority — so it runs
 # unprojected and its failure gates nothing.
-run_pass "(11) pr-stack" pr-stack.sh || FAILED="${FAILED}pr-stack rc=$?; "
+run_pass "(12) pr-stack" pr-stack.sh || FAILED="${FAILED}pr-stack rc=$?; "
 
 # The per-pass bd_list cache is this pass's; drop it so no later pass can read
 # these rows. A killed pass never reaches here and the next pass's rm-then-create

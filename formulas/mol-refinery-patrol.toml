@@ -58,7 +58,7 @@ default = ""
 
 [vars.lint_command]
 description = "Lint command. Empty = skip."
-default = ""
+default = "tools/lint.sh $(git diff --name-only origin/main...HEAD)"
 
 [vars.test_command]
 description = "Test command (when run_tests is true)."

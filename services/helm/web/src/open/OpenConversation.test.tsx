@@ -66,6 +66,9 @@ describe('OpenConversation', () => {
     expect(call.url).toBe('helm/open');
     expect(call.init?.method).toBe('POST');
     expect(JSON.parse(String(call.init?.body))).toEqual({ bead: BEAD_ID });
+    // The supervisor refuses a private-service mutation without X-GC-Request
+    // (403 "csrf: X-GC-Request header required"), so the open write must carry it.
+    expect((call.init?.headers as Record<string, string>)?.['X-GC-Request']).toBe('true');
   });
 
   it('reports a filed visit without claiming to have attached the operator', async () => {
