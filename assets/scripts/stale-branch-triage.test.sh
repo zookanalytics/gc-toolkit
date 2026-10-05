@@ -345,7 +345,7 @@ new_origin
 run --nope >/dev/null 2>&1; eq "$?" 2 "an unknown argument is refused"
 OUT="$(STALE_BRANCH_COLD_DAYS=0 run 2>&1)"; eq "$?" 2 "a zero cold horizon is refused"
 OUT="$(STALE_BRANCH_COLD_DAYS=xx run 2>&1)"; eq "$?" 2 "a non-numeric cold horizon is refused"
-unset_rig_out="$(GC_RIG='' run 2>&1)"; eq "$?" 2 "a missing GC_RIG is refused"
+OUT="$(GC_RIG='' run 2>&1)"; eq "$?" 2 "a missing GC_RIG is refused"
 
 echo
 echo "stale-branch-triage.test.sh: $PASS passed, $FAIL failed"
