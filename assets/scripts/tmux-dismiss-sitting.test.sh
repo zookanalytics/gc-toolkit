@@ -330,11 +330,16 @@ fi
 # prefix+X, answer the confirm prompt, and detach once the predicate holds. The
 # script's messages go to the client that pressed the key, so the client stays
 # attached until the outcome is shown; a message aimed at a client that has
-# already detached is never shown at all.
+# already detached is never shown at all. The message log is copied to
+# PRESS_MSGS before the detach, because tmux 3.4 answers show-messages with
+# "no current client" once no client is attached.
+PRESS_MSGS="$TMP/press-messages"
 press() {
     local s="$1" answer="$2"; shift 2
+    : > "$PRESS_MSGS"
     { sleep 1.2; printf '\002'; sleep 0.4; printf 'X'; sleep 0.8; printf '%s' "$answer"
       if [ $# -gt 0 ]; then wait_for "$@"; sleep 0.3; else sleep 1.5; fi
+      tmux -L "$SOCKET" show-messages > "$PRESS_MSGS" 2>&1
       printf '\002d'; sleep 0.4
     } | TERM="$LIVE_TERM" script -qec "tmux -L $SOCKET attach -t $s" /dev/null >/dev/null 2>&1
 }
@@ -369,7 +374,7 @@ if [ -n "$LIVE_TERM" ]; then
     has "$live" "GC_SESSION_NAME=s-lx-conv1" "(LIVE-YES) …under the pressed pane's session"
     has "$live" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-vis1" "(LIVE-YES) …and its alias"
     has "$live" "GC_CITY_PATH=$LIVE_CITY" "(LIVE-YES) …with the city path baked in at install"
-    has "$(tmux -L "$SOCKET" show-messages 2>/dev/null)" "the sitting on tk-sub1 is over" "(LIVE-YES) the outcome reaches the operator"
+    has "$(cat "$PRESS_MSGS")" "the sitting on tk-sub1 is over" "(LIVE-YES) the outcome reaches the operator"
     # View mode would open as the job exits, just after its last message, so
     # give the exit a beat before reading the pane.
     sleep 1
@@ -382,7 +387,7 @@ if [ -n "$LIVE_TERM" ]; then
     # The refused press below is the barrier: once its message is shown, the
     # declined press before it has had every chance to run something.
     press gc-toolkit__polecat-lx-pole1 y msg_has "is not a converse sitting"
-    has "$(tmux -L "$SOCKET" show-messages 2>/dev/null)" "is not a converse sitting" "(LIVE-GUARD) a confirmed press in a polecat pane is refused out loud"
+    has "$(cat "$PRESS_MSGS")" "is not a converse sitting" "(LIVE-GUARD) a confirmed press in a polecat pane is refused out loud"
     eq "$(cat "$LIVE_CALLS")" "" "(LIVE-NO) declining the prompt runs nothing, and (LIVE-GUARD) neither does the refused pane"
     tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
 else
