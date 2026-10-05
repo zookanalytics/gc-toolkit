@@ -8,7 +8,8 @@
 # every executable in lint-learned.d/ as a detector, so a test file in that
 # directory would be run as one.
 #
-# Covered: raw-bd-invocation, mktemp-untemplated, bd-helper-in-scope.
+# Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
+# bd-helper-in-scope.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -658,6 +659,405 @@ FIX
 runm "$TMP/continued.md"
 eq "$RC" 1 "a continued bare call in a marker-fenced snippet is scanned as one call"
 has "$OUT" "continued.md:2:" "and reported where it opened"
+
+echo "── zsh-colon-modifier: what is a finding ──"
+
+# The detector is path-scoped to agent-run surfaces, so fixtures are planted at
+# matching paths under a root of their own. The shapes are spelled literally:
+# this test file is not one of those paths, so the runner never reads it for
+# this rule.
+DET_ZC="$HERE/lint-learned.d/zsh-colon-modifier.sh"
+[ -x "$DET_ZC" ] || { echo "no detector at $DET_ZC"; exit 1; }
+runz() { OUT="$("$DET_ZC" "$@" 2>&1)"; RC=$?; }
+ZC="$TMP/zc"
+SKILL="$ZC/skills/s/SKILL.md"
+mkdir -p "$ZC/formulas" "$ZC/agents/a" "$ZC/packs/k/agents/b" \
+         "$ZC/template-fragments" "$ZC/skills/s" "$ZC/docs"
+
+# Every in-scope surface is scanned: a formula TOML's description, agent prompt
+# templates at the top level and under packs/, startup fragments, skills, and
+# the named docs runbook.
+cat > "$ZC/formulas/f.toml" <<'FIX'
+description = """
+```bash
+git show "$REV:review-checks.toml"
+```
+"""
+FIX
+for p in agents/a/prompt.template.md packs/k/agents/b/prompt.template.md \
+         template-fragments/frag.template.md skills/s/SKILL.md \
+         docs/gascity-dispatch-containment.md; do
+    cat > "$ZC/$p" <<'FIX'
+```bash
+git show "$REV:review-checks.toml"
+```
+FIX
+done
+runz "$ZC/formulas/f.toml" "$ZC/agents/a/prompt.template.md" \
+     "$ZC/packs/k/agents/b/prompt.template.md" \
+     "$ZC/template-fragments/frag.template.md" "$SKILL" \
+     "$ZC/docs/gascity-dispatch-containment.md"
+eq "$RC" 1 "an unbraced modifier in any in-scope surface is a finding"
+has "$OUT" "formulas/f.toml:3:" "a formula TOML is scanned"
+has "$OUT" "agents/a/prompt.template.md:2:" "a top-level agent prompt is scanned"
+has "$OUT" "packs/k/agents/b/prompt.template.md:2:" "a pack agent prompt is scanned"
+has "$OUT" "template-fragments/frag.template.md:2:" "a startup fragment is scanned"
+has "$OUT" "skills/s/SKILL.md:2:" "a skill is scanned"
+has "$OUT" "docs/gascity-dispatch-containment.md:2:" "the named docs runbook is scanned"
+has "$OUT" 'unbraced $REV:r' "the finding names the expansion and its modifier"
+has "$OUT" 'write ${REV}:r' "the finding names the fix"
+has "$OUT" "zsh-colon-modifier" "the finding names the rule"
+
+# Each modifier letter rewrites on its own, and g, w and f prefix a run of
+# them. One line per shape, so the count proves none is missed or doubled.
+{
+    echo '```bash'
+    for L in a c e h l q r s t u A P Q; do printf 'echo "$V:%sord"\n' "$L"; done
+    for P in ga wh fr gwt; do printf 'echo "$V:%sx"\n' "$P"; done
+    echo '```'
+} > "$SKILL"
+runz "$SKILL"
+eq "$RC" 1 "the modifier letters are findings"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 17 "each modifier letter and prefixed run is reported once"
+has "$OUT" 'unbraced $V:gwt' "a prefixed run is reported with the modifier it prefixes"
+
+# Every context zsh expands in, one line each. The second line of a multi-line
+# double-quoted string, an unquoted heredoc body, and the line after a quoted
+# heredoc closes are each read in the context they really have. A `#` inside a
+# word opens no comment. The sh and shell tags are shell too.
+cat > "$SKILL" <<'FIX'
+```bash
+echo $V:hello
+X=$V:hello
+echo "$V:hello"
+echo "$(printf '%s' "$V:hello")"
+echo `echo $V:hello`
+echo "'$V:hello'"
+cat <<< "$V:hello"
+KEY="pr:$REPO_SLUG#$N:comment:$CID"
+echo pr:$REPO_SLUG#$N:comment
+git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+echo "$1:h"
+echo "$12:h"
+echo "$?:h"
+echo "first
+second $V:hello"
+cat <<EOF
+body '$V:hello'
+EOF
+cat <<'EOF'
+quoted
+EOF
+echo after $V:hello
+echo "$V:hello" "$V:hello"
+```
+```sh
+echo $V:hello
+```
+```shell
+echo $V:hello
+```
+FIX
+runz "$SKILL"
+eq "$RC" 1 "every expanding context is a finding"
+for n in 2 3 4 5 6 7 8 9 10 11 12 13 14 16 18 23 24 27 30; do
+    has "$OUT" "SKILL.md:$n:" "SKILL.md line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 19 "nothing else is, and a line with two expansions is reported once"
+has "$OUT" "SKILL.md:10: unbraced \$N:c" "a # inside an unquoted word opens no comment"
+has "$OUT" 'unbraced $12:h' "a multi-digit positional parameter is read whole"
+
+# A formula TOML is read through its basic-string escapes: `\\` there is one
+# backslash, which escapes the `$` after it. The same bytes in markdown are an
+# escaped backslash, and the expansion after them is live.
+cat > "$ZC/formulas/esc.toml" <<'FIX'
+description = """
+```bash
+echo \\$V:hello
+```
+"""
+FIX
+printf '%s\n' '```bash' 'echo \\$V:hello' '```' > "$SKILL"
+runz "$ZC/formulas/esc.toml"
+eq "$RC" 0 "an escaped dollar in a formula TOML is not a finding"
+runz "$SKILL"
+eq "$RC" 1 "the same bytes in markdown escape the backslash, not the dollar"
+
+echo "── zsh-colon-modifier: what is not ──"
+
+# Letters zsh keeps, characters that are not modifiers, braced names, and every
+# context that does not expand. F and W read a delimited argument and are not
+# flagged.
+cat > "$SKILL" <<'FIX'
+```bash
+echo "$V:d $V:m $V:b $V:x $V:p $V:go $V:wx $V:fo $V:String $V:Feature $V:Worker"
+echo "$V:- $V:= $V:+ $V:? $V:$X $V:443 $V:/ $V::h $V:"
+echo "${V}:hello ${V:-x}:hello"
+echo '$V:hello'
+gh api graphql -f query='query($owner:String!, $after:String) { x }'
+jq -r '
+  "$V:hello"
+' f
+echo $'$V:hello'
+echo \$V:hello "\$V:hello"
+# echo $V:hello
+echo hi # $V:hello
+echo "$(jq -r '$V:hello' f)"
+cat <<'EOF'
+$V:hello
+EOF
+cat <<"EOF"
+$V:hello
+EOF
+cat <<\EOF
+$V:hello
+EOF
+X="$(cat <<'BODY'
+$V:hello
+BODY
+)"
+echo $(( N + 1 )):hello
+```
+FIX
+runz "$SKILL"
+eq "$RC" 0 "kept letters, non-modifiers, braced names and non-expanding contexts are not findings"
+eq "$OUT" "" "and nothing is printed"
+
+# The terminator of a <<- heredoc may be tab-indented. The quoted body ends
+# there, so the line after it is scanned again.
+printf '```bash\ncat <<-%sEOF%s\n\t$V:hello\n\tEOF\necho after $V:hello\n```\n' "'" "'" > "$SKILL"
+runz "$SKILL"
+eq "$RC" 1 "the line after a tab-indented terminator is scanned"
+has "$OUT" "SKILL.md:5:" "and reported"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "while the quoted body stays quiet"
+
+# Only a fence tagged as shell is read. Untagged, text and zsh fences, and prose
+# outside any fence, are not.
+cat > "$SKILL" <<'FIX'
+```
+echo $V:hello
+```
+```text
+echo $V:hello
+```
+```zsh
+echo $V:hello
+```
+not fenced: echo $V:hello
+FIX
+runz "$SKILL"
+eq "$RC" 0 "untagged, text and zsh fences and unfenced prose are not read"
+
+# Scripts run under bash, where the shape is literal. A doc off the runbook list
+# may show a broken command as a counter-example. specs/, generated/ and
+# base-snapshots/ are frozen or rendered, and lint-learned.d/ states the shapes.
+mkdir -p "$ZC/assets/scripts" "$ZC/specs/b/formulas" \
+         "$ZC/generated/seed-audit/agents/a" "$ZC/base-snapshots/x/formulas" \
+         "$ZC/lint-learned.d/skills/s"
+printf '#!/usr/bin/env bash\ngit show "$REV:review-checks.toml"\n' > "$ZC/assets/scripts/x.sh"
+for p in docs/other-doc.md specs/b/formulas/f.toml \
+         generated/seed-audit/agents/a/prompt.template.md \
+         base-snapshots/x/formulas/f.toml lint-learned.d/skills/s/SKILL.md; do
+    printf '```bash\ngit show "$REV:review-checks.toml"\n```\n' > "$ZC/$p"
+done
+runz "$ZC/assets/scripts/x.sh" "$ZC/docs/other-doc.md" "$ZC/specs/b/formulas/f.toml" \
+     "$ZC/generated/seed-audit/agents/a/prompt.template.md" \
+     "$ZC/base-snapshots/x/formulas/f.toml" "$ZC/lint-learned.d/skills/s/SKILL.md" \
+     "$ZC/does-not-exist.md"
+eq "$RC" 0 "scripts, unlisted docs, frozen and rendered trees, and missing paths are out of scope"
+eq "$OUT" "" "and nothing is printed"
+
+echo "── zsh-colon-modifier: a detector that cannot scan says so ──"
+
+# A failed scan prints nothing, so on its output alone it would pass for a clean
+# file.
+mkdir -p "$ZC/broken-awk"
+printf '#!/bin/sh\nexit 2\n' > "$ZC/broken-awk/awk"
+chmod +x "$ZC/broken-awk/awk"
+printf '```bash\necho $V:hello\n```\n' > "$SKILL"
+OUT="$(PATH="$ZC/broken-awk:${PATH:-}" "$DET_ZC" "$SKILL" 2>&1)"; RC=$?
+eq "$RC" 2 "a scan that fails exits 2"
+has "$OUT" "cannot scan" "and names the file it could not scan"
+
+echo "── zsh-colon-modifier: the review-triage lines, unbraced ──"
+
+# Put back the shape these two lines shipped with, and both are found in their
+# real context, past every quote, heredoc and substitution above them. The
+# braced skill is clean.
+REAL_TRIAGE="$HERE/../skills/review-triage/SKILL.md"
+MUT="$ZC/skills/review-triage/SKILL.md"
+mkdir -p "$ZC/skills/review-triage"
+sed -e 's/"${REVIEWED_OID}:review-checks.toml"/"$REVIEWED_OID:review-checks.toml"/' \
+    -e 's/bead:${ANCHOR}:turn:/bead:$ANCHOR:turn:/' "$REAL_TRIAGE" > "$MUT"
+L1="$(grep -nF '"$REVIEWED_OID:review-checks.toml"' "$MUT" | cut -d: -f1)"
+L2="$(grep -nF 'bead:$ANCHOR:turn:' "$MUT" | cut -d: -f1)"
+if [ -n "$L1" ] && [ -n "$L2" ]; then
+    ok "both lines are unbraced in the copy"
+else
+    bad "both lines are unbraced in the copy" "the braced lines were not found in $REAL_TRIAGE"
+fi
+runz "$MUT"
+eq "$RC" 1 "the unbraced lines are findings"
+has "$OUT" "SKILL.md:$L1: unbraced \$REVIEWED_OID:r" "the index read is reported"
+has "$OUT" "SKILL.md:$L2: unbraced \$ANCHOR:t" "the provenance key is reported"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "and nothing else in the skill is"
+runz "$REAL_TRIAGE"
+eq "$RC" 0 "the braced skill is clean"
+
+echo "── zsh-colon-modifier: every real shell fence is scanned to its end ──"
+
+# A canary expansion goes in before the closing line of every shell fence in
+# every in-scope file of this checkout. The scan must reach each canary in a
+# context that expands and report nothing else. A quote, heredoc or
+# substitution the scanner misread would run past its real end and hide the
+# canary, or expose text that never expands.
+ZC_ROOT="$(cd "$HERE/.." && pwd)"
+CAN="$ZC/canary"
+mkdir -p "$CAN"
+: > "$CAN/.want"
+mutants=()
+while IFS= read -r p; do
+    case "$p" in
+        specs/* | */specs/* | generated/* | */generated/* \
+        | base-snapshots/* | */base-snapshots/*) continue ;;
+        formulas/*.toml | */formulas/*.toml \
+        | template-fragments/*.template.md | */template-fragments/*.template.md \
+        | agents/*/prompt.template.md | */agents/*/prompt.template.md \
+        | skills/*/SKILL.md | */skills/*/SKILL.md \
+        | docs/gascity-dispatch-containment.md) ;;
+        *) continue ;;
+    esac
+    mkdir -p "$(dirname "$CAN/$p")"
+    awk -v want="$CAN/.want" -v m="$CAN/$p" '
+        function shell_fence(l,   lang) {
+            lang = l
+            sub(/^[[:space:]]*```[[:space:]]*/, "", lang)
+            sub(/[[:space:]].*$/, "", lang)
+            return (lang == "bash" || lang == "sh" || lang == "shell")
+        }
+        /^[[:space:]]*```/ {
+            if (inb) { print "echo $CANARY:hello"; n++; print m ":" n >> want; inb = 0 }
+            else if (other) other = 0
+            else if (shell_fence($0)) inb = 1
+            else other = 1
+        }
+        { print; n++ }
+    ' "$ZC_ROOT/$p" > "$CAN/$p"
+    mutants+=("$CAN/$p")
+done < <(git -C "$ZC_ROOT" ls-files)
+sort "$CAN/.want" > "$CAN/.want.sorted"
+"$DET_ZC" ${mutants[@]+"${mutants[@]}"} | cut -d: -f1,2 | sort > "$CAN/.got"
+FENCES="$(grep -c . "$CAN/.want.sorted")"
+if [ "$FENCES" -gt 0 ]; then
+    ok "the checkout has shell fences to plant ($FENCES in ${#mutants[@]} files)"
+else
+    bad "the checkout has shell fences to plant" "no in-scope shell fence found under $ZC_ROOT"
+fi
+if cmp -s "$CAN/.want.sorted" "$CAN/.got"; then
+    ok "every canary is reported, and nothing else"
+else
+    bad "every canary is reported, and nothing else" "$(diff "$CAN/.want.sorted" "$CAN/.got" | head -20)"
+fi
+
+if command -v zsh >/dev/null 2>&1; then
+    echo "── zsh-colon-modifier: a finding is exactly what zsh rewrites ──"
+
+    # zsh and bash run each snippet with the same values, and the detector must
+    # report it exactly when the two print different text. F and W are left
+    # out: what zsh prints for them is not stable from run to run.
+    ZPRE='V=x1/y2.z3 N=7 CID=9 REPO_SLUG=o/r BRANCH=polecat/tk-a.b; set -- p1/q1.r1 a b c d e f g h i j k12/l.m; true'
+    zcheck() {
+        local z b want
+        printf '```bash\n%s\n```\n' "$1" > "$SKILL"
+        z="$(cd "$ZC" && zsh -f -c "$ZPRE"$'\n'"$1" < /dev/null 2>&1)"
+        b="$(cd "$ZC" && bash -c "$ZPRE"$'\n'"$1" < /dev/null 2>&1)"
+        if [ "$z" = "$b" ]; then want=0; else want=1; fi
+        runz "$SKILL"
+        [ "$RC" = "$want" ] || ZMISS="$ZMISS
+        [detector exit $RC, zsh output differs: $want] $1"
+    }
+    ZMISS=""
+    for L in a b c d e f g h i j k l m n o p q r s t u v w x y z \
+             A B C D E G H I J K L M N O P Q R S T U V X Y Z; do
+        zcheck "printf '%s\n' \"\$V:${L}ord\""
+    done
+    for L in a h q x; do zcheck "printf '%s\n' \$V:${L}ord"; done
+    for P in g w f gw ff; do
+        for L in a h s Q o d; do zcheck "printf '%s\n' \"\$V:${P}${L}z\""; done
+    done
+    eq "$ZMISS" "" "every letter and prefixed run is a finding exactly when zsh rewrites it"
+
+    ZMISS=""
+    snip=""
+    while IFS= read -r line; do
+        if [ "$line" = "--" ]; then zcheck "$snip"; snip=""; continue; fi
+        snip="$snip${snip:+$'\n'}$line"
+    done <<'CASES'
+X=$V:hello; printf '%s\n' "$X"
+--
+printf '%s\n' "$(printf '%s' "$V:hello")"
+--
+printf '%s\n' `printf '%s' $V:hello`
+--
+printf '%s\n' "'$V:hello'"
+--
+cat <<< "$V:hello"
+--
+KEY="pr:$REPO_SLUG#$N:comment:$CID"; printf '%s\n' "$KEY"
+--
+printf '%s\n' "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+--
+printf '%s\n' "$1:h" "$12:h"
+--
+true; printf '%s\n' "$?:h"
+--
+printf '%s\n' "first
+second $V:hello"
+--
+cat <<EOF
+body $V:hello '$V:hello'
+EOF
+--
+case $V:hello in x1ello) echo M ;; *) echo L ;; esac
+--
+[[ $V:hello == x1ello ]] && echo M || echo L
+--
+printf '%s\n' ${V}:hello "${V:-x}:hello"
+--
+printf '%s\n' "$V:- $V:= $V:+ $V:$N $V:443 $V:/ $V::h $V:"
+--
+printf '%s\n' "$V:?"
+--
+printf '%s\n' '$V:hello' $'$V:hello' \$V:hello "\$V:hello"
+--
+printf '%s\n' "$(printf '%s' '$V:hello')"
+--
+printf '%s\n' '
+$V:hello
+'
+--
+printf '%s\n' hi # $V:hello
+--
+cat <<'EOF'
+$V:hello
+EOF
+--
+cat <<\EOF
+$V:hello
+EOF
+--
+X="$(cat <<'BODY'
+$V:hello
+BODY
+)"; printf '%s\n' "$X"
+--
+printf '%s\n' $(( N + 1 )):hello
+--
+printf '%s\n' "pr:$REPO_SLUG#$N"
+--
+CASES
+    eq "$ZMISS" "" "every context is a finding exactly when zsh rewrites it"
+fi
 
 
 echo "── bd-helper-in-scope: what is a finding ──"
