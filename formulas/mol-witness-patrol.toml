@@ -30,11 +30,12 @@ rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
 the other, and either stamp reads back clean, so a hand-written address is
 right only by luck.
 
-Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
-topology-root-skip, liveness-map-guard, liveness-lookup, warrant-file,
-husk-guard, owning-store-guard, recovery-stamp-gate, crash-loop-window,
-patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
-their tests; keep markers, keep them backslash-free."""
+Marked blocks (bug-dispatch, notice-finding, host-bead-skip,
+downstream-court-skip, topology-root-skip, liveness-map-guard,
+liveness-lookup, warrant-file, husk-guard, owning-store-guard,
+recovery-stamp-gate, crash-loop-window, patrol-wisp-pour,
+refinery-stuck-escalate) are extracted and executed by their tests; keep
+markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -62,7 +63,7 @@ findings. Emergencies (crash, data loss, corruption, security) go straight to
 escalate.sh — they need a human now, not a disposition.
 A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
 filed — note the outcome (the closed warrant carries the evidence) and
-archive. Lifecycle chatter is acknowledged and archived.
+archive.
 
 Mail reporting a defect in the pack itself, a formula or script fault the
 sender hit and worked around, is none of those: it needs a polecat rather
@@ -95,6 +96,70 @@ else
 fi
 # <<< bug-dispatch
 ```
+
+A `NOTICE:` is never chatter. It reports a fact about shared state the sender
+does not own, so it leaves a tracked record before it is archived. A pack
+defect goes through bug-dispatch above and an emergency through escalate.sh.
+Every other notice becomes a finding through the notice-finding block below.
+Mail that asks you to act where you may not is the same, whatever its subject:
+reaping a molecule, reconciling or closing another agent's beads, re-homing a
+bead. The finding is the request's record, and its first reaction routes the
+act to whoever may perform it.
+
+The block files one mail per run. Set MAIL_ID first. KEY names the situation
+the mail reports, the way every finding key does, and ABOUT is the bead it
+concerns, left empty when it names none. NOTE is optional and adds what you
+know that the sender did not. The block copies the mail into the finding
+verbatim and archives the mail only after the finding is filed. When nothing is
+filed, the mail stays unread and the next cycle files it:
+```bash
+# >>> notice-finding
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+# peek leaves the mail unread. The control-byte strip keeps a raw byte from
+# failing the parse; the body's escaped newlines survive it.
+MAIL_JSON=""
+if [ -n "${MAIL_ID:-}" ]; then
+  MAIL_JSON=$(gc mail peek "$MAIL_ID" --json | tr -d '[:cntrl:]') || MAIL_JSON=""
+fi
+MAIL_SUBJECT=$(printf '%s' "$MAIL_JSON" | jq -r '.message.subject // empty' 2>/dev/null) || MAIL_SUBJECT=""
+NOT_FILED=""
+[ -n "$SCRIPTS" ] || NOT_FILED="patrol-finding.sh is not in the pack"
+[ -n "${KEY:-}" ] || NOT_FILED="KEY is unset"
+[ -n "$MAIL_SUBJECT" ] || NOT_FILED="the mail is unreadable"
+[ -n "${MAIL_ID:-}" ] || NOT_FILED="MAIL_ID is unset"
+if [ -n "$NOT_FILED" ]; then
+  echo "notice-finding: nothing filed for mail '${MAIL_ID:-}': $NOT_FILED. The mail stays unread for the next cycle." >&2
+  [ -z "${MAIL_ID:-}" ] || gc mail mark-unread "$MAIL_ID" >/dev/null 2>&1 || true
+else
+  MAIL_BODY=$(printf '%s' "$MAIL_JSON" | jq -r '.message.body // ""') || MAIL_BODY=""
+  MAIL_FROM=$(printf '%s' "$MAIL_JSON" | jq -r '.message.from // "unknown"') || MAIL_FROM="unknown"
+  MAIL_SENT=$(printf '%s' "$MAIL_JSON" | jq -r '.message.created_at // "unknown"') || MAIL_SENT="unknown"
+  FINDING_TEXT="$MAIL_BODY
+
+## Source
+Mail $MAIL_ID from $MAIL_FROM, sent $MAIL_SENT. Subject: $MAIL_SUBJECT"
+  if [ -n "${NOTE:-}" ]; then
+    FINDING_TEXT="$FINDING_TEXT
+
+## Witness
+$NOTE"
+  fi
+  MAIL_TITLE="${MAIL_SUBJECT#NOTICE: }"
+  [ -n "$MAIL_TITLE" ] || MAIL_TITLE="$MAIL_SUBJECT"
+  if "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key "$KEY" --about "${ABOUT:-}" --title "$MAIL_TITLE" --message "$FINDING_TEXT"; then
+    gc mail archive "$MAIL_ID" >/dev/null || echo "notice-finding: filed, but mail $MAIL_ID did not archive. The next cycle files it again, and the finding counts that as a recurrence." >&2
+  else
+    echo "notice-finding: patrol-finding.sh filed nothing for mail $MAIL_ID. The mail stays unread for the next cycle." >&2
+    gc mail mark-unread "$MAIL_ID" >/dev/null 2>&1 || true
+  fi
+fi
+# <<< notice-finding
+```
+Lifecycle chatter is mail that reports the sender's own progress and asks for
+nothing. Acknowledge it and archive it.
+
 Inbox near-empty after this step. Close it and continue."""
 
 [[steps]]
