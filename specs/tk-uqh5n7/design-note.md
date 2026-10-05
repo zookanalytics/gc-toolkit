@@ -89,6 +89,10 @@ is read back on origin before the branch is deleted, so a branch is never delete
 against an archive that did not land. A delete also re-reads the branch's origin
 tip and refuses unless it matches the tip the pass classified, so a commit that
 arrived after classification — one the tag never pinned — stands the delete down.
+That guard holds only because the classified tip is the one `ls-remote` reported.
+A remote-tracking ref the fetch did not move can lag origin, and a delete keyed
+to origin's tip but reasoned on the lagging ref would pass the re-read and
+remove commits no read ever saw.
 
 ## Identity source
 

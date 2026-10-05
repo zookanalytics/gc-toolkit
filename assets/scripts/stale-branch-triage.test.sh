@@ -287,6 +287,39 @@ if on_origin claude/moved; then ok "a branch whose tip moved since classificatio
 has "$OUT" "refused" "a moved tip is reported refused"
 
 # =============================================================================
+# The tip classified is origin's tip, the one acted on: a tracking ref the
+# pass's fetch did not move (a concurrent fetch holding the ref lock, a push
+# landing after the fetch) never stands in for it
+# =============================================================================
+new_origin
+mk_merged_branch superseded-current      # reachable, tracking ref current -> DELETE
+MAIN_TIP="$(git -C "$WORK" rev-parse main)"
+# origin's tip is a commit on top of main that this checkout never fetched;
+# its tracking ref still reads main's tip -> CONTESTED, unreadable
+mk_merged_branch stale-ref-unfetched
+UNFETCHED="$(git -C "$BARE" -c commit.gpgsign=false commit-tree -p "$MAIN_TIP" -m "work this checkout never fetched" "$MAIN_TIP^{tree}")"
+git -C "$BARE" update-ref refs/heads/stale-ref-unfetched "$UNFETCHED"
+# origin's tip is a cold commit on top of main whose object is here, but its
+# tracking ref still reads main's tip -> ARCHIVE at origin's tip
+mk_branch stale-ref-cold 40
+COLD_TIP="$(git -C "$WORK" rev-parse refs/remotes/origin/stale-ref-cold)"
+git -C "$WORK" update-ref refs/remotes/origin/stale-ref-cold "$MAIN_TIP"
+cat > "$BIN/git" <<STUB
+#!/usr/bin/env bash
+# The pass's fetch moves no tracking ref; every other git call is real.
+[ "\${3:-}" = "fetch" ] && exit 0
+exec "$REAL_GIT" "\$@"
+STUB
+chmod +x "$BIN/git"
+OUT="$(run)"
+rm -f "$BIN/git"
+if on_origin superseded-current; then bad "a reachable branch is deleted beside the stale tracking refs"; else ok "a reachable branch is deleted beside the stale tracking refs"; fi
+if on_origin stale-ref-unfetched; then ok "a branch whose origin tip never fetched is not deleted on its stale tracking ref"; else bad "a branch whose origin tip never fetched is not deleted on its stale tracking ref"; fi
+has "$(cat "$FINDINGS")" "stale-ref-unfetched: tip unreadable" "a branch whose origin tip never fetched is reported contested"
+if tag_on_origin "archive/stale-ref-cold@${COLD_TIP:0:12}"; then ok "a cold branch behind a stale tracking ref is archived at origin's tip"; else bad "a cold branch behind a stale tracking ref is archived at origin's tip"; fi
+has "$OUT" "deleted 1 superseded, archived 1 cold, filed 1 contested" "only the reachable tip is deleted bare"
+
+# =============================================================================
 # Protected names are reported, not archived
 # =============================================================================
 new_origin; mk_branch integration/keepme 40

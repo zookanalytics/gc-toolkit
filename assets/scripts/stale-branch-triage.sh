@@ -155,9 +155,9 @@ if [ -z "$TARGET" ]; then
 fi
 [ -n "$TARGET" ] || TARGET=main
 
-# Bring remote-tracking refs current so ancestry, age and size read off local
-# objects. A partial fetch is tolerated: a branch whose object is still missing
-# below reads as contested-unreadable and is never archived.
+# Fetch origin's heads so ancestry, age and size read off local objects. A
+# partial fetch is tolerated: a branch whose tip object is still missing below
+# reads as contested-unreadable and is never archived.
 git -C "$RIG_ROOT" fetch --prune origin "+refs/heads/*:refs/remotes/origin/*" >/dev/null 2>&1 || true
 TARGET_REF="refs/remotes/origin/$TARGET"
 if ! git -C "$RIG_ROOT" rev-parse --verify --quiet "$TARGET_REF" >/dev/null 2>&1; then
@@ -257,10 +257,13 @@ while IFS= read -r line; do
     # A live bead names or targets it -> kept, silently.
     [ -n "${OWNED_BRANCH[$branch]:-}" ] && { n_kept=$((n_kept + 1)); continue; }
 
-    bref="refs/remotes/origin/$branch"
-    # The tip must be a readable object to reason about. A head ls-remote named
-    # but the fetch did not land is contested-unreadable: never archived.
-    if ! git -C "$RIG_ROOT" rev-parse --verify --quiet "$bref^{commit}" >/dev/null 2>&1; then
+    # Every read below is of the tip ls-remote named, the tip the plan records,
+    # the archive tag pins, and the match-head guard requires origin to still
+    # hold. The remote-tracking ref can lag it, since a concurrent fetch holding
+    # the ref lock or a push landing after the fetch leaves it unmoved, and a
+    # disposition reasoned on a lagging ref deletes commits it never read. A tip
+    # the fetch did not land is unreadable, so it is contested, never archived.
+    if ! git -C "$RIG_ROOT" rev-parse --verify --quiet "$sha^{commit}" >/dev/null 2>&1; then
         printf 'contested%s%s%s%s%s%s\n' "$US" "$branch" "$US" "$sha" "$US" "tip unreadable" >> "$WORK/plan"
         n_contested=$((n_contested + 1)); continue
     fi
@@ -272,7 +275,7 @@ while IFS= read -r line; do
     # bead landed: a commit pushed after the squash, or a squash later reverted,
     # is content the target never received. An unreachable branch is therefore
     # unmerged, and once cold it is archived before it is deleted.
-    if git -C "$RIG_ROOT" merge-base --is-ancestor "$bref" "$TARGET_REF" 2>/dev/null; then
+    if git -C "$RIG_ROOT" merge-base --is-ancestor "$sha" "$TARGET_REF" 2>/dev/null; then
         # Already on the target. A head still under an open PR, or one the
         # operator pinned, is left for the refinery / the operator rather than
         # deleted out from under it.
@@ -284,7 +287,7 @@ while IFS= read -r line; do
     fi
 
     # Unmerged. Too fresh to be abandoned -> kept.
-    ct="$(git -C "$RIG_ROOT" log -1 --format=%ct "$bref" 2>/dev/null || echo 0)"
+    ct="$(git -C "$RIG_ROOT" log -1 --format=%ct "$sha" 2>/dev/null || echo 0)"
     case "$ct" in '' | *[!0-9]*) ct=0 ;; esac
     age_days=$(( (NOW - ct) / 86400 ))
     if [ "$ct" -eq 0 ] || [ $((NOW - ct)) -lt "$COLD_SECS" ]; then
@@ -292,10 +295,10 @@ while IFS= read -r line; do
     fi
 
     # Cold and unmerged. The classification every disposition carries.
-    ahead="$(git -C "$RIG_ROOT" rev-list --count "$TARGET_REF..$bref" 2>/dev/null || echo 0)"
-    lines="$(git -C "$RIG_ROOT" diff --shortstat "$TARGET_REF...$bref" 2>/dev/null | tr -d '\n' || true)"
+    ahead="$(git -C "$RIG_ROOT" rev-list --count "$TARGET_REF..$sha" 2>/dev/null || echo 0)"
+    lines="$(git -C "$RIG_ROOT" diff --shortstat "$TARGET_REF...$sha" 2>/dev/null | tr -d '\n' || true)"
     [ -n "$lines" ] || lines="no diff"
-    author="$(git -C "$RIG_ROOT" log -1 --format='%an' "$bref" 2>/dev/null || echo unknown)"
+    author="$(git -C "$RIG_ROOT" log -1 --format='%an' "$sha" 2>/dev/null || echo unknown)"
     class="${age_days}d old, $ahead commit(s) ahead, $lines, last by $author"
 
     # An open PR heads it, or the operator protected the name -> contested, left

@@ -93,10 +93,12 @@ Liveness is resolved first and every read fails closed. An unreadable bead
 ledger, an unreadable open-PR list, an unreadable origin branch list, or an
 unreadable default branch sweeps nothing that pass, because under any of them a
 branch would read as unowned. A ledger listing that exits 0 but does not parse
-as one array of bead rows is unreadable too. A partial fetch is tolerated: a
-branch whose tip object did not land reads as contested-unreadable and is never
-archived. A time budget bounds the pass; a pass cut short leaves a consistent
-origin and the next pass takes the rest.
+as one array of bead rows is unreadable too. Each branch is classified at the
+tip origin's branch list reports, never at a remote-tracking ref the fetch left
+behind, so the tip a disposition reasons about is the tip it acts on. A partial
+fetch is tolerated: a branch whose tip object did not land reads as
+contested-unreadable and is never archived. A time budget bounds the pass; a
+pass cut short leaves a consistent origin and the next pass takes the rest.
 
 ## Operating it
 
