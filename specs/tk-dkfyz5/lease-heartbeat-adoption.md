@@ -59,9 +59,11 @@ lease-bearing one):
   review step bead (`CLAIMED_STEP_BEAD_ID`).
 
 Each resolves the wrapper from the pack and degrades to running the command
-plain if it cannot (best-effort). Where the rig declares no test command and
-the holder runs the repo's own quality gate, the step instructs wrapping that
-command the same way.
+plain if it cannot (best-effort). The polecat steps carry the rig's test
+command to the wrapper in a quoted heredoc, so a quote inside the command
+cannot re-split it. Where the rig declares no test command and the holder runs
+the repo's own quality gate, the step instructs wrapping that command the same
+way.
 
 ### The target is the claim, never the subject
 

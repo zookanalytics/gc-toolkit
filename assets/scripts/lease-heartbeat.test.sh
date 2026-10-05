@@ -13,7 +13,9 @@
 # wiring section EXECUTES each formula's keepalive region, extracted verbatim,
 # and asserts the id it hands the wrapper is the bead the step's own
 # `gc hook --claim` returned — never the review bead or the work bead, which
-# carry no lease for the holder to refresh.
+# carry no lease for the holder to refresh. It also renders each polecat step's
+# test-command lines with a command carrying both quote kinds and runs them, so
+# the rig's test command reaches the keepalive verbatim.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -187,6 +189,90 @@ check_region() {  # check_region <toml-path-under-root> <marker> <want-target>
 check_region formulas/mol-polecat-work.toml preflight-lease-keepalive   tk-claimed-step
 check_region formulas/mol-polecat-work.toml self-review-lease-keepalive tk-claimed-iter
 check_region formulas/mol-review.toml       review-lease-keepalive      tk-claimed-step
+
+# --- the rig's test command reaches the keepalive verbatim -------------------
+# A pour renders the rig's test command into the step text, so a quote inside
+# it must not re-split the command the step hands to hb. Each block runs from
+# its keepalive region to its closing fence, rendered the way a pour renders
+# it, against the stub wrapper. The command carries both quote kinds and a
+# pipe character, which a single-quoted rendering turns into shell syntax.
+block_tail() {  # block_tail <toml> <marker> : the lines after the region, up to the closing fence
+    awk -v m="$2" '
+        $0 ~ ("# <<< " m "$") {f=1; next}
+        f && /^```/ {exit}
+        f' "$1"
+}
+
+# render : substitute each command var literally, test_command from $TC and
+# affected_tests_command from $ATC, every other command var empty.
+render() {
+    TC="$TC" ATC="$ATC" awk '
+        function rep(s, k, v,   i, out) {
+            out = ""
+            while ((i = index(s, k)) > 0) { out = out substr(s, 1, i - 1) v; s = substr(s, i + length(k)) }
+            return out s
+        }
+        {
+            s = rep($0, "{{test_command}}", ENVIRON["TC"])
+            s = rep(s, "{{affected_tests_command}}", ENVIRON["ATC"])
+            s = rep(s, "{{setup_command}}", ""); s = rep(s, "{{typecheck_command}}", "")
+            s = rep(s, "{{lint_command}}", ""); s = rep(s, "{{build_command}}", "")
+            print s
+        }'
+}
+
+run_block() {  # run_block <toml-path-under-root> <marker> : status lands in BLOCK_RC
+    extract "$ROOT/$1" "$2" > "$TMP/region.sh"
+    block_tail "$ROOT/$1" "$2" | render > "$TMP/tail.sh"
+    : > "$TARGET_LOG"
+    rm -f "$TMP/cmd-out"
+    BLOCK_RC=0
+    ( cd "$TMP" && env GC_PACK_DIR="$STUB_PACK" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
+        CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
+        bash -c '. "$1"; . "$2"' _ "$TMP/region.sh" "$TMP/tail.sh" ) 2> /dev/null || BLOCK_RC=$?
+}
+
+QUOTED="printf '%s|%s|' 'one two' \"it's\" > cmd-out"
+WANT_OUT="one two|it's|"
+
+check_tail() {  # check_tail <toml-path-under-root> <marker>
+    local tail_text
+    tail_text="$(block_tail "$ROOT/$1" "$2")"
+    [ -n "$tail_text" ] && ok "$2: test-command lines found" || bad "$2: no test-command lines after the region"
+    case "$tail_text" in
+        *\\*) bad "$2: test-command lines contain a backslash, which TOML would mangle" ;;
+        *)    ok  "$2: test-command lines are backslash-free" ;;
+    esac
+    case "$(printf '%s\n' "$tail_text" | TC=x ATC=x render)" in
+        *'{{'*) bad "$2: test-command lines carry a var the render does not cover" ;;
+        *)      ok  "$2: every var in the test-command lines is rendered" ;;
+    esac
+}
+
+check_tail formulas/mol-polecat-work.toml preflight-lease-keepalive
+check_tail formulas/mol-polecat-work.toml self-review-lease-keepalive
+
+TC="$QUOTED"; ATC=""; run_block formulas/mol-polecat-work.toml preflight-lease-keepalive
+eq "$BLOCK_RC" "0" "preflight: a quoted test command exits 0"
+eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "preflight: a quoted test command runs verbatim"
+eq "$(cat "$TARGET_LOG")" "tk-claimed-step" "preflight: the test command runs under the keepalive"
+
+TC=""; ATC=""; run_block formulas/mol-polecat-work.toml preflight-lease-keepalive
+eq "$BLOCK_RC" "0" "preflight: an empty test command exits 0"
+eq "$(cat "$TARGET_LOG")" "" "preflight: an empty test command runs nothing"
+
+TC="false"; ATC="$QUOTED"; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
+eq "$BLOCK_RC" "0" "self-review: a quoted affected-tests command exits 0"
+eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: the affected-tests command runs verbatim, in place of the full suite"
+eq "$(cat "$TARGET_LOG")" "tk-claimed-iter" "self-review: the affected-tests command runs under the keepalive"
+
+TC="$QUOTED"; ATC=""; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
+eq "$BLOCK_RC" "0" "self-review: a quoted test command exits 0"
+eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: with no affected-tests command, the test command runs verbatim"
+
+TC=""; ATC=""; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
+eq "$BLOCK_RC" "0" "self-review: no test command exits 0"
+eq "$(cat "$TARGET_LOG")" "" "self-review: no test command runs nothing"
 
 echo "----"
 echo "lease-heartbeat.test.sh: $PASS passed, $FAIL failed"

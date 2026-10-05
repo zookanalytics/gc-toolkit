@@ -517,7 +517,12 @@ hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@";
 # <<< preflight-lease-keepalive
 {{typecheck_command}}
 {{lint_command}}
-if [ -n "{{test_command}}" ]; then hb bash -c '{{test_command}}'; fi
+# A quoted heredoc hands the test command over verbatim, whatever quotes it carries.
+TEST_CMD=$(cat <<'TEST_CMD_EOF'
+{{test_command}}
+TEST_CMD_EOF
+)
+if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
 ```
 
 **If ALL commands above are empty**, check the repo's CLAUDE.md or AGENTS.md
@@ -835,18 +840,24 @@ Run them through the claim-lease keepalive. A claim's lease has a fixed
 five-minute TTL and the suite routinely outlives it, so a live holder whose
 lease expired reads, to any lease consumer, exactly like a dead one;
 `assets/scripts/lease-heartbeat.sh` refreshes `$CLAIMED_ITER_BEAD` every couple
-of minutes while the command runs. It is best-effort — an unresolved wrapper, or
-a store that refuses the refresh, runs the command plain and never fails it.
+of minutes while the command runs. It is best-effort. An unresolved wrapper runs
+the command plain, and a refresh the store refuses is reported once on stderr.
+Neither fails the command.
 ```bash
 # >>> self-review-lease-keepalive
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_ITER_BEAD" -- "$@"; else "$@"; fi; }
 # <<< self-review-lease-keepalive
-if [ -n "{{affected_tests_command}}" ]; then
-    hb bash -c '{{affected_tests_command}}'
-else
-    hb bash -c '{{test_command}}'
-fi
+# A quoted heredoc hands each command over verbatim, whatever quotes it carries.
+TEST_CMD=$(cat <<'TEST_CMD_EOF'
+{{affected_tests_command}}
+TEST_CMD_EOF
+)
+[ -n "$TEST_CMD" ] || TEST_CMD=$(cat <<'TEST_CMD_EOF'
+{{test_command}}
+TEST_CMD_EOF
+)
+if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
 ```
 If the rig declares no test command (both empty) and you run the repo's own
 quality gate instead, invoke it the same way — `hb bash -c '<your test
