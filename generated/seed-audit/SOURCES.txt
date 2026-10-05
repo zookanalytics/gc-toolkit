@@ -58,7 +58,7 @@ agents/witness/agent.toml
 agents/witness/prompt.template.md
 6dc57aa4811ae551eff65cada2f74fa65eb68eba355e83d59473315b652691ce
 assets/scripts/render-seed-audit.sh
-e716c2305c3d5ae4cd5239cb46675cc179660842c1d34ad84532395f1e4c79dc
+ec82668bf652e4d3830f7c59c352c7dbb133b21d8fed4f419fac5f0d9919d987
 formulas/mol-deacon-patrol.toml
 511afa2345e548de5a0675ae4cb821a6e27f5c908e22c48dfbeae8b93a2d9366
 formulas/mol-dog-shutdown-dance.toml
@@ -72,7 +72,7 @@ formulas/mol-first-reaction.toml
 formulas/mol-polecat-work.toml
 7a5b5124424aaf70ed942438892ebc136d4ac4e140b85e37f2bb948c2869fde0
 formulas/mol-refinery-patrol.toml
-55a6b55ae20e02a0f48b4c7b5e1e8eea67801d2cd704f78aeb4d8ca422afae1d
+6c15a431c5972b7cfcfc2e860fd33fe1df3db779e55fef873ecb64d1dda87bd1
 formulas/mol-review-quorum-signoff.toml
 5754a2a98abc5ef77e05093a9f223311d287afd986dc7983d7623f217c3e8ba8
 formulas/mol-review.toml
