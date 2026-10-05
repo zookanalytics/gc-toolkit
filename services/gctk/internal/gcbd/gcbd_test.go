@@ -186,4 +186,76 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 			t.Error("List with no gc on PATH = ok true; want ok false")
 		}
 	})
+
+	// bd_list's contract, which merge.sh reads every list through: a store
+	// error mid-query can print an empty or partial array and exit 1, and a
+	// caller that read it would merge on that partial view.
+	t.Run("a non-zero exit fails closed whatever was printed", func(t *testing.T) {
+		writeGC(t, "echo '[]'\nexit 1\n")
+		if _, ok := New().List(); ok {
+			t.Error("List on [] beside exit 1 = ok true; want ok false (bd_list fails a non-zero exit)")
+		}
+		writeGC(t, "echo '[{\"id\":\"k1\",\"metadata\":{}}]'\nexit 1\n")
+		if _, ok := New().List(); ok {
+			t.Error("List on a row beside exit 1 = ok true; want ok false")
+		}
+	})
+
+	t.Run("a bare null or empty stdout fails closed", func(t *testing.T) {
+		writeGC(t, "echo 'null'\n")
+		if _, ok := New().List(); ok {
+			t.Error("List on null = ok true; want ok false (null is not an array)")
+		}
+		writeGC(t, "exit 0\n")
+		if _, ok := New().List(); ok {
+			t.Error("List on empty stdout = ok true; want ok false")
+		}
+	})
+}
+
+// DepList shares List's decode and its strict exit contract: an edge probe that
+// failed is not "no dependencies".
+func TestDepListFailsClosedLikeList(t *testing.T) {
+	writeGC := func(t *testing.T, body string) {
+		t.Helper()
+		bin := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bin, "gc"), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	writeGC(t, "echo '[{\"id\":\"blk\",\"status\":\"open\",\"metadata\":{}}]'\n")
+	rows, ok := New().DepList("a", "--direction=down", "-t", "blocks", "--json")
+	if !ok || len(rows) != 1 || rows[0].ID != "blk" {
+		t.Fatalf("DepList = (%+v, ok=%v), want one row blk", rows, ok)
+	}
+	writeGC(t, "echo '[]'\nexit 1\n")
+	if _, ok := New().DepList("a"); ok {
+		t.Error("DepList on [] beside exit 1 = ok true; want ok false")
+	}
+	writeGC(t, "echo 'not-json'\n")
+	if _, ok := New().DepList("a"); ok {
+		t.Error("DepList on garbage = ok true; want ok false")
+	}
+}
+
+// jq's `.status // "open"` substitutes only for a null or absent status. An
+// empty string is a status of its own, and a liveness test keyed on the
+// substitution must not read it as open.
+func TestStatusLowerOrSubstitutesOnlyForNullOrAbsent(t *testing.T) {
+	for _, tc := range []struct{ name, row, want string }{
+		{"absent", `[{"id":"b"}]`, "open"},
+		{"null", `[{"id":"b","status":null}]`, "open"},
+		{"empty string", `[{"id":"b","status":""}]`, ""},
+		{"set", `[{"id":"b","status":"IN_PROGRESS"}]`, "in_progress"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decode(t, tc.row).StatusLowerOr("open"); got != tc.want {
+				t.Errorf("StatusLowerOr(open) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := decode(t, `[{"id":"b","status":null}]`).StatusLower(); got != "" {
+		t.Errorf("StatusLower on a null status = %q, want empty", got)
+	}
 }

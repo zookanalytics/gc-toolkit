@@ -9,8 +9,10 @@
 # identity refusals (fork, url/branch mismatch); the record for a PR already
 # merged and the live anchor identity both it and the merge stand on;
 # the terminal full-authorization re-read; the loud non-zero exit when the
-# record half fails after a merge; and the cap that turns a record failing
-# every pass into one visit a person can claim.
+# record half fails after a merge; the cap that turns a record failing every
+# pass into one visit a person can claim; and the reads that fail closed when
+# they stop partway (a cut-short reviews or threads stream, a list or dep probe
+# that exited non-zero after printing an array).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1088,6 +1090,112 @@ printf '%s' "$(prview 99 OPEN DIRTY)" > "$GH_DIR/pr_view_99.json"
 echo '[]' > "$GH_DIR/reviews_99.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed merge-in in flight is the city's move, not a wedge"
+: > "$STUB_DEPS"
+rm -f "$GH_DIR/rules_main.json"
+
+# The reads below fail CLOSED: a read that stopped partway is unreadable as a
+# whole, never the part that decoded. Each fixture is a pass the partial view
+# would have merged or misfiled.
+
+echo "# a reviews stream that stops decoding partway is unreadable, never a partial history"
+# --paginate hands back two good rows and a third cut short. The stub prints a
+# string element raw, so the third row arrives as half a JSON object.
+store "[$(anchor RV1 120), $(rev RV1)]"
+printf '%s' "$(prview 120 OPEN CLEAN)" > "$GH_DIR/pr_view_120.json"
+jq -cn '[ {user:{login:"human1"},state:"APPROVED",commit_id:"sha-120",submitted_at:"2026-01-01T00:00:00Z",id:1},
+          {user:{login:"human2"},state:"COMMENTED",commit_id:"sha-120",submitted_at:"2026-01-02T00:00:00Z",id:2},
+          ({user:{login:"human3"},state:"CHANGES_REQUESTED",commit_id:"sha-120",submitted_at:"2026-01-03T00:00:00Z",id:3} | tojson | .[0:50]) ]' \
+  > "$GH_DIR/reviews_120.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#120 reviews history unreadable; merge held" "a reviews stream cut short is an unreadable history"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 120" "…and the PR is not squashed on the rows that decoded"
+
+echo "# an enumeration that exits non-zero after printing [] fails the pass loudly"
+store "[$(anchor EN1 121), $(rev EN1)]"
+printf '%s' "$(prview 121 OPEN CLEAN)" > "$GH_DIR/pr_view_121.json"
+echo '[]' > "$GH_DIR/reviews_121.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_LIST_PARTIAL="merge_result=pull_request" "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "an enumeration that exited non-zero fails the pass"
+has "$out" "could not enumerate gating anchors" "…naming the unreadable enumeration"
+hasnt "$out" "no gating anchors" "…never reporting the empty array as no anchors"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+echo "# a referencing-bead read that exits non-zero after printing [] holds, never reads as no holder"
+# The rework child names the PR only by pr_number, so the by_pr read is the one
+# that would have found it.
+store "[$(anchor BP1 122), $(rev BP1),
+        {\"id\":\"rw-bp1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"pr_number\":\"122\",\"pr_url\":\"https://github.com/zook/gc-toolkit/pull/122\"}}]"
+printf '%s' "$(prview 122 OPEN CLEAN)" > "$GH_DIR/pr_view_122.json"
+echo '[]' > "$GH_DIR/reviews_122.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_LIST_PARTIAL="pr_number=" "$SUT" 2>&1)
+has "$out" "PR#122 referencing-bead read failed; merge held" "a failed by_pr read holds the merge"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and the in-flight rework it would have found is not merged past"
+
+echo "# a dependency probe that exits non-zero after printing [] holds, never reads as no blockers"
+store "[$(anchor DE1 128), $(rev DE1)]"
+printf '%s' "$(prview 128 OPEN CLEAN)" > "$GH_DIR/pr_view_128.json"
+echo '[]' > "$GH_DIR/reviews_128.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_DEP_PARTIAL=1 "$SUT" 2>&1)
+has "$out" "PR#128 dependency probe unreadable; merge held" "a failed dependency probe holds the merge"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+echo "# a review-thread read whose later page will not decode is unreadable, never a zero count"
+# Page one decodes with no unresolved thread; page two is garbled. Read as a
+# zero count, the BLOCKED PR would fall through to the approval wait (settled).
+store "[$(anchor TH1 123), $(rev TH1)]"
+printf '%s' "$(prview 123 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_123.json"
+echo '[]' > "$GH_DIR/reviews_123.json"
+echo '{"threads":[]}' > "$GH_DIR/threads_123.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+out=$(STUB_GQL_THREADS_TAIL='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNext' "$SUT" 2>&1)
+eq "$(pinned TH1)" "blocked@sha-123" "a thread read cut short is a blocked hold, not the approval wait"
+has "$(reason TH1)" "could not be read" "…and the reason says the threads could not be read"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# with the reconcile cache on, the pass reads the anchor enumeration once, not once per anchor"
+store "[$(anchor DP1 124), $(rev DP1), $(anchor DP2 125), $(rev DP2)]"
+for n in 124 125; do
+  printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
+  echo '[]' > "$GH_DIR/reviews_$n.json"
+done
+rm -rf "$TMP/bdcache"; mkdir -p "$TMP/bdcache"
+: > "$STUB_GC_LOG"
+out=$(GC_RECONCILE_BD_CACHE="$TMP/bdcache" "$SUT" 2>&1)
+has "$out" "2 merged" "both anchors merge"
+eq "$(grep -c -- '--metadata-field merge_result=pull_request' "$STUB_GC_LOG")" "1" "…on ONE read of the anchor enumeration, whatever the anchor count"
+rm -rf "$TMP/bdcache"
+
+echo "# isCrossRepository: null reaches the cross-repo gate as cross=null; only an absent key is unreadable"
+store "[$(anchor XR1 126), $(rev XR1)]"
+printf '%s' "$(prview 126 OPEN CLEAN)" | jq -c '.isCrossRepository = null' > "$GH_DIR/pr_view_126.json"
+echo '[]' > "$GH_DIR/reviews_126.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#126 is opened from 'zook/gc-toolkit' (cross=null), not this repository's own branch; merge held" "a null isCrossRepository is reported by the cross-repo gate"
+hasnt "$out" "PR#126 head identity unreadable" "…not as an unreadable head identity"
+printf '%s' "$(prview 126 OPEN CLEAN)" | jq -c 'del(.isCrossRepository)' > "$GH_DIR/pr_view_126.json"
+out=$("$SUT" 2>&1)
+has "$out" "PR#126 head identity unreadable; merge held" "an ABSENT isCrossRepository is the unreadable head identity"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and neither shape merges"
+
+echo "# a referencing bead whose status is the empty string is not live; a null status is open"
+# jq's `.status // "open"` substitutes only for null or absent.
+store "[$(anchor ES1 127), $(rev ES1), {\"id\":\"blk-es1\",\"status\":\"\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'blk-es1|blocks|ES1\n' > "$STUB_DEPS"
+printf '%s' "$(prview 127 OPEN CLEAN)" > "$GH_DIR/pr_view_127.json"
+echo '[]' > "$GH_DIR/reviews_127.json"
+out=$("$SUT" 2>&1)
+hasnt "$out" "PR#127 held by" "an empty-status blocker holds nothing"
+has "$out" "merged + recorded ES1" "…and the merge proceeds"
+store "[$(anchor ES2 127), $(rev ES2), {\"id\":\"blk-es2\",\"status\":null,\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'blk-es2|blocks|ES2\n' > "$STUB_DEPS"
+out=$("$SUT" 2>&1)
+has "$out" "PR#127 held by unclosed rework/review bead blk-es2 (open); merge held" "the control: a null-status blocker reads as open and holds"
+: > "$STUB_DEPS"
 
 }
 
@@ -1102,39 +1210,45 @@ if [ -n "$GCTK_BUILT" ]; then
     suite
     # The arm proves nothing unless merge.sh actually handed off. merge's stdout
     # is byte-identical across the two, so a sentinel on the resolved path is the
-    # discriminator: it names itself and the subcommand merge.sh must pass it.
+    # discriminator: it names itself, the subcommand merge.sh must pass it, and
+    # the helper directory the binary resolves its siblings in.
     SENTINEL="$TMP/sentinel-gctk"
-    printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s\\n" "$*"\n' > "$SENTINEL"
+    printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s dir=%%s\\n" "$*" "${GCTK_SCRIPTS_DIR:-}"\n' > "$SENTINEL"
     chmod +x "$SENTINEL"
-    has "$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)" "SENTINEL-GCTK merge" "merge.sh execs \$GCTK_BIN with the merge subcommand when it resolves"
+    out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
+    has "$out" "SENTINEL-GCTK merge" "merge.sh execs \$GCTK_BIN with the merge subcommand when it resolves"
+    has "$out" "dir=$SD" "…exporting its own directory as GCTK_SCRIPTS_DIR"
+    # The city chain itself is gctk-resolve.test.sh's. This is the one shape
+    # most callers have — an agent session names its city by GC_CITY_PATH alone —
+    # reached through merge.sh with GCTK_BIN unset.
+    CITY="$TMP/city"
+    mkdir -p "$CITY/.gc/services/gctk/bin"
+    cp "$SENTINEL" "$CITY/.gc/services/gctk/bin/gctk"
+    out=$(env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT GC_CITY_PATH="$CITY" "$SUT" 2>&1)
+    has "$out" "SENTINEL-GCTK merge" "GC_CITY_PATH alone resolves the deployed binary through merge.sh"
+
+    # Run directly, the binary has no merge.sh to name the helper directory. It
+    # refuses the pass rather than holding every anchor on a helper it cannot
+    # find and dropping every escalation.
+    store "[$(anchor SD1 129), $(rev SD1)]"
+    printf '%s' "$(prview 129 OPEN CLEAN)" > "$GH_DIR/pr_view_129.json"
+    echo '[]' > "$GH_DIR/reviews_129.json"
+    : > "$STUB_GH_LOG"
+    out=$(env -u GCTK_SCRIPTS_DIR "$GCTK_BUILT" merge 2>&1); rc=$?
+    eq "$rc" 1 "gctk merge run without GCTK_SCRIPTS_DIR exits 1"
+    has "$out" "GCTK_SCRIPTS_DIR is unset" "…naming the missing directory"
+    has "$out" "NOTHING is merged this pass" "…and saying nothing merged"
+    eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
+    mkdir -p "$TMP/no-helpers"
+    out=$(GCTK_SCRIPTS_DIR="$TMP/no-helpers" "$GCTK_BUILT" merge 2>&1); rc=$?
+    eq "$rc" 1 "a GCTK_SCRIPTS_DIR without the helpers exits 1 too"
+    has "$out" "holds no executable lane-state.sh or finalize-gate.sh" "…naming the helpers it lacks"
+    out=$(GCTK_SCRIPTS_DIR="$SD" "$GCTK_BUILT" merge 2>&1)
+    has "$out" "merged + recorded SD1" "the control: the same direct run with the helper directory named merges"
 elif [ "$GO_PRESENT" -eq 0 ]; then
     bad "no Go toolchain: the gctk merge port was NOT exercised, and this suite is its acceptance bar"
 else
     bad "gctk did not build; the port was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
-fi
-
-echo
-echo "## arm: the city chain, with no GCTK_BIN to shortcut it"
-# GC_CITY_PATH is the city root a supervisor puts in an agent session; GC_CITY
-# and GC_CITY_ROOT are absent there. A resolver blind to it leaves every agent
-# on the fallback, so the port ships and never runs in the shape most callers
-# have. Reached with GCTK_BIN unset, which is how a real caller reaches it. The
-# deployed binary is byte-identical to the shell, so a self-naming sentinel at
-# the resolved path is the discriminator.
-if [ -n "$GCTK_BUILT" ]; then
-    CITY="$TMP/city"
-    mkdir -p "$CITY/.gc/services/gctk/bin"
-    printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s\\n" "$*"\n' > "$CITY/.gc/services/gctk/bin/gctk"
-    chmod +x "$CITY/.gc/services/gctk/bin/gctk"
-    for VAR in GC_CITY_PATH GC_CITY GC_CITY_ROOT; do
-        out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$VAR=$CITY" "$SUT" 2>&1)
-        has "$out" "SENTINEL-GCTK merge" "$VAR alone resolves the deployed binary"
-    done
-    # The control: the same binary on disk, named by nothing — the shell answers.
-    out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" 2>&1)
-    hasnt "$out" "SENTINEL-GCTK" "no city named: the shell fallback answers"
-else
-    bad "gctk did not build; the city resolution chain was NOT exercised"
 fi
 
 echo

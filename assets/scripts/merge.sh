@@ -50,53 +50,12 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # THE SHELL BELOW IS THE FALLBACK. `gctk merge` (services/gctk) is the ported
 # implementation and answers whenever the build order has published a binary;
 # this script runs when it has not — a fresh city, a build that failed, a rig
-# checkout ahead of the deployed binary. Both must stay correct until the last
-# port lands and the fallback drops, so merge.test.sh runs its whole body
-# against both.
-#
-# Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
-# GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
-# and the tmux pickers read, and GC_CITY_PATH is the one the supervisor puts in
-# an agent session — else the city `gc service list --json` reports. Never a
-# walk up from this file's own path — the hermetic suite runs from a tree inside
-# a live city, and a filesystem hunt would find that city's binary and stop
-# testing this script. GCTK_BIN=none forces this implementation.
-#
-# A binary the city resolved is held to THIS checkout: `gctk version` carries
-# the tree hash of services/gctk it was built from, and a checkout whose
-# services/gctk is at another one — a rig ahead of the build order's ~5m lag, or
-# a branch that changed the port — falls back to this script. A binary that
-# cannot be compared (no stamp, no git) is trusted; an explicit $GCTK_BIN is
-# never second-guessed. GCTK_SCRIPTS_DIR hands the binary this script's own
-# directory: merge shells out to the sibling helpers (escalate.sh,
-# record-failure-cap.sh, lane-state.sh, finalize-gate.sh, render-seed-audit.sh)
-# exactly as this script does, and that is where they live.
-GCTK_BIN="${GCTK_BIN:-}"
-if [ -z "$GCTK_BIN" ]; then
-    _gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
-    if [ -z "$_gctk_city" ]; then
-        _gctk_city="$(gc service list --json 2>/dev/null | jq -r '.city_path // empty' 2>/dev/null || true)"
-    fi
-    [ -n "$_gctk_city" ] && GCTK_BIN="$_gctk_city/.gc/services/gctk/bin/gctk"
-    if [ -n "$GCTK_BIN" ] && [ -x "$GCTK_BIN" ]; then
-        _gctk_mod="$(dirname "${BASH_SOURCE[0]}")/../../services/gctk"
-        _gctk_want="$(git -C "$_gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)"
-        _gctk_have="$("$GCTK_BIN" version 2>/dev/null | head -n 1 || true)"
-        if [ -n "$_gctk_want" ] && [ -n "$_gctk_have" ] && [ "$_gctk_have" != unknown ] \
-           && [ "$_gctk_have" != "$_gctk_want" ]; then
-            # A hand build carries the toolchain's commit stamp instead; the
-            # subtree that commit holds is the comparable identity.
-            _gctk_mapped="$(git -C "$_gctk_mod" rev-parse "${_gctk_have%-dirty}:./" 2>/dev/null || true)"
-            if [ "$_gctk_mapped" != "$_gctk_want" ]; then
-                echo "$0: deployed gctk is built from $_gctk_have, this checkout's services/gctk is at $_gctk_want; using the shell fallback" >&2
-                GCTK_BIN=""
-            fi
-        fi
-    fi
-fi
-if [ "$GCTK_BIN" != "none" ] && [ -n "$GCTK_BIN" ] && [ -x "$GCTK_BIN" ]; then
-    GCTK_SCRIPTS_DIR="$SCRIPTS_DIR" exec "$GCTK_BIN" merge "$@"
-fi
+# checkout ahead of the deployed binary. Both must stay correct while the
+# fallback stands, so merge.test.sh runs its whole body against both.
+# gctk-resolve.sh decides which one answers.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+gctk_resolve merge "$@"
 
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The composable "may this anchor be finalized?" precondition set. An open visit
@@ -542,8 +501,12 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num referencing-bead read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   }
-  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null | scrub)
-  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null | scrub)
+  # A probe that exited non-zero is unreadable whatever it printed — bd_list's
+  # contract for the list reads, since a failed read can print an empty array.
+  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null) || children=""
+  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null) || blockers=""
+  children=$(printf '%s' "$children" | scrub)
+  blockers=$(printf '%s' "$blockers" | scrub)
   if ! printf '%s' "$children" | jq -e 'type == "array"' >/dev/null 2>&1 \
      || ! printf '%s' "$blockers" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "$PROG: PR#$num dependency probe unreadable; merge held (anchor $id)"

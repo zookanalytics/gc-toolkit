@@ -19,17 +19,20 @@ import (
 
 // `gctk merge` is the port of assets/scripts/merge.sh: arm 4 of the merge
 // cadence, THE single writer of merged truth. The CLI is contract-preserving —
-// it takes no flags, emits the same stdout grammar, and exits 0 except when a
-// record half failed after a merge (exit 1) — because refinery-reconcile.sh
-// invokes it as an opaque command and must not notice which language answers.
+// it takes no flags, emits the same stdout grammar, and exits 0 except when
+// the gating anchors cannot be enumerated or a record half failed after a
+// merge (exit 1) — because refinery-reconcile.sh invokes it as an opaque
+// command and must not notice which language answers.
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
 // same writer the shell reached through lifecycle.sh. Every other seam is a
 // subprocess exactly as the script's was — gc/bd/gh/git and the sibling shell
 // helpers (escalate.sh, record-failure-cap.sh, lane-state.sh, finalize-gate.sh,
-// render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR, which merge.sh exports
-// as its own directory before it execs this binary. That keeps the stub
-// harness, the observability and the permissions surfaces identical.
+// render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh
+// exports as merge.sh's directory before it execs this binary. That keeps the
+// stub harness, the observability and the permissions surfaces identical. Run
+// any other way, with no usable GCTK_SCRIPTS_DIR, the pass refuses (exit 1)
+// before it reads a PR.
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
@@ -61,11 +64,16 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return 0
 	}
+	scriptsDir := os.Getenv("GCTK_SCRIPTS_DIR")
+	if p := helperDirProblem(scriptsDir); p != "" {
+		fmt.Fprintf(stderr, "%s: %s; NOTHING is merged this pass\n", mergeProg, p)
+		return 1
+	}
 	m := &merger{
 		stdout:     stdout,
 		stderr:     stderr,
 		client:     gcbd.New(),
-		scriptsDir: os.Getenv("GCTK_SCRIPTS_DIR"),
+		scriptsDir: scriptsDir,
 	}
 	m.repoRoot = strings.TrimSpace(runOut("git", "rev-parse", "--show-toplevel"))
 	if rc, done := m.resolveOrigin(); done {
@@ -88,6 +96,7 @@ type merger struct {
 	selfLogin      string
 	repoRoot       string
 	scriptsDir     string
+	anchors        []gcbd.Bead
 
 	merged       int
 	recovered    int
@@ -137,6 +146,7 @@ func (m *merger) run() int {
 		fmt.Fprintf(m.stdout, "%s: no gating anchors\n", mergeProg)
 		return 0
 	}
+	m.anchors = anchors
 	for i := range anchors {
 		m.handle(&anchors[i])
 	}
@@ -181,10 +191,10 @@ func (m *merger) handle(row *gcbd.Bead) {
 	if o, n := pr.HeadRepositoryOwner.Login, pr.HeadRepository.Name; o != "" && n != "" {
 		headRepo = o + "/" + n
 	}
-	headCross := ""
-	if pr.IsCrossRepository != nil {
-		headCross = strconv.FormatBool(*pr.IsCrossRepository)
-	}
+	// `if has("isCrossRepository") then tostring else "" end`: a key that is
+	// present but null reads "null" and reaches the cross-repo gate, and only an
+	// absent key leaves the identity unreadable.
+	headCross := jqHasToString(pr.IsCrossRepository)
 
 	// --- identity gates ---------------------------------------------------------
 	if urlRepoQ(liveURL) != m.originRepoQ {
@@ -273,7 +283,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	aroute := fresh.Meta("gc.routed_to")
 
 	// --- validate, in order -------------------------------------------------------
-	if strings.Trim(stripSpacesCommas(checkset), "") == "" {
+	if stripSpacesCommas(checkset) == "" {
 		fmt.Fprintf(m.stdout, "%s: PR#%s anchor %s has no normalized check_set (empty is never the 'none' opt-out); merge held\n", mergeProg, num, id)
 		m.held++
 		return
@@ -292,14 +302,12 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 	// One-anchor-per-PR: a second open anchor of this number, keyed by the
-	// repository its OWN pr_url names, holds every anchor of the PR.
-	dups, dupOK := m.client.List("--status=open", "--metadata-field", "merge_result=pull_request", "--limit=0", "--json")
-	if !dupOK {
-		fmt.Fprintf(m.stdout, "%s: PR#%s duplicate-anchor read failed; merge held (anchor %s)\n", mergeProg, num, id)
-		m.held++
-		return
-	}
-	if others := duplicateAnchors(dups, id, num, prurl); others != "" {
+	// repository its OWN pr_url names, holds every anchor of the PR. The set is
+	// the pass's own enumeration: inside a reconcile pass every repeat of that
+	// list is served from the cache the enumeration filled (bd-lib.sh's bd_list
+	// refetches an entry only past its 90s max age), so a full-store read per
+	// anchor would buy no fresher view.
+	if others := duplicateAnchors(m.anchors, id, num, prurl); others != "" {
 		fmt.Fprintf(m.stdout, "%s: PR#%s is claimed by more than one open anchor (%s + %s); merge held — close/demote the duplicate (doctor check-one-anchor-per-pr owns the structure)\n", mergeProg, num, id, others)
 		m.escalate("--subject", id, "--key", "one-anchor-per-pr."+num,
 			"--message", "PR#"+num+" ("+liveURL+") is claimed by multiple open anchors ("+id+", "+others+"); every anchor of this PR is held until exactly one remains.")
@@ -687,7 +695,9 @@ func (m *merger) finalizeGate(id string) (reason string, ok bool) {
 }
 
 // unresolvedThreads counts unresolved review threads on num. ok=false is an
-// unreadable connection, never zero.
+// unreadable connection, never zero: a page that will not decode makes the
+// whole count unreadable, as `jq -s` reads the paginated stream, because the
+// unresolved threads may sit on exactly that page.
 func (m *merger) unresolvedThreads(num string) (int, bool) {
 	raw, rc := m.ghOrigin("graphql", "--paginate",
 		"-f", "query="+threadsQuery,
@@ -704,7 +714,10 @@ func (m *merger) unresolvedThreads(num string) (int, bool) {
 	for {
 		var page gqlThreadsPage
 		if err := dec.Decode(&page); err != nil {
-			break
+			if err == io.EOF {
+				break
+			}
+			return 0, false
 		}
 		rt := page.Data.Repository.PullRequest.ReviewThreads
 		if rt == nil {
@@ -793,6 +806,32 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 }
 
 // --- sibling-script helpers -----------------------------------------------------
+
+// mergeRequiredHelpers are the siblings every anchor's validation runs, so a
+// pass without them would hold each anchor for a reason that is not the
+// anchor's. escalate.sh, record-failure-cap.sh and render-seed-audit.sh are
+// guarded where they are called, as merge.sh guards them.
+var mergeRequiredHelpers = []string{"lane-state.sh", "finalize-gate.sh"}
+
+// helperDirProblem says why dir cannot serve as the sibling-script directory,
+// or "" when it can. merge.sh exports its own directory as GCTK_SCRIPTS_DIR
+// before it execs this binary; a binary run any other way has no directory to
+// resolve the helpers in, and a bare name would fall to a PATH lookup.
+func helperDirProblem(dir string) string {
+	if dir == "" {
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+	}
+	var missing []string
+	for _, h := range mergeRequiredHelpers {
+		if !isExecutable(filepath.Join(dir, h)) {
+			missing = append(missing, h)
+		}
+	}
+	if len(missing) > 0 {
+		return "GCTK_SCRIPTS_DIR=" + dir + " holds no executable " + strings.Join(missing, " or ")
+	}
+	return ""
+}
 
 func (m *merger) scriptPath(name string) string { return filepath.Join(m.scriptsDir, name) }
 
@@ -904,16 +943,11 @@ func repoQ(url string) string {
 	return mm[1] + "/" + mm[2]
 }
 
-func canonPrURL(s string) string {
-	s = stripSpaces(s)
-	if loc := rePullSeg.FindStringIndex(s); loc != nil {
-		s = s[:loc[1]]
-	}
-	return strings.TrimRight(s, "/")
-}
+// canonPrURL is cutAtPull plus canon_pr_url's trailing-slash trim.
+func canonPrURL(s string) string { return strings.TrimRight(cutAtPull(s), "/") }
 
-// cutAtPull keeps a url up to and including /pull/<n>, without the trailing-slash
-// trim canonPrURL applies — the terminal re-read's sub() shape.
+// cutAtPull keeps a whitespace-stripped url up to and including its first
+// /pull/<n> — the terminal re-read's sub() shape.
 func cutAtPull(s string) string {
 	s = stripSpaces(s)
 	if loc := rePullSeg.FindStringIndex(s); loc != nil {
@@ -1053,7 +1087,30 @@ type prViewRow struct {
 	HeadRepositoryOwner struct {
 		Login string `json:"login"`
 	} `json:"headRepositoryOwner"`
-	IsCrossRepository *bool `json:"isCrossRepository"`
+	// Raw, so an absent key (nil) stays distinguishable from a present null.
+	IsCrossRepository json.RawMessage `json:"isCrossRepository"`
+}
+
+// jqHasToString reproduces `if has(k) then (.k | tostring) else "" end` for a
+// value decoded as json.RawMessage: an absent key is "", a string is its text,
+// and any other value, null included, is its JSON spelling.
+func jqHasToString(raw json.RawMessage) string {
+	v := bytes.TrimSpace(raw)
+	if len(v) == 0 {
+		return ""
+	}
+	if v[0] == '"' {
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			return s
+		}
+		return ""
+	}
+	var buf bytes.Buffer
+	if json.Compact(&buf, v) != nil {
+		return ""
+	}
+	return buf.String()
 }
 
 type gqlThreadsPage struct {
@@ -1119,7 +1176,6 @@ func duplicateAnchors(dups []gcbd.Bead, id, num, ourURL string) string {
 // (the edge is the claim, local by construction). The order is by_pr, then
 // children, then blockers.
 func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead) string {
-	live := strings.Split(mergeLiveStatuses, ",")
 	ours := strings.ToLower(m.originRepoQ)
 	type tagged struct {
 		b   *gcbd.Bead
@@ -1137,14 +1193,7 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 	}
 	for _, t := range all {
 		b := t.b
-		if b.ID == id {
-			continue
-		}
-		stLower := b.StatusLower()
-		if stLower == "" {
-			stLower = "open"
-		}
-		if !inSlice(live, stLower) {
+		if b.ID == id || !isLive(b) {
 			continue
 		}
 		if !t.dep {
@@ -1164,26 +1213,31 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 				kind = "finding"
 			}
 		}
-		return fmt.Sprintf("%s %s (%s)", kind, b.ID, stLower)
+		return fmt.Sprintf("%s %s (%s)", kind, b.ID, holderStatus(b))
 	}
 	return ""
 }
 
+// mergeLive is mergeLiveStatuses as the set a holder's status is tested in.
+var mergeLive = strings.Split(mergeLiveStatuses, ",")
+
+// holderStatus is a referencing bead's status as the holder probes read it,
+// `(.status // "open") | ascii_downcase`: only a null or absent status defaults
+// to open, and an empty string stays empty.
+func holderStatus(b *gcbd.Bead) string { return b.StatusLowerOr("open") }
+
+// isLive reports whether a referencing bead's status lets it hold the merge.
+func isLive(b *gcbd.Bead) bool { return inSlice(mergeLive, holderStatus(b)) }
+
 // poolHolder is the first live blocker a pool will claim (routed to something
 // other than a human).
 func poolHolder(blockers []gcbd.Bead) string {
-	live := strings.Split(mergeLiveStatuses, ",")
 	for i := range blockers {
 		b := &blockers[i]
-		stLower := b.StatusLower()
-		if stLower == "" {
-			stLower = "open"
-		}
-		if !inSlice(live, stLower) {
+		if !isLive(b) {
 			continue
 		}
-		r := b.Meta("gc.routed_to")
-		if r != "" && r != "human" {
+		if r := b.Meta("gc.routed_to"); r != "" && r != "human" {
 			return b.ID
 		}
 	}
@@ -1193,17 +1247,9 @@ func poolHolder(blockers []gcbd.Bead) string {
 // stuckHolder is the first live blocker carrying no route at all — one no
 // automated actor will claim and no `asking` edge names.
 func stuckHolder(blockers []gcbd.Bead) string {
-	live := strings.Split(mergeLiveStatuses, ",")
 	for i := range blockers {
 		b := &blockers[i]
-		stLower := b.StatusLower()
-		if stLower == "" {
-			stLower = "open"
-		}
-		if !inSlice(live, stLower) {
-			continue
-		}
-		if b.Meta("gc.routed_to") == "" {
+		if isLive(b) && b.Meta("gc.routed_to") == "" {
 			return b.ID
 		}
 	}
@@ -1226,7 +1272,10 @@ type reviewSummary struct {
 
 // reviewState reproduces the review-grouping jq: the latest state-bearing review
 // per non-self reviewer decides veto and approver; self_dismissed counts every
-// own DISMISSED review. ok=false models an unreadable history.
+// own DISMISSED review. ok=false is an unreadable history: `jq -cs` slurps the
+// whole stream or nothing, so one row that will not decode makes all of it
+// unreadable, because the veto or the only approval at head may be that row
+// or follow it.
 func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
@@ -1242,12 +1291,12 @@ func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
 			ID          json.Number `json:"id"`
 		}
 		if err := dec.Decode(&obj); err != nil {
+			// The end of the stream, trailing whitespace and an empty history
+			// all decode to io.EOF; anything else is a row that did not decode.
 			if err == io.EOF {
 				break
 			}
-			// Trailing whitespace or a blank stream decodes to nothing; only a
-			// genuine parse failure with bytes present is unreadable.
-			break
+			return reviewSummary{}, false
 		}
 		all = append(all, reviewRow{
 			Login:       obj.User.Login,

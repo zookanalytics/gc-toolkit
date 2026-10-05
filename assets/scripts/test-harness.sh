@@ -82,10 +82,14 @@ mk_sut_dir() { # <dir> <file>...
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
   # bd-lib.sh is the shared bead-store read library many SUTs source by sibling
-  # path; copy it beside them so that source resolves in the private dir. It sits
-  # beside this harness, so it is found whatever the SUT's own directory is.
-  local lib; lib="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/bd-lib.sh"
-  [ -f "$lib" ] && cp "$lib" "$d/"
+  # path, and gctk-resolve.sh is what every ported script (lifecycle.sh among
+  # them) sources the same way; copy both beside them so those sources resolve
+  # in the private dir. They sit beside this harness, so they are found whatever
+  # the SUT's own directory is.
+  local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  for lib in "$here/bd-lib.sh" "$here/gctk-resolve.sh"; do
+    [ -f "$lib" ] && cp "$lib" "$d/"
+  done
 }
 
 _write_gc_stub() {
@@ -182,6 +186,13 @@ case "$verb" in
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
+    # STUB_LIST_PARTIAL="<text>": a list whose arguments contain <text> prints
+    # `[]` and exits 1 — a store error mid-query that still printed an array.
+    if [ -n "${STUB_LIST_PARTIAL:-}" ]; then
+      case " $* " in
+        *"$STUB_LIST_PARTIAL"*) echo '[]'; echo "gc: simulated mid-query store error" >&2; exit 1 ;;
+      esac
+    fi
     statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -328,6 +339,9 @@ case "$verb" in
     case "${1:-}" in
       list)
         [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
+        # STUB_DEP_PARTIAL: the probe prints `[]` and exits 1, a failed read
+        # that still printed an array.
+        [ -n "${STUB_DEP_PARTIAL:-}" ] && { echo '[]'; echo "gc bd dep: simulated store error" >&2; exit 1; }
         id="${2:-}"; shift 2 || true
         dir=""; dtyp=""
         while [ $# -gt 0 ]; do
@@ -573,6 +587,9 @@ case "$sub" in
           jq -c '{data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
                 nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+          # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
+          # hands back when a later page came back garbled.
+          [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"
           exit 0 ;;
         *PullRequestReviewThread*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
