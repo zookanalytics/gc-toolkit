@@ -2895,9 +2895,9 @@ hasnt "$(meta "$RCFIX_NC5" rejection_reason)" "Vercel" "…and the rework reason
 rm -f "$GH_DIR/rules_main.json"
 
 # ---- attempt cap: a stuck PR stops drawing fixers and parks to a human --------
-# Each red-check child embeds "head <oid>" in its rejection_reason, so the
-# distinct prior hex heads across this anchor's children are the attempts made.
-# Under the cap the arm keeps dispatching; at the cap it parks the anchor to a
+# Each red-check child names "head <oid>" in its title and its rejection_reason,
+# so the distinct prior hex heads across this anchor's children are the attempts
+# made. Under the cap the arm keeps dispatching; at the cap it parks the anchor to a
 # human rather than churn another fixer. Heads are full 40-hex because the count
 # extracts a git SHA, the same reason the reap fixtures above use hex.
 CAPH1=1111111111111111111111111111111111111111
@@ -2947,6 +2947,34 @@ rcredview 122 "$CAPHX"
 out=$(run)
 has "$out" "required check(s) failing (test); filed" "three children at one prior head count as a single attempt, so the arm still dispatches"
 eq "$(meta CAP3 'gc.routed_to')" "" "…and does not park"
+rm -f "$GH_DIR/rules_main.json"
+
+# A worked child as the live flow leaves it. Resuming a rework unsets its
+# rejection_reason (mol-polecat-work's rejected-branch-resume block), so the head
+# it was sent to fix survives only in the title the arm minted it with.
+rwchild_worked() { # id anchor num head
+  printf '{"id":"%s","status":"closed","assignee":"rig/refinery","notes":"","issue_type":"task","title":"Fix failing required check(s) on PR#%s: required check red at head %s","metadata":{"task_kind":"rework","anchor_bead":"%s","branch":"polecat/x%s","prepare_mode":"merge","merge_strategy":"mr","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s"}}' \
+    "$1" "$3" "$4" "$2" "$3" "$3" "$3"
+}
+
+echo "# …the cap counts a worked child by the head in its title, since resuming it cleared its rejection_reason"
+reap_req
+store "[$(anchor CAP4 123),$(rwchild_worked CK9 CAP4 123 "$CAPH1"),$(rwchild_worked CK10 CAP4 123 "$CAPH2"),$(rwchild_worked CK11 CAP4 123 "$CAPH3")]"
+rcredview 123 "$CAPHX"
+: > "$STUB_ESC_LOG"
+out=$(run)
+has "$out" "reached the cap (3)" "three worked children with no rejection_reason are three attempts"
+eq "$(meta CAP4 'gc.routed_to')" "human" "…so the anchor parks to a human"
+eq "$(no_rework)" "0" "…and no fourth fixer is dispatched"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# …a worked child at the CURRENT head is not a prior attempt"
+reap_req
+store "[$(anchor CAP5 124),$(rwchild_worked CK12 CAP5 124 "$CAPH1"),$(rwchild_worked CK13 CAP5 124 "$CAPH2"),$(rwchild_worked CK14 CAP5 124 "$CAPHX")]"
+rcredview 124 "$CAPHX"
+out=$(run)
+hasnt "$out" "reached the cap" "two prior heads plus one child at the current head stay under the cap"
+eq "$(meta CAP5 'gc.routed_to')" "" "…and the anchor is not parked"
 rm -f "$GH_DIR/rules_main.json"
 
 # ---- per-review dismissal + re-request once a human review's findings clear ----

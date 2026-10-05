@@ -2234,22 +2234,26 @@ GATES
               echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); child $rc_dup already covers this head, no new child"
               skipped=$((skipped + 1)); continue
             fi
-            # Attempt cap. Each red-check child embeds "head <oid>" in its
-            # rejection_reason, so the distinct hex heads across this anchor's
-            # children (any status) are the fixers already dispatched. This head
-            # is not among them — rc_dup ruled out a child naming it — so the
-            # count is of PRIOR attempts. At the cap, stop churning fixers at a
-            # stuck PR and park it to a human. A stranded child (rescued below) is
-            # this head's attempt whose route failed to land, not a new one, so it
-            # is never capped. Nothing lowers the count, so once an anchor reaches
-            # the cap every later red head parks it again, including the first
-            # pass after a person clears the route.
-            rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" '
+            # Attempt cap. Each red-check child names the head it was sent to fix
+            # twice: in the title it is minted with ("$RC_TITLE required check red
+            # at head <oid>") and in its rejection_reason ("... at head <oid>").
+            # Resuming a rework unsets rejection_reason (mol-polecat-work's
+            # rejected-branch-resume block), so a child that has been worked keeps
+            # its head only in the title, and both are read. The distinct hex heads
+            # across this anchor's children (any status), less this head, are the
+            # PRIOR attempts. At the cap, stop churning fixers at a stuck PR and
+            # park it to a human. A stranded child (rescued below) is this head's
+            # attempt whose route failed to land, not a new one, so it is never
+            # capped. Nothing lowers the count, so once an anchor reaches the cap
+            # every later red head parks it again, including the first pass after
+            # a person clears the route.
+            RC_TITLE="Fix failing required check(s) on PR#$num:"
+            rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" '
               [ .[] | select(.id != $id)
-                | ((.metadata.rejection_reason // "") | tostring)
-                | select(test("Required check"))
+                | ( ((.title // "") | tostring | select(startswith($t))),
+                    ((.metadata.rejection_reason // "") | tostring | select(test("Required check"))) )
                 | scan("head ([0-9a-fA-F]{7,40})"; "i") | .[0] | ascii_downcase ]
-              | unique | length' 2>/dev/null)
+              | unique | map(select(. != ($h | ascii_downcase))) | length' 2>/dev/null)
             case "$rc_attempts" in ''|*[!0-9]*) rc_attempts=0 ;; esac
             if [ -z "$rc_stranded" ] && [ "$rc_attempts" -ge "$RC_FIX_ATTEMPT_CAP" ]; then
               if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
@@ -2270,7 +2274,6 @@ GATES
             # branch shape is brought current by MERGE, never a rebase/force-push.
             rc_prepare=merge
             RC_REASON="Required check(s) failing on PR#$num at head $head_oid: $rc_names.${rc_urls:+ Run log(s): $rc_urls.} Fix the failing check(s) and push to '$rc_fix_branch'. Do NOT open a new PR: this reworks PR#$num."
-            RC_TITLE="Fix failing required check(s) on PR#$num:"
             reuse=""
             if [ -n "$rc_stranded" ]; then
               reuse="$rc_stranded"
