@@ -540,14 +540,21 @@ and its specific cause is spelled out in `needs` as `blocked: <reason>`, read
 from `pr.machine_reason`. It is distinct from `settled`, which is the merge
 cadence's ordinary wait on a review or the merge pass.
 
-**Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
-for the `codex` gate is owed once it has held past three days
-(`preOpenStaleThresholdDays`) with nothing advancing it — no review or rework a
-live session is working, and the gate not yet green. Childless it would otherwise
-band `LOW` and read `in the merge cadence` (a stale `progressing` marker) or
-`position unknown`, so it sinks with no age; the signal bands it `ELEVATED`, dates
-it from the anchor's `updated_at`, and its `needs` names the codex gate and why it
-is stuck — `no review has run`, `findings open`, or `reviewed, not advanced`.
+**Stalled at a pre-open check.** A merge anchor parked at `pre_open_gate` is owed
+once it has held past three days (`preOpenStaleThresholdDays`) with a check not
+yet green and nothing advancing it, meaning no review or rework a live session is
+working. Its checks are the lanes its `check_set` declares, split by the rule
+`merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
+and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
+is green when its `check.<lane>` marker reads `green`. A legacy `codex` lane counts
+like any other, and a `check_set` that declares no lane is never a stalled check.
+Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a
+stale `progressing` marker) or `position unknown`, so it sinks with no age; the
+signal bands it `ELEVATED`, dates it from the anchor's `updated_at`, and its
+`needs` names the first lane in declared order that is not green, with why the
+anchor is stuck: `correctness check stalled — no review has run`, `findings
+open`, or `reviewed, not advanced`. The reason reads every review and rework child
+on the anchor, because a rework title names no lane.
 Routed-ness is not liveness: a review routed to a pool no session is draining is
 itself the stall, not a healthy hold, so the suppression turns on a live worker
 (`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A
