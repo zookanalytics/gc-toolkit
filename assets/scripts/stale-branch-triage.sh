@@ -41,7 +41,8 @@
 #
 # Rails, after worktree-reap.sh: liveness is resolved first and fail-closed — an
 # unreadable ledger, PR list, or branch list sweeps nothing, because every
-# branch would then read as unowned; the archive tag is verified on origin
+# branch would then read as unowned, and a ledger listing that does not parse as
+# a bead list is unreadable; the archive tag is verified on origin
 # before the branch is deleted; a dry run is the review surface and touches
 # nothing; a time budget bounds the pass and the next pass takes the rest.
 #
@@ -183,12 +184,22 @@ LIVE_ROWS="$(gc bd --rig "$RIG" list --status "$LIVE_STATUSES" --limit=0 --json 
     echo "$PROG: live beads for rig '$RIG' are unreadable; sweeping nothing rather than reading every branch as unowned" >&2
     exit 0
 }
+# A listing that exits 0 is read only once it parses as exactly one array of
+# bead rows. A non-JSON payload, an error object, an empty payload, or a row that
+# is not a bead would otherwise contribute no protectors and leave every branch
+# reading as unowned, so each refuses the pass the way a failed listing does.
+OWNED_LIST="$(printf '%s' "$LIVE_ROWS" | scrub \
+    | jq -rs 'if length == 1 and (.[0] | type) == "array" then .[0][]
+              else error("not a bead list") end
+              | (.metadata // {}) as $md
+              | (($md.branch // ""), ($md.target // ""))
+              | select(. != "")' 2>/dev/null)" || {
+    echo "$PROG: live beads for rig '$RIG' did not parse as a bead list; sweeping nothing rather than reading every branch as unowned" >&2
+    exit 0
+}
 while IFS= read -r b; do
     [ -n "$b" ] && OWNED_BRANCH["$b"]=1
-done < <(printf '%s' "$LIVE_ROWS" | scrub \
-    | jq -r '.[]? | (.metadata // {}) as $md
-             | (($md.branch // ""), ($md.target // ""))
-             | select(. != "")' 2>/dev/null || true)
+done <<< "$OWNED_LIST"
 
 # --- open pull requests: a head under review is contested ------------------
 # One listing for the repo. An unreadable listing holds the whole pass: this is

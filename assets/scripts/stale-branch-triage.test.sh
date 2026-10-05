@@ -229,6 +229,19 @@ eq "$RC" 0 "an unreadable ledger exits 0 (soft)"
 has "$OUT" "unreadable" "an unreadable ledger is named"
 if on_origin claude/cold-unmerged; then ok "an unreadable ledger deletes nothing"; else bad "an unreadable ledger deletes nothing"; fi
 
+# A listing that exits 0 is unread until it parses as one array of bead rows.
+# Taking any of these as "no live beads" would leave every branch unowned, so
+# the cold branch that pass would otherwise archive must survive each one.
+for payload in 'not-json-but-exit-zero' '{"error":"store busy"}' '["claude/cold-unmerged"]' ''; do
+  new_origin; mk_branch claude/cold-unmerged 40
+  printf '%s' "$payload" > "$STUB_LIVE"
+  OUT="$(run)"; RC=$?
+  what="an exit-0 ledger reading '${payload:-<empty>}'"
+  eq "$RC" 0 "$what exits 0 (soft)"
+  has "$OUT" "did not parse" "$what is named"
+  if on_origin claude/cold-unmerged; then ok "$what deletes nothing"; else bad "$what deletes nothing"; fi
+done
+
 new_origin; mk_branch claude/cold-unmerged 40
 OUT="$(STUB_PR_RC=1 run)"
 if on_origin claude/cold-unmerged; then ok "an unreadable PR list deletes nothing"; else bad "an unreadable PR list deletes nothing"; fi
