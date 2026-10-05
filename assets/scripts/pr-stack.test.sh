@@ -314,12 +314,10 @@ opened_region() { # id branch checkset summary oldhead
     '<!-- /gc:pr-summary -->'
 }
 
-# compose_managed resolves the handoff bullet's pre-open gates through
-# review-checks.sh at the reviewed head. The scenarios below use synthetic head
-# oids that no `--at` read can resolve, so point the resolver at a readable index
-# — the hermetic-test hook a real cadence caller's `--at` falls through to.
-# Without it the resolver takes its no-index fail-safe (every token gates at
-# merge), and the pre-open gates come back empty.
+# refresh_summary resolves the handoff bullet's gates through review-checks.sh at
+# the PR head. The scenarios below use synthetic head oids that no `--at` read can
+# resolve, so the resolver is pointed at a fixed index — the hermetic-test hook
+# that wins over `--at` — and the bullets name the gates that index declares.
 CHECKS_IDX="$TMP/review-checks.toml"
 printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.triage]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$CHECKS_IDX"
 export GC_REVIEW_CHECKS_INDEX="$CHECKS_IDX"

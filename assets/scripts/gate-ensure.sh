@@ -681,8 +681,11 @@ STRAY
   # (draft_readied set, or opened ready with no open-as-draft gate) every remaining
   # phase dispatches too, so a ready-for-review or merge-phase check gets a review
   # bead rather than relying on the GitHub-approval green fallback forever. The
-  # draft/ready state is read from the markers pr-open.sh records — no gh call. The
-  # one resolver names the set at the reviewed head and drops the non-lanes.
+  # draft/ready state is read from the markers pr-open.sh records — no gh call.
+  # They track the PR: opened_as_draft goes only on a draft the refinery opened as
+  # one, and draft_readied is recorded whenever pr-open reads that PR ready, hold
+  # or no hold. The one resolver names the set at the reviewed head and drops the
+  # non-lanes.
   if [ "$mr" != pull_request ]; then
     GE_THROUGH=pre-open
   elif [ -n "$(meta_of "$row" opened_as_draft)" ] && [ -z "$(meta_of "$row" draft_readied)" ]; then

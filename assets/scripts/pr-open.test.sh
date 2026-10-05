@@ -12,7 +12,12 @@
 # gating the create path; the all-lanes-green gate over every check the anchor
 # declares, which no head move disturbs; the moved-head refusal on the created
 # PR; the comment-not-approval verdict replay; and the de-duplicated ## Summary
-# heading.
+# heading. The phase model: a draft create when an open-as-draft check gates the
+# PR, the draft-to-ready arm (its prefilter, holds, must-fix, loud enumeration
+# failure, and the draft_readied record a held ready PR still takes), adoption's
+# opened_as_draft only for the refinery's own draft, one resolve per anchor, a
+# failing or missing resolver holding the create, and heads read from one pass
+# fetch.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -635,6 +640,120 @@ printf '%s' "$(prrow 78 OPEN polecat/dr9 sha-dr9 main)" > "$GH_DIR/pr_view_78.js
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 eq "$(meta DR9 draft_readied)" "sha-dr9" "an already-ready draft records draft_readied"
 hasnt "$(cat "$STUB_GH_LOG")" "pr ready 78" "…and is not re-flipped"
+
+echo "# adoption stamps opened_as_draft only on a draft the refinery opened as one"
+# The marker hands the ready flip to the draft-to-ready arm, so it goes only on a
+# draft the city opened as a draft and nobody re-drafted since. An adopted READY PR,
+# an operator's own draft, and a city PR someone converted back to draft are all
+# adopted WITHOUT it, so the arm never surfaces a PR somebody parked.
+adopt_row() { # num branch head isDraft author
+  prrow "$1" OPEN "$2" "$3" main | jq -c --argjson d "$4" --arg a "$5" '. + {isDraft:$d, author:{login:$a}}'
+}
+adopt_fixture() { # id num isDraft author — anchor + PR list/view fixtures
+  store "[$(pre "$1" "polecat/$1" '' 'correctness,demo')]"
+  printf '[%s]' "$(adopt_row "$2" "polecat/$1" "sha-$1" "$3" "$4")" > "$GH_DIR/pr_list_polecat_$1.json"
+  adopt_row "$2" "polecat/$1" "sha-$1" "$3" "$4" | jq '. + {body:"A hand-written body."}' > "$GH_DIR/pr_view_$2.json"
+}
+adopt_fixture ad1 81 false gc-city-bot
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(meta ad1 merge_result)" "pull_request" "an adopted READY PR whose check_set names demo flips"
+eq "$(meta ad1 opened_as_draft)" "<absent>" "…without opened_as_draft: it is not a draft"
+adopt_fixture ad2 82 true johnzook
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(meta ad2 merge_result)" "pull_request" "an operator's own draft is adopted"
+eq "$(meta ad2 opened_as_draft)" "<absent>" "…without opened_as_draft, so the refinery never readies it"
+has "$out" "did not open as one" "…and the pass says the flip is not the refinery's"
+adopt_fixture ad3 83 true gc-city-bot
+printf '[{"event":"ready_for_review"},{"event":"convert_to_draft"}]' > "$GH_DIR/timeline_83.json"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(meta ad3 merge_result)" "pull_request" "a city PR someone re-drafted is adopted"
+eq "$(meta ad3 opened_as_draft)" "<absent>" "…without opened_as_draft: the conversion was someone parking it"
+adopt_fixture ad4 84 true gc-city-bot
+printf '[{"event":"labeled"},{"event":"commented"}]' > "$GH_DIR/timeline_84.json"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(meta ad4 opened_as_draft)" "sha-ad4" "the refinery's own never-re-drafted draft records opened_as_draft at its head"
+adopt_fixture ad5 85 true gc-city-bot
+out=$(STUB_TIMELINE_RC=1 GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(meta ad5 merge_result)" "pre_open_gate" "an unreadable draft owner holds the adoption at pre_open_gate"
+has "$out" "draft ownership unreadable" "…and says why"
+
+echo "# each anchor's gates are resolved once, and a resolver that fails holds the create"
+# A counting shim stands in for review-checks.sh: it logs each call and runs the
+# real resolver, or fails when RC_FAIL is set.
+mv "$SD/review-checks.sh" "$SD/review-checks.real.sh"
+cat > "$SD/review-checks.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${RC_CALL_LOG:?}"
+[ -z "${RC_FAIL:-}" ] || exit 1
+exec "$(dirname "$0")/review-checks.real.sh" "$@"
+SH
+chmod +x "$SD/review-checks.sh"
+export RC_CALL_LOG="$TMP/rc-calls.log"
+store "[$(pre ro1 polecat/ro1 '' 'correctness,demo'), $(rev ro1)]"
+echo "sha-ro1" > "$GH_DIR/head_polecat_ro1"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/86"
+printf '%s' "$(prrow 86 OPEN polecat/ro1 sha-ro1 main)" > "$GH_DIR/pr_view_86.json"
+: > "$RC_CALL_LOG"; : > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "opened PR#86" "the anchor opens"
+eq "$(grep -c -- '--resolve' "$RC_CALL_LOG")" "1" "its gates are resolved ONCE for the create gate, the draft decision and the body"
+has "$(cat "$STUB_GH_LOG")" "--draft" "the draft decision reads that one answer"
+has "$(cat "$GH_DIR/pr_create_body.txt")" 'Draft-stage gates `demo`' "…and so does the body"
+store "[$(pre ro2 polecat/ro2 '' 'correctness,demo'), $(rev ro2)]"
+echo "sha-ro2" > "$GH_DIR/head_polecat_ro2"
+: > "$STUB_GH_LOG"
+out=$(RC_FAIL=1 GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "gate set unreadable" "a failed resolve is reported"
+eq "$(meta ro2 merge_result)" "pre_open_gate" "…the anchor stays pre_open_gate"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR opens, ready or draft"
+rm -f "$SD/review-checks.sh"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+eq "$rc" "1" "a missing resolver fails the arm"
+has "$out" "check resolver is missing" "…and says so"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…before anything is opened"
+mv "$SD/review-checks.real.sh" "$SD/review-checks.sh"
+
+echo "# heads come from one pass fetch; an anchor held on a red lane pays no API read"
+store "[$(pre hf1 polecat/hf1 '' 'correctness')]"
+echo "sha-hf1" > "$GH_DIR/head_polecat_hf1"
+: > "$STUB_GH_LOG"
+out=$(STUB_FETCHED_HEAD=sha-hf1 GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "lane 'correctness' does not derive green; held" "an ungreen anchor is held"
+hasnt "$(cat "$STUB_GH_LOG")" "commits/polecat/hf1" "…on the head the pass fetch answered, with no API read of it"
+store "[$(pre hf2 polecat/hf2 '' 'correctness'), $(rev hf2)]"
+echo "sha-hf2" > "$GH_DIR/head_polecat_hf2"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/87"
+printf '%s' "$(prrow 87 OPEN polecat/hf2 sha-hf2 main)" > "$GH_DIR/pr_view_87.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_FETCHED_HEAD=sha-hf2 GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "opened PR#87" "a green anchor opens at the fetched head"
+eq "$(grep -c 'commits/polecat/hf2' "$STUB_GH_LOG")" "1" "…confirmed by one API read just before the create"
+store "[$(pre hf3 polecat/hf3 '' 'correctness'), $(rev hf3)]"
+echo "sha-hf3-new" > "$GH_DIR/head_polecat_hf3"
+: > "$STUB_GH_LOG"
+out=$(STUB_FETCHED_HEAD=sha-hf3-old GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "moved since the pass fetch" "a branch that moved after the fetch is caught"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…no PR opens at the stale head"
+eq "$(meta hf3 merge_result)" "pre_open_gate" "…and the anchor re-gates next pass"
+
+echo "# the draft-to-ready arm fails loudly when the store will not enumerate"
+store "[$(pr_anchor re1 polecat/re1 88 'correctness,demo' sha-re1)]"
+out=$(STUB_LIST_FAIL_ON="merge_result=pull_request" GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1); rc=$?
+eq "$rc" "1" "an unreadable pull_request enumeration fails the arm"
+has "$out" "could not enumerate pull_request anchors" "…naming what it could not read"
+has "$out" "0 readied" "…after still reporting the pass summary"
+
+echo "# a PR GitHub reads ready records draft_readied even while held"
+# Holds stop the flip, not the record: a held anchor whose PR is already ready
+# (readied by hand, then held) records draft_readied, so gate-ensure dispatches its
+# ready-for-review and merge phases instead of pinning it at the draft stage.
+store "[$(pr_anchor dh1 polecat/dh1 89 'correctness,demo' sha-dh1 | jq -c '.metadata.rebase_hold="true"')]"
+printf '%s' "$(prrow 89 OPEN polecat/dh1 sha-dh1 main)" > "$GH_DIR/pr_view_89.json"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(meta dh1 draft_readied)" "sha-dh1" "a held anchor whose PR reads ready records draft_readied"
+hasnt "$(cat "$STUB_GH_LOG")" "pr ready 89" "…and nothing is flipped"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

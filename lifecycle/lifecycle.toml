@@ -515,16 +515,19 @@ keys = [
 #   branch name.
 # opened_as_draft — the head oid a PR was opened (or adopted) as a draft at,
 #   because its check_set names an `open-as-draft` check that gates the
-#   draft->ready flip. pr-open.sh writes it on the pull_request transition; its
-#   PRESENCE is what tells the draft-to-ready arm this is a draft the refinery
-#   owns the flip of (not an operator's manual re-draft) and tells gate-ensure.sh
-#   the anchor is still in the open-as-draft stage. Absent means the PR opened
-#   ready (no draft gate). Never cleared. An oid.
-# draft_readied — the head oid the draft-to-ready arm flipped a PR to ready at
-#   (pr-open.sh). Its PRESENCE stops that arm re-reading the PR every pass and
-#   stops it ever re-flipping a PR an operator later re-drafted, and tells
-#   gate-ensure.sh the anchor reached the ready-for-review stage. Absent means the
-#   arm has not readied it. Never cleared. An oid.
+#   draft->ready flip. pr-open.sh writes it on the pull_request transition: on a
+#   draft it created, or on an adopted draft only when the city's own login
+#   authored it and its timeline carries no conversion to draft. Its PRESENCE is
+#   what tells the draft-to-ready arm this is a draft the refinery owns the flip
+#   of (not an operator's manual draft or re-draft) and tells gate-ensure.sh the
+#   anchor is still in the open-as-draft stage. Absent means the PR opened ready,
+#   or is a draft someone else owns. Never cleared. An oid.
+# draft_readied — the head oid a PR was read ready at (pr-open.sh): the head the
+#   draft-to-ready arm flipped it at, or the head it already read ready at,
+#   whatever holds the anchor. Its PRESENCE stops that arm re-reading the PR
+#   every pass and stops it ever re-flipping a PR an operator later re-drafted,
+#   and tells gate-ensure.sh the anchor reached the ready-for-review stage.
+#   Absent means the arm has not read it ready. Never cleared. An oid.
 
 [metadata.gates]
 keys = [

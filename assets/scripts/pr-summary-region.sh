@@ -22,20 +22,28 @@
 PRS_MARK_OPEN="<!-- gc:pr-summary -->"
 PRS_MARK_CLOSE="<!-- /gc:pr-summary -->"
 
-# review-checks.sh resolves beside this library. The render asks it for the
-# anchor's gates by phase — the one resolver that knows none/off are the gateless
-# sentinels and approval is a merge rule, not a lane — so publishing and merging
-# judge one anchor by one rule.
+# The anchor's gates, by phase, come from review-checks.sh — the one resolver that
+# knows none/off are the gateless sentinels and approval is a merge rule, not a
+# lane — so publishing and merging judge one anchor by one rule. The composer
+# never resolves: a caller resolves once with prs_resolve_phased and hands the set
+# to compose_managed, so the gate a writer holds on, its draft decision and the
+# body it publishes all read one answer.
 _prs_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd 2>/dev/null)" || _prs_lib_dir="."
-PRS_REVIEW_CHECKS="${GC_REVIEW_CHECKS:-$_prs_lib_dir/review-checks.sh}"
+PRS_REVIEW_CHECKS="$_prs_lib_dir/review-checks.sh"
 
-# The open-as-draft gates only, one per line: the checks that run against the open
-# PR before it is surfaced for review.
-prs_draft_gates() { # <check_set> <head_oid>
-  [ -x "$PRS_REVIEW_CHECKS" ] || return 0
-  "$PRS_REVIEW_CHECKS" --resolve --check-set "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null \
-    | awk -F'\t' '$2 == "open-as-draft" { print $1 }'
-  return 0
+# Every gate through the draft stage at <head_oid>, `<name>\t<phase>` per line.
+# A caller that resolves the anchor's gates itself names its own resolver, so its
+# gate and its body cannot ask two different ones. Non-zero when the resolver is
+# missing or fails: an unreadable set is never an empty one, and the caller holds.
+prs_resolve_phased() { # <check_set> <head_oid> [<resolver>]
+  local resolver="${3:-$PRS_REVIEW_CHECKS}"
+  [ -x "$resolver" ] || return 1
+  "$resolver" --resolve --check-set "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null
+}
+
+# One phase band of a resolved set: the names tagged <phase>, one per line.
+prs_band() { # <phased> <phase>
+  printf '%s\n' "${1:-}" | awk -F'\t' -v p="$2" '$2 == p { print $1 }'
 }
 
 # The region always writes its own `## Summary`, so a stored pr_summary that opens
@@ -62,9 +70,12 @@ strip_summary_heading() { # <text>
 # have not re-signed-off there, and one of them may be actively requesting
 # changes. It names the current head and points to the PR's own checks for the
 # live status instead.
-compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> [<mode>]
+#
+# <phased> is the anchor's resolved gate set (prs_resolve_phased at <head_oid>);
+# the two bands the bullets name are partitioned from it here.
+compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> <mode> <phased>
   local summary="$1" desc="$2" id="$3" branch="$4" target="$5" checkset="$6" head_oid="$7" sup_num="$8" sup_head="$9"
-  local mode="${10:-open}"
+  local mode="${10:-open}" phased="${11:-}"
   local greened draftg
   # A standing banner leads the region when the base is an integration branch, so a
   # reviewer reads it before the diff: approving mints this phase into
@@ -92,15 +103,10 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
   fi
   echo; echo "## Refinery handoff"; echo
   printf -- '- Issue: `%s`\n- Source branch: `%s`\n- Target: `%s`\n' "$id" "$branch" "$target"
-  # One resolver fork for both phase bands rather than one each: `--through
-  # open-as-draft --with-phase` names every gate up to the draft stage tagged with
-  # its phase, and the two bands are partitioned here — the pre-open gates signed
-  # off before the PR opened, the open-as-draft gates that run against the open PR.
-  local phased=""
-  [ -x "$PRS_REVIEW_CHECKS" ] && phased=$("$PRS_REVIEW_CHECKS" --resolve \
-    --check-set "$checkset" --through open-as-draft --with-phase --at "$head_oid" 2>/dev/null)
-  greened=$(printf '%s\n' "$phased" | awk -F'\t' '$2 == "pre-open" { print $1 }' | paste -sd, -)
-  draftg=$(printf '%s\n' "$phased" | awk -F'\t' '$2 == "open-as-draft" { print $1 }' | paste -sd, -)
+  # The pre-open gates signed off before the PR opened; the open-as-draft gates run
+  # against the open PR.
+  greened=$(prs_band "$phased" pre-open | paste -sd, -)
+  draftg=$(prs_band "$phased" open-as-draft | paste -sd, -)
   if [ "$mode" = refresh ]; then
     if [ -n "$greened" ]; then
       printf -- '- Head `%.8s`; gates `%s`; see the PR checks for current status.\n' "$head_oid" "$greened"
