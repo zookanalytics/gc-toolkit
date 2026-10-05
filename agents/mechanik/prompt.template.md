@@ -110,15 +110,25 @@ git -C <rig-root> worktree add "$SEED" -b "integration/<convoy-id>" origin/main
 git -C "$SEED" push -u origin "integration/<convoy-id>"
 git -C <rig-root> worktree remove "$SEED"
 
-# 3. File child work beads in the rig's store, link to convoy, sling normally.
+# 3. File each child work bead in the rig's store, link it to the convoy, and
+#    stamp the convoy's target on it before you sling.
+TARGET=$(gc bd --rig <rig> show "$CONVOY" --json | jq -r '.[0].metadata.target // empty')
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
 gc bd dep add "$WORK" "$CONVOY" --type=parent-child
-gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # inherits metadata.target via convoy walk
+gc bd --rig <rig> update "$WORK" --set-metadata target="$TARGET"
+gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # branches from the bead's own target
 ```
 
-Children inherit `metadata.target = integration/<convoy-id>` via the
-convoy-ancestor walk in `gc sling`: polecats branch from the integration
-branch and the refinery lands their work back onto it, never onto main.
+`gc sling` takes `base_branch` from the bead's own `metadata.target` first.
+Without one, it reads the first convoy target on the one parent chain bd
+reports, and then falls back to the rig default branch. A child filed under
+an epic and also linked to the convoy can report the epic as its parent, and
+then sling resolves main. The stamp in step 3 makes every child branch from
+the integration branch whichever parent bd reports, and the refinery lands
+their work back onto it, never onto main. A child slung without the stamp,
+whose reported parent is not the convoy, is held at workspace-setup before
+any branch is cut.
+
 When all children close AND the ledger records at least one landing on the
 branch, the cadence graduates the convoy automatically — a human-approved
 `integration/<id>` -> main PR through the same work-bead machine. Children
@@ -128,6 +138,9 @@ complete but unrecorded convoy deliberately with `gc convoy land`.
 
 Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
 points one dispatch at any ref; explicit `--var` wins over the auto-compute.
+A convoy child takes its override as `metadata.target` instead: workspace-setup
+holds a convoy child whose base differs from the convoy's target unless the
+bead names a target of its own.
 
 **Anti-pattern:** dispatching a shared input artifact to land on main by
 itself, with no convoy above it. Catching this shape is a dispatch judgment

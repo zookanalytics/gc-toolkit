@@ -338,9 +338,9 @@ description = """
 Ensure an isolated git worktree and a clean feature branch. Every check is
 idempotent — safe to re-run after crash/restart.
 
-**Config: base_branch = {{base_branch}}** (resolved by `gc sling`:
-metadata.target on the bead, else the parent convoy chain, else the rig
-default branch)
+**Config: base_branch = {{base_branch}}** (resolved by `gc sling`: the
+bead's own metadata.target, else the first convoy target on the one parent
+chain bd reports, else the rig default branch)
 **Config: setup_command = {{setup_command}}**
 
 **1. Fetch and derive the work bead:**
@@ -362,6 +362,62 @@ if [ -z "$WORK_BEAD_ID" ]; then
   exit 1
 fi
 ```
+
+**1b. Hold a convoy child poured from the wrong base (fails closed).**
+`gc sling` picks `base_branch` with one lookup: the bead's own
+`metadata.target`, else the first convoy target on the parent chain bd
+reports, else the rig default branch. bd reports one parent per bead. A child
+filed under an epic and also linked to an owned convoy can report the epic,
+and then the lookup never reaches the convoy. That child is poured from the
+default branch and would land there, so the convoy's integration branch never
+receives it. This block reads every parent-child edge on the bead. When an
+open convoy among them targets a branch other than `{{base_branch}}`, and the
+bead names neither its own `target` nor a `branch` to resume, the block holds
+the molecule before any worktree exists:
+```bash
+# >>> workspace-setup-convoy-target-guard
+GUARD_JSON=$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null)
+if ! printf '%s' "$GUARD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  echo "convoy target guard: could not read $WORK_BEAD_ID, so it proceeds unguarded; the hold would write to the store this read just failed on" >&2
+  GUARD_JSON='[{}]'
+fi
+CONVOY_TARGETS=$(printf '%s' "$GUARD_JSON" | jq -r --arg base "{{base_branch}}" '
+  .[0] as $b
+  | (($b.metadata // {}) | [((.target // "") | tostring), ((.branch // "") | tostring)]) as $own
+  | if $own[0] != "" or $own[1] != "" then ""
+    else [ $b.dependencies[]?
+           | select(.dependency_type == "parent-child" and .issue_type == "convoy" and .status != "closed")
+           | (((.metadata // {}).target // "") | tostring) as $t
+           | select($t != "" and $t != $base)
+           | $t + " (convoy " + .id + ")" ]
+         | unique | join(", ")
+    end' 2>/dev/null)
+if [ -n "$CONVOY_TARGETS" ]; then
+  GUARD_POOL=$(printf '%s' "$GUARD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // "<pool>"' 2>/dev/null)
+  GUARD_STAKE="This work would branch from {{base_branch}} and land there, but it belongs to a convoy that lands on $CONVOY_TARGETS, so that branch would never receive it"
+  GUARD_RELEASE="stamp the landing branch on the bead (gc bd update $WORK_BEAD_ID --set-metadata target=<branch>, naming the convoy branch, or {{base_branch}} if that base was deliberate), retire this molecule (gc workflow delete-source $WORK_BEAD_ID --apply), and re-sling the bead (gc sling ${GUARD_POOL:-<pool>} $WORK_BEAD_ID), which then branches from its own target"
+  gc bd update "$WORK_BEAD_ID" --append-notes "Convoy target guard: $GUARD_STAKE. Held at workspace-setup before any worktree was poured. To release, $GUARD_RELEASE."
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-convoy-target-mismatch --message "$GUARD_STAKE. Held at workspace-setup; nothing was poured, pushed or closed. To release, $GUARD_RELEASE."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "convoy target guard: base_branch {{base_branch}} differs from convoy target $CONVOY_TARGETS and the bead names no target; stamp its target, retire this molecule, then re-sling the bead"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
+# <<< workspace-setup-convoy-target-guard
+```
+
+A bead with its own `target` passes, because sling took that target before
+any parent. A bead with a recorded `branch` resumes that branch and cuts
+nothing from `{{base_branch}}`. A closed convoy expects no more landings, so
+its target does not count. An unreadable bead passes with a warning, because
+the hold writes to the same store the read just failed on. The visit names the
+release: stamp the landing branch as the bead's `target`, retire this
+molecule, and re-sling the bead, which then pours from its own target.
 
 **2. Worktree — reuse or create.** Reuse `metadata.work_dir` when the
 directory still exists; otherwise create one scoped to the BEAD (not the

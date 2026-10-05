@@ -34,7 +34,7 @@ agents/mechanik/PROVENANCE.md
 agents/mechanik/agent.toml
 dfc288929ab8afc50b01275a7b7a9b1a2f00804043fbdab010cb7f841bb54901
 agents/mechanik/prompt.template.md
-44e4ec30ff963124cbee7b221d417f2464e96aad8190eb1eaf5032706c18d300
+70456c46becf615b8f4675a50487c02c00d5b09d86aef651217c121fad3d709b
 agents/polecat-codex/agent.toml
 232a9b3bd2c4322bfcfcf3b562608354a4b0049c6bde2d0d635a256ba4bf9933
 agents/polecat-codex/prompt.template.md
@@ -70,7 +70,7 @@ formulas/mol-feedback-miner.toml
 formulas/mol-first-reaction.toml
 52709493ee385b642418497af636439a90a04c3e21339d85934e77a876e39a8f
 formulas/mol-polecat-work.toml
-7a5b5124424aaf70ed942438892ebc136d4ac4e140b85e37f2bb948c2869fde0
+e0ece332a8df1ea283555395646f9d195db4382e4249ffe1e92814a60cf4f626
 formulas/mol-refinery-patrol.toml
 6c15a431c5972b7cfcfc2e860fd33fe1df3db779e55fef873ecb64d1dda87bd1
 formulas/mol-review-quorum-signoff.toml
@@ -132,7 +132,7 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 4cc4ec151e31b86d2d38f6d435d98361cc710274c5a1a884c23d45bbde434d69
 template-fragments/polecat-doctrine.template.md
-fc78ee4c74edaee62dc5e011f7d7a2d18a3a8c4c495ab751d2b236f97f8a4ab0
+1828b55e004f20a682517992ab7ccbb81385bc5ca8c3994dfdc515c2431109ea
 template-fragments/scratch-reclaim.template.md
 f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
