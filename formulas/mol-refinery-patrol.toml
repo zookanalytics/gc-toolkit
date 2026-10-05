@@ -57,7 +57,7 @@ default = ""
 
 [vars.lint_command]
 description = "Lint command. Empty = skip."
-default = ""
+default = "tools/lint.sh $(git diff --name-only origin/main...HEAD)"
 
 [vars.test_command]
 description = "Test command (when run_tests is true)."
@@ -137,13 +137,21 @@ returns a bead here clears the field first.
 # tr -d '[:cntrl:]' drops the control bytes JSON forbids raw before the parse.
 # The shape guard then fails CLOSED on anything still unparseable, so a broken
 # read ends the turn visibly instead of reading as an empty queue.
-WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=25 --json | tr -d '[:cntrl:]')
+# The window is unbounded (--limit=0). Selection orders by priority then
+# created_at, but bd sorts server-side on one field at a time, so any bounded
+# single-key window can truncate off the bead this sort should pick: a newer
+# high-priority handoff would fall past a created-ordered window, and the oldest
+# within a band would fall past a priority-ordered one. Fetching the whole
+# assigned-handoff set lets the client-side sort below see every candidate.
+# created_at ranks wait time; updated_at does not, because any later write to a
+# waiting handoff re-stamps it, so it tracks last-touched rather than age.
+WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=0 --json | tr -d '[:cntrl:]')
 if ! printf '%s' "$WORK_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "find-work: work list did not parse as a JSON array (bd unreadable, or a payload no scrub could rescue) — ending the turn without claiming; the next patrol retries." >&2
   gc runtime drain-ack
   exit 0
 fi
-WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
+WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
 WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
 if [ -n "$WORK_PARKED" ]; then
   echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the cadence, never by find-work; flag only — do not re-gate it, do not clear it here." >&2
@@ -151,9 +159,13 @@ fi
 # <<< find-work-select
 ```
 
-`${GC_RIG:+--rig}` scopes to this refinery's rig store; `--limit=25` (not 1)
-because the filter is client-side — a parked anchor at the head of a 1-row
-window would starve a queue with real work behind it. Flag, never rewrite.
+`${GC_RIG:+--rig}` scopes to this refinery's rig store; `--limit=0` fetches the
+whole assigned-handoff set, because selection orders by priority then created_at
+and bd sorts on one field server-side, so any bounded window could truncate off
+the bead the client-side sort would pick. An unbounded window also means a
+parked anchor can never crowd real work out of it; the client-side filter drops
+the anchors and the sort takes the highest-priority, oldest-within-band
+handoff. Flag, never rewrite.
 
 If found: confirm `metadata.branch` exists (`gc bd show $WORK --json`),
 default `metadata.target` to {{target_branch}}, note the id, close this
@@ -833,7 +845,8 @@ needs = ["patrol-summary"]
 description = """
 Pour the next wisp BEFORE burning this one, and GUARD the assign — a poured
 but unassigned wisp reaches no hook and drops the loop. Forward every
-declared var: a --root-only pour materializes no defaults.
+declared var, so a value chosen at the startup pour is not silently
+replaced by the formula default from the next cycle on.
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
 current wisp has to work: a wisp is an EPHEMERAL molecule, which means
