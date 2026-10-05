@@ -154,7 +154,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I12** | A bead's kind is `metadata.task_kind`, and no reader decides a kind from a label ([what kind of bead this is](#what-kind-of-bead-this-is)). Where a reader narrows a listing with `-l <kind>` it re-filters on `task_kind`, and every writer of that kind sets the label — a narrowing on a label some writer omits returns a quietly short answer. | **UNCHECKED** (tk-0i90x5). The reader half is held by construction and by test: every kind branch in the pack reads `task_kind`, and `learning-recurrence.test.sh` pins the one script that narrows by label against a bead carrying the label without the kind. The writer half — for each kind a reader narrows on, no live bead carries the `task_kind` without the label — is the check that does not exist; only `observation` is narrowed on by a reader today, and it is clean at filing, so the check would ship as a forward regression detector. |
 | **I13** | Every started workflow root is still advancing or reachable: an in_progress `gc.kind=workflow` root whose owning session is gone and whose work has not landed does not sit behind an executable frontier that is unclaimable — unrouted AND unowned — which no pool can be offered and no orphan recovery reaches. | `doctor/check-root-advancing` (tk-d12vam): a graph.v2 molecule runs its continuation-group steps inline in one pool session, and those steps carry no owner and no route by construction, so a drain landing mid-molecule strands them past both recovery paths — the witness's orphan recovery keys on an assignee, and no route means no pool is offered them. Reported STRANDED (error) only when all four hold, each a distinct healthy shape it must not report: SILENT (root or any member, a close included, untouched past the bound — default 120m, `GC_DOCTOR_ROOT_STALL_MINUTES`); UNHELD (no live session behind the root's `gc.session_name` or any member's assignee, `gc.session_id` or `gc.session_name` — the affinity slot a restart reuses counts, so a live slot exempts); STARTED (at least one step has closed, so it moved then stopped, AND its input convoy is still open, since a convoy closes when its one work bead lands); UNCLAIMABLE (a non-empty executable frontier — the `bd ready` members minus the inert `workflow`/`scope`/`spec` topology kinds poured alongside steps — every member unassigned AND carrying neither `gc.routed_to` nor `gc.execution_routed_to`, so the execution route a recovery fix stamps reads as reachable). A non-empty `gc.takeaway` or `hold_reason` on the root or a member is a note. It is the root-level complement to I8 (closed roots) and I11 (claimed or routed steps), neither of which fires here. Fails toward silence: an unread roster declines the run, and an unread store, convoy or closed-step listing leaves that unit unjudged rather than flagged. |
 
-Ten further checks guard structure that is not an anchor invariant:
+Eleven further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent),
@@ -187,6 +187,12 @@ order within its cadence, so one that has stayed armed and open past that window
 one armed at a non-open status `bd ready` never answers — is a dispatch silently not
 firing; the is_blocked flag cascades down parent-child edges, so such an arm appears in
 `bd blocked` under an ancestor and `check-blocked-work-armed` cannot see it; warn-only),
+and `doctor/check-until-resolved-owed` (the resolved-by mirror of
+`check-armed-dispatch-owed`: the same reconcile order disposes an open, unassigned
+bead through `bead-rehome.sh` within its cadence once every one of its own `until`
+targets has closed, so one still undisposed past that window, with no open
+`blocks` blocker holding it, is a disposition silently not firing; the common
+stuck case is an open visit on the bead holding the close; warn-only),
 and `doctor/check-feedback-routing-owed` (the complement to the merge cadence's
 feedback arm: a cheap pre-merge arm records a PR's review posture on the anchor and
 a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture` is
@@ -200,12 +206,12 @@ open unassigned task/bug/defect there — unrouted or routed to a pool — is
 marooned by construction; the operator-queue decisions routed to human, daily
 digests, and doctor and tech-debt advisories that legitimately live there are
 exempt).
-An eleventh non-invariant check, `doctor/check-demo-toolchain`, reports readiness
+A twelfth non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, a Chromium
 build, ffmpeg, and `OPENAI_API_KEY` — is resolvable, warn-only, so a demo
 session learns before it captures whether the clip will narrate or degrade to a
 silent, captioned one.
-That is the whole set: **23 checks — 22 asserting a live structural property
+That is the whole set: **24 checks — 23 asserting a live structural property
 and one reporting toolchain readiness** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
@@ -322,8 +328,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | Component | Workflow | Why it sits there |
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
-| `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
-| `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
+| `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed, and disposes work whose `until` targets have closed. |
+| `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs. A pending dispatch is a fact about the work, so it lives on the work bead, and so does a resolution: an `until` edge records that the bead is resolved when another one closes. The pass slings an armed bead once its blockers close, and disposes an open, unassigned bead through `bead-rehome.sh` once every one of its `until` targets has closed. A `blocks` edge never disposes. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
@@ -359,7 +365,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
-| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, and `duplicate-sweep.sh`. |
+| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, `duplicate-sweep.sh`, `pr-facts.sh` consummating a pre-recorded PR-close disposition, and `deferred-dispatch.sh` disposing a bead its `until` targets resolved. |
 | `assets/scripts/pr-dispose.sh` | visit | Records a deliberate supersede/not-planned PR-close disposition on the open anchor and closes the PR, so `pr-facts.sh` consummates it through `bead-rehome.sh` instead of filing a rework-or-close visit. The PR side of the same disposition doctrine, with the same callers: converse dispositions and operator close-outs. |
 | `assets/scripts/gc-terminal-attach.sh` | visit | The city web terminal's attach target. |
 | `assets/scripts/tmux-visit-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |

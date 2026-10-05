@@ -1,13 +1,17 @@
-# deferred-dispatch — perform the dispatches owed once their blockers clear.
+# deferred-dispatch — perform the dispatches owed once their blockers clear, and
+# dispose the beads an `until` dependency resolved.
 # `gc sling` reads no `blocks` deps, so a dep between work beads holds nothing;
 # `deferred-dispatch.sh arm` records the owed dispatch ON the bead and this
-# order slings each armed bead once `bd` reports it ready. Exec, not a formula:
-# one `bd list` + one sling per ready bead needs no LLM. Rig-scoped: one pass
+# order slings each armed bead once `bd` reports it ready. An `until` dep says
+# "X resolves me": once every `until` target of an open, unassigned bead has
+# closed, the same pass disposes that bead through bead-rehome, so its close
+# carries a successor pointer. A `blocks` dep never disposes. Exec, not a formula: store reads plus
+# one sling or bead-rehome call per owed bead need no LLM. Rig-scoped: one pass
 # per importing rig against its own store; the runtime's open-tracking gate is
 # the single-flight guard, so keep `timeout` under the tracking sweep's
 # stale-after (10m). Tune interval from city.toml [[orders.overrides]].
 [order]
-description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first"
+description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first; dispose through bead-rehome every open, unassigned bead whose until targets have all closed"
 trigger = "cooldown"
 interval = "2m"
 timeout = "120s"
