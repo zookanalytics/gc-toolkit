@@ -12,7 +12,7 @@
 #   anchor_bead      the gating anchor
 #   check_name       the lane it backs (absent resolves to correctness, as elsewhere)
 #   reviewed_oid     the head the validator ruled converged (a dispatch pin, read
-#                    by no gate as a claim about a commit)
+#                    by no check as a claim about a commit)
 #   signoff_verdict  approve
 #   gc.outcome       recorded, or superseded once the validator retires it
 #
@@ -38,8 +38,8 @@
 #                   feedback batch (check_name=human) the validator ruled has not
 #                   converged. A batch rules the whole diff, so it supersedes the
 #                   approve backing of EVERY lane the anchor's check_set declares —
-#                   not the check_name=human pseudo-lane no gate reader derives
-#                   green from. This is what returns the real gates to unreviewed
+#                   not the check_name=human pseudo-lane no check reader derives
+#                   green from. This is what returns the real checks to unreviewed
 #                   so a fresh whole-diff review is dispatched and holds the merge.
 #
 # A must-fix finding still open holds the lane at `fixing` and the merge on its
@@ -230,7 +230,7 @@ cmd_supersede_anchor() {
   # A human feedback batch rules the whole diff, so its non-convergence returns
   # every lane the anchor's check_set declares to unreviewed. The lanes are read
   # from the anchor here rather than passed in: the pass carries check_name=human,
-  # a pseudo-lane no check_set names, and superseding it moves nothing a gate
+  # a pseudo-lane no check_set names, and superseding it moves nothing a check
   # reader derives green from. Fail closed if the anchor or its check_set will not
   # read — a silent no-op here leaves the merge open on a review the validator
   # required.
@@ -243,9 +243,9 @@ cmd_supersede_anchor() {
     || { warn "anchor $anchor declares no check_set; refusing to treat that as no gating lane"; exit 2; }
 
   # Drop the non-lane check_set tokens, the same list merge.sh and pr-open.sh
-  # apply: none/off is gateless by choice and approval is met by a GitHub review,
+  # apply: none/off is checkless by choice and approval is met by a GitHub review,
   # not a lane derivation. A check_set naming only those has no lane to move, so a
-  # deliberately gateless anchor is a zero no-op, not an error.
+  # deliberately checkless anchor is a zero no-op, not an error.
   local lanes
   lanes=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' | grep -Eiv '^(none|off|approval)$')
   [ -n "$lanes" ] || { echo 0; return 0; }

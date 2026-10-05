@@ -9,7 +9,7 @@
 # (gc.pr_close_disposition_*, stamped by pr-dispose.sh), auto-dispose it through
 # bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
 # + escalate.sh visit; base moved -> retargeted +
-# escalate (gate markers cleared: a review of the pre-retarget diff proves
+# escalate (check markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING with no feedback owed -> file ONE
 # merge-in rework child while none is in flight, to the fix pool that brings the
 # branch current by MERGE (no branch shape is
@@ -624,7 +624,7 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # authored by a login other than ours (unanswered-feedback-body), so a review
 # posted UNDER our own login — an outside review agent, an operator-run review, a
 # reviewer using the automation's credential — sets no `unanswered` and routes
-# nowhere, and the gate stays green across it (lane-state reads the finding and
+# nowhere, and the check stays green across it (lane-state reads the finding and
 # review-outcome beads, never a thread), so nothing re-reviews it. This reads the
 # review THREADS instead of the comment authors. A thread counts as an unengaged
 # finding when it is unresolved, carries a comment that is not one of our own
@@ -676,7 +676,7 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
            | select(((.body // "") | contains($marker)) | not) ] | length' 2>/dev/null)
   case "$sf" in ''|*[!0-9]*) sf=0 ;; esac
   [ "$sf" -gt 0 ] || return 1
-  # Only a green gate hides findings: a red lane is already re-reviewing.
+  # Only a green check hides findings: a red lane is already re-reviewing.
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
@@ -1079,7 +1079,7 @@ CHILDREN_EOF
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # A review posted under OUR OWN login leaves unresolved finding threads arm 7
       # never counts — it reads other logins — so `unanswered` stays 0 while the
-      # gate stays green, and the posture would read review_required/none. merge.sh
+      # check stays green, and the posture would read review_required/none. merge.sh
       # reads posture off the bead and never reads threads, and the full pass that
       # would file the visit runs after merge, so the hold has to be recorded HERE,
       # in the pre-merge pass. Fold a confirmed hold into `commented`; a read that
@@ -1176,7 +1176,7 @@ GATES
       flagged=$((flagged + 1))
       escalate "$id" "pr-retargeted.$num" \
         "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
-      echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, gate markers cleared, escalated"
+      echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, check markers cleared, escalated"
     else
       echo "$PROG: $id retargeted transition failed; retry next pass" >&2
       skipped=$((skipped + 1))
@@ -1999,8 +1999,8 @@ $CBODY"
     # through, leaving the dismissal arm below to act if it applies.
   fi
 
-  # --- dismiss our OWN superseded CHANGES_REQUESTED when the gate is green -------
-  # Only when every declared gate reads green but GitHub is still red on our own
+  # --- dismiss our OWN superseded CHANGES_REQUESTED when the check is green -------
+  # Only when every declared check reads green but GitHub is still red on our own
   # block, left at a commit other than the live head. Never a human's review;
   # skipped when native auto-merge is armed (the dismissal would hand GitHub the
   # landing).
@@ -2038,7 +2038,7 @@ GATES
         skipped=$((skipped + 1)); continue
       fi
       if gh_api_origin -X PUT "repos/$ORIGIN_REPO/pulls/$num/reviews/$stale_rid/dismissals" \
-           -f message="Superseded: check gates are green at the live head $head_oid; this block was pinned to a commit that is no longer the head." >/dev/null 2>&1; then
+           -f message="Superseded: checks are green at the live head $head_oid; this block was pinned to a commit that is no longer the head." >/dev/null 2>&1; then
         dismissed_n=$((dismissed_n + 1))
         echo "$PROG: $id — dismissed our own superseded CHANGES_REQUESTED (review $stale_rid) on PR#$num; signoff_dismissed recorded"
       else
@@ -2061,7 +2061,7 @@ GATES
   if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
     UTKEY="pr-unengaged-threads.$num.$head_oid"
     escalate "$id" "$UTKEY" \
-      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login (an outside review agent, or an operator-run review), so the comment-routing arm never counted them and the green gate triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
+      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login (an outside review agent, or an operator-run review), so the comment-routing arm never counted them and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
     UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
     if [ -z "$UTVID" ]; then
       echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2

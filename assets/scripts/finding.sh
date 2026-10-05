@@ -406,7 +406,7 @@ cmd_set_disposition() {
       # the arm does not land, and read the arm back off the bead — an un-gated or
       # un-armed follow-up is the unclaimable orphan again, and the finding is about
       # to close off the validator's unvalidated set where nothing re-attempts it.
-      gc bd dep add "$anchor" "$followup" --type blocks >/dev/null 2>&1 \
+      gc bd dep "$anchor" --blocks "$followup" >/dev/null 2>&1 \
         || { warn "deferred $finding: could not wire anchor $anchor --blocks follow-up $followup; NOT closing"; exit 2; }
       edge_exists "$anchor" "$followup" \
         || { warn "deferred $finding: anchor $anchor does not block follow-up $followup after wiring; NOT closing"; exit 2; }

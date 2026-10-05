@@ -38,9 +38,13 @@ for v in GC_RIG GC_CITY_PATH GC_CITY GC_AGENT GC_SESSION_NAME GC_SESSION_ID \
 done
 
 # The whole namespace, not just the names above: a variable a future city release
-# adds must be gone too, or the leak returns one release later.
-resid="$(compgen -v | grep -E '^(GC_|BEADS_)' || true)"
+# adds must be gone too, or the leak returns one release later. GC_NO_API is the
+# one deliberate exception. harness_init sets it, rather than inheriting it, to
+# pin the gctk read seam onto the stubbed gc the same way GCTK_BIN is pinned. The
+# sweep excludes it by exact name, and the assertion below proves the pin took.
+resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF GC_NO_API || true)"
 if [ -z "$resid" ]; then ok "no GC_/BEADS_ variable survives harness_init"; else bad "residual city vars: $resid"; fi
+eq "${GC_NO_API:-}" "1" "harness_init pins GC_NO_API=1 so a gctk read hits the stub, not the live daemon"
 
 # GCTK_* is out of scope: the port pin stays, and a pre-init build path is not
 # collateral — a blanket GC* unset would have taken GCTK_BUILT with it.
@@ -55,6 +59,21 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 # A suite that WANTS a rig sets it after harness_init returns.
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
+
+# The gc bd dep stub mirrors real bd's blocks orientation. Real `dep add
+# <blocked> <blocker> --type blocks` makes the SECOND operand the blocker — the
+# documented `dep add Y X` equals `dep X --blocks Y`. A stub that stored the add
+# source-first lets a reversed dep-add read back as the intended edge and pass,
+# so the orientation is pinned here.
+store '[{"id":"tk-blk","status":"open","assignee":"","title":"b","notes":"","metadata":{}},{"id":"tk-kd","status":"open","assignee":"","title":"k","notes":"","metadata":{}}]'
+down_blockers() { gc bd dep list "$1" --direction=down -t blocks --json | jq -r '.[].id' | tr '\n' ' '; }
+: > "$STUB_DEPS"
+gc bd dep add tk-kd tk-blk --type blocks
+has " $(down_blockers tk-kd) " " tk-blk " "dep add <blocked> <blocker> --type blocks: the second operand is the blocker"
+hasnt " $(down_blockers tk-blk) " " tk-kd " "...not the reverse — the first operand is the blocked, never a blocker"
+: > "$STUB_DEPS"
+gc bd dep tk-blk --blocks tk-kd
+has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> lands the same orientation as the dep add form"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

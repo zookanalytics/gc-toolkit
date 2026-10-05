@@ -9,7 +9,7 @@
 # than rewritten);
 # refusing fork/foreign/uncertifiable rows; the closed-unmerged headstone (fresh
 # PR + supersede note; same-head close is a human decision left alone); holds
-# gating the create path; the all-lanes-green gate over every gate the anchor
+# gating the create path; the all-lanes-green gate over every check the anchor
 # declares, which no head move disturbs; the moved-head refusal on the created
 # PR; the comment-not-approval verdict replay; and the de-duplicated ## Summary
 # heading.
@@ -246,7 +246,7 @@ out=$("$SUT" 2>&1)
 has "$out" "held (merge_hold" "merge_hold holds the create"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR published past the hold"
 
-echo "# a declared gate short of green holds"
+echo "# a declared check short of green holds"
 store "[$(pre B2 polecat/b2)]"
 echo "sha-b2" > "$GH_DIR/head_polecat_b2"
 : > "$STUB_GH_LOG"
@@ -255,10 +255,10 @@ has "$out" "lane 'correctness' does not derive green" "a lane short of green hol
 eq "$(meta B2 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
 # The gate check is row-only (green is a state of the lane, not the head), so
 # it is judged before the head fetch: a held anchor pays no network call.
-hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an ungreen gate holds before the head is ever fetched"
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an ungreen check holds before the head is ever fetched"
 
 # The whole of the 211: a green lane is green however far the branch has moved
-# since the verdict, so the head the PR opens at is not the gate's business.
+# since the verdict, so the head the PR opens at is not the check's business.
 echo "# a green lane publishes at a head no verdict ever named"
 store "[$(pre B2b polecat/b2b), $(rev B2b)]"
 echo "sha-b2b-moved-on" > "$GH_DIR/head_polecat_b2b"
@@ -271,18 +271,18 @@ has "$(cat "$STUB_GH_LOG")" "pr create" "…and the PR is opened"
 
 # The gate is the anchor's whole declared set: a set naming a second reviewer
 # publishes only once that reviewer has answered, and a set naming no
-# marker-bearing gate publishes rather than waiting on a marker no arm writes.
-echo "# a second declared gate with no marker holds the publish"
+# marker-bearing check publishes rather than waiting on a marker no arm writes.
+echo "# a second declared check with no marker holds the publish"
 store "[$(pre B3 polecat/b3 '' 'correctness,triage'), $(rev B3)]"
 echo "sha-b3" > "$GH_DIR/head_polecat_b3"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "lane 'triage' does not derive green" "the unbacked second lane holds"
 eq "$(meta B3 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
-hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR is published past an unanswered gate"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR is published past an unanswered check"
 hasnt "$(cat "$STUB_GH_LOG")" "commits/" "…and the head was never fetched to decide it"
 
-echo "# an empty check_set is never the gateless opt-out"
+echo "# an empty check_set is never the checkless opt-out"
 store "[$(pre B4 polecat/b4 '' '')]"
 echo "sha-b4" > "$GH_DIR/head_polecat_b4"
 : > "$STUB_GH_LOG"
@@ -291,7 +291,7 @@ has "$out" "no normalized check_set" "an unnormalized anchor is held, not publis
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and nothing is opened under it"
 hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an unnormalized check_set holds before the head is ever fetched"
 
-echo "# check_set=none publishes: gateless BY CHOICE is not a missing marker"
+echo "# check_set=none publishes: checkless BY CHOICE is not a missing marker"
 store "[$(pre B5 polecat/b5 '' 'none')]"
 echo "sha-b5" > "$GH_DIR/head_polecat_b5"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/61"

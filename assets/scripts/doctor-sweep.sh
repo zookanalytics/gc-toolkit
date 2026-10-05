@@ -13,6 +13,8 @@
 #
 #   nothing live, sweep or retry due     start one detached     state=started
 #   nothing live, none due yet           nothing                state=idle
+#   due, one already started this hour   hold the cadence       state=throttled
+#   due, but the data plane is degraded  stand down for now     state=deferred
 #   in flight                            report progress        state=running
 #   finished                             collect it             state=complete
 #   finished badly, or bad payload       a FAILED scan          state=failed
@@ -47,6 +49,9 @@ env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps (default 3600)
                                      launch with setsid/nohup instead
        GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT  seconds bounding the pre-spawn Dolt
                                      health probe (default 20)
+       GC_DOCTOR_SWEEP_CADENCE_DIR   where the cross-session cadence lock and
+                                     last-start timestamp live (default under
+                                     $XDG_RUNTIME_DIR, else a per-uid /tmp path)
 USAGE
 }
 
@@ -101,6 +106,20 @@ STATE_DIR="${GC_DOCTOR_SWEEP_STATE_DIR:-$DEFAULT_STATE_DIR}"
 RUN="$STATE_DIR/current"
 STAMP="$STATE_DIR/last-start"
 OUTCOME="$STATE_DIR/last-outcome"
+
+# The cadence floor's lock and last-start live OUTSIDE STATE_DIR, at a path every
+# one of the user's sessions shares and that survives a session recycle, so a
+# sweep one session starts is visible to the next even when STATE_DIR is the
+# per-session fallback above. XDG_RUNTIME_DIR is the user's systemd runtime dir;
+# with none, a fixed per-uid /tmp path stands in. The same place for every
+# session is what lets the floor serialize them, independent of STATE_DIR.
+CADENCE_DIR="${GC_DOCTOR_SWEEP_CADENCE_DIR:-}"
+if [ -z "$CADENCE_DIR" ]; then
+  if [ -n "${XDG_RUNTIME_DIR:-}" ]; then CADENCE_DIR="$XDG_RUNTIME_DIR/gc-doctor-sweep"
+  else CADENCE_DIR="/tmp/gc-doctor-sweep.$(id -u 2>/dev/null || echo 0)"; fi
+fi
+CADENCE_STAMP="$CADENCE_DIR/last-start"
+CADENCE_LOCK="$CADENCE_DIR/lock"
 
 NOW="$(date +%s)"
 
@@ -172,23 +191,6 @@ kill_tree() { # <root-pid>
   sleep 2
   for p in $pids; do kill -KILL "$p" 2>/dev/null; done
   kill -KILL "$root" 2>/dev/null
-}
-
-# Whether a doctor sweep this launcher started is still running, read from the
-# systemd user manager rather than STATE_DIR so a blind or non-persistent state
-# directory cannot hide it. Echoes the live unit and returns 0; returns 1 when
-# none is active, when systemd is not the launcher here, or when the query
-# cannot answer — a backstop never blocks a start it could not justify.
-sweep_unit_live() {
-  [ -z "${GC_DOCTOR_SWEEP_NO_SYSTEMD:-}" ] || return 1
-  command -v systemctl >/dev/null 2>&1 || return 1
-  { [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; } || return 1
-  local unit
-  unit="$(timeout 10 systemctl --user list-units --no-legend \
-            'gc-doctor-sweep-*.service' 2>/dev/null \
-          | awk '$3 == "active" { print $1; exit }')"
-  [ -n "$unit" ] || return 1
-  printf '%s' "$unit"
 }
 
 # Whether Dolt is degraded enough that a sweep must not pile onto it. Echoes a
@@ -385,6 +387,7 @@ DO_START=0
 NEW_WINDOW=""     # window-start to stamp on a start; empty leaves it in place
 NEW_ATTEMPTS=""   # attempts to stamp on a start
 NEXT_IN=""        # seconds until the window reopens, for the idle report
+RETRY=0           # a retry the window authorized: exempt from the cadence floor
 if [ -z "$WINDOW_START" ] || [ -z "$ATTEMPTS" ]; then
   # Missing or corrupt pair: degrade to one start per interval on last-start.
   if [ -n "$SINCE" ] && [ "$SINCE" -lt "$INTERVAL" ]; then
@@ -398,7 +401,7 @@ elif [ "$(( NOW - WINDOW_START ))" -ge "$INTERVAL" ]; then
 elif [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ] && [ "$LAST_OUTCOME" = "failed" ]; then
   # One retry inside the open window after a failed run. Leaving window-start
   # in place is what makes the per-interval ceiling hold however runs fail.
-  DO_START=1; NEW_ATTEMPTS=$(( ATTEMPTS + 1 ))
+  DO_START=1; NEW_ATTEMPTS=$(( ATTEMPTS + 1 )); RETRY=1
 else
   # Window still open and either the cap is spent or the last run completed.
   NEXT_IN=$(( INTERVAL - ( NOW - WINDOW_START ) ))
@@ -416,32 +419,64 @@ fi
 
 # --------------------------------------------------------------- pre-spawn --
 # A start is due. Two last gates stand before spawning a ~10-minute sweep that
-# queries every store's Dolt, and both exist so this health check can never
-# drive the data plane it watches from a slowdown into a collapse.
+# queries every store's Dolt. The Dolt-health gate keeps the sweep off a data
+# plane that is already unreachable or overloaded. The cadence floor keeps a
+# would-be burst — concurrent sessions, or a rapidly recycled one whose STATE_DIR
+# cannot see the last start — collapsed to one sweep per interval. Together they
+# stop this health check from driving the data plane it watches into a collapse.
 
-# A sweep already running, even when STATE_DIR cannot see it. The in-flight and
-# interval guards above read only STATE_DIR, which falls back to a per-process
-# /tmp path when the city is unset and need not survive a rapidly recycled fresh
-# session; a blind STATE_DIR un-gates a burst of concurrent starts where there
-# should be one. A systemd user unit outlives the session, so it answers "is a
-# sweep already running" independent of STATE_DIR, and one live unit collapses a
-# would-be burst to a single sweep.
-if UNIT_LIVE="$(sweep_unit_live)"; then
-  report running "reason=unit-already-live" "unit=$UNIT_LIVE" "bound=$BOUND"
-  exit 0
-fi
-
-# Dolt degraded. Starting a sweep while the data plane is unreachable or
-# overloaded is the amplifier this brake removes; the probe is far cheaper than
-# the sweep it gates. Deferring here, past the start decision, covers the
-# ordinary hourly start and equally the retry a failed run armed at the gate
-# above: neither spawns while Dolt is down. window-start and attempts are left
-# untouched, so the deferred start fires on the next pass once Dolt recovers,
-# with no attempt burned on a sweep that never ran.
+# Dolt degraded. Piling a ~10-minute sweep onto a data plane that is unreachable
+# or overloaded is one way this health check amplifies a slowdown; the probe is
+# far cheaper than the sweep it gates. This runs before the cadence stamp below,
+# so a start deferred here spends no cadence window; window-start and attempts
+# are left untouched too, so the same due start — the ordinary hourly one or the
+# retry a failed run armed — fires on the next pass once Dolt recovers, with no
+# attempt burned on a sweep that never ran.
 if DOLT_DETAIL="$(dolt_degraded)"; then
   report deferred "reason=dolt-degraded" "detail=$DOLT_DETAIL"
   exit 0
 fi
+
+# The cadence floor — the one cross-session gate. The in-flight and interval
+# guards above read only STATE_DIR, which falls back to a per-session path when
+# the city is unset and need not survive a rapidly recycled session; a blind
+# STATE_DIR lets concurrent or back-to-back starts each read as the first. The
+# floor reads and stamps a shared last-start timestamp under flock, so the check
+# and the claim are one atomic step no second starter can slip between. A fresh
+# start is refused while the last one sits inside the interval; the retry a
+# failed run armed is exempt from the refusal — it was authorized by a STATE_DIR
+# this session could read, where the burst cannot arise — but still stamps the
+# floor. The gate rests on a file lock, not on any process or query staying
+# responsive. If it cannot be taken — no flock, or a runtime dir it cannot write
+# — the sweep proceeds rather than go silent, and the report says so.
+CADENCE_NOTE=""
+if ! command -v flock >/dev/null 2>&1; then
+  CADENCE_NOTE="flock not found"
+elif ! mkdir -p "$CADENCE_DIR" 2>/dev/null || ! ( : >> "$CADENCE_LOCK" ) 2>/dev/null; then
+  CADENCE_NOTE="cannot write $CADENCE_DIR"
+else
+  CADENCE_THROTTLE=""
+  {
+    if flock -w 10 9 2>/dev/null; then
+      CADENCE_LAST="$(read_file "$CADENCE_STAMP")"
+      case "$CADENCE_LAST" in ''|*[!0-9]*) CADENCE_LAST="" ;; esac
+      if [ "$RETRY" -eq 0 ] && [ -n "$CADENCE_LAST" ] \
+         && [ "$(( NOW - CADENCE_LAST ))" -lt "$INTERVAL" ]; then
+        CADENCE_THROTTLE=$(( NOW - CADENCE_LAST ))
+      else
+        printf '%s' "$NOW" > "$CADENCE_STAMP.tmp" 2>/dev/null \
+          && mv "$CADENCE_STAMP.tmp" "$CADENCE_STAMP" 2>/dev/null
+      fi
+    else
+      CADENCE_NOTE="cadence lock contended past 10s"
+    fi
+  } 9>>"$CADENCE_LOCK"
+  if [ -n "$CADENCE_THROTTLE" ]; then
+    report throttled "reason=cadence-floor" "since_last=$CADENCE_THROTTLE" "floor=$INTERVAL"
+    exit 0
+  fi
+fi
+[ -n "$CADENCE_NOTE" ] && NOTE="${NOTE:+$NOTE; }cadence floor unavailable ($CADENCE_NOTE); started without the cross-session guard"
 
 # Nothing is in flight, so whatever is here is spent: a collected run, or a
 # dir left by a start that died before recording anything. Clearing it is what

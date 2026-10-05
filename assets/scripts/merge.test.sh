@@ -2,7 +2,7 @@
 # Hermetic test for assets/scripts/merge.sh — the single writer of merged truth.
 # Covers: the happy path (pinned read, --squash --match-head-commit, ONE
 # lifecycle transition closing with merged_sha); every validate hold in order
-# (merge_hold, duplicate anchor + escalate, retarget, non-green gate, unclosed
+# (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, approval arms + veto,
 # CLEAN/UNSTABLE handling, BLOCKED naming its cause from reviewThreads +
 # reviewDecision); the recorded pr_posture hold, read off the anchor;
@@ -888,7 +888,7 @@ pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@
 reason()  { printf '%s' "$(meta "$1" pr.machine_reason)"; }
 
 echo "# machine axis: a standing veto in the settled tail is settled — the operator re-reviews"
-# Gates green at the live head, a non-city CHANGES_REQUESTED standing, and every
+# Checks green at the live head, a non-city CHANGES_REQUESTED standing, and every
 # rework child it filed already closed. GitHub keeps the veto standing across
 # pushes and the city never dismisses it, so with nothing in flight the anchor is
 # the operator's to clear by re-reviewing. The machine axis records `settled`,
@@ -933,7 +933,7 @@ printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
 echo '[]' > "$GH_DIR/reviews_82.json"
 echo '[]' > "$GH_DIR/reviews_83.json"
 out=$("$SUT" 2>&1)
-eq "$(pinned V3)" "progressing@sha-82" "a lane short of green is a gate a review is due to raise"
+eq "$(pinned V3)" "progressing@sha-82" "a lane short of green is a check a review is due to raise"
 eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold=signoff_cap with signoff_cap beside it is the convergence cap's wedge"
 
 # An operator's own hold carries no signoff_cap, and the board must not read it
@@ -957,7 +957,7 @@ out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate)" "the hold still holds the merge"
 eq "$(pinned V4c)" "<absent>" "…but the orphaned signoff_cap does not make it the cap's wedge"
 
-echo "# gates green and waiting on a person: settled, not wedged"
+echo "# checks green and waiting on a person: settled, not wedged"
 store "[$(anchor V5 84 ',"check_set":"correctness,approval"'), $(rev V5)]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
 echo '[]' > "$GH_DIR/reviews_84.json"
@@ -1036,7 +1036,7 @@ out=$("$SUT" 2>&1)
 eq "$(pinned BK4)" "blocked@sha-95" "a base gone BEHIND is a blocked hold, not settled"
 has "$(reason BK4)" "moved ahead" "…and the reason says to bring the branch current"
 
-# The conflicting-after-approval wedge: gates green, nothing in flight, but the
+# The conflicting-after-approval wedge: checks green, nothing in flight, but the
 # branch conflicts with the base. No review verdict brings it current, so it is
 # the operator's (or the merge-in cadence's), not the awaiting-review tail —
 # record blocked, not settled, so the board stops reading it as a merge in

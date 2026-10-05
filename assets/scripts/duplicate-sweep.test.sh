@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/duplicate-sweep.sh — arm 10 of the merge
+# Hermetic test for assets/scripts/duplicate-sweep.sh — arm 11 of the merge
 # cadence. Covers: both proofs of "recorded no work" (an explicit
 # work_outcome=no-op and the structural no-work-key case) and the fact that a
 # no-op duplicate carrying the TWIN's branch still disposes; both successor
