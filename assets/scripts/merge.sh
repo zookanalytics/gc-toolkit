@@ -405,7 +405,6 @@ while IFS= read -r row; do
   # Only the merge consults these; the record above needs none of them.
   target=$(printf '%s' "$fresh" | jq -r '.meta.merged_target // ""')
   hold=$(printf '%s' "$fresh" | jq -r '.meta.merge_hold // ""')
-  dismissed=$(printf '%s' "$fresh" | jq -r '.meta.signoff_dismissed // ""')
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
   posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
   aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
@@ -800,13 +799,12 @@ $sa_out" >/dev/null 2>&1 || true
     held=$((held + 1)); continue
   fi
   freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" '
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" '
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
     | ((($m.pr_number // "") | tostring)) as $pn
     | ((($m.merge_hold // "") | tostring)) as $h
-    | ((($m.signoff_dismissed // "") | tostring)) as $d
     | ((($m.merged_target // "") | tostring)) as $t
     | ((($m.pr_url // "") | tostring | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p))) as $pu
     | ((($m.branch // "") | tostring)) as $br
@@ -816,7 +814,6 @@ $sa_out" >/dev/null 2>&1 || true
       elif $pn != $num then "anchor now claims PR#\($pn)"
       elif (["","false","0","null","False","FALSE"] | index($h)) == null then "merge_hold was set after validation"
       elif ((($m.pr_posture // "") | tostring) | startswith("commented@")) then "review comments went unanswered after validation"
-      elif $d != $dis then "signoff_dismissed changed after the approval gate ran"
       elif ($t != "" and $t != $base) then "retargeted after validation (merged_target=\($t))"
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"

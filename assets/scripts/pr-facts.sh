@@ -2049,9 +2049,9 @@ GATES
         | select(.state == "CHANGES_REQUESTED")
         | select((.commit_id // "") != $head) | (.id // empty) ] | .[0] // empty' 2>/dev/null)
     if [ -n "$stale_rid" ]; then
-      # Record signoff_dismissed FIRST and read it back: the marker arms the
-      # external-approval requirement, and a dismissal without it drops both the
-      # block and the requirement.
+      # Record signoff_dismissed FIRST and read it back: the dismissal cannot be
+      # undone, and the marker is its record on the anchor, so a dismissal never
+      # lands unrecorded.
       gc bd update "$id" --set-metadata signoff_dismissed="$stale_rid@$head_oid" >/dev/null 2>&1
       got=$(gc bd show "$id" --json 2>/dev/null | scrub | jq -r '.[0].metadata.signoff_dismissed // empty')
       if [ "$got" != "$stale_rid@$head_oid" ]; then

@@ -530,9 +530,10 @@ ensure_validation_pass() {
 # else the PR stays BLOCKED on a dead commit while the bead reads green.
 # Guards, all fail-closed: our handle only (a human's block is a real veto);
 # a commit other than the reviewed one; the reviewed commit still the live
-# head; auto-merge definitely disarmed (a dismissal merges server-side past
-# the recorded approval requirement otherwise); signoff_dismissed stamped and
-# read back BEFORE the irreversible dismissal.
+# head; auto-merge definitely disarmed (with it armed, a dismissal can let
+# GitHub merge server-side, past the approval rule merge.sh enforces);
+# signoff_dismissed stamped and read back BEFORE the irreversible dismissal,
+# so no dismissal goes unrecorded.
 dismiss_superseded() {
   [ -n "$POST_OPEN" ] || return 0
   local handle live raw rc stale rid paired

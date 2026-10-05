@@ -799,6 +799,28 @@ has "$out" "merge_hold was set after validation; merge held" "the terminal re-re
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 51" "…and the merge was withheld"
 eq "$(bstatus T2)" "open" "the anchor was not closed"
 
+echo "# a signoff_dismissed stamp landing mid-pass does NOT hold the merge"
+# The marker records a dismissal; approval is a universal rule no dismissal arms or
+# relaxes, so the terminal re-read has nothing to compare it against.
+store "[$(anchor T2D 53), $(rev T2D)]"
+printf '%s' "$(prview 53 OPEN CLEAN)" > "$GH_DIR/pr_view_53.json"
+approved 53
+: > "$HOOK_COUNT"
+cat > "$TMP/hookd.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "T2D" ] || exit 0
+n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
+  jq -c 'map(if .id == "T2D" then .metadata.signoff_dismissed = "901@sha-53" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+fi
+HOOK
+chmod +x "$TMP/hookd.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/hookd.sh" "$SUT" 2>&1)
+hasnt "$out" "signoff_dismissed changed" "a mid-pass dismissal record is no hold reason"
+has "$(cat "$STUB_GH_LOG")" "pr merge 53" "…and the approved, green PR merges"
+
 echo "# terminal re-read HOLDS when a lane leaves green mid-pass — the shared lane-state derivation"
 # The lane derived green at validation (a backing approve bead); the terminal
 # re-read has to catch that SAME lane leaving green between validation and the

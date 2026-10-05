@@ -549,9 +549,9 @@ keys = [
 #
 # signoff_dismissed — `<github-review-id>@<oid>`: a stale GitHub review the city
 #   dismissed at that head. Written by signoff.sh and pr-facts.sh, each reading it
-#   back before the irreversible dismissal; read by merge.sh, whose pre-merge
-#   staleness guard holds the merge when it changes after the approval gate ran.
-#   Never cleared.
+#   back before the irreversible dismissal, so no dismissal goes unrecorded. A
+#   record only: no gate reads it, since approval is a universal merge rule that
+#   no dismissal arms or relaxes. Never cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same update that closes the review bead (signoff.sh; review-outcome.sh
 #   writes `approve` on a back-lane outcome). lane-state.sh derives a lane green
