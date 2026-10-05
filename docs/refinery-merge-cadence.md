@@ -191,8 +191,17 @@ the cadence — the arms run whether or not any refinery session is awake.
    children on `metadata.branch` and write the same `head <oid>` phrasing, so
    whichever sees a branch first files and the other stands down. The vetoes are
    arm 7's: `merge_hold`, `rebase_hold` on the anchor or on any bead naming the
-   branch, and a live demand. A failure here is not a merge hold — an anchor it
-   could not observe is left exactly as the pass found it.
+   branch, and a live demand. So is the supersession guard. Past the vetoes and
+   the dedup, both arms ask `branch-supersession.sh` whether the conflict is drift
+   or a change that landed first and deleted or rewrote code the branch edits.
+   Whether a superseded branch still has work to do is the operator's call, so
+   the arm files a `rework-base-supersession` visit on the anchor instead of a
+   child, and dispatches nothing while that visit is open. The guard holds only
+   behind an open visit, so a conflict it cannot classify or record still gets
+   the merge-in child
+   ([specs/tk-b7c72m/supersession-tells.md](../specs/tk-b7c72m/supersession-tells.md)).
+   A failure here is not a merge hold — an anchor it could not observe is left
+   exactly as the pass found it.
 6. **pr-open.sh** — `pre_open_gate → pull_request`. It runs after merge because
    it produces the `pull_request` anchors a LATER pass lands: the city approves
    nothing at open (the verdict is replayed only as a comment), so a freshly
@@ -228,7 +237,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    lifecycle edge).
 7. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
-   (→ `retargeted` + visit), CONFLICTING (one rework child per head), `BLOCKED`
+   (→ `retargeted` + visit), CONFLICTING (one rework child per head, or the
+   operator's supersession decision when the conflict is a landed change
+   deleting or rewriting code the branch edits, as for arm 5), `BLOCKED`
    (→ a visit under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
    from the branch's own rules. A missing required approving review files no

@@ -587,7 +587,13 @@ review's result set.
   (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
   branch current is routinely one horn of what such a demand asks, so a child
   filed under one answers the question by performing it. Closing the demand is
-  what releases the dispatch.
+  what releases the dispatch. A conflict that is not drift gets no child
+  either. When a change that landed first deleted or rewrote code the branch
+  edits, `branch-supersession.sh` files a `rework-base-supersession` visit on the
+  anchor, because whether the branch still has work to do is the operator's
+  call. That visit holds the dispatch while it is open. Closing it `benign` (the
+  overlap was incidental) lets the next pass send the merge-in child.
+  `pre-open-rebase.sh` applies the same guard to an anchor with no PR yet.
 - **Disposal** (`review-sweep.sh`, cadence arm 9): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes

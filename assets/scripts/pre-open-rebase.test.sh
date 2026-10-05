@@ -6,7 +6,10 @@
 # merges dispatching nothing; every branch shape brought current by merge (no
 # shape rebases or force-pushes, polecat/* and a graduation included) and this
 # site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
-# rebase_hold on a bead naming the branch, a live demand, no fix pool); dedup on
+# rebase_hold on a bead naming the branch, a live demand, no fix pool); a branch
+# whose edited code main deleted getting the operator's supersession decision
+# instead of a child, a pending decision holding without a second escalation, and
+# a decision that cannot be recorded falling through to the ordinary child; dedup on
 # branch and head against a live child, a stranded child re-routed rather than
 # buried, and an unstamped orphan adopted by title; the read-backs that leave a
 # child unrouted when prepare_mode or the route did not persist; anchors that
@@ -38,14 +41,25 @@ chmod +x "$BIN/git"
 
 # --- fixture repository ---------------------------------------------------------
 # One base point. Four branches edit line 2 and then main edits it too, so each
-# conflicts; one branch touches a different file and still merges.
+# conflicts; one branch touches a different file and still merges. One more
+# branch edits a line inside a block of pin.sh that main then deletes outright:
+# its conflict is a landed change superseding it, not drift.
 SRC="$TMP/src"; WORK="$TMP/work"
 git init -q -b main "$SRC"
 (
   cd "$SRC"
   git config user.email t@t; git config user.name t
   printf 'l1\nl2\nl3\n' > f.txt
-  git add f.txt; git commit -qm base
+  {
+    printf 'check_pin() {\n'
+    printf '  marker=$(gc bd show "$1" --json | jq -r ".[0].metadata.check")\n'
+    printf '  if [ "${marker#*@}" != "$(git rev-parse HEAD)" ]; then\n'
+    printf '    echo "stale pin on $1: the marker names an older commit than the head"\n'
+    printf '    echo "a review bound to an older commit proves nothing about this one"\n'
+    printf '    return 1\n  fi\n'
+    printf '  echo "pin current for $1, so the verdict still binds to this head"\n}\n'
+  } > pin.sh
+  git add f.txt pin.sh; git commit -qm base
   BASE=$(git rev-parse HEAD)
   for spec in "polecat/tk-c1:C1" "integration/conv:CONV" "polecat/tk-grad:GRAD" "polecat/tk-hold:HOLD"; do
     git checkout -q -b "${spec%%:*}" "$BASE"
@@ -54,17 +68,45 @@ git init -q -b main "$SRC"
   done
   git checkout -q -b polecat/tk-ok "$BASE"
   echo g > g.txt; git add g.txt; git commit -qm ok
+  git checkout -q -b polecat/tk-moot "$BASE"
+  sed -i 's/proves nothing about this one/proves nothing about this head/' pin.sh
+  git commit -qam moot
   git checkout -q main
   printf 'l1\nMAIN\nl3\n' > f.txt
   git commit -qam main-moves
+  : > pin.sh
+  git commit -qam "remove the commit pin"
 ) >/dev/null 2>&1
 git clone -q "$SRC" "$WORK"
 C1_HEAD=$(git -C "$SRC" rev-parse polecat/tk-c1)
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh"
+mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh"
 SUT="$SD/pre-open-rebase.sh"
 POOL="loomington/gc-toolkit.polecat"
+# escalate.sh's contract for the supersession guard: one visit per subject+key,
+# stamped so the guard can find the visit it filed. STUB_ESC_RC models a refusal.
+cat > "$SD/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
+[ -n "${STUB_ESC_RC:-}" ] && exit "$STUB_ESC_RC"
+subj=""; key=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --subject) shift; subj="${1:-}" ;;
+    --key)     shift; key="${1:-}" ;;
+  esac
+  shift || true
+done
+[ -n "$subj" ] && [ -n "$key" ] || exit 2
+vid=$(gc bd create "visit: $subj — $key" -t task --json | jq -r '.id // empty')
+[ -n "$vid" ] || exit 1
+gc bd update "$vid" --set-metadata "escalation_key=$key" \
+  --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" >/dev/null
+ESC
+chmod +x "$SD/escalate.sh"
+export STUB_ESC_LOG="$TMP/esc.log" STUB_ESC_RC=""; : > "$STUB_ESC_LOG"
 
 run() { ( cd "$WORK" && "$SUT" "$@" 2>&1 ); }
 
@@ -74,11 +116,12 @@ pre() { # id branch [extra-metadata-json]
 }
 reset() { # <row-json>...
   local IFS=,; store "[$*]"
-  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_SESSION_LOG"
-  export STUB_DROP_KEYS="" STUB_LIST_FAIL=""
+  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_SESSION_LOG"; : > "$STUB_ESC_LOG"
+  export STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_ESC_RC=""
 }
 newborn() { jq -r '[ .[] | select(.id | startswith("new-")) ][0].id // "<none>"' "$STUB_STORE"; }
 newcount() { jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE"; }
+kidcount() { jq '[ .[] | select(.id | startswith("new-")) | select((.title // "") | startswith("visit:") | not) ] | length' "$STUB_STORE"; }
 
 echo "# the premise the ref guard rests on"
 ( cd "$WORK" && git merge-tree --write-tree main nosuchref >/dev/null 2>&1 ); rc=$?
@@ -110,6 +153,32 @@ eq "$(meta "$K" pr_url)" "<absent>" "no pr_url either"
 eq "$(meta "$K" existing_pr)" "<absent>" "and no existing_pr to adopt"
 has "$(cat "$STUB_DEPS")" "$K|blocks|A1" "the child blocks the anchor it was filed for"
 has "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is woken"
+
+echo "# a branch a landed change superseded gets the operator's decision, not a child"
+( cd "$WORK" && git merge-tree --write-tree --quiet origin/main origin/polecat/tk-moot >/dev/null 2>&1 ); rc=$?
+eq "$rc" "1" "the superseded branch really conflicts (premise of the next checks)"
+reset "$(pre AM polecat/tk-moot)"
+OUT=$(run --fix-pool "$POOL")
+eq "$(kidcount)" "0" "no merge-in child is filed for a branch whose edited code main deleted"
+has "$(cat "$STUB_ESC_LOG")" "--subject AM --key rework-base-supersession" "the supersession decision is filed on the anchor instead"
+has "$OUT" "filed decision" "the guard's answer is in the pass log"
+has "$OUT" "held=1" "and the anchor is counted held, not skipped or reworked"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is not woken"
+
+echo "# a pending supersession decision holds without asking again"
+reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"AN","task_kind":"visit"}}'
+OUT=$(run --fix-pool "$POOL")
+eq "$(kidcount)" "0" "an open decision on the anchor files no child"
+eq "$(cat "$STUB_ESC_LOG")" "" "and no second escalation"
+has "$OUT" "VN is still open" "the pending decision is named"
+
+echo "# a supersession that cannot be recorded falls through to the ordinary child"
+reset "$(pre AO polecat/tk-moot)"
+export STUB_ESC_RC=1
+OUT=$(run --fix-pool "$POOL")
+eq "$(kidcount)" "1" "with no visit behind it, the guard holds nothing and the child is filed as before"
+has "$OUT" "could not be filed" "and the pass log says why"
+export STUB_ESC_RC=""
 
 echo "# a branch that still merges is left alone"
 reset "$(pre A2 polecat/tk-ok)"

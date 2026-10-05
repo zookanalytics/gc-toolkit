@@ -25,7 +25,9 @@
 # Same vetoes as pr-facts.sh: an operator merge_hold or rebase_hold on the
 # anchor, a rebase_hold on any bead naming the branch, and a live demand
 # (rebasing is one horn of what a demand asks, so performing it answers the
-# person's question by fait accompli).
+# person's question by fait accompli). And the same supersession guard: a
+# branch whose conflict is a landed change deleting or rewriting the code it
+# edits gets the operator's decision instead of a child (branch-supersession.sh).
 #
 # Dedup is shared with pr-facts.sh by construction rather than by bookkeeping:
 # both arms probe children on `metadata.branch`, and the `rejection_reason`
@@ -60,6 +62,8 @@ done
 # nothing here can move a branch or a remote-tracking ref; the same device
 # merge.sh uses for its seed-audit merge gate.
 GATE_REF="refs/gc-toolkit/pre-open-rebase"
+# Tells a branch a landed change made moot from one that only drifted.
+SUPERSESSION="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/branch-supersession.sh"
 
 # The target an anchor that records none lands on, derived per rig from
 # origin/HEAD so a rig whose default branch is not `main` gets its own.
@@ -295,6 +299,18 @@ while IFS= read -r row; do
       | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null)
   if [ -n "$frozen" ]; then
     echo "$PROG: $id — '$branch' conflicts but $frozen holds it with rebase_hold (operator gate); no rework dispatched"
+    held=$((held + 1)); continue
+  fi
+  # A conflict is not always drift. When a change already on the target deleted
+  # or rewrote the code this branch edits, bringing it current decides whether
+  # the branch still has work to do, and a child sent to merge it would stop and
+  # ask. branch-supersession.sh tells the two apart and puts that decision to the
+  # operator; it holds only behind an open decision visit, so anything it cannot
+  # classify or record falls through to the ordinary child. Read after the dedup
+  # above, so a live child stands the arm down first, and before the strand
+  # re-route below, so a superseded branch's strand is not routed either.
+  if [ -x "$SUPERSESSION" ] && "$SUPERSESSION" hold --anchor "$id" --branch "$branch" \
+       --target "$target" --base "$base_oid" --head "$head_oid"; then
     held=$((held + 1)); continue
   fi
   if [ -n "$stranded" ]; then

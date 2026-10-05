@@ -20,7 +20,9 @@
 # nothing in flight re-dispatches, not only on the PR's first head; an unstamped
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
 # operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
-# since rebasing is one horn of what a demand asks;
+# since rebasing is one horn of what a demand asks; a branch whose conflict is a
+# landed change deleting or rewriting the code it edits gets the operator's
+# supersession decision instead of a child (branch-supersession.sh);
 # dismissal of our OWN superseded CHANGES_REQUESTED (never a
 # human's; signoff_dismissed read back FIRST; skipped under native auto-merge).
 # No arm here re-reviews a moved head: a lane state is a state of the lane, and
@@ -303,6 +305,28 @@ anchor_decision_held() { # <anchor-id>
   return 1
 }
 # <<< anchor-decision-guard
+
+# Whether a conflict is a landed change superseding this branch rather than drift,
+# in which case bringing it current is the operator's decision and no merge-in
+# child goes. branch-supersession.sh owns the classification and the decision
+# visit; this only puts both tips where git can read them. Its own ref namespace,
+# overwritten per anchor, so nothing here moves a branch or a remote-tracking ref.
+# A tip that will not fetch, or a head that moved since GitHub reported it,
+# answers "proceed": the guard only ever withholds a dispatch it has put to a
+# person. 0 = hold.
+SUPERSESSION="$SCRIPTS_DIR/branch-supersession.sh"
+SUPERSESSION_REF="refs/gc-toolkit/pr-facts"
+supersession_holds() { # <anchor> <branch> <target> <head-oid> <pr-number>
+  local base_oid head_tip
+  [ -x "$SUPERSESSION" ] || return 1
+  git fetch --quiet --no-tags origin "+refs/heads/$3:$SUPERSESSION_REF/base" \
+    "+refs/heads/$2:$SUPERSESSION_REF/head" >/dev/null 2>&1 || return 1
+  base_oid=$(git rev-parse --verify --quiet "$SUPERSESSION_REF/base^{commit}" 2>/dev/null)
+  head_tip=$(git rev-parse --verify --quiet "$SUPERSESSION_REF/head^{commit}" 2>/dev/null)
+  [ -n "$base_oid" ] && [ -n "$head_tip" ] && [ "$head_tip" = "$4" ] || return 1
+  "$SUPERSESSION" hold --anchor "$1" --branch "$2" --target "$3" \
+    --base "$base_oid" --head "$head_tip" --pr "$5"
+}
 
 # >>> pr-posture-vocabulary
 # Mirrors lifecycle/lifecycle.toml [posture]; pr-facts.test.sh fails on drift.
@@ -1452,6 +1476,15 @@ REAP_EOF
           | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null)
       if [ -n "$frozen" ]; then
         echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
+        skipped=$((skipped + 1)); continue
+      fi
+      # A conflict is not always drift. When a change already on the base deleted
+      # or rewrote the code this branch edits, bringing it current decides whether
+      # the branch still has work to do, and a child sent to merge it would stop
+      # and ask. This is read after the dedup above, so a live child (one a sitting
+      # sent to re-scope the branch, say) stands the arm down first, and before the
+      # strand re-route below, so a superseded branch's strand is not routed either.
+      if supersession_holds "$id" "$fix_branch" "$base" "$head_oid" "$num"; then
         skipped=$((skipped + 1)); continue
       fi
       reuse=""
