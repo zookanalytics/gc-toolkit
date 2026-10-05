@@ -56,12 +56,14 @@ operator draws it off the board and `gc-helm engage` spawns a converse sitting
 on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
-                 override with GC_VISIT_DEFAULT_RIG). Ignored for a bead id —
-                 an existing bead's own rig is authoritative.
+                 override with GC_VISIT_DEFAULT_RIG). Refused with exit 2 for
+                 a bead id, a PR number, or a PR URL, because an existing
+                 bead's own rig is authoritative.
   --no-react     Skip the proactive first reaction and file the visit now.
                  Faster and unconditional; you lose the framing card.
   --type <t>     Subject bead type (default: task, or decision when the topic
-                 reads as a question).
+                 reads as a question). Refused with exit 2 for a bead id, a PR
+                 number, or a PR URL, because an existing bead keeps its type.
   --topic        Treat the argument as a topic even if it looks like a bead id,
                  a PR number, or a PR URL.
   -h, --help     This help.

@@ -33,7 +33,9 @@
 #               suspended rig (agents paused, see LIVENESS) still files.
 #   (SUBJECT)   an existing bead is its own subject — no second bead is
 #               minted — and a contradictory --rig/--type is refused rather
-#               than ignored.
+#               than ignored, for a bead id and a PR reference alike. The
+#               --help text is held to the same refusal, since it is where the
+#               operator learns the contract.
 #   (SHAPE)     "dolt-latency" is a topic, "tk-abc12" is a bead id, and the
 #               difference is the RIG PREFIX, not the hyphen. A prefix-shaped
 #               string no ledger answers for must not become a bead literally
@@ -413,6 +415,25 @@ eq "$RC" "2" "(SUBJECT) --rig on an existing bead is refused, not ignored"
 eq "$CALLS" "" "(SUBJECT) and files nothing"
 run no tk-abc12 --type decision
 eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
+run no 615 --rig gascity
+eq "$RC" "2" "(SUBJECT) --rig on a PR reference is refused, not ignored"
+eq "$CALLS" "" "(SUBJECT) and files nothing"
+run no 615 --type decision
+eq "$RC" "2" "(SUBJECT) --type on a PR reference is refused"
+
+# --help is where the operator learns this contract, so each flag's entry is
+# held to the refusals above. help_entry prints a flag's line and the
+# deeper-indented lines that continue it, lowercased so the checks ignore case.
+help_entry() {
+    awk -v f="$1" '$1 == f { on = 1; print; next } on && /^   / { print; next } { on = 0 }' <<< "$2" \
+        | tr '[:upper:]' '[:lower:]'
+}
+run no --help
+for flag in --rig --type; do
+    entry="$(help_entry "$flag" "$ERR")"
+    has "$entry" "refused" "(SUBJECT) --help says $flag is refused for an existing bead"
+    hasnt "$entry" "ignored" "(SUBJECT) --help never says $flag is ignored"
+done
 
 # --- (ORIGIN) the origin is recorded as a KEY, not only as prose --------------
 # The description sentence ("Operator-origin intake, filed by …") is for a human
