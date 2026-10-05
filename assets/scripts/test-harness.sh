@@ -61,6 +61,8 @@ harness_init() {
   # behaviour every existing suite relies on); a file path serves that roster;
   # STUB_SESSION_LIST_RC models the read the liveness guard must fail closed on.
   export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
+  # The `close` verb's ownership check (see its handler). Off = any actor closes.
+  export STUB_ENFORCE_CLOSE_OWNER=""
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
@@ -310,6 +312,17 @@ case "$verb" in
   close)
     id="${1:-}"
     case " ${STUB_CLOSE_FAIL:-} " in *" $id "*) echo "gc: simulated close refusal" >&2; exit 1 ;; esac
+    # STUB_ENFORCE_CLOSE_OWNER: bd's close-ownership check. The close verb refuses
+    # a bead assigned to someone other than the actor (BEADS_ACTOR) unless --force
+    # is passed, and an unassigned bead closes for anyone. `update --status=closed`
+    # never runs this check, so the update handler does not model it.
+    if [ -n "${STUB_ENFORCE_CLOSE_OWNER:-}" ]; then
+      _forced=0; for _a in "$@"; do [ "$_a" = "--force" ] && _forced=1; done
+      _asg=$(jq -r --arg id "$id" '(.[] | select(.id == $id) | .assignee) // ""' "$S")
+      if [ "$_forced" = 0 ] && [ -n "$_asg" ] && [ "$_asg" != "${BEADS_ACTOR:-}" ]; then
+        echo "gc: cannot close $id: assignee is \"$_asg\", actor is \"${BEADS_ACTOR:-}\"; reclaim or use --force to override" >&2; exit 1
+      fi
+    fi
     if [ -n "${STUB_ENFORCE_BLOCKS:-}" ]; then
       for _b in $(awk -F'|' -v id="$id" '$2=="blocks" && $3==id {print $1}' "$D"); do
         _bst=$(jq -r --arg b "$_b" '(.[] | select(.id == $b) | .status) // "open"' "$S")

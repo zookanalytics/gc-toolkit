@@ -60,6 +60,28 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
 
+# STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
+# refuses a bead assigned to another actor unless --force is passed, an
+# unassigned bead or the actor's own closes plainly, and `bd update
+# --status=closed` never runs the check. A caller that drops its --force passes
+# against a stub that refuses nothing, so the refusal is pinned here, and so is
+# the default: with the knob unset any actor closes, as every other suite expects.
+store '[{"id":"tk-held","status":"in_progress","assignee":"lx-sitting","title":"h","notes":"","metadata":{}},{"id":"tk-free","status":"open","assignee":"","title":"f","notes":"","metadata":{}},{"id":"tk-mine","status":"open","assignee":"rig/refinery","title":"m","notes":"","metadata":{}},{"id":"tk-upd","status":"in_progress","assignee":"lx-sitting","title":"u","notes":"","metadata":{}},{"id":"tk-off","status":"in_progress","assignee":"lx-sitting","title":"o","notes":"","metadata":{}}]'
+as_refinery() { STUB_ENFORCE_CLOSE_OWNER=1 BEADS_ACTOR=rig/refinery gc bd "$@" >/dev/null 2>&1; }
+as_refinery close tk-held --reason r; rc=$?
+eq "$rc" "1" "close: a bead assigned to another actor is refused without --force"
+eq "$(bstatus tk-held)" "in_progress" "...and is left as it was"
+as_refinery close tk-held --reason r --force
+eq "$(bstatus tk-held)" "closed" "close --force overrides the ownership check"
+as_refinery close tk-free --reason r
+eq "$(bstatus tk-free)" "closed" "close: an unassigned bead closes for any actor"
+as_refinery close tk-mine --reason r
+eq "$(bstatus tk-mine)" "closed" "close: the actor's own bead closes without --force"
+as_refinery update tk-upd --status=closed
+eq "$(bstatus tk-upd)" "closed" "update --status=closed never runs the close verb's ownership check"
+gc bd close tk-off --reason r >/dev/null 2>&1
+eq "$(bstatus tk-off)" "closed" "with the knob unset, a plain close lands whoever holds the bead"
+
 # The gc bd dep stub mirrors real bd's blocks orientation. Real `dep add
 # <blocked> <blocker> --type blocks` makes the SECOND operand the blocker — the
 # documented `dep add Y X` equals `dep X --blocks Y`. A stub that stored the add
