@@ -156,8 +156,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    interrupted before its record is adopted by the next pass rather than
    opened twice. It walks under its share of the pass budget: the anchors
    gate-ensure last recorded as `settled` first (the mark only orders the walk;
-   each still meets the full gate), then the rest in a rotation, with at least
-   one of each visited every pass. For each anchor whose
+   each still meets the full gate), then the rest, with at least one of each
+   visited every pass. Each group rotates on a cursor of its own
+   (`pr-open.cursor.first` and `pr-open.cursor` in the pass state dir), because
+   a settled anchor this arm holds, such as an operator's `merge_hold` on a
+   green branch, stays settled, and in a fixed order it would lead every pass
+   while the settled anchors behind it waited. For each anchor whose
    every marker-bearing check in `check_set` reads `green` (the same
    predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
    set is held, never read as ungated): adopt an existing PR for the branch or

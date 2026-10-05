@@ -112,8 +112,12 @@ gate-ensure, pr-facts, then the sweeps and pr-stack.
   computed, and PRs that left the open list (they owe a record) are never
   paced. The rest only refresh a verdict, so they rotate.
 - **pr-open visits the anchors gate-ensure last marked settled first**, then
-  rotates the rest, with one of each visited every pass. An anchor it opens
-  leaves its set, so a pass the budget stops still opened what it reached.
+  the rest, with one of each visited every pass. An anchor it opens leaves its
+  set, so a pass the budget stops still opened what it reached. Each group
+  rotates on its own cursor. A settled anchor pr-open holds stays settled: at
+  2026-10-05T17:00Z two of the four settled pre-open anchors carried an
+  operator's `merge_hold`. In a fixed order such anchors would lead every pass,
+  and the settled anchors behind them would never be reached.
 - **pass.log carries each arm's start time, its elapsed seconds and rc, the
   pass's total, and how much of its set each paced arm covered.** A slowdown
   is then visible as a duration and a set size before it stops landing.

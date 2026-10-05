@@ -407,7 +407,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the markerless body is not rewritten"
 eq "$(body 230)" "$LEGACY_Z" "…and is left byte-identical"
 
 echo "# a pre_open_gate anchor's summary is arm 3's to refresh on adoption, not this arm's"
-store "[$(printf '{"id":"PG","status":"open","title":"anchor PG","description":"","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pre_open_gate","branch":"polecat/PG","pr_number":"250","merged_target":"main","check_set":"correctness","pr_summary":"NEW: a summary arm 6 will publish on adoption."}}')]"
+store "[$(printf '{"id":"PG","status":"open","title":"anchor PG","description":"","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pre_open_gate","branch":"polecat/PG","pr_number":"250","merged_target":"main","check_set":"correctness","pr_summary":"NEW: a summary arm 3 will publish on adoption."}}')]"
 STALE_PG=$(opened_region PG polecat/PG 'correctness' 'OLD PG summary.' 'ffff6666')
 pr 250 OPEN polecat/PG "$STALE_PG" 9999888800000000
 : > "$STUB_GH_LOG"

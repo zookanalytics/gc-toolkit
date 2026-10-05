@@ -14,7 +14,8 @@
 # gets neither; gate-ensure's rc=3 reported without holding or failing anything;
 # the
 # posture-gates-merge interlock (a non-zero posture arm HOLDS merge.sh in the
-# same pass, because merge.sh validates the posture that arm records),
+# same pass, because merge.sh validates the posture that arm records, and the
+# held arm's share of the pass budget goes to the paced arms behind it),
 # exercised by extracting and executing the marked block against stubs;
 # BEADS_ACTOR / GC_AGENT projections scoped to their arms; a failing arm not
 # skipping the arms after it; the exit-1 failure report; per-arm start and
@@ -236,7 +237,7 @@ case "$*" in *--posture-only*) exit 1 ;; esac
 exit 0
 ARM
 chmod +x "$SD/pr-facts.sh"
-: > "$ARM_LOG"
+: > "$ARM_LOG"; T0=$(date -u +%s)
 out=$(drive); rc=$?
 eq "$rc" 1 "an unrecordable posture fails the order"
 has "$out" "pr-posture rc=1" "…naming the arm"
@@ -244,6 +245,11 @@ has "$out" "merge.sh HELD this pass" "…and reporting the hold"
 if grep -q '^merge.sh' "$ARM_LOG"; then bad "merge.sh RAN on a posture the arm could not record"; else ok "merge.sh did not run"; fi
 grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG" && ok "the full pr-facts arm still ran" || bad "the full pr-facts arm was skipped"
 grep -q '^convoy-graduate' "$ARM_LOG" && ok "convoy-graduate still ran (the hold is merge's alone)" || bad "convoy-graduate was skipped"
+# The held merge spends none of the pass budget, so the paced arms behind it
+# divide its share: with the stub arms returning at once, pr-facts gets half of
+# the 420s and pr-stack all of it, as on a pass whose merge ran.
+near "$(offset "$(grep '^pr-facts.sh|--fix-pool' "$ARM_LOG")")" 210 "a held merge leaves its share to the arms behind it: pr-facts gets half the budget"
+near "$(offset "$(grep '^pr-stack' "$ARM_LOG")")" 420 "…and pr-stack all that is left"
 mkarm pr-facts.sh
 
 echo "# a failing arm fails the order but does not skip later arms"

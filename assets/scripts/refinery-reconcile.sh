@@ -337,6 +337,9 @@ if [ "$MERGE_HELD" = 1 ]; then
   log "-- (2) merge: HELD this pass (posture not current)"
   # A hold is a recorded decision, not a dropped tail.
   mark_merge held
+  # The held arm spends none of the pass budget, so the paced arms behind it
+  # divide its share among themselves.
+  PACED_LEFT=$((PACED_LEFT - 1))
 else
   # `reached` before merge, `decided` after: a pass killed between them leaves
   # `reached`, which the next pass reads as a merge arm that never finished.

@@ -21,8 +21,9 @@
 # text an operator or a later arm (pr-stack) added; the region writes its own
 # `## Summary` heading, so a stored pr_summary that repeats one is de-duplicated.
 # Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
-# anchors gate-ensure last recorded as settled are visited first, the rest in a
-# rotation, and no new anchor starts past the deadline.
+# anchors gate-ensure last recorded as settled are visited first and the rest
+# after them, each group in a rotation of its own, and no new anchor starts
+# past the deadline.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
 
@@ -323,17 +324,22 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pre_open_gate) || 
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no pre-open anchors"; exit 0; }
 
-# --- visit order: the anchors most likely to open first, the rest in rotation --
+# --- visit order: the anchors most likely to open first, each group in rotation
 # The walk's cost grows with the pre-open set, so a deadline can stop it. An
 # anchor gate-ensure last recorded as settled (every lane green, nothing owed)
 # is visited first: opening one takes it out of this set, so a pass the
-# deadline stops still opened what it reached, and the next pass starts on the
-# rest of them. The settled mark only orders the walk; every anchor still meets
-# the full gate below. The others rotate after the cursor (pace-lib.sh).
+# deadline stops still opened what it reached. A settled anchor this arm holds
+# (an operator's merge_hold on a green branch, a PR a human closed at this
+# head) stays settled, so the settled group rotates on a cursor of its own: in
+# a fixed order the same held anchors would lead every pass and the deadline
+# would keep the settled anchors behind them from ever opening. The settled
+# mark only orders the walk; every anchor still meets the full gate below. The
+# others rotate after the arm's own cursor (pace-lib.sh).
+pace_start "$CURSOR" "$DEADLINE"
 if split_rows=$(printf '%s' "$ANCHORS" | jq -r '
       .[] | (if ((.metadata["pr.machine"] // "") | tostring | startswith("settled@"))
              then "first" else "rest" end) + "\t" + tojson' 2>/dev/null); then
-  first_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "first" { print $2 }')
+  first_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "first" { print $2 }' | pace_order "$PACE_FIRST_CURSOR")
   rest_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "rest" { print $2 }' | pace_order "$CURSOR")
 else
   first_rows=""
@@ -348,7 +354,6 @@ opened=0; flipped=0; held=0; skipped=0
 BODY=""
 trap 'rm -f "$BODY" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r tagged; do
   [ -n "${tagged:-}" ] || continue
   group="${tagged%%$'\t'*}"

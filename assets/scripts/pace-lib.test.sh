@@ -2,13 +2,14 @@
 # pace-lib.test.sh — hermetic tests for the paced walk the merge-cadence arms
 # share: the rotation order after a cursor, the cursor write, the deadline, and
 # the per-group bookkeeping (exempt never stops, first skips past the deadline
-# without moving the cursor, rest stops and resumes at the anchor it stopped
-# at, and one anchor of each paced group is always visited).
+# and rotates on a cursor of its own, rest stops and resumes at the anchor it
+# stopped at, and one anchor of each paced group is always visited).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pace-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
+# shellcheck disable=SC2034 # read by pace-lib.sh's warnings
 PROG="pace-lib-test"
 . "$HERE/pace-lib.sh"
 
@@ -68,13 +69,24 @@ printf 'q\n' > "$CUR"
 eq "$(walk 1 exempt:x exempt:y rest:a rest:b)" "x,y,a" "exempt anchors all visit past the deadline, then one rest anchor"
 eq "$(cat "$CUR")" "a" "only the rest anchor moved the cursor"
 
-echo "# the walk: first anchors come first, are skipped past the deadline, and the rotation still runs"
-printf 'q\n' > "$CUR"
+echo "# the walk: first anchors come first, are skipped past the deadline, and the rest still run"
+printf 'q\n' > "$CUR"; rm -f "$CUR.first"
 out=$(walk 1 first:f1 first:f2 first:f3 rest:a rest:b)
 eq "$out" "f1,a" "past the deadline one first anchor and one rest anchor are visited"
 walk 1 first:f1 first:f2 first:f3 rest:a rest:b >/dev/null
 eq "$PACE_FIRST_SKIPPED,$PACE_VISITED,$PACE_RESUME_AT" "2,2,b" "the skipped first anchors are counted, and the rest walk names where it stopped"
-eq "$(cat "$CUR")" "a" "first anchors never move the cursor"
+eq "$(cat "$CUR")" "a" "first anchors never move the rest cursor"
+eq "$PACE_FIRST_CURSOR" "$CUR.first" "first anchors rotate on a cursor of their own, beside the rest cursor"
+eq "$(cat "$CUR.first" 2>/dev/null)" "f1" "…which names the first anchor the walk finished"
+eq "$(rows f3 f1 f2 | pace_order "$PACE_FIRST_CURSOR" | ids)" "f2,f3,f1" "…so the next pass starts the first group after it, not at the anchor that led this one"
+
+echo "# the walk: a first anchor is recorded once the walk moves on to the rest"
+rm -f "$CUR" "$CUR.first"
+pace_start "$CUR" ""
+pace_visit first f1; pace_visit first f2; pace_visit rest a
+eq "$(cat "$CUR.first" 2>/dev/null)" "f2" "the last first anchor is recorded when the first rest visit begins, so a kill there does not redo it"
+pace_end
+eq "$(cat "$CUR" 2>/dev/null)" "a" "pace_end records the rest anchor in hand"
 
 echo "# a cursor write that fails warns once and the walk goes on"
 CUR="$TMP/no-such-dir/walk.cursor"

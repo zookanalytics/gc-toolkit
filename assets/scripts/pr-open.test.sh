@@ -530,24 +530,26 @@ has "$inewbody" "[!IMPORTANT]" "the refreshed body carries the checkpoint banner
 has "$inewbody" 'integration/tk-5kk1zh' "…naming the integration base"
 has "$(pv_labels 93)" "base: integration" "adoption also stamps the base: label"
 
-echo "# pacing: anchors gate-ensure recorded settled go first; the rest rotate under --deadline/--cursor"
+echo "# pacing: anchors gate-ensure recorded settled go first; each group rotates under --deadline/--cursor"
 # Q3 and Q4 carry a settled machine verdict, Q1 and Q2 do not, and the ids sort
 # the groups the other way round, so the order of the visits is the arm's. None
-# has a backing review, so each visit only holds. A deadline of epoch 1 has
-# always passed, so a pass visits one settled anchor and one rotating one.
+# has a backing review, so each visit only holds, and a settled anchor the arm
+# holds stays settled. A deadline of epoch 1 has always passed, so a pass
+# visits one settled anchor and one other.
 SETTLED=',"pr.machine":"settled@sha-x@2026-10-05T00:00:00Z"'
 store "[$(pre Q1 polecat/q1), $(pre Q2 polecat/q2), $(pre Q3 polecat/q3 "$SETTLED"), $(pre Q4 polecat/q4 "$SETTLED")]"
-OCUR="$TMP/open.cursor"; rm -f "$OCUR"
+OCUR="$TMP/open.cursor"; rm -f "$OCUR" "$OCUR.first"
 heads() { grep -o 'pr list --head [^ ]*' "$STUB_GH_LOG" | awk '{print $4}' | paste -sd, -; }
 : > "$STUB_GH_LOG"
 out=$("$SUT" --deadline 1 --cursor "$OCUR" 2>&1); rc=$?
 eq "$rc" 0 "a paced pass exits 0"
-eq "$(heads)" "polecat/q3,polecat/q1" "past the deadline one settled anchor goes first, then one rotating anchor"
+eq "$(heads)" "polecat/q3,polecat/q1" "past the deadline one settled anchor goes first, then one other anchor"
 has "$out" "visited 2 of 4 pre-open anchors (2 settled first) before the deadline; the next pass resumes at Q2" "the pass names its pacing and where the rotation resumes"
-eq "$(cat "$OCUR" 2>/dev/null)" "Q1" "the cursor records the rotating anchor, never a settled one"
+eq "$(cat "$OCUR" 2>/dev/null)" "Q1" "the cursor records the other anchor, never a settled one"
+eq "$(cat "$OCUR.first" 2>/dev/null)" "Q3" "the settled anchors rotate on a cursor of their own"
 : > "$STUB_GH_LOG"
 out=$("$SUT" --deadline 1 --cursor "$OCUR" 2>&1)
-eq "$(heads)" "polecat/q3,polecat/q2" "the next pass resumes the rotation after the cursor"
+eq "$(heads)" "polecat/q4,polecat/q2" "the next pass resumes both rotations after their cursors, so the held settled anchor does not lead every pass"
 : > "$STUB_GH_LOG"
 out=$("$SUT" --deadline "$(( $(date +%s) + 600 ))" --cursor "$OCUR" 2>&1)
 eq "$(heads)" "polecat/q3,polecat/q4,polecat/q1,polecat/q2" "a deadline that has not passed visits every anchor, settled first"

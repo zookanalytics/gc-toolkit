@@ -33,14 +33,18 @@
 #   done
 #   pace_end
 #
-# pace_visit's group says how the anchor is paced. `rest` anchors rotate: the
-# previous rest anchor is recorded before this one starts, so a walk the
-# deadline stops here, or a kill interrupts, resumes at this anchor. `first`
-# anchors come before the rotation and count against the deadline, but move no
-# cursor, because acting on one takes it out of the walk's set. `exempt`
-# anchors are never stopped and never recorded. Past the deadline pace_visit
-# returns 1 for a `first` anchor (skip it, and reach the rotation) and 2 for a
-# `rest` anchor (stop the walk). One anchor of each paced group is always
+# pace_visit's group says how the anchor is paced. `rest` anchors rotate: an
+# anchor is recorded as finished when the walk's next visit begins, so a walk
+# the deadline stops, or a kill interrupts, resumes at the anchor it was on.
+# `first` anchors come before the rest and rotate the same way on a cursor of
+# their own, PACE_FIRST_CURSOR (the cursor file's path with `.first` appended),
+# which the caller orders them by: `pace_order "$PACE_FIRST_CURSOR"` after
+# pace_start. Acting on a first anchor usually takes it out of the walk's set,
+# but one the arm holds stays in it, and in a fixed order the same held anchors
+# would lead every pass while the deadline kept the group's tail waiting.
+# `exempt` anchors are never stopped and never recorded. Past the deadline
+# pace_visit returns 1 for a `first` anchor (skip it, and reach the rest) and 2
+# for a `rest` anchor (stop the walk). One anchor of each paced group is always
 # visited first, so a walk started past its deadline still makes progress on
 # both. After the walk, PACE_VISITED counts the paced anchors visited,
 # PACE_FIRST_SKIPPED the `first` anchors the deadline left for the next pass,
@@ -80,25 +84,42 @@ pace_spent() { # <deadline-epoch-secs>
 
 pace_start() { # <cursor-file> <deadline-epoch-secs>
   PACE_CURSOR="${1:-}"
+  PACE_FIRST_CURSOR="${1:+$1.first}"
   PACE_DEADLINE="${2:-}"
   PACE_VISITED=0
   PACE_FIRST_VISITED=0
   PACE_FIRST_SKIPPED=0
   PACE_REST_VISITED=0
   PACE_FINISHED=""
+  PACE_FIRST_FINISHED=""
   PACE_RESUME_AT=""
   PACE_WARNED=0
 }
 
-_pace_record() { # <id>
-  pace_note "$PACE_CURSOR" "$1" && return 0
+_pace_record() { # <cursor-file> <id>
+  pace_note "$1" "$2" && return 0
   [ "$PACE_WARNED" = 1 ] \
-    || echo "${PROG:-pace}: WARN cannot record progress in $PACE_CURSOR; the next pass starts the rotation over" >&2
+    || echo "${PROG:-pace}: WARN cannot record progress in $1; the next pass starts the rotation over" >&2
   PACE_WARNED=1
   return 0
 }
 
+# The anchor in hand has finished once the walk's next visit begins, whichever
+# group that visit is in.
+_pace_flush() {
+  if [ -n "$PACE_FIRST_FINISHED" ]; then
+    _pace_record "$PACE_FIRST_CURSOR" "$PACE_FIRST_FINISHED"
+    PACE_FIRST_FINISHED=""
+  fi
+  if [ -n "$PACE_FINISHED" ]; then
+    _pace_record "$PACE_CURSOR" "$PACE_FINISHED"
+    PACE_FINISHED=""
+  fi
+  return 0
+}
+
 pace_visit() { # <first|rest|exempt> <anchor-id>
+  _pace_flush
   case "$1" in
     exempt) return 0 ;;
     first)
@@ -106,12 +127,9 @@ pace_visit() { # <first|rest|exempt> <anchor-id>
         PACE_FIRST_SKIPPED=$((PACE_FIRST_SKIPPED + 1))
         return 1
       fi
-      PACE_FIRST_VISITED=$((PACE_FIRST_VISITED + 1)) ;;
+      PACE_FIRST_VISITED=$((PACE_FIRST_VISITED + 1))
+      PACE_FIRST_FINISHED="$2" ;;
     *)
-      if [ -n "$PACE_FINISHED" ]; then
-        _pace_record "$PACE_FINISHED"
-        PACE_FINISHED=""
-      fi
       if [ "$PACE_REST_VISITED" -gt 0 ] && pace_spent "$PACE_DEADLINE"; then
         # shellcheck disable=SC2034 # read by the arm that sourced this file
         PACE_RESUME_AT="$2"
@@ -125,7 +143,5 @@ pace_visit() { # <first|rest|exempt> <anchor-id>
 }
 
 pace_end() {
-  [ -n "$PACE_FINISHED" ] && _pace_record "$PACE_FINISHED"
-  PACE_FINISHED=""
-  return 0
+  _pace_flush
 }
