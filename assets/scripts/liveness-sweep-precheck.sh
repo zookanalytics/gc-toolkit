@@ -269,10 +269,32 @@ fi
 # an exclusion, for the reason the sweep's classify block gives; $demanded is
 # the sweep's arm of the same name, and it has to stay in step with it or a
 # bead the sweep would report is dropped here and never reaches a pass.
+# Live sitting identities, for the holder-liveness gate the SURVIVORS jq applies
+# to visits (mirrors liveness-sweep.sh). A holder GONE from the session list is
+# dead, and so is one still listed in a terminal state (archived/closed, helm's
+# ownerLive dead states); one listed in any other state is live; an UNCLAIMED
+# visit has none and still covers.
+# Fail CLOSED here: on an unreadable list LIVENESS_KNOWN is false, so a claimed
+# visit reads not-live, its subject is not excluded, and the pass runs rather
+# than risking a skipped report.
+LIVE_SESSIONS_JSON="[]"
+LIVENESS_KNOWN=false
+SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
+if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/dev/null 2>&1; then
+    LIVE_SESSIONS_JSON=$(printf '%s' "$SESS_RAW" \
+        | jq -c '[ (.sessions // [])[]? | select((.state // "") as $s | ($s != "archived") and ($s != "closed")) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
+    if printf '%s' "$LIVE_SESSIONS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        LIVENESS_KNOWN=true
+    else
+        LIVE_SESSIONS_JSON="[]"
+    fi
+fi
+
 SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
-    SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" "$VISIT_IDENTITY_JQ"'
+    SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
+      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
       def machine_convoy:
         (.issue_type // "") == "convoy"
         and ((((.title // "") | startswith("sling-"))
@@ -281,8 +303,21 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
       def order_wisp:
         ((.id // "") | contains("-wisp-"))
         and ((.title // "") | startswith("order:"));
+      # holder_live mirrors liveness-sweep.sh so this stays a SUPERSET of its
+      # census, but fails CLOSED on an unreadable session list ($livenessknown
+      # false -> not live -> subject not excluded -> the pass runs). A claim
+      # writes one of assignee / gc.session_id / gc.session_name; no holder is an
+      # unclaimed visit, a pending escalation that still covers.
+      def holder_live:
+        ([ (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "") ]
+         | map(select(. != ""))) as $holders
+        | if ($holders | length) == 0 then true
+          elif ($livenessknown | not) then false
+          else any($holders[]; . as $h | ($livesessions | index($h)) != null)
+          end;
       ([ ($live[0] // [])[]
          | select((.metadata.task_kind // "") == "visit")
+         | select(holder_live)
          | visit_identity_subjects[] ]) as $convgroups
       | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
       | ([ ($alive[0] // [])[]
@@ -296,7 +331,7 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
           # machinery, not work — the exclusion classify makes first.
           | select((machine_convoy or order_wisp) | not)
           | select((.metadata["gc.routed_to"] // "") == "")
-          | select((.metadata.task_kind // "") != "visit")
+          | select(((.metadata.task_kind // "") != "visit") or (holder_live | not))
           | select((.metadata.task_kind // "") != "triage-subject")
           | select(.id as $id | ($demanded | index($id)) | not)
           | select((.metadata["triage.hold"] // "") == "")
