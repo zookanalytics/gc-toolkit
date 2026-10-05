@@ -502,9 +502,24 @@ bead first, files the demand, wires the edge, and then reads the edge back
 off the gated bead — exiting non-zero when it did not land, because a
 demand with no edge leaves the work reading ready while a person still
 owes an answer, which is precisely the state the verb exists to remove.
-One open demand per gated bead: a resumed sitting that re-states the same
-question refreshes the existing demand rather than giving one wait two
-blockers.
+One open demand per gated bead and topic: a resumed sitting that re-states
+the same question under the same topic (`--topic`, the visit's
+escalation_key) refreshes its own demand rather than giving one wait two
+blockers. The topic scopes the lookup so two sittings on one shared
+standing-scope bucket each keep their own demand — without it the second
+would refresh the first's gate in place and overwrite the operator question
+it holds. An absent topic matches on the gated bead alone, the behaviour
+every caller that files no topic keeps.
+
+`converse-hold.sh` passes the visit's escalation_key as the topic on every
+demand a sitting files. The discharge in `converse-signoff.sh` resolves only
+demands the sitting itself filed, never the first unassigned demand on the
+item. The conversation demand is the one `gc.hold_demand` names, the id
+`converse-hold.sh` stamps on the visit. Any other demand, such as a
+`--hold-merge` demand on the anchor or a hold that predates the stamp, is found
+by the same topic-scoped lookup, keyed on the visit's escalation_key. So a
+sign-off under a standing scope resolves or re-states its own operator question
+and leaves a sibling topic's untouched.
 
 The gate is the STATE; the visit is its RESOLUTION. Because the operator does
 not read the "human" mailbox, the notify order is a durable record, not the
@@ -554,7 +569,9 @@ conversation wait cannot ride the closing visit — a demand left on a closed vi
 is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
 — so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
 the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
-abandoned question is answered or the demand is resolved.
+abandoned question is answered or the demand is resolved. The moved wait carries
+the sitting's topic, so it refreshes this sitting's own demand on the anchor and
+never a sibling sitting's.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that
