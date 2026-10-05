@@ -502,9 +502,24 @@ bead first, files the demand, wires the edge, and then reads the edge back
 off the gated bead — exiting non-zero when it did not land, because a
 demand with no edge leaves the work reading ready while a person still
 owes an answer, which is precisely the state the verb exists to remove.
-One open demand per gated bead: a resumed sitting that re-states the same
-question refreshes the existing demand rather than giving one wait two
-blockers.
+One open demand per gated bead and topic: a resumed sitting that re-states
+the same question under the same topic (`--topic`, the visit's
+escalation_key) refreshes its own demand rather than giving one wait two
+blockers. The topic scopes the lookup so two sittings on one shared
+standing-scope bucket each keep their own demand — without it the second
+would refresh the first's gate in place and overwrite the operator question
+it holds. An absent topic matches on the gated bead alone, the behaviour
+every caller that files no topic keeps.
+
+`converse-hold.sh` passes the visit's escalation_key as the topic on every
+demand a sitting files. The discharge in `converse-signoff.sh` resolves only
+demands the sitting itself filed, never the first unassigned demand on the
+item. The conversation demand is the one `gc.hold_demand` names, the id
+`converse-hold.sh` stamps on the visit. Any other demand, such as a
+`--hold-merge` demand on the anchor or a hold that predates the stamp, is found
+by the same topic-scoped lookup, keyed on the visit's escalation_key. So a
+sign-off under a standing scope resolves or re-states its own operator question
+and leaves a sibling topic's untouched.
 
 The gate is the STATE; the visit is its RESOLUTION. Because the operator does
 not read the "human" mailbox, the notify order is a durable record, not the
@@ -558,7 +573,9 @@ demand left on a closed visit is a gate `gate-visit-sweep` names on stderr forev
 and no return trip re-offers — so `converse-signoff.sh` and `gc-helm dismiss
 --leave-gate` both move it onto the ANCHOR: the liveness sweep re-offers the next
 sitting from `gc.demand_for=<anchor>`, and the merge holds until the abandoned
-question is answered or the demand is resolved.
+question is answered or the demand is resolved. The moved wait carries the
+sitting's topic, its visit's escalation_key, so it refreshes that sitting's own
+demand on the anchor and never a sibling sitting's.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that
@@ -723,8 +740,9 @@ way a sign-off records one. `--leave-gate <gate>` re-asks it, clearing
 dismissed cannot be re-asked where it stands, because once that visit closes the
 gate blocks closed work, which the sweep never re-offers. Leaving it open
 therefore moves its wait onto the subject, the move a cut-short sign-off makes:
-the question is re-stated as a demand on the subject first, and only then does the
-visit's demand close as moved. A gate's question is settled only on a ruling,
+the question is re-stated as a demand on the subject first, under the visit's
+escalation_key as its topic, and only then does the visit's demand close as
+moved. A gate's question is settled only on a ruling,
 never as a byproduct of closing a conversation. The decider is the
 caller: a converse agent holding the ruling from the thread supplies it, and a
 raw board dismiss surfaces the gate to the operator. A gate assigned to a person
@@ -919,10 +937,14 @@ session that dies between the stamp and the close leaves a visit that is
 `in_progress`, assigned, and carrying a final outcome. It is complete in
 every way except the one that ends it, and the claim result says only
 `existing_assignment`, so the hold answers and the prompt goes back to
-waiting. The close never runs. `assets/scripts/liveness-sweep.sh` reads
-the still-live visit as `conversing`, which keeps its subject out of the
-unnamed-wait census for as long as the strand stands, so nothing else
-raises it either.
+waiting. The close never runs. Two nets catch what the missing close would
+otherwise strand. When the same session re-claims the visit, `action=finish`
+performs the close (below). When the session is gone and no re-claim reaches it,
+`assets/scripts/liveness-sweep.sh` is the backstop: it counts a visit as
+`conversing` only while its holder session is listed in a live state, so a
+visit stranded by a dead session — one gone from the session list, or lingering
+in it as archived or closed — returns its subject to the unnamed-wait census
+rather than masking it.
 
 `action=finish` is keyed on the stamp. Every path that writes `gc.outcome`
 closes the visit immediately after it, so a `task_kind=visit` still open
