@@ -845,7 +845,8 @@ needs = ["patrol-summary"]
 description = """
 Pour the next wisp BEFORE burning this one, and GUARD the assign — a poured
 but unassigned wisp reaches no hook and drops the loop. Forward every
-declared var: a --root-only pour materializes no defaults.
+declared var, so a value chosen at the startup pour is not silently
+replaced by the formula default from the next cycle on.
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
 current wisp has to work: a wisp is an EPHEMERAL molecule, which means
