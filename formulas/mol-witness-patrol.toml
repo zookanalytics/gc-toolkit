@@ -822,8 +822,10 @@ fi
 # outcome. Gated on a queue that read AND parsed as an array ($STUCK_N set): an
 # unreadable or unparseable queue is not proof a handoff resolved, and an
 # empty-set fallback there would withdraw every live escalation. Only a visit
-# whose group is exactly the handoff bead id is retracted; a legacy group
-# carrying extra tokens (a malformed-subject filing) is left for repair.
+# whose group is exactly the handoff bead id is retracted. A legacy group
+# carrying extra tokens (a malformed-subject filing) names no handoff, so this
+# arm leaves it. Such a visit was filed in error, and it closes through
+# visit-close.sh with outcome moot, never a bare gc bd close.
 if [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
