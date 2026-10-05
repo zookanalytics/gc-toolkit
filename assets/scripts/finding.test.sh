@@ -183,7 +183,7 @@ esac; done
 existing=$(gc bd list --metadata-field escalation_key="$key" --status=open,in_progress,blocked --json 2>/dev/null \
   | jq -r --arg s "$subj" '[.[]? | select((.metadata["gc.continuation_group"] // "") == $s)][0].id // empty')
 [ -n "$existing" ] && exit 0
-vid=$(gc bd create "visit: $subj — $msg" -t task --json | jq -r '.id // .[0].id')
+vid=$(gc bd create "visit: $subj — $msg" -t task --json | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 gc bd update "$vid" --set-metadata task_kind=visit --set-metadata escalation_key="$key" \
   --set-metadata gc.continuation_group="$subj" --set-metadata gc.routed_to=human >/dev/null
 gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true

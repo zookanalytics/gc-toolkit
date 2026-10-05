@@ -274,7 +274,7 @@ cmd_upsert() {
   local title desc id
   title="finding[$lane]: $(printf '%s' "$msg" | tr '\n' ' ' | cut -c1-120)"
   desc=$(printf 'Locus: %s\n\n%s\n\nRaised by %s reviewing anchor %s.' "$locus" "$msg" "$source" "$anchor")
-  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$id" ] || { warn "could not create finding bead for key $key on $anchor"; exit 2; }
   gc bd update "$id" \
     --set-metadata task_kind=finding \
@@ -393,7 +393,7 @@ cmd_set_disposition() {
       ftitle="follow-up: $(printf '%s' "$ftitle" | sed -E 's/^finding\[[^]]*\]: //')"
       fdesc=$(printf 'Deferred from the review of anchor %s (finding %s), to be picked up after the PR merges.\n\n%s' \
         "$anchor" "$finding" "${reason:-No reason recorded.}")
-      followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+      followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
       [ -n "$followup" ] \
         || { warn "could not file a follow-up bead for deferred finding $finding; NOT closing (a deferral with no tracked later-work is the orphan this retires)"; exit 2; }
       gc bd dep add "$followup" "$anchor" --type discovered-from >/dev/null 2>&1 \

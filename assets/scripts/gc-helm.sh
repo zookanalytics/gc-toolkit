@@ -1513,7 +1513,7 @@ cmd_demand() {
         demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
         if [ -z "$demand" ]; then
             demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="$(demand_await_id "$gated" "$topic")" --title "$text" --reason "$body" --json 2>/dev/null \
-                | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+                | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
             if [ -z "$demand" ] || [ "$demand" = null ]; then
                 candidate=$(demand_lookup "$gated" "$topic") \
                     || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: $(demand_await_id "$gated" "$topic")." >&2; exit 4; }
