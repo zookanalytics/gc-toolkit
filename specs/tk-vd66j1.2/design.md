@@ -12,7 +12,7 @@ video review modality (tk-vd66j1.9) pours the formula to produce a clip for a PR
 under review; an operator pours it for any rig from a shell.
 
 This records the design decisions and the proof for tk-vd66j1.2, the mol leg of
-epic tk-vd66j1. The authoritative how-to is `docs/rig-demo.md`.
+epic tk-vd66j1.
 
 ## Engine-driven capture, not agent-driven
 
@@ -42,6 +42,14 @@ The capability splits along the line between mechanical work and judgment.
 Keeping the engine-resolution and fail-closed logic in one script is what lets
 tk-vd66j1.9 reuse it without copying it, and lets it carry a hermetic test
 (`rig-demo-capture.test.sh`) the formula body could not.
+
+## The how-to lives in the formula and the skill
+
+The formula documents its own use: `gc formula show mol-rig-demo` prints the
+pour line and every input with its description. The `demo` review check, which
+tk-vd66j1.9 wires to this mol, follows `skills/demo-capture/SKILL.md` as its
+method, so that skill names the script and the mol. A `docs/` how-to would be a
+third copy of the same facts, so the capability has none.
 
 ## The app target is a pour variable
 

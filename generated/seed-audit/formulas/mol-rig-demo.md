@@ -23,9 +23,9 @@ Two inputs name the scenario, and the mol needs exactly one: demo_script is a
 ready demo:capture-format script; source_bead is a bead whose work the mol turns
 into a script by following skills/gc-demo-script/SKILL.md. One input names how
 the rig's app is reached — serve_dir, serve_cmd, or base_url — the one
-rig-specific fact, threaded as a pour var because no rig-to-app map exists
-(docs/rig-demo.md). A per-rig default store is tracked separately; this mol
-reads the target from the pour.
+rig-specific fact, threaded as a pour var because no rig-to-app map exists.
+A per-rig default store is tracked separately; this mol reads the target from
+the pour.
 
 The clip is an artifact, never a committed file: it is written outside the repo
 tree and delivered to the PR, because a user-attachments URL is the only

@@ -78,7 +78,7 @@ formulas/mol-review-quorum-signoff.toml
 formulas/mol-review.toml
 42dcfd3637bbaad16b3bcfafd6942f3274b4e40122f8817fcd71d3c818bf89c8
 formulas/mol-rig-demo.toml
-da96e2faffe7a4cc110a5c8f2242a0c1cf4f15b448bd7653ce80bf4b966b6a00
+7b0d2e31477622b900151c69c299b71668830163c28fec19d6bbaa7884684711
 formulas/mol-validate-close.toml
 73580bb5fee932a95cd766bc2e51bde6d3c2ea7354a213c77090f560d695a947
 formulas/mol-validate.toml
