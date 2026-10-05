@@ -26,6 +26,14 @@ visit_cg() { # <id> <status> <continuation_group-subject>
   printf '{"id":"%s","status":"%s","assignee":"","title":"%s","description":"","notes":"","issue_type":"task","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
     "$1" "$2" "$1" "$3"
 }
+# A human demand gate: the bead it holds (gc.demand_for) and the visit recorded on
+# it (gc.gate_visit, the sweep's idempotence key). An empty assignee is a ruling; a
+# non-empty one is a task a named person performs, which the orphan clause leaves
+# alone. An empty gate_visit stands for the unset key (the sweep will offer one).
+gate() { # <id> <status> <demand_for> <gate_visit> [<assignee>]
+  printf '{"id":"%s","status":"%s","assignee":"%s","title":"decide %s","description":"","notes":"","issue_type":"gate","await_type":"human","metadata":{"gc.demand_for":"%s","gc.gate_visit":"%s"}}' \
+    "$1" "$2" "${5:-}" "$3" "$3" "$4"
+}
 
 # 1. No tracker at all -> may finalize.
 store "[$(work A1 open)]"; : > "$STUB_DEPS"
@@ -100,6 +108,58 @@ store "[$(work A11 open), $(work OTHER11 open), $(visit_cg V11 open A11)]"
 printf 'V11|tracks|OTHER11\n' > "$STUB_DEPS"
 out=$("$SUT" check A11 2>/dev/null); rc=$?
 eq "$rc" 0 "stamp here but tracks edge elsewhere: exit 0"
+
+# ── clause no-orphan-gate: a gate whose conversation died without a decision ──
+# The gate stays open and still blocks its bead, but its gc.gate_visit names a
+# closed visit the sweep never re-offers. no-open-visit cannot see it (the visit
+# is closed); this clause does and refuses finalize, fail-closed.
+
+# 13. ORPHAN: open gate on A13, gc.gate_visit names a CLOSED visit -> refuse.
+store "[$(work A13 open), $(gate G13 open A13 V13C), $(visit V13C closed)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A13 2>/dev/null); rc=$?
+eq "$rc" 1 "orphan gate (gate_visit -> closed visit): exit 1"
+has "$out" "G13" "orphan gate: names the gate"
+has "$out" "A13" "orphan gate: names the gated bead"
+
+# 14. LIVE gate_visit: the recorded visit is still OPEN -> no orphan (that live
+# visit is no-open-visit's domain; here it does not cover A14, so the set passes).
+store "[$(work A14 open), $(gate G14 open A14 V14O), $(visit V14O open)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A14 2>/dev/null); rc=$?
+eq "$rc" 0 "gate with an open recorded visit: exit 0"
+
+# 15. UNSET gate_visit: the sweep will offer a visit; not a dead-visit orphan.
+store "[$(work A15 open), $(gate G15 open A15 "")]"; : > "$STUB_DEPS"
+out=$("$SUT" check A15 2>/dev/null); rc=$?
+eq "$rc" 0 "gate with no recorded visit (sweep will offer): exit 0"
+
+# 16. SKIP sentinel: a deliberate operator suppression, not an orphan.
+store "[$(work A16 open), $(gate G16 open A16 skip)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A16 2>/dev/null); rc=$?
+eq "$rc" 0 "gate suppressed with gc.gate_visit=skip: exit 0"
+
+# 17. ASSIGNED gate: a task a named person performs, not a ruling -> left alone.
+store "[$(work A17 open), $(gate G17 open A17 V17C human/op), $(visit V17C closed)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A17 2>/dev/null); rc=$?
+eq "$rc" 0 "assigned gate (a person's task): exit 0"
+
+# 18. DANGLING visit: gc.gate_visit names a visit not in the store -> fail-closed
+# orphan (a visit we cannot read is treated as gone).
+store "[$(work A18 open), $(gate G18 open A18 V18GONE)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A18 2>/dev/null); rc=$?
+eq "$rc" 1 "orphan gate (gate_visit -> missing visit): exit 1"
+has "$out" "G18" "dangling-visit orphan: names the gate"
+
+# 19. A gate demanding for ANOTHER bead does not hold this one.
+store "[$(work A19 open), $(work OTHER19 open), $(gate G19 open OTHER19 V19C), $(visit V19C closed)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A19 2>/dev/null); rc=$?
+eq "$rc" 0 "orphan gate on another subject: exit 0"
+
+# 20. Fail closed: an unreadable gate listing refuses, naming this clause. Called
+# directly (sourced), since a failing `gc bd list` would otherwise refuse at
+# no-open-visit's own probe first.
+out=$(STUB_LIST_FAIL=1 bash -c '. "$1"; clause_no_orphan_gate A20' _ "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "orphan-gate probe unreadable: exit 1 (fail-closed)"
+has "$out" "fail-closed" "orphan-gate probe unreadable: names fail-closed"
 
 # 12. Usage.
 "$SUT" check >/dev/null 2>&1; eq "$?" 2 "check without a bead id: exit 2"

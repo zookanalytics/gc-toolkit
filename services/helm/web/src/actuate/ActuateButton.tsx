@@ -19,7 +19,14 @@
 // panel's session <section>.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { actuate, ActuateError, type ActuateResult, type ActuateVerb } from './client';
+import {
+  actuate,
+  ActuateError,
+  type ActuateResult,
+  type ActuateVerb,
+  type DismissGate,
+  type GateDecision,
+} from './client';
 
 // What the operator should do next, per failure reason. Empty where the service's
 // own sentence already names the move — doubling up would just add noise.
@@ -76,7 +83,34 @@ type State =
   | { phase: 'idle' }
   | { phase: 'running' }
   | { phase: 'done'; result: ActuateResult }
-  | { phase: 'failed'; error: ActuateError };
+  | { phase: 'failed'; error: ActuateError }
+  // dismiss only: the subject carries open linked gates a close would orphan, and
+  // the operator must decide each before the dismiss can complete. `choices` holds
+  // the per-gate resolve/leave decision (a gate absent is still undecided) and
+  // `ruling` is the single decision gc-helm.sh records for every gate resolved.
+  | {
+      phase: 'deciding';
+      gates: DismissGate[];
+      message: string;
+      choices: Record<string, 'resolve' | 'leave'>;
+      ruling: string;
+    };
+
+type DecidingState = Extract<State, { phase: 'deciding' }>;
+
+// A ruling is only needed when at least one gate is being resolved; leaving a gate
+// open records nothing.
+function anyResolve(s: DecidingState): boolean {
+  return Object.values(s.choices).some((c) => c === 'resolve');
+}
+
+// The confirm is enabled once every surfaced gate has a choice, and — if any is a
+// resolve — a non-empty ruling is typed. This mirrors gc-helm.sh, which holds on
+// any undecided gate and refuses a resolve with no ruling.
+function canConfirm(s: DecidingState): boolean {
+  const allDecided = s.gates.every((g) => s.choices[g.id] !== undefined);
+  return allDecided && (!anyResolve(s) || s.ruling.trim() !== '');
+}
 
 export interface ActuateButtonProps {
   beadId: string;
@@ -113,30 +147,76 @@ export function ActuateButton({ beadId, verb, formula, compact, onDone }: Actuat
     setState({ phase: 'idle' });
   }, [beadId]);
 
+  // Shared completion for the first click (run) and the decision re-submit
+  // (submitDecision). A dismiss HELD for a gate decision is not done and fires no
+  // onDone — nothing changed; it moves to the decision phase carrying the gates.
+  // Anything else is a success (onDone) or a failure.
+  const settle = useCallback(
+    (target: string, p: Promise<ActuateResult>) => {
+      p.then((result) => {
+        if (current.current !== target) return;
+        if (
+          verb === 'dismiss' &&
+          result.outcome === 'held_for_gate_decision' &&
+          result.gates &&
+          result.gates.length > 0
+        ) {
+          setState({ phase: 'deciding', gates: result.gates, message: result.message, choices: {}, ruling: '' });
+        } else {
+          setState({ phase: 'done', result });
+          onDone?.();
+        }
+      })
+        .catch((cause: unknown) => {
+          if (current.current !== target) return;
+          const error =
+            cause instanceof ActuateError
+              ? cause
+              : new ActuateError(0, 'internal', cause instanceof Error ? cause.message : String(cause));
+          setState({ phase: 'failed', error });
+        })
+        .finally(() => {
+          if (current.current === target) inFlight.current = false;
+        });
+    },
+    [verb, onDone],
+  );
+
   const run = useCallback(() => {
     if (inFlight.current) return;
     inFlight.current = true;
     const target = beadId;
     setState({ phase: 'running' });
-    actuate(verb, target)
-      .then((result) => {
-        if (current.current === target) {
-          setState({ phase: 'done', result });
-          onDone?.();
-        }
-      })
-      .catch((cause: unknown) => {
-        if (current.current !== target) return;
-        const error =
-          cause instanceof ActuateError
-            ? cause
-            : new ActuateError(0, 'internal', cause instanceof Error ? cause.message : String(cause));
-        setState({ phase: 'failed', error });
-      })
-      .finally(() => {
-        if (current.current === target) inFlight.current = false;
-      });
-  }, [beadId, verb, onDone]);
+    settle(target, actuate(verb, target));
+  }, [beadId, verb, settle]);
+
+  // The decision re-submit: resolve/leave per gate plus the single ruling, sent
+  // back to the same dismiss route. gc-helm.sh applies the decisions and then
+  // closes the visit, so a success here ends the flow.
+  const submitDecision = useCallback(
+    (gates: DismissGate[], choices: Record<string, 'resolve' | 'leave'>, ruling: string) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      const target = beadId;
+      const decisions: GateDecision[] = gates
+        .map((g) => ({ gate: g.id, action: choices[g.id] }))
+        .filter((d): d is GateDecision => d.action !== undefined);
+      // The ruling rides only when a gate is being resolved; a leave-only decision
+      // records nothing, so no ruling is sent (the server ignores one with no gate
+      // to apply it to).
+      const resolving = decisions.some((d) => d.action === 'resolve');
+      setState({ phase: 'running' });
+      settle(target, actuate('dismiss', target, { ruling: resolving ? ruling : undefined, decisions }));
+    },
+    [beadId, settle],
+  );
+
+  const choose = useCallback((gateId: string, action: 'resolve' | 'leave') => {
+    setState((s) => (s.phase === 'deciding' ? { ...s, choices: { ...s.choices, [gateId]: action } } : s));
+  }, []);
+  const setRuling = useCallback((ruling: string) => {
+    setState((s) => (s.phase === 'deciding' ? { ...s, ruling } : s));
+  }, []);
 
   const copy = COPY[verb];
   return (
@@ -145,7 +225,7 @@ export function ActuateButton({ beadId, verb, formula, compact, onDone }: Actuat
         type="button"
         className={`actuate-go actuate-go--${verb}`}
         onClick={run}
-        disabled={state.phase === 'running'}
+        disabled={state.phase === 'running' || state.phase === 'deciding'}
         title={
           verb === 'accept' && formula
             ? `dispatch ${formula} at ${beadId} and dismiss the visit`
@@ -170,6 +250,60 @@ export function ActuateButton({ beadId, verb, formula, compact, onDone }: Actuat
           {NEXT_MOVE[state.error.reason] !== undefined && (
             <span className="muted"> {NEXT_MOVE[state.error.reason]}</span>
           )}
+        </span>
+      )}
+
+      {state.phase === 'deciding' && (
+        <span className="actuate-gate-decision" role="group" aria-label="decide the open gates before dismissing">
+          {' '}
+          <span className="actuate-gate-prompt" role="status">
+            {state.message}
+          </span>
+          {state.gates.map((g) => (
+            <span key={g.id} className="actuate-gate">
+              {' '}
+              <span className="actuate-gate-demand">{g.demand !== '' ? g.demand : g.id}</span>{' '}
+              <span className="muted">(blocks {g.blocks})</span>{' '}
+              <button
+                type="button"
+                className="actuate-gate-choice"
+                aria-pressed={state.choices[g.id] === 'resolve'}
+                onClick={() => choose(g.id, 'resolve')}
+              >
+                Resolve
+              </button>{' '}
+              <button
+                type="button"
+                className="actuate-gate-choice"
+                aria-pressed={state.choices[g.id] === 'leave'}
+                onClick={() => choose(g.id, 'leave')}
+              >
+                Leave open
+              </button>
+            </span>
+          ))}
+          {anyResolve(state) && (
+            <>
+              {' '}
+              <input
+                type="text"
+                className="actuate-gate-ruling"
+                maxLength={140}
+                placeholder="ruling (≤140 chars)"
+                aria-label="ruling for the resolved gates"
+                value={state.ruling}
+                onChange={(e) => setRuling(e.target.value)}
+              />
+            </>
+          )}{' '}
+          <button
+            type="button"
+            className="actuate-go actuate-go--dismiss"
+            disabled={!canConfirm(state)}
+            onClick={() => submitDecision(state.gates, state.choices, state.ruling)}
+          >
+            Confirm dismissal
+          </button>
         </span>
       )}
     </span>

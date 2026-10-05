@@ -73,7 +73,7 @@ type ToolResult struct {
 // could not classify may be returned as a plain error and is reported as an
 // internal fault.
 type Actuator interface {
-	Run(ctx context.Context, verb, bead string) (ToolResult, error)
+	Run(ctx context.Context, verb, bead string, extraArgs ...string) (ToolResult, error)
 }
 
 // Sentinel failures an [Actuator] reports instead of an exit code, because the
@@ -85,8 +85,24 @@ var (
 
 // actuateRequest is the POST body shared by every write route: the bead to act
 // on. A visit id is accepted too — gc-helm.sh resolves it to its subject.
+//
+// Ruling and Decisions are dismiss-only and empty on the other routes. They
+// carry the operator's answer to a prior dismiss that HELD for a gate decision
+// (held_for_gate_decision): one resolve/leave choice per surfaced gate, plus the
+// single ruling gc-helm.sh records for every gate resolved in the run. The first
+// dismiss click sends neither; the decision re-submit sends both.
 type actuateRequest struct {
-	Bead string `json:"bead"`
+	Bead      string         `json:"bead"`
+	Ruling    string         `json:"ruling,omitempty"`
+	Decisions []gateDecision `json:"decisions,omitempty"`
+}
+
+// gateDecision is the operator's choice for one open linked gate a held dismiss
+// surfaced: resolve it (settled on the request's Ruling) or leave it open
+// (re-asked as a fresh visit). Gate is a bead id, validated at this boundary.
+type gateDecision struct {
+	Gate   string `json:"gate"`
+	Action string `json:"action"` // "resolve" | "leave"
 }
 
 // actuateErrorBody is the non-2xx body of every write route.
@@ -213,6 +229,17 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 		return ToolResult{}, "", false
 	}
 
+	// dismiss carries the gate-decision flags (--json always, plus the operator's
+	// resolve/leave choices); the other verbs carry none. Built here, at the HTTP
+	// boundary, because the gate ids become argv elements and must cross the same
+	// validation the subject does. A malformed decision is a bad request, caught
+	// before the gate and the subprocess.
+	extraArgs, argErr := extraArgsFor(verb, req)
+	if argErr != nil {
+		writeActuateError(w, http.StatusBadRequest, reasonUsage, argErr.Error())
+		return ToolResult{}, "", false
+	}
+
 	// Keyed on the subject (bead): every write verb mutates its visit, so a
 	// double-clicked Accept, and an Accept racing a Dismiss on one row, both
 	// collapse to one in-flight write. The same verb on two different beads still
@@ -239,7 +266,7 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 	// once validated and holding the per-(verb, bead) gate the run is bound by the
 	// actuator's own timeout and nothing else. A disconnected operator loses the
 	// RESPONSE, not the write.
-	res, err := s.actuator.Run(context.WithoutCancel(r.Context()), verb, bead)
+	res, err := s.actuator.Run(context.WithoutCancel(r.Context()), verb, bead, extraArgs...)
 	if err != nil {
 		status, reason, msg := mapActuateErr(err)
 		log.Printf("helm: %s %s: %v", verb, bead, err)
@@ -247,6 +274,14 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 		return ToolResult{}, "", false
 	}
 	if res.ExitCode != 0 {
+		// dismiss's exit 5 is NOT a failure: it is the subject carrying open linked
+		// human gates a close would orphan, which the verb surfaces for a decision
+		// (gc-helm.sh dismiss-gate-decision). Hand it back to handleDismiss un-mapped
+		// — it renders the gates into a resolve/leave prompt — and do NOT bust the
+		// board cache, because nothing was closed.
+		if verb == "dismiss" && res.ExitCode == exitHeldForGateDecision {
+			return res, bead, true
+		}
 		status, reason := mapExit(verb, res.ExitCode)
 		msg := firstStderrLine(res.Stderr)
 		if msg == "" {
@@ -287,9 +322,97 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request)  { s.handleActuateVerb(w, r, "accept") }
-func (s *Server) handleEngage(w http.ResponseWriter, r *http.Request)  { s.handleActuateVerb(w, r, "engage") }
-func (s *Server) handleDismiss(w http.ResponseWriter, r *http.Request) { s.handleActuateVerb(w, r, "dismiss") }
+func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
+	s.handleActuateVerb(w, r, "accept")
+}
+func (s *Server) handleEngage(w http.ResponseWriter, r *http.Request) {
+	s.handleActuateVerb(w, r, "engage")
+}
+
+// handleDismiss serves POST /helm/dismiss. It has its own handler, rather than
+// the flat [Server.handleActuateVerb], because dismiss runs with --json and its
+// result is a discriminated outcome the operator must act on: the sitting CLOSED,
+// or dismiss HELD because the subject carries open linked human gates a close
+// would orphan (gc-helm.sh exit 5). The held body carries each gate so the board
+// can take the resolve/leave decision in place; the decision returns as the
+// request's ruling + decisions, which runActuation forwards and gc-helm.sh
+// applies before it closes the visit. runActuation has already mapped every true
+// failure, so a result reaching here is exit 0 (closed) or exit 5 (held).
+func (s *Server) handleDismiss(w http.ResponseWriter, r *http.Request) {
+	res, bead, ok := s.runActuation(w, r, "dismiss")
+	if !ok {
+		return
+	}
+	// dismiss always runs with --json, so stdout is one JSON object, never the
+	// prose the other parity verbs pass through. A shape this cannot read is
+	// reported, never shown raw.
+	var out dismissToolJSON
+	if err := json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &out); err != nil {
+		log.Printf("helm: dismiss %s: unreadable --json stdout: %v", bead, err)
+		writeActuateError(w, http.StatusBadGateway, reasonInternal,
+			"the dismiss tool answered in a shape the board could not read")
+		return
+	}
+	if res.ExitCode == exitHeldForGateDecision || out.HeldForGateDecision {
+		writeJSON(w, http.StatusOK, dismissResponse{
+			Bead:    bead,
+			Verb:    "dismiss",
+			Outcome: dismissOutcomeHeld,
+			Message: heldMessage(len(out.Gates)),
+			Gates:   out.Gates,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, dismissResponse{
+		Bead:    bead,
+		Verb:    "dismiss",
+		Outcome: dismissOutcomeClosed,
+		Message: closedMessage(out.Closed),
+	})
+}
+
+// extraArgsFor builds a verb's handler-supplied flags. Only dismiss has any;
+// every other verb runs on its positionals alone.
+func extraArgsFor(verb string, req actuateRequest) ([]string, error) {
+	if verb != "dismiss" {
+		return nil, nil
+	}
+	return dismissExtraArgs(req)
+}
+
+// dismissExtraArgs builds the dismiss flags: always --json (so the service reads
+// the structured result and the held gates), plus the operator's per-gate
+// resolve/leave choices when a prior held response prompted them. Each gate id is
+// validated to the bead-id shape — the same argument boundary the subject crosses
+// — so a crafted id cannot reach dismiss's flag loop as a flag. gc-helm.sh takes
+// ONE --ruling for every gate resolved in a run, so the ruling is a single request
+// field, required once any gate is resolved and omitted when none is.
+func dismissExtraArgs(req actuateRequest) ([]string, error) {
+	args := []string{"--json"}
+	resolving := false
+	for _, d := range req.Decisions {
+		if !validBeadID(d.Gate) {
+			return nil, errors.New("not a gate id: " + d.Gate + " — expected a form like tk-abc12")
+		}
+		switch d.Action {
+		case "resolve":
+			args = append(args, "--resolve-gate", d.Gate)
+			resolving = true
+		case "leave":
+			args = append(args, "--leave-gate", d.Gate)
+		default:
+			return nil, errors.New(`unknown gate decision action: "` + d.Action + `" — expected "resolve" or "leave"`)
+		}
+	}
+	if resolving {
+		ruling := strings.TrimSpace(req.Ruling)
+		if ruling == "" {
+			return nil, errors.New("resolving a gate needs a ruling (the decision it resolves with)")
+		}
+		args = append(args, "--ruling", ruling)
+	}
+	return args, nil
+}
 
 // handleActuateVerb serves accept, engage and dismiss: the shared write
 // middleware, then the flat [actuateResponse]. Unlike open, what these three
@@ -346,6 +469,91 @@ type actuateResponse struct {
 	// possible and honest (dismiss on a subject with no open visit says so on
 	// stdout, but a bare success is not invented into a claim).
 	Message string `json:"message"`
+}
+
+// exitHeldForGateDecision is gc-helm.sh dismiss's exit 5: the subject carries open
+// linked human gates a close would orphan, so the verb surfaced them and closed
+// nothing. Not a failure — a decision the operator still owes.
+const exitHeldForGateDecision = 5
+
+// dismiss outcomes, the discriminator on dismissResponse.
+const (
+	dismissOutcomeClosed = "closed"
+	dismissOutcomeHeld   = "held_for_gate_decision"
+)
+
+// dismissResponse is the 200 body of POST /helm/dismiss.
+//
+// Richer than the flat [actuateResponse] the other parity verbs share, for the
+// same reason [openResponse] is: the operator must tell the two outcomes apart. A
+// dismiss either CLOSED the sitting (Outcome "closed") or HELD because the subject
+// carries open linked human gates a close would orphan (Outcome
+// "held_for_gate_decision", gc-helm.sh exit 5). The held body carries each gate so
+// the board takes the resolve/leave decision in place rather than failing with a
+// lost sentence and sending the operator to the CLI.
+//
+// DELIBERATELY NOT IN src/contract.ts, like [openResponse] and [actuateResponse]:
+// its mirror lives beside the fetch in web/src/actuate/client.ts.
+type dismissResponse struct {
+	Bead string `json:"bead"`
+	Verb string `json:"verb"`
+	// Outcome is "closed" or "held_for_gate_decision". The browser branches on it,
+	// never on Message, the same discipline the reason slug carries for errors.
+	Outcome string `json:"outcome"`
+	// Message is a short board sentence for the outcome. dismiss runs with --json,
+	// so there is no verbatim script prose to pass through here.
+	Message string `json:"message"`
+	// Gates is the open linked gates a held dismiss surfaced, each to be decided;
+	// empty (and omitted) on a closed outcome.
+	Gates []dismissGate `json:"gates,omitempty"`
+}
+
+// dismissGate is one open linked gate a held dismiss surfaced. Mirrors the objects
+// in gc-helm.sh dismiss --json's held_for_gate_decision.gates: the gate id, the
+// bead it blocks, and its demand headline.
+type dismissGate struct {
+	ID     string `json:"id"`
+	Blocks string `json:"blocks"`
+	Demand string `json:"demand"`
+}
+
+// dismissToolJSON is the parse target for gc-helm.sh dismiss --json. One struct
+// reads both shapes: the closed result {subject, matched, closed, ok:true} and the
+// held result {subject, ok:false, held_for_gate_decision:true, gates:[…]}. Fields
+// absent from one shape stay zero-valued.
+type dismissToolJSON struct {
+	Subject string `json:"subject"`
+	OK      bool   `json:"ok"`
+	// Matched is gc-helm.sh's array of the visits it matched to the subject. This
+	// layer reports `closed`, not the match list, so it keeps the array raw rather
+	// than decoding an element it never reads.
+	Matched             json.RawMessage `json:"matched"`
+	Closed              int             `json:"closed"`
+	HeldForGateDecision bool            `json:"held_for_gate_decision"`
+	Gates               []dismissGate   `json:"gates"`
+	GateReadFailed      bool            `json:"gate_read_failed"`
+}
+
+// heldMessage is the board sentence for a dismiss held on a gate decision; it
+// points the operator at the gates the body carries rather than restating them.
+func heldMessage(n int) string {
+	if n == 1 {
+		return "Dismiss is held: this subject has an open linked gate a close would orphan. Decide it below."
+	}
+	return "Dismiss is held: this subject has " + strconv.Itoa(n) + " open linked gates a close would orphan. Decide each below."
+}
+
+// closedMessage is the board sentence for a completed dismiss, keyed off how many
+// visits closed — 0 is the honest "nothing was holding a sitting".
+func closedMessage(closed int) string {
+	switch {
+	case closed <= 0:
+		return "No open visit was holding a sitting."
+	case closed == 1:
+		return "The visit was closed."
+	default:
+		return "Closed " + strconv.Itoa(closed) + " visits."
+	}
 }
 
 // mapExit turns a gc-helm.sh exit code into an HTTP status and a stable reason.

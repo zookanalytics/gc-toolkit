@@ -44,7 +44,7 @@ Usage:
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
-  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--resolve-gate <gate> --ruling "..." | --leave-gate <gate>]... [--by <who>] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted). An open linked human gate is NOT silently passed: dismiss surfaces each and exits 5 until every one is decided — --resolve-gate settles it on --ruling (recorded as a sign-off records it), --leave-gate re-asks it (a fresh visit); --json prints {subject,matched,closed,ok}, or {subject,ok:false,held_for_gate_decision,gates} when it holds for a gate decision
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue) and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
@@ -1987,13 +1987,38 @@ current_sitting_subject() {
 # The outcome stamp precedes the close: a visit closed without a gc.outcome is
 # a sitting the board cannot report, and once closed no re-run reaches it. A
 # visit the verb could not account for aborts the run. Idempotent.
+#
+# Ending the sitting is COUPLED to the gate it holds. A converse hold files a
+# human demand gate, on the visit for a PR anchor and on the subject otherwise;
+# closing the visit without deciding that gate orphans it (open, still blocking,
+# its gc.gate_visit pointing at a closed visit the sweep never re-offers). So a
+# subject with an open linked gate is not silently dismissed: the verb surfaces
+# each gate and exits 5 until the caller decides it — resolve it on a stated
+# ruling (the gate closes and the ruling overwrites its board sentence, exactly
+# as a sign-off records it) or leave it open (gc.gate_visit unset, so the sweep
+# offers a fresh visit; a gate on the visit itself has its wait moved onto the
+# subject, the move a cut-short sign-off makes). A gate's question is settled
+# only on a ruling, never as a byproduct of closing a conversation.
 cmd_dismiss() {
     bead=""; dismiss_reason=""; dismiss_json=""
+    resolve_gates=""; leave_gates=""; dismiss_ruling=""; dismiss_by=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) dismiss_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --reason requires a value" >&2; exit 2; }
                         dismiss_reason="$1"; shift ;;
+            --resolve-gate=*) resolve_gates="$resolve_gates ${1#--resolve-gate=}"; shift ;;
+            --resolve-gate)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --resolve-gate requires a gate id" >&2; exit 2; }
+                              resolve_gates="$resolve_gates $1"; shift ;;
+            --leave-gate=*)   leave_gates="$leave_gates ${1#--leave-gate=}"; shift ;;
+            --leave-gate)     shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --leave-gate requires a gate id" >&2; exit 2; }
+                              leave_gates="$leave_gates $1"; shift ;;
+            --ruling=*) dismiss_ruling="${1#--ruling=}"; shift ;;
+            --ruling)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --ruling requires a value" >&2; exit 2; }
+                        dismiss_ruling="$1"; shift ;;
+            --by=*)     dismiss_by="${1#--by=}"; shift ;;
+            --by)       shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --by requires a value" >&2; exit 2; }
+                        dismiss_by="$1"; shift ;;
             --json)     dismiss_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: dismiss: unknown flag '$1'" >&2; exit 2 ;;
@@ -2105,6 +2130,183 @@ cmd_dismiss() {
         echo "$PROG: dismiss: could not read the visits on $bead — 'gc bd list' failed (rig '${path:-?}')" >&2
     fi
 
+    # >>> dismiss-gate-decision
+    # A converse hold files a human demand GATE and stamps gc.hold_demand on the
+    # visit. The gate blocks the VISIT when the subject is a PR anchor, so the
+    # conversation does not freeze the merge, and the subject otherwise; an
+    # opt-in merge hold adds a second gate on the anchor. The gate is the
+    # decision's STATE; the visit is its resolution. Closing the visit without
+    # deciding the gate orphans it — the gate stays open, still blocking its bead,
+    # its gc.gate_visit pointing at a visit now closed, which gate-visit-sweep
+    # never re-offers. So a dismiss on a subject that still carries an open linked
+    # gate does not silently proceed. It surfaces each gate and takes an explicit
+    # decision: RESOLVE it on a stated ruling (recorded the way a sign-off records
+    # one — the gate closes on the ruling and the ruling overwrites the gate's
+    # board sentence), or LEAVE it open (re-asked: gc.gate_visit unset, so the
+    # sweep offers a fresh visit). A gate on a visit this dismiss closes cannot be
+    # re-asked where it stands, so leaving it open moves its wait onto the subject
+    # instead (the leave loop below). A gate ASSIGNED to a person is that person's
+    # task, not a ruling to make, and is left alone — the demand converse's own
+    # discharge skips for the same reason.
+    #
+    # Run only when the visit read above succeeded: an uncertain sitting aborts
+    # below, and a gate decision keyed off a half-read sitting could not be trusted.
+    if [ "$sitting_failed" -eq 0 ]; then
+        TAB=$(printf '\t')
+        # The gates this sitting owes a decision on, by either link: the
+        # gc.hold_demand each dismissed visit stamped (the hold's own record of the
+        # demand it filed), and the gc.demand_for==subject convention signoff and
+        # the sweep share. --include-gates is load-bearing: a gate is hidden from a
+        # plain `bd list`. Unassigned only — an assigned gate is a person's task.
+        gate_hold_demands=$(printf '%s' "$visits_json" | jq -r --arg vids "$(printf '%s' "$visits" | tr '\n' ' ')" '
+            ($vids | split(" ") | map(select(length > 0))) as $v
+            | [ .[]? | (.id // "") as $i | select(($v | index($i)) != null) | .metadata["gc.hold_demand"] // empty ]
+            | .[]' 2>/dev/null | sort -u | tr '\n' ' ')
+        gates_raw=$(gc bd list --include-gates --has-metadata-key gc.demand_for --status=open,in_progress --json --limit=0 2>/dev/null | scrub)
+        if ! printf '%s' "$gates_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            # Fail closed: an unreadable gate listing is not proof the subject has
+            # no open gate, and closing the sitting could orphan one it cannot rule
+            # out. Nothing is closed; a re-run retries the read.
+            [ -n "$dismiss_json" ] && jq -nc --arg s "$bead" '{subject:$s, ok:false, gate_read_failed:true}'
+            echo "$PROG: dismiss: could not read the open gates on $bead ('gc bd list --include-gates' answered nothing this verb could parse) — refusing, because the dismiss could orphan a gate this read cannot rule out. Nothing was closed; re-run dismiss." >&2
+            exit 4
+        fi
+        gate_rows=$(printf '%s' "$gates_raw" | jq -r --arg s "$bead" --arg hd "$gate_hold_demands" '
+            ($hd | split(" ") | map(select(length > 0))) as $hdids
+            | [ .[]?
+                | (.id // "") as $i
+                | select(((.assignee // "") | tostring) == "")
+                | select(((.metadata["gc.demand_for"] // "") == $s) or (($hdids | index($i)) != null)) ]
+            | unique_by(.id)
+            | .[] | [ (.id // ""), (.metadata["gc.demand_for"] // ""), (.title // "") ] | @tsv' 2>/dev/null || true)
+
+        if [ -n "$gate_rows" ]; then
+            gate_ids=$(printf '%s\n' "$gate_rows" | cut -f1)
+            # Every id the caller named must be one of this sitting's open linked gates.
+            for _g in $resolve_gates $leave_gates; do
+                printf '%s\n' "$gate_ids" | grep -qxF "$_g" || {
+                    echo "$PROG: dismiss: --resolve-gate/--leave-gate named $_g, which is not an open gate linked to $bead's sitting (linked: $(printf '%s' "$gate_ids" | tr '\n' ' ')). Nothing was closed." >&2
+                    exit 2
+                }
+            done
+            # A gate cannot be both resolved and left.
+            for _g in $resolve_gates; do for _l in $leave_gates; do
+                [ "$_g" = "$_l" ] && { echo "$PROG: dismiss: gate $_g was named to BOTH --resolve-gate and --leave-gate; pick one. Nothing was closed." >&2; exit 2; }
+            done; done
+            # Resolving records a ruling; absent it, the resolve has nothing to record.
+            if [ -n "$resolve_gates" ] && [ -z "$dismiss_ruling" ]; then
+                echo "$PROG: dismiss: --resolve-gate needs --ruling (the decision the gate resolves with, recorded as a sign-off would record it). Nothing was closed." >&2
+                exit 2
+            fi
+            # Any linked gate the caller did not decide holds the dismiss.
+            undecided=""
+            for _g in $gate_ids; do
+                _d=""
+                for _r in $resolve_gates; do [ "$_r" = "$_g" ] && _d=1; done
+                for _l in $leave_gates;  do [ "$_l" = "$_g" ] && _d=1; done
+                [ -z "$_d" ] && undecided="$undecided $_g"
+            done
+
+            if [ -n "$undecided" ]; then
+                # Surface every linked gate and HOLD: the decider (a converse agent
+                # holding the ruling, or the operator) names a decision for each and
+                # re-runs. Nothing is closed, so a dismiss is never the act that
+                # orphans or silently settles a gate.
+                if [ -n "$dismiss_json" ]; then
+                    jq -nc --arg s "$bead" \
+                        --argjson g "$(printf '%s\n' "$gate_rows" | jq -R 'split("\t") | {id:.[0], blocks:.[1], demand:.[2]}' | jq -s .)" \
+                        '{subject:$s, ok:false, held_for_gate_decision:true, gates:$g}'
+                fi
+                {
+                    echo "$PROG: dismiss: $bead carries open linked gate(s) a dismiss would orphan. Decide each, then re-run:"
+                    printf '%s\n' "$gate_rows" | while IFS="$TAB" read -r _gid _gfor _gtitle; do
+                        [ -n "$_gid" ] || continue
+                        echo "  gate $_gid — blocks $_gfor — \"${_gtitle:-<no headline>}\""
+                        if [ -n "$_gfor" ] && printf '%s\n' "$visits" | grep -qxF "$_gfor"; then
+                            echo "    $_gfor is this sitting's own visit, so leaving this gate open moves its wait onto $bead."
+                        fi
+                    done
+                    echo "  RESOLVE (settle it, recording the ruling):  $PROG dismiss $bead --resolve-gate <gate> --ruling \"<the decision>\""
+                    echo "  LEAVE open  (re-ask it as a fresh visit):   $PROG dismiss $bead --leave-gate <gate>"
+                    echo "  Resolve only a ruling you hold; absent one, leave it open — never resolve a gate just to close a conversation."
+                } >&2
+                exit 5
+            fi
+
+            # Apply the decisions BEFORE any visit closes, so a refused gate write
+            # never leaves a closed visit beside an unresolved gate.
+            for _g in $resolve_gates; do
+                # Resolve on the ruling, then overwrite the gate's board sentence
+                # with the ruling (takeaway --no-wait) — the two writes a sign-off
+                # makes, so a resolved demand stops advertising its question
+                # (services/helm reads gc.takeaway, not the close reason). A pre-gate
+                # demand (issue_type=decision) is refused by `gate resolve`, so it is
+                # closed on the same terms instead.
+                if gc bd gate resolve "$_g" --reason "$dismiss_ruling" >/dev/null 2>&1 \
+                   || gc bd close "$_g" --reason "$dismiss_ruling" >/dev/null 2>&1; then
+                    _dmsg "$PROG: dismiss: resolved gate $_g on the ruling: $dismiss_ruling"
+                else
+                    echo "$PROG: dismiss: could not resolve gate $_g — it stays open and keeps blocking its bead. Resolve it by hand: gc bd gate resolve $_g --reason \"$dismiss_ruling\". Nothing was closed." >&2
+                    exit 4
+                fi
+                # The same stamp a sign-off makes, run in a subshell so its
+                # arg-parse and any exit stay out of this run while it writes
+                # through the same `gc`.
+                ( cmd_takeaway "$_g" "$dismiss_ruling" --by "${dismiss_by:-operator}" --no-wait ) >/dev/null 2>&1 \
+                    || echo "$PROG: dismiss: resolved gate $_g but could not stamp the ruling as its board sentence; the board may still show its question. Run: $PROG takeaway $_g \"$dismiss_ruling\" --by ${dismiss_by:-operator} --no-wait" >&2
+            done
+            for _g in $leave_gates; do
+                # A gate on a visit this dismiss closes is the conversation demand
+                # an anchored hold files on the VISIT. Clearing its gc.gate_visit
+                # re-asks nothing: once the visit closes, the gate blocks closed
+                # work, which gate-visit-sweep names on stderr and never re-offers.
+                # So its wait moves onto the subject, the move converse-signoff.sh
+                # makes for a cut-short sitting: the question is re-stated as a
+                # demand on $bead, then the visit's demand closes as moved. The
+                # re-state lands first, so a refused write never leaves the
+                # question closed with nothing still asking it.
+                _gfor=$(printf '%s\n' "$gate_rows" | awk -F"$TAB" -v g="$_g" '$1 == g { print $2; exit }')
+                if [ -n "$_gfor" ] && printf '%s\n' "$visits" | grep -qxF "$_gfor"; then
+                    _gq=$(printf '%s\n' "$gate_rows" | awk -F"$TAB" -v g="$_g" '$1 == g { print $3; exit }')
+                    [ -n "$_gq" ] || _gq="the question a dismissed sitting left open"
+                    # cmd_demand exits on any refusal, so it runs in a subshell, and
+                    # the || keeps set -e from ending this run before the refusal is
+                    # reported. Its stderr carries the reason through; its stdout
+                    # names the demand it filed or refreshed.
+                    _moved_rc=0
+                    _moved_out=$( ( cmd_demand "$bead" "$_gq" --by "${dismiss_by:-operator}" ) ) || _moved_rc=$?
+                    _moved=$(printf '%s\n' "$_moved_out" | awk '/^demand /{ print $2; exit }')
+                    if [ "$_moved_rc" -ne 0 ] || [ -z "$_moved" ]; then
+                        echo "$PROG: dismiss: could not move gate $_g's wait onto $bead (status $_moved_rc, no demand filed there); $_g stays open on its visit. Nothing was closed. Re-state it by hand: $PROG demand $bead \"$_gq\"" >&2
+                        exit 4
+                    fi
+                    if gc bd gate resolve "$_g" --reason "dismissed; wait re-stated on $bead as $_moved" >/dev/null 2>&1 \
+                       || gc bd close "$_g" --reason "dismissed; wait re-stated on $bead as $_moved" >/dev/null 2>&1; then
+                        ( cmd_takeaway "$_g" "dismissed; wait moved to $bead" --by "${dismiss_by:-operator}" --no-wait ) >/dev/null 2>&1 \
+                            || echo "$PROG: dismiss: moved gate $_g's wait onto $bead but could not stamp that as its board sentence; the board may still show its question. Run: $PROG takeaway $_g \"dismissed; wait moved to $bead\" --by ${dismiss_by:-operator} --no-wait" >&2
+                        _dmsg "$PROG: dismiss: left gate $_g's question open — it gated the closing visit, so its wait moved onto $bead as demand $_moved, which the sweep re-asks in a fresh visit"
+                    else
+                        echo "$PROG: dismiss: re-stated gate $_g's wait on $bead as $_moved but could not close $_g, which still gates its visit. Nothing was closed. Close it by hand: gc bd gate resolve $_g --reason \"dismissed; wait re-stated on $bead\"" >&2
+                        exit 4
+                    fi
+                    continue
+                fi
+                # Re-ask: clear gc.gate_visit so gate-visit-sweep offers a fresh
+                # visit. The gate stays open — visibly still owed, not stranded.
+                if gc bd update "$_g" --unset-metadata gc.gate_visit >/dev/null 2>&1; then
+                    _dmsg "$PROG: dismiss: left gate $_g open and re-asked it — the sweep will offer a fresh visit"
+                else
+                    echo "$PROG: dismiss: could not re-ask gate $_g (clearing gc.gate_visit failed); it may stay stranded behind its closed visit. Re-ask by hand: gc bd update $_g --unset-metadata gc.gate_visit. Nothing was closed." >&2
+                    exit 4
+                fi
+            done
+        elif [ -n "$resolve_gates$leave_gates" ]; then
+            echo "$PROG: dismiss: --resolve-gate/--leave-gate were given, but $bead carries no open linked gate. Nothing was closed." >&2
+            exit 2
+        fi
+    fi
+    # <<< dismiss-gate-decision
+
     # A held visit is ASSIGNED to the converse session sitting on it, and bd's
     # close-authority guard refuses a close by anyone else. That guard is
     # exactly what this verb overrides — the operator is the holder's audience,
@@ -2195,7 +2397,7 @@ cmd_dismiss() {
         jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
             '{subject: $s, matched: $m, closed: $c, ok: true}'
     else
-        [ "$closed_n" -eq 0 ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
+        [ "$closed_n" -eq 0 ] && [ -z "$resolve_gates$leave_gates" ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
     fi
     return 0
 }

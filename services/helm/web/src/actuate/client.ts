@@ -17,8 +17,10 @@ import { SVC_WRITE_HEADERS } from '../svcWrite';
 export type ActuateVerb = 'accept' | 'engage' | 'dismiss';
 
 /**
- * The 200 body of POST <mount>/helm/{accept,engage,dismiss}. Mirrors Go
- * `actuateResponse`.
+ * The 200 body of POST <mount>/helm/{accept,engage}, and the CLOSED case of
+ * dismiss. Mirrors Go `actuateResponse` (accept, engage) and the shared fields of
+ * `dismissResponse`. The dismiss-only `outcome` and `gates` fields are absent on
+ * accept and engage.
  */
 export interface ActuateResult {
   bead: string;
@@ -29,6 +31,48 @@ export interface ActuateResult {
    * renders as the verb's default sentence rather than a blank.
    */
   message: string;
+  /**
+   * dismiss only. 'closed' when the sitting was closed; 'held_for_gate_decision'
+   * when the subject carries open linked human gates a close would orphan, in which
+   * case `gates` is populated and nothing was closed. Branch on this, never on the
+   * message, the same discipline the error `reason` slug carries.
+   */
+  outcome?: DismissOutcome;
+  /** dismiss held only: the open linked gates to decide. Mirrors Go `dismissGate`. */
+  gates?: DismissGate[];
+}
+
+/** The two ways a dismiss can end. Mirrors Go `dismissResponse.Outcome`. */
+export type DismissOutcome = 'closed' | 'held_for_gate_decision';
+
+/**
+ * One open linked gate a held dismiss surfaced: its id, the bead it blocks, and its
+ * demand headline. Mirrors Go `dismissGate`.
+ */
+export interface DismissGate {
+  id: string;
+  blocks: string;
+  demand: string;
+}
+
+/**
+ * The operator's choice for one surfaced gate: resolve it (settled on the single
+ * `ruling` passed beside the decisions) or leave it open (re-asked). Mirrors Go
+ * `gateDecision`.
+ */
+export interface GateDecision {
+  gate: string;
+  action: 'resolve' | 'leave';
+}
+
+/** Options for {@link actuate}. `ruling` and `decisions` are dismiss-only: the
+ *  operator's answer to a prior held dismiss, sent on the decision re-submit. */
+export interface ActuateOptions {
+  signal?: AbortSignal;
+  /** The single decision recorded for every gate marked resolve (gc-helm.sh takes
+   *  one --ruling per run). Required by the server once any gate is resolved. */
+  ruling?: string;
+  decisions?: GateDecision[];
 }
 
 /**
@@ -100,15 +144,17 @@ const TRANSPORT_UNCERTAINTY: Record<ActuateVerb, string> = {
 export async function actuate(
   verb: ActuateVerb,
   bead: string,
-  signal?: AbortSignal,
+  opts: ActuateOptions = {},
 ): Promise<ActuateResult> {
   let res: Response;
   try {
     res = await fetch(actuateURL(verb), {
       method: 'POST',
-      signal,
+      signal: opts.signal,
       headers: SVC_WRITE_HEADERS,
-      body: JSON.stringify({ bead }),
+      // ruling and decisions are dismiss-only and undefined elsewhere; JSON.stringify
+      // drops undefined fields, so accept and engage still send a bare {bead}.
+      body: JSON.stringify({ bead, ruling: opts.ruling, decisions: opts.decisions }),
     });
   } catch (cause) {
     // The request never reached the service: offline, the tailnet dropped, the

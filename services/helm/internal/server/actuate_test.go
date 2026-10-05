@@ -40,11 +40,13 @@ func decodeActuate(t *testing.T, rr *httptest.ResponseRecorder) actuateResponse 
 	return got
 }
 
-// Each parity route runs the verb its path names, on the requested bead, and
-// hands back the tool's own stdout — the whole of it, since engage's attach line
-// and accept's dismiss line are on a second line the operator needs.
+// Each flat parity route (accept, engage) runs the verb its path names, on the
+// requested bead, and hands back the tool's own stdout — the whole of it, since
+// engage's attach line and accept's dismiss line are on a second line the operator
+// needs. dismiss has its own shape (--json, a closed/held outcome) and its own
+// tests below.
 func TestActuateRoutesRunTheirVerb(t *testing.T) {
-	for _, verb := range []string{"accept", "engage", "dismiss"} {
+	for _, verb := range []string{"accept", "engage"} {
 		t.Run(verb, func(t *testing.T) {
 			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: " + verb + ": did the thing on tk-abc12\n  attach: gc session attach gc-42\n"}}
 			rr := serveOpen(t, f, actuateReq(verb, `{"bead":"tk-abc12"}`))
@@ -236,7 +238,12 @@ func TestActuateRoutesBeatTheSPACatchAll(t *testing.T) {
 	}
 	for _, verb := range []string{"accept", "engage", "dismiss"} {
 		t.Run(verb, func(t *testing.T) {
-			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: " + verb + ": ok on tk-abc12\n"}}
+			// dismiss runs with --json, so its stub must answer JSON, not prose.
+			stdout := "gc-helm: " + verb + ": ok on tk-abc12\n"
+			if verb == "dismiss" {
+				stdout = `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`
+			}
+			f := &fakeActuator{res: ToolResult{Stdout: stdout}}
 			s := New(newFake(), time.Minute, WithSPA(spa), WithActuator(f))
 			rr := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rr, actuateReq(verb, `{"bead":"tk-abc12"}`))
@@ -250,5 +257,196 @@ func TestActuateRoutesBeatTheSPACatchAll(t *testing.T) {
 				t.Errorf("tool ran %d times, want 1", len(calls))
 			}
 		})
+	}
+}
+
+func decodeDismiss(t *testing.T, rr *httptest.ResponseRecorder) dismissResponse {
+	t.Helper()
+	var got dismissResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode 200 body: %v (body=%s)", err, rr.Body.String())
+	}
+	return got
+}
+
+func hasArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// argFollows reports whether val is the argv element immediately after flag — the
+// property that keeps a flag's value from floating loose into another position.
+func argFollows(args []string, flag, val string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
+
+// dismiss runs with --json and reports a CLOSED outcome when it closed the
+// sitting. The flag is not optional — it is how the service reads the structured
+// result and the held gates — so the forwarding is asserted here.
+func TestDismissClosedReportsOutcomeAndForwardsJSON(t *testing.T) {
+	// The stub mirrors gc-helm.sh dismiss --json's closed shape exactly: `matched`
+	// is the ARRAY of matched visits the script emits, not a count. The parse must
+	// read `closed` past it, so the fixture carries the array a scalar field would
+	// choke on.
+	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`}}
+	rr := serveOpen(t, f, actuateReq("dismiss", `{"bead":"tk-abc12"}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	got := decodeDismiss(t, rr)
+	if got.Outcome != dismissOutcomeClosed {
+		t.Errorf("outcome = %q, want %q", got.Outcome, dismissOutcomeClosed)
+	}
+	if len(got.Gates) != 0 {
+		t.Errorf("gates = %+v, want none on a closed dismiss", got.Gates)
+	}
+	calls := f.seenCalls()
+	if len(calls) != 1 || !hasArg(calls[0].args, "--json") {
+		t.Errorf("dismiss ran with args %v, want it to carry --json", calls)
+	}
+}
+
+// THE FINDING (review tk-89vkuv, P1). A dismiss that HELD for a gate decision
+// (gc-helm.sh exit 5) must not read as an internal 502 with the gate details lost
+// to firstStderrLine. It is a 200 carrying outcome held_for_gate_decision and every
+// surfaced gate, so the board takes the resolve/leave decision in place instead of
+// sending the operator to the CLI.
+func TestDismissHeldForGateDecisionIsNotInternal(t *testing.T) {
+	f := &fakeActuator{res: ToolResult{
+		ExitCode: 5,
+		Stdout:   `{"subject":"tk-abc12","ok":false,"held_for_gate_decision":true,"gates":[{"id":"tk-g1","blocks":"tk-abc12","demand":"should the merge wait on this?"}]}`,
+		Stderr:   "gc-helm: dismiss: tk-abc12 carries open linked gate(s) a dismiss would orphan\n",
+	}}
+	rr := serveOpen(t, f, actuateReq("dismiss", `{"bead":"tk-abc12"}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — exit 5 is a decision, not a 502 (body=%s)", rr.Code, rr.Body.String())
+	}
+	got := decodeDismiss(t, rr)
+	if got.Outcome != dismissOutcomeHeld {
+		t.Fatalf("outcome = %q, want %q", got.Outcome, dismissOutcomeHeld)
+	}
+	if len(got.Gates) != 1 || got.Gates[0].ID != "tk-g1" || got.Gates[0].Blocks != "tk-abc12" {
+		t.Errorf("gates = %+v, want the surfaced gate carried through with its id and blocked bead", got.Gates)
+	}
+	if got.Gates[0].Demand == "" {
+		t.Error("gate demand headline was dropped; the operator needs it to decide")
+	}
+}
+
+// A held dismiss closed nothing, so it must NOT bust the board cache: invalidate
+// only on a real write.
+func TestDismissHeldDoesNotInvalidateBoard(t *testing.T) {
+	f := &fakeActuator{res: ToolResult{
+		ExitCode: 5,
+		Stdout:   `{"subject":"tk-abc12","ok":false,"held_for_gate_decision":true,"gates":[{"id":"tk-g1","blocks":"tk-abc12","demand":"q"}]}`,
+	}}
+	s := New(newFake(), time.Minute, WithActuator(f))
+	if _, err := s.Board(context.Background()); err != nil {
+		t.Fatalf("warm the board: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, actuateReq("dismiss", `{"bead":"tk-abc12"}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	s.mu.Lock()
+	still := s.cached != nil
+	s.mu.Unlock()
+	if !still {
+		t.Error("a held dismiss busted the board cache, but it closed nothing")
+	}
+}
+
+// The decision re-submit carries the operator's resolve/leave choices and the one
+// ruling gc-helm.sh records for every resolved gate; the service turns them into
+// the flags, each value adjacent to its flag.
+func TestDismissForwardsTheGateDecision(t *testing.T) {
+	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`}}
+	body := `{"bead":"tk-abc12","ruling":"land it","decisions":[{"gate":"tk-g1","action":"resolve"},{"gate":"tk-g2","action":"leave"}]}`
+	rr := serveOpen(t, f, actuateReq("dismiss", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	calls := f.seenCalls()
+	if len(calls) != 1 {
+		t.Fatalf("dismiss ran %d times, want 1", len(calls))
+	}
+	args := calls[0].args
+	if !argFollows(args, "--resolve-gate", "tk-g1") || !argFollows(args, "--leave-gate", "tk-g2") || !argFollows(args, "--ruling", "land it") {
+		t.Errorf("dismiss args %v: a flag and its value are not adjacent", args)
+	}
+	if !hasArg(args, "--json") {
+		t.Errorf("dismiss args %v missing --json", args)
+	}
+}
+
+// A leave-only decision needs no ruling: re-asking a gate records nothing.
+func TestDismissLeaveOnlyNeedsNoRuling(t *testing.T) {
+	f := &fakeActuator{res: ToolResult{Stdout: `{"subject":"tk-abc12","matched":[{"id":"tk-v1","identity":"continuation-group"}],"closed":1,"ok":true}`}}
+	body := `{"bead":"tk-abc12","decisions":[{"gate":"tk-g1","action":"leave"}]}`
+	rr := serveOpen(t, f, actuateReq("dismiss", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	args := f.seenCalls()[0].args
+	if hasArg(args, "--ruling") {
+		t.Errorf("args %v carry --ruling for a leave-only decision", args)
+	}
+	if !hasArg(args, "--leave-gate") {
+		t.Errorf("args %v missing --leave-gate", args)
+	}
+}
+
+// A gate id becomes an argv element of the subprocess, so it crosses the same
+// bead-id boundary the subject does: a crafted id is a 400 before anything runs,
+// never a flag reaching dismiss.
+func TestDismissRejectsBadGateID(t *testing.T) {
+	f := &fakeActuator{res: ToolResult{Stdout: "should never run"}}
+	body := `{"bead":"tk-abc12","ruling":"x","decisions":[{"gate":"--oops","action":"resolve"}]}`
+	rr := serveOpen(t, f, actuateReq("dismiss", body))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body=%s)", rr.Code, rr.Body.String())
+	}
+	if got := decodeErr(t, rr).Reason; got != reasonUsage {
+		t.Errorf("reason = %q, want %q", got, reasonUsage)
+	}
+	if len(f.seen()) != 0 {
+		t.Error("the subprocess ran despite a bad gate id")
+	}
+}
+
+// Resolving a gate records a ruling; absent one, the request is a 400 before exec
+// rather than a gc-helm.sh refusal one round-trip later.
+func TestDismissResolveNeedsRuling(t *testing.T) {
+	f := &fakeActuator{res: ToolResult{Stdout: "should never run"}}
+	body := `{"bead":"tk-abc12","decisions":[{"gate":"tk-g1","action":"resolve"}]}`
+	rr := serveOpen(t, f, actuateReq("dismiss", body))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body=%s)", rr.Code, rr.Body.String())
+	}
+	if len(f.seen()) != 0 {
+		t.Error("the subprocess ran despite a resolve with no ruling")
+	}
+}
+
+// dismiss promises JSON (it runs with --json). Stdout the service cannot parse is a
+// 502 it names, never a panic and never raw bytes shown to the operator.
+func TestDismissUnreadableJSONIsReported(t *testing.T) {
+	f := &fakeActuator{res: ToolResult{Stdout: "not json at all"}}
+	rr := serveOpen(t, f, actuateReq("dismiss", `{"bead":"tk-abc12"}`))
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body=%s)", rr.Code, rr.Body.String())
+	}
+	if got := decodeErr(t, rr).Reason; got != reasonInternal {
+		t.Errorf("reason = %q, want %q", got, reasonInternal)
 	}
 }
