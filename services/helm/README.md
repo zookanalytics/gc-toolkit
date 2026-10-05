@@ -416,20 +416,20 @@ become a new way to hide a stranded child.
 Three properties carry over from the disposition rule, and one is new:
 
 - **Derived, never stored** — so a re-opened question stands back up by itself.
-- **The wait clause is not decoration.** It is why `waitingEdges` is read for
-  `decision` and `human` and not for `parked` alone: with no edges gathered,
+- **The wait clause is not decoration.** It is why `needsWaitingEdges` lists
+  `decision` and `human`, not `parked` alone: with no edges gathered,
   "every wait landed" is vacuously true and an answered decision whose routed
   work is still open would stand down anyway. Nothing errors and no field goes
   missing — the only symptom is a row that quietly stopped asking too early.
 - **An empty wait set only counts when it was READ.** The clause fires on the
-  absence of open waits, and a failed per-anchor dependency query produces that
-  same absence — so a Dolt timeout would stand an answered row down and invite
-  the operator to close or extend a question whose routed work the board never
-  checked. `waitingEdges` therefore reports a read failure as
-  `Anchor.WaitingUnknown` rather than as an empty set, and `ruled` refuses it
-  (tk-fhd705). `gc-helm.sh` needs no counterpart: there `waiting_on` rides on
-  the same payload that produced the anchor, so a failed read drops the row
-  rather than leaving it standing with its edges missing.
+  absence of open waits, and a failed dependency read produces that same
+  absence — so a Dolt timeout would stand an answered row down and invite the
+  operator to close or extend a question whose routed work the board never
+  checked. `attachEdges` therefore reports a failed read as
+  `Anchor.WaitingUnknown` rather than as an empty set, and `ruled` and
+  `ruledInFlight` both refuse it (tk-fhd705). The read is one batched query per
+  rig and status pass, so one failure flags every anchor that reads waits, epic
+  and convoy included.
 - **The settled stand-down is LOW, not NORMAL.** NORMAL is stale-bumped past
   fourteen days, which would put `tk-z130v` — thirty days old — straight back in
   the band it was standing down from. The in-flight case above is deliberately

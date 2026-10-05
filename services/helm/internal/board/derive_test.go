@@ -1008,7 +1008,7 @@ func TestRuledInFlightIsInProgress(t *testing.T) {
 //
 // The two look identical on the anchor — WaitingOn is empty in both the
 // "nothing outstanding" case and the "never learned" one — and reading the
-// empty set as an answer is the hazard. A per-anchor Dolt timeout or schema
+// empty set as an answer is the hazard. A Dolt timeout or schema
 // skew would otherwise stand an answered row down and tell the operator to
 // close or extend a question whose routed work the board never checked
 // (tk-fhd705). Not standing it down costs a glance; standing it down on an
