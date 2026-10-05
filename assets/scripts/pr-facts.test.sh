@@ -69,23 +69,38 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
+# --retract is the counterpart: it closes the OPEN visit for the situation as
+# moot, leaves a claimed (in_progress) one to its holder, and is a no-op success
+# when no open visit matches.
 cat > "$SD/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
-subj=""; key=""
+subj=""; key=""; msg=""; retract=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) shift; subj="${1:-}" ;;
     --key)     shift; key="${1:-}" ;;
+    --message) shift; msg="${1:-}" ;;
+    --retract) retract=1 ;;
   esac
   shift || true
 done
 [ -n "$subj" ] && [ -n "$key" ] || exit 2
+if [ "$retract" = 1 ]; then
+  open=$(jq -r --arg s "$subj" --arg k "$key" '
+    [ .[] | select((.status // "open") == "open")
+      | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+      | select(((.metadata.escalation_key // "") | tostring) == $k) | .id ] | .[0] // empty' "${STUB_STORE:?}")
+  [ -n "$open" ] || exit 0
+  gc bd update "$open" --status=closed --set-metadata gc.outcome=moot \
+    --set-metadata "gc.outcome_reason=$msg" >/dev/null || exit 1
+  exit 0
+fi
 have=$(jq -r --arg s "$subj" --arg k "$key" '
   [ .[] | select((.status // "open") != "closed")
     | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
@@ -107,27 +122,36 @@ export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # pre-recorded disposition through. The contract that matters here: on success
 # it stamps gc.superseded_by and CLOSES the origin; STUB_REHOME_RC models the
 # refusals it reports without closing (4 transient, 5/6 a human is needed).
-# It also models the real open-children hold: the close is NOT --force, so an
-# OPEN bead that still `blocks` the origin refuses it with exit 5 (bead-rehome.sh
-# :254-263). Without that, a stub that closed straight through a blocking rework
-# child would green-light the strand pr-facts's dispose-children-first order
-# exists to prevent — an anchor stranded open behind a rework child it cannot
-# close.
+# It also models the two real holds on that close, each exit 5, in the real
+# order. The finalize gate runs first, and it is the real finalize-gate.sh: an
+# OPEN visit on the origin holds the close, except the one visit --except-visit
+# names while that visit is open. Without it, a stub that ignored visits would
+# pass an anchor its own escalation holds forever. Then the close is NOT --force,
+# so an OPEN bead that still `blocks` the origin refuses it. Without that, a stub
+# that closed straight through a blocking rework child would green-light the
+# strand pr-facts's dispose-children-first order exists to prevent — an anchor
+# stranded open behind a rework child it cannot close.
 cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_REHOME_LOG:?}"
-origin=""; succ=""; store=""
+origin=""; succ=""; store=""; except=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --origin)          shift; origin="${1:-}" ;;
     --successor)       shift; succ="${1:-}" ;;
     --successor-store) shift; store="${1:-}" ;;
+    --except-visit)    shift; except="${1:-}" ;;
   esac
   shift || true
 done
 rc="${STUB_REHOME_RC:-0}"
 if [ "$rc" != "0" ]; then echo "bead-rehome (stub): refusing rc=$rc" >&2; exit "$rc"; fi
+fg=(check "$origin"); [ -n "$except" ] && fg+=(--except-visit "$except")
+if ! why=$("$(dirname "$0")/finalize-gate.sh" "${fg[@]}" 2>/dev/null); then
+  echo "bead-rehome (stub): the close is held: $why (exit 5)" >&2
+  exit 5
+fi
 # Real close: drop ONLY the origin->successor wait edge, then close WITHOUT
 # --force. Any OTHER open blocker (a rework child that blocks this anchor) refuses
 # the close, leaving the bead OPEN and pointed — exit 5, the shape pr-facts reads
@@ -444,6 +468,85 @@ eq "$(bstatus F2m)" "open" "…but the anchor close is still refused (another bl
 has "$(cat "$STUB_ESC_LOG")" "--subject F2m --key pr-dispose-failed.33" "escalated under the dispose-failed key"
 has "$(cat "$STUB_ESC_LOG")" "K5" "…the escalation names the child that was already disposed"
 has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it if the disposition is wrong"
+
+# A refused close escalates under pr-dispose-failed.<num>, and that visit tracks
+# the anchor. It reports this arm's own failed close and asks for the next pass's
+# retry, so the retry excepts it from the finalize gate while it is open and
+# retracts it moot once the close lands. Held by it instead, the anchor could not
+# close even after the obstruction it reported cleared. dvisit seeds the visit
+# escalate.sh files: stamped with its key and its subject's group, and tracked
+# onto the subject by the edge each case seeds beside it.
+dvisit() { # id subject key [status]
+  printf '{"id":"%s","status":"%s","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
+    "$1" "${4:-open}" "$3" "$2"
+}
+# How many visits in the store carry a situation key, whatever their status.
+nvisits() { jq --arg k "$1" '[ .[] | select((.metadata.escalation_key // "") == $k) ] | length' "$STUB_STORE"; }
+# Filings of a situation, apart from its retraction: a filing's argv begins
+# with --subject, a retraction's with --retract.
+filings() { grep -c -- "^--subject $1 --key $2 " "$STUB_ESC_LOG"; }
+
+echo "# the arm's own pr-dispose-failed visit does not hold the retry it asks for"
+: > "$STUB_DEPS"
+store "[$(anchor F2n 120 ',"gc.pr_close_disposition_kind":"re-homed","gc.pr_close_disposition_successor":"tk-n"'), $(dvisit VN F2n pr-dispose-failed.120), {\"id\":\"OB\",\"status\":\"closed\",\"title\":\"former blocker\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'VN|tracks|F2n\nOB|blocks|F2n\n' > "$STUB_DEPS"   # the visit's edge, and the obstruction it reported, since closed
+printf '%s' "$(prview 120 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_120.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2n)" "closed" "the anchor closes once the obstruction its escalation reported has cleared"
+eq "$(meta F2n 'gc.superseded_by')" "tk-n" "…through the sanctioned terminal close"
+has "$(cat "$STUB_REHOME_LOG")" "--origin F2n --successor tk-n --kind re-homed --except-visit VN" "bead-rehome is told the arm's own visit does not hold this retry"
+eq "$(bstatus VN)" "closed" "the arm's own visit is retracted once the close lands"
+eq "$(meta VN 'gc.outcome')" "moot" "…closed moot: the obstruction it reported is gone"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject F2n --key pr-dispose-failed.120" "…through escalate.sh's retract verb"
+eq "$(filings F2n pr-dispose-failed.120)" "0" "…and nothing is re-filed"
+has "$out" "retracted its own pr-dispose-failed visit VN" "the retraction is reported"
+
+echo "# a pr-dispose-failed visit a person has claimed still holds the close"
+: > "$STUB_DEPS"
+store "[$(anchor F2o 121 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-o"'), $(dvisit VC F2o pr-dispose-failed.121 in_progress)]"
+printf 'VC|tracks|F2o\n' > "$STUB_DEPS"
+printf '%s' "$(prview 121 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_121.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2o)" "open" "the anchor is left OPEN while a person holds the visit"
+has "$out" "held by open visit VC" "…held by the claimed visit"
+eq "$(bstatus VC)" "in_progress" "the claimed visit is its holder's to conclude"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…so nothing retracts it"
+eq "$(nvisits pr-dispose-failed.121)" "1" "…and no second visit is filed beside it"
+
+echo "# a standing obstruction keeps its one visit; the pass after it clears closes the anchor"
+: > "$STUB_DEPS"
+store "[$(anchor F2p 122 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-p"'), $(dvisit VS F2p pr-dispose-failed.122), {\"id\":\"BS\",\"status\":\"open\",\"title\":\"open must-fix finding\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'VS|tracks|F2p\nBS|blocks|F2p\n' > "$STUB_DEPS"
+printf '%s' "$(prview 122 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_122.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2p)" "open" "an anchor still blocked stays OPEN"
+has "$out" "has an OPEN blocker" "…refused for the obstruction itself, not for its own visit"
+eq "$(bstatus VS)" "open" "the visit stays open while the obstruction stands"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…nothing retracts it"
+eq "$(nvisits pr-dispose-failed.122)" "1" "…and the escalation dedups onto it rather than filing a second"
+# The obstruction clears (arm 10 retires a disposed anchor's findings), and the
+# next pass retries the close the visit asked for.
+jq -c 'map(if .id == "BS" then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/store.next" && mv "$TMP/store.next" "$STUB_STORE"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus F2p)" "closed" "the next pass after the obstruction clears closes the anchor"
+eq "$(bstatus VS)" "closed" "…and retracts the visit that reported it"
+eq "$(meta VS 'gc.outcome')" "moot" "…as moot"
+
+echo "# another open visit on the anchor still holds the close; only the arm's own is excepted"
+: > "$STUB_DEPS"
+store "[$(anchor F2q 123 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-q"'), $(dvisit VQ F2q pr-dispose-failed.123), $(dvisit VR F2q an-unrelated-question)]"
+printf 'VQ|tracks|F2q\nVR|tracks|F2q\n' > "$STUB_DEPS"
+printf '%s' "$(prview 123 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_123.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2q)" "open" "the anchor is left OPEN"
+has "$out" "held by open visit VR" "…held by the visit the arm does not own"
+eq "$(bstatus VQ)" "open" "the arm's own visit stays open: the close it asks for has not landed"
+eq "$(bstatus VR)" "open" "…and the other visit is untouched"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"

@@ -16,7 +16,8 @@
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
 # writes only the canonical gc.-prefixed pair.
-# Callers: converse dispositions, operator re-homes, duplicate-sweep.sh.
+# Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
+# pr-facts.sh (a PR closed with a pre-recorded disposition).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -36,7 +37,7 @@ BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
-ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""
+ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; EXCEPT_VISIT=""
 
 usage() {
     cat <<'U'
@@ -45,7 +46,7 @@ Usage:
                  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
                  [--note "<one sentence of why>"] \
                  [--origin-store rig:<name>] [--successor-store rig:<name>] \
-                 [--dry-run]
+                 [--except-visit <visit-id>] [--dry-run]
 
 Under every kind but not-needed the successor is the bead that carries the
 work now. Under not-needed nothing carries it, and the successor is the
@@ -55,6 +56,12 @@ from the sitting that ruled. It is required either way.
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
 An already-closed origin gains the pointer and an appended note (repair path).
+
+An open visit on the origin holds the close (finalize-gate.sh). --except-visit
+names the one visit that does not: the visit the caller filed to report an
+earlier refusal of this same close, which asks for the retry it would otherwise
+hold. It is excepted only while open; claimed, it holds like any other. The
+caller concludes that visit once the close lands.
 U
     exit "${1:-1}"
 }
@@ -69,6 +76,7 @@ while [ $# -gt 0 ]; do
         --note)             NOTE="${2:-}"; shift 2 ;;
         --origin-store)     ORIGIN_STORE="${2:-}"; shift 2 ;;
         --successor-store)  SUCCESSOR_STORE="${2:-}"; shift 2 ;;
+        --except-visit)     EXCEPT_VISIT="${2:-}"; shift 2 ;;
         --dry-run)          DRY_RUN=1; shift ;;
         -h|--help)          usage 0 ;;
         *)                  die "unknown argument '$1' (try --help)" 64 ;;
@@ -309,7 +317,9 @@ else
     # The successor pointer is already stamped, so a hold here leaves an OPEN,
     # pointed, findable bead — the shape a refused close below also leaves. The
     # release is to conclude the open visit, then re-run this close.
-    if ! FG_REASON=$("$FINALIZE_GATE" check "$ORIGIN" 2>/dev/null); then
+    FG_ARGS=(check "$ORIGIN")
+    if [ -n "$EXCEPT_VISIT" ]; then FG_ARGS+=(--except-visit "$EXCEPT_VISIT"); fi
+    if ! FG_REASON=$("$FINALIZE_GATE" "${FG_ARGS[@]}" 2>/dev/null); then
         echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}." >&2
         echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Conclude the open visit, then re-run this close." >&2
         exit 5

@@ -935,9 +935,20 @@ CHILDREN_EOF
             echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
           fi
         fi
+        # This arm's own escalation from an earlier refused close tracks the
+        # anchor too, and it asks for exactly this retry: "clear the obstruction
+        # and the next refinery pass retries". If the finalize gate held the
+        # retry on it, the anchor could not close even after that obstruction
+        # cleared. So bead-rehome excepts the visit from the gate while it is
+        # open, and the visit is retracted moot once the close lands. A visit a
+        # person has claimed still holds the close and is theirs to conclude. A
+        # refused close leaves the visit open, so a standing obstruction keeps
+        # its one visit and nothing is re-filed.
+        own_vid=$(visit_for "$id" "pr-dispose-failed.$num") || own_vid=""
+        EXCEPT_ARG=(); [ -n "$own_vid" ] && EXCEPT_ARG=(--except-visit "$own_vid")
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
-                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
+                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} ${EXCEPT_ARG[@]+"${EXCEPT_ARG[@]}"} \
                    --note "PR#$num closed $disp_kind (disposition pre-recorded before the close)" 2>&1); rrc=$?
         else
           rout="bead-rehome.sh is not executable at $REHOME"; rrc=127
@@ -945,6 +956,16 @@ CHILDREN_EOF
         if [ "$rrc" -eq 0 ]; then
           disposed_n=$((disposed_n + 1))
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
+          if [ -n "$own_vid" ]; then
+            [ -x "$ESCALATE" ] && "$ESCALATE" --retract --subject "$id" --key "pr-dispose-failed.$num" \
+              --message "PR#$num's pre-recorded disposition is consummated: $id closed ($disp_kind -> $disp_succ) once the obstruction this visit reported cleared." >/dev/null 2>&1
+            own_st=$(gc bd show "$own_vid" --json 2>/dev/null | scrub | jq -r '.[0].status // ""' 2>/dev/null)
+            if [ "$own_st" = "closed" ]; then
+              echo "$PROG: $id — retracted its own pr-dispose-failed visit $own_vid as moot (the close landed)"
+            else
+              echo "$PROG: $id — closed, but its own pr-dispose-failed visit $own_vid is still ${own_st:-unreadable}; conclude it moot by hand" >&2
+            fi
+          fi
           continue
         elif [ "$rrc" -eq 4 ]; then
           # Pointer would not stick — transient. Keep merge_result=pull_request

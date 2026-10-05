@@ -55,6 +55,16 @@ A `tracks` edge is non-blocking. So the gate holds only this bead's finalization
 it never consults the bead's readiness, and it never reaches the bead's children.
 A visit on an epic holds the epic's own close and leaves every child free to move.
 
+### The caller's own escalation
+
+`finalize-gate.sh check <bead-id> --except-visit <visit-id>` names one visit that
+does not hold: the visit the caller filed to report its own refused finalization
+of this bead. That visit asks for the retry, so holding the retry on it would keep
+the bead from ever finalizing once the obstruction it reported had cleared. The
+exception applies only while the visit is open. Once a person claims it
+(`in_progress`), it holds like any other visit, so a finalization never lands
+under a live conversation. Every other open visit on the bead still holds.
+
 ## Fail closed
 
 A tracker list that does not read, or does not answer with a JSON array, refuses
@@ -72,6 +82,10 @@ a squash-merge, a close — cannot be taken back.
   path runs the gate before the close. The successor pointer is already stamped,
   so a hold leaves an open, pointed, findable bead — the same shape a refused
   close leaves. The release is to conclude the open visit, then re-run.
+  `bead-rehome.sh --except-visit <visit-id>` hands one visit to the gate's
+  exception. `pr-facts.sh` names its own `pr-dispose-failed.<num>` visit when it
+  retries a pre-recorded PR-close disposition, and retracts that visit as moot
+  once the close lands.
 
 `assets/scripts/lifecycle.sh` closes only into `merged`, and on the merge path
 that close is the bookkeeping that runs after the irreversible merge — so the

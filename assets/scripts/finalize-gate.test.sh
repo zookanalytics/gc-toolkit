@@ -2,7 +2,8 @@
 # finalize-gate.test.sh — the composable finalize gate over the hermetic bd stub.
 # Seeds visits as store beads plus a `VISIT|tracks|SUBJECT` edge and asserts the
 # gate refuses (exit 1) only for an OPEN visit tracking the subject, allows
-# (exit 0) otherwise, and fails closed (exit 1) on an unreadable probe.
+# (exit 0) otherwise, and fails closed (exit 1) on an unreadable probe. The one
+# visit --except-visit names passes only while it is open; claimed, it holds.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/finalize-gate-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -105,6 +106,43 @@ eq "$rc" 0 "stamp here but tracks edge elsewhere: exit 0"
 "$SUT" check >/dev/null 2>&1; eq "$?" 2 "check without a bead id: exit 2"
 "$SUT" >/dev/null 2>&1; eq "$?" 2 "no subcommand: exit 2"
 "$SUT" bogus >/dev/null 2>&1; eq "$?" 2 "unknown subcommand: exit 2"
+
+# 13. --except-visit: the visit a caller filed to report its own refused
+# finalization does not hold the retry it asks for, while it is open.
+store "[$(work A13 open), $(visit V13 open)]"
+printf 'V13|tracks|A13\n' > "$STUB_DEPS"
+out=$("$SUT" check A13 --except-visit V13 2>/dev/null); rc=$?
+eq "$rc" 0 "excepted open visit: exit 0"
+eq "$out" "" "excepted open visit: no output"
+
+# 14. Claimed, the excepted visit holds like any other: a person is in it.
+store "[$(work A14 open), $(visit V14 in_progress)]"
+printf 'V14|tracks|A14\n' > "$STUB_DEPS"
+out=$("$SUT" check A14 --except-visit V14 2>/dev/null); rc=$?
+eq "$rc" 1 "excepted visit claimed (in_progress): exit 1"
+has "$out" "V14" "excepted visit claimed: names the visit"
+
+# 15. The exception names one visit: another open visit still holds.
+store "[$(work A15 open), $(visit V15 open), $(visit W15 open)]"
+printf 'V15|tracks|A15\nW15|tracks|A15\n' > "$STUB_DEPS"
+out=$("$SUT" check A15 --except-visit V15 2>/dev/null); rc=$?
+eq "$rc" 1 "another open visit beside the excepted one: exit 1"
+has "$out" "W15" "another open visit beside the excepted one: names it"
+
+# 16. The exception reaches the gc.continuation_group fallback too, and there
+# also excepts only the visit it names.
+store "[$(work A16 open), $(visit_cg V16 open A16)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A16 --except-visit V16 2>/dev/null); rc=$?
+eq "$rc" 0 "excepted stamp-only visit: exit 0"
+store "[$(work A16b open), $(visit_cg V16b open A16b), $(visit_cg W16b open A16b)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A16b --except-visit V16b 2>/dev/null); rc=$?
+eq "$rc" 1 "another stamp-only visit beside the excepted one: exit 1"
+has "$out" "W16b" "another stamp-only visit beside the excepted one: names it"
+
+# 17. Usage of the option.
+"$SUT" check A1 --except-visit >/dev/null 2>&1; eq "$?" 2 "--except-visit without a visit id: exit 2"
+"$SUT" check A1 --bogus >/dev/null 2>&1; eq "$?" 2 "unknown option: exit 2"
+"$SUT" check --except-visit V1 >/dev/null 2>&1; eq "$?" 2 "an option in place of the bead id: exit 2"
 
 echo "----- finalize-gate: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
