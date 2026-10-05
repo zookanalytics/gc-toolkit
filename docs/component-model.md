@@ -328,6 +328,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
+| `assets/scripts/review-workspace.sh` | review | A review's directory on disk, named for its review bead: makes the worktree the review tests in, removes the directory at the verdict step, and, as the review-workspace-reap order's pass, removes the directories of reviews that closed some other way. |
 | `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up `discovered-from` the anchor and closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
 | `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every check reader agrees without a stored `check.<lane>` marker. |
 | `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined, or needs-you — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker and never touches the anchor. |
@@ -383,6 +384,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
+| `orders/review-workspace-reap.toml` | patrol | Fires the review-workspace reaper hourly, city-wide. |
 | `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
 | `orders/dolt-reclaim.toml` | patrol | Fires the Dolt reclaim pass daily, city-wide: runs `gc dolt compact --gc-only` on each store whose noms size is over the per-database line. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
