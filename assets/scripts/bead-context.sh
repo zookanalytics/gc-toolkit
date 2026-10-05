@@ -176,14 +176,15 @@ bd_json() {
 bd_show() { bd_json "$1" show "$2" --brief-deps; }
 # The walk reads list rows instead: `gc bd show` leaves out an edge whose far end
 # lives in another rig's store, and a list row keeps every edge. --brief drops the
-# free text. `gc bd list` hides gates, infrastructure beads and ephemeral rows
-# unless asked, and a blocker can be any of them, so the read asks for all three.
+# free text. `gc bd list` hides gates, infrastructure beads, template molecules
+# and ephemeral rows unless asked, and a blocker can be any of them, so the read
+# asks for all four.
 # One call takes any number of ids from one store and returns the rows it found,
 # so a missing id shows as an absence. bd_rows <db> <id>...
 bd_rows() {
   local db="$1"; shift
   local ids; ids=$(IFS=,; printf '%s' "$*")
-  bd_json "$db" list --id "$ids" --all --brief --include-gates --include-infra --include-ephemeral --limit 0
+  bd_json "$db" list --id "$ids" --all --brief --include-gates --include-infra --include-templates --include-ephemeral --limit 0
 }
 
 # ── The advance classifier ──────────────────────────────────────────────────
