@@ -248,6 +248,12 @@ next level's batch and drop out there. A child's row comes with the `--parent`
 listing, so only its blockers are read. A blocker whose store no rig carries
 reads unknown and fails the verdict closed, never landed.
 
+A `blocks` edge into another store holds nothing for bd: the bead stays in `bd
+ready`, and a deferred dispatch does not wait on it (`docs/component-model.md`,
+I1). The frontier still names that blocker and judges it, because its author
+declared the wait. A reader who finds one should mirror the wait into the
+waiting bead's own store, where it holds.
+
 The walk reads level by level, with one read per store per level carrying every
 id that level needs. It stops descending at the first stuck bead on a branch,
 since nothing below can make that branch advance. The subject's own blockers are
