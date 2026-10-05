@@ -6,7 +6,9 @@
 # Ensures <target-dir> is a git worktree of the rig repo, on a per-target
 # branch cut from the remote default-branch tip. Called from agent pre_start
 # (agents/*/agent.toml) before the session exists, so the agent starts IN the
-# worktree. Existing worktrees are left alone; --sync fast-forwards them.
+# worktree. Existing worktrees are left alone; --sync fast-forwards a branch to
+# its upstream and moves a detached HEAD to the default-branch tip when no
+# commit or tracked change can be lost (sync_detached).
 
 set -eu
 
@@ -42,6 +44,11 @@ sync_worktree() {
 
     git -C "$WT" fetch origin 2>/dev/null || true
 
+    if ! git -C "$WT" symbolic-ref -q HEAD >/dev/null 2>&1; then
+        sync_detached
+        return 0
+    fi
+
     # Fast-forward only, never replay local commits: a `pull --rebase` replays
     # shed commits onto every fetched tip and parks the worktree mid-rebase.
     UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || return 0
@@ -49,6 +56,52 @@ sync_worktree() {
 
     # A branch that cannot fast-forward is left as it stands, by design.
     git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1 || true
+}
+
+# A detached HEAD has no upstream, so the fast-forward never moves it, and the
+# agent would run that commit's files on every later start. It moves to the
+# remote default tip only when nothing can be lost: the tracked tree is clean
+# and HEAD is already an ancestor of the tip. It lands on its per-target branch,
+# tracking the default branch, so the next sync takes the fast-forward path.
+# That branch is reset only when the tip already contains it; when it holds
+# commits the tip lacks, or another worktree has it checked out, the worktree
+# is detached at the tip instead. A worktree that cannot move safely stays
+# where it is, and one stderr line names it and the reason.
+sync_detached() {
+    DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || DEFAULT_REF=""
+    if [ -z "$DEFAULT_REF" ]; then
+        sync_skipped "origin/HEAD is unset, so there is no default branch to move to"
+        return 0
+    fi
+    TARGET=${DEFAULT_REF#refs/remotes/}
+    if ! DIRTY=$(git -C "$WT" status --porcelain --untracked-files=no 2>/dev/null); then
+        sync_skipped "git status failed"
+        return 0
+    fi
+    if [ -n "$DIRTY" ]; then
+        sync_skipped "it has uncommitted changes to tracked files"
+        return 0
+    fi
+    if ! git -C "$WT" merge-base --is-ancestor HEAD "$DEFAULT_REF" 2>/dev/null; then
+        sync_skipped "HEAD has commits that are not on $TARGET"
+        return 0
+    fi
+
+    BRANCH=$(branch_name)
+    if ! git -C "$WT" show-ref --verify --quiet "refs/heads/$BRANCH" \
+        || git -C "$WT" merge-base --is-ancestor "refs/heads/$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
+        if GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --track -B "$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    if ERR=$(GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --detach "$DEFAULT_REF" 2>&1); then
+        return 0
+    fi
+    sync_skipped "git checkout $TARGET failed: $(printf '%s\n' "$ERR" | head -n 1)"
+}
+
+sync_skipped() {
+    printf 'worktree-setup: not syncing %s (detached HEAD): %s\n' "$WT" "$1" >&2
 }
 
 branch_name() {
