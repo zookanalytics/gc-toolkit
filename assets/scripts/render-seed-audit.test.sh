@@ -10,7 +10,8 @@
 # Covers: the clobber (a base that moved an input against a head whose render
 # predates it) with the offending input named; the current case; a merge result
 # carrying no audit; a head that widens the input set, which must be read under
-# ITS definition and not this checkout's; the delegation itself, asserted on the
+# ITS definition and not this checkout's; a symlinked input, recorded under its
+# own path and hashed through the link; the delegation itself, asserted on the
 # argv the merged tree's renderer receives; the three cannot-tell exits
 # (unresolvable rev, missing manifest, conflicting merge); and the merge shape,
 # against a control carrying the repo-global line the manifest replaced.
@@ -115,6 +116,17 @@ theirs=$(bash "$TMP/mt/assets/scripts/render-seed-audit.sh" --root "$TMP/mt" --p
 ours=$(bash "$SUT" --root "$TMP/mt" --print-sources)
 if [ "$ours" != "$theirs" ]; then ok "control: this checkout's renderer disagrees, so the delegation is load-bearing"
 else bad "control: both renderers agree, so this case proves nothing"; fi
+
+echo "# a symlinked input is recorded under its own path, hashed through the link"
+on base; git -C "$R" checkout -q -b linked
+mkdir -p "$R/packs/p/template-fragments"
+ln -s ../../../template-fragments/x.md "$R/packs/p/template-fragments/x.md"
+record_of() { sources_of "$R" | grep -A1 -xF "$1" | sed -n 2p; }
+eq "$(record_of packs/p/template-fragments/x.md)" "$(sha256sum "$R/template-fragments/x.md" | cut -d' ' -f1)" \
+    "the link is an input, hashed as the file it resolves to"
+ln -sfn ../../../template-fragments/y.md "$R/packs/p/template-fragments/x.md"
+eq "$(record_of packs/p/template-fragments/x.md)" "$(sha256sum "$R/template-fragments/y.md" | cut -d' ' -f1)" \
+    "…and a link moved to another file moves its record"
 
 echo "# the merged tree's renderer is asked for a manifest, never a render"
 on base; git -C "$R" checkout -q -b stubbed
