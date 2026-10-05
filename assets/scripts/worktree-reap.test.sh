@@ -722,7 +722,7 @@ BAD_TIP="$(git -C "$REPO2" commit-tree "$BAD_TREE" -p "$(git -C "$REPO2" rev-par
 git -C "$REPO2" branch polecat/zz-bad "$BAD_TIP"
 git -C "$REPO2" update-ref refs/remotes/origin/main "$BAD_TIP"
 git -C "$REPO2" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
-OUT="$(WORKTREE_REAP_REPOS= run)"
+OUT="$(WORKTREE_REAP_REPOS='' run)"
 if git -C "$REPO2" show-ref --verify --quiet refs/heads/polecat/zz-bad; then ok "an unreadable store's branch family is held though its name-bead is closed and landed"; else bad "an unreadable store's branch family is held though its name-bead is closed and landed"; fi
 if git -C "$REPO" show-ref --verify --quiet refs/heads/polecat/zz-healthy; then bad "the healthy store's closed, landed branch is dropped in the same run"; else ok "the healthy store's closed, landed branch is dropped in the same run"; fi
 has "$OUT" "dropped 1 stale local branches" "only the healthy store's branch is dropped"
@@ -770,7 +770,7 @@ git -C "$CITY" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
 bead_to "$TMP/beads.town.json" lx-towndrop  closed 100 "" polecat/lx-towndrop
 bead_to "$TMP/beads.town.json" lx-townheld  closed 100 "" polecat/lx-townheld
 bead_to "$TMP/beads.town.json" lx-townchild open    "" "" polecat/lx-townheld
-OUT="$(WORKTREE_REAP_REPOS= run)"
+OUT="$(WORKTREE_REAP_REPOS='' run)"
 if exists "$REPO/wt/hq-path"; then ok "a live city bead on the path holds it, though a closed rig bead names it too"; else bad "a live city bead on the path holds it, though a closed rig bead names it too"; fi
 if exists "$REPO/wt/hq-branch"; then ok "a live city bead on the BRANCH holds it, though the path's own rig bead closed"; else bad "a live city bead on the BRANCH holds it, though the path's own rig bead closed"; fi
 if exists "$REPO/wt/hq-closed"; then bad "a tree only a closed city bead names is taken"; else ok "a tree only a closed city bead names is taken"; fi
