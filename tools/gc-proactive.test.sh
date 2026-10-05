@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down, the
-# standing-record scan exclusion, and the fail-closed-on-unset-GC_RIG sweep
-# guard.
+# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down
+# and the fail-closed-on-unset-GC_RIG sweep guard.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
