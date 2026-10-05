@@ -84,6 +84,14 @@ bash -n "$SCRIPT" && ok "liveness-sweep-precheck.sh: valid bash" \
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+# The holder-liveness read, served before the bd guard so it is not recorded to
+# $FIXDIR/reads (the store-pin assertion counts bd reads only). GC_SESSION_FAIL =
+# an outage; default (no FAKE_SESSIONS) is a readable, empty session set.
+if [ "${1:-}" = "session" ] && [ "${2:-}" = "list" ]; then
+    [ -n "${GC_SESSION_FAIL:-}" ] && exit 1
+    if [ -n "${FAKE_SESSIONS:-}" ] && [ -f "${FAKE_SESSIONS:-}" ]; then cat "$FAKE_SESSIONS"; else printf '{"sessions":[]}\n'; fi
+    exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 sub="$2"; shift 2
 status=""; db=""
@@ -762,6 +770,84 @@ eq "$MISSING" "" "every classifier candidate also survives the precheck (contain
 [ "$PRE_N" -gt "$CLASSIFY_N" ] \
     && ok "the precheck is the LOOSER filter ($PRE_N survivors vs $CLASSIFY_N candidates)" \
     || bad "the precheck is the LOOSER filter" "precheck $PRE_N, classifier $CLASSIFY_N — the non-local exclusions are not showing up"
+
+echo "── holder liveness gates the visit exclusions (mirrors liveness-sweep.sh) ──"
+# A live-held visit excludes its subject (the pass can skip it); a dead-held
+# visit does not, so its subject survives and the pass runs. A visit bead left
+# ready by a dead session is likewise no longer dropped as a visit.
+HLFIX="$TMP/hlfix"; mkdir -p "$HLFIX"
+cat > "$HLFIX/ready.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+]
+JSON
+cat > "$HLFIX/live.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-live","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-v-dead","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+]
+JSON
+printf '[]\n' > "$HLFIX/widen.json"
+cat > "$TMP/hl-sessions.json" <<'JSON'
+{"sessions":[{"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"n","agent_name":"testrig/testrig.tk-livevisit"}]}
+JSON
+FIXDIR="$HLFIX"; export FIXDIR
+FAKE_SESSIONS="$TMP/hl-sessions.json"; export FAKE_SESSIONS
+BASELINE_CSV="" run_precheck
+SURV="$(survivors_of "$OUT")"
+hasnt ",$SURV," ",hl-live-subj," "a live-held visit's subject stays excluded (holder alive)"
+has   ",$SURV," ",hl-dead-subj," "a dead-held visit's subject survives → the pass runs"
+has   ",$SURV," ",hl-ready-deadvisit," "a visit stranded ready by a dead session survives (not dropped as a visit)"
+
+echo "── precheck fails CLOSED on an unreadable session list (never under-excludes) ──"
+export GC_SESSION_FAIL=1
+BASELINE_CSV="" run_precheck
+unset GC_SESSION_FAIL
+SURV="$(survivors_of "$OUT")"
+has ",$SURV," ",hl-dead-subj," "unreadable session list → the subject still survives (run the pass)"
+has ",$SURV," ",hl-ready-deadvisit," "unreadable session list → the stranded visit still survives"
+
+echo "── a holder listed in a TERMINAL state (archived/closed) is dead here too ──"
+# Mirrors liveness-sweep.sh: a closed/archived holder that lingers in the list
+# is dead, so its visit no longer excludes the subject — the subject survives and
+# the pass runs. An asleep (non-terminal) holder is live and still excludes, so
+# the gate drops the terminal states only, not everything that is not "active".
+HLTERM="$TMP/hlterm"; mkdir -p "$HLTERM"
+cat > "$HLTERM/ready.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-closed-subj","title":"subject of a visit held by a CLOSED session","issue_type":"task","metadata":{}},
+  {"id":"hl-arch-subj","title":"subject of a visit held by an ARCHIVED session","issue_type":"task","metadata":{}},
+  {"id":"hl-asleep-subj","title":"subject of a visit held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
+]
+JSON
+cat > "$HLTERM/live.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-closed","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-v-arch","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-v-asleep","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+]
+JSON
+printf '[]\n' > "$HLTERM/widen.json"
+cat > "$TMP/hlterm-sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
+  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
+  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+]}
+JSON
+FIXDIR="$HLTERM"; export FIXDIR
+FAKE_SESSIONS="$TMP/hlterm-sessions.json"; export FAKE_SESSIONS
+BASELINE_CSV="" run_precheck
+SURV="$(survivors_of "$OUT")"
+has   ",$SURV," ",hl-closed-subj," "a CLOSED but still-listed holder → its subject survives (run the pass)"
+has   ",$SURV," ",hl-arch-subj," "an ARCHIVED but still-listed holder → its subject survives (run the pass)"
+hasnt ",$SURV," ",hl-asleep-subj," "a non-terminal (asleep) holder still excludes its subject"
 
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"

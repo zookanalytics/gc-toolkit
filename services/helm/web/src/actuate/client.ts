@@ -11,6 +11,8 @@
 // small and flat. Their Go originals are actuateResponse and actuateErrorBody in
 // internal/server/actuate.go.
 
+import { SVC_WRITE_HEADERS } from '../svcWrite';
+
 /** The three parity write verbs. open has its own richer client (open/client.ts). */
 export type ActuateVerb = 'accept' | 'engage' | 'dismiss';
 
@@ -105,7 +107,7 @@ export async function actuate(
     res = await fetch(actuateURL(verb), {
       method: 'POST',
       signal,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: SVC_WRITE_HEADERS,
       body: JSON.stringify({ bead }),
     });
   } catch (cause) {
