@@ -1597,8 +1597,11 @@ cat >"$SOBIN/gc" <<'STUB'
 case "${2:-}" in
     show)
         case "${3:-}" in
-            v-x) jq -nc --arg sr "${SO_STALL-item-x}" \
-                    '[{id:"v-x",metadata:(({"task_kind":"visit"}+(if $sr=="" then {} else {"stall_root":$sr} end)))}]' ;;
+            v-x) jq -nc --arg sr "${SO_STALL-item-x}" --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
+                    '[{id:"v-x",metadata:(({"task_kind":"visit"}
+                        +(if $sr=="" then {} else {"stall_root":$sr} end)
+                        +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
+                        +(if $tp=="" then {} else {"escalation_key":$tp} end)))}]' ;;
             *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
                  else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
         esac ;;
@@ -1606,13 +1609,18 @@ case "${2:-}" in
         # The demand list the discharge filters client-side: an item/anchor demand
         # (SO_DEMAND, default on — the explicit merge-hold case) and/or a demand on
         # the visit (SO_VISIT_DEMAND, default off — the conversation-wait case).
-        items=""
-        [ "${SO_DEMAND:-1}" = "1" ] && items='{"id":"d-x","assignee":"","metadata":{"gc.demand_for":"item-x"}}'
-        if [ "${SO_VISIT_DEMAND:-0}" = "1" ]; then
-            [ -n "$items" ] && items="$items,"
-            items="$items"'{"id":"d-v","assignee":"","metadata":{"gc.demand_for":"v-x"}}'
-        fi
-        printf '[%s]\n' "$items" ;;
+        # SO_DEMAND_LIST replaces both with a literal list, for the cases where
+        # sibling sittings hold topic-keyed demands on one shared item.
+        if [ -n "${SO_DEMAND_LIST:-}" ]; then printf '%s\n' "$SO_DEMAND_LIST"
+        else
+            items=""
+            [ "${SO_DEMAND:-1}" = "1" ] && items='{"id":"d-x","assignee":"","metadata":{"gc.demand_for":"item-x"}}'
+            if [ "${SO_VISIT_DEMAND:-0}" = "1" ]; then
+                [ -n "$items" ] && items="$items,"
+                items="$items"'{"id":"d-v","assignee":"","metadata":{"gc.demand_for":"v-x"}}'
+            fi
+            printf '[%s]\n' "$items"
+        fi ;;
     gate)  printf 'GC: %s\n' "$*" >>"$SOGC"; exit "${SO_GATE_RC:-0}" ;;
     close) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
     update) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
@@ -1675,6 +1683,29 @@ have "an unruled sitting re-states the demand on the item" 'helm[RIG] demand ite
 if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled sitting" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled sitting"; fi
 if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unruled sitting" "found a release on --ruled no"; else ok "…and releases nothing on an unruled sitting"; fi
 
+# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
+# holds its own topic-keyed demand on it. The discharge must resolve the exact
+# demand THIS sitting filed — the one converse-hold stamped as gc.hold_demand on
+# the visit — so a ruling on finding-b cannot resolve or re-state finding-a's
+# operator question. Two demands sit on item-x, A before B; the unscoped
+# first-match would resolve dA.
+echo "── --ruled yes discharges THIS sitting's demand, not a sibling topic's ──"
+TWO_DEMANDS='[{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-a","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-a"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-b","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-b"}}]'
+SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so SO_HOLD_DEMAND=dB SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
+eq "$SO_RC" "0" "the topic-scoped discharge exits 0"
+have "the ruling resolves the demand gc.hold_demand names" 'bd gate resolve dB --reason approved' "$SOGC"
+if grep -q 'gate resolve dA' "$SOGC"; then bad "…and never the sibling topic's gate" "gate resolve reached dA — a sibling topic's operator question"; else ok "…and never the sibling topic's gate (dA left shut)"; fi
+have "…and stamps the ruling onto its own demand's board sentence" 'helm[RIG] takeaway dB approved --by converse --no-wait' "$SOLOG"
+if grep -q 'takeaway dA' "$SOLOG"; then bad "…and never onto the sibling's" "the ruling reached dA's board sentence"; else ok "…and never onto the sibling's board sentence"; fi
+
+# With no gc.hold_demand stamped (a hold predating it), the fallback scan scopes
+# by the visit's escalation_key, so it still isolates finding-b from finding-a.
+echo "── the discharge isolates by topic even with no gc.hold_demand stamp ──"
+run_so SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
+have "the topic-scoped fallback resolves finding-b's demand" 'bd gate resolve dB --reason approved' "$SOGC"
+if grep -q 'gate resolve dA' "$SOGC"; then bad "…and not finding-a's" "the fallback scan resolved a sibling topic's demand"; else ok "…and not finding-a's demand"; fi
+
 echo "── the conversation wait gates the VISIT: a ruling resolves the visit demand ──"
 # Default Phase A shape: converse-hold files the conversation demand on the visit,
 # not the anchor, so the PR is never frozen by the conversation. The discharge
@@ -1711,6 +1742,31 @@ SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-
 run_so SO_DEMAND=1 SO_VISIT_DEMAND=1 STUB_STATE=pull_request
 have "the conversation (visit) demand resolves" 'bd gate resolve d-v --reason approved' "$SOGC"
 have "the merge-hold (anchor) demand resolves too" 'bd gate resolve d-x --reason approved' "$SOGC"
+
+# The two shapes compose under a standing scope. Each sitting's conversation wait
+# gates its own visit, and each sitting that took --hold-merge holds its own
+# topic-keyed demand on the shared anchor. A ruling resolves this sitting's visit
+# demand and its own merge hold, never a sibling's merge hold, so the anchor's
+# merge stays paused until that sibling is answered too.
+echo "── a ruling discharges THIS sitting's merge hold on a shared anchor, not a sibling's ──"
+SIBLING_HOLDS='[{"id":"d-v","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:v-x:finding-b","metadata":{"gc.demand_for":"v-x","gc.demand_topic":"finding-b"}},{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-a","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-a"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-b","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-b"}}]'
+SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_HOLD_DEMAND=d-v SO_TOPIC=finding-b SO_DEMAND_LIST="$SIBLING_HOLDS" STUB_STATE=pull_request
+have "the conversation (visit) demand resolves" 'bd gate resolve d-v --reason approved' "$SOGC"
+have "…this sitting's merge hold on the anchor resolves" 'bd gate resolve dB --reason approved' "$SOGC"
+lacks "…and a sibling sitting's merge hold stays shut" 'gate resolve dA' "$SOGC" \
+      "gate resolve reached dA — the ruling released a merge another sitting still holds"
+
+# Re-stated with no topic, the moved wait would match any demand on the shared
+# item and refresh a sibling sitting's gate in place, overwriting its question.
+echo "── a cut-short moves the wait onto the item under THIS sitting's topic ──"
+SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_HOLD_DEMAND=d-v SO_TOPIC=finding-b SO_DEMAND_LIST="$SIBLING_HOLDS"
+have "the visit demand is closed" 'gate resolve d-v' "$SOGC"
+have "…and the wait is re-stated on the item under the sitting's topic" \
+     'helm[RIG] demand item-x still need X --by converse --topic finding-b' "$SOLOG"
+lacks "…and a sibling's demand is left alone" 'gate resolve dA' "$SOGC" \
+      "the cut-short resolved dA, a sibling sitting's demand"
 
 echo "── the item is the stall_root, and falls back to the subject ──"
 SOARGS=(--visit v-x --subject sub --outcome "x — y" --ruled no --still-owed z)
