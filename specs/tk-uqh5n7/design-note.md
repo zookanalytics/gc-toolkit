@@ -1,6 +1,6 @@
 ---
 name: Stale-branch triage — implementation decisions and divergences from the proposal
-description: Why the sweep is modeled on worktree-reap rather than the recover-stranded-branches.sh the proposal names, which of the proposal's premises were stale against the current pack, and why introducing the pack's first direct origin ref mutation is sound.
+description: Why the sweep is modeled on worktree-reap rather than the recover-stranded-branches.sh the proposal names, which of the proposal's premises were stale against the current pack, why only reachability earns a branch an unarchived delete, and why introducing the pack's first direct origin ref mutation is sound.
 ---
 
 # Stale-branch triage: what was built, and where it departs from the proposal
@@ -51,6 +51,24 @@ code rather than trusted.
   `metadata.target`), which the ledger read already keeps; and a branch touched
   within the cold horizon is not abandoned. So no per-process `/proc` scan is
   needed — the two checks that keep a live branch cover it.
+
+## Superseded means reachable
+
+A bare delete, with no archive, is reserved for a branch whose tip the target
+already contains: every commit is on the target, so nothing can be lost. This
+is the proposal's own definition. A squash-merged branch does not qualify. Its
+tip is a commit the target never carries, and a target commit subject naming the
+branch's bead does not prove the tip's content landed: a commit pushed after the
+squash, or a squash later reverted, leaves content only the branch holds. So an
+unreachable branch is treated as unmerged and is archived once cold, whatever
+the target's subjects say.
+
+The cost is an archive tag for a squash-merged leftover that had in fact fully
+landed. The cost is small because a merged PR already deletes its own head
+branch, so few such leftovers exist. If their tags ever pile up, a
+content-equivalence proof could return them to a bare delete. That proof would
+check that the target holds the branch's exact content at every path the branch
+changed.
 
 ## The novel capability: direct origin ref mutation
 

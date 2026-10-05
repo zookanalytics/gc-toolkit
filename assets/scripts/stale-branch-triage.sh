@@ -19,7 +19,8 @@
 # For each origin branch with no live owner:
 #   SUPERSEDED     every commit already reachable from the target -> delete. The
 #                  work is on the target, so nothing is lost and no archive is
-#                  needed.
+#                  needed. A squash-merged tip is unreachable, so it is not
+#                  superseded; it is archived like any other unmerged branch.
 #   COLD+UNMERGED  the newest commit is older than the cold horizon and not on
 #                  the target -> archive, verify the tag on origin, then delete.
 #   CONTESTED      an open PR heads it, or its tip or the target could not be
@@ -239,14 +240,11 @@ if [ -z "$HEADS" ]; then
     exit 0
 fi
 
-BEAD_RE='[a-z][a-z]-[a-z0-9]+(\.[0-9]+)*'
-
 # --- classify: build the plan ----------------------------------------------
 # Each candidate lands in exactly one plan file as kind<US>fields. Classification
 # is read-only; the plan is executed below and skipped entirely in a dry run.
 : > "$WORK/plan"
 n_super=0; n_archive=0; n_contested=0; n_kept=0
-landed_built=0
 
 while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -267,27 +265,14 @@ while IFS= read -r line; do
         n_contested=$((n_contested + 1)); continue
     fi
 
-    # Superseded: the tip is reachable from the target, or (for a branch whose
-    # name is a bead id) that bead id rode a squash-merge commit subject onto
-    # the target. A squash tip is a new sha and never an ancestor, so the subject
-    # scan is the only signal that catches it.
-    superseded=0
+    # Superseded: the tip is reachable from the target, so every commit on the
+    # branch is already there and a bare delete loses nothing. Reachability is
+    # the only proof that holds. A squash merge leaves the tip unreachable, and a
+    # target subject naming the branch's bead shows only that some commit for the
+    # bead landed: a commit pushed after the squash, or a squash later reverted,
+    # is content the target never received. An unreachable branch is therefore
+    # unmerged, and once cold it is archived before it is deleted.
     if git -C "$RIG_ROOT" merge-base --is-ancestor "$bref" "$TARGET_REF" 2>/dev/null; then
-        superseded=1
-    else
-        bead="$(grep -oE "^$BEAD_RE$" <<< "$branch" || true)"
-        [ -z "$bead" ] && bead="$(grep -oE "^$BEAD_RE$" <<< "${branch#polecat/}" || true)"
-        if [ -n "$bead" ]; then
-            if [ "$landed_built" -eq 0 ]; then
-                git -C "$RIG_ROOT" log "$TARGET_REF" --format='%s' 2>/dev/null \
-                    | grep -oE "\($BEAD_RE\)" | tr -d '()' | sort -u > "$WORK/landed" 2>/dev/null || : > "$WORK/landed"
-                landed_built=1
-            fi
-            grep -qxF "$bead" "$WORK/landed" 2>/dev/null && superseded=1
-        fi
-    fi
-
-    if [ "$superseded" -eq 1 ]; then
         # Already on the target. A head still under an open PR, or one the
         # operator pinned, is left for the refinery / the operator rather than
         # deleted out from under it.

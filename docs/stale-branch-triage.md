@@ -19,10 +19,12 @@ act needs a human by rule.
 
 For each origin branch other than the default, with no live owner:
 
-- **Superseded** — every commit is already reachable from the target, or (for a
-  `polecat/<bead-id>` branch) the bead id rode a squash-merge commit subject onto
-  the target. The work is on the target, so the branch is deleted with no
-  archive; nothing can be lost.
+- **Superseded** — every commit is already reachable from the target. The work
+  is on the target, so the branch is deleted with no archive; nothing can be
+  lost. Reachability is the only proof taken. A squash merge leaves the tip
+  unreachable, and a target commit subject naming the branch's bead does not
+  show that this tip's content landed, so a squash-merged branch is unmerged
+  here and takes the archive path once cold.
 - **Cold and unmerged** — the newest commit is older than the cold horizon and
   not on the target. The tip is pinned by an annotated tag
   `archive/<branch>@<short-sha>` carrying the classification, the tag is verified

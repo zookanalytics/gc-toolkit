@@ -165,9 +165,11 @@ tag_on_origin() { [ -n "$(git -C "$WORK" ls-remote --tags origin "refs/tags/$1" 
 # One run, every disposition — a KEEP beside every TAKE
 # =============================================================================
 new_origin
-land_subject "squashed work (tk-sqsh9)"  # advance main; its bead id now on main
+land_subject "squashed work (tk-sqsh9)"  # advance main; these bead ids now ride its subjects
+land_subject "squashed work (tk-fresh9)"
 mk_merged_branch superseded-reachable  # 0 ahead of main -> reachable -> DELETE
-mk_branch polecat/tk-sqsh9 30          # main+1, but its bead id landed -> squash -> DELETE
+mk_branch polecat/tk-sqsh9 30          # main+1; its bead id landed but its tip did not -> ARCHIVE then delete
+mk_branch polecat/tk-fresh9 1          # main+1; its bead id landed but its tip did not, fresh -> KEEP
 mk_branch claude/cold-unmerged 40      # cold + unmerged + no PR -> ARCHIVE then delete
 mk_branch polecat/fresh-unmerged 1     # unmerged but fresh -> KEEP
 mk_branch polecat/live-owned 40        # cold+unmerged but a live bead names it -> KEEP
@@ -181,10 +183,14 @@ OUT="$(run)"; RC=$?
 eq "$RC" 0 "a normal pass exits 0"
 # TAKES
 if on_origin superseded-reachable; then bad "a branch reachable from the target is deleted"; else ok "a branch reachable from the target is deleted"; fi
-if on_origin polecat/tk-sqsh9; then bad "a branch whose bead id landed by squash is deleted"; else ok "a branch whose bead id landed by squash is deleted"; fi
 if on_origin claude/cold-unmerged; then bad "a cold unmerged branch is archived then deleted"; else ok "a cold unmerged branch is archived then deleted"; fi
 if grep -q "refs/tags/archive/claude/cold-unmerged@" < <(git -C "$WORK" ls-remote --tags origin); then ok "the archived branch is pinned by an archive tag on origin"; else bad "the archived branch is pinned by an archive tag on origin"; fi
+# A target subject naming the bead is not proof the tip landed: the tip is
+# unreachable, so the branch is unmerged and is pinned before it is deleted.
+if on_origin polecat/tk-sqsh9; then bad "a cold branch whose bead id rode a target subject is archived then deleted"; else ok "a cold branch whose bead id rode a target subject is archived then deleted"; fi
+if grep -q "refs/tags/archive/polecat/tk-sqsh9@" < <(git -C "$WORK" ls-remote --tags origin); then ok "a branch whose bead id rode a target subject is pinned by an archive tag, never deleted bare"; else bad "a branch whose bead id rode a target subject is pinned by an archive tag, never deleted bare"; fi
 # KEEPS
+if on_origin polecat/tk-fresh9; then ok "a fresh branch whose bead id rode a target subject is kept"; else bad "a fresh branch whose bead id rode a target subject is kept"; fi
 if on_origin polecat/fresh-unmerged; then ok "a fresh unmerged branch is kept"; else bad "a fresh unmerged branch is kept"; fi
 if on_origin polecat/live-owned; then ok "a branch a live bead names is kept"; else bad "a branch a live bead names is kept"; fi
 if on_origin integration/conv-live; then ok "a branch a live bead targets is kept"; else bad "a branch a live bead targets is kept"; fi
@@ -193,7 +199,7 @@ if on_origin claude/cold-with-pr; then ok "a branch under an open PR is not dele
 has "$(cat "$FINDINGS")" "claude/cold-with-pr" "a contested branch gets a finding"
 has "$(cat "$FINDINGS")" "open PR heads it" "the finding carries the classification"
 # summary line
-has "$OUT" "deleted 2 superseded, archived 1 cold, filed 1 contested" "the summary counts each disposition"
+has "$OUT" "deleted 1 superseded, archived 2 cold, filed 1 contested" "the summary counts each disposition"
 
 # the archive tag preserves the content: the branch is one command back
 TAGREF="$(git -C "$WORK" ls-remote --tags origin | sed -n 's#.*refs/tags/\(archive/claude/cold-unmerged@[0-9a-f]*\)$#\1#p' | head -1)"
