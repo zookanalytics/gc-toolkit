@@ -6,6 +6,12 @@
 # working) and gating anchors (the cadence's own, carrying merge_result) must
 # never escalate, and a false escalation here is the defect this block fixes. A
 # count-nudge is gone: it went stale the moment the assignee set drained.
+#
+# The queue is read at the refinery's live identity, resolved by the real
+# resolve-route.sh against a stubbed roster. The store stub answers only that
+# owner's queue and lists any other address as a valid empty array, the way bd
+# does, so a block that read an address it never resolved would see an empty
+# queue and retract every open stuck-handoff escalation.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,22 +40,34 @@ BLOCK="$(awk '
 
 has "$BLOCK" 'gc bd list' "the block reads the queue itself"
 has "$BLOCK" 'escalate.sh' "the block escalates a stuck handoff"
+has "$BLOCK" 'resolve-route.sh' "the block resolves the refinery address"
 hasnt "$BLOCK" 'gc session nudge' "the block no longer nudges a count"
 
 # {{binding_prefix}} must be substituted exactly as the materializer does it.
-render() { printf '%s\n' "$BLOCK" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
-render > "$TMP/block.sh"
+# The patrol's steps are never materialized: each session fills the token by
+# hand from the unrendered formula, so a wrong or empty prefix is a live input.
+render() { printf '%s\n' "$BLOCK" | sed "s|{{binding_prefix}}|$1|g"; }
+render gc-toolkit. > "$TMP/block.sh"
+render '' > "$TMP/block-noprefix.sh"
+render typo. > "$TMP/block-typo.sh"
 
 bash -n "$TMP/block.sh" \
   && ok "extracted block is syntactically valid bash" \
   || bad "extracted block failed bash -n"
 
-# Stub `gc` (bd list only) and a stub escalate.sh resolved via GC_RIG_ROOT, which
-# the block probes first — so the real pack escalate.sh is never reached.
+# Stub `gc` (bd list and agent list) and a stub escalate.sh resolved via
+# GC_RIG_ROOT, which the block probes first, so the real pack escalate.sh is
+# never reached. The rig root also holds a copy of the real resolver.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
+cp "$ROOT/assets/scripts/resolve-route.sh" "$TMP/rig/assets/scripts/"
+chmod +x "$TMP/rig/assets/scripts/resolve-route.sh"
 cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
+  "agent list")
+    [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
+    printf '%s\n' "${STUB_AGENTS:-}"
+    ;;
   "bd list")
     printf '%s\n' "$*" >> "$LIST_LOG"
     case "$*" in *--json*) ;; *) echo "gc bd list called without --json" >&2; exit 64 ;; esac
@@ -66,7 +84,12 @@ case "$1 $2" in
           echo "gc bd list: store unavailable" >&2; exit "${LIST_RC}"
         fi
         [ -n "${QUEUE_STDERR:-}" ] && printf '%s\n' "$QUEUE_STDERR" >&2
-        cat "$QUEUE_FIXTURE"
+        # The fixture is QUEUE_OWNER's queue. bd lists an address no agent
+        # holds as a valid empty array, so every other assignee reads [].
+        case "$* " in
+          *" --assignee=$QUEUE_OWNER "*) cat "$QUEUE_FIXTURE" ;;
+          *) echo "[]" ;;
+        esac
         ;;
     esac
     ;;
@@ -82,21 +105,32 @@ STUB
 chmod +x "$TMP/rig/assets/scripts/escalate.sh"
 export PATH="$TMP/bin:$PATH"
 
+# The live roster: this rig's refinery, another rig's under the same binding,
+# and agents of other roles. The fixture queue belongs to this rig's refinery.
+AGENTS_DEFAULT='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},
+  {"qualified_name":"gascity/gc-toolkit.refinery"},
+  {"qualified_name":"gc-toolkit/gc-toolkit.polecat"},{"qualified_name":"gc-toolkit.dog"}]}'
+
 # run <fixture-json> [stderr-noise] [list-rc] [shell-prelude] [esc-list-json]
 #   -> the escalate log. Runs from a non-repo cwd so the block's git-toplevel
 # probe finds nothing and GC_RIG_ROOT (the stub) wins. The 5th arg is the
 # retract arm's open-escalation set; omitted leaves it an empty array, so the
-# queue-only tests never retract.
+# queue-only tests never retract. Overrides, set on the call: BLOCK_OVERRIDE
+# (a block rendered with another prefix), AGENTS_OVERRIDE (the roster),
+# AGENTS_FAIL (an unreadable roster), QUEUE_OWNER_OVERRIDE (whose queue the
+# fixture is), GC_RIG_OVERRIDE.
 run() {
   : > "$TMP/esc"; : > "$TMP/lists"
   printf '%s' "$1" > "$TMP/queue.json"
   local esc_list=""
   if [ -n "${5:-}" ]; then printf '%s' "$5" > "$TMP/esc_list.json"; esc_list="$TMP/esc_list.json"; fi
-  { printf '%s\n' "${4:-}"; cat "$TMP/block.sh"; } > "$TMP/run.sh"
+  { printf '%s\n' "${4:-}"; cat "${BLOCK_OVERRIDE:-$TMP/block.sh}"; } > "$TMP/run.sh"
   ( cd "$TMP"
     QUEUE_FIXTURE="$TMP/queue.json" ESC_LOG="$TMP/esc" LIST_LOG="$TMP/lists" \
     ESC_LIST_FIXTURE="$esc_list" \
     QUEUE_STDERR="${2:-}" GC_RIG="${GC_RIG_OVERRIDE-gc-toolkit}" LIST_RC="${3:-0}" \
+    STUB_AGENTS="${AGENTS_OVERRIDE-$AGENTS_DEFAULT}" STUB_AGENTS_FAIL="${AGENTS_FAIL:-}" \
+    QUEUE_OWNER="${QUEUE_OWNER_OVERRIDE-gc-toolkit/gc-toolkit.refinery}" \
     GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="$TMP/nocity" \
       bash "$TMP/run.sh" > "$TMP/out" 2>&1 || true )
   cat "$TMP/esc"
@@ -178,10 +212,17 @@ blind 'null'
 blind '' '' 1
 has "$(out)" "unreadable" "a failed listing still reports it is unreadable"
 
-# unset GC_RIG still names the refinery in the message, with no leading slash.
-URIG="$(GC_RIG_OVERRIDE= run "$STUCK_ONE")"
+# Unset GC_RIG leaves no rig to qualify the name with. A city-scoped refinery
+# still resolves, and the message names it with no leading slash.
+CITY_REFINERY='{"agents":[{"qualified_name":"gc-toolkit.refinery"}]}'
+URIG="$(GC_RIG_OVERRIDE='' AGENTS_OVERRIDE="$CITY_REFINERY" QUEUE_OWNER_OVERRIDE=gc-toolkit.refinery run "$STUCK_ONE")"
 has "$URIG" "gc-toolkit.refinery" "unset GC_RIG still names the refinery"
 hasnt "$URIG" "/gc-toolkit.refinery" "unset GC_RIG emits no leading slash"
+# Two rigs' refineries and no rig to choose between them: no queue is guessed.
+AMBIG="$(GC_RIG_OVERRIDE='' run "$STUCK_ONE")"
+has "$AMBIG" "--key witness-refinery-queue-unroutable" \
+   "unset GC_RIG with several rigs' refineries escalates the blind monitor"
+eq "$(cat "$TMP/lists")" "" "and reads no queue it would have to guess"
 
 # The block is instruction text an agent runs, so it lands in whatever shell the
 # caller has already set up, including a strict one.
@@ -259,6 +300,54 @@ for PRELUDE in 'set -e' 'set -euo pipefail'; do
   has "$(run "$QUEUE_OTHER" "" "" "$PRELUDE" "$ESC_GONE")" "--retract --subject tk-gone" \
      "$PRELUDE: a resolved handoff's escalation is still retracted"
 done
+
+# --- The queue is read at a resolved address, never an assembled one ---------
+# An empty or wrong prefix renders an address no agent holds. A read there is a
+# valid empty array, so the old block reported a clean queue and then retracted
+# every open escalation, including one whose handoff still sat in the queue.
+# Here tk-stuck is in the live queue and its visit is open.
+ESC_STUCK_OPEN='[{"id":"tk-v-stuck","metadata":{"task_kind":"visit","escalation_key":"witness-refinery-queue","gc.continuation_group":"tk-stuck"}}]'
+for PFX in noprefix typo; do
+  NESC="$(BLOCK_OVERRIDE="$TMP/block-$PFX.sh" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN")"
+  has "$NESC" "--key witness-refinery-queue-unroutable" \
+     "$PFX: an address no agent holds escalates the blind monitor"
+  hasnt "$NESC" "--retract" "$PFX: and retracts no escalation, though its handoff is unseen"
+  hasnt "$NESC" "--subject tk-stuck" "$PFX: and files nothing about a queue it never read"
+  eq "$(cat "$TMP/lists")" "" "$PFX: no queue and no escalation set is read"
+  hasnt "$(out)" "no stuck handoffs" "$PFX: an unread queue is never reported clean"
+  has "$(out)" "no live refinery identity resolves" "$PFX: the diagnostic says why"
+done
+for PRELUDE in 'set -e' 'set -euo pipefail'; do
+  NESC="$(BLOCK_OVERRIDE="$TMP/block-noprefix.sh" run "$STUCK_ONE" '' 0 "$PRELUDE" "$ESC_STUCK_OPEN")"
+  has "$NESC" "--key witness-refinery-queue-unroutable" \
+     "$PRELUDE: an address no agent holds still escalates the blind monitor"
+  hasnt "$NESC" "--retract" "$PRELUDE: and still retracts nothing"
+done
+
+# The read follows the identity that is live, not the string the template
+# rendered: where the refinery is city-scoped, the rig-qualified name resolves
+# to the bare identity, and that is the queue read.
+CESC="$(AGENTS_OVERRIDE="$CITY_REFINERY" QUEUE_OWNER_OVERRIDE=gc-toolkit.refinery run "$STUCK_ONE")"
+has "$CESC" "--subject tk-stuck" "a city-scoped refinery's stuck handoff escalates"
+has "$(cat "$TMP/lists")" "--assignee=gc-toolkit.refinery " "the queue read is the live city-scoped identity"
+
+# An unreadable roster proves nothing about the address. resolve-route.sh hands
+# the rendered name back UNVERIFIED, so the queue there is still read and a stuck
+# handoff in it still escalates. An empty read there is no proof a handoff left,
+# so nothing is retracted: tk-gone's visit, which a verified read retracts above,
+# stays open.
+UESC="$(AGENTS_FAIL=1 run "$STUCK_ONE" "" "" "" "$ESC_GONE")"
+has "$UESC" "--subject tk-stuck" "unreadable roster: a stuck handoff at the rendered address still escalates"
+has "$(cat "$TMP/lists")" "--assignee=gc-toolkit/gc-toolkit.refinery " \
+   "unreadable roster: the rig-qualified rendered address is the one read"
+has "$(out)" "UNVERIFIED" "unreadable roster: the read is marked unproven"
+hasnt "$UESC" "--retract" "unreadable roster: nothing is retracted on an unverified read"
+
+# Both faults at once: the dead address is read unverified and comes back empty.
+# The retract gate is all that stands between that read and withdrawing a live
+# escalation.
+DESC="$(AGENTS_FAIL=1 BLOCK_OVERRIDE="$TMP/block-noprefix.sh" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN")"
+hasnt "$DESC" "--retract" "unreadable roster and empty prefix: no live escalation is withdrawn"
 
 echo
 echo "refinery-stuck-escalate: $PASS passed, $FAIL failed"

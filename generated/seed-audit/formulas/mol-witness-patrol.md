@@ -23,12 +23,14 @@ disposes it: routed to a pool, held on an edge, or escalated to the operator
 as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
 a bead — an emergency that needs a human now.
 
-Every address this formula stamps comes from assets/scripts/resolve-route.sh.
-The agents it files to do not share a scope: the dog is city-scoped and its
-identity carries no rig segment, while the polecat and refinery pools are
-rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
-the other, and either stamp reads back clean, so a hand-written address is
-right only by luck.
+Every address this formula stamps or queries comes from
+assets/scripts/resolve-route.sh. The agents it files to do not share a scope:
+the dog is city-scoped and its identity carries no rig segment, while the
+polecat and refinery pools are rig-scoped and carry `<rig>/`. The qualifier that
+reaches one is invisible to the other, and either stamp reads back clean, so a
+hand-written address is right only by luck. A query by a hand-written address
+fails just as quietly: listing beads by an address no agent holds returns a
+valid empty array, which reads as an empty queue.
 
 Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
 topology-root-skip, liveness-map-guard, liveness-lookup, warrant-file,
