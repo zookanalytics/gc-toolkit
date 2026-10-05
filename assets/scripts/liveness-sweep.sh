@@ -312,7 +312,10 @@ fi
 # which runs against the open PR, never holds a pre_open_gate anchor as not-yet-
 # gated. Built once per pass as a {anchor-id: [gates]} map, read by
 # pre_open_all_green below. If the resolver script is absent (have_resolver=0) the
-# jq falls back to the pre-phase none/off/approval drop.
+# jq falls back to the pre-phase none/off/approval drop. Either way a gate keeps
+# the case of its check_set token, deduped case-insensitively: gate-ensure
+# dispatches that token as the check_name and signoff stamps `check.<token>`, so
+# the census reads the marker under the same key every other reader does.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
 # rig's own review-checks.toml beside the pack) so a hermetic test can point it at
@@ -333,7 +336,7 @@ if [ -x "$_LS_DIR/review-checks.sh" ]; then
         _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
              ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null) || continue
         printf '%s\n' "$_g" | jq -R . | jq -sc --arg id "$_aid" \
-          'map(select(length > 0) | ascii_downcase) | {($id): .}'
+          'map(select(length > 0)) | {($id): .}'
       done \
     | jq -sc 'add // {}' 2>/dev/null)
   [ -n "$PREOPEN_GATES_MAP" ] || PREOPEN_GATES_MAP="{}"
@@ -389,8 +392,8 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     | (if $have_resolver == "1" then ($preopen_gates[(.id // "")] // [])
        else (($m.check_set // "")
              | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
-             | map(ascii_downcase)
-             | map(select(. != "none" and . != "off" and . != "approval")))
+             | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))
+             | reduce .[] as $t ([]; if any(.[]; ascii_downcase == ($t | ascii_downcase)) then . else . + [$t] end))
        end) as $gates
     | ($gates | length) > 0
       and all($gates[]; ($m["check." + .] // "") == "green");

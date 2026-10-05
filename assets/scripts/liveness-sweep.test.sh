@@ -670,15 +670,18 @@ printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks
 printf '%s\n' '[
   {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
   {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.correctness":"green"}},
-  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.demo":"green"}}
+  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.demo":"green"}},
+  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}}
 ]' > "$TMP/ph-ready.json"
 GC_REVIEW_CHECKS_INDEX="$PH_IDX" FAKE_READY="$TMP/ph-ready.json" run_sweep ABSENT
 eq "$RC" "0" "the phase-aware pass completes"
 # Only ph-preopen-ungreen is an unnamed wait: the legacy codex token gated pre-open
 # (resolver default, not dropped) and its green read as converged; the open-as-draft
 # demo did NOT hold the pre-open census; a genuinely ungreen pre-open lane still does.
+# The mixed-case lane reads its marker under the token's own case (check.Arch), the
+# key signoff stamps, so it reads green rather than flagged.
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
-   "the resolver classes the legacy-token and draft-pending anchors gated; only the pre-open-ungreen one is unnamed"
+   "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is
