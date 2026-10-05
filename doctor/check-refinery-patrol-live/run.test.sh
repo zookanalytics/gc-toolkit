@@ -5,11 +5,13 @@
 # must not report: an idle refinery whose wisp rests beside an empty queue, and
 # a refinery that has not yet had the bound to take work that just arrived.
 # The stub applies the filters real bd applies server-side (assignee, status,
-# type, exclude-type, has-metadata-key, and hiding ephemeral wisps unless
-# --include-infra), so a row the real store would never return cannot reach the
-# check here either. The last section pins the queue probe to the filters
-# find-work-select uses, so the queue this check ages stays the queue the
-# patrol takes from.
+# type, exclude-type, has-metadata-key), so a row the real store would never
+# return cannot reach the check here either. It also hides ephemeral wisps
+# unless the call passes --include-infra. That is stricter than bd, which lists
+# them for an explicit --type molecule too, and it holds the wisp probe to the
+# patrol formula's own wisp lookup, --type molecule --include-infra. The last
+# section pins the queue probe to the filters find-work-select uses, so the
+# queue this check ages stays the queue the patrol takes from.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -109,7 +111,7 @@ store alpha "$(work tk-old "$A" 5430)" "$(wisp tk-wisp-new "$A" 330)"
 run
 eq "$RC" "0" "a queue waiting 90m behind a wisp that moved 5m ago is OK"
 has "$OUT" "$A: 1 bead(s) wait in its find-work queue, the oldest (tk-old) for 90m; patrol wisp tk-wisp-new moved 5m ago, so the patrol is cycling" \
-    "the cycling patrol is named with its wisp, which the store lists only under --include-infra"
+    "the cycling patrol is named with its wisp, which the stub lists only under --include-infra"
 has "$OUT" "$B: find-work queue empty, so a resting patrol is idle" "a 5h-old wisp beside an empty queue reads as idle"
 has "$OUT" "$C: skipped (rig cold is suspended" "a refinery on a suspended rig is skipped as a note"
 hasnt "$OUT" "witness" "a non-refinery agent is not judged"
