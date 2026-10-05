@@ -49,9 +49,9 @@ type Bead struct {
 // Scrub strips every C0 control byte (U+0000–U+001F), the range JSON requires
 // escaped inside a string; a raw one — LF and TAB alike — makes the payload
 // invalid JSON. Every byte above 0x1F passes through, DEL included, which JSON
-// permits raw. It must accept exactly what the shell fallback accepts —
-// lifecycle.sh scrubs with `tr -d '\000-\037'` — because a caller cannot tell
-// which implementation answered.
+// permits raw. It accepts exactly what the scripts' control-char-scrub block
+// accepts (`tr -d '\000-\037'`), so a subcommand ported from a script reads
+// every payload that script read.
 func Scrub(b []byte) []byte {
 	return bytes.Map(func(r rune) rune {
 		if r < 0x20 {
@@ -181,12 +181,12 @@ func (c *Client) ShowDirect(id string) *Bead { return c.showViaExec(id) }
 
 // showViaExec reads one bead by forking `gc bd show --json`.
 //
-// The exit status is NOT consulted: the shell it replaces reads
+// The exit status is NOT consulted: the scripts read
 // `gc bd show ... 2>/dev/null | scrub | jq -c '.[0] // empty'` with no
 // pipefail, so a payload printed beside a non-zero exit is a bead there, and a
-// caller cannot tell which implementation answered. Reporting a landed
-// transition as UNVERIFIED (exit 2) because the read-back's `gc` also warned
-// is the divergence this avoids.
+// port reads it the same way. Reporting a landed transition as UNVERIFIED
+// (exit 2) because the read-back's `gc` also warned is the divergence from
+// those scripts that this avoids.
 //
 // `bd show --json` answers with an ARRAY when any id resolves and an OBJECT
 // when none does, at rc=0 either way, so a non-array payload is a miss and not

@@ -12,11 +12,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
-// `gctk lifecycle` is the port of assets/scripts/lifecycle.sh: THE writer of
-// anchor lifecycle transitions. The CLI is contract-preserving — same verbs,
-// same flags, same exit codes, same stdout grammar — because its callers
-// (pr-open, merge, pr-facts, mol-refinery-patrol) treat it as an opaque command
-// and must not notice which language answers.
+// `gctk lifecycle` is THE writer of anchor lifecycle transitions, and the only
+// implementation of assets/scripts/lifecycle.sh, which execs it. The CLI is the
+// script's contract — same verbs, same flags, same exit codes, same stdout
+// grammar — because its callers (pr-open, merge, pr-facts, mol-refinery-patrol)
+// invoke lifecycle.sh as an opaque command.
 //
 // Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
 // 2 post-write verification mismatch (or unreadable bead).

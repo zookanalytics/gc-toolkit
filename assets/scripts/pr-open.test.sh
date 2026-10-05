@@ -20,6 +20,9 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-open-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# pr-open.sh flips the anchor to pull_request through lifecycle.sh, which execs
+# gctk.
+harness_build_gctk
 harness_init
 
 SD="$TMP/scripts"

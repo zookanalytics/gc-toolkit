@@ -18,6 +18,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# merge.sh records every landing through lifecycle.sh, which execs gctk.
+harness_build_gctk
 harness_init
 
 SD="$TMP/scripts"

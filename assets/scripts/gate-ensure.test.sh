@@ -41,6 +41,8 @@ trap 'rm -rf "$TMP"' EXIT
 # A hermetic suite must not read the caller's city: an ambient GC_RIG changes
 # the gc sling argv these assertions match on.
 unset GC_RIG 2>/dev/null || true
+# gate-ensure records its verdicts through lifecycle.sh, which execs gctk.
+harness_build_gctk
 harness_init
 
 # Private scripts dir: the SUT, lifecycle.sh, and the REAL graph-derivation

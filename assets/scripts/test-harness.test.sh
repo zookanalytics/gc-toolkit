@@ -10,13 +10,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-test-harness-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 
-# Seed the environment a polecat/agent session exports, plus a port binary path
-# a suite builds before sourcing the harness (the lifecycle.test.sh pattern:
-# GCTK_BUILT is set pre-init because the stub git must not answer the Go build).
+# Seed the environment a polecat/agent session exports, an inherited gctk
+# binary path, and the build a suite makes before harness_init
+# (harness_build_gctk sets GCTK_BUILT pre-init because the stub git must not
+# answer the Go build).
 export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=loomington
 export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=lx-live
 export GC_TRIGGER_BEAD_ID=tk-live GC_RIG_ROOT=/live/rigs/gc-toolkit
 export BEADS_DIR=/live/beads BEADS_ACTOR=live-actor
+export GCTK_BIN=/live/city/.gc/services/gctk/bin/gctk
 GCTK_BUILT="$TMP/gctk"
 
 # Capture the seed before harness_init runs — it is the call under test AND it
@@ -46,10 +48,21 @@ resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF GC_NO_API || true)"
 if [ -z "$resid" ]; then ok "no GC_/BEADS_ variable survives harness_init"; else bad "residual city vars: $resid"; fi
 eq "${GC_NO_API:-}" "1" "harness_init pins GC_NO_API=1 so a gctk read hits the stub, not the live daemon"
 
-# GCTK_* is out of scope: the port pin stays, and a pre-init build path is not
-# collateral — a blanket GC* unset would have taken GCTK_BUILT with it.
-eq "$GCTK_BIN"   "none"       "harness_init pins GCTK_BIN=none"
+# GCTK_* is out of that sweep: the pre-init build path is not collateral — a
+# blanket GC* unset would have taken GCTK_BUILT with it — and GCTK_BIN is pinned
+# to that build, never to the binary an inherited GCTK_BIN names.
 eq "$GCTK_BUILT" "$TMP/gctk"  "harness_init preserves a pre-init GCTK_BUILT"
+eq "$GCTK_BIN"   "$TMP/gctk"  "harness_init pins GCTK_BIN to the suite's own build, over an inherited one"
+
+# A suite that built nothing reaches no binary at all: lifecycle.sh refuses
+# under GCTK_BIN=none, and that refusal is what such a suite sees.
+eq "$(unset GCTK_BUILT; harness_init >/dev/null; printf '%s' "$GCTK_BIN")" "none" \
+   "with no build, harness_init pins GCTK_BIN=none"
+# A build that did not happen is named as the suite's first failure, rather
+# than surfacing as every lifecycle transition the suite makes being refused.
+out=$(GCTK_BUILT="" GCTK_BUILD_ERR="gctk did not build — fixture" harness_init; echo "fails=$FAIL")
+has "$out" "FAIL - gctk did not build — fixture" "harness_init reports a build that did not happen"
+has "$out" "fails=1" "…as one counted failure"
 
 # The hermetic stub environment is still installed.
 case "$STUB_STORE" in "$TMP"/*) ok "STUB_STORE points into TMP" ;; *) bad "STUB_STORE not under TMP: $STUB_STORE" ;; esac

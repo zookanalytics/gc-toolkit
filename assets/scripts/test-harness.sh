@@ -13,6 +13,28 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
+# Build gctk from THIS checkout, for a suite whose scripts reach lifecycle.sh.
+# lifecycle.sh execs `gctk lifecycle` and has no other implementation, so such a
+# suite needs a binary, and the one it needs is built from the tree under test.
+# Call this BEFORE harness_init: the stub git harness_init puts on PATH answers
+# nothing, and the build must not read a fixture. -buildvcs=false keeps the
+# toolchain off git entirely; no assertion reads the binary's version.
+# A build that does not happen is recorded in GCTK_BUILD_ERR, and harness_init
+# turns it into the suite's first failure. Otherwise the suite would fail every
+# lifecycle transition and never name the cause.
+harness_build_gctk() {
+  GCTK_BUILT=""; GCTK_BUILD_ERR=""; GCTK_BUILD_LOG="$TMP/gctk-build.log"
+  local mod
+  mod="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../services/gctk" && pwd)"
+  if ! command -v go >/dev/null 2>&1; then
+    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh had nothing to exec in this suite"
+  elif ( cd "$mod" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
+    GCTK_BUILT="$TMP/gctk"
+  else
+    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+  fi
+}
+
 harness_init() {
   PASS=0; FAIL=0
   # These suites run from a tree inside a live city, whose session environment
@@ -22,17 +44,18 @@ harness_init() {
   # on the operator's shell rather than on the code. Clear both namespaces so the
   # harness owns the environment; a suite that wants a rig exports it after
   # harness_init returns. GCTK_* is left alone: GCTK_BIN is pinned just below,
-  # and a suite may build a port binary before harness_init (lifecycle.test.sh).
+  # from the binary harness_build_gctk left in GCTK_BUILT.
   unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
-  # Pin the merge cadence to its shell implementations. The scripts prefer a
-  # deployed `gctk` binary, resolved from the ambient GC_CITY — and these suites
-  # run from a tree INSIDE a live city, so left alone a suite would silently
-  # test whichever implementation that city last built. A suite that means to
-  # exercise the port says so by overriding this after harness_init, the way
-  # lifecycle.test.sh does for its second arm.
-  export GCTK_BIN=none
+  # Pin gctk to the binary this suite built from the checkout, or to none. The
+  # scripts resolve a deployed `gctk` from the ambient city otherwise, and these
+  # suites run from a tree INSIDE a live city, so left alone a suite would test
+  # whichever binary that city last built. A suite that built nothing reaches no
+  # binary at all: lifecycle.sh refuses under GCTK_BIN=none, and
+  # pr-status-label.sh derives nothing.
+  export GCTK_BIN="${GCTK_BUILT:-none}"
+  [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
   # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
   # bead reads prefer the running supervisor's API, and these suites run inside
   # a live city whose supervisor is up, so left alone a read would answer from

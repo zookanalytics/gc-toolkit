@@ -55,6 +55,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# pr-facts.sh records what it observes through lifecycle.sh, which execs gctk.
+harness_build_gctk
 harness_init
 
 # The value@oid half of a dated key. pr_posture carries a third @<since>
