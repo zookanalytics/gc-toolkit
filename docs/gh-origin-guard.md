@@ -102,10 +102,19 @@ forge read as a repository we own.
 rather than in `--repo`. The guard reads `repos/OWNER/REPO` from the endpoint
 path, accepting a leading slash and a full REST URL, and maps the api host
 (`api.github.com`, or `HOST/api/v3` on an enterprise forge) back to the forge
-host a remote names. `{owner}` and `{repo}` placeholders are filled from
-`GH_REPO` or the working directory, the way gh fills them, and `--hostname`
-chooses the forge for an unqualified endpoint. An endpoint naming no repository
-is handled under what the guard does not cover.
+host a remote names. A full URL names its own host. Any other endpoint resolves
+on the forge `--hostname` names, or else on the host an unqualified owner/name
+is completed with.
+
+`{owner}` and `{repo}` placeholders are filled from the repository `GH_REPO`
+names, or else from the working directory's `origin`. gh fills them before it
+reads the host or the path, and the guard does the same. Only the owner and the
+name come from that repository. The host stays the one the endpoint names, and a
+concrete owner or name beside a placeholder stays in the target. So
+`https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues` run from our
+checkout is a write to `gitlab.example.com`, not to our origin, and
+`repos/someone/{repo}/issues` is a write to `someone`'s repository. An endpoint
+naming no repository is handled under what the guard does not cover.
 
 ## What the session owns
 
@@ -132,9 +141,10 @@ own can be resolved, or the target resolves to nothing, there is no way to show
 the write lands somewhere we own, and "outside" is the safe reading.
 
 The subject of that rule is a write aimed at a repository. A `gh api` write to a
-`repos/OWNER/REPO` endpoint with no concrete owner and name is such a write and
-is refused; an endpoint that names no repository at all is not, and is left
-alone rather than refused.
+`repos/OWNER/REPO` endpoint with no concrete owner and name, including one whose
+placeholders have no `GH_REPO` or `origin` to fill them, is such a write and is
+refused; an endpoint that names no repository at all is not, and is left alone
+rather than refused.
 
 The cost of that choice is small. Every `gh` write in this repo lives inside a
 script, and those scripts run in a rig checkout where the origin resolves.

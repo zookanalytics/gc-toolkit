@@ -51,8 +51,10 @@
 #        wrapped write; `command -v gh` is a lookup and stays unguarded
 #   (25) `gh api` with a writing method (POST/PATCH/PUT/DELETE, explicit via -X
 #        or implicit when fields are added) is guarded off the endpoint path;
-#        GET and graphql are left alone, and an endpoint naming no repository is
-#        out of the guard's domain
+#        {owner}/{repo} placeholders fill only the owner and name, so the host
+#        stays the endpoint's and a concrete owner or name beside one stays in
+#        the target; GET and graphql are left alone, and an endpoint naming no
+#        repository is out of the guard's domain
 
 set -u
 
@@ -430,6 +432,24 @@ allowed "api POST full-url own origin"           "$RIG" "gh api -X POST https://
 # fills them, so the same command writes wherever the cwd belongs.
 allowed "api placeholder from own cwd"           "$RIG" "gh api -X POST repos/{owner}/{repo}/issues -f title=x"
 denied  "api placeholder from third-party cwd"   "$SANDBOX/third" "gh api -X POST repos/{owner}/{repo}/issues -f title=x"
+# gh takes only the owner and the name from the repository it fills from. The
+# host is the one the endpoint names: a full URL's own host, else the forge
+# --hostname or GH_HOST selects. Filling the whole target from GH_REPO or the
+# cwd read a placeholder URL on another forge as our own origin.
+denied  "api placeholder URL on another forge"   "$RIG" "gh api -X POST 'https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues' -f title=x"
+denied  "api placeholder URL, GH_REPO own"       "$RIG" "GH_REPO=zookanalytics/gc-toolkit gh api -X POST 'https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues' -f title=x"
+allowed "api placeholder URL on our forge"       "$RIG" "gh api -X POST 'https://api.github.com/repos/{owner}/{repo}/issues' -f title=x"
+denied  "api placeholder URL, third-party cwd"   "$SANDBOX/third" "gh api -X POST 'https://api.github.com/repos/{owner}/{repo}/issues' -f title=x"
+denied  "api placeholder, --hostname elsewhere"  "$RIG" "gh api --hostname gitlab.example.com -X POST 'repos/{owner}/{repo}/issues' -f title=x"
+denied  "api placeholder, GH_HOST elsewhere"     "$RIG" "GH_HOST=gitlab.example.com GH_REPO=github.com/zookanalytics/gc-toolkit gh api -X POST 'repos/{owner}/{repo}/issues' -f title=x"
+allowed "api placeholder, GH_REPO host unused"   "$RIG" "GH_REPO=gitlab.example.com/zookanalytics/gc-toolkit gh api -X POST 'repos/{owner}/{repo}/issues' -f title=x"
+# A placeholder fills only its own slot, so a concrete owner or name beside one
+# stays part of the target.
+denied  "api concrete owner, placeholder name"   "$RIG" "gh api -X POST 'repos/get-convex/{repo}/issues' -f title=x"
+denied  "api placeholder owner, concrete name"   "$RIG" "gh api -X POST 'repos/{owner}/agent/issues' -f title=x"
+allowed "api own owner, placeholder name"        "$RIG" "gh api -X POST 'repos/zookanalytics/{repo}/issues' -f title=x"
+# A placeholder with no GH_REPO and no checkout to fill it names nothing.
+denied  "api placeholder with nothing to fill"   "$SANDBOX/plain" "gh api -X POST 'repos/{owner}/{repo}/issues' -f title=x"
 # --hostname chooses the forge an unqualified endpoint resolves on.
 denied  "api --hostname to another forge"        "$RIG" "gh api --hostname gitlab.example.com -X POST repos/zookanalytics/gc-toolkit/issues"
 # A writing method whose endpoint names no repos/OWNER/REPO path resolves to

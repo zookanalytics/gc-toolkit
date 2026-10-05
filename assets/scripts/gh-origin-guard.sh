@@ -104,18 +104,31 @@ origin_of() {
 # Resolve the repository a `gh api` endpoint writes to. gh reads the repository
 # straight from the endpoint path, so this is the api analogue of repo_from_url.
 # The endpoint is a REST path (`repos/OWNER/REPO/...`), a leading-slash path, or
-# a full URL; $2 is the host gh would use for a relative path. Prints one of:
-#   host/owner/repo   a concrete repos/OWNER/REPO path — the resolved target
-#   @placeholder      a repos path using {owner}/{repo}; gh fills it from the
-#                     working directory or GH_REPO, so the caller resolves it there
-#   @malformed        a repos/ path with no concrete owner and name — unresolvable,
-#                     refused the way an unresolved porcelain target is
+# a full URL; $2 is the host gh would use for a relative path, and $3 is the
+# host/owner/name that fills {owner} and {repo}, or empty when none resolves.
+# Prints one of:
+#   host/owner/repo   a repos/OWNER/REPO path — the resolved target
+#   @malformed        a repos/ path with no concrete owner and name, including a
+#                     placeholder left unfilled — unresolvable, refused the way an
+#                     unresolved porcelain target is
 #   @nonrepos         any other endpoint; it names no repository and is left alone
 # An api URL carries the api host (api.github.com, or HOST/api/v3 for an
 # enterprise forge); both are mapped back to the forge host that a remote names,
 # so the comparison is against the same identity origin_of produces.
-api_endpoint_target() { # api_endpoint_target <endpoint> <effective-host>
-    _ep=$(printf '%s' "${1:-}" | tr -d '[:space:]')
+api_endpoint_target() { # api_endpoint_target <endpoint> <effective-host> <fill-repo>
+    # gh fills {owner} and {repo} across the whole endpoint before it reads a host
+    # or a path from it, and takes only the owner and the name of the repository
+    # it fills from. Filling first and resolving the result the way a concrete
+    # endpoint resolves keeps the endpoint's own host, and any concrete owner or
+    # name standing beside a placeholder. The fill values come out of norm_repo,
+    # so they carry nothing sed would read as syntax.
+    _ep=${1:-}
+    _fown=$(printf '%s' "${3:-}" | cut -d/ -f2)
+    _fname=$(printf '%s' "${3:-}" | cut -d/ -f3)
+    if [ -n "$_fown" ] && [ -n "$_fname" ]; then
+        _ep=$(printf '%s' "$_ep" | sed -e "s#{owner}#$_fown#g" -e "s#{repo}#$_fname#g")
+    fi
+    _ep=$(printf '%s' "$_ep" | tr -d '[:space:]')
     [ -n "$_ep" ] || { printf '@nonrepos'; return 0; }
     case "$_ep" in
         *://*)
@@ -138,9 +151,6 @@ api_endpoint_target() { # api_endpoint_target <endpoint> <effective-host>
     esac
     _owner=$(printf '%s' "$_path" | cut -d/ -f2)
     _name=$(printf '%s' "$_path" | cut -d/ -f3)
-    case "$_owner/$_name" in
-        *'{'*|*'}'*) printf '@placeholder'; return 0 ;;
-    esac
     { [ -n "$_owner" ] && [ -n "$_name" ]; } || { printf '@malformed'; return 0; }
     _t=$(norm_repo "$_host/$_owner/$_name")
     [ -n "$_t" ] && printf '%s' "$_t" || printf '@malformed'
@@ -528,26 +538,29 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
 
     # `gh api` names its repository in the endpoint, not in --repo, so it is
     # resolved on its own terms. An endpoint that names no repository is left
-    # alone; one with {owner}/{repo} placeholders is filled from GH_REPO or the
-    # working directory the way gh fills them; a repos path with no concrete
-    # owner and name resolves to nothing and is refused.
+    # alone, and a repos path with no concrete owner and name resolves to
+    # nothing and is refused. {owner} and {repo} are filled from GH_REPO, else
+    # from the working directory's origin, in the order gh consults the two.
     if [ "$_noun" = "api" ]; then
-        _api=$(api_endpoint_target "${_endpoint:-}" "$_eff_host")
+        _fill=""
+        case "${_endpoint:-}" in
+            *'{owner}'*|*'{repo}'*)
+                if [ -n "${_inline:-}" ]; then
+                    _fill=$(norm_repo "$_inline" "$_eff_host")
+                elif [ "${_ghset:-0}" = "1" ] && [ -n "${_ghval:-}" ]; then
+                    _fill=$(norm_repo "$_ghval" "$_eff_host")
+                elif [ "${_ghset:-0}" = "1" ]; then
+                    _fill=$(origin_of "$_base")
+                elif [ -n "${GH_REPO:-}" ]; then
+                    _fill=$(norm_repo "$GH_REPO" "$_eff_host")
+                else
+                    _fill=$(origin_of "$_base")
+                fi ;;
+        esac
+        _api=$(api_endpoint_target "${_endpoint:-}" "$_eff_host" "$_fill")
         case "$_api" in
             @nonrepos) continue ;;
             @malformed) _target="" ;;
-            @placeholder)
-                if [ -n "${_inline:-}" ]; then
-                    _target=$(norm_repo "$_inline" "$_eff_host")
-                elif [ "${_ghset:-0}" = "1" ] && [ -n "${_ghval:-}" ]; then
-                    _target=$(norm_repo "$_ghval" "$_eff_host")
-                elif [ "${_ghset:-0}" = "1" ]; then
-                    _target=$(origin_of "$_base")
-                elif [ -n "${GH_REPO:-}" ]; then
-                    _target=$(norm_repo "$GH_REPO" "$_eff_host")
-                else
-                    _target=$(origin_of "$_base")
-                fi ;;
             *) _target=$_api ;;
         esac
     else
@@ -609,9 +622,10 @@ if [ -z "${TARGET:-}" ] && [ "$NOUN" = "api" ]; then
     deny "gh-origin-guard: refused \`gh api $VERB\`.
 
 This call writes, but its endpoint names no repository that resolves: a
-\`repos/OWNER/REPO\` path carries no concrete owner and name, or a
-\`{owner}/{repo}\` endpoint was run outside a checkout of one of ours. The
-repositories this session may write to are: $OWNED.
+\`repos/OWNER/REPO\` path carries no concrete owner and name, or an \`{owner}\` or
+\`{repo}\` placeholder had nothing to fill it, with no GH_REPO set and no
+\`origin\` remote in the working directory. The repositories this session may
+write to are: $OWNED.
 
 Name the repository in the endpoint (\`repos/OWNER/REPO/...\`), or hand the
 operator the exact command. Bead $PREPARE_PATH_BEAD carries that path."
