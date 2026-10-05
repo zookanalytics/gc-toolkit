@@ -524,7 +524,7 @@ has "$out" "repointed" "and says so"
 echo "# an ephemeral subject is filed on a durable standing subject"
 # The sitting writes its outcome to the subject and its takeaway to the item,
 # which is the subject when the visit names no stall_root
-# (agents/converse/prompt.template.md step 7). A wisp is burned at the end of
+# (agents/_converse/prompt.template.md step 7). A wisp is burned at the end of
 # its iteration, so a visit filed on one carries both writes to a bead that is
 # gone before anyone claims it.
 reset
@@ -555,7 +555,7 @@ echo "# two findings share the bucket but keep their own escalation_key"
 # The subject no longer tells them apart, so the key is the only thing that
 # does. The converse fold check resolves a visit's topic as stall_root, else
 # the key, else the subject, and a redirected visit names no stall_root
-# (agents/converse/prompt.template.md). A visit that reached the bucket
+# (agents/_converse/prompt.template.md). A visit that reached the bucket
 # without its own key would fold into its sibling and close unread.
 reset "[$STANDING]"
 "$SUT" --subject lx-wisp-aaaaa --key doctor-dolt-noms-size --message m >/dev/null 2>&1

@@ -146,7 +146,7 @@ take `overlays/gh-origin-guard`:
 |---|---|
 | `overlays/work-context` | polecat |
 | `overlays/cycle-recycle` | refinery, witness, deacon |
-| `overlays/gh-origin-guard` | converse, mechanik, proactive |
+| `overlays/gh-origin-guard` | converse-opus, converse-fable, mechanik, proactive, demo |
 
 Every registration runs the same command, which resolves the script from
 `$GC_RIG_ROOT` and then from `$GC_CITY_PATH/rigs/gc-toolkit`. Both are set by

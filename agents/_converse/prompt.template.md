@@ -126,7 +126,7 @@ The loop, every visit:
 1. **Claim.** `assets/scripts/converse-claim.sh` is your only source of
    work. It wraps `gc hook --claim --json` and adds the one thing that
    command cannot express: a claim scoped to a continuation group. It puts
-   an out-of-group turn back in the pool, completes the close of a sitting
+   an out-of-group turn back unclaimed, completes the close of a sitting
    whose record is already done, and reports which of the four verdicts
    applies. Resolve it once, then let it decide:
 
@@ -157,7 +157,7 @@ The loop, every visit:
    `SUBJECT` its `continuation_group`; both are used by name below.
 
    **A claim outside your current group is not yours to work.** The
-   script puts an out-of-group turn BACK in the pool and tells you to
+   script puts an out-of-group turn BACK, unclaimed, and tells you to
    drain. `reason=unreleasable` means it could not: work the turn it
    hands you, say in your first message that the thread is switching
    subjects, and use `VISIT` as parsed rather than the bead it named.
@@ -317,25 +317,24 @@ Rules:
   hands the operator important information — a live decision, a routing
   answer, anything they may want to respond to — posts the hand-back and
   leaves the visit open, and that thread ends on a later turn instead.
-  `idle_timeout` is `0` on this role (`agents/converse/agent.toml`) so
-  that reading a thread cannot end it.
+  `idle_timeout` is `0` on every `converse-<model>` template, so that
+  reading a thread cannot end it.
   Closing the visit ends the sitting's work but does not drain the
   session: a manual converse session is exempt from the `no-wake-reason`
   clock that collects an ended pool session. The `converse-reap` order
   (`assets/scripts/converse-reap.sh`) closes the settled session on a
-  later pass, once its visit reads closed or gone, and frees the
-  `max_active_sessions` slot; it reaps only an UNATTACHED pane, so a
-  closed-visit sitting you are still attached to waits until it is no
-  longer attended. The per-model sittings run `wake_mode = "resume"`
-  (`agents/converse-opus/agent.toml`), so a health restart replays the
-  thread and the sitting continues; the durable demand and the step-1
-  re-claim guard cover the rare respawn that comes up without it. The
-  record never lives only in the thread, and the discipline is unchanged:
-  the sign-off has to land before you close, not after; stamp the takeaway
-  when the hold BEGINS (step 5); and append the outcome as soon as a
-  sitting settles anything (step 6). That is what the board reads and a
-  later reader inherits. Mechanism: `docs/gascity-human-engagement.md` →
-  "How a held sitting ends".
+  later pass, once its visit reads closed or gone; it reaps only an
+  UNATTACHED pane, so a closed-visit sitting you are still attached to
+  waits until it is no longer attended. The per-model sittings run
+  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a health
+  restart replays the thread and the sitting continues; the durable
+  demand and the step-1 re-claim guard cover the rare respawn that comes
+  up without it. The record never lives only in the thread, and the
+  discipline is unchanged: the sign-off has to land before you close, not after;
+  stamp the takeaway when the hold BEGINS (step 5); and append the outcome as
+  soon as a sitting settles anything (step 6). That is what the board reads
+  and a later reader inherits. Mechanism: `docs/gascity-human-engagement.md`
+  → "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is

@@ -117,7 +117,7 @@ writer = "formulas/mol-refinery-patrol.toml (no commits on branch; via lifecycle
 [[transition]]
 from = "unanchored"
 to = "held"
-writer = "agents/converse, sitting hold (via lifecycle.sh)"
+writer = "assets/scripts/converse-hold.sh, a converse sitting's hold (via lifecycle.sh)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -177,7 +177,7 @@ writer = "human"
 [[transition]]
 from = "held"
 to = "unanchored"
-writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
+writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.sh); or human"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by

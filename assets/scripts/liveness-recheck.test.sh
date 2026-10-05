@@ -43,7 +43,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-recheck.sh"
 SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
-PROMPT="$ROOT/agents/converse/prompt.template.md"
+PROMPT="$ROOT/agents/_converse/prompt.template.md"
 # The claim-time re-check lives in the converse prep skill (steps 3–4); it calls
 # the hook script, which reads the visit.recheck stamp as a path and runs it.
 PREP="$ROOT/skills/converse-prep/SKILL.md"

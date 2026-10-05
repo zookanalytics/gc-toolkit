@@ -33,7 +33,7 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
-PROMPT="$REPO/agents/converse/prompt.template.md"
+PROMPT="$REPO/agents/_converse/prompt.template.md"
 SWEEP="$REPO/assets/scripts/liveness-sweep.sh"
 FOLD_SUT="$REPO/assets/scripts/converse-fold.sh"
 CLAIMER="$REPO/assets/scripts/converse-claim.sh"

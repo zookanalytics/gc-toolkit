@@ -307,9 +307,11 @@ commit is the operator running `git rebase --skip` in the worktree first.
 
 `gc sling` stamps `gc.routed_to` and nothing else, whatever the target.
 For a **pool** that is the whole address — polecat, polecat-codex, dog,
-proactive, converse — because pool members run the routed tier of the
-work query, and the bead has to stay unassigned for their claim filter
-to offer it.
+proactive — because pool members run the routed tier of the work query,
+and the bead has to stay unassigned for their claim filter to offer it.
+A converse sitting is neither a pool nor a named agent: a visit parks on
+the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
+sitting when the operator draws it off the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
 witness, refinery, keeper. Their sessions skip the routed tier, so a

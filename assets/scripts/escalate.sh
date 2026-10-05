@@ -340,7 +340,7 @@ fi
 # A closed visit carries a VERDICT, and two of them say a human was not needed:
 # `moot` (the premise no longer holds) and `benign` (it holds but needs nobody).
 # The converse role stamps them on gc.outcome before it closes
-# (agents/converse/prompt.template.md). Nothing read them back, and the dedup
+# (agents/_converse/prompt.template.md). Nothing read them back, and the dedup
 # above only sees OPEN visits, so a detector whose condition outlives the
 # sitting re-filed the identical situation on its next cycle and spent another
 # one. This window is where that verdict is honored.
@@ -412,7 +412,7 @@ POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 # The subject has to outlive the visit. A converse sitting records what it
 # settled by appending to the subject, and stamps the takeaway on the item —
 # which is the subject whenever the visit names no stall_root
-# (agents/converse/prompt.template.md, step 7). A wisp is burned at the end of
+# (agents/_converse/prompt.template.md, step 7). A wisp is burned at the end of
 # the iteration that poured it, so on a wisp subject both writes address a bead
 # that no longer exists, and the sitting's own guard ("NO TAKEAWAY ON $ITEM")
 # cannot be satisfied at all.
@@ -437,7 +437,7 @@ POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 # The converse fold check reads exactly that: its visit-fold-check block
 # resolves a topic of stall_root, else the key under a `key:` prefix, else the
 # subject, and folds a sitting only into a sibling of the same topic
-# (agents/converse/prompt.template.md). A redirected visit names no stall_root,
+# (agents/_converse/prompt.template.md). A redirected visit names no stall_root,
 # so the key is the only discriminator it has; dropping it, or scoping it to
 # the bucket, would make every finding here look like one situation and fold
 # all but the lowest id away unread.
