@@ -265,8 +265,19 @@ case "$verb" in
     for kv in ${sets[@]+"${sets[@]}"}; do
       k="${kv%%=*}"; v="${kv#*=}"
       case ",$drops," in *",$k,"*) continue ;; esac
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
-        'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+      # bd stores a value that parses as a JSON number, true, false or null as
+      # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
+      # boolean. Every other value, a quoted JSON string included, is stored as
+      # its raw text. The number grammar is JSON's, which is stricter than jq's
+      # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
+      jq -c --arg id "$id" --arg k "$k" --arg v "$v" '
+        ($v | gsub("^[ \t\r\n]+|[ \t\r\n]+$"; "")) as $t
+        | (if ($t | test("^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$")) then ($t | tonumber)
+           elif $t == "true" then true
+           elif $t == "false" then false
+           elif $t == "null" then null
+           else $v end) as $stored
+        | map(if .id == $id then .metadata[$k] = $stored else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
     done
     for k in ${unsets[@]+"${unsets[@]}"}; do
       case ",$drops," in *",$k,"*) continue ;; esac

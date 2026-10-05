@@ -332,7 +332,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     (.issue_type // "") == "convoy"
     and ((((.title // "") | startswith("sling-"))
           or ((.title // "") | startswith("input convoy for"))
-          or ((.metadata["gc.synthetic"] // "") == "true")));
+          or (((.metadata["gc.synthetic"] // "") | tostring) == "true")));
   # The tracking bead of an order is a wisp: issue_type task, no metadata
   # until it closes, and no edges, so its id and its title are the only
   # durable structural signals it carries. Both are machine-minted and

@@ -75,5 +75,41 @@ hasnt " $(down_blockers tk-blk) " " tk-kd " "...not the reverse — the first op
 gc bd dep tk-blk --blocks tk-kd
 has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> lands the same orientation as the dep add form"
 
+# The gc bd update stub stores a --set-metadata value with real bd's typing. A
+# value that parses as a JSON number, true, false or null is stored typed, so
+# `k=1` reads back as the number 1, and a jq compare of it against the string
+# "1" is false. Every other value is stored as its raw text. A stub that stored
+# only strings would pass a script whose jq compares a stamp to a string
+# literal, and the real store would fail it, so the typing is pinned value by
+# value. Numbers are pinned by type alone: jq versions print a number literal
+# such as 1e3 differently.
+store '[{"id":"tk-md","status":"open","assignee":"","title":"m","notes":"","metadata":{}}]'
+stored_type() { jq -r --arg k "$1" '.[] | select(.id == "tk-md") | .metadata | if has($k) then (.[$k] | type) else "<absent>" end' "$STUB_STORE"; }
+stored_json() { jq -c --arg k "$1" '.[] | select(.id == "tk-md") | .metadata[$k]' "$STUB_STORE"; }
+gc bd update tk-md --set-metadata one=1 --set-metadata pr=1025 --set-metadata neg=-1 \
+  --set-metadata frac=1.5 --set-metadata exp=1e3 --set-metadata padded=" 1" \
+  --set-metadata yes=true --set-metadata no=false --set-metadata nul=null \
+  --set-metadata word=main --set-metadata lead0=0123 --set-metadata zeros=00 \
+  --set-metadata plus=+1 --set-metadata dot=.5 --set-metadata nan=NaN --set-metadata cap=True \
+  --set-metadata quoted='"x"' --set-metadata arr='[1]' --set-metadata obj='{}' --set-metadata empty= >/dev/null
+eq "$(stored_json one)" '1' "k=1 is stored as the number 1, not the string \"1\""
+for k in pr neg frac exp padded; do
+  eq "$(stored_type "$k")" "number" "a JSON number ($k) is stored as a number"
+done
+eq "$(stored_json yes)" 'true'  "k=true is stored as the boolean true"
+eq "$(stored_json no)"  'false' "k=false is stored as the boolean false"
+eq "$(stored_type nul)" "null"  "k=null is stored as JSON null, with the key present"
+eq "$(stored_json word)"   '"main"'  "a word is stored as a string"
+eq "$(stored_json lead0)"  '"0123"'  "a leading-zero number is not JSON, so it stays a string"
+eq "$(stored_json zeros)"  '"00"'    "00 stays a string"
+eq "$(stored_json plus)"   '"+1"'    "+1 stays a string"
+eq "$(stored_json dot)"    '".5"'    ".5 stays a string"
+eq "$(stored_json nan)"    '"NaN"'   "NaN stays a string"
+eq "$(stored_json cap)"    '"True"'  "True stays a string: only lowercase true and false are booleans"
+eq "$(stored_json quoted)" '"\"x\""' "a quoted JSON string keeps its quotes"
+eq "$(stored_json arr)"    '"[1]"'   "a JSON array is stored as its raw text"
+eq "$(stored_json obj)"    '"{}"'    "a JSON object is stored as its raw text"
+eq "$(stored_json empty)"  '""'      "an empty value is stored as the empty string"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
