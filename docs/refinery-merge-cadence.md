@@ -196,9 +196,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    or a change that landed first and deleted or rewrote code the branch edits.
    Whether a superseded branch still has work to do is the operator's call, so
    the arm files a `rework-base-supersession` visit on the anchor instead of a
-   child, and dispatches nothing while that visit is open. The guard holds only
-   behind an open visit, so a conflict it cannot classify or record still gets
-   the merge-in child
+   child, and dispatches nothing while that visit is open and routed to somebody.
+   An open visit whose route addresses nobody holds nothing, and on a
+   supersession `escalate.sh` repoints it rather than filing a second. The guard
+   holds only behind an open visit that asks somebody, so a conflict it cannot
+   classify or record still gets the merge-in child
    ([specs/tk-b7c72m/supersession-tells.md](../specs/tk-b7c72m/supersession-tells.md)).
    A failure here is not a merge hold — an anchor it could not observe is left
    exactly as the pass found it.

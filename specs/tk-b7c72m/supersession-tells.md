@@ -55,14 +55,21 @@ words it kept 100%. Prose with renamed headings, as in PR#480 (tk-z6yme4), keeps
 before the arm files or re-routes a child:
 
 1. **A decision is already open.** If a `rework-base-supersession` visit is open
-   on the anchor, it holds. The demand a converse sitting files while working
-   the visit sits on the visit, not the anchor, so the visit itself is the hold.
+   on the anchor and its route addresses somebody, it holds. The demand a
+   converse sitting files while working the visit sits on the visit, not the
+   anchor, so the visit itself is the hold. The route is judged with
+   `pool-route.sh --verdict`, the reading `escalate.sh` gives an open visit it
+   finds. A visit with no route, a route no live agent carries, or another rig's
+   pool has asked nobody, so it holds nothing and the guard goes on to classify.
+   On a supersession `escalate.sh` finds that visit and repoints it at the
+   board, or refuses and the arm proceeds.
 2. **Classify.** Drift, or a trial merge it cannot read, proceeds to the
    ordinary child.
 3. **File the decision.** On a supersession it files the visit through
    `escalate.sh` on the anchor and holds behind it. If the visit cannot be
-   filed, or no open visit stands behind it afterwards, it proceeds. A guard
-   that removed a dispatch with no record behind it would be a silent strand.
+   filed or repointed, or no open visit that asks somebody stands behind it
+   afterwards, it proceeds. A guard that removed a dispatch with no record
+   behind it would be a silent strand.
 
 The operator rules the visit one of three ways:
 

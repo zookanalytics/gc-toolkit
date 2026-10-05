@@ -11,9 +11,11 @@
 # copy, Go `init`, and a definition only test files share. An unresolvable ref
 # and unrelated histories are "could not tell". Covers hold over a stubbed store: a
 # supersession files one rework-base-supersession visit on the anchor and holds;
-# an open visit holds without classifying; drift proceeds; and every way the
-# record can fail to stand behind the hold proceeds, so the guard never withholds
-# a dispatch no person was asked about.
+# an open visit holds without classifying while its route addresses somebody, and
+# one with no route, a dead pool or another rig's pool holds nothing, so a
+# supersession repoints it rather than filing a second; drift proceeds; and every
+# way the record can fail to stand behind the hold proceeds, so the guard never
+# withholds a dispatch no person was asked about.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,12 +37,16 @@ GITW
 chmod +x "$BIN/git"
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/branch-supersession.sh"
+# The real pool-route.sh: hold reads an open visit's route with it, as escalate.sh
+# does, and it answers from the stubbed `gc agent list`.
+mk_sut_dir "$SD" "$HERE/branch-supersession.sh" "$HERE/pool-route.sh"
 SUT="$SD/branch-supersession.sh"
 # escalate.sh's contract, not just its call log: one visit per subject+key,
-# stamped so the caller can find it again. STUB_ESC_RC models a refusal;
-# STUB_ESC_NOFILE models the exit 0 that files nothing (a recent moot or benign
-# verdict on the situation answers it).
+# stamped and routed at the board so the caller can find it again. An open or
+# claimed visit it finds counts while pool-route.sh reads its route as addressing
+# somebody, and is repointed at the board when it does not. STUB_ESC_RC models a
+# refusal; STUB_ESC_NOFILE models the exit 0 that files nothing (a recent moot or
+# benign verdict on the situation answers it).
 cat > "$SD/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
@@ -57,16 +63,25 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$subj" ] && [ -n "$key" ] || exit 2
 printf '%s' "$msg" > "${STUB_ESC_MSG:?}"
-[ -n "${STUB_ESC_NOFILE:-}" ] && exit 0
-have=$(jq -r --arg s "$subj" --arg k "$key" '
-  [ .[] | select((.status // "open") != "closed")
+row=$(jq -r --arg s "$subj" --arg k "$key" '
+  [ .[] | select((.status // "open") == "open" or .status == "in_progress")
     | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
-    | select(((.metadata.escalation_key // "") | tostring) == $k) | .id ] | .[0] // empty' "${STUB_STORE:?}")
-[ -n "$have" ] && exit 0
+    | select(((.metadata.escalation_key // "") | tostring) == $k)
+    | [.id, ((.metadata["gc.routed_to"] // "") | tostring)] | @tsv ] | .[0] // empty' "${STUB_STORE:?}")
+if [ -n "$row" ]; then
+  case "$("$(dirname "$0")/pool-route.sh" --verdict "${row#*$'\t'}")" in
+    ok|unknown) exit 0 ;;
+    unbound-store) exit 1 ;;
+  esac
+  gc bd update "${row%%$'\t'*}" --set-metadata "gc.routed_to=human" >/dev/null
+  exit 0
+fi
+[ -n "${STUB_ESC_NOFILE:-}" ] && exit 0
 vid=$(gc bd create "visit: $subj — $key" -t task --json | jq -r '.id // empty')
 [ -n "$vid" ] || exit 1
 gc bd update "$vid" --set-metadata "escalation_key=$key" \
-  --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" >/dev/null
+  --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" \
+  --set-metadata "gc.routed_to=human" >/dev/null
 ESC
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log" STUB_ESC_MSG="$TMP/esc.msg" STUB_ESC_RC="" STUB_ESC_NOFILE=""
@@ -324,6 +339,11 @@ reset() { # <row-json>...
 }
 hold() { "$SUT" hold --anchor "$1" --branch polecat/tk-pin --target main --base "$2" --head "$3" "${@:4}" 2>&1; }
 visits() { jq -r --arg a "$1" '[ .[] | select((.metadata.escalation_key // "") == "rework-base-supersession") | select((.metadata["gc.continuation_group"] // "") == $a) | select((.status // "open") != "closed") ] | length' "$STUB_STORE"; }
+visit() { # <id> <anchor> [<route>]: an open supersession visit, routed only when a route is given
+  local route=""
+  [ -n "${3:-}" ] && route=$(printf ',"gc.routed_to":"%s"' "$3")
+  printf '{"id":"%s","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"%s","task_kind":"visit"%s}}' "$1" "$2" "$route"
+}
 
 echo "# hold: a supersession files the decision and holds behind it"
 reset "$(anchor A1)"
@@ -331,6 +351,8 @@ OUT=$(hold A1 "$SUP_BASE" "$SUP_HEAD"); rc=$?
 eq "$rc" "0" "a superseded branch holds the dispatch"
 has "$(cat "$STUB_ESC_LOG")" "--subject A1 --key rework-base-supersession" "the decision is filed on the anchor under the key polecats file by hand"
 eq "$(visits A1)" "1" "exactly one open decision visit stands behind the hold"
+eq "$(jq -r '[ .[] | select((.metadata["gc.continuation_group"] // "") == "A1") ][0].metadata["gc.routed_to"] // "<absent>"' "$STUB_STORE")" "human" \
+  "routed at the board, where escalate.sh parks a decision for the operator"
 has "$OUT" "filed decision" "and the arm's log says the decision was filed"
 MSG=$(cat "$STUB_ESC_MSG")
 FIRST=$(printf '%s\n' "$MSG" | head -n 1)
@@ -352,11 +374,71 @@ has "$MSG" "PR#7 may be moot" "a PR anchor is named by its PR"
 has "$MSG" "pr-dispose.sh closes the PR and disposes of the anchor" "and gets the PR disposal verb"
 
 echo "# hold: an open decision holds without asking again"
-reset "$(anchor A3)" '{"id":"V3","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"A3","task_kind":"visit"}}'
+reset "$(anchor A3)" "$(visit V3 A3 human)"
 OUT=$(hold A3 "$ORD_BASE" "$ORD_HEAD"); rc=$?
 eq "$rc" "0" "an open decision on the anchor holds, even where the branch now reads as drift"
 eq "$(cat "$STUB_ESC_LOG")" "" "and nothing is escalated a second time"
 has "$OUT" "V3 is still open" "the arm's log names the pending decision"
+reset "$(anchor A3c)" "$(visit V3c A3c human | jq -c '.status = "in_progress" | .assignee = "s-sitting"')"
+hold A3c "$ORD_BASE" "$ORD_HEAD" >/dev/null; rc=$?
+eq "$rc" "0" "so does one a sitting has claimed"
+
+echo "# hold: an open decision holds only while its route addresses somebody"
+reset "$(anchor R1)" "$(visit VR1 R1)"
+OUT=$(hold R1 "$SUP_BASE" "$SUP_HEAD"); rc=$?
+has "$OUT" "VR1 is open, but its route '' addresses nobody, so it holds nothing" "an open decision with no route is not counted as asking anybody"
+has "$(cat "$STUB_ESC_LOG")" "--subject R1 --key rework-base-supersession" "the decision goes back through escalate.sh"
+eq "$(meta VR1 gc.routed_to)" "human" "which repoints the open visit at the board"
+eq "$(visits R1)" "1" "rather than filing a second"
+eq "$rc" "0" "and the hold stands behind the repointed visit"
+has "$OUT" "repointed decision VR1" "the arm's log names the repair"
+
+reset "$(anchor R2)" "$(visit VR2 R2)"
+OUT=$(hold R2 "$ORD_BASE" "$ORD_HEAD"); rc=$?
+eq "$rc" "1" "an open decision that asks nobody does not hold a branch that now reads as drift"
+eq "$(cat "$STUB_ESC_LOG")" "" "and nothing is escalated"
+
+printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}\n' > "$TMP/agents.json"
+export GC_RIG=gc-toolkit STUB_AGENTS="$TMP/agents.json"
+reset "$(anchor R3)" "$(visit VR3 R3 gc-toolkit/gc-toolkit.retired)"
+OUT=$(hold R3 "$SUP_BASE" "$SUP_HEAD"); rc=$?
+eq "$rc" "0" "a decision routed to a pool no live agent carries holds only once escalate.sh repoints it"
+eq "$(meta VR3 gc.routed_to)" "human" "it is repointed at the board"
+eq "$(visits R3)" "1" "with no second visit"
+
+reset "$(anchor R4)" "$(visit VR4 R4 other-rig/other-rig.polecat)"
+OUT=$(hold R4 "$ORD_BASE" "$ORD_HEAD"); rc=$?
+eq "$rc" "1" "a decision routed to another rig's pool, which never reads this store, holds nothing"
+has "$OUT" "VR4 is open, but its route 'other-rig/other-rig.polecat' addresses nobody" "and the arm's log names the route"
+
+reset "$(anchor R5)" "$(visit VR5 R5 gc-toolkit/gc-toolkit.polecat)"
+OUT=$(hold R5 "$ORD_BASE" "$ORD_HEAD"); rc=$?
+eq "$rc" "0" "a decision routed to a live pool holds"
+eq "$(cat "$STUB_ESC_LOG")" "" "without asking again"
+
+export STUB_AGENTS="$TMP/no-such-agents.json"
+reset "$(anchor R6)" "$(visit VR6 R6 gc-toolkit/gc-toolkit.retired)"
+hold R6 "$ORD_BASE" "$ORD_HEAD" >/dev/null; rc=$?
+eq "$rc" "0" "an agent set that cannot be read counts the visit, as escalate.sh does, rather than reading an outage as nobody"
+
+unset GC_RIG STUB_AGENTS
+reset "$(anchor R7)" "$(visit VR7 R7 gc-toolkit/gc-toolkit.polecat)"
+hold R7 "$ORD_BASE" "$ORD_HEAD" >/dev/null; rc=$?
+eq "$rc" "1" "a rig-qualified route with no GC_RIG to check it against holds nothing"
+
+reset "$(anchor R8)" "$(visit VR8 R8)"
+export STUB_ESC_RC=1
+OUT=$(hold R8 "$SUP_BASE" "$SUP_HEAD"); rc=$?
+eq "$rc" "1" "an open decision escalate.sh can neither count nor repoint proceeds rather than holding behind it"
+has "$OUT" "could not be filed or repointed" "and says so"
+
+# A deferred visit is live to this guard but outside escalate.sh's open-visit
+# dedup, so escalate.sh can answer without touching it.
+reset "$(anchor R9)" "$(visit VR9 R9 | jq -c '.status = "deferred"')"
+export STUB_ESC_NOFILE=1
+OUT=$(hold R9 "$SUP_BASE" "$SUP_HEAD"); rc=$?
+eq "$rc" "1" "after escalate.sh answers, a live visit that still asks nobody does not hold"
+has "$OUT" "no supersession visit is open and routed to somebody" "and the arm's log says no visit stands behind the hold"
 
 reset "$(anchor A4)" '{"id":"V4","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"some-other-key","gc.continuation_group":"A4","task_kind":"visit"}}' \
   '{"id":"V5","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"OTHER","task_kind":"visit"}}' \

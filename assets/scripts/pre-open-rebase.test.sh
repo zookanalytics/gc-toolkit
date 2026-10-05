@@ -81,11 +81,12 @@ git clone -q "$SRC" "$WORK"
 C1_HEAD=$(git -C "$SRC" rev-parse polecat/tk-c1)
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh"
+mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh" "$HERE/pool-route.sh"
 SUT="$SD/pre-open-rebase.sh"
 POOL="loomington/gc-toolkit.polecat"
 # escalate.sh's contract for the supersession guard: one visit per subject+key,
-# stamped so the guard can find the visit it filed. STUB_ESC_RC models a refusal.
+# stamped and routed at the board so the guard can find the visit it filed and
+# count it as asking somebody. STUB_ESC_RC models a refusal.
 cat > "$SD/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
@@ -103,7 +104,8 @@ done
 vid=$(gc bd create "visit: $subj — $key" -t task --json | jq -r '.id // empty')
 [ -n "$vid" ] || exit 1
 gc bd update "$vid" --set-metadata "escalation_key=$key" \
-  --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" >/dev/null
+  --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" \
+  --set-metadata "gc.routed_to=human" >/dev/null
 ESC
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log" STUB_ESC_RC=""; : > "$STUB_ESC_LOG"
@@ -166,7 +168,7 @@ has "$OUT" "held=1" "and the anchor is counted held, not skipped or reworked"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is not woken"
 
 echo "# a pending supersession decision holds without asking again"
-reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"AN","task_kind":"visit"}}'
+reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"AN","task_kind":"visit","gc.routed_to":"human"}}'
 OUT=$(run --fix-pool "$POOL")
 eq "$(kidcount)" "0" "an open decision on the anchor files no child"
 eq "$(cat "$STUB_ESC_LOG")" "" "and no second escalation"

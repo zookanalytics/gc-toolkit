@@ -42,17 +42,21 @@
 #                               --base <commit> --head <commit> [--pr <n>]
 #     The conflict arm's question: should the merge-in dispatch wait for a
 #     person's decision? It waits while a rework-base-supersession visit is open
-#     on the anchor. Otherwise it classifies <head> against <base>, and on a
-#     supersession files that visit through escalate.sh, with the evidence and
-#     the ways out, then waits behind it. A visit a sitting closes `benign`
-#     (the overlap was incidental) lets the next pass dispatch the ordinary
-#     child, through escalate.sh's verdict window.
-#     Exit: 0 hold: a supersession decision is open on the anchor, so dispatch
-#             nothing.
+#     on the anchor and its route addresses somebody, judged the way escalate.sh
+#     judges the route of an open visit it finds. Otherwise it classifies <head>
+#     against <base>, and on a supersession files that visit through
+#     escalate.sh, with the evidence and the ways out, then waits behind it. An
+#     open visit whose route addresses nobody is repointed there rather than
+#     filed again. A visit a sitting closes `benign` (the overlap was
+#     incidental) lets the next pass dispatch the ordinary child, through
+#     escalate.sh's verdict window.
+#     Exit: 0 hold: a supersession decision is open on the anchor and routed to
+#             somebody, so dispatch nothing.
 #           1 proceed: dispatch the ordinary merge-in child. This is also the
 #             answer when the tells are not met, the trial merge cannot be read,
-#             or no open visit stands behind the hold, so this guard only ever
-#             removes a dispatch a person has been asked about.
+#             or no open visit that addresses somebody stands behind the hold, so
+#             this guard only ever removes a dispatch a person has been asked
+#             about.
 #           2 usage.
 #
 # Callers: pre-open-rebase.sh and pr-facts.sh's CONFLICTING arm, after their own
@@ -63,6 +67,8 @@ PROG="branch-supersession"
 
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
+# The route reading escalate.sh applies to an open visit it finds.
+POOL_ROUTE="$SCRIPTS_DIR/pool-route.sh"
 # The situation key a polecat files by hand when it finds this mid-rework, so
 # both routes land the same question on one key.
 KEY="rework-base-supersession"
@@ -98,7 +104,8 @@ usage: branch-supersession.sh classify <base> <branch>
             evidence. Exit 0 superseded, 1 not superseded, 2 could not tell.
   hold      decide whether a conflict arm's merge-in dispatch waits for a
             person. Exit 0 hold (a rework-base-supersession visit is open on
-            the anchor), 1 proceed with the ordinary child, 2 usage.
+            the anchor and routed to somebody), 1 proceed with the ordinary
+            child, 2 usage.
 U
 }
 
@@ -378,17 +385,34 @@ No merge-in rework is sent for this branch while this visit is open. (anchor $an
 BRIEF
 }
 
-open_visit() { # <anchor>; prints the open supersession visit's id; non-zero when the store would not read
+open_visits() { # <anchor>; prints "<id>\t<route>" per open supersession visit; non-zero when the store would not read
   local rows
   rows=$(bd_list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$KEY" \
            --metadata-field "gc.continuation_group=$1") || return 1
   printf '%s' "$rows" | jq -r --arg a "$1" --arg k "$KEY" '
-    [ .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a)
-          | select(((.metadata.escalation_key // "") | tostring) == $k) | .id ] | .[0] // empty' 2>/dev/null
+    .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a)
+        | select(((.metadata.escalation_key // "") | tostring) == $k)
+        | [.id, ((.metadata["gc.routed_to"] // "") | tostring)] | @tsv' 2>/dev/null
+}
+
+# The first of open_visits' rows whose route addresses somebody, by the verdict
+# escalate.sh reads for an open visit it finds: `ok`, or `unknown` when the live
+# agent set could not be read. No route, a pool no live agent carries, another
+# rig's pool, and a rig-qualified route with no GC_RIG to check it against
+# address nobody. Prints the visit id, or nothing.
+asking_visit() { # <rows>
+  local vid route
+  while IFS=$'\t' read -r vid route; do
+    [ -n "$vid" ] || continue
+    case "$("$POOL_ROUTE" --verdict "$route" 2>/dev/null)" in
+      ok|unknown) printf '%s\n' "$vid"; return 0 ;;
+    esac
+  done <<< "$1"
+  return 0
 }
 
 hold() {
-  local anchor="" branch="" target="" base="" head="" pr="" label vid evidence crc title msg
+  local anchor="" branch="" target="" base="" head="" pr="" label rows prior vid route evidence crc title msg
   while [ $# -gt 0 ]; do
     case "$1" in
       --anchor) anchor="${2:-}"; shift 2 || { usage; return 2; } ;;
@@ -409,12 +433,21 @@ hold() {
   # looks like now: the person is ruling on this branch, and a merge-in child
   # performs one of the answers before they give it. The demand a sitting files
   # while working the visit sits on the visit, not the anchor, so the open visit
-  # is what holds here. An unreadable store answers nothing and falls through.
-  vid=$(open_visit "$anchor") || vid=""
+  # is what holds here. It holds only while its route addresses somebody. A visit
+  # routed nowhere has asked nobody, so the branch is classified as though no
+  # visit were open. On a supersession escalate.sh finds that visit and repoints
+  # it, or refuses and the arm proceeds. On drift the arm proceeds. An unreadable
+  # store answers nothing and falls through.
+  rows=$(open_visits "$anchor") || rows=""
+  vid=$(asking_visit "$rows")
   if [ -n "$vid" ]; then
     echo "$PROG: $anchor — $label conflicts with '$target'; supersession decision $vid is still open, no rework dispatched"
     return 0
   fi
+  while IFS=$'\t' read -r vid route; do
+    [ -n "$vid" ] && echo "$PROG: $anchor — supersession decision $vid is open, but its route '$route' addresses nobody, so it holds nothing" >&2
+  done <<< "$rows"
+  prior="$rows"
 
   evidence=$(classify "$base" "$head"); crc=$?
   case "$crc" in
@@ -427,20 +460,27 @@ hold() {
   title=$(bd_json show "$anchor" | jq -r '.[0].title // empty' 2>/dev/null)
   msg=$(brief "$label" "$branch" "$target" "$anchor" "$title" "$head" "$base" "$pr" "$evidence")
   if ! "$ESCALATE" --subject "$anchor" --key "$KEY" --message "$msg" >/dev/null 2>&1; then
-    echo "$PROG: WARN $anchor — $label looks superseded, but the decision visit could not be filed; dispatching the ordinary merge-in child rather than holding with no record" >&2
+    echo "$PROG: WARN $anchor — $label looks superseded, but the decision visit could not be filed or repointed at somebody; dispatching the ordinary merge-in child rather than holding with no record" >&2
     return 1
   fi
   # escalate.sh wrote to the store, so the pass's cached reads are stale.
   bd_cache_clear
-  # The hold stands only behind an open visit. escalate.sh also exits 0 without
-  # filing when a sitting recently closed this situation moot or benign, and that
-  # ruling is the release.
-  vid=$(open_visit "$anchor") || vid=""
+  # The hold stands only behind an open visit that addresses somebody. escalate.sh
+  # also exits 0 without filing when a sitting recently closed this situation moot
+  # or benign, and that ruling is the release.
+  rows=$(open_visits "$anchor") || rows=""
+  vid=$(asking_visit "$rows")
   if [ -z "$vid" ]; then
-    echo "$PROG: $anchor — $label looks superseded, but no supersession visit is open (a recent moot or benign ruling answers it); dispatching the ordinary merge-in child"
+    echo "$PROG: $anchor — $label looks superseded, but no supersession visit is open and routed to somebody (a recent moot or benign ruling answers it); dispatching the ordinary merge-in child"
     return 1
   fi
-  echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; filed decision $vid, no rework dispatched"
+  # A visit that was open before escalate.sh ran, and addresses somebody only
+  # now, is one it repointed.
+  if grep -qxF -- "$vid" < <(cut -f1 <<< "$prior"); then
+    echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; repointed decision $vid at somebody, no rework dispatched"
+  else
+    echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; filed decision $vid, no rework dispatched"
+  fi
   return 0
 }
 
