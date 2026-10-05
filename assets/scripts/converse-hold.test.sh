@@ -44,7 +44,7 @@ bash -n "$SUT" && ok "converse-hold.sh: valid bash" \
     || bad "converse-hold.sh: valid bash" "bash -n failed"
 
 # A stub gc serving the two reads/one write the script makes: `bd show` returns
-# the visit with its stall_root and whatever the stamp has persisted; `bd update`
+# the visit with whatever the stamp has persisted; `bd update`
 # persists the stamped id unless STAMP_PERSIST=0, overridable by STAMP_VALUE for
 # the landed-wrong case, and exits STAMP_RC. Anything else exits 2 so a script
 # that grows a third call fails here rather than reaching the live store.
@@ -54,9 +54,8 @@ cat >"$BIN/gc" <<'STUB'
 case "${2:-}" in
     show)
         hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
-        jq -nc --arg sr "${STUB_STALL-item-x}" --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
+        jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
             '[{id:"v-x", metadata:(({"task_kind":"visit"}
-                + (if $sr == "" then {} else {"stall_root":$sr} end)
                 + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
                 + (if $tp == "" then {} else {"escalation_key":$tp} end)))}]' ;;
     update)
@@ -134,7 +133,7 @@ run() {
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
-        VISIT=v-x SUBJECT=sub "$@" bash "$SUT" "need X" 2>&1)"
+        VISIT=v-x SUBJECT=item-x "$@" bash "$SUT" "need X" 2>&1)"
     RC=$?
 }
 # Like run, but passes the --hold-merge opt-in flag to the script.
@@ -143,7 +142,7 @@ run_hold_merge() {
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
-        VISIT=v-x SUBJECT=sub "$@" bash "$SUT" --hold-merge "need X" 2>&1)"
+        VISIT=v-x SUBJECT=item-x "$@" bash "$SUT" --hold-merge "need X" 2>&1)"
     RC=$?
 }
 calls() { cat "$HLOG" 2>/dev/null; }
@@ -157,11 +156,10 @@ has "the demand is filed on the item with the bare need text" "helm[RIG] demand 
 is "the stamp persisted the demand id on the visit" "$(cat "$PERSIST" 2>/dev/null)" "d-x"
 has "an unanchored item is transitioned to held, routed to a person" "lc transition item-x --to held --route human" "$(calls)"
 
-echo "── the item is the visit's stall_root, and falls back to the subject ──"
-run STUB_STALL=item-y
-has "a named stall_root is the item the hold writes to" "takeaway item-y holding" "$(calls)"
-run STUB_STALL=
-has "an absent stall_root falls back to the subject" "takeaway sub holding" "$(calls)"
+echo "── the item is the subject ──"
+run SUBJECT=item-y
+has "the hold writes to the subject it is handed" "takeaway item-y holding" "$(calls)"
+hasnt "…and to no other bead" "takeaway item-x" "$(calls)"
 
 echo "── the demand gate fails closed unless a demand id lands ──"
 run STUB_DEMAND_RC=4

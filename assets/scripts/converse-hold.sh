@@ -24,9 +24,9 @@
 # demand on the anchor — the blocks edge the merge sweep already honors; by
 # default it does not.
 #
-# The item is the visit's stall_root, else the subject; the writers (gc-helm.sh,
-# lifecycle.sh) are SEARCHED for on the candidate roots, never assumed, because
-# $GC_RIG_ROOT is the rig that imported this agent and may hold no assets/.
+# The item is the subject; the writers (gc-helm.sh, lifecycle.sh) are SEARCHED
+# for on the candidate roots, never assumed, because $GC_RIG_ROOT is the rig
+# that imported this agent and may hold no assets/.
 #
 # Inputs:
 #   $1           the one decision or input needed (≤140 chars); the takeaway
@@ -36,7 +36,7 @@
 #                whose single demand already gates it. Fails closed like the
 #                conversation demand — if the merge hold does not land, exit 1.
 #   VISIT        the visit bead reaching its hold (environment)
-#   SUBJECT      its continuation group, the item fallback (environment)
+#   SUBJECT      its continuation group, which is the item (environment)
 # Exit: 0 the hold is real and stamped — post the framing; 1 a gate failed —
 # do NOT post the framing, raise the failure in the thread; 2 usage.
 set -u
@@ -70,8 +70,7 @@ command -v jq >/dev/null 2>&1 || { echo "converse-hold: jq is required" >&2; exi
 command -v gc >/dev/null 2>&1 || { echo "converse-hold: gc is required" >&2; exit 2; }
 
 V=$(gc bd show "$VISIT" --json | scrub)
-ITEM=$(printf '%s' "$V" | jq -r '.[0].metadata.stall_root // ""')
-ITEM="${ITEM:-$SUBJECT}"
+ITEM="$SUBJECT"
 # The demand's topic scopes it to THIS sitting. Under a standing scope the item
 # is a shared bucket, and two concurrent sittings on it each resolve $ITEM to
 # that bucket; without a topic the second sitting's demand on the item (the

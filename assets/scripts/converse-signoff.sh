@@ -82,8 +82,7 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
 V=$(gc bd show "$VISIT" --json | scrub)
-ITEM=$(printf '%s' "$V" | jq -r '.[0].metadata.stall_root // ""')
-ITEM="${ITEM:-$SUBJECT}"
+ITEM="$SUBJECT"
 # The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
 # on a shared standing-scope bucket (same item, distinct escalation_key) keeps its
 # own demand: this sign-off neither resolves it nor overwrites its operator

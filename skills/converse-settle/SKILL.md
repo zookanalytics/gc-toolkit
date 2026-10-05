@@ -16,8 +16,7 @@ Append the sitting's outcome to the subject:
 `gc bd update $SUBJECT --append-notes "<decision, rationale, what
 changed>"`. If the notes have grown past a quick read, refresh a
 `## Current state` block at the top: current position, decisions in
-force, open questions. The notes stay on the SUBJECT even when the
-item is another bead, so name the item in what you append.
+force, open questions.
 
 ## 7. Sign off, then close the visit — only when nothing important is still pending
 

@@ -44,17 +44,16 @@ Definitions:
   at claim time (step 2). A `tracks` edge carries its subject, never
   `parent-child`, which would transmit the subject's blocked state to the
   visit and make it unclaimable (`formulas/mol-visit.toml`).
-- **Item** — the BEAD this visit is about, which is not always the
-  subject: a visit that names its own target carries it as `stall_root`,
-  and with no target named the item is the subject. A standing scope
-  (`task_kind=triage-subject`) carries one visit per distinct item, so
-  its group is a bucket. Step 5 stamps the takeaway and files the
-  conversation demand on the gated bead (the visit for a PR anchor, the item
-  otherwise), never on that bucket.
+- **Item** — the bead step 5 and step 7 write to, which is the subject.
+  A standing scope (`task_kind=triage-subject`) carries one visit per
+  distinct situation, so its group is a bucket that sibling sittings
+  share, and each demand a sitting files there carries its visit's
+  `escalation_key`. Step 5 stamps the takeaway and files the
+  conversation demand on the gated bead: the visit for a PR anchor, the
+  item otherwise.
 - **Topic** — what makes two visits the same sitting, which is not always
-  a bead: `stall_root` when the visit names a target, `escalation_key`
-  when `escalate.sh` filed it for one situation, the subject otherwise.
-  The fold check keys on `$TOPIC`.
+  a bead: `escalation_key` when `escalate.sh` filed the visit for one
+  situation, the subject otherwise. The fold check keys on `$TOPIC`.
 - **Demand** — what a person owes, as a native human gate
   (`issue_type=gate`, `await_type=human`): a ruling files unassigned, a task
   only a person can perform is assigned to them, and the assignment is what

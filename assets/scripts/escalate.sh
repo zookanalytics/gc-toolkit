@@ -410,12 +410,11 @@ fi
 POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 
 # The subject has to outlive the visit. A converse sitting records what it
-# settled by appending to the subject, and stamps the takeaway on the item —
-# which is the subject whenever the visit names no stall_root
-# (agents/converse/prompt.template.md, step 7). A wisp is burned at the end of
-# the iteration that poured it, so on a wisp subject both writes address a bead
-# that no longer exists, and the sitting's own guard ("NO TAKEAWAY ON $ITEM")
-# cannot be satisfied at all.
+# settled by appending to the subject and stamps its closing takeaway there
+# (converse-signoff.sh, step 7 of agents/converse/prompt.template.md). A wisp
+# is burned at the end of the iteration that poured it, so on a wisp subject
+# both writes address a bead that no longer exists, and the sitting's own guard
+# ("NO TAKEAWAY ON $ITEM") cannot be satisfied at all.
 #
 # So an ephemeral subject is redirected rather than filed on: the visit hangs
 # on this store's standing triage subject, and the wisp survives as
@@ -434,13 +433,12 @@ POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 #
 # A shared subject makes the group a bucket rather than a topic, so what keeps
 # two findings in it apart is the escalation_key stamped on each visit below.
-# The converse fold check reads exactly that: its visit-fold-check block
-# resolves a topic of stall_root, else the key under a `key:` prefix, else the
-# subject, and folds a sitting only into a sibling of the same topic
-# (agents/converse/prompt.template.md). A redirected visit names no stall_root,
-# so the key is the only discriminator it has; dropping it, or scoping it to
-# the bucket, would make every finding here look like one situation and fold
-# all but the lowest id away unread.
+# The converse fold check (converse-fold.sh) reads exactly that: it resolves a
+# visit's topic as the key under a `key:` prefix, else the subject, and folds a
+# sitting only into a sibling of the same topic. On a redirected visit the
+# subject is the shared bucket, so the key is the only discriminator it has;
+# dropping it, or scoping it to the bucket, would make every finding here look
+# like one situation and fold all but the lowest id away unread.
 TRIAGE_SCOPE="ephemeral-subject-findings"
 RAISED_BY=""
 if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
