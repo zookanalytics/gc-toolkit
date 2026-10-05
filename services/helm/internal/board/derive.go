@@ -2249,6 +2249,16 @@ const clusterThreshold = 3
 // because dropping it would erase the only trace of the attention; its needs is
 // rewritten from its own title so the kept row states the ask instead of the
 // empty "routed to you — no question recorded".
+//
+// A CLOSED wrapper never moves its ask. Its conversation has ended, so folding
+// the ask would mark the subject owed on the strength of an ask nobody is making
+// any more. Its row is dropped whenever its subject has a row, live or DONE, and
+// whether or not that subject is itself a wrapper: the subject's row either
+// survives the fold or is dropped in favour of a row that does, so the attention
+// stays on the board. Closed wrappers that name each other in a loop keep their
+// rows, since no row outside the loop stands for them. With no subject row the
+// closed wrapper stays in the DONE band like any closed anchor, because it is the
+// only trace of the attention it carried.
 func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	for _, a := range anchors {
@@ -2269,6 +2279,27 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		}
 		return false
 	}
+	// closedLoop reports whether walking from a closed wrapper to its subject, and
+	// on through every subject that is a closed wrapper too, comes back to where it
+	// started. Any other walk ends at a row the fold keeps, or at an open wrapper
+	// the fold keeps or folds onto a row it keeps. A loop is the one shape in which
+	// dropping every closed wrapper beside its subject would leave no row at all.
+	closedLoop := func(start string) bool {
+		seen := map[string]bool{}
+		for cur := start; !seen[cur]; {
+			seen[cur] = true
+			subj, _, _, _ := wrapperTarget(anchorByID[cur])
+			if subj == start {
+				return true
+			}
+			j, has := idx[subj]
+			if !has || !isWrapper(subj) || tiles[j].ClosedAt.IsZero() {
+				return false
+			}
+			cur = subj
+		}
+		return false
+	}
 	asks := make(map[string][]foldedAsk) // subject id -> the asks folded onto it
 	drop := make(map[string]bool)
 	for i := range tiles {
@@ -2280,13 +2311,16 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		if !ok {
 			continue
 		}
-		// A CLOSED wrapper is a finished conversation, not a live ask. Leaving it
-		// in the DONE band is right; folding it onto a subject would mark that
-		// subject owed on the strength of a visit that already ended.
+		j, has := idx[subj]
+		// A CLOSED wrapper is a finished conversation, not a live ask: nothing of
+		// it folds onto the subject, whose row already stands for it.
 		if !tiles[i].ClosedAt.IsZero() {
+			if has && !closedLoop(a.ID) {
+				drop[a.ID] = true
+			}
 			continue
 		}
-		if j, has := idx[subj]; has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
+		if has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
 			asks[subj] = append(asks[subj], foldedAsk{ask: ask, kind: kind, owedSince: owedSince(tiles[i])})
 			drop[a.ID] = true
 		} else if ask != "" {
