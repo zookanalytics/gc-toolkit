@@ -60,6 +60,33 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
 
+# The gc bd create stub lands a create the way real bd does: --metadata (a JSON
+# value, its types kept), --status and --notes ride the one insert, and a
+# --metadata that is not JSON is refused with nothing created. A stub that
+# dropped the payload made a writer whose stamps ride the create look like one
+# that stamps in a second write, so no suite could see a payload land at birth.
+store '[]'
+eq "$(gc bd create "born" -t task --metadata '{"task_kind":"review","n":1,"oid":"0123"}' --status=closed --notes "first note" --json | jq -r '.id')" \
+  "new-1" "create answers the id it minted"
+eq "$(bstatus new-1)" "closed" "--status rides the create"
+eq "$(meta new-1 task_kind)" "review" "--metadata rides the create"
+eq "$(jq -c '.[] | select(.id == "new-1") | .metadata.n' "$STUB_STORE")" '1' "…keeping its JSON types: a number stays a number"
+eq "$(jq -c '.[] | select(.id == "new-1") | .metadata.oid' "$STUB_STORE")" '"0123"' "…and a JSON string stays a string"
+eq "$(notes new-1)" "first note" "--notes rides the create"
+gc bd create "plain" -t task --json >/dev/null
+eq "$(bstatus new-2)" "open" "a create with no --status is open"
+eq "$(jq -c '.[] | select(.id == "new-2") | .metadata' "$STUB_STORE")" '{}' "…and carries no metadata"
+if gc bd create "bad" --metadata 'not json' --json >/dev/null 2>&1; then bad "an unparseable --metadata was accepted"; else ok "an unparseable --metadata is refused"; fi
+eq "$(jq 'length' "$STUB_STORE")" "2" "…and creates nothing"
+STUB_DROP_KEYS="new-3:status,oid" gc bd create "partial" --metadata '{"task_kind":"review","oid":"x"}' --status=closed --json >/dev/null
+eq "$(bstatus new-3)" "open" "STUB_DROP_KEYS naming the minted id drops the create's status"
+eq "$(meta new-3 oid)" "<absent>" "…and the named metadata keys"
+eq "$(meta new-3 task_kind)" "review" "…and lands the rest"
+if STUB_CREATE_FAIL=1 gc bd create "refused" --json >/dev/null 2>&1; then bad "STUB_CREATE_FAIL did not refuse the create"; else ok "STUB_CREATE_FAIL refuses the create"; fi
+eq "$(jq 'length' "$STUB_STORE")" "3" "…and creates nothing"
+if STUB_CREATE_GARBAGE=1 gc bd create "lost" --json | jq -e . >/dev/null 2>&1; then bad "STUB_CREATE_GARBAGE answered parseable JSON"; else ok "STUB_CREATE_GARBAGE answers a reply no JSON reader parses"; fi
+eq "$(jq -r '.[] | select(.id == "new-4") | .title' "$STUB_STORE")" "lost" "…while the create still lands"
+
 # The gc bd dep stub mirrors real bd's blocks orientation. Real `dep add
 # <blocked> <blocker> --type blocks` makes the SECOND operand the blocker — the
 # documented `dep add Y X` equals `dep X --blocks Y`. A stub that stored the add
