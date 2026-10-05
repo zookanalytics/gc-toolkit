@@ -906,12 +906,24 @@ eq "$(vccount)" "0" "and does not close the claimed visit"
 has "$out" "no open visit" "treating a claimed visit as none to retract"
 
 echo "# --retract refuses an ephemeral subject"
-# A wisp's visits hang on the standing triage bucket keyed by --key alone, so
-# there is no one subject-scoped visit to retract.
+# An ephemeral subject's visits hang on the standing triage bucket keyed by
+# --key alone, so there is no one subject-scoped visit to retract.
 reset '[]'
 out=$("$SUT" --retract --subject tk-wisp-abc --key k --message m 2>&1); rc=$?
 eq "$rc" 2 "retract on an ephemeral subject is a usage error"
 eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+
+# A subject proven to name no bead is ephemeral in the same way: its visit was
+# filed on the standing triage subject, so a subject-scoped lookup finds nothing
+# and would report "no open visit" while that visit stays open. It is refused
+# like a wisp, with and without a pinned GC_RIG.
+reset "[$STANDING,"'{"id":"vis-5","status":"open","assignee":"","title":"visit: sub-0 — empty identity","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"refinery-empty-identity","gc.continuation_group":"sub-0","escalation_raised_by":"refinery","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 2 "retract on a subject proven to name no bead is a usage error"
+eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+hasnt "$out" "no open visit" "rather than reporting nothing to retract while the triage visit stays open"
+out=$(env -u GC_RIG "$SUT" --retract --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 2 "and with GC_RIG unset it is the same usage error"
 
 echo "# --retract reports a close that did not land"
 # visit-close.sh guards its own close; a non-zero exit means the visit stays open

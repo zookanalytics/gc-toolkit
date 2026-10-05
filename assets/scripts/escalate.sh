@@ -234,9 +234,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # ambient GC_RIG, pinned to the subject's own rig by the board-route block above
 # exactly as the filing path pins it.
 if [ "$RETRACT" = 1 ]; then
-  case "$SUBJECT" in
-    *-wisp-*) warn "--retract needs a durable subject; an ephemeral wisp's visits hang on the standing triage bucket keyed by --key alone, so there is no one subject-scoped visit to retract"; exit 2 ;;
-  esac
+  if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
+    warn "--retract needs a durable subject; '$SUBJECT' is ephemeral (a patrol wisp, or a subject proven to name no bead), and its visits hang on the standing triage bucket keyed by --key alone, so there is no one subject-scoped visit to retract"
+    exit 2
+  fi
   VISIT_CLOSE="${GC_ESCALATE_VISIT_CLOSE_TOOL:-$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/visit-close.sh}"
   [ -x "$VISIT_CLOSE" ] || { warn "visit-close.sh not found or not executable ($VISIT_CLOSE); cannot retract the visit as moot"; exit 1; }
   # Read the open visits for this subject+key. An unreadable read is not proof no
