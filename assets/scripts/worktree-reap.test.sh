@@ -694,7 +694,9 @@ git -C "$REPO2" config user.name Test
 git -C "$REPO2" config commit.gpgsign false
 git -C "$REPO2" remote add origin https://github.com/zook/broken.git
 echo seed > "$REPO2/seed"; git -C "$REPO2" add seed; git -C "$REPO2" commit -qm seed
-# Rig mode: both stores come from `gc rig list`, named, so --rig is passed.
+# Rig-list mode: both repos come from `gc rig list`, and the reaper opens each
+# one's store by path, as `gc bd --db <path>/.beads`. The stub resolves that
+# path to the row's name, which selects the per-rig fixtures written below.
 jq -n --arg r1 "$REPO" --arg r2 "$REPO2" \
     '{rigs:[{name:"demo",path:$r1,hq:false},{name:"broken",path:$r2,hq:false}]}' > "$TMP/rigs.json"
 export STUB_RIGS="$TMP/rigs.json"
