@@ -8,8 +8,11 @@
 # zsh does split the output of an unquoted command substitution, as sh does,
 # so a list built from $(cmd) or backticks iterates per word in both shells
 # and is not a finding. Words inside a substitution are argument quoting,
-# which this rule does not judge. Quoted lists, literal/glob lists, and zsh's
-# explicit ${=VAR} split are fine too. Scope: fenced shell blocks in formula
+# which this rule does not judge. Quoted lists, literal/glob lists, zsh's
+# explicit ${=VAR} split, and a ${#VAR} length are fine too. Quoting is read
+# left to right, so a `;`, `#` or quote character inside a quoted span, an
+# escape or a substitution is data: it neither ends the list nor hides an
+# expansion after it. Scope: fenced shell blocks in formula
 # TOMLs, agent prompt templates, startup fragments, skills, and named
 # paste-to-run docs runbooks. Rendered (generated/, base-snapshots/) and
 # frozen (specs/) trees are excluded. Fix: capture to a file and
@@ -27,50 +30,64 @@ function is_shell_fence(l,   lang) {
     sub(/[[:space:]].*$/, "", lang)
     return (lang == "" || lang == "bash" || lang == "sh" || lang == "shell")
 }
-# Drop every command substitution span whole: backticks, $(cmd), and the
-# arithmetic $((expr)), nested parentheses included. zsh splits a
+# Blank every span of s that is not unquoted text at the top level of the
+# list: quoted strings ('…', $'…', "…"), backslash escapes, command, process
+# and arithmetic substitutions ($(…), <(…), >(…), $((…)), `…`, nested to any
+# depth), and two expansions that are not findings: zsh's explicit ${=VAR}
+# split, and a ${#VAR} length, which is one number. zsh splits a
 # substitution's output, so neither the span nor the words inside it decide
-# how the list splits. An unterminated $( runs to the end of the list.
-function strip_substitutions(s,   out, i, n, c, depth) {
-    gsub(/`[^`]*`/, " ", s)
-    out = ""; depth = 0; n = length(s)
-    for (i = 1; i <= n; i++) {
-        c = substr(s, i, 1)
-        if (depth == 0) {
-            if (c == "$" && substr(s, i + 1, 1) == "(") { depth = 1; i++; out = out " "; continue }
-            out = out c
-        } else if (c == "(") {
-            depth++
-        } else if (c == ")") {
-            depth--
+# how the list splits. Each blanked character becomes a dot, so a `;`, `#` or
+# `$` inside a span can neither end the list nor read as an unquoted
+# expansion, and a dot after a bare `$` names no parameter. An unterminated
+# span is blanked to the end of s. Context stack, top last: S single quote,
+# E $'…', D double quote, K backtick, Z ${=…} or ${#…}, C a substitution
+# opened by `(`, P a ( nested inside one. Each step reads one token of w
+# characters at i, and every token that is not unquoted top-level text is
+# blanked at the one append at the bottom of the loop.
+function mask_spans(s,   out, i, n, c, nx, k, top, st, w) {
+    out = ""; n = length(s); top = 0
+    for (i = 1; i <= n; i += w) {
+        c = substr(s, i, 1); nx = substr(s, i + 1, 1)
+        k = top ? st[top] : ""
+        w = 1
+        if (k == "S") { if (c == "'") top-- }
+        else if (k == "Z") { if (c == "}") top-- }
+        else if (c == "\\") w = 2
+        else if (k == "E") { if (c == "'") top-- }
+        else if (k == "K") { if (c == "`") top-- }
+        else if (k == "D") {
+            if (c == "\"") top--
+            else if (c == "`") st[++top] = "K"
+            else if (c == "$" && nx == "(") { st[++top] = "C"; w = 2 }
         }
+        # Unquoted from here on: at the top level, or inside a substitution.
+        else if (c == "'") st[++top] = "S"
+        else if (c == "\"") st[++top] = "D"
+        else if (c == "`") st[++top] = "K"
+        else if (c == "$" && nx == "'") { st[++top] = "E"; w = 2 }
+        else if ((c == "$" || c == "<" || c == ">") && nx == "(") { st[++top] = "C"; w = 2 }
+        else if (c == "$" && nx == "{" && (substr(s, i + 2, 1) == "=" || substr(s, i + 2, 1) == "#")) { st[++top] = "Z"; w = 3 }
+        else if (top) {
+            if (c == "(") st[++top] = "P"
+            else if (c == ")") top--
+        }
+        else { out = out c; continue }
+        out = out substr("...", 1, w)
     }
     return out
 }
-# True when s still holds a parameter expansion ($NAME, $1, ${...}) after
-# every QUOTED span and every command substitution is removed.
-function unquoted_expansion(s,   t) {
-    t = s
-    gsub(/\$\{=[^}]*\}/, " ", t)   # ${=VAR}: zsh's explicit split — sanctioned
-    gsub(/'[^']*'/, " ", t)
-    gsub(/"[^"]*"/, " ", t)
-    sub(/#.*$/, "", t)
-    t = strip_substitutions(t)
-    return (t ~ /\$([A-Za-z_0-9]|\{)/)
-}
-# The word list of the first for-statement in s: after `in`, up to the `;` or
-# `do` that ends it — without the truncation the BODY would be scanned too.
-# The text after the list is left in WL_REST, where a later for-statement on
-# the same line is found.
-function word_list(s,   rest, p) {
-    WL_REST = ""
-    rest = s
-    if (!match(rest, /(^|[;&|(){}]|\$\(|[[:space:]](do|then|else))[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]/)) return ""
-    rest = substr(rest, RSTART + RLENGTH)
-    p = index(rest, ";")
-    if (p > 0) { WL_REST = substr(rest, p); rest = substr(rest, 1, p - 1) }
-    if (match(rest, /[[:space:]]do([[:space:]]|$)/)) { WL_REST = substr(rest, RSTART) WL_REST; rest = substr(rest, 1, RSTART - 1) }
-    return rest
+# The word list of a for-statement whose `in` ends where s begins, as
+# mask_spans blanks it: s up to the first top-level `;`, or up to a `#` that
+# starts a word and so opens a comment. A newline ends a list too, and the
+# scan reads one line at a time. `do` does not end a list: the shells reserve
+# it only after the `;` or newline that does, so inside a list it is an
+# ordinary word, and the body that follows `do` is never part of the list.
+function list_of(s,   m, e) {
+    m = mask_spans(s)
+    e = length(m) + 1
+    if (match(m, /;/)) e = RSTART
+    if (match(m, /(^|[[:space:]])#/) && RSTART + RLENGTH - 1 < e) e = RSTART + RLENGTH - 1
+    return substr(m, 1, e - 1)
 }
 /^[[:space:]]*```/ {
     if (inb) { inb = 0 } else { inb = is_shell_fence($0) }
@@ -85,10 +102,12 @@ function word_list(s,   rest, p) {
     stripped = text
     sub(/^[[:space:]]+/, "", stripped)
     if (stripped ~ /^#/) next
+    # Every for-statement on the line is judged, one nested inside another's
+    # list included: each search resumes just after the previous `in`.
     remain = text
-    while ((list = word_list(remain)) != "") {
-        if (unquoted_expansion(list)) { print start ":" stripped; break }
-        remain = WL_REST
+    while (match(remain, /(^|[;&|(){}]|\$\(|[[:space:]](do|then|else))[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]/)) {
+        remain = substr(remain, RSTART + RLENGTH)
+        if (list_of(remain) ~ /\$([A-Za-z_0-9]|\{)/) { print start ":" stripped; break }
     }
 }
 AWKEOF
