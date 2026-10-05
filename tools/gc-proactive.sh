@@ -49,6 +49,12 @@ RC_ALREADY_REACTED=3
 # convoy/epic/step/molecule (machinery or work-in-flight), decision (already a
 # surfaced human choice) and spec (an output, not a raw input).
 PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
+# The one definition of the standing kinds, shared with the liveness sweep and
+# the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter
+# applies.
+# shellcheck source=../assets/scripts/standing-kinds.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/standing-kinds.sh" \
+    || { printf '%s: cannot source assets/scripts/standing-kinds.sh from the pack\n' "$PROG" >&2; exit 1; }
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
@@ -296,7 +302,9 @@ cmd_demand() {
 #     step/molecule/spec/decision by omission.
 #   - topology roots (gc.kind in workflow/scope/spec) — a workflow root is
 #     issue_type task, so the allowlist misses it; drop it explicitly.
-#   - task_kind=feedback-pattern — distiller-loop machinery, not an input.
+#   - a standing kind (is_standing_kind, assets/scripts/standing-kinds.sh) — a
+#     standing record is open and unrouted by design and never closes, so a
+#     reaction has no disposition to make on it.
 #   - task_kind=review — a dispatched signoff lane, work-in-flight.
 #   - durable work/lifecycle markers ($markers) — a review lane carries
 #     check_name/anchor_bead; an implementation anchor carries branch/
@@ -329,7 +337,7 @@ scan_precision_filter() {
     # than raw input. Kept as one list so the review-lane keys and the
     # implementation-anchor keys share a single source of truth.
     markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
-    jq --argjson types "$types_json" --argjson markers "$markers_json" '
+    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ"'
         map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
             and ((.metadata["gc.first_reaction"] // "") == "")
@@ -338,7 +346,7 @@ scan_precision_filter() {
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
             and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
-            and ((.metadata["task_kind"] // "") != "feedback-pattern")
+            and (is_standing_kind | not)
             and ((.metadata["task_kind"] // "") != "review")
             and ((.metadata["gc.takeaway"] // "") == "")
             and ((.metadata["gc.takeaway_by"] // "") == "")
