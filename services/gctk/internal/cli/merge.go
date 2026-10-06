@@ -833,11 +833,12 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // or "" when it can. merge.sh exports its own directory as GCTK_SCRIPTS_DIR
 // before it execs this binary; a binary run any other way has no directory to
 // resolve the helpers in, and a bare name would fall to a PATH lookup. A named
-// directory missing a helper is not refused here. merge.sh checks only the
-// check resolver up front (Merge does the same), and every other helper fails
-// where it is called: lane-state.sh and finalize-gate.sh hold that anchor,
-// escalate.sh, record-failure-cap.sh and render-seed-audit.sh are skipped, and
-// the pass still records a PR that has already merged.
+// directory missing a helper is not refused here, because merge.sh refuses the
+// pass only for a missing check resolver, which Merge checks next. Every other
+// helper is handled where it is called. A missing lane-state.sh or
+// finalize-gate.sh holds that anchor. A missing escalate.sh,
+// record-failure-cap.sh or render-seed-audit.sh is skipped. The pass still
+// records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
 		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
@@ -1231,10 +1232,10 @@ type reviewSummary struct {
 // reviewState reproduces the review-grouping jq: the latest state-bearing review
 // per non-self reviewer decides veto and approver. An approval stands across
 // later pushes until someone dismisses it, so the commit a review was given at
-// is not read: a later DISMISSED row is what retires an approval. ok=false is
-// an unreadable history: `jq -cs` slurps the whole stream or nothing, so one
-// row that will not decode makes all of it unreadable, because the veto or the
-// only approval may be that row or follow it.
+// is not read. ok=false is an unreadable history: `jq -cs` slurps the whole
+// stream or nothing, so one row that will not decode makes all of it
+// unreadable, because the veto or the only approval may be that row or follow
+// it.
 func reviewState(raw []byte, self string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
