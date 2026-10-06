@@ -45,7 +45,7 @@ chmod +x "$BIN/git"
 SRC="$TMP/src"; WORK="$TMP/work"
 git init -q -b main "$SRC"
 (
-  cd "$SRC"
+  cd "$SRC" || exit 1
   git config user.email t@t; git config user.name t
   printf 'l1\nl2\nl3\n' > f.txt
   git add f.txt; git commit -qm base
