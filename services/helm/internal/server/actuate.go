@@ -415,10 +415,10 @@ func dismissExtraArgs(req actuateRequest) ([]string, error) {
 	return args, nil
 }
 
-// handleActuateVerb serves accept, engage and dismiss: the shared write
-// middleware, then the flat [actuateResponse]. Unlike open, what these three
-// return that a surface acts on is the tool's own sentence, so there is no
-// per-verb parsing to do here.
+// handleActuateVerb serves accept and engage: the shared write middleware, then
+// the flat [actuateResponse]. Unlike open and dismiss, what these two return
+// that a surface acts on is the tool's own sentence, so there is no per-verb
+// parsing to do here.
 func (s *Server) handleActuateVerb(w http.ResponseWriter, r *http.Request, verb string) {
 	res, bead, ok := s.runActuation(w, r, verb)
 	if !ok {
@@ -452,23 +452,22 @@ type openResponse struct {
 	Message string `json:"message"`
 }
 
-// actuateResponse is the 200 body of the accept, engage and dismiss routes.
+// actuateResponse is the 200 body of the accept and engage routes.
 //
-// One flat shape for all three, because — unlike open's filed/existing/visit
-// distinction, which the operator must see to not double-file — what these three
+// One flat shape for both, because — unlike open's filed/existing/visit
+// distinction, which the operator must see to not double-file — what these two
 // return that a surface acts on is the tool's own sentence. It names the ids each
 // verb produces in prose (accept: the slung formula and the closed visit; engage:
-// the spawned session to attach to; dismiss: the closed visit), and passing that
-// through verbatim means these routes' messages IMPROVE when the script's do,
-// with no change here. Like [openResponse], it is DELIBERATELY NOT in
-// src/contract.ts; its mirror lives beside the fetch in web/src/actuate/client.ts.
+// the spawned session to attach to), and passing that through verbatim means
+// these routes' messages IMPROVE when the script's do, with no change here. Like
+// [openResponse], it is DELIBERATELY NOT in src/contract.ts; its mirror lives
+// beside the fetch in web/src/actuate/client.ts.
 type actuateResponse struct {
 	Bead string `json:"bead"`
 	Verb string `json:"verb"`
 	// Message is the script's stdout, trimmed: its success sentence, and for
-	// engage the follow-on "attach: gc session attach <id>" line. Empty is
-	// possible and honest (dismiss on a subject with no open visit says so on
-	// stdout, but a bare success is not invented into a claim).
+	// engage the follow-on "attach: gc session attach <id>" line. Empty stdout
+	// stays empty: a bare success is not invented into a claim.
 	Message string `json:"message"`
 }
 
