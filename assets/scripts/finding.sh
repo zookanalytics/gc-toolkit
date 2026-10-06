@@ -275,25 +275,41 @@ cmd_upsert() {
   fi
   # The title carries the human-readable objection; the locus and full message
   # live in the description. The key, not the title, is the dedup handle.
-  local title desc id
+  local title desc meta id
   title="finding[$lane]: $(printf '%s' "$msg" | tr '\n' ' ' | cut -c1-120)"
   desc=$(printf 'Locus: %s\n\n%s\n\nRaised by %s reviewing anchor %s.' "$locus" "$msg" "$source" "$anchor")
-  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
-  [ -n "$id" ] || { warn "could not create finding bead for key $key on $anchor"; exit 2; }
-  gc bd update "$id" \
-    --set-metadata task_kind=finding \
-    --set-metadata anchor_bead="$anchor" \
-    --set-metadata finding.lane="$lane" \
-    --set-metadata finding.key="$key" \
-    --set-metadata finding.disposition=unvalidated \
-    --set-metadata finding.source="$source" >/dev/null 2>&1 || { warn "could not stamp finding $id metadata"; exit 2; }
+  # The identity rides the create, one insert, so a finding bead exists fully
+  # stamped or not at all. A bead stamped in a second write is left with no
+  # metadata when that write fails: no finding reader selects it, and with no
+  # finding.key the next pass's dedup misses it and files a stamped twin.
+  meta=$(jq -nc --arg ab "$anchor" --arg ln "$lane" --arg k "$key" --arg src "$source" \
+    '{task_kind: "finding", anchor_bead: $ab, "finding.lane": $ln, "finding.key": $k,
+      "finding.disposition": "unvalidated", "finding.source": $src}' 2>/dev/null)
+  [ -n "$meta" ] || { warn "could not build finding metadata for key $key on $anchor; nothing filed"; exit 2; }
+  id=$(gc bd create "$title" -t task -d "$desc" --metadata "$meta" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
   # A new finding changes this anchor's findings list; drop the per-pass bd_list
   # cache so a same-pass re-read sees it (pr-facts files a finding for a human
   # comment, then re-reads to wire its fix unit). No-op outside a reconcile pass.
   bd_cache_clear
-  local got
-  got=$(bd_json show "$id" | jq -r '(.[0].metadata["finding.key"] // "") | tostring' 2>/dev/null)
-  [ "$got" = "$key" ] || { warn "finding $id key did not read back (got '$got', want '$key')"; exit 2; }
+  # A create whose reply did not parse may still have landed, and the key it was
+  # born with finds it.
+  [ -n "$id" ] || id=$(find_open_by_key "$anchor" "$key")
+  [ -n "$id" ] || { warn "could not create finding bead for key $key on $anchor"; exit 2; }
+  local row got
+  row=$(bd_json show "$id")
+  got=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.key"] // "") | tostring' 2>/dev/null)
+  if [ "$got" != "$key" ]; then
+    # A bead that reads back with no key is a create whose payload did not land.
+    # It is closed rather than left open where no finding reader sees it. A read
+    # that failed proves nothing about the bead, so it closes nothing.
+    if [ -z "$got" ] && printf '%s' "$row" | jq -e --arg id "$id" '.[0].id == $id' >/dev/null 2>&1; then
+      gc bd update "$id" --status=closed --set-metadata gc.outcome=abandoned \
+        --append-notes "Unmade by finding.sh upsert: the create landed without its metadata, so no finding reader could see this bead. The next upsert of key $key on $anchor files the finding afresh." >/dev/null 2>&1 \
+        || warn "could not close $id, which landed without its metadata"
+    fi
+    warn "finding $id key did not read back (got '$got', want '$key')"
+    exit 2
+  fi
   printf '%s\n' "$id"
 }
 
