@@ -17,6 +17,7 @@
 #   due, but the data plane is degraded  stand down for now     state=deferred
 #   in flight                            report progress        state=running
 #   finished                             collect it             state=complete
+#   finished more than an interval ago   discard its payload    state=stale
 #   finished badly, or bad payload       a FAILED scan          state=failed
 #   past its bound                       kill it, name the check state=exceeded
 #   cannot sweep at all                  say why, start nothing state=blocked
@@ -24,6 +25,13 @@
 # The bound is enforced here rather than by `timeout`, which is what lets it
 # exceed the harness ceiling. A sweep that never finishes still ends in a state
 # the patrol escalates, carrying its elapsed time and the check it died in.
+#
+# A payload describes the city at the second its sweep finished, and only a pass
+# collects it, so a patrol that stops for hours leaves a finished run waiting.
+# A run that finished more than one interval before the pass that reaches it is
+# reported stale, never complete or failed: its payload and its exit code are
+# not handed on, and because its window has elapsed, the next pass is due to
+# start a fresh sweep in its place.
 #
 # Starts are capped per interval. An ordinary sweep opens a window; a run that
 # ends failed or exceeded earns one retry on the next pass (up to
@@ -41,7 +49,9 @@ usage: doctor-sweep.sh [--status]
        (default)   advance the sweep: collect a finished run, or start one
                    once the interval has passed
        --status    report the current state; never starts, kills, or collects
-env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps (default 3600)
+env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps, and the age past
+                                     which a finished sweep is stale
+                                     (default 3600)
        GC_DOCTOR_SWEEP_MAX_ATTEMPTS  sweep starts per interval (default 2, min 1)
        GC_DOCTOR_SWEEP_BOUND         seconds a sweep may run (default 1800)
        GC_DOCTOR_SWEEP_STATE_DIR     where the run record lives
@@ -145,8 +155,10 @@ read_file() { [ -f "$1" ] && tr -d '\n' < "$1" || printf ''; }
 # retry after a failure. Advance mode only — --status must not write it. A
 # collection records `failed`, and only the complete path upgrades it to
 # `complete`, so every abnormal end (bad rc, invalid payload, a vanished
-# wrapper, an exceeded bound) is the failure that earns the retry.
-collect() { # <complete|failed>
+# wrapper, an exceeded bound) is the failure that earns the retry. A stale run
+# records `stale`, which arms no retry and needs none: its window has elapsed,
+# so the next start is the ordinary one.
+collect() { # <complete|failed|stale>
   [ "$MODE" = "status" ] && return 0
   : > "$RUN/collected"
   printf '%s' "$1" > "$OUTCOME"
@@ -260,7 +272,22 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
   # payload is whole.
   if [ -n "$RC" ]; then
     FINISHED="$(read_file "$RUN/finished_at")"
+    # Read into arithmetic below, so an unreadable stamp is dropped like the
+    # others rather than aborting the collect.
+    case "$FINISHED" in ''|*[!0-9]*) FINISHED="" ;; esac
     [ -n "$FINISHED" ] && ELAPSED=$(( FINISHED - STARTED_AT ))
+    # Aged from when the run finished. An unreadable finished_at falls back to
+    # started_at, which is never later, so the fallback can only overstate the
+    # age: it may discard a current payload, never report a stale one.
+    AGE=$(( NOW - ${FINISHED:-$STARTED_AT} ))
+
+    if [ "$AGE" -gt "$INTERVAL" ]; then
+      collect stale
+      report stale "finished_at=${FINISHED:-unknown}" "age=$AGE" \
+        "interval=$INTERVAL"
+      exit 0
+    fi
+
     collect failed
 
     if [ "$RC" != "0" ] && [ "$RC" != "1" ]; then
@@ -310,7 +337,8 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
     ABANDONED="$(printf '%s' "$COUNTS" | cut -f3)"
     ABANDONED_NAMES="$(printf '%s' "$COUNTS" | cut -f4)"
     collect complete
-    report complete "rc=$RC" "elapsed=$ELAPSED" "payload=$PAYLOAD" \
+    report complete "rc=$RC" "elapsed=$ELAPSED" \
+      "finished_at=${FINISHED:-unknown}" "age=$AGE" "payload=$PAYLOAD" \
       "checks=$CHECKS" "findings=$FINDINGS" \
       "abandoned=$ABANDONED" "abandoned_checks=$ABANDONED_NAMES"
     exit 0

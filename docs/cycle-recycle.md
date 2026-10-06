@@ -147,13 +147,12 @@ UI and does not invoke the skill from internal judgment.
 
 A generic `Stop` hook fires at a turn boundary that may be mid-wisp, and it
 cannot reliably reconstruct the patrol formula's pour vars
-(`binding_prefix`, `target_branch`, `rig_name`,
-`default_merge_strategy`) — those live in the agent's own prompt, not in
-the environment. So the hook does not attempt a pour. The inheriting
-session re-establishes its wisp through its own Tier-2/3 startup-adopt
-path, which pours or adopts with the correct vars. The trigger token count
-travels in the HANDOFF body so the new session has that context before it
-re-derives its wisp.
+(`binding_prefix`, `target_branch`, `rig_name`) — those live in the agent's
+own prompt, not in the environment. So the hook does not attempt a pour.
+The inheriting session re-establishes its wisp through its own Tier-2/3
+startup-adopt path, which pours or adopts with the correct vars. The trigger
+token count travels in the HANDOFF body so the new session has that context
+before it re-derives its wisp.
 
 Pour-before-burn cycle-recycle can therefore leave an open wisp behind;
 the startup-discovery fragments handle that case explicitly.
