@@ -42,7 +42,7 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 ## The arms
 
-1. **pr-facts.sh --posture-only** — the posture record, and nothing else.
+1. **pr-facts.sh --posture-only** — the posture record.
    `merge.sh` answers "is a human waiting on this?" off the bead and never asks
    GitHub, so the value it reads has to be written in the same pass. It runs
    first, immediately before merge, so the window in which a newly arrived
@@ -57,7 +57,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    validate against a fact from an earlier tick, so the driver holds arm 2 for
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
-   other anchor's too.
+   other anchor's too. Where this arm changes an anchor's posture value, it also
+   re-derives that PR's `status:` label, so an approval moves the label in the
+   pass that records it
+   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
 2. **merge.sh** — `pull_request → merged`. It runs the moment its one
    same-pass interlock, the posture record above, is done. Landing is the main
    way an anchor leaves the gating set, and every arm that walks that set costs
@@ -210,7 +213,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    window: it re-reads each open anchor's feedback and dispatches the same
    rework child or visit and opens the same validation pass arm 7 would, then
    stops — no write-back sweep, no external-fact reconciliation, none of the
-   arms that belong at the tail. Arm 7 still runs the routing idempotently (a
+   arms that belong at the tail. A batch it routes is live work on the anchor,
+   which the `status:` label reads, so it re-derives that PR's label as it
+   routes. Arm 7 still runs the routing idempotently (a
    landed batch's watermark and `pr_comment_disposition` make the re-run a
    no-op) and still owns the write-back and the terminal-state records. Its rc
    is reported but holds nothing: merge has already run, routing is not the
