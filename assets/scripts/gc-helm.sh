@@ -865,10 +865,10 @@ quiesce_release_molecule_steps() (
 # route: a named session's hook matches its assignee and skips the routed tier,
 # so a route alone never reaches it (docs/gascity-routing-model.md, Lane 2). A
 # bead is addressed one way or the other, never both. --assign is refused on a
-# closed anchor like --route, and so is a blocker the caller did not name: with
-# no --waiting-on it takes the --route blocker guard; with --waiting-on the
-# caller has named the waits, and the hook offers the bead only once bd reports
-# it ready.
+# closed anchor like --route. Without --waiting-on it also takes the --route
+# blocker guard. With --waiting-on the guard is skipped: the caller has named
+# the waits, and the hook offers the bead only once bd reports it ready, so
+# every open blocker gates the hand-off, named or not.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
