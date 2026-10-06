@@ -182,6 +182,17 @@ blk "$R_TK" tk-w-cl1 open "$POOL" tk-w-clx tk-w-cl2
 blk "$R_TK" tk-w-clx closed '{}'
 blk "$R_TK" tk-w-cl2 open "$POOL" tk-w-cl3
 blk "$R_TK" tk-w-cl3 open "$POOL"
+# A routed blocker over four routed leaves: one level wider than a budget of
+# three, so the read has to stop inside the level.
+blk "$R_TK" tk-w-wide open '{}' tk-w-fan
+blk "$R_TK" tk-w-fan open "$POOL" tk-w-f1 tk-w-f2 tk-w-f3 tk-w-f4
+for i in 1 2 3 4; do blk "$R_TK" "tk-w-f$i" open "$POOL"; done
+# The same fan with a closed leaf first: its row hands its share of the budget
+# back, so the leaf the cut read left out is read next.
+blk "$R_TK" tk-w-refund open '{}' tk-w-rfan
+blk "$R_TK" tk-w-rfan open "$POOL" tk-w-rx tk-w-r1 tk-w-r2 tk-w-r3
+blk "$R_TK" tk-w-rx closed '{}'
+for i in 1 2 3; do blk "$R_TK" "tk-w-r$i" open "$POOL"; done
 # Routed chains six and seven deep, for the depth bound: six levels are read.
 blk "$R_TK" tk-w-six open '{}' tk-w-s1
 for i in 1 2 3 4 5; do blk "$R_TK" "tk-w-s$i" open "$POOL" "tk-w-s$((i + 1))"; done
@@ -573,6 +584,18 @@ eq "$(jr .frontier.blockers.open)" 1 "  ... the subject's own blocker is read wh
 
 run tk-w-cl --frontier --walk-budget 2 --json
 eq "$(jr .frontier.verdict)" advancing "the budget counts open beads met: a closed row beside the chain costs nothing"
+
+run tk-w-wide --frontier --walk-budget 4 --json
+eq "$(jr .frontier.verdict)" advancing "a level exactly as wide as the budget is read in full"
+: > "$FAKE_GC_LOG"
+run tk-w-wide --frontier --walk-budget 3 --json
+eq "$(blkr tk-w-fan)" "stuck tk-w-f4 budget" "a level wider than the budget has left reads stuck, naming the blocker past the budget"
+eq "$(logcount 'list --id tk-w-f1,tk-w-f2,tk-w-f3 ')" 1 "  ... the batch asks for only the three beads the budget covers"
+eq "$(logcount 'list --id.*tk-w-f4')" 0 "  ... and the fourth is never read"
+: > "$FAKE_GC_LOG"
+run tk-w-refund --frontier --walk-budget 3 --json
+eq "$(jr .frontier.verdict)" advancing "a closed row in a read the budget cut short hands its share of the budget back"
+eq "$(logcount 'list --id tk-w-r3 ')" 1 "  ... so the leaf the cut read left out is read next"
 
 run tk-w-six --frontier --json
 eq "$(jr .frontier.verdict)" advancing "a routed chain six deep is read to its end"

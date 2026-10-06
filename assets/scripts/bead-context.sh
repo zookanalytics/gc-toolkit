@@ -60,10 +60,10 @@ set -uo pipefail
 
 PROG="bead-context"
 
-# The walk's bounds. It reads at most WALK_BUDGET beads beyond the subject's own
-# direct blockers, which are always read, and descends at most WALK_DEPTH levels.
-# A branch either bound cuts reads stuck with why=budget: a walk that stopped
-# early cannot vouch that the branch drains.
+# The walk's bounds. It reads at most WALK_BUDGET open beads beyond the
+# subject's own direct blockers, which are always read, and descends at most
+# WALK_DEPTH levels. A branch either bound cuts reads stuck with why=budget: a
+# walk that stopped early cannot vouch that the branch drains.
 WALK_BUDGET=50
 WALK_DEPTH=6
 # deferred-dispatch.sh stops re-slinging an armed bead at this many failed slings
@@ -93,10 +93,10 @@ with a count per class), and the store that answered. --frontier adds the
 blocker verdict (ready/advancing/stuck) with open blockers named and closed
 counted; --horizon adds the direct-children epic-health snapshot. Each named
 blocker or child carries a transitive advance: stuck names the bead that stops
-it and why. --walk-budget caps the beads that walk reads beyond the subject's
-direct blockers (default 50). --store / --db pin the owning store when a prefix
-is ambiguous or names the city's own store, which no --rig value reaches.
---json emits the whole context as one object.
+it and why. --walk-budget caps the open beads that walk reads beyond the
+subject's direct blockers (default 50). --store / --db pin the owning store
+when a prefix is ambiguous or names the city's own store, which no --rig
+value reaches. --json emits the whole context as one object.
 
 Examples:
   bead-context.sh tk-8kc5dz --json                    core + edges + store
@@ -466,6 +466,11 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
   # subject's own first, at one read per store, and fold the rows back in. The
   # budget counts the open beads met below the subject's own blockers; a closed
   # row costs nothing, as an open blocker's own rows bring its closed edges too.
+  # A read asks for no more of those beads than the budget has left, counting
+  # each as open until its row comes back, so no batch carries the walk past the
+  # budget. They are asked for nearest first, so a read the budget cuts short
+  # leaves the farthest unread. Those lead the next read when closed rows hand
+  # budget back, and read stuck with why=budget when the walk stops.
   SPENT=0; LEVEL=0
   declare -A DB_OF=()   # prefix -> its store, resolved once per prefix
   while [ "$LEVEL" -lt "$WALK_DEPTH" ]; do
@@ -474,11 +479,11 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
       | walk_pending(.rows; .req; $st; .roots) as $p
       | (.relist | map("F\t\(.)")) + ($p | map(select($f[.]) | "F\t\(.)")) + ($p | map(select($f[.] | not) | "B\t\(.)"))
       | .[]' 2>/dev/null) || break
-    ASK=(); BELOW=()
+    ASK=(); BELOW=(); LEFT=$((WALK_BUDGET - SPENT))
     while IFS=$'\t' read -r kind id; do
       [ -n "${id:-}" ] || continue
       if [ "$kind" = F ]; then ASK+=("$id")
-      elif [ "$SPENT" -lt "$WALK_BUDGET" ]; then ASK+=("$id"); BELOW+=("$id"); fi
+      elif [ "${#BELOW[@]}" -lt "$LEFT" ]; then ASK+=("$id"); BELOW+=("$id"); fi
     done <<< "$NEXT"
     [ "${#ASK[@]}" -gt 0 ] || break
     # id<TAB>store, the id first so an unresolved store survives as an empty field.

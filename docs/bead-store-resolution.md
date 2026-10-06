@@ -256,10 +256,13 @@ I1). The frontier still names that blocker and judges it, because its author
 declared the wait. A reader who finds one should mirror the wait into the
 waiting bead's own store, where it holds.
 
-The walk reads level by level, with one read per store per level carrying every
-id that level needs. It stops descending at the first stuck bead on a branch,
-since nothing below can make that branch advance. The subject's own blockers are
-always read. Below them the walk stops descending once it has met 50 open beads
-(`--walk-budget <n>`), and it descends at most six levels. A closed row costs
-nothing against the budget. Anything the walk has not read when it stops reads
-stuck with `why=budget`.
+The walk reads level by level, with one read per store per level. It stops
+descending at the first stuck bead on a branch, since nothing below can make
+that branch advance. The subject's own blockers are always read. Below them the
+walk reads at most 50 open beads (`--walk-budget <n>`), and it descends at most
+six levels. Each read asks for no more of those beads than the budget has left,
+nearest first, and counts each one as open until its row comes back, so a level
+wider than the budget has left is cut short. A closed row costs nothing against
+the budget. When a cut read brings back closed rows, the beads it left out lead
+the next read, which counts as a level. Anything the walk has not read when it
+stops reads stuck with `why=budget`.
