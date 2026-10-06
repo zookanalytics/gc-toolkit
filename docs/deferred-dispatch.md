@@ -86,11 +86,14 @@ that is plainly work and carries neither a route nor `gc.dispatch_when_ready`
 is silent manual-follow-up debt — the exact miss
 `doctor/check-blocked-work-armed` reports.
 
-An arm also keeps the bead out of the proactive scan. `tools/gc-proactive.sh
-scan` looks for raw input to react to, and it drops an armed bead the way it
-drops a routed one, since both already have their dispatch decided. Otherwise
-a sweep that ran between a blocker closing and the next reconcile pass would
-sling a first reaction at a bead the arm is about to dispatch.
+An arm is a dispatch path, as a route is. Both are defined once, in
+`assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
+dispatch is already decided sources that file: the proactive scan,
+`doctor/check-blocked-work-armed` and `doctor/check-step-terminal`. So an arm
+also keeps the bead out of the proactive scan. `tools/gc-proactive.sh scan`
+looks for raw input to react to, and it drops a bead that has a dispatch path.
+Otherwise a sweep that ran between a blocker closing and the next reconcile
+pass would sling a first reaction at a bead the arm is about to dispatch.
 
 To see what is owed, in this rig's store:
 

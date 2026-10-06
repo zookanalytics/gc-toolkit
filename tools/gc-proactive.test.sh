@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for tools/gc-proactive.sh: the live-intake stand-down,
-# the armed-bead drop, and the fail-closed-on-unset-GC_RIG sweep guard.
+# the dispatch-path drop, and the fail-closed-on-unset-GC_RIG sweep guard.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -18,6 +18,13 @@
 # disposition to make on it:
 #   (STANDING-DROP) scan_precision_filter drops a bead of every standing kind
 #   (STANDING-KEEP) …while a raw input beside them is still a candidate
+# A bead with a dispatch path (assets/scripts/dispatch-path.sh: a route or an
+# arm) already has its dispatch decided, so a first reaction would only
+# second-guess it:
+#   (DISPATCH-DROP) scan_precision_filter drops a bead carrying any dispatch-path key
+#   (ARMED-DROP)    …among them a full arm record and an arm capped at its failure cap
+#   (DISPATCH-KEEP) …while a raw input, and a bead whose keys are blank, stay candidates
+#   (ARMED-SWEEP)   a scan --sling sweep reacts to raw input and never to those beads
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
 # bash, not sh.
@@ -110,30 +117,46 @@ set -e
 eq "$RC" 0 "(SLING-GO) sling of an unmarked bead exits 0"
 has "$OUT" "would sling" "(SLING-GO) …and dispatches (fixture dry line)"
 
-# --- an armed bead is not a scan candidate --------------------------------
-# A bead armed with deferred-dispatch.sh arm already has its dispatch decided,
-# and the deferred-dispatch order slings it once its own blockers close. From
-# that close until the next reconcile pass the bead is ready, unassigned and
-# unrouted, so the arm is all that sets it apart from raw input. tk-armed
-# carries the record arm writes. tk-capped is an arm the reconcile pass stopped
-# retrying at its failure cap, which waits on the visit the cap filed. Both pass
-# every other clause (task type, a description, unrouted, no reaction or work
-# markers, top-level), beside one raw input.
-cat > "$TMP/scan.json" <<'JSON'
-[
-  {"id":"tk-raw",    "issue_type":"task", "description":"a raw input bead",                  "title":"raw input",       "metadata":{}},
-  {"id":"tk-armed",  "issue_type":"task", "description":"a blocked follow-up armed by hand", "title":"armed follow-up", "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_by":"gc-toolkit/gc-toolkit.mechanik","gc.dispatch_when_ready_armed_at":"2026-10-01T00:00:00Z","gc.dispatch_when_ready_reason":"waits for tk-blocker to land"}},
-  {"id":"tk-capped", "issue_type":"task", "description":"an arm past its failure cap",       "title":"capped arm",      "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":3}}
-]
-JSON
+# --- a bead with a dispatch path is not a scan candidate --------------------
+# A route or an arm already decides a bead's dispatch. An armed bead is ready,
+# unassigned and unrouted from its own blockers' close until the next
+# deferred-dispatch reconcile pass, so the arm is all that sets it apart from
+# raw input. tk-armed carries the record deferred-dispatch.sh arm writes.
+# tk-capped is an arm the reconcile pass stopped retrying at its failure cap,
+# which waits on the visit the cap filed. One more bead per dispatch-path key
+# carries only that key. The keys are read from the shared definition, so a key
+# added there is covered here with no edit to this file. tk-blank carries every
+# key with a blank value, which names no queue and no sling target, so it is
+# raw input like tk-raw. All pass every other clause (task type, a description,
+# no reaction or work markers, top-level).
+# shellcheck source=../assets/scripts/dispatch-path.sh
+. "$HERE/../assets/scripts/dispatch-path.sh"
+PATH_KEYS="$(jq -nr "$DISPATCH_PATH_JQ"'dispatch_path_keys[]')"
+[ -n "$PATH_KEYS" ] && ok "(DISPATCH) the shared definition lists the dispatch-path keys" \
+    || bad "(DISPATCH) the shared definition lists the dispatch-path keys (read back empty)"
+jq -n --arg keys "$PATH_KEYS" '
+  ($keys | split("\n") | map(select(length > 0))) as $k
+  | [ {"id":"tk-raw",    "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
+      {"id":"tk-armed",  "issue_type":"task", "description":"a blocked follow-up armed by hand", "title":"armed follow-up",
+       "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_by":"gc-toolkit/gc-toolkit.mechanik","gc.dispatch_when_ready_armed_at":"2026-10-01T00:00:00Z","gc.dispatch_when_ready_reason":"waits for tk-blocker to land"}},
+      {"id":"tk-capped", "issue_type":"task", "description":"an arm past its failure cap", "title":"capped arm",
+       "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":3}},
+      {"id":"tk-blank",  "issue_type":"task", "description":"dispatch-path keys left blank", "title":"blank keys",
+       "metadata": ($k | map({key: ., value: " "}) | from_entries)} ]
+    + [ $k[] | {"id": ("tk-path-" + .), "issue_type": "task", "description": "a bead with a dispatch path",
+                "title": ("dispatch path " + .), "metadata": {(.): "gc-toolkit/gc-toolkit.polecat"}} ]' > "$TMP/scan.json"
 
-echo "# scan_precision_filter drops an armed bead, keeps a raw input"
+echo "# scan_precision_filter drops a bead with a dispatch path, keeps raw input"
 IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
-has "$IDS" "tk-raw" "(ARMED-KEEP) a raw input beside the armed beads is still a candidate"
+has "$IDS" "tk-raw" "(DISPATCH-KEEP) a raw input beside the routed and armed beads is still a candidate"
+has "$IDS" "tk-blank" "(DISPATCH-KEEP) …and so is a bead whose dispatch-path keys are blank"
+for k in $PATH_KEYS; do
+    hasnt "$IDS" "tk-path-$k" "(DISPATCH-DROP) a bead carrying $k is not a scan candidate"
+done
 hasnt "$IDS" "tk-armed" "(ARMED-DROP) an armed bead is not a scan candidate"
 hasnt "$IDS" "tk-capped" "(ARMED-DROP) …nor an arm the reconcile pass stopped retrying"
 
-echo "# a scan --sling sweep reacts to the raw input and never to an armed bead"
+echo "# a scan --sling sweep reacts to raw input and never to a bead with a dispatch path"
 set +e
 OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
 set -e
@@ -141,6 +164,9 @@ eq "$RC" 0 "(ARMED-SWEEP) the sweep exits 0"
 has "$OUT" "would sling mol-first-reaction at tk-raw" "(ARMED-SWEEP) the sweep slings a first reaction at the raw input"
 hasnt "$OUT" "tk-armed" "(ARMED-SWEEP) …and none at the armed bead"
 hasnt "$OUT" "tk-capped" "(ARMED-SWEEP) …nor at the capped arm"
+for k in $PATH_KEYS; do
+    hasnt "$OUT" "tk-path-$k" "(ARMED-SWEEP) …nor at the bead carrying $k"
+done
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route
