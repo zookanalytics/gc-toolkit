@@ -459,6 +459,7 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded A1" "an approval given at an older head still satisfies the rule after a push"
 has "$(cat "$STUB_GH_LOG")" "pr merge 20 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-20" "…and the merge is pinned to the live head it validated, not the approved commit"
 
+echo "# a dismissed review is dropped: it neither approves nor hides an older approval"
 printf '[{"user":{"login":"human1"},"state":"DISMISSED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
 store "[$(anchor A1 20), $(rev A1)]"
 : > "$STUB_GH_LOG"
@@ -466,12 +467,23 @@ out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review stands" "a dismissed approval holds the PR"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 20" "…and nothing merged"
 
+# human1 approved at an older head, then requested changes, and that request was
+# dismissed once its fix landed. GitHub reports the dismissed request as DISMISSED.
 printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1},{"user":{"login":"human1"},"state":"DISMISSED","commit_id":"sha-20","submitted_at":"2026-08-21T01:00:00Z","id":2}]' > "$GH_DIR/reviews_20.json"
 store "[$(anchor A1 20), $(rev A1)]"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review stands" "a later dismissed review shadows its author's older approval"
-hasnt "$(cat "$STUB_GH_LOG")" "pr merge 20" "…and nothing merged"
+has "$out" "merged + recorded A1" "a later dismissed review does not hide its author's older approval"
+has "$(cat "$STUB_GH_LOG")" "pr merge 20 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-20" "…and the PR merges on that approval, pinned to the live head"
+
+# human1 approved at an older head; human2's CHANGES_REQUESTED was dismissed
+# later. One approval stands and no veto does.
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1},{"user":{"login":"human2"},"state":"DISMISSED","commit_id":"sha-20","submitted_at":"2026-08-21T01:00:00Z","id":2}]' > "$GH_DIR/reviews_20.json"
+store "[$(anchor A1 20), $(rev A1)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded A1" "another reviewer's dismissed CHANGES_REQUESTED leaves an older approval standing"
+has "$(cat "$STUB_GH_LOG")" "pr merge 20 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-20" "…and the PR merges on human1's approval"
 
 printf '[{"user":{"login":"gc-city-bot"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
 store "[$(anchor A1 20), $(rev A1)]"
@@ -507,6 +519,7 @@ has "$out" "standing CHANGES_REQUESTED" "the veto holds a correctness-only ancho
 
 # A standing approval does not outrank a veto: human1's approval from an older
 # head still stands, and human2's CHANGES_REQUESTED still holds the PR.
+printf '%s' "$(prview 23 OPEN CLEAN)" > "$GH_DIR/pr_view_23.json"
 printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-old","submitted_at":"2026-08-18T00:00:00Z","id":1},{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":2}]' > "$GH_DIR/reviews_23.json"
 store "[$(anchor A4 23), $(rev A4)]"
 : > "$STUB_GH_LOG"

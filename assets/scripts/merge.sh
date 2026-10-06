@@ -17,10 +17,12 @@
 # the PR, the shared fallback); approval (a UNIVERSAL merge rule armed for every
 # PR, not a check_set member — satisfied only by a latest APPROVED from an
 # account other than the city's, given at any commit, because an approval stands
-# across later pushes until it is dismissed; a standing CHANGES_REQUESTED
-# from any other account vetoes); no unclosed rework/review
-# child or open must-fix finding (metadata keys naming this PR AND dependency
-# edges, the finding held by its own blocks edge; unreadable holds);
+# across later pushes until it is dismissed; dismissed reviews are dropped before
+# each reviewer's latest is taken, so a dismissed approval does not count and a
+# dismissed CHANGES_REQUESTED does not hide its author's older approval; a
+# standing CHANGES_REQUESTED from any other account vetoes); no unclosed
+# rework/review child or open must-fix finding (metadata keys naming this PR AND
+# dependency edges, the finding held by its own blocks edge; unreadable holds);
 # mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
 # generated/seed-audit current at the MERGE RESULT (its inputs re-hashed in the
 # tree `git merge-tree` writes, so a render clobbered by a base that moved holds
@@ -593,12 +595,14 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num reviews history read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
-  # Latest state-bearing review per non-self reviewer (DISMISSED shadows its
-  # author's older rows). An approval stands across later pushes until someone
-  # dismisses it, so it counts at whatever commit it was given.
+  # Each non-self reviewer's latest APPROVED or CHANGES_REQUESTED review, taken
+  # after every DISMISSED review is dropped: a dismissed approval does not count,
+  # and a dismissed CHANGES_REQUESTED does not hide its author's older approval.
+  # An approval stands across later pushes until someone dismisses it, so it
+  # counts at whatever commit it was given.
   rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" '
     ([ .[] | select((.user.login // "") != $self)
-       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
+       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED") ]
      | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
     | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
         approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") }' 2>/dev/null)
@@ -634,8 +638,8 @@ while IFS= read -r row; do
   fi
   approver=$(printf '%s' "$rstate" | jq -r '.approver // ""')
   if [ -z "$approver" ]; then
-    # Every declared check is green at the live head and no pool-routed blocker
-    # is open: the cadence is done and the pull request is waiting on a person.
+    # Every declared check is green and no pool-routed blocker is open: the
+    # cadence is done and the pull request is waiting on a person.
     # That is `settled`, and the approval clause of the owed rule is what makes
     # the row the operator's rather than nobody's.
     record_machine "$id" "settled" "$head_oid" "$aroute"
