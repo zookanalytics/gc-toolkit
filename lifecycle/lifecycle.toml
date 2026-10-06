@@ -766,8 +766,8 @@ keys = [
 #   Read by that script's own guard, tools/gc-proactive.sh and
 #   mol-first-reaction.toml. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route or waiting-ids or visit it
-#   named, and the timestamp. _target and _at are read only to compose the
+#   update as gc.first_reaction: the reason, the route, named agent, waiting-ids
+#   or visit it named, and the timestamp. _target and _at are read only to compose the
 #   "already landed" message; _reason has no reader and is the one collapse
 #   candidate this surface still carries. Never cleared. _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction

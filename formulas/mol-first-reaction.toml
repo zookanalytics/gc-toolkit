@@ -15,10 +15,11 @@ reaction, and drains.
    · Proposal · Decision needed · Disposition` — the shape the board lands the
    human on, ending in the one line the terminal step acts on.
 3. **Dispose, don't close.** The reaction ends in ONE of five exits — route
-   the bead to a pool, recommend an action on a visit the operator can Accept,
-   hold it on an edge, route it to a validating closer, or file a plain visit —
-   chosen from the card. The reaction never closes the bead itself; where a bead
-   should close, the closer pool confirms and closes it.
+   the bead to a pool or to the named agent whose work it is, recommend an
+   action on a visit the operator can Accept, hold it on an edge, route it to a
+   validating closer, or file a plain visit — chosen from the card. The
+   reaction never closes the bead itself; where a bead should close, the closer
+   pool confirms and closes it.
 4. **mr-only for code.** A reaction is notes-only by default; code it
    produces takes the gated `mr` path, never `direct`, never a push to main.
 
@@ -165,8 +166,9 @@ is in front of you. Triage on the bead's merits, biased to move work forward, so
 a human card is the minority exit. It is one of exactly five:
 
 - **actionable** — the bead names work someone can pick up: a done condition
-  you can state, and no unanswered question in front of it. The exit routes it
-  to the pool that does that work.
+  you can state, and no unanswered question in front of it. The exit hands it
+  to whoever does that work: the pool that runs it, or the named agent whose
+  own work it is (a town-repo edit is mechanik's, below).
 - **recommend** — you can name the action, but it warrants the operator's
   trigger before it runs: a determinable action reserved to converse/operator
   authority (retire an in-flight PR, supersede an anchor; authority-map rows
@@ -185,11 +187,22 @@ a human card is the minority exit. It is one of exactly five:
   in for it: a genuine fork with several reasonable directions, an irreversible
   or destructive action, or a policy call. Discuss-only. Files a visit (step 1d).
 
-Move the bead forward when you can: take **actionable** when a pool can just do
-the thing, **blocked** when a named bead has to land first, and **close** when
-the honest conclusion is that there is no work. Take **recommend** when you can
-name the action but it needs the operator's trigger, and reserve **ruling** for
-the judgment only the operator can give.
+Move the bead forward when you can: take **actionable** when a pool or a named
+agent can just do the thing, **blocked** when a named bead has to land first,
+and **close** when the honest conclusion is that there is no work. Take
+**recommend** when you can name the action but it needs the operator's trigger,
+and reserve **ruling** for the judgment only the operator can give.
+
+**A town-repo edit is mechanik's, not the operator's.** The town repo holds
+`city.toml`, `packs.lock` and the rest of the city root, outside every rig. No
+pool works it, because a polecat's worktree is cut from its own rig's repo, and
+no formula runs it, but mechanik edits it directly (docs/authority-map.md). So a
+bead whose remedy is a determinable town-repo edit is **actionable**, addressed
+to mechanik with `--assign gc-toolkit.mechanik`, or **blocked** with
+`--then-assign gc-toolkit.mechanik` when the edit waits on a change that has not
+landed. "No pool can run it" and "no formula runs it" do not make it a ruling. A
+city-config question that is genuinely a policy call, such as resuming an order
+the operator paused, is still a **ruling**.
 
 `gc.origin=operator` does not decide the exit. An operator capture whose action
 is clear and reversible routes or holds like any other bead; keep it a **ruling**
@@ -262,7 +275,7 @@ included: it routes the bead to a validating closer rather than closing it here.
 
 | Disposition | The exit | What it leaves behind |
 |---|---|---|
-| actionable | release the bead TO a pool | a routed, unassigned, open bead a worker claims |
+| actionable | release the bead TO a pool, or TO a named agent | a routed, unassigned, open bead a worker claims, or an open bead assigned to the agent whose hook offers it |
 | recommend | file the visit AND stamp the recommended mol | a visit the operator can Accept (runs the mol) or Discuss |
 | blocked | write the wait as a `blocks` edge | a bead held by a named bead, in the same store |
 | close | route the bead to a validating closer | a capable pool re-checks the no-work call and closes the bead, or escalates |
@@ -374,12 +387,15 @@ longer one rather than truncating it. The **reason** is why this disposition
 and not the other two; it is required, because a classification nobody can
 second-guess is one nobody can correct.
 
-**1a. ACTIONABLE — the bead is work, so hand it to the pool that does that
-work.** This is the exit that schedules an action for a bead: a routed,
-unassigned, open bead is exactly what a pool's find-work offers, and the card
-you just wrote is the dispatch note the worker reads. The default target is
-this rig's polecat pool, which runs `mol-polecat-work`; pass `--route` for any
-other pool.
+**1a. ACTIONABLE — the bead is work, so hand it to whoever does that work.**
+This is the exit that schedules an action for a bead: a routed, unassigned,
+open bead is exactly what a pool's find-work offers, and the card you just
+wrote is the dispatch note the worker reads. The default target is this rig's
+polecat pool, which runs `mol-polecat-work`; pass `--route` for any other pool.
+Work that is a named agent's own goes to that agent instead: `--assign <agent>`
+makes it the bead's assignee, which is the address the agent's own hook
+matches, since a named agent never reads `gc.routed_to`. A town-repo edit takes
+`--assign gc-toolkit.mechanik`.
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -390,6 +406,8 @@ DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 done
 [ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 "$DISPOSE" "$WORK_BEAD_ID" --disposition actionable --by proactive --reason "<why this is work and not a question>" --takeaway "<the ≤140-char headline>"
+# Work that is a named agent's own, such as a town-repo edit:
+"$DISPOSE" "$WORK_BEAD_ID" --disposition actionable --by proactive --reason "<why this is work, and why it is mechanik's>" --takeaway "<the ≤140-char headline>" --assign gc-toolkit.mechanik
 ```
 
 Two things this exit must not become. It routes the ONE bead you reacted to —
@@ -418,14 +436,19 @@ done
 # The wait is not a bead yet — file it once, keyed so a repeat of the same
 # cause waits on the same bead instead of filing a second:
 "$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat
+# The waiting work is a named agent's own, such as a town-repo edit:
+"$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --waiting-on <blocker-bead-id> --then-assign gc-toolkit.mechanik
 ```
 
 The examples pass `--then-route <rig>/<rig>.polecat` because a blocked bead that is
 plainly work must not be left unrouted: it arms the deferred dispatch, so the
 blocker closing is what sends the bead to that pool and nobody has to route it
 by hand. Leaving a blocked work bead with no route and no arm is the debt
-doctor/check-blocked-work-armed flags. Omit `--then-route` only when the bead is
-not work a pool takes — a decision, a ruling, or a research note.
+doctor/check-blocked-work-armed flags. Waiting work that is a named agent's own
+takes `--then-assign <agent>` instead: the bead is assigned in the same release,
+and the agent's hook offers it once the wait lifts, so nothing is armed. Omit
+both only when the bead is not work anyone takes — a decision, a ruling, or a
+research note.
 
 **1c. CLOSE — you are confident there is nothing to do, so route the bead to a
 validating closer.** Take this when you verified the thing is already fixed with
@@ -478,9 +501,9 @@ you can name the action:
   recommendation AND why the operator might discuss instead. The card (from
   `first-reaction`) is the execution guidance, broad direction not a spec.
 
-Both are the minority case: if a pool can just do the thing take 1a, and if the
-honest conclusion is that there is nothing to do take 1c. The visit form is
-mol-visit's, spelled inline:
+Both are the minority case: if a pool or a named agent can just do the thing
+take 1a, and if the honest conclusion is that there is nothing to do take 1c.
+The visit form is mol-visit's, spelled inline:
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -561,6 +584,7 @@ gc runtime drain-ack
 exception is the code case from step 2: if you produced code and handed it to
 the refinery, the refinery closes the bead after the merge — you still do not
 close it yourself. Every disposition here leaves the bead open: routed to a
-pool, held on an edge, or waiting on the operator with its visit filed.
+pool or assigned to a named agent, held on an edge, or waiting on the operator
+with its visit filed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
