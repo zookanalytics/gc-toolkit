@@ -364,6 +364,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
+| `orders/converse-reap.toml` | visit | Fires the converse sitting reaper every five minutes, city-wide. |
+| `assets/scripts/converse-reap.sh` | visit | The pass that order runs: closes each unattached converse session whose visit reads closed or gone. A sign-off or a `gc-helm dismiss` closes the visit and leaves the manual session running, so this pass is the teardown both endings rely on ([gascity-human-engagement.md](gascity-human-engagement.md)). It leaves an attached session alone, because attachment is the only signal the pack has that someone is at the pane. It sits in visit, not in patrol with the other reapers, because it completes a visit's ending the way `reconcile-rig-checkouts` completes a merge's effect. |
 | `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
 | `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, and `duplicate-sweep.sh`. |
 | `assets/scripts/pr-dispose.sh` | visit | Records a deliberate supersede/not-planned PR-close disposition on the open anchor and closes the PR, so `pr-facts.sh` consummates it through `bead-rehome.sh` instead of filing a rework-or-close visit. The PR side of the same disposition doctrine, with the same callers: converse dispositions and operator close-outs. |
