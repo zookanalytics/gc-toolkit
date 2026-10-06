@@ -73,27 +73,8 @@ read, the pass removes nothing and exits 1.
 
 ## How a directory is removed
 
-Every git worktree inside the directory is removed with `git worktree remove`,
-deepest first. Each removal runs from inside that worktree, so its registration
-goes with it in whichever repository owns it. Then the tree is made writable
-and deleted, because a read-only subtree such as a Go module cache otherwise
-refuses deletion.
-
-Nothing here runs `git worktree prune`. A prune covers the whole repository: it
-drops the admin `HEAD` of every other worktree whose directory has gone, and
-worktree-reap pins that ref with an archive tag before it prunes.
-
-## Operating it
-
-```bash
-assets/scripts/review-workspace.sh reap --dry-run   # every entry, removed or kept, and why
-assets/scripts/review-workspace.sh reap             # one summary line
-assets/scripts/review-workspace.sh path --review-bead <id>
-assets/scripts/review-workspace.sh remove --review-bead <id>
-```
-
-`REVIEW_WORKSPACE_DIR` overrides the directory and limits the reap to it.
-`REVIEW_WORKSPACE_IDLE_AFTER` (seconds, default 86400) is the horizon for an
-entry that names no bead. `assets/scripts/review-workspace.test.sh` is the
-regression suite. It uses real git and a real filesystem with only `gc` stubbed,
-and it runs the formulas' own add and remove lines verbatim.
+Each git worktree inside the directory is removed with `git worktree remove`,
+so its registration goes with it, and then the directory is deleted.
+`review-workspace.sh` never runs `git worktree prune`, because a prune is
+repository-wide and would drop the admin `HEAD` of every other worktree whose
+directory has gone before worktree-reap pins that `HEAD` with an archive tag.
