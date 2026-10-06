@@ -14,7 +14,7 @@
 # is the one parser and the one resolver of that grammar. correctness and triage
 # are the forced baseline; triage may widen check_set to add any check declared
 # here and may not invent one. `approval` is not a check here: it is a universal
-# merge rule (merge.sh) requiring a non-city APPROVED review at the live head.
+# merge rule (merge.sh) requiring a standing non-city APPROVED review.
 #
 # Adding a check. Declare it here as a [checks.<name>] row whose `method` points
 # at the skill that carries its full generic method. Give it a dispatch arm in
