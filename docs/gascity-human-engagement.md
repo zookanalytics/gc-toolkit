@@ -908,10 +908,14 @@ session that dies between the stamp and the close leaves a visit that is
 `in_progress`, assigned, and carrying a final outcome. It is complete in
 every way except the one that ends it, and the claim result says only
 `existing_assignment`, so the hold answers and the prompt goes back to
-waiting. The close never runs. `assets/scripts/liveness-sweep.sh` reads
-the still-live visit as `conversing`, which keeps its subject out of the
-unnamed-wait census for as long as the strand stands, so nothing else
-raises it either.
+waiting. The close never runs. Two nets catch what the missing close would
+otherwise strand. When the same session re-claims the visit, `action=finish`
+performs the close (below). When the session is gone and no re-claim reaches it,
+`assets/scripts/liveness-sweep.sh` is the backstop: it counts a visit as
+`conversing` only while its holder session is listed in a live state, so a
+visit stranded by a dead session — one gone from the session list, or lingering
+in it as archived or closed — returns its subject to the unnamed-wait census
+rather than masking it.
 
 `action=finish` is keyed on the stamp. Every path that writes `gc.outcome`
 closes the visit immediately after it, so a `task_kind=visit` still open
