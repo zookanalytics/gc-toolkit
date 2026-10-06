@@ -236,13 +236,32 @@ has " $out " " $F1 " "open-must-fix names the must-fix finding"
 if "$SUT" open-must-fix --anchor tk-anc --lane arch >/dev/null; then bad "open-must-fix found a must-fix on a lane with none"; else ok "open-must-fix is lane-scoped (none on arch)"; fi
 
 # ---------------------------------------------------------------------------
-# close-unvalidated: an approving lane clears its own unruled findings, and
-# leaves a validated one (must-fix) alone.
+# close-unvalidated: a green lane clears its own unruled findings, and leaves a
+# validated one (must-fix) alone. gate-ensure.sh drives this per reconcile pass
+# off the derived green lane state (the close moved out of signoff.sh), so it
+# must also be a safe no-op when the lane has nothing left to resolve.
 # ---------------------------------------------------------------------------
-eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the approve"
-"$SUT" close-unvalidated --anchor tk-anc --lane correctness --reason "lane approved"
+eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the lane derives green"
+"$SUT" close-unvalidated --anchor tk-anc --lane correctness --reason "lane green"
 eq "$(bstatus "$F2")" "closed" "close-unvalidated closes the unvalidated finding"
 eq "$(bstatus "$F1")" "open" "close-unvalidated leaves the must-fix finding for the validator/fix unit"
+# Re-run on the now-clean lane: it closes nothing and still exits 0. This is the
+# per-pass-safe shape gate-ensure relies on — it early-returns before the cache
+# invalidation when there is nothing to resolve, exactly as close-answered does.
+if "$SUT" close-unvalidated --anchor tk-anc --lane correctness >/dev/null; then ok "close-unvalidated is a no-op when the lane has no unvalidated findings"; else bad "close-unvalidated errored on a lane with nothing to resolve"; fi
+eq "$(bstatus "$F1")" "open" "…and still leaves the must-fix finding open"
+
+# --lanes: one call resolves several green lanes in a single finding-set read
+# (the batched shape gate-ensure uses after its gate loop), and stays lane-scoped
+# — a lane not named is left alone.
+LA=$("$SUT" upsert --anchor tk-anc --lane arch --locus "assets/scripts/a.sh:a()" --message "arch unvalidated one")
+LP=$("$SUT" upsert --anchor tk-anc --lane pm --locus "docs/p.md" --message "pm unvalidated one")
+LD=$("$SUT" upsert --anchor tk-anc --lane docs --locus "docs/d.md" --message "docs unvalidated one")
+"$SUT" close-unvalidated --anchor tk-anc --lanes "arch,pm" --reason "lanes green at deadbeef"
+eq "$(bstatus "$LA")" "closed" "close-unvalidated --lanes closes the arch finding"
+eq "$(bstatus "$LP")" "closed" "…and the pm finding, in the one call"
+eq "$(bstatus "$LD")" "open" "…and leaves a lane it was not given (docs) alone"
+eq "$(bstatus "$F1")" "open" "…and still never touches the must-fix finding"
 
 # ---------------------------------------------------------------------------
 # close-answered: the must-fix finding closes once its fix unit LANDS (every
@@ -380,6 +399,21 @@ FF=$("$SUT" upsert --anchor tk-ancF --lane codex --locus "assets/scripts/f.sh:f(
 gc bd update "$FF" --set-metadata finding.disposition=must-fix >/dev/null
 "$SUT" close-answered --anchor tk-ancF
 eq "$(bstatus "$FF")" "open" "close-answered leaves an edge-less must-fix finding open while its lane's fix unit is in flight"
+
+# ---------------------------------------------------------------------------
+# shed-orphaned: an unvalidated finding whose anchor has left the open set is
+# moot (no validator runs on closed work) and is shed, keyed on the anchor being
+# closed and never on an approve. A finding on a still-open anchor is left alone,
+# for gate-ensure's per-anchor pass.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-open","status":"open","assignee":"","title":"open anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness"}},
+        {"id":"tk-gone","status":"closed","assignee":"","title":"merged anchor","notes":"","metadata":{"merge_result":"merged"}}]'
+ORPH=$("$SUT" upsert --anchor tk-gone --lane correctness --locus "assets/scripts/g.sh:g()" --message "orphan on a merged anchor")
+LIVEF=$("$SUT" upsert --anchor tk-open --lane correctness --locus "assets/scripts/h.sh:h()" --message "live on an open anchor")
+"$SUT" shed-orphaned --reason "test"
+eq "$(bstatus "$ORPH")" "closed" "shed-orphaned closes an unvalidated finding on a closed anchor"
+eq "$(bstatus "$LIVEF")" "open" "…and leaves one on a still-open anchor for gate-ensure's per-anchor pass"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
