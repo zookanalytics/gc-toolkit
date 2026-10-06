@@ -169,6 +169,8 @@ bead is handed to the people who need it, and nothing downstream can miss a
 note it never saw. This applies to every write in the done sequence,
 including the `auto_push=false` halt arm.
 
+{{ template "pool-worker-no-consent-ui" . }}
+
 ## Escalation
 
 When blocked, act — do not wait, and do not guess. Where the signal goes
