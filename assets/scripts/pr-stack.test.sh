@@ -358,11 +358,12 @@ echo "# the opened-region fixture is byte-for-byte what pr-open's composer write
 # The no-churn case below, and the stale-region cases around it, model a PR as
 # pr-open.sh opened it, so the model is pinned to the shared composer: an
 # open-mode wording this fixture does not carry fails here instead of leaving
-# those cases testing a body no writer produces.
+# those cases testing a body no writer produces. The gates are resolved first and
+# handed to the composer, as pr-open.sh does, against the fixed index above.
 # shellcheck source=pr-summary-region.sh
-composed_open=$(. "$SD/pr-summary-region.sh" && {
+composed_open=$(. "$SD/pr-summary-region.sh" && phased=$(prs_resolve_phased 'correctness' abcdef1234567890) && {
   printf '%s\n' "$PRS_MARK_OPEN"
-  compose_managed 'CURRENT: the summary.' '' X polecat/X main 'correctness' abcdef1234567890 '' '' open
+  compose_managed 'CURRENT: the summary.' '' X polecat/X main 'correctness' abcdef1234567890 '' '' open "$phased"
   printf '%s\n' "$PRS_MARK_CLOSE"
 })
 eq "$(opened_region X polecat/X 'correctness' 'CURRENT: the summary.' 'abcdef12')" "$composed_open" \
@@ -431,8 +432,9 @@ eq "$(body 280)" "$before_q" "the body is byte-identical"
 echo "# the green-claim check reads only the bullets under the region's last handoff heading"
 # Each body quotes the claim where a reader might mistake it for the region's own:
 # in a region with no handoff block, under a handoff heading a summary wrote
-# above the composed one, and below the markers. The last body carries it as the
-# region's own bullet, the positive control that also proves the library sourced.
+# above the composed one, and below the markers, bare or under a handoff heading
+# of its own. The last body carries it as the region's own bullet, the positive
+# control that also proves the library sourced.
 # shellcheck source=pr-summary-region.sh
 claim_of() { ( . "$SD/pr-summary-region.sh" && prs_region_says_opened_green "$1" ) && echo claim || echo none; }
 PB="$TMP/claim-body"
@@ -445,6 +447,9 @@ eq "$(claim_of "$PB")" none "only the block under the last handoff heading is th
 printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' \
   '<!-- /gc:pr-summary -->' '' "$OG" > "$PB"
 eq "$(claim_of "$PB")" none "a claim below the markers is not the region's"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' \
+  '<!-- /gc:pr-summary -->' '' '## Refinery handoff' '' "$OG" > "$PB"
+eq "$(claim_of "$PB")" none "…nor is one under a handoff heading of its own below them"
 printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' "$OG" \
   '<!-- /gc:pr-summary -->' > "$PB"
 eq "$(claim_of "$PB")" claim "the region's own handoff bullet is the claim"

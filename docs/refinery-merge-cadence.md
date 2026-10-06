@@ -365,12 +365,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    squash commit message — would otherwise keep describing superseded work. When
    the region is a well-formed marker pair whose handoff bullet names a head other
    than the PR's or says the PR opened green (a CI result the static body cannot
-   know), or whose summary is behind the anchor's
-   current `pr_summary`, this arm recomposes and re-splices it; a region already
-   current, a legacy markerless body (arm 6's adoption path establishes that), or
-   a malformed shape is left alone. The recompose uses `refresh` mode: the
-   reworked head has not re-signed-off, so the handoff bullet names the head and
-   defers to the PR's checks rather than repeating arm 6's pre-open sign-off line.
+   know), or whose summary is behind the anchor's current `pr_summary`, this arm
+   recomposes and re-splices it; a region already current, a legacy markerless
+   body (arm 6's adoption path establishes that), or a malformed shape is left
+   alone. The recompose uses `refresh` mode: the reworked head has not
+   re-signed-off, so the handoff bullet names the head and defers to the PR's
+   checks rather than repeating arm 6's pre-open sign-off line.
 
    The title is left alone: it names the anchor, and the body is where a reviewer
    reads scope. Idempotence for each region is its rendered content compared

@@ -64,14 +64,14 @@ strip_summary_heading() { # <text>
 #
 # The last handoff bullet states the gate posture, and its wording is the one
 # thing that turns on the mode. Neither mode states a CI result: the body is
-# static and CI state is live, so a bullet naming gates points to the PR's checks
-# for it. `open` (create and pre_open_gate adoption) records that the declared
-# gates signed off pre-open at this head, a fact true at that moment. `refresh`
-# (an already-open PR whose anchor summary
-# a rework restamped) must not repeat that claim at the reworked head: the gates
-# have not re-signed-off there, and one of them may be actively requesting
-# changes. It names the current head and points to the PR's own checks for the
-# live status instead.
+# static and CI state is live, so the bullet that names the pre-open gates points
+# to the PR's checks for it. `open` (create and pre_open_gate adoption) records
+# that the declared gates signed off pre-open at this head, a fact true at that
+# moment. `refresh` (an already-open PR whose anchor summary a rework restamped)
+# must not repeat that claim at the reworked head: the gates have not
+# re-signed-off there, and one of them may be actively requesting changes. It
+# names the current head and points to the PR's own checks for the live status
+# instead.
 #
 # <phased> is the anchor's resolved gate set (prs_resolve_phased at <head_oid>);
 # the two bands the bullets name are partitioned from it here.
