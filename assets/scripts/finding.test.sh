@@ -226,7 +226,7 @@ has "$(deps)" "$FU|blocks|$F1" "fix unit blocks the first finding it answers"
 has "$(deps)" "$FU|blocks|$F2" "fix unit blocks the second finding it answers"
 
 # ---------------------------------------------------------------------------
-# open-must-fix: the quiescence read helper.
+# open-must-fix: the read pr-open.sh holds a publish behind.
 # ---------------------------------------------------------------------------
 if out=$("$SUT" open-must-fix --anchor tk-anc); then ok "open-must-fix exits 0 when a must-fix finding is open"; else bad "open-must-fix missed the open must-fix finding"; fi
 has " $out " " $F1 " "open-must-fix names the must-fix finding"
@@ -262,8 +262,8 @@ eq "$(bstatus "$F1")" "open" "…and still never touches the must-fix finding"
 
 # ---------------------------------------------------------------------------
 # close-answered: the must-fix finding closes once its fix unit LANDS (every
-# blocks-blocker closed), which is what releases the re-gate quiescence and
-# unwedges a pre_open_gate anchor. FU (wired above) blocks the must-fix F1.
+# blocks-blocker closed), which releases the publish and the merge, unwedging a
+# pre_open_gate anchor. FU (wired above) blocks the must-fix F1.
 # ---------------------------------------------------------------------------
 eq "$(bstatus "$F1")" "open" "the must-fix finding is open with its fix unit still in flight"
 "$SUT" close-answered --anchor tk-anc
@@ -275,7 +275,7 @@ eq "$(bstatus "$F1")" "closed" "close-answered closes the must-fix finding once 
 has "$(notes "$F1")" "fix unit landed" "the close records why the finding was resolved"
 # The anchor is released: open-must-fix, the read pr-open.sh publishes behind,
 # now finds nothing on it, so nothing the open finding held is left.
-if "$SUT" open-must-fix --anchor tk-anc >/dev/null; then bad "open-must-fix still holds the re-gate after the finding closed"; else ok "quiescence clears once the answered finding closes, so the anchor re-gates"; fi
+if "$SUT" open-must-fix --anchor tk-anc >/dev/null; then bad "open-must-fix still holds the publish after the finding closed"; else ok "open-must-fix clears once the answered finding closes, so the anchor can publish"; fi
 
 # A must-fix finding NO fix unit blocks is an objection nothing has answered
 # yet: close-answered must leave it open, or it drops the objection.

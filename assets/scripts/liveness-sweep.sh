@@ -580,8 +580,8 @@ stale_escalations
 
 # --- landed-fix wedge: a must-fix finding whose fix landed but did not close ---
 # gate-ensure closes a must-fix finding once its fix unit lands, which releases
-# the re-gate the open finding held. If that close is ever missed the finding
-# stays open, holds the re-gate through quiescence forever, and wedges the
+# the publish and the merge the open finding held. If that close is ever missed
+# the finding stays open, holds the publish (pr-open.sh) forever, and wedges the
 # anchor at pre_open_gate with the fix already on the branch — the silent
 # multi-day strand this backstop exists to make loud. Two shapes reach it: the
 # finding's fix-unit edge is present and all closed, and the finding carries NO
@@ -637,12 +637,12 @@ wedged_fix_escalations() {
         fi
         if [ -n "$edgeless" ]; then
             body="landed-fix wedge (edge-less): anchor $anchor is held at pre_open_gate by must-fix finding $fid, which carries NO fix-unit edge, yet its lane ($lane) fix unit has already closed — the fix is on the branch.
-The missing close-ordering edge hides the landed fix from the normal close, so the finding stays open and the anchor cannot re-gate or open its PR until $fid closes.
-Disposition: close $fid to release the re-gate (its fix landed, matched by lane), then find why the close-ordering edge was never hung (finding.sh set-disposition / anchor_fix_unit)."
+The missing close-ordering edge hides the landed fix from the normal close, so the finding stays open and the anchor cannot open its PR until $fid closes.
+Disposition: close $fid to release the publish (its fix landed, matched by lane), then find why the close-ordering edge was never hung (finding.sh set-disposition / anchor_fix_unit)."
         else
             body="landed-fix wedge: anchor $anchor is held at pre_open_gate by must-fix finding $fid whose fix unit has already closed — the fix is on the branch.
-gate-ensure closes such a finding each pass so the re-gate proceeds; this one is still open, so that close is not running, and the anchor cannot re-gate or open its PR until $fid closes.
-Disposition: close $fid to release the re-gate (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
+gate-ensure closes such a finding each pass so the publish proceeds; this one is still open, so that close is not running, and the anchor cannot open its PR until $fid closes.
+Disposition: close $fid to release the publish (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
         fi
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "$PROG: dry-run: would escalate $anchor [landed-fix-wedge] (finding $fid)"

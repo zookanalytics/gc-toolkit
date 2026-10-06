@@ -5,10 +5,12 @@
 # state (green settles when a closed approve review backs the lane, through the
 # real lane-state.sh — a stale check.<g> marker settles nothing, and a backed
 # lane stays settled at a head no verdict ever named); QUIESCENCE (no review is
-# dispatched while an open must-fix finding, a fix unit, or a validation pass is
-# out on the anchor — anchor-wide, so a sibling lane's must-fix holds this lane
-# too; a closed validation pass holds nothing; an unreadable probe holds the
-# dispatch fail-closed); a declared lane still carrying a legacy exception@<oid>
+# dispatched while a fix unit, including the one answering an open must-fix
+# finding, or a validation pass is out on the anchor — anchor-wide, so the fix
+# for a sibling lane's must-fix holds this lane too; a must-fix finding no fix
+# unit answers holds the merge, not the dispatch; a closed validation pass holds
+# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane
+# still carrying a legacy exception@<oid>
 # park is a pre-migration hold (wedged, no dispatch); the live-head read, which
 # decides only the dispatch pin and the machine axis (a deleted ref, a body
 # without .sha, and a failed read are all unanswerable); the stray-marker sweep
@@ -45,7 +47,7 @@ harness_init
 
 # Private scripts dir: the SUT, lifecycle.sh, and the REAL graph-derivation
 # helpers gate-ensure now shells out to — lane-state.sh (lane green) and
-# finding.sh (open must-fix), copied in unstubbed so the fixtures exercise the
+# finding.sh (fix-in-flight), copied in unstubbed so the fixtures exercise the
 # real derivation, plus a body-emitter stub (interface unchanged).
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
@@ -144,7 +146,7 @@ backed() { # <id> <anchor> [lane=correctness]
     "$1" "${3:-correctness}" "$2" "$(oid "backing-$1")"
 }
 # An open must-fix finding on <anchor> (quiescence clause a): a task_kind=finding
-# bead whose finding.disposition is must-fix, which finding.sh open-must-fix reads.
+# bead whose finding.disposition is must-fix, which finding.sh fix-in-flight reads.
 mustfix() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"%s","finding.disposition":"must-fix"}}' \
     "$1" "$2" "${3:-correctness}"
@@ -752,11 +754,12 @@ oid r1c > "$GH_DIR/head_polecat_r1c"
 out=$(run)
 has "$out" "1 reviews dispatched" "a closed rework child no longer withholds the review"
 
-echo "# a landed fix unit's must-fix finding is closed, so quiescence clears and the wedged anchor re-gates"
+echo "# a landed fix unit's must-fix finding is closed before quiescence reads it, and the wedged anchor re-gates"
 # The pre_open_gate deadlock: the fix unit closed having pushed its fix onto the
-# branch, but the must-fix finding it answered was left open, and clause (a)
-# holds the re-gate on that open finding forever. gate-ensure closes the finding
-# whose blockers have all closed, so quiescence clears and the re-gate dispatches.
+# branch, but the must-fix finding it answered was left open, holding the publish
+# and the merge forever. gate-ensure closes the finding whose blockers have all
+# closed before it computes quiescence, so the finding is neither held on nor
+# reported unanswered, and the re-gate dispatches.
 store "[$(anchor W1 pre_open_gate correctness "" polecat/w1),
         $(mustfix find-w1 W1),
         $(rework_kid fix-w1 rev-w1 closed)]"
@@ -767,7 +770,8 @@ oid w1 > "$GH_DIR/head_polecat_w1"
 : > "$STUB_GC_LOG"
 out=$(run)
 eq "$(bstatus find-w1)" "closed" "gate-ensure closes the must-fix finding once its fix unit has landed"
-hasnt "$out" "quiesced (open must-fix finding find-w1)" "…so the landed fix no longer holds the re-gate"
+hasnt "$out" "must-fix finding(s) find-w1" "…before quiescence reads it, so it is not reported unanswered"
+hasnt "$out" "being acted on" "…and the landed fix holds no dispatch"
 has "$out" "1 reviews dispatched" "…and the wedged anchor re-gates"
 
 echo "# …but a must-fix finding whose fix unit is still IN FLIGHT is left open (not closed early)"
@@ -1253,13 +1257,14 @@ for bad_shape in "settled" "settled@OID@" "settled@OID@2026-08-28T04:05:06Z@x"; 
 done
 
 echo "# machine axis: a green anchor still being acted on is progressing, not settled"
-# Every declared lane deriving green is not the same as nothing owed. Quiescence
-# is anchor-wide — an open must-fix finding, an in-flight fix unit, or an open
-# validation pass — and none of those is a pool-routed blocker the check loop
-# visits, so a fully green anchor reaches the settle decision with the loop's
-# progress flag still clear. Recording settled would render the board row green
-# while the anchor is still being worked, so quiescence is computed before
-# settling and any hold names the anchor progressing.
+# Every declared lane deriving green is not the same as nothing owed. What is
+# owed is anchor-wide — an open must-fix finding, answered or not, an in-flight
+# fix unit, or an open validation pass — and none of those is a pool-routed
+# blocker the check loop visits, so a fully green anchor reaches the settle
+# decision with the loop's progress flag still clear. Recording settled would
+# render the board row green while the anchor is still being worked, so
+# quiescence is computed before settling, and a hold or an unanswered must-fix
+# finding names the anchor progressing.
 store "[$(anchor X10 pull_request correctness "" polecat/x10), $(backed rev-x10 X10), $(mustfix find-x10 X10)]"
 oid x10 > "$GH_DIR/head_polecat_x10"
 run >/dev/null

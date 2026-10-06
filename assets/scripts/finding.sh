@@ -715,9 +715,11 @@ cmd_shed_orphaned() {
 # issue, so the finding is closeable exactly when all its blockers have closed —
 # which is the fix unit's landing (merge-push closes the rework once its commit
 # is on the branch). Nothing else performs that close, so the finding otherwise
-# stays open and holds the re-gate through quiescence, wedging a landed fix at
-# pre_open_gate. gate-ensure runs this per anchor: the reader that computes
-# quiescence and holds the re-gate is the one that releases it, so the two
+# stays open and holds the publish (pr-open.sh) and the merge (merge.sh) with its
+# fix already on the branch, wedging a landed fix at pre_open_gate. gate-ensure
+# runs this per anchor, and its quiescence reads the same blockers through
+# fix-in-flight: the reader that holds review dispatch while a fix unit is in
+# flight is the one that releases the finding once that unit lands, so the two
 # cannot disagree. A finding still blocked by a live fix unit is left for that
 # unit's landing. A finding with NO blocker edge is the ambiguous case: usually
 # an objection no fix unit answers yet (left open), but also the shape a missed
