@@ -1113,18 +1113,19 @@ out=$("$SUT" 2>&1)
 eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed merge-in in flight is the city's move, not a wedge"
 
 echo "# landing first: a PR that can land, or has left the open list, is visited first and never paced"
-# PC9's PR is CLEAN in the open-PR list, so it can land this pass; PD5's PR is
-# not in that list (it merged out of band and owes its record). PB1 and PB2's
-# PRs are BLOCKED, so a visit there only refreshes a verdict. The ids sort the
-# two groups the other way round, so the order the visits take is the order
-# the arm chose. A deadline of epoch 1 has always passed, so exactly one of the
-# paced anchors is visited per pass.
+# PC9's PR is CLEAN in the open-PR list and approved at its head, so it can land
+# this pass; PD5's PR is not in that list (it merged out of band and owes its
+# record). PB1 and PB2's PRs are BLOCKED, so a visit there only refreshes a
+# verdict. The ids sort the two groups the other way round, so the order the
+# visits take is the order the arm chose. A deadline of epoch 1 has always
+# passed, so exactly one of the paced anchors is visited per pass.
 store "[$(anchor PB1 51), $(anchor PB2 52), $(anchor PC9 61), $(rev PC9), $(anchor PD5 70)]"
 printf '%s' "$(prview 51 OPEN BLOCKED)" > "$GH_DIR/pr_view_51.json"
 printf '%s' "$(prview 52 OPEN BLOCKED)" > "$GH_DIR/pr_view_52.json"
 printf '%s' "$(prview 61 OPEN CLEAN)" > "$GH_DIR/pr_view_61.json"
 printf '%s' "$(prview 70 MERGED CLEAN)" > "$GH_DIR/pr_view_70.json"
-for n in 51 52 61; do echo '[]' > "$GH_DIR/reviews_$n.json"; done
+for n in 51 52; do echo '[]' > "$GH_DIR/reviews_$n.json"; done
+approved 61
 echo '[{"number":51,"mergeStateStatus":"BLOCKED"},{"number":52,"mergeStateStatus":"BLOCKED"},{"number":61,"mergeStateStatus":"CLEAN"}]' > "$GH_DIR/pr_list_.json"
 MCUR="$TMP/merge.cursor"; rm -f "$MCUR"
 : > "$STUB_GH_LOG"

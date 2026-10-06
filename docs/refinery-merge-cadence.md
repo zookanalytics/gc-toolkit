@@ -147,14 +147,14 @@ the cadence — the arms run whether or not any refinery session is awake.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of
-   its output: the city approves nothing at open (the verdict is replayed only
-   as a comment), so a freshly opened PR is never mergeable on the same tick,
-   and running after merge costs a PR its open-pass landing only in the
-   ungated lane-only case. It needs nothing gate-ensure writes in the same
-   pass, for the reasons merge does not. A pass that ends inside this arm still
-   makes progress: an anchor it opened has left its domain, and an open
-   interrupted before its record is adopted by the next pass rather than
-   opened twice. It walks under its share of the pass budget: the anchors
+   its output: every merge needs an external approval at the live head, and
+   the city approves nothing at open (the verdict is replayed only as a
+   comment), so a freshly opened PR is never mergeable on the same tick and
+   running after merge costs no landing. It needs nothing gate-ensure writes
+   in the same pass, for the reasons merge does not. A pass that ends inside
+   this arm still makes progress: an anchor it opened has left its domain, and
+   an open interrupted before its record is adopted by the next pass rather
+   than opened twice. It walks under its share of the pass budget: the anchors
    gate-ensure last recorded as `settled` first (the mark only orders the walk;
    each still meets the full gate), then the rest, with at least one of each
    visited every pass. Each group rotates on a cursor of its own
