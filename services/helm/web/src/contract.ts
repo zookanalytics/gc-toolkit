@@ -201,15 +201,13 @@ export interface Tile {
    */
   pr_conversation: string;
   /**
-   * Whether GitHub is withholding the merge for a human review: `'required'`,
-   * `'met'`, `'not_required'`, or `'unknown'`. Read from the recorded review
-   * decision, which is GitHub's own requirement rather than the city's gate
-   * set — a repository can require a review `check_set` never declared.
-   *
-   * `'required'` covers a standing `changes_requested` too, so a pull request
-   * GitHub is blocking never renders as one it will let through. That row is
-   * not `owed` by the operator, though: answering a rejecting review is the
-   * city's move.
+   * Whether this pull request still owes an external approval before it can
+   * merge: `'required'`, `'met'`, or `'unknown'`. Approval is a universal merge
+   * rule — the city holds every open pull request until a non-city `APPROVED`
+   * review stands at the live head — so only an approved row is `'met'` and every
+   * other posture owes one. It is the city's rule, not GitHub's protection set,
+   * so a pull request on an `integration/*` base or in a repo with no
+   * required-review rule reads `'required'` too.
    */
   pr_approval: string;
   /**

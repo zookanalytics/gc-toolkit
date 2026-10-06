@@ -216,12 +216,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    opened PR is never mergeable on the same tick, and deferring it past merge
    costs a PR its open-pass landing only in the ungated lane-only case and never
    starves merge. For each anchor whose
-   every marker-bearing check in `check_set` reads `green` (the same
-   predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
+   every `pre-open` check in `check_set` reads `green` (the one resolver names
+   that set — `none`/`off` and the universal `approval` rule dropped; an empty
    set is held, never read as ungated): adopt an existing PR for the branch or
-   `gh pr create` non-draft, re-read the created PR by number, refuse a moved
-   head, replay the verdict as a comment (never an approval), then one
-   `lifecycle.sh` transition carrying `pr_url`/`pr_number`/`merged_target`.
+   `gh pr create` — as a draft when `check_set` names an `open-as-draft` check,
+   so a preview can deploy before the change is surfaced, else ready — re-read
+   the created PR by number, refuse a moved head, replay the verdict as a comment
+   (never an approval), then one `lifecycle.sh` transition carrying
+   `pr_url`/`pr_number`/`merged_target`. A later pass flips a draft to ready once
+   its `open-as-draft` checks are green. Each anchor's head comes from one fetch
+   of origin's branches per pass, with the API answering when that fetch could
+   not and confirming the head before any create, so an anchor parked on a red
+   lane costs no API read for its head. Its gates are resolved once at that
+   head, and the one answer feeds the gate, the draft decision and the body; a
+   resolver that is missing or fails holds the anchor. An adopted draft is the
+   refinery's to flip only when the city opened it as a draft and nobody has
+   re-drafted it since. Any other draft is adopted without that claim and stays
+   with whoever parked it.
    The body's `## Summary` is the polecat's `pr_summary`, written at handoff
    by the only actor that has read the diff; the anchor's description is
    dispatch text, demoted to a collapsed section and standing in as the
