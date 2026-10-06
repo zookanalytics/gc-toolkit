@@ -43,7 +43,7 @@ Usage:
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
-  gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
+  gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
@@ -1366,18 +1366,33 @@ cmd_takeaway() {
 # blocked. An --also-blocks target is held to the same terms as the gated bead,
 # and every missing edge is named with its own repair command.
 #
-# One open demand per gated bead: a resumed sitting re-states the same question
-# and gets the existing demand refreshed, never a second blocker for one wait.
-# Find both stamped demands and gates whose creation outlived its response.
+# One open demand per (gated bead, topic): a resumed sitting re-states the same
+# question under the same topic and gets its own demand refreshed, never a second
+# blocker for one wait. The topic scopes the lookup so two sittings on one
+# standing-scope bucket — same gated bead, one visit each, distinct
+# escalation_key — keep their own demand instead of the second refreshing the
+# first's in place and overwriting its title and gc.takeaway, which is the
+# operator's question. An empty topic matches on the gated bead alone, the
+# pre-topic behaviour every other caller keeps.
+#
+# Find both stamped demands and gates whose creation outlived its response. The
+# await_id carries the topic too — gc.demand_for is the stamp external readers
+# key on, while await_id is this verb's private recovery handle — so an unstamped
+# orphan is recoverable under its own topic rather than colliding with a sibling's.
 # Keep lookup errors distinct from an empty result: either a failed read or
 # ambiguous matches must prevent another create. Use a subshell for scratch vars.
+demand_await_id() { if [ -n "${2:-}" ]; then printf 'gc-demand:%s:%s' "$1" "$2"; else printf 'gc-demand:%s' "$1"; fi; }
 demand_lookup() (
+    gated="$1"; topic="${2:-}"
+    aid=$(demand_await_id "$gated" "$topic")
     raw=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit=0 2>/dev/null) || return 1
-    printf '%s' "$raw" | scrub | jq -ce --arg g "$1" '
+    printf '%s' "$raw" | scrub | jq -ce --arg g "$gated" --arg t "$topic" --arg aid "$aid" '
         if type != "array" then error("invalid demand list") else
-          [ .[] | select((.metadata["gc.demand_for"] // "") == $g or
-              (.issue_type == "gate" and .await_type == "human" and
-               .await_id == ("gc-demand:" + $g))) ]
+          [ .[] | select(
+              ((.metadata["gc.demand_for"] // "") == $g
+                 and ($t == "" or (.metadata["gc.demand_topic"] // "") == $t))
+              or (.issue_type == "gate" and .await_type == "human"
+                 and .await_id == $aid)) ]
           | if length > 1 then
               error("multiple demand gates; reconcile before retrying: " + (map(.id) | join(", ")))
             else .[0] // {} end
@@ -1385,11 +1400,13 @@ demand_lookup() (
 )
 
 cmd_demand() {
-    gated=""; text=""; by="host"; who=""; body=""; also=""; npos=0
+    gated=""; text=""; by="host"; who=""; body=""; also=""; topic=""; npos=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)          by="${1#--by=}"; shift ;;
             --by)            shift; [ $# -gt 0 ] || { echo "$PROG: demand: --by requires a value" >&2; exit 2; }; by="$1"; shift ;;
+            --topic=*)       topic="${1#--topic=}"; shift ;;
+            --topic)         shift; [ $# -gt 0 ] || { echo "$PROG: demand: --topic requires a value" >&2; exit 2; }; topic="$1"; shift ;;
             --assignee=*)    who="${1#--assignee=}"; shift ;;
             --assignee)      shift; [ $# -gt 0 ] || { echo "$PROG: demand: --assignee requires a value" >&2; exit 2; }; who="$1"; shift ;;
             --body=*)        body="${1#--body=}"; shift ;;
@@ -1448,7 +1465,7 @@ cmd_demand() {
     # set is the demand readers' (signoff, pr-facts, liveness): a gate an
     # operator deferred or pinned still holds the work there, so a re-state
     # must refresh it rather than file a second gate beside it.
-    candidate=$(demand_lookup "$gated") \
+    candidate=$(demand_lookup "$gated" "$topic") \
         || { echo "$PROG: demand: could not establish a unique demand on $gated — stopped before creating another gate." >&2; exit 4; }
     existing=$(printf '%s' "$candidate" | jq -r --arg g "$gated" \
         'select((.metadata["gc.demand_for"] // "") == $g) | .id // empty')
@@ -1460,6 +1477,7 @@ cmd_demand() {
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled="
+        [ -n "$topic" ] && set -- "$@" --set-metadata "gc.demand_topic=$topic"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
         gc bd update "$demand" "$@" >/dev/null 2>&1 \
             || { echo "$PROG: demand: could not refresh the open demand $demand on $gated" >&2; exit 4; }
@@ -1491,11 +1509,11 @@ cmd_demand() {
         # recover the same unstamped gate, even if the first recovery read fails.
         demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
         if [ -z "$demand" ]; then
-            demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="gc-demand:$gated" --title "$text" --reason "$body" --json 2>/dev/null \
+            demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="$(demand_await_id "$gated" "$topic")" --title "$text" --reason "$body" --json 2>/dev/null \
                 | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
             if [ -z "$demand" ] || [ "$demand" = null ]; then
-                candidate=$(demand_lookup "$gated") \
-                    || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: gc-demand:$gated." >&2; exit 4; }
+                candidate=$(demand_lookup "$gated" "$topic") \
+                    || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: $(demand_await_id "$gated" "$topic")." >&2; exit 4; }
                 demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
             fi
         fi
@@ -1514,6 +1532,7 @@ cmd_demand() {
                --set-metadata "gc.takeaway_settled=" \
                --set-metadata "gc.demand_for=$gated" \
                --set-metadata "gc.routed_to=human"
+        [ -n "$topic" ] && set -- "$@" --set-metadata "gc.demand_topic=$topic"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
         stamped=1
         gc bd update "$demand" "$@" >/dev/null 2>&1 || stamped=0

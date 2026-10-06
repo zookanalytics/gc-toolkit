@@ -302,24 +302,27 @@ elif [ -n "$PRIOR_REACTION" ]; then
 fi
 
 # ── Route only where something can claim ─────────────────────────────
-# A route to a pool this city does not run is worse than a visit: the bead is
-# open, unassigned and offered to nobody, and nothing says so. gc-proactive.sh
-# `deliverable` already answers exactly this question against the agent
-# roster, for any rig-qualified target, and it answers no only on a positive
-# finding — so a probe that cannot run leaves the disposition alone.
+# A route to a pool this city does not run — or one whose rig does not own this
+# bead's store — is worse than a visit: the bead is open, unassigned and offered
+# to nobody, and nothing says so. gc-proactive.sh `deliverable` answers exactly
+# this against the agent roster and, given the bead, against store ownership too
+# (a rig-scope pool only claims beads in its own store), for any rig-qualified
+# target, and it answers no only on a positive finding — so a probe that cannot
+# run leaves the disposition alone.
 if { [ "$DISPOSITION" = "actionable" ] || [ "$DISPOSITION" = "close" ]; } && [ -x "$PROACTIVE" ]; then
-    DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$ROUTE" 2>/dev/null)" || {
+    DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$ROUTE" "$BEAD" 2>/dev/null)" || {
         usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. Put it to the operator instead (--disposition recommend or ruling)."
     }
 fi
 # --then-route names the pool the deferred dispatch slings the bead to once its
-# blocker lifts, so it is held to the SAME roster test as --route. Its own check
-# at parse time only tests for a "/", which a copied `<rig>/<agent>` placeholder
-# passes; a target the roster does not know would arm a dispatch every reconcile
-# pass replays into a failure. The probe answers no only on a positive finding,
-# so an unrunnable probe leaves the arm alone.
+# blocker lifts, so it is held to the SAME roster and store test as --route. Its
+# own check at parse time only tests for a "/", which a copied `<rig>/<agent>`
+# placeholder passes; a target the roster does not know, or one whose rig does
+# not own this bead's store, would arm a dispatch every reconcile pass replays
+# into a failure. The probe answers no only on a positive finding, so an
+# unrunnable probe leaves the arm alone.
 if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -x "$PROACTIVE" ]; then
-    DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$THEN_ROUTE" 2>/dev/null)" || {
+    DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$THEN_ROUTE" "$BEAD" 2>/dev/null)" || {
         usage_die "--then-route $THEN_ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Arming it would record a dispatch the reconcile pass replays into a failure every cycle. Pass a pool that runs (e.g. <rig>/<rig>.polecat), or omit --then-route if no pool takes this bead."
     }
 fi
