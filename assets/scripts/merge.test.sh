@@ -152,20 +152,20 @@ echo "# a broken lane or finalize helper holds its own anchor, never the pass"
 # already merged still gets its record, which needs neither helper.
 for helper in lane-state.sh finalize-gate.sh; do
   case "$helper" in
-    lane-state.sh) why="PR#63 lane state unreadable on anchor HM1; merge held" ;;
-    finalize-gate.sh) why="PR#63 finalize gate refused (fail-closed); merge held (anchor HM1)" ;;
+    lane-state.sh) why="PR#65 lane state unreadable on anchor HM1; merge held" ;;
+    finalize-gate.sh) why="PR#65 finalize gate refused (fail-closed); merge held (anchor HM1)" ;;
   esac
-  store "[$(anchor HM1 63), $(rev HM1), $(anchor HM2 64)]"
-  printf '%s' "$(prview 63 OPEN CLEAN)" > "$GH_DIR/pr_view_63.json"
-  printf '%s' "$(prview 64 MERGED CLEAN)" > "$GH_DIR/pr_view_64.json"
-  approved 63
+  store "[$(anchor HM1 65), $(rev HM1), $(anchor HM2 66)]"
+  printf '%s' "$(prview 65 OPEN CLEAN)" > "$GH_DIR/pr_view_65.json"
+  printf '%s' "$(prview 66 MERGED CLEAN)" > "$GH_DIR/pr_view_66.json"
+  approved 65
   chmod -x "$SD/$helper"
   : > "$STUB_GH_LOG"
   out=$("$SUT" 2>&1); rc=$?
   chmod +x "$SD/$helper"
   eq "$rc" 0 "a non-executable $helper leaves the pass at exit 0"
   has "$out" "merge: $why" "…holding the open PR at the $helper call"
-  hasnt "$(cat "$STUB_GH_LOG")" "pr merge 63" "…which does not merge"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr merge 65" "…which does not merge"
   has "$out" "merge: recovered HM2" "…while the PR already merged gets its record"
   eq "$(bstatus HM2)" "closed" "…and its anchor closes"
   has "$out" "merge: 0 merged, 1 recovered, 1 held, 0 skipped, 0 record-failed" "…in one pass that reads both anchors"
