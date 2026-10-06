@@ -19,6 +19,10 @@
 # nothing, leaves MERGED/CLOSED reconciliation to the full pass, and reports an
 # anchor it could not make current in its EXIT CODE, which is what holds
 # merge.sh for that pass);
+# Also covers the status: label moving in the arm that records a review: each
+# pre-merge arm re-derives it for an anchor whose posture value it changes or
+# whose feedback batch it routes, a merge state moving alone is left to the full
+# pass, and the full pass's own re-derive reads the labels its sweep just wrote;
 # Also covers the POSTURE record and the comment watermark: the declared
 # vocabulary, posture pinned to the live head and written only on change, an
 # unanswered comment routing to a fix-pool child or (under a human hold) to a
@@ -3058,6 +3062,78 @@ hasnt "$(cat "$STUB_ESC_LOG")" "pr-retargeted.153" "…and files no retarget esc
 # Control: the full pass on the SAME fixture retargets, proving the skip is route mode's doing.
 out=$(run)
 eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
+
+# ---- the status: label moves in the arm that records a review ----------------
+# A human's review changes the label's inputs in the pre-merge arms: --posture-only
+# records the new posture value, and --route-comments-only routes the feedback
+# into live work on the anchor. Each re-derives the label there, so the PR list
+# shows the review without waiting for the full pass at the tail. These cases run
+# the real writer over the real derivation (gctk pr-status), so the label read
+# back off the PR fixture is what the shared code path decided. The writer gets
+# the built gctk through a wrapper, because an exported GCTK_BIN would also swap
+# lifecycle.sh onto its gctk port; the wrapper is removed after these cases.
+echo "# the status: label moves in the arm that records a review"
+if command -v go >/dev/null 2>&1 \
+   && ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1; then
+  ok "gctk built for the label derivation"
+else
+  bad "gctk did not build; the status: label is derived by gctk alone, so the label cases below were NOT exercised — $(tail -3 "$TMP/gctk-build.log" 2>/dev/null | tr '\n' ' ')"
+fi
+printf '#!/usr/bin/env bash\nGCTK_BIN=%q exec %q "$@"\n' "$TMP/gctk" "$HERE/pr-status-label.sh" > "$SD/pr-status-label.sh"
+chmod +x "$SD/pr-status-label.sh"
+# The labels on a PR view fixture, sorted and comma-joined.
+pv_labels() { jq -r '[.labels[]?.name] | sort | join(",")' "$GH_DIR/pr_view_$1.json"; }
+
+echo "# …an approval recorded by --posture-only moves the label in that arm"
+store "[$(anchor LB1 170 ',"pr_posture":"review_required@sha-170@2026-10-01T00:00:00Z","pr_merge_state":"CLEAN@sha-170"')]"
+prview 170 OPEN CLEAN MERGEABLE | jq -c '.reviewDecision = "APPROVED" | .labels = [{name: "status: needs-review"}]' > "$GH_DIR/pr_view_170.json"
+printf '[{"id":17001,"user":{"login":"human1"},"state":"APPROVED","body":"ship it","commit_id":"sha-170"}]' > "$GH_DIR/reviews_170.json"
+out=$(run_posture); rc=$?
+eq "$rc" 0 "the posture-only pass exits 0"
+eq "$(meta_pinned LB1 pr_posture)" "approved@sha-170" "the approval is recorded as the posture"
+eq "$(pv_labels 170)" "status: working" "…and the label leaves needs-review in the same arm: an approved PR is the city's to merge"
+
+echo "# …a merge state moving under an unchanged posture leaves the label to the full pass"
+# The label is deliberately wrong for the anchor's state, so any derivation would
+# rewrite it. GitHub reports UNKNOWN while it computes mergeability, so this move
+# is the common posture write, and re-deriving on it would cost one per PR.
+store "[$(anchor LB2 171 ',"pr_posture":"review_required@sha-171@2026-10-01T00:00:00Z","pr_merge_state":"UNKNOWN@sha-171"')]"
+prview 171 OPEN BLOCKED MERGEABLE | jq -c '.reviewDecision = "REVIEW_REQUIRED" | .labels = [{name: "status: working"}]' > "$GH_DIR/pr_view_171.json"
+: > "$STUB_GH_LOG"
+out=$(run_posture)
+eq "$(meta LB2 pr_merge_state)" "BLOCKED@sha-171" "the moved merge state is recorded"
+eq "$(pv_labels 171)" "status: working" "…but the label is not re-derived for it"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 171" "…so nothing is written to the PR"
+# Control: the full pass reconciles the same fixture, so the label above stood
+# because the posture-only pass did not derive it, not because it was right.
+out=$(run)
+eq "$(pv_labels 171)" "status: needs-review" "the full pass's reconcile corrects it on the same fixture"
+
+echo "# …a change request routed by --route-comments-only moves the label in that arm"
+store "[$(anchor LB3 172)]"
+prview 172 OPEN BLOCKED MERGEABLE | jq -c '.reviewDecision = "CHANGES_REQUESTED" | .labels = [{name: "status: needs-review"}]' > "$GH_DIR/pr_view_172.json"
+printf '[{"id":17201,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"rename this flag","commit_id":"sha-172","submitted_at":"2026-10-05T00:00:00Z"}]' > "$GH_DIR/reviews_172.json"
+out=$(run_posture)
+eq "$(meta_pinned LB3 pr_posture)" "changes_requested@sha-172" "--posture-only records the change request"
+eq "$(pv_labels 172)" "status: needs-review" "…and the label stays, because nothing is acting on the PR yet"
+out=$(run_route)
+has "$(meta LB3 pr_comment_disposition)" "rework:" "--route-comments-only routes the batch into a rework child"
+eq "$(pv_labels 172)" "status: working" "…and the label moves to working in the same arm"
+
+echo "# …the full pass re-derives after its own posture write, over the label its sweep just wrote"
+# The sweep at the top of the anchor writes needs-review off the posture the bead
+# still carries. The approval the same pass then records has to move the label
+# again, and that works only if the second call reads the PR's labels afresh
+# rather than the list the pass read before its sweep changed them.
+store "[$(anchor LB4 173 ',"pr_posture":"review_required@sha-173@2026-10-01T00:00:00Z","pr_merge_state":"CLEAN@sha-173"')]"
+prview 173 OPEN CLEAN MERGEABLE | jq -c '.reviewDecision = "APPROVED" | .labels = [{name: "status: working"}]' > "$GH_DIR/pr_view_173.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "pr edit 173 --repo github.com/zook/gc-toolkit --add-label status: needs-review" "the sweep writes needs-review off the recorded posture first"
+eq "$(meta_pinned LB4 pr_posture)" "approved@sha-173" "the same pass then records the approval"
+eq "$(pv_labels 173)" "status: working" "…and the label follows the approval, not the value the sweep wrote"
+
+rm -f "$SD/pr-status-label.sh"
 
 echo "# with GC_RECONCILE_BD_CACHE set, a rework mint invalidates the dedup so a re-probe files no twin"
 # A CONFLICTING anchor mints one rework child; mint_rework_child drops the
