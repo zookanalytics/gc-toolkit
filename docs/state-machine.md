@@ -226,10 +226,12 @@ left behind, migrated. The full lane state machine is
 merge rule**. `merge.sh` requires every PR to carry a latest APPROVED review by
 an account other than the city's, with a standing CHANGES_REQUESTED from any
 other account a veto. An approval stands across later pushes until it is
-dismissed, so it counts whatever commit it was given at. No `check.approval`
-marker and no `check_set` token arms it or opts out, and GitHub branch
-protection is an extra layer, not the authority. `lifecycle/lifecycle.toml`
-records the rule.
+dismissed, so it counts whatever commit it was given at. A dismissed review is
+dropped before each reviewer's latest review is taken, so it neither approves
+nor vetoes, and it does not hide its author's older approval. No
+`check.approval` marker and no `check_set` token arms it or opts out, and
+GitHub branch protection is an extra layer, not the authority.
+`lifecycle/lifecycle.toml` records the rule.
 What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check
 verdicts** (component-model I7). A verdict binds to no commit: the reviewed oid
