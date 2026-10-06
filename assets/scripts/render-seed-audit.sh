@@ -437,19 +437,31 @@ open(sys.argv[2], "w", encoding="utf-8").write(src.replace("@@ROOT@@", os.enviro
     rm -f "$CITY/city.toml.in"
 }
 
-# Every gc call runs through here. `env -i` is not tidiness: an inherited
-# GC_CITY would point the render at the operator's live city, and inherited
+# Every gc call runs through here, and the render has to be hermetic against two
+# ambient inputs: the environment and the working directory.
+#
+# `env -i` handles the environment. It is not tidiness: an inherited GC_CITY
+# would point the render at the operator's live city, and inherited
 # GC_RIG/GC_AGENT/GC_SESSION_* leak the CALLER's identity into the rendered
 # prompt (a polecat running this by hand renders its own agent name and worktree
-# path into the artifact). Scrubbing is what makes the output depend on the
-# scenario alone.
+# path into the artifact).
+#
+# `cd "$CITY"` handles the working directory, which `env -i` does not scrub. `gc`
+# discovers a city by walking up from cwd, and this script runs from whatever
+# worktree invoked it, which for every polecat is one nested inside the live
+# city. The explicit `--city "$CITY"` is meant to settle which city is in scope,
+# but whether an explicit flag beats cwd discovery is the running binary's call,
+# and the synthetic city exists precisely so the render depends on nothing
+# outside this repo. Running from "$CITY" makes the upward walk resolve the
+# synthetic city under either precedence, so scrubbing the environment and
+# pinning the cwd are together what make the output depend on the scenario alone.
 gcq() {
-    env -i \
+    ( cd "$CITY" && env -i \
         PATH="$PATH" \
         HOME="$HOME" \
         TERM=dumb \
         NO_COLOR=1 \
-        gc --city "$CITY" "$@"
+        gc --city "$CITY" "$@" )
 }
 
 synth_city

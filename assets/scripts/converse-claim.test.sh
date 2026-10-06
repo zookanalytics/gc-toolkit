@@ -147,6 +147,20 @@ is   "no open demand on the item at all is BEGAN=no" "$(began)" "no"
 run STALL_ROOT= DEMAND_ITEM=g
 is   "with no stall_root the item falls back to the group, and its gate still rechecks" "$(began)" "recheck"
 
+echo "── an anchored hold files its demand on the VISIT: still BEGAN=recheck ──"
+# A PR-anchor conversation files its demand on the visit, not the item. A hold
+# whose gc.hold_demand stamp did not persist must still read as a live wait off
+# that visit demand — else the caller closes an engaged sitting as a dead premise
+# and orphans the demand on the visit it just closed.
+run DEMAND_ITEM=v-x
+is   "a demand gating the visit reads BEGAN=recheck, not no" "$(began)" "recheck"
+has  "…and the hold verdict stands" "action=hold bead=v-x group=g reason=already-underway" "$OUT"
+# The pre-fix reader keyed only on the item, so a visit-gating demand read as a
+# dead claim — the same regression the item-gating control above proves, on the
+# anchored path the Phase A change introduced.
+oldbegan_visit() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_ITEM=v-x bash "$TMPD/oldread" item-x ); }
+is   "the pre-fix reader misjudges a visit-gating demand as NO" "$(oldbegan_visit)" "no"
+
 echo "── the other top-level verdicts still hold ──"
 run CLAIM_MODE=nowork
 has  "an empty claim drains as no-work" "action=drain reason=no-work" "$OUT"
