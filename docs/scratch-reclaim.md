@@ -136,6 +136,8 @@ in the total.
 
 ## What it does not touch
 
-Scope is the harness scratch root. Other `/tmp` tenants — worktrees, build
-roots, tool temp directories — are their own owners' to reclaim, and a
-horizon on `/tmp` as a whole is the host's policy, not the pack's.
+Scope is the harness scratch root. Other `/tmp` tenants are reclaimed
+elsewhere: build and test scratch left by killed or crashed runs is
+`build-scratch-reap.sh`'s, the worktrees of closed beads are
+`worktree-reap.sh`'s, and a horizon on `/tmp` as a whole is the host's policy,
+not the pack's.
