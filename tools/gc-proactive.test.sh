@@ -168,6 +168,55 @@ printf 'not json' > "$TMP/roots.json"
 IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
 has "$IDS" "tk-live" "(INFLIGHT-FAILOPEN) with the roots unreadable, the bead stays a candidate (gc sling's own check still refuses it)"
 
+# --- deliverable: the store-ownership arm -----------------------------------
+# A rig-scope pool only claims beads in its own store, so `deliverable <target>
+# <bead>` answers no when the target's rig does not own the bead's id prefix (the
+# cross-store route gc sling refuses as CrossStoreRouteError), and falls through
+# to the roster check when they agree. The fixture seam feeds rigs.json/agents.json
+# instead of `gc rig list` / `gc agent list`.
+cat > "$TMP/rigs.json" <<'JSON'
+{"rigs":[
+  {"name":"gc-toolkit","prefix":"tk","path":"/x/gc-toolkit"},
+  {"name":"gascity","prefix":"gc","path":"/x/gascity"},
+  {"name":"loomington","prefix":"lx","path":"/x/loomington"}]}
+JSON
+cat > "$TMP/agents.json" <<'JSON'
+{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}
+JSON
+
+echo "# deliverable refuses a cross-store route, by rig prefix"
+set +e
+OUT="$(bash "$SCRIPT" deliverable gascity/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(XSTORE-NO) a tk- bead routed at a gascity pool is refused"
+has "$OUT" "cross-store" "(XSTORE-NO) …naming the dimension"
+has "$OUT" "CrossStoreRouteError" "(XSTORE-NO) …tying it to the sling guard it mirrors"
+
+set +e
+OUT="$(bash "$SCRIPT" deliverable gc-toolkit/gc-toolkit.converse lx-300fe 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(XSTORE-CITY) a city-store (lx-) bead routed at a rig pool is refused"
+
+echo "# deliverable falls through to the roster when target and bead share a store"
+set +e
+OUT="$(bash "$SCRIPT" deliverable gc-toolkit/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(XSTORE-SAME) a tk- bead routed at a gc-toolkit pool passes the store arm"
+has "$OUT" "yes" "(XSTORE-SAME) …and the roster arm answers yes for a present pool"
+
+echo "# the store arm is skipped without a bead argument (backward compatible)"
+set +e
+OUT="$(bash "$SCRIPT" deliverable gc-toolkit/gc-toolkit.polecat 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(XSTORE-NOBEAD) with no bead named, only the roster arm runs"
+
+echo "# an unreadable rig list is not evidence of a cross-store route (positive finding only)"
+rm -f "$TMP/rigs.json"
+set +e
+OUT="$(bash "$SCRIPT" deliverable gascity/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+hasnt "$OUT" "cross-store" "(XSTORE-UNREADABLE) with no rig list, the store arm does not fire"
+
 echo
 echo "gc-proactive stand-down: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
