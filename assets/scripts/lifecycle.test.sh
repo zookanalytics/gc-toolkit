@@ -155,6 +155,29 @@ hasnt "$(cat "$STUB_GC_LOG")" "bd close" "the close never uses the \`bd close\` 
 has "$out" '"ok":true' "--json reports the transition"
 has "$out" '"from":"pull_request"' "--json names the from state"
 
+# --- a closed-state transition sheds every live objection ------------------------
+# A merged (closed) bead carries no live objection: a rejection_reason or a
+# blocked_reason still on it contradicts the record. The close clears both at
+# this one writer, so a caller that lists NEITHER still lands a clean terminal
+# record — the divergence the per-caller --unset enumeration used to allow.
+echo "# transition closed-state sheds live objections"
+store '[{"id":"obj-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","rejection_reason":"bounced for X","blocked_reason":"merge_hold: do not merge until Y"}}]'
+out="$("$SUT" transition obj-1 --to merged --expect pull_request --close \
+  --set merged_sha=def456 2>&1)"; rc=$?
+eq "$rc" 0 "merged-close exits 0 though neither reason is listed"
+eq "$(meta obj-1 merge_result)" "merged" "merge_result written"
+eq "$(meta obj-1 rejection_reason)" "<absent>" "rejection_reason cleared by the close, unlisted"
+eq "$(meta obj-1 blocked_reason)" "<absent>" "blocked_reason cleared by the close, unlisted"
+eq "$(bstatus obj-1)" "closed" "--close landed"
+
+# The clear is scoped to the terminal land: a non-closed transition keeps a
+# pre-existing blocked_reason (the mirror of the rejection_reason control in the
+# unanchored case below).
+store '[{"id":"obj-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","blocked_reason":"merge_hold: still blocked"}}]'
+out="$("$SUT" transition obj-2 --to unanchored --route rig/polecat 2>&1)"; rc=$?
+eq "$rc" 0 "non-closed transition exits 0"
+eq "$(meta obj-2 blocked_reason)" "merge_hold: still blocked" "blocked_reason survives a non-closed transition"
+
 # --- --set-dated: the @<since> compare-and-preserve rule ------------------------
 # The operator's queue is ordered by how long a row has been owed, so the instant
 # a turn began has to survive every pass that re-reaches the same verdict at the

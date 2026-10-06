@@ -199,6 +199,19 @@ C="$("$SCRIPT" --ids "b-assigned,b-cr" --json 2>/dev/null)"
 eq "$(verdict_of "$C" b-assigned)" "worked"   "an assignee alone is enough to read as worked"
 eq "$(verdict_of "$C" b-cr)"       "resolved" "closed outranks a leftover route — the disposition differs"
 
+echo "── a work bead marked only by gc.execution_routed_to reads as worked ──"
+# A slung work bead's claim moves its pool route to gc.execution_routed_to and
+# leaves assignee and gc.routed_to empty. It is unassigned and unblocked, so it
+# stays in the ready set — which is why the miss surfaced as "idle", not
+# "not-ready", and a sitting re-slung work already in flight.
+jq -nc --argjson b "[$(bead b-exec open '{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}')]" '$b' > "$STUB_BEADS"
+jq -nc '[{id:"b-exec"}]' > "$STUB_READY"
+C="$("$SCRIPT" --ids "b-exec" --json 2>/dev/null)"
+eq "$(verdict_of "$C" b-exec)" "worked" "an execution route alone reads as worked, not idle"
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-exec")] | .[0].detail | test("execution_routed_to=gc-toolkit/gc-toolkit.polecat")' >/dev/null 2>&1 \
+    && ok "the worked detail names the execution route" \
+    || bad "the worked detail names the execution route" "$(printf '%s' "$C" | jq -r '[.new[] | select(.id == "b-exec")] | .[0].detail')"
+
 # --- 2. report-don't-hide on every failure path ------------------------------
 echo "── the bead read failing prints NO census (a partial one looks complete) ──"
 printf 'FAIL\n' > "$STUB_BEADS"

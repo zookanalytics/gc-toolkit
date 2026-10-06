@@ -57,7 +57,7 @@ default = ""
 
 [vars.lint_command]
 description = "Lint command. Empty = skip."
-default = ""
+default = "tools/lint.sh $(git diff --name-only origin/main...HEAD)"
 
 [vars.test_command]
 description = "Test command (when run_tests is true)."
@@ -84,7 +84,7 @@ description = "After a direct merge, best-effort fast-forward the rig's canonica
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a non-city APPROVED review at the live head), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
 default = "correctness,triage"
 
 [[steps]]
@@ -137,13 +137,21 @@ returns a bead here clears the field first.
 # tr -d '[:cntrl:]' drops the control bytes JSON forbids raw before the parse.
 # The shape guard then fails CLOSED on anything still unparseable, so a broken
 # read ends the turn visibly instead of reading as an empty queue.
-WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=25 --json | tr -d '[:cntrl:]')
+# The window is unbounded (--limit=0). Selection orders by priority then
+# created_at, but bd sorts server-side on one field at a time, so any bounded
+# single-key window can truncate off the bead this sort should pick: a newer
+# high-priority handoff would fall past a created-ordered window, and the oldest
+# within a band would fall past a priority-ordered one. Fetching the whole
+# assigned-handoff set lets the client-side sort below see every candidate.
+# created_at ranks wait time; updated_at does not, because any later write to a
+# waiting handoff re-stamps it, so it tracks last-touched rather than age.
+WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=0 --json | tr -d '[:cntrl:]')
 if ! printf '%s' "$WORK_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "find-work: work list did not parse as a JSON array (bd unreadable, or a payload no scrub could rescue) — ending the turn without claiming; the next patrol retries." >&2
   gc runtime drain-ack
   exit 0
 fi
-WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
+WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
 WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
 if [ -n "$WORK_PARKED" ]; then
   echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the cadence, never by find-work; flag only — do not re-gate it, do not clear it here." >&2
@@ -151,9 +159,13 @@ fi
 # <<< find-work-select
 ```
 
-`${GC_RIG:+--rig}` scopes to this refinery's rig store; `--limit=25` (not 1)
-because the filter is client-side — a parked anchor at the head of a 1-row
-window would starve a queue with real work behind it. Flag, never rewrite.
+`${GC_RIG:+--rig}` scopes to this refinery's rig store; `--limit=0` fetches the
+whole assigned-handoff set, because selection orders by priority then created_at
+and bd sorts on one field server-side, so any bounded window could truncate off
+the bead the client-side sort would pick. An unbounded window also means a
+parked anchor can never crowd real work out of it; the client-side filter drops
+the anchors and the sort takes the highest-priority, oldest-within-band
+handoff. Flag, never rewrite.
 
 If found: confirm `metadata.branch` exists (`gc bd show $WORK --json`),
 default `metadata.target` to {{target_branch}}, note the id, close this
@@ -349,6 +361,25 @@ PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
+# A target under polecat/ is another bead's per-bead PR head, so work landing
+# there folds into that PR rather than opening one of its own. In mr mode with
+# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
+# which a fold never wants, so resolve it to direct: the branch merges onto the
+# PR head and the PR re-reviews at the new head. Shaped targets (the rig
+# default, integration/, a named branch) stay mr, and so does a bead already
+# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
+# a kept branch and this flip cannot disagree.
+MS_FOLD_IN=
+MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
+MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
+case "$MS_TARGET" in
+  polecat/*)
+    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
+      MERGE_STRATEGY="direct"
+      MS_FOLD_IN=1
+    fi ;;
+esac
 # <<< merge-strategy-resolve
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 # Nothing PR-shaped on the bead means "no PR will ever want this branch" only
@@ -362,6 +393,8 @@ elif [ "$MERGE_STRATEGY" != "direct" ]; then
   echo "keeping origin/$BRANCH — merge_strategy=$MERGE_STRATEGY; the PR pipeline needs the branch"
 elif [ "${PR_SHAPED:-1}" != "0" ]; then
   echo "keeping origin/$BRANCH — the bead already records a PR"
+elif [ -n "$MS_FOLD_IN" ]; then
+  echo "keeping origin/$BRANCH — it folds into the PR at $MS_TARGET and carries the rework"
 else
   git push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
 fi
@@ -472,6 +505,25 @@ TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "{{target_bra
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
+# A target under polecat/ is another bead's per-bead PR head, so work landing
+# there folds into that PR rather than opening one of its own. In mr mode with
+# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
+# which a fold never wants, so resolve it to direct: the branch merges onto the
+# PR head and the PR re-reviews at the new head. Shaped targets (the rig
+# default, integration/, a named branch) stay mr, and so does a bead already
+# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
+# a kept branch and this flip cannot disagree.
+MS_FOLD_IN=
+MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
+MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
+case "$MS_TARGET" in
+  polecat/*)
+    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
+      MERGE_STRATEGY="direct"
+      MS_FOLD_IN=1
+    fi ;;
+esac
 # <<< merge-strategy-resolve
 EXISTING_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.existing_pr // empty')
 if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
@@ -793,7 +845,8 @@ needs = ["patrol-summary"]
 description = """
 Pour the next wisp BEFORE burning this one, and GUARD the assign — a poured
 but unassigned wisp reaches no hook and drops the loop. Forward every
-declared var: a --root-only pour materializes no defaults.
+declared var, so a value chosen at the startup pour is not silently
+replaced by the formula default from the next cycle on.
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
 current wisp has to work: a wisp is an EPHEMERAL molecule, which means

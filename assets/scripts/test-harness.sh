@@ -33,6 +33,12 @@ harness_init() {
   # exercise the port says so by overriding this after harness_init, the way
   # lifecycle.test.sh does for its second arm.
   export GCTK_BIN=none
+  # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
+  # bead reads prefer the running supervisor's API, and these suites run inside
+  # a live city whose supervisor is up, so left alone a read would answer from
+  # that live store instead of the stub. GC_NO_API=1 keeps every read on the
+  # `gc bd` subprocess the stub serves (services/gctk/internal/daemon).
+  export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_GC_LOG="$TMP/gc.log"
@@ -43,12 +49,12 @@ harness_init() {
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
-  export STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
+  export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
-  export STUB_PR_EDIT_RC=0
+  export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
@@ -176,6 +182,11 @@ case "$verb" in
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
+    # STUB_LIST_FAIL_ON fails only the list reads whose argv carries that text
+    # (e.g. one --metadata-field), so a suite can break one enumeration of several.
+    if [ -n "${STUB_LIST_FAIL_ON:-}" ]; then
+      case "$*" in *"$STUB_LIST_FAIL_ON"*) echo "gc: simulated list failure" >&2; exit 1 ;; esac
+    fi
     statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -352,7 +363,16 @@ case "$verb" in
           case "$1" in --type=*) ty="${1#--type=}" ;; --type) shift; ty="${1:-}" ;; esac
           shift || true
         done
-        printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D" ;;
+        # Real bd reads `dep add <blocked> <blocker> --type blocks` with the
+        # SECOND operand as the blocker — `dep add Y X` is the documented
+        # equivalent of `dep X --blocks Y`. Stored rows are blocker-first
+        # ("A|blocks|B" = A blocks B), so a blocks add swaps its operands to match;
+        # every other edge type keeps the source-first orientation.
+        if [ "$ty" = "blocks" ]; then
+          printf '%s|%s|%s\n' "$b" "$ty" "$a" >> "$D"
+        else
+          printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D"
+        fi ;;
       remove|rm)
         # gc bd dep remove <issue> <depends-on>: drop the edge with that
         # orientation, whatever its type. Real bd prints ✓ and exits 0 even for
@@ -408,6 +428,7 @@ case "$sub" in
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment) exit 0 ;;
+      ready)   exit "${STUB_PR_READY_RC:-0}" ;;
       edit)
         # The edit MUTATES the fixture the next `pr view` serves, so a second
         # pass over an unchanged store is idempotent because the caller read
@@ -649,6 +670,13 @@ case "$sub" in
         [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
         [ -z "${STUB_ISSUE_LIST_RC:-}" ] || exit "$STUB_ISSUE_LIST_RC"
         f="$G/issue_comments_$n.json"
+        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
+      */issues/*/timeline*)
+        # A PR's timeline events ({event: ...} rows). An absent fixture is a PR
+        # with no events; STUB_TIMELINE_RC models a timeline read that fails.
+        n="${path##*/issues/}"; n="${n%%/*}"
+        [ -z "${STUB_TIMELINE_RC:-}" ] || exit "$STUB_TIMELINE_RC"
+        f="$G/timeline_$n.json"
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */rules/branches/*)
         b="${path##*/rules/branches/}"
