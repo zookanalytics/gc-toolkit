@@ -228,7 +228,7 @@ append_section() { # <body-file> <section-file> <out-file>
 # repeating the pre-open sign-off claim.
 refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
-  local summary want cur desc checkset branch target SECTION
+  local summary want cur desc checkset branch target phased SECTION
   summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty' 2>/dev/null)
   [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || return 1
   prs_marker_state "$bin" || return 1
@@ -243,8 +243,12 @@ refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""' 2>/dev/null)
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty' 2>/dev/null)
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // "main"' 2>/dev/null)
+  # The gates the handoff bullet names, resolved at this head. An unreadable set
+  # leaves the region as it stands this pass rather than publish a bullet that
+  # names no gate.
+  phased=$(prs_resolve_phased "$checkset" "$head_oid") || return 1
   SECTION=$(mktemp "$STACK_TMP/summary.XXXXXX") || return 1
-  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh > "$SECTION" \
+  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh "$phased" > "$SECTION" \
      || [ ! -s "$SECTION" ]; then
     rm -f "$SECTION"; return 1
   fi

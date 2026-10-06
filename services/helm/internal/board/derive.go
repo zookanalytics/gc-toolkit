@@ -1005,9 +1005,8 @@ const (
 	// stop looking.
 	ConversationUnknown = AxisUnknown
 
-	ApprovalRequired    = "required"
-	ApprovalMet         = "met"
-	ApprovalNotRequired = "not_required"
+	ApprovalRequired = "required"
+	ApprovalMet      = "met"
 )
 
 // The anchor metadata the axes are read from.
@@ -1132,21 +1131,27 @@ func prMachine(a Anchor, blockers []Blocker) string {
 	return AxisUnknown
 }
 
-// prApproval answers one question: is GitHub withholding the merge for a human
-// review? It reads the posture pr-facts.sh records off the review decision it
-// already fetches, and the mapping is TOTAL over the posture's value set,
-// because a partial one leaves the rest to be invented.
+// prApproval answers one question: does this pull request still owe an external
+// approval before it can merge? Approval is a UNIVERSAL merge rule — merge.sh
+// holds every open pull request until it carries a latest APPROVED review at the
+// live head from an account other than the city's — so the only satisfied state
+// is an approval GitHub reflects; every other posture still owes one. It reads
+// the posture pr-facts.sh records off the review decision it already fetches, and
+// the mapping is TOTAL over the posture's value set, because a partial one leaves
+// the rest to be invented.
 //
-//	review_required, changes_requested -> required
-//	approved                           -> met
-//	commented, none                    -> not_required
+//	approved                                             -> met
+//	review_required, changes_requested, commented, none  -> required
 //
-// `not_required` has to be reachable from an ordinary row: most pull requests
-// carry no protection rule and no review, so if `none` fell through to unknown
-// the field would report a gap that is not there and hold the coverage sentence
-// open forever. `changes_requested` is `required` because the requirement
-// stands and is unmet, and a pull request GitHub is blocking must never render
-// as one it will let through.
+// No posture reads as needing no approval. A pull request on an integration/*
+// base, or in a repo with no required-review rule, reports reviewDecision empty —
+// posture `none` — and still owes the approval, because merge.sh holds it every
+// pass until one stands. A pull request GitHub is blocking must never render as
+// one it will let through, and neither must one the city's own merge rule is
+// holding. (A posture read off reviewDecision can lag an approval merge.sh
+// computes from the reviews list directly, so an approved PR on a rule-less base
+// reads `required` until the next merge pass lands it — conservative, and
+// transient.)
 //
 // The reference head is the one pr.machine was last recorded at — the newest
 // head the merge cadence actually resolved. A posture pinned to any other head
@@ -1164,12 +1169,10 @@ func prApproval(a Anchor) string {
 		return AxisUnknown
 	}
 	switch posture {
-	case postureReviewRequired, postureChangesRequested:
-		return ApprovalRequired
 	case postureApproved:
 		return ApprovalMet
-	case postureCommented, postureNone:
-		return ApprovalNotRequired
+	case postureReviewRequired, postureChangesRequested, postureCommented, postureNone:
+		return ApprovalRequired
 	}
 	return AxisUnknown
 }

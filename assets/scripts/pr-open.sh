@@ -7,15 +7,18 @@
 # CLOSED-unmerged-only PR is a headstone — open a fresh PR noting the superseded
 # one (unless the dead head IS the live head: that close was a decision about
 # this exact commit).
-# Otherwise: holds gate the create path; require every lane the anchor's
-# check_set declares to DERIVE green (lane-state.sh, the same helper merge.sh
-# asks) and no must-fix finding on the anchor to be open (finding.sh);
-# `gh pr create` non-draft pinned to origin, body summarizing the polecat's
+# Otherwise: holds gate the create path; require every pre-open lane the
+# anchor's check_set declares at the head to DERIVE green (lane-state.sh, the
+# same helper merge.sh asks) and no must-fix finding on the anchor to be open
+# (finding.sh); `gh pr create` pinned to origin — a draft when the check_set
+# names an open-as-draft check, ready otherwise — body summarizing the polecat's
 # `pr_summary` with the dispatch text demoted (the description only when no
 # summary was carried), read back BY NUMBER, refuse a moved head, replay the
 # recorded verdict as a COMMENT (never an approval);
 # then ONE lifecycle.sh transition to pull_request carrying
 # pr_url/pr_number/merged_target. Every failure leaves pre_open_gate.
+# A second arm flips a draft the refinery opened to ready once its pre-open and
+# open-as-draft gates read green.
 # The composed body lives in a delimited region (compose_managed, between the
 # gc:pr-summary markers), so an adoption re-splices a fresh region while keeping
 # text an operator or a later arm (pr-stack) added; the region writes its own
@@ -58,6 +61,13 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # disagree), and finding reads the anchor's open must-fix findings.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The one resolver of the check index: given a check_set and a transition, it
+# names the checks that gate it (dropping the non-lanes none/off/approval). Each
+# anchor's gates are resolved once, at the head, and that one answer feeds the
+# create gate, the draft decision and the published body. Without it nothing can
+# be gated, so nothing opens.
+REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
+[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); NOTHING is opened or readied this pass" >&2; exit 1; }
 # The single writer of the workflow-owned PR labels. A PR is born check-green with
 # no review yet, so its initial status is needs-review; reconcile derives that (and
 # self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
@@ -131,12 +141,13 @@ cc_title() { # <title> <issue_type> — <title>, guaranteed to open with a type
 
 # Certify one PR row as this anchor's: right repo url, right head branch, OUR
 # head repository (fork gap), not cross-repo, right base. 0=ours, 1=not ours,
-# 2=unreadable (the caller must do nothing for the branch).
-CERT_NUM=""; CERT_URL=""; CERT_STATE=""; CERT_HEAD_OID=""; CERT_MERGED_AT=""
+# 2=unreadable (the caller must do nothing for the branch). CERT_IS_DRAFT and
+# CERT_AUTHOR carry the row's draft state and author login when it lists them.
+CERT_NUM=""; CERT_URL=""; CERT_STATE=""; CERT_HEAD_OID=""; CERT_MERGED_AT=""; CERT_IS_DRAFT=""; CERT_AUTHOR=""
 certify_row() { # <id> <row-json> <branch> <target> [<want-num>]
   local id="$1" row="$2" br="$3" tgt="$4" want="${5:-}"
   local num url state base head hrepo cross goturl
-  CERT_NUM=""; CERT_URL=""; CERT_STATE=""; CERT_HEAD_OID=""; CERT_MERGED_AT=""
+  CERT_NUM=""; CERT_URL=""; CERT_STATE=""; CERT_HEAD_OID=""; CERT_MERGED_AT=""; CERT_IS_DRAFT=""; CERT_AUTHOR=""
   num=$(printf '%s' "$row" | jq -r '.number // "" | tostring' 2>/dev/null)
   url=$(printf '%s' "$row" | jq -r '.url // ""' 2>/dev/null)
   state=$(printf '%s' "$row" | jq -r '.state // ""' 2>/dev/null)
@@ -149,6 +160,8 @@ certify_row() { # <id> <row-json> <branch> <target> [<want-num>]
   cross=$(printf '%s' "$row" | jq -r 'if has("isCrossRepository") then (.isCrossRepository | tostring) else "" end' 2>/dev/null)
   CERT_MERGED_AT=$(printf '%s' "$row" | jq -r '(.mergedAt // "") | tostring' 2>/dev/null)
   CERT_HEAD_OID=$(printf '%s' "$row" | jq -r '(.headRefOid // "") | tostring' 2>/dev/null)
+  CERT_IS_DRAFT=$(printf '%s' "$row" | jq -r 'if .isDraft == true then "true" else "false" end' 2>/dev/null)
+  CERT_AUTHOR=$(printf '%s' "$row" | jq -r '(.author.login // "") | tostring' 2>/dev/null)
   if [ -z "$url" ] || [ -z "$state" ] || [ -z "$base" ] || [ -z "$head" ] \
      || [ -z "$hrepo" ] || [ -z "$cross" ] || [ -z "$num" ] || [ -n "${num//[0-9]/}" ]; then
     echo "$PROG: $id branch '$br' — PR identity unreadable (num='$num' url='$url' state='$state' base='$base' head='$head' headrepo='$hrepo' cross='$cross'); NOTHING done this pass" >&2
@@ -169,10 +182,10 @@ certify_row() { # <id> <row-json> <branch> <target> [<want-num>]
 # 1=none, 2=refuse (unreadable/collision), 3=dead only (DEAD_* set).
 DEAD_NUM=""; DEAD_URL=""; DEAD_HEAD=""
 find_pr() { # <id> <branch> <target>
-  local id="$1" br="$2" tgt="$3" json rc row disp best_rank=99 bn="" bu="" bs="" bh=""
+  local id="$1" br="$2" tgt="$3" json rc row disp best_rank=99 bn="" bu="" bs="" bh="" bd="" ba=""
   DEAD_NUM=""; DEAD_URL=""; DEAD_HEAD=""
   json=$(gh pr list --head "$br" --state all --repo "$ORIGIN_REPO_Q" \
-    --json number,url,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository \
+    --json number,url,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,isDraft,author \
     --limit 100 2>/dev/null); rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$json" ] \
      || ! printf '%s' "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -200,6 +213,7 @@ find_pr() { # <id> <branch> <target>
     esac
     if [ "$disp" -lt "$best_rank" ] || { [ "$disp" -eq "$best_rank" ] && [ "$CERT_NUM" -gt "${bn:-0}" ]; }; then
       best_rank="$disp"; bn="$CERT_NUM"; bu="$CERT_URL"; bs="$CERT_STATE"; bh="$CERT_HEAD_OID"
+      bd="$CERT_IS_DRAFT"; ba="$CERT_AUTHOR"
     fi
   done <<ROWS
 $(printf '%s' "$json" | jq -c '.[]' 2>/dev/null)
@@ -212,14 +226,66 @@ ROWS
     fi
     return 1
   fi
-  CERT_NUM="$bn"; CERT_URL="$bu"; CERT_STATE="$bs"; CERT_HEAD_OID="$bh"
+  CERT_NUM="$bn"; CERT_URL="$bu"; CERT_STATE="$bs"; CERT_HEAD_OID="$bh"; CERT_IS_DRAFT="$bd"; CERT_AUTHOR="$ba"
   return 0
 }
 
-flip() { # <id> <url> <num> <target> — ONE atomic lifecycle transition
+flip() { # <id> <url> <num> <target> [<opened-as-draft-oid>] — ONE atomic lifecycle transition
+  # A non-empty 5th arg stamps opened_as_draft on the same transition: the PR was
+  # opened or adopted as a draft the refinery owns the ready-flip of, which the
+  # draft-to-ready arm and gate-ensure read as the open-as-draft stage.
   "$LIFECYCLE" transition "$1" --to pull_request --expect pre_open_gate \
     --set "pr_url=$2" --set "pr_number=$3" --set "merged_target=$4" \
+    ${5:+--set "opened_as_draft=$5"} \
     >/dev/null 2>&1
+}
+
+# Whether an adopted draft PR is one the refinery owns the ready-flip of: a draft
+# the city opened as a draft, which nobody has converted back to draft since. Its
+# author is the city's own login, and its timeline carries no convert_to_draft
+# (the refinery never re-drafts a PR, so any conversion is someone parking it).
+# 0 = the refinery's draft; 1 = someone else's, which is adopted without the
+# marker so its ready flip stays with whoever parked it; 2 = the acting login or
+# the timeline is unreadable, which the caller holds on rather than guess.
+SELF_LOGIN=""
+city_draft() { # <num> <author-login>
+  local conv
+  [ -n "${2:-}" ] || return 2
+  [ -n "$SELF_LOGIN" ] || SELF_LOGIN=$(gh api --hostname "$ORIGIN_HOST" user --jq '.login' 2>/dev/null)
+  [ -n "$SELF_LOGIN" ] || return 2
+  [ "$2" = "$SELF_LOGIN" ] || return 1
+  conv=$(gh api --hostname "$ORIGIN_HOST" --paginate "repos/$ORIGIN_REPO/issues/$1/timeline?per_page=100" \
+    --jq '.[] | select(.event == "convert_to_draft") | .event' 2>/dev/null) || return 2
+  [ -z "$conv" ] || return 1
+  return 0
+}
+
+# --- branch heads: one fetch for the pass ----------------------------------------
+# The create gate resolves its check index at the head the PR opens at, so an
+# anchor's head is read before its lanes are judged. One glob fetch of origin's
+# branches into a private namespace — the way pre-open-rebase.sh observes branches
+# — answers every anchor's head from a local ref, so an anchor parked on a red lane
+# pays no API read for its head, and each head's commit is already here for the
+# resolver's --at read. It runs once, for the first anchor that needs a head. A
+# failed fetch, or a branch it did not bring, falls back to the API read. A head
+# the fetch answered is confirmed against the API before a create (below), so the
+# PR still opens at the head the gate judged.
+HEADS_REF="refs/gc-toolkit/pr-open"
+HEADS_FETCHED=""
+fetched_head() { # <branch> -> sha from the pass fetch, or nothing
+  if [ -z "$HEADS_FETCHED" ]; then
+    if git fetch --prune --quiet --no-tags origin "+refs/heads/*:$HEADS_REF/heads/*" >/dev/null 2>&1; then
+      HEADS_FETCHED=yes
+    else
+      HEADS_FETCHED=no
+      echo "$PROG: could not fetch origin's branches; each head is read from the API this pass" >&2
+    fi
+  fi
+  [ "$HEADS_FETCHED" = yes ] || return 0
+  git rev-parse --verify --quiet "$HEADS_REF/heads/$1^{commit}" 2>/dev/null
+}
+api_head() { # <branch> -> sha from the API, or nothing
+  gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$1" 2>/dev/null | jq -r '.sha // empty' 2>/dev/null
 }
 
 # --- PR body: one delimited region, composed once and re-splice-able ------------
@@ -242,9 +308,10 @@ flip() { # <id> <url> <num> <target> — ONE atomic lifecycle transition
 # reworked summary could not be proven onto a MANAGED body: a missing head oid, an
 # unreadable or unparseable body, a scratch or compose failure, or a failed edit —
 # hold at pre_open_gate and retry rather than flip a managed body known to be behind,
-# the miss the refresh exists to close.
-refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid>
-  local id="$1" num="$2" row="$3" branch="$4" target="$5" head_oid="$6"
+# the miss the refresh exists to close. <phased> is the anchor's gate set resolved
+# at <head_oid>, which the composed handoff bullets name.
+refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid> <phased>
+  local id="$1" num="$2" row="$3" branch="$4" target="$5" head_oid="$6" phased="${7:-}"
   local summary desc checkset body_json CUR SECTION NEW ms rc
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id PR#$num head oid unknown from the PR row; body refresh cannot be composed, anchor stays pre_open_gate (retry next pass)" >&2
@@ -276,7 +343,7 @@ refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid>
     return 1
   fi
   printf '%s' "$body_json" | jq -r '.body // ""' 2>/dev/null | tr -d '\r' > "$CUR"
-  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" > "$SECTION" \
+  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" open "$phased" > "$SECTION" \
      || [ ! -s "$SECTION" ]; then
     rm -f "$CUR" "$SECTION" "$NEW"
     echo "$PROG: $id PR#$num refreshed body could not be composed; anchor stays pre_open_gate (retry next pass)" >&2
@@ -322,7 +389,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pre_open_gate) || 
   echo "$PROG: could not enumerate pre-open anchors; failing loudly rather than reporting a false all-clear" >&2
   exit 1
 }
-[ "$ANCHORS" != "[]" ] || { echo "$PROG: no pre-open anchors"; exit 0; }
+[ "$ANCHORS" != "[]" ] || echo "$PROG: no pre-open anchors to open; the draft-to-ready arm still runs"
 
 # --- visit order: the anchors most likely to open first, each group in rotation
 # The walk's cost grows with the pre-open set, so a deadline can stop it. An
@@ -376,12 +443,40 @@ while IFS= read -r tagged; do
       # before the flip, or the merge surface stays stale. A refresh that cannot
       # land holds the anchor at pre_open_gate for the next pass rather than
       # flipping a body it knows to be behind. A MERGED PR is a landed record and
-      # is flipped untouched.
-      if [ "$CERT_STATE" = OPEN ] \
-         && ! refresh_pr_body "$id" "$CERT_NUM" "$row" "$branch" "$target" "$CERT_HEAD_OID"; then
-        skipped=$((skipped + 1)); continue
+      # is flipped untouched. An OPEN PR's gates are resolved once, at its head,
+      # for both the body refresh and the draft decision below; an unreadable set
+      # holds the adoption this pass.
+      adopt_draft=""
+      if [ "$CERT_STATE" = OPEN ]; then
+        acs=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
+        if [ -z "$CERT_HEAD_OID" ]; then
+          echo "$PROG: $id PR#$CERT_NUM head oid unknown from the PR row; its gates cannot be resolved nor its body composed, anchor stays pre_open_gate (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
+        if ! APHASED=$(prs_resolve_phased "$acs" "$CERT_HEAD_OID" "$REVIEW_CHECKS"); then
+          echo "$PROG: $id PR#$CERT_NUM gate set unreadable at its head ${CERT_HEAD_OID:0:8}; anchor stays pre_open_gate (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
+        if ! refresh_pr_body "$id" "$CERT_NUM" "$row" "$branch" "$target" "$CERT_HEAD_OID" "$APHASED"; then
+          skipped=$((skipped + 1)); continue
+        fi
+        # Record whether this adopted PR is a draft the refinery owns the ready-flip
+        # of: an OPEN draft the city opened as a draft and nobody has re-drafted
+        # since (city_draft), whose check_set names an open-as-draft check at its
+        # head. Without the marker the draft-to-ready arm never surfaces it, which
+        # is right for any other draft: an operator's parked PR stays parked. A
+        # ready or MERGED PR takes none.
+        if [ "$CERT_IS_DRAFT" = true ] && [ -n "$(prs_band "$APHASED" open-as-draft)" ]; then
+          city_draft "$CERT_NUM" "$CERT_AUTHOR"
+          case $? in
+            0) adopt_draft="$CERT_HEAD_OID" ;;
+            1) echo "$PROG: $id PR#$CERT_NUM is a draft the refinery did not open as one (author '${CERT_AUTHOR:-?}', or re-drafted since); adopted without opened_as_draft, so its ready flip stays with whoever parked it" ;;
+            *) echo "$PROG: $id PR#$CERT_NUM draft ownership unreadable (acting login or PR timeline); anchor stays pre_open_gate (retry next pass)" >&2
+               skipped=$((skipped + 1)); continue ;;
+          esac
+        fi
       fi
-      if flip "$id" "$CERT_URL" "$CERT_NUM" "$target"; then
+      if flip "$id" "$CERT_URL" "$CERT_NUM" "$target" "$adopt_draft"; then
         flipped=$((flipped + 1))
         # Adopting an existing PR: reconcile its label from the anchor's current
         # rework state rather than assuming ready. Best-effort.
@@ -411,11 +506,9 @@ while IFS= read -r tagged; do
     held=$((held + 1)); continue
   fi
 
-  # The gate: every lane the anchor's check_set declares DERIVES green through
-  # lane-state.sh (the same helper merge.sh asks), and no must-fix finding on the
-  # anchor is open. green is a state of the lane, not a claim about a commit, so
-  # it is judged before the head fetch below: a held anchor pays no head fetch,
-  # and no PR is published over work the city has already ruled must change.
+  # The gate: no open must-fix finding on the anchor, then every pre-open lane
+  # the anchor's check_set declares DERIVES green through lane-state.sh (the same
+  # helper merge.sh asks). green is a state of the lane, not a claim about a commit.
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   # Empty is never the checkless opt-out: that is the 'none' sentinel. Empty
   # means never normalized, and gate-ensure stamps the declared default when it
@@ -424,25 +517,12 @@ while IFS= read -r tagged; do
     echo "$PROG: $id branch '$branch' has no normalized check_set (empty is never the 'none' opt-out); no PR opened — gate-ensure stamps the default"
     held=$((held + 1)); continue
   fi
-  # A lane derives green, does not, or the store would not read; the last two
-  # both hold, so an unreadable lane is never published as green. --no-remote:
-  # at pre-open there is no PR yet, so a GitHub approval cannot back a lane here.
-  UNGREEN=""
-  while IFS= read -r g; do
-    [ -n "${g:-}" ] || continue
-    "$LANE_STATE" green --anchor "$id" --lane "$g" --no-remote && continue
-    UNGREEN="$g"; break
-  done <<GATES
-$(gates_of "$checkset")
-GATES
-  if [ -n "$UNGREEN" ]; then
-    echo "$PROG: $id branch '$branch' lane '$UNGREEN' does not derive green; held"
-    held=$((held + 1)); continue
-  fi
   # No PR over an unfixed must-fix finding — the same finding graph merge.sh's
-  # blocker probe holds on, read here through the shared helper. open-must-fix
-  # exits 0 naming the open must-fix findings, 1 when there are none, 2 when the
-  # store would not read; 0 and 2 both hold rather than publish blind.
+  # blocker probe holds on, read through the shared helper. It is row-local and
+  # judged BEFORE the head read, so an anchor the city has ruled must change never
+  # reads a head. open-must-fix exits 0 naming the open must-fix findings, 1
+  # when there are none, 2 when the store would not read; 0 and 2 both hold rather
+  # than publish blind.
   MUSTFIX=$("$FINDING" open-must-fix --anchor "$id"); mfrc=$?
   if [ "$mfrc" -eq 0 ]; then
     echo "$PROG: $id branch '$branch' has an open must-fix finding ($(printf '%s' "$MUSTFIX" | tr '\n' ' ' | sed 's/ *$//')); held"
@@ -451,15 +531,63 @@ GATES
     echo "$PROG: $id branch '$branch' must-fix finding read unreadable (rc=$mfrc); held"
     held=$((held + 1)); continue
   fi
-
-  # Every check_set check reads green — the only cases left need the live head:
-  # what the PR is opened at, and (below) whether a dead PR was closed at
-  # exactly this commit.
-  HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
-  head_oid=$(printf '%s' "$HEAD_JSON" | jq -r '.sha // empty' 2>/dev/null)
+  # The head the PR opens at, read here — before the gate — because the create
+  # gate resolves its check index at that head, the same commit gate-ensure
+  # dispatch resolves against: a branch whose head index differs from the
+  # refinery's working tree (one that moves a check's phase, or adds a new
+  # open-as-draft check) is gated by its own index. The pass fetch answers it
+  # locally (fetched_head), so an anchor parked on a red lane pays no API read
+  # for its head; the API answers when the fetch could not. A held,
+  # unnormalized, or must-fix-held anchor returned above reads no head at all.
+  head_oid=$(fetched_head "$branch"); head_src=fetch
+  if [ -z "$head_oid" ]; then head_oid=$(api_head "$branch"); head_src=api; fi
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id branch '$branch' head unresolved; skip (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
+  fi
+  # The anchor's gates, resolved ONCE at the head: the pre-open band is the create
+  # gate, the open-as-draft band decides whether the PR opens as a draft, and the
+  # whole set is what the published body names. One answer feeds all three, so
+  # the gate, the draft decision and the body cannot disagree. An unreadable set
+  # holds.
+  if ! PHASED=$(prs_resolve_phased "$checkset" "$head_oid" "$REVIEW_CHECKS"); then
+    echo "$PROG: $id branch '$branch' gate set unreadable at ${head_oid:0:8}; held"
+    held=$((held + 1)); continue
+  fi
+  PREOPEN_GATES=$(prs_band "$PHASED" pre-open)
+  DRAFT_GATES=$(prs_band "$PHASED" open-as-draft)
+  # The create gate waits only on the PRE-OPEN checks — the ones that read the
+  # diff and must be green before the PR exists. open-as-draft checks (demo) run
+  # against the open PR and gate the draft->ready flip, not the create.
+  # --no-remote on the lane read: at pre-open there is no PR yet, so no GitHub
+  # approval can back a lane here. A lane derives green, does not, or the store
+  # would not read; the last two both hold, so an unreadable lane is never
+  # published as green.
+  UNGREEN=""
+  while IFS= read -r g; do
+    [ -n "${g:-}" ] || continue
+    "$LANE_STATE" green --anchor "$id" --lane "$g" --no-remote && continue
+    UNGREEN="$g"; break
+  done <<GATES
+$PREOPEN_GATES
+GATES
+  if [ -n "$UNGREEN" ]; then
+    echo "$PROG: $id branch '$branch' lane '$UNGREEN' does not derive green; held"
+    held=$((held + 1)); continue
+  fi
+  # A head the pass fetch answered may have moved since; confirm it against the API
+  # before publishing, so the PR opens at the head the gate judged. A moved branch
+  # re-gates at its new head next pass.
+  if [ "$head_src" = fetch ]; then
+    live=$(api_head "$branch")
+    if [ -z "$live" ]; then
+      echo "$PROG: $id branch '$branch' head unconfirmed before the create; skip (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    if [ "$live" != "$head_oid" ]; then
+      echo "$PROG: $id branch '$branch' moved since the pass fetch (${head_oid:0:8} -> ${live:0:8}); skip — the new head re-gates next pass"
+      skipped=$((skipped + 1)); continue
+    fi
   fi
 
   # A dead PR closed at EXACTLY this head was a decision about this commit;
@@ -475,7 +603,7 @@ GATES
     fi
   fi
 
-  # --- create, pinned and non-draft ----------------------------------------------
+  # --- create, pinned; a draft when an open-as-draft check gates the PR ----------
   title=$(printf '%s' "$row" | jq -r '.title // empty')
   kind=$(printf '%s' "$row" | jq -r '.issue_type // empty')
   desc=$(printf '%s' "$row" | jq -r '.description // empty')
@@ -490,14 +618,25 @@ GATES
   BODY=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open.XXXXXX") || { echo "$PROG: cannot create a temp file for the PR body" >&2; exit 1; }
   {
     printf '%s\n' "$PRS_MARK_OPEN"
-    compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "$SUP_NUM" "$SUP_HEAD"
+    compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "$SUP_NUM" "$SUP_HEAD" open "$PHASED"
     printf '%s\n' "$PRS_MARK_CLOSE"
   } > "$BODY"
   # The bead id stays in the title so a PR is traceable to its anchor; the
   # type prefix goes ahead of it so the conventional-commit check passes.
   pr_title="$(cc_title "$title" "$kind") ($id)"
-  CREATED_URL=$(pr_url_canon "$(gh pr create --repo "$ORIGIN_REPO_Q" --base "$target" \
-    --head "$branch" --title "$pr_title" --body-file "$BODY" 2>/dev/null || true)")
+  # Open as a DRAFT when the check_set names an open-as-draft check (demo): that
+  # check runs against the open PR, so the PR must exist for a preview to deploy,
+  # but it is not surfaced for human review until the draft->ready arm below flips
+  # it once the open-as-draft gates are green. A check_set of only pre-open checks
+  # (gc-toolkit today) has no draft gate and opens ready at once — the empty-phase
+  # collapse, current behavior unchanged.
+  create_args=(--repo "$ORIGIN_REPO_Q" --base "$target" --head "$branch" --title "$pr_title" --body-file "$BODY")
+  # OPENED_DRAFT, set to the reviewed head when a draft gate exists, both adds
+  # --draft and is stamped as opened_as_draft at the flip, so the draft-to-ready
+  # arm and gate-ensure know the open-as-draft stage without re-resolving it.
+  OPENED_DRAFT=""
+  [ -n "$DRAFT_GATES" ] && { create_args+=(--draft); OPENED_DRAFT="$head_oid"; }
+  CREATED_URL=$(pr_url_canon "$(gh pr create "${create_args[@]}" 2>/dev/null || true)")
   rm -f "$BODY"
   if [ -z "$CREATED_URL" ]; then
     echo "$PROG: $id branch '$branch' PR create produced nothing; skip (retry next pass)" >&2
@@ -538,7 +677,7 @@ GATES
   [ -n "$SUP_NUM" ] && gh pr comment "$SUP_NUM" --repo "$ORIGIN_REPO_Q" \
     --body "Superseded by #$PR_NUMBER: branch \`$branch\` was re-implemented and re-gated at \`${head_oid:0:8}\`." >/dev/null 2>&1 || true
 
-  if flip "$id" "$CERT_URL" "$CERT_NUM" "$target"; then
+  if flip "$id" "$CERT_URL" "$CERT_NUM" "$target" "$OPENED_DRAFT"; then
     opened=$((opened + 1))
     # Born check-green: seed the initial status label (and its group). Best-effort
     # — a label failure never unwinds an opened PR; pr-facts.sh reconciles it.
@@ -566,5 +705,101 @@ elif [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
 else
   echo "$PROG: $paced"
 fi
-echo "$PROG: $opened opened, $flipped flipped, $held held, $skipped skipped"
+
+# --- arm: draft -> ready -------------------------------------------------------
+# A PR the refinery opened or adopted as a draft — recorded as opened_as_draft at
+# the flip — is surfaced for review once every pre-open AND open-as-draft check
+# reads green. The candidate set is one metadata prefilter over the enumeration,
+# no API and no resolver fork per anchor: an anchor with no opened_as_draft opened
+# ready and has no draft to flip; one carrying draft_readied was already surfaced,
+# and is never re-read or re-flipped — which is also what keeps this arm off a PR
+# an operator converted back to draft after it was readied. Only an un-readied,
+# undisposed candidate pays the PR read below, and that read is spent once per
+# ready PR: a ready PR records draft_readied whatever holds it, so the arm never
+# reads it again and gate-ensure dispatches its later phases. A store that would
+# not enumerate fails the arm loudly (exit 1 after the summary), the way the
+# pre-open arm does, rather than report nothing to ready.
+READY_FAILED=""
+if ! READY_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request); then
+  echo "$PROG: could not enumerate pull_request anchors; the draft-to-ready arm did not run, failing loudly rather than reporting nothing to ready" >&2
+  READY_FAILED=1; READY_ANCHORS="[]"
+fi
+readied=0
+# One jq does the prefilter and pulls the fields, unit-separated so an empty field
+# (an unset hold) keeps its place.
+while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
+  [ -n "$rid" ] && [ -n "$rnum" ] || continue
+  # A disposed PR is pr-facts.sh's to close; it is never surfaced.
+  [ -z "$rdisp" ] || continue
+  # It may be a draft: ask GitHub (the one read this arm pays, bounded to
+  # un-readied drafts). A closed/merged PR is pr-facts.sh's; an unreadable read
+  # retries next pass.
+  rview=$(gh pr view "$rnum" --repo "$ORIGIN_REPO_Q" --json isDraft,state,headRefOid 2>/dev/null)
+  [ -n "$rview" ] || continue
+  [ "$(printf '%s' "$rview" | jq -r '.state // ""')" = "OPEN" ] || continue
+  rhead=$(printf '%s' "$rview" | jq -r '.headRefOid // empty')
+  [ -n "$rhead" ] || continue
+  if [ "$(printf '%s' "$rview" | jq -r '.isDraft // false')" != "true" ]; then
+    # Already ready (surfaced externally): record it so the arm stops re-reading
+    # this PR and gate-ensure moves the anchor to its ready-for-review stage. A
+    # hold does not stop this write: recording that GitHub reads the PR ready
+    # surfaces nothing, and skipping it would pin the anchor's dispatch at the
+    # draft stage for as long as the hold stands.
+    gc bd update "$rid" --set-metadata draft_readied="$rhead" >/dev/null 2>&1 \
+      || echo "$PROG: WARN $rid PR#$rnum is ready but draft_readied did not stamp; will re-read next pass" >&2
+    continue
+  fi
+  # The draft is the operator's while they hold it: never surface it.
+  if is_held "$rhold" || is_held "$rrhold"; then
+    echo "$PROG: $rid PR#$rnum is a draft but held (merge_hold='$rhold' rebase_hold='$rrhold'); not surfacing"
+    continue
+  fi
+  # A draft the refinery owns, unheld: never surface it over an open must-fix
+  # finding (the city has ruled the diff must change). open-must-fix exits 0 with
+  # findings, 1 with none, 2 unreadable; 0 and 2 both hold the flip.
+  "$FINDING" open-must-fix --anchor "$rid" >/dev/null 2>&1; mfrc=$?
+  if [ "$mfrc" -ne 1 ]; then
+    echo "$PROG: $rid PR#$rnum draft has an open must-fix finding or an unreadable finding read (rc=$mfrc); not surfacing"
+    continue
+  fi
+  # Every pre-open and open-as-draft gate must derive green at the live head,
+  # remote allowed — the PR is open, so a GitHub approval can back a lane. An
+  # unreadable gate set (a resolver crash) or lane holds the flip.
+  if ! RGATES=$("$REVIEW_CHECKS" --resolve --check-set "$rcs" --through open-as-draft --at "$rhead" 2>/dev/null); then
+    continue
+  fi
+  rungreen=""
+  while IFS= read -r g; do
+    [ -n "${g:-}" ] || continue
+    "$LANE_STATE" green --anchor "$rid" --lane "$g" && continue
+    rungreen="$g"; break
+  done <<RGATESEOF
+$RGATES
+RGATESEOF
+  [ -z "$rungreen" ] || continue
+  # All green: surface it, and record draft_readied so this arm never re-reads or
+  # re-flips the PR — including after an operator later re-drafts it to park it.
+  if gh pr ready "$rnum" --repo "$ORIGIN_REPO_Q" >/dev/null 2>&1; then
+    readied=$((readied + 1))
+    gc bd update "$rid" --set-metadata draft_readied="$rhead" >/dev/null 2>&1 \
+      || echo "$PROG: WARN $rid PR#$rnum readied but draft_readied did not stamp; will re-read next pass" >&2
+    "$PR_STATUS_LABEL" reconcile --anchor "$rid" --pr "$rnum" \
+      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
+    echo "$PROG: $rid PR#$rnum draft gates green at ${rhead:0:8}; flipped draft -> ready for review"
+  else
+    echo "$PROG: $rid PR#$rnum draft gates green but 'gh pr ready' did not land; stays draft (retry next pass)" >&2
+  fi
+done <<READY_EOF
+$(printf '%s' "$READY_ANCHORS" | jq -r '
+    .[]?
+    | select(((.metadata.opened_as_draft // "") | tostring) != ""
+             and ((.metadata.draft_readied // "") | tostring) == "")
+    | [ (.id // ""), (.metadata.check_set // ""), (.metadata.pr_number // ""),
+        (.metadata.merge_hold // ""), (.metadata.rebase_hold // ""),
+        (.metadata["gc.pr_close_disposition_kind"] // "") ]
+    | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)
+READY_EOF
+
+echo "$PROG: $opened opened, $flipped flipped, $readied readied, $held held, $skipped skipped"
+[ -z "$READY_FAILED" ] || exit 1
 exit 0

@@ -124,6 +124,12 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # (holds the dispatch), never dispatches blind.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The one resolver of the check index: the dispatch loop asks it for the lanes
+# that gate the anchor's current stage (pre-open before the PR exists, through
+# open-as-draft once it is open), which drops the non-lanes none/off and the
+# approval merge rule in one place instead of this loop re-deriving it.
+REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
+[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot gate" >&2; exit 1; }
 WEDGE_KEY="review-wedge"
 
 # Origin pin for the live-head read; optional — an unresolvable origin or a
@@ -696,12 +702,35 @@ STRAY
   # below (which reads the same findings) fails the dispatch closed.
   "$FINDING" close-answered --anchor "$id" >/dev/null 2>&1 || true
 
-  gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+  # Dispatch is scoped to the anchor's stage, which advances with the PR: before
+  # the PR exists only pre-open checks run (they read the diff); a draft PR
+  # (opened_as_draft set, not yet draft_readied) dispatches through open-as-draft
+  # so the checks that flip it to ready can run; once it is ready for review
+  # (draft_readied set, or opened ready with no open-as-draft gate) every remaining
+  # phase dispatches too, so a ready-for-review or merge-phase check gets a review
+  # bead rather than relying on the GitHub-approval green fallback forever. The
+  # draft/ready state is read from the markers pr-open.sh records — no gh call.
+  # They track the PR: opened_as_draft goes only on a draft the refinery opened as
+  # one, and draft_readied is recorded whenever pr-open reads that PR ready, hold
+  # or no hold. The one resolver names the set at the reviewed head and drops the
+  # non-lanes.
+  if [ "$mr" != pull_request ]; then
+    GE_THROUGH=pre-open
+  elif [ -n "$(meta_of "$row" opened_as_draft)" ] && [ -z "$(meta_of "$row" draft_readied)" ]; then
+    GE_THROUGH=open-as-draft
+  else
+    GE_THROUGH=merge
+  fi
+  # The resolver's exit status is load-bearing: a crash prints nothing, and an
+  # empty gate list would dispatch nothing AND let this anchor settle on the axis
+  # below while a lane is actually short of green. Fail closed — skip the whole
+  # anchor this pass (no dispatch, no settle), retry next pass.
+  if ! gates=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through "$GE_THROUGH" --at "$head" 2>/dev/null); then
+    echo "$PROG: $id gate resolver failed for check_set '$checkset'; dispatching nothing this pass (merge stays held, retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in
-      none|off|approval) continue ;;  # approval is evidenced by GitHub review state
-    esac
     # The marker is read for two legacy purposes only — never to classify the
     # lane. First, a legacy exception@ park: signoff.sh refuses to stamp green
     # over it and migrate-lane-states.sh rewrites it to merge_hold=true, so until
