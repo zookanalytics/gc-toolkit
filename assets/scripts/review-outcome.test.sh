@@ -155,6 +155,14 @@ eq "$(bstatus tk-ato)" "closed" "back-lane finishes the open outcome beside the 
 eq "$(outcomes)" "2" "…and files nothing new"
 if green tk-at correctness; then ok "…so the lane derives green"; else bad "the lane stayed held after the open outcome was finished"; fi
 
+# A close that reports success but leaves the outcome open still holds the lane,
+# and the dedup cannot see an open outcome, so back-lane reads the close back
+# and fails closed instead of filing a twin beside it.
+store "[$AT_ANCHOR, $AT_OPEN]"
+STUB_DROP_KEYS="tk-ato:status" "$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef >/dev/null 2>&1; rc=$?
+eq "$rc" 2 "a close of the open outcome that does not land fails closed (exit 2)"
+eq "$(outcomes)" "1" "…and files no twin beside the outcome still holding the lane"
+
 # Finishing is bound to back-lane's own outcome. An open approve review under
 # any other title belongs to another writer, and back-lane leaves it open.
 OTHER='{"id":"tk-other","status":"open","assignee":"","title":"Review PR#43 correctness","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-at","reviewed_oid":"deadbeef","signoff_verdict":"approve","gc.outcome":"recorded"}}'

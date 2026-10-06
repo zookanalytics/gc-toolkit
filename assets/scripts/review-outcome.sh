@@ -95,23 +95,21 @@ backing_ids() { # <anchor> <lane>
     | .[].id' 2>/dev/null
 }
 
-# Close every approve outcome back-lane filed for this lane that is stamped but
-# still open, so it becomes the backing it was filed to be. lane-state.sh reads
-# an open review for the lane as one in flight and holds the lane out of green
-# while it stays open, and backing_ids reads closed beads only, so a retry that
-# deduped against backings alone would file a twin and leave this one holding
-# the lane. The match is back-lane's own shape: its exact title on this anchor
-# and lane, carrying reviewed_oid, signoff_verdict=approve and
-# gc.outcome=recorded. signoff.sh writes a reviewer's verdict in the update that
-# closes the review, so an open approve under any other title is not this
-# writer's to close. Returns 2 when the store would not read or a close was
-# refused.
-finish_stranded() { # <anchor> <lane> <title>
-  local anchor="$1" lane="$2" title="$3" rows ids id
+# The approve outcomes back-lane filed for this lane that are stamped but still
+# open. lane-state.sh reads an open review for the lane as one in flight and
+# holds the lane out of green while it stays open, and backing_ids reads closed
+# beads only, so a retry that deduped against backings alone would file a twin
+# and leave this one holding the lane. The match is back-lane's own shape: its
+# exact title on this anchor and lane, carrying reviewed_oid,
+# signoff_verdict=approve and gc.outcome=recorded. signoff.sh writes a
+# reviewer's verdict in the update that closes the review, so an open approve
+# under any other title is not this writer's to close. Ids on stdout, one per
+# line; exit 2 when the store would not read.
+stranded_ids() { # <anchor> <lane> <title>
+  local anchor="$1" lane="$2" title="$3" rows
   rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 \
-    || { warn "could not read review outcomes on $anchor to find an open $lane approve outcome"; return 2; }
-  ids=$(printf '%s' "$rows" | jq -r --arg lane "$lane" --arg title "$title" '
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  printf '%s' "$rows" | jq -r --arg lane "$lane" --arg title "$title" '
     [ .[] | (.metadata // {}) as $m
           | select(((.status // "") | tostring | ascii_downcase) != "closed")
           | select(((.title // "") | tostring) == $title)
@@ -120,7 +118,19 @@ finish_stranded() { # <anchor> <lane> <title>
           | select((($m.reviewed_oid // "") | tostring) != "")
           | select((($m.signoff_verdict // "") | tostring) == "approve")
           | select((($m["gc.outcome"] // "") | tostring) == "recorded") ]
-    | .[].id' 2>/dev/null)
+    | .[].id' 2>/dev/null
+}
+
+# Close every stranded outcome so it becomes the backing it was filed to be. The
+# closes are read back: one that reported success but left the outcome open
+# would still hold the lane, and the dedup that follows cannot see an open
+# outcome. Returns 2 when the store would not read, a close was refused, or an
+# outcome still reads open.
+finish_stranded() { # <anchor> <lane> <title>
+  local anchor="$1" lane="$2" title="$3" ids id still
+  ids=$(stranded_ids "$anchor" "$lane" "$title") \
+    || { warn "could not read review outcomes on $anchor to find an open $lane approve outcome"; return 2; }
+  [ -n "$ids" ] || return 0
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     gc bd update "$id" --status=closed \
@@ -129,6 +139,9 @@ finish_stranded() { # <anchor> <lane> <title>
   done <<EOF
 $ids
 EOF
+  still=$(stranded_ids "$anchor" "$lane" "$title") \
+    || { warn "could not read back the open $lane approve outcomes on $anchor"; return 2; }
+  [ -z "$still" ] || { warn "lane $lane on $anchor still has an open approve outcome after the close: $still"; return 2; }
 }
 
 # The closed reviews a supersede must retire — a strict superset of the backings
