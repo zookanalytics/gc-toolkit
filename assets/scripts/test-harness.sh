@@ -198,6 +198,13 @@ case "$verb" in
         *"$STUB_LIST_PARTIAL"*) echo '[]'; echo "gc: simulated mid-query store error" >&2; exit 1 ;;
       esac
     fi
+    # STUB_LIST_TRAILING="<text>": a list whose arguments contain <text> prints
+    # its answer, then a line that is not JSON, and exits 0 — a stream with
+    # unreadable bytes after the array.
+    ltrail=""
+    if [ -n "${STUB_LIST_TRAILING:-}" ]; then
+      case " $* " in *"$STUB_LIST_TRAILING"*) ltrail=1 ;; esac
+    fi
     statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -229,6 +236,7 @@ case "$verb" in
         '[ .[] | select((((.metadata // {})[$k]) // "" | tostring) == $v) ]')
     done
     printf '%s\n' "$out"
+    [ -z "$ltrail" ] || echo 'gc: simulated trailing output'
     ;;
   update)
     id="${1:-}"; shift || true
@@ -347,6 +355,8 @@ case "$verb" in
         # STUB_DEP_PARTIAL: the probe prints `[]` and exits 1, a failed read
         # that still printed an array.
         [ -n "${STUB_DEP_PARTIAL:-}" ] && { echo '[]'; echo "gc bd dep: simulated store error" >&2; exit 1; }
+        # STUB_DEP_TRAILING: the probe prints its answer, then a line that is
+        # not JSON, and exits 0 — unreadable bytes after the array.
         id="${2:-}"; shift 2 || true
         dir=""; dtyp=""
         while [ $# -gt 0 ]; do
@@ -369,7 +379,8 @@ case "$verb" in
             else                  { if (b == id) print a }   # legacy: who names me
           }' "$D")
         jq -c --arg ids "$ids" '($ids | split("\n")) as $want
-          | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S"
+          | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S" || exit $?
+        [ -z "${STUB_DEP_TRAILING:-}" ] || echo 'gc bd dep: simulated trailing output'
         ;;
       add)
         a="${2:-}"; b="${3:-}"; ty="parent-child"; shift 3 || true

@@ -13,7 +13,8 @@
 # record half fails after a merge; the cap that turns a record failing every
 # pass into one visit a person can claim; and the reads that fail closed when
 # they stop partway (a cut-short reviews or threads stream, a list or dep probe
-# that exited non-zero after printing an array).
+# that exited non-zero after printing an array or printed unreadable bytes
+# after it).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1207,6 +1208,38 @@ approved 128
 : > "$STUB_GH_LOG"
 out=$(STUB_DEP_PARTIAL=1 "$SUT" 2>&1)
 has "$out" "PR#128 dependency probe unreadable; merge held" "a failed dependency probe holds the merge"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+# The same three reads at exit 0, with unreadable bytes after the array. The
+# array gate fails the whole stream, so the rows ahead of the bytes are no
+# answer. Each PR is approved and green, so a hold can come only from a read
+# that refused the stream, and each case names the read that must.
+echo "# an enumeration with unreadable bytes after its array fails the pass loudly"
+store "[$(anchor TR1 130), $(rev TR1)]"
+printf '%s' "$(prview 130 OPEN CLEAN)" > "$GH_DIR/pr_view_130.json"
+approved 130
+: > "$STUB_GH_LOG"
+out=$(STUB_LIST_TRAILING="merge_result=pull_request" "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "an enumeration with bytes after its array fails the pass"
+has "$out" "could not enumerate gating anchors" "…naming the unreadable enumeration"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+echo "# a referencing-bead read with unreadable bytes after its array holds"
+store "[$(anchor TR2 131), $(rev TR2)]"
+printf '%s' "$(prview 131 OPEN CLEAN)" > "$GH_DIR/pr_view_131.json"
+approved 131
+: > "$STUB_GH_LOG"
+out=$(STUB_LIST_TRAILING="pr_number=" "$SUT" 2>&1)
+has "$out" "PR#131 referencing-bead read failed; merge held" "a by_pr read with bytes after its array holds the merge"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+echo "# a dependency probe with unreadable bytes after its array holds"
+store "[$(anchor TR3 132), $(rev TR3)]"
+printf '%s' "$(prview 132 OPEN CLEAN)" > "$GH_DIR/pr_view_132.json"
+approved 132
+: > "$STUB_GH_LOG"
+out=$(STUB_DEP_TRAILING=1 "$SUT" 2>&1)
+has "$out" "PR#132 dependency probe unreadable; merge held" "a dependency probe with bytes after its array holds the merge"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 
 echo "# a review-thread read whose later page will not decode is unreadable, never a zero count"
