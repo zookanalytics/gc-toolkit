@@ -153,7 +153,9 @@ It resolves the target from the store by (`metadata."gc.root_bead_id"`,
 assignee across every run it makes, so only that pair names exactly one bead;
 the assignee corroborates the match and never identifies it alone. It refuses
 to write at all when it cannot prove which bead is yours. The pack's
-`doctor/check-step-close-owns-bead` holds the line.
+hardened detector `tools/lint-learned.d/step-close-env-id.sh` holds the
+line, flagging any step that closes a bead on an id read from the
+environment.
 
 **`gc runtime drain-ack` is a session verb, not a step verb.** It tells the
 reconciler this session is finished; it closes no bead. So a step body that
