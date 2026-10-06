@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -774,7 +773,7 @@ func (m *merger) reviewGatesFor(branch string) (st string, threadReq bool, appro
 		if r.Parameters.RequiredReviewThreadResolution != nil && *r.Parameters.RequiredReviewThreadResolution {
 			threadReq = true
 		}
-		if n := numberToInt(r.Parameters.RequiredApprovingReviewCount); n > approvals {
+		if n := int(numberToInt64(r.Parameters.RequiredApprovingReviewCount)); n > approvals {
 			approvals = n
 		}
 	}
@@ -874,7 +873,7 @@ func (m *merger) scriptRC(name string, args ...string) int {
 	cmd := exec.Command(m.scriptPath(name), args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = m.stderr
-	return rcOf(cmd.Run())
+	return gcbd.ExitCode(cmd.Run())
 }
 
 func (m *merger) scriptCapture(name string, args ...string) (string, int) {
@@ -883,7 +882,7 @@ func (m *merger) scriptCapture(name string, args ...string) (string, int) {
 	cmd.Stdout = &buf
 	cmd.Stderr = io.Discard
 	err := cmd.Run()
-	return buf.String(), rcOf(err)
+	return buf.String(), gcbd.ExitCode(err)
 }
 
 func (m *merger) printIndented(s string, max int) {
@@ -993,19 +992,6 @@ func shortSha(oid string) string {
 	return oid
 }
 
-func numberToInt(n json.Number) int {
-	if n == "" {
-		return 0
-	}
-	if i, err := n.Int64(); err == nil {
-		return int(i)
-	}
-	if f, err := n.Float64(); err == nil {
-		return int(f)
-	}
-	return 0
-}
-
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
@@ -1016,23 +1002,12 @@ func isExecutable(p string) bool {
 	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
 }
 
-func rcOf(err error) int {
-	if err == nil {
-		return 0
-	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		return ee.ExitCode()
-	}
-	return 127
-}
-
 // capture runs a command, returns stdout and the exit code, discarding stderr —
 // the `$(cmd 2>/dev/null)` shape.
 func capture(bin string, args ...string) ([]byte, int) {
 	cmd := exec.Command(bin, args...)
 	out, err := cmd.Output()
-	return out, rcOf(err)
+	return out, gcbd.ExitCode(err)
 }
 
 func firstOut(out []byte, _ int) []byte { return out }
@@ -1046,13 +1021,13 @@ func runRC(bin string, args ...string) int {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	return rcOf(cmd.Run())
+	return gcbd.ExitCode(cmd.Run())
 }
 
 func runCombined(bin string, args ...string) (string, int) {
 	cmd := exec.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
-	return strings.TrimRight(string(out), "\n"), rcOf(err)
+	return strings.TrimRight(string(out), "\n"), gcbd.ExitCode(err)
 }
 
 // --- JSON-shaped helpers ---------------------------------------------------------
@@ -1411,7 +1386,7 @@ func terminalReason(final *gcbd.Bead, num, base, url, ref string) string {
 		return "merge_result is now " + mr
 	case pn != num:
 		return "anchor now claims PR#" + pn
-	case !isUnsetHold(h):
+	case isHeld(h):
 		return "merge_hold was set after validation"
 	case strings.HasPrefix(final.Meta("pr_posture"), "commented@"):
 		return "review comments went unanswered after validation"
@@ -1426,15 +1401,6 @@ func terminalReason(final *gcbd.Bead, num, base, url, ref string) string {
 	default:
 		return "OK"
 	}
-}
-
-// isUnsetHold is the terminal re-read's set of "not held" values.
-func isUnsetHold(h string) bool {
-	switch h {
-	case "", "false", "0", "null", "False", "FALSE":
-		return true
-	}
-	return false
 }
 
 func inSlice(s []string, v string) bool {
