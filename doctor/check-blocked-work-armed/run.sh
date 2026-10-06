@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
 # LIVE, unassigned bead that is plainly work (not a review, step, workflow-
-# topology, or demand bead, and not a merge anchor) and is held out of
-# `bd ready` by an open `blocks` edge must ALSO carry a way to be dispatched
-# once that edge clears: either `gc.routed_to` (a pool queue consumes it, and
-# bd's readiness gates the offer until the blocker closes) or
+# topology, or demand bead, not a standing record, and not a merge anchor) and
+# is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
+# dispatched once that edge clears: either `gc.routed_to` (a pool queue
+# consumes it, and bd's readiness gates the offer until the blocker closes) or
 # `gc.dispatch_when_ready` (armed, so the deferred-dispatch reconcile order
 # slings it the moment bd reports it ready). A blocked work bead with NEITHER
 # is the "unrouted-and-remember" anti-pattern: when its blocker closes it
@@ -32,6 +32,12 @@
 # cadence and offered by no pool queue (lifecycle/lifecycle.toml — the anchor
 # state is status x merge_result), so it is exempt on that marker.
 #
+# A standing record (a task_kind assets/scripts/standing-kinds.sh lists) rests
+# unrouted and unassigned by design too: nothing ever dispatches it, so a wait
+# it sits behind owes it no dispatch path, and arming one would sling a
+# held-by-design record to a pool the moment its blocker closed. It is exempt on
+# its task_kind, read from that shared definition.
+#
 # The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
 # safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
 # The complement check is doctor/check-wait-is-an-edge (I1): that one asserts
@@ -58,6 +64,17 @@ set -u
 # never heard of is left alone rather than mistaken for work. doctor.toml names
 # the same set.
 WORK_TYPES=" bug feature task chore spike "
+
+# The standing kinds, from the one definition shared with the liveness sweep and
+# the proactive scan. Exposes $STANDING_KINDS_JQ. An unsourceable one warns:
+# without it a standing record would read as stranded work and draw the arm
+# remedy.
+# shellcheck source=../../assets/scripts/standing-kinds.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
+    echo "cannot determine whether blocked work carries a dispatch path"
+    printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from stranded work."
+    exit 1
+}
 
 findings=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -139,14 +156,16 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     }
     # The predicate, entirely on the listing's own fields: plainly work
-    # (unassigned; not review/step/workflow-topology/demand; not a merge anchor;
-    # an allowlisted work issue_type), AND carrying no route, AND not armed.
-    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" '
+    # (unassigned; not review/standing/step/workflow-topology/demand; not a
+    # merge anchor; an allowlisted work issue_type), AND carrying no route, AND
+    # not armed.
+    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
         | select(($b.assignee // "") == "")
         | select(($m["task_kind"] // "") != "review")
+        | select(($b | is_standing_kind) | not)
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")
         | select(($m["gc.demand_for"] // "") == "")
