@@ -325,6 +325,7 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	s.handleActuateVerb(w, r, "accept")
 }
+
 func (s *Server) handleEngage(w http.ResponseWriter, r *http.Request) {
 	s.handleActuateVerb(w, r, "engage")
 }
