@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/signoff.sh — the single gate-verdict writer.
+# Hermetic test for assets/scripts/signoff.sh — the single check-verdict writer.
 # Stubbed gc/gh/git; no live city, Dolt, network, or PRs. The posted artifact
 # carries the anchor link; --approve is NEVER used. A verdict records a lane
 # state and binds to no commit, so the reviewed oid reaches the artifact and the
@@ -691,7 +691,7 @@ reset "$ANCHOR_PR"
 printf 'tk-anc\n' > "$STUB_UPD_FAIL"
 out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 2 "a marker that does not stick exits 2"
-eq "$(status rv-1)" "in_progress" "the review bead is NOT closed over an unrecorded gate"
+eq "$(status rv-1)" "in_progress" "the review bead is NOT closed over an unrecorded check"
 
 echo "# a signoff_verdict that does not read back on close is caught, not shipped"
 reset "$ANCHOR_PR"
@@ -1035,12 +1035,15 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$TMP/
 eq "$rc" 0 "a malformed findings file still lands the verdict"
 has "$(cat "$STUB_CREATED")" "Rework PR#42" "…and still files the rework child that holds the merge"
 
-# --- approve closes the lane's still-unruled findings ---------------------------
-echo "# approve closes the lane's unvalidated findings"
+# --- approve is a pure verdict-recorder: it resolves no findings -----------------
+# Stage-3 resolution — closing a green lane's still-unvalidated findings as moot —
+# is gate-ensure.sh's, the single owner. signoff records the verdict only, so the
+# finding tool is never invoked to resolve on an approve verdict.
+echo "# approve resolves no findings (gate-ensure owns stage-3 resolution)"
 reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "approve exits 0"
-has "$(cat "$STUB_FINDING_LOG")" "close-unvalidated --anchor tk-anc --lane correctness" "approve closes the lane's still-unruled findings"
+hasnt "$(cat "$STUB_FINDING_LOG")" "close-unvalidated" "approve does NOT resolve findings — gate-ensure resolves a green lane's unvalidated findings as moot"
 
 # --- the standing prohibition: the city never approves its own PRs ----------------
 if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then

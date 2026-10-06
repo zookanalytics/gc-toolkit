@@ -10,9 +10,11 @@
 #                        bounded by GC_PROACTIVE_SLING_CAP per sweep
 #   sling <bead> [--nudge] [-n]  sling a first reaction (mr path, hard-refuses
 #                        --merge direct — the security invariant)
-#   deliverable          "would a sling be picked up?" — no when the city's
+#   deliverable [bead]   "would a sling be picked up?" — no when the city's
 #                        agent roster says this pool cannot pick it up
-#                        (absent, suspended, or capped at zero), exit 0/1
+#                        (absent, suspended, or capped at zero), or when the
+#                        named bead lives in a store the pool's rig does not
+#                        own (cross-store route), exit 0/1
 # The pool's only throttle is its max_active_sessions
 # (agents/proactive/agent.toml); slung beads queue until a slot frees. That
 # bounds how many reactions run at once. GC_PROACTIVE_SLING_CAP is a different
@@ -161,14 +163,17 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       direct (the security invariant). Exit 0
                                       slung, $RC_ALREADY_REACTED already reacted
                                       (no-op, nothing slung), 1 error.
-       $PROG deliverable [<pool-target>]
+       $PROG deliverable [<pool-target>] [<bead>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
-                                      roster says it cannot: absent, suspended,
-                                      or capped at zero slots. Defaults to the
-                                      proactive pool; any rig-qualified target
-                                      answers. Exit 0 yes, 1 no; callers divert
-                                      on no.
+                                      roster says it cannot (absent, suspended,
+                                      or capped at zero slots), or when <bead>
+                                      is named and the target's rig does not own
+                                      the bead's store (a rig-scope pool never
+                                      claims another store's bead). Defaults to
+                                      the proactive pool; any rig-qualified
+                                      target answers. Exit 0 yes, 1 no; callers
+                                      divert on no.
 
 Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) throttles
 how many run at once; routed beads queue until a slot frees. One --sling sweep
@@ -179,26 +184,62 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# deliverable [<pool-target>] — "if I route work there right now, will anything
-# ever pick it up?" The default target is the proactive pool; the first
+# deliverable [<pool-target>] [<bead>] — "if I route work there right now, will
+# anything ever pick it up?" The default target is the proactive pool; the first
 # reaction's actionable exit asks the same question about the pool it is about
 # to hand a bead to."
 # The queue is not the question: a routed bead waits at zero cost until a slot
-# frees. What makes a sling vanish is a pool that cannot claim it at all, and
-# the city's own agent roster is where that shows: the pool is not registered
-# in this city, it is suspended, or it is capped at zero slots.
+# frees. Two things make a sling vanish. A pool that cannot claim it at all,
+# which the city's own agent roster shows: the pool is not registered in this
+# city, it is suspended, or it is capped at zero slots. And a pool that reads a
+# different store than the bead lives in: a rig-scope pool only ever claims
+# beads in its own rig's store, so a route whose rig does not own the bead's id
+# prefix is offered by nobody, the shape `gc sling` refuses as
+# CrossStoreRouteError. The store check is answerable only when the caller names
+# the bead, so it is skipped when <bead> is absent.
 #
-# NO is a positive finding only. A roster this cannot read answers YES, because
-# an unreadable roster is not evidence of an absent pool, and a false no
-# silently retires the framing every caller diverts from
+# NO is a positive finding only. A roster or rig list this cannot read answers
+# YES, because an unreadable one is not evidence of an absent or wrong-store
+# pool, and a false no silently retires the framing every caller diverts from
 # (assets/scripts/gc-visit-open.sh files a bare visit on a no).
 # ---------------------------------------------------------------------------
 cmd_deliverable() {
-    local target roster verdict
+    local target bead roster verdict riglist bead_prefix target_rig target_prefix bead_rig
     target="$(resolve_pool_target "${1:-}" 2>/dev/null)" || {
         printf 'no: cannot rig-qualify the proactive pool target (set GC_RIG or pass <rig>/<base>) — a bare name routes to nobody\n'
         return 1
     }
+    bead="${2:-}"
+
+    # Store-ownership arm. A rig-scope pool reads only its own rig's store, so a
+    # bead whose id prefix that rig does not own is open, unassigned and offered
+    # to nobody — the pool's find-work queries its store and never sees it. Refuse
+    # it here, before the route is written, the way `gc sling` refuses it at the
+    # sling (CrossStoreRouteError). Positive finding only: an unreadable rig list,
+    # or a rig or prefix this cannot resolve, falls through to the roster arm.
+    if [ -n "$bead" ]; then
+        if [ -n "$FIXTURE" ]; then
+            riglist=""
+            [ -f "$FIXTURE/rigs.json" ] && riglist="$(cat "$FIXTURE/rigs.json")"
+        else
+            riglist="$(gc rig list --json 2>/dev/null || true)"
+        fi
+        if [ -n "$riglist" ]; then
+            bead_prefix="${bead%%-*}"
+            target_rig="${target%%/*}"
+            target_prefix="$(printf '%s' "$riglist" \
+                | jq -r --arg n "$target_rig" '.rigs[]? | select((.name // "") == $n) | .prefix // ""' 2>/dev/null \
+                | head -n1 || true)"
+            if [ -n "$target_prefix" ] && [ "$target_prefix" != "$bead_prefix" ]; then
+                bead_rig="$(printf '%s' "$riglist" \
+                    | jq -r --arg p "$bead_prefix" '.rigs[]? | select((.prefix // "") == $p) | .name // ""' 2>/dev/null \
+                    | head -n1 || true)"
+                printf 'no: %s reads the %s store (prefix %s-) but %s lives in the %s store (prefix %s-) — a rig-scope pool only ever claims beads in its own store, so a reaction routed there is open, unassigned and offered to nobody (cross-store route; gc sling refuses this as CrossStoreRouteError)\n' \
+                    "$target" "$target_rig" "$target_prefix" "$bead" "${bead_rig:-<no rig owns prefix $bead_prefix->}" "$bead_prefix"
+                return 1
+            fi
+        fi
+    fi
 
     if [ -n "$FIXTURE" ]; then
         roster=""
@@ -259,7 +300,10 @@ cmd_demand() {
         # agent.toml work_query writes. Mirrors the polecat probe, pinned to
         # the proactive target.
         local target db
-        target="$(resolve_pool_target "${1:-}")"
+        # resolve_pool_target dies (with the "set GC_RIG or pass <rig>/<base>"
+        # guidance) on an unset GC_RIG; fail the demand query closed rather than
+        # query with an empty route that matches nothing.
+        target="$(resolve_pool_target "${1:-}")" || return 1
         db="$(rig_beads_db)"
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         r="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.routed_to=$target" --unassigned \
@@ -403,6 +447,17 @@ cmd_scan() {
         ''|*[!0-9]*) die "GC_PROACTIVE_SLING_CAP must be a non-negative integer (got '$SLING_CAP')" ;;
     esac
 
+    # A --sling sweep routes to the proactive pool, so resolve that target ONCE
+    # up front and fail the whole sweep closed when it cannot. resolve_pool_target
+    # dies on an unset GC_RIG; the per-bead cmd_sling re-resolves inside the loop's
+    # condition below, where set -e is disabled and that die cannot abort — so
+    # without this gate an unset GC_RIG surfaces the guidance once per candidate
+    # and then attempts `gc sling "" <bead>` each time. The subshell keeps die's
+    # exit local, so the guidance shows a single time; `|| return 1` stops the sweep.
+    if [ -n "$do_sling" ]; then
+        ( resolve_pool_target >/dev/null ) || return 1
+    fi
+
     local cands
     cands="$(scan_candidates)"
 
@@ -498,7 +553,12 @@ cmd_sling() {
     fi
 
     local target
-    target="$(resolve_pool_target)"
+    # resolve_pool_target emits the "set GC_RIG or pass <rig>/<base>" guidance and
+    # dies on an unset GC_RIG. Fail closed rather than sling an empty target that
+    # routes to nobody — this guards both a direct `sling` (where set -e would
+    # abort) and the cmd_scan loop's condition (where set -e is disabled, so the
+    # guard, not set -e, is what refuses the empty target).
+    target="$(resolve_pool_target)" || return 1
 
     # --on attaches the workflow to the existing bead and routes THAT bead;
     # --merge pins the path; --reassign hands a human-held bead over cleanly.

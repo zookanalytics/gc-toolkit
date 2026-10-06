@@ -7,7 +7,7 @@
 # anchor for the same PR. Because merge.sh validates each anchor
 # independently, the PR's effective gate became its WEAKEST anchor — the
 # rework anchor carried no check_set, so a CLEAN PR merged with the real
-# anchor's correctness gate red. And because the in-flight-rework hold excludes
+# anchor's correctness check red. And because the in-flight-rework hold excludes
 # merge_result-carrying beads, the rework bead's openness held nothing.
 #
 # The fix under test: before dispatching the signoff and transitioning to a
@@ -189,7 +189,7 @@ eq "$(resolve work-1 polecat/work-1)" "|work-1" \
 #       - id ordering  — the newer duplicate's id sorts FIRST lexicographically,
 #         so a resolver reading a non-existent timestamp field (the tk-52mrh
 #         defect: `.created` on a row that only has `created_at`) collapses to
-#         `.id` and elects the gateless duplicate;
+#         `.id` and elects the checkless duplicate;
 #       - no ordering  — the newer duplicate is also the FIRST input row, so a
 #         missing/stable-no-op sort picks it too.
 #     Only sorting on the real `created_at` yields tk-zzzz9.

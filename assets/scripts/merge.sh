@@ -14,10 +14,10 @@
 # base == merged_target;
 # every declared lane DERIVES green through lane-state.sh (no stored marker; a
 # lane with no local review bead is backed by an operator's GitHub approval on
-# the PR, the shared fallback); approval (armed by the check_set
-# member, signoff_dismissed, or a DISMISSED review of our own — satisfied only
-# by a latest APPROVED from another account at the live head; a standing
-# CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
+# the PR, the shared fallback); approval (a UNIVERSAL merge rule armed for every
+# PR, not a check_set member — satisfied only by a latest APPROVED from an
+# account other than the city's at the live head; a standing CHANGES_REQUESTED
+# from any other account vetoes); no unclosed rework/review
 # child or open must-fix finding (metadata keys naming this PR AND dependency
 # edges, the finding held by its own blocks edge; unreadable holds);
 # mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
@@ -63,6 +63,13 @@ RENDERER="$SCRIPTS_DIR/render-seed-audit.sh"
 # merge and publish never drift on which lane is green (a second implementation
 # of the predicate is how two actors come to disagree about one anchor).
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
+# The one resolver of the check index: the merge gate asks it for every declared
+# lane (`--through merge` spans all phases), which drops the non-lanes none/off
+# and the approval merge rule in one place instead of merge.sh re-deriving it.
+REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
+# A missing resolver would make every anchor read as having no lanes — merge's
+# fail-open. Require it, so a pack-integrity gap holds the merge rather than passing it.
+[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); merge held" >&2; exit 1; }
 # The repository this pass merges into, resolved through git so a run with no
 # checkout under it simply has no committed artifact to keep current.
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -92,11 +99,11 @@ gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
 # Used only to exclude our own reviews; unresolved holds the approval gate.
 SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
 if [ -z "$SELF_LOGIN" ]; then
-  # Bounded fail-open: with no login, an own DISMISSED review cannot arm the
-  # approval requirement from the GitHub side this pass. The signoff_dismissed
-  # marker (stamped before any dismissal) still arms it, and an armed approval
-  # gate still holds below.
-  echo "$PROG: WARN acting login unresolved; own-dismissed-review approval arming is unavailable this pass (signoff_dismissed still arms it)" >&2
+  # Approval is universal, so every PR needs an APPROVED review from an account
+  # other than the city's. With no acting login the city cannot tell an external
+  # approver from its own review, so the approval gate holds every anchor this
+  # pass (fail-closed, below).
+  echo "$PROG: WARN acting login unresolved; cannot distinguish an external approver from the city's own review, so the universal approval gate holds every PR this pass" >&2
 fi
 
 url_repo_q() {
@@ -200,17 +207,6 @@ anchor_row() { # live {status, meta}; empty = unreadable, never an all-default r
              | {status: (.status // ""), meta: .metadata}' 2>/dev/null
 }
 
-# The declared lanes a check_set names, one per line, dropping the non-lane
-# tokens: none/off is gateless by choice, and approval is met by an external
-# GitHub review, not a lane derivation. The same drop list pr-open.sh applies,
-# so publishing and merging judge one anchor by one rule. The drop is
-# case-insensitive; what survives keeps its case, addressing a metadata key.
-lanes_of() { # <check_set>
-  printf '%s' "${1:-}" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' \
-    | grep -Eiv '^(none|off|approval)$'
-  return 0
-}
-
 # The repository an anchor's pr_url names, case-folded, "?" when the url is
 # absent or unparseable (mirrors url_repo_q). Shared between the duplicate-
 # anchor guard and the in-flight holder filter so the two repo-qualified keys
@@ -229,12 +225,17 @@ REPO_Q_DEF='
 # holds on and never reads as all-green. The derivation is the shared one every
 # reader uses: a lane greens from its own local approve-review bead, or, when it
 # has none, from an operator's GitHub approval on the anchor's PR (an approval
-# names no gate, so it backs every lane). The lane is compared to no head: green
+# names no check, so it backs every lane). The lane is compared to no head: green
 # is a state of the lane, and a commit landing on the branch neither clears it
 # nor buys a review. The head-bound human approval the merge separately requires
-# is the approval gate below, armed only for the check_sets that name it.
+# is the universal approval rule enforced below, required of every PR.
 first_notgreen_lane() { # <anchor-id> <check_set>
-  local anchor="$1" cs="$2" lane
+  local anchor="$1" cs="$2" lane lanes
+  # The resolver's exit status is load-bearing. A resolver that dies mid-run
+  # prints nothing, and an empty lane list reads as "every lane green" — the
+  # merge would then proceed on approval alone. Capture the status and fail
+  # closed (unreadable, the caller holds) rather than reading a crash as a pass.
+  lanes=$("$REVIEW_CHECKS" --resolve --check-set "$cs" --through merge 2>/dev/null) || return 2
   while IFS= read -r lane; do
     [ -n "$lane" ] || continue
     "$LANE_STATE" green --anchor "$anchor" --lane "$lane"
@@ -244,7 +245,7 @@ first_notgreen_lane() { # <anchor-id> <check_set>
       *) return 2 ;;                          # unreadable; the caller holds
     esac
   done <<LANES
-$(lanes_of "$cs")
+$lanes
 LANES
   return 0
 }
@@ -387,7 +388,7 @@ while IFS= read -r row; do
       *) short=$(printf '%.8s' "$merge_oid") ;;
     esac
     if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
-         --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --set "merged_sha=$merge_oid" \
          --unset merge_record_failures \
          --append-notes "Merged to $base at $short (record recovered by merge)"; then
       recovered=$((recovered + 1))
@@ -404,13 +405,12 @@ while IFS= read -r row; do
   # Only the merge consults these; the record above needs none of them.
   target=$(printf '%s' "$fresh" | jq -r '.meta.merged_target // ""')
   hold=$(printf '%s' "$fresh" | jq -r '.meta.merge_hold // ""')
-  dismissed=$(printf '%s' "$fresh" | jq -r '.meta.signoff_dismissed // ""')
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
   posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
   aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
 
   # --- validate, in order -------------------------------------------------------
-  # Empty/absent check_set is NEVER "no gates": the declared gateless opt-out is
+  # Empty/absent check_set is NEVER "no checks": the declared checkless opt-out is
   # the 'none' sentinel; empty means never normalized (gate-ensure stamps the
   # default). Fail closed rather than merge ungated.
   if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
@@ -585,9 +585,7 @@ while IFS= read -r row; do
      | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
     | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
         approver: ([ $latest[] | select(.state == "APPROVED")
-                     | select((.commit_id // "") == $head) | (.user.login // "") ] | .[0] // ""),
-        self_dismissed: ([ .[] | select($self != "") | select((.user.login // "") == $self)
-                           | select(.state == "DISMISSED") ] | length) }' 2>/dev/null)
+                     | select((.commit_id // "") == $head) | (.user.login // "") ] | .[0] // "") }' 2>/dev/null)
   if [ -z "$rstate" ]; then
     echo "$PROG: PR#$num reviews history unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -607,28 +605,26 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED and the cadence has run dry; merge held for re-review (anchor $id)"
     held=$((held + 1)); continue
   fi
-  needs_approval=""
-  case ",$(printf '%s' "$checkset" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')," in
-    *",approval,"*) needs_approval=1 ;;
-  esac
-  [ -n "$dismissed" ] && needs_approval=1
-  sd=$(printf '%s' "$rstate" | jq -r '.self_dismissed // 0')
-  [ "${sd:-0}" != "0" ] && needs_approval=1
-  if [ -n "$needs_approval" ]; then
-    if [ -z "$SELF_LOGIN" ]; then
-      echo "$PROG: PR#$num approval required but the acting login is unresolved; merge held (anchor $id)"
-      held=$((held + 1)); continue
-    fi
-    approver=$(printf '%s' "$rstate" | jq -r '.approver // ""')
-    if [ -z "$approver" ]; then
-      # Every declared gate is green at the live head and no pool-routed blocker
-      # is open: the cadence is done and the pull request is waiting on a person.
-      # That is `settled`, and the approval clause of the owed rule is what makes
-      # the row the operator's rather than nobody's.
-      record_machine "$id" "settled" "$head_oid" "$aroute"
-      echo "$PROG: PR#$num no external APPROVED review at the live head $head_oid (approval armed by: check_set/signoff_dismissed/own dismissed review); merge held (anchor $id)"
-      held=$((held + 1)); continue
-    fi
+  # Approval is a UNIVERSAL merge rule: every PR requires an external APPROVED
+  # review at the live head by an account other than the city's, enforced here in
+  # city merge logic (GitHub branch protection is an extra layer only, not the
+  # authority). No check_set token arms it and none opts out — the token that used
+  # to arm it per-anchor left integration-branch PRs robot-merging on green, the
+  # hole this closes. A designated agent approving certain PRs is a later
+  # extension; today the approver is any non-city login.
+  if [ -z "$SELF_LOGIN" ]; then
+    echo "$PROG: PR#$num approval required but the acting login is unresolved; merge held (anchor $id)"
+    held=$((held + 1)); continue
+  fi
+  approver=$(printf '%s' "$rstate" | jq -r '.approver // ""')
+  if [ -z "$approver" ]; then
+    # Every declared check is green at the live head and no pool-routed blocker
+    # is open: the cadence is done and the pull request is waiting on a person.
+    # That is `settled`, and the approval clause of the owed rule is what makes
+    # the row the operator's rather than nobody's.
+    record_machine "$id" "settled" "$head_oid" "$aroute"
+    echo "$PROG: PR#$num no external APPROVED review at the live head $head_oid (approval is a universal merge rule); merge held (anchor $id)"
+    held=$((held + 1)); continue
   fi
 
   # --- mergeStateStatus: CLEAN, or UNSTABLE decided on required contexts only ----
@@ -668,7 +664,7 @@ while IFS= read -r row; do
       fi
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
     BLOCKED)
-      # Branch protection holds a PR whose city-side gates (checked above) are
+      # Branch protection holds a PR whose city-side checks (checked above) are
       # all green. The blocking condition is read from the branch's own rules:
       # an unresolved review thread is the gate only where thread resolution is
       # required (required_review_thread_resolution), otherwise a missing
@@ -803,13 +799,12 @@ $sa_out" >/dev/null 2>&1 || true
     held=$((held + 1)); continue
   fi
   freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" '
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" '
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
     | ((($m.pr_number // "") | tostring)) as $pn
     | ((($m.merge_hold // "") | tostring)) as $h
-    | ((($m.signoff_dismissed // "") | tostring)) as $d
     | ((($m.merged_target // "") | tostring)) as $t
     | ((($m.pr_url // "") | tostring | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p))) as $pu
     | ((($m.branch // "") | tostring)) as $br
@@ -819,7 +814,6 @@ $sa_out" >/dev/null 2>&1 || true
       elif $pn != $num then "anchor now claims PR#\($pn)"
       elif (["","false","0","null","False","FALSE"] | index($h)) == null then "merge_hold was set after validation"
       elif ((($m.pr_posture // "") | tostring) | startswith("commented@")) then "review comments went unanswered after validation"
-      elif $d != $dis then "signoff_dismissed changed after the approval gate ran"
       elif ($t != "" and $t != $base) then "retargeted after validation (merged_target=\($t))"
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"
@@ -873,7 +867,7 @@ $sa_out" >/dev/null 2>&1 || true
     *) short=$(printf '%.8s' "$merge_oid") ;;
   esac
   if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
-       --set "merged_sha=$merge_oid" --unset rejection_reason \
+       --set "merged_sha=$merge_oid" \
        --unset merge_record_failures \
        --append-notes "Merged to ${target:-$base} at ${short:-merge}"; then
     merged=$((merged + 1))

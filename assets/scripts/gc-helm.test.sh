@@ -225,6 +225,10 @@ case "$1 ${2:-}" in
       *STUCK*) exit 1 ;;
     esac ;;
   "convoy status")
+    # Record each convoy resolved, so a test can prove the quiesce confirms only
+    # the ONE molecule the reverse-tracks lookup matched — not one status call
+    # per open root in the store.
+    printf '%s\n' "$3" >> "${FAKE_CONVOY_CALLS:-/dev/null}"
     anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
@@ -316,6 +320,15 @@ case "$1 ${2:-}" in
     # the way the real `dep list` reports a bead it cannot resolve — a JSON
     # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
     if [ "${3:-}" = "list" ]; then
+      # reverse `tracks` (dep list <bead> --direction=up -t tracks): the convoys
+      # that TRACK this bead — how the quiesce resolves the released molecule
+      # from its anchor. Derived from FAKE_CONVOYS (convoy|anchor).
+      case "$*" in
+        *--direction=up*)
+          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$FAKE_CONVOYS" \
+            | jq -Rnc '[inputs | select(length > 0) | {id: .}]'
+          exit 0 ;;
+      esac
       case "${4:-}" in
         A-PROBEDEAD*) exit 1 ;;
         A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
@@ -339,8 +352,9 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes"
+       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
+: > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
 # returns: one full bead row per edge, keyed .dependency_type.
@@ -401,6 +415,7 @@ unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
+: > "$FAKE_CONVOY_CALLS"
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait 2>"$TMP/err" || true)"
 ERR="$(cat "$TMP/err")"
 UP="$TMP/updates"
@@ -526,6 +541,16 @@ grep -q 'could not reap step s-NOPIN' <<< "$ERR" \
 # (REPORT) the run announces the steps it reaped.
 grep -q 'reaped step s-load' <<< "$OUT" \
   && ok "(REPORT) run reports the affine step it reaped" || bad "(REPORT) run reports s-load (out: $OUT)"
+
+# (BOUND) the resolution is keyed on the parked anchor, not the store: one
+# reverse-tracks lookup, then a convoy-status confirm for the ONE matched root,
+# NOT a status call per open root. Enumerating every root would confirm
+# convoy-PARKED, convoy-OTHER and convoy-FOLD; asserting only the matched
+# molecule's convoy is touched is what keeps the fan-out from coming back.
+eq "$(grep -c . "$FAKE_CONVOY_CALLS")" "1" \
+  "(BOUND) --release confirms only the matched molecule's convoy, not one per open root"
+eq "$(cat "$FAKE_CONVOY_CALLS")" "convoy-PARKED" \
+  "(BOUND) …and the one it confirms is the parked anchor's own convoy"
 
 # (REAP static) the reap block is what force-closes; the markers bound it, and
 # --status=closed is the close verb it uses.
@@ -1947,6 +1972,16 @@ export FAKE_STEPS_JSON="$TMP/steps.json"
 # wrote.
 LIVE="$TMP/live"; mkdir -p "$LIVE/bin"
 export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIVE/log"
+# A store write the stub cannot land must not pass silently. The stub mutates the
+# store with a whole-file `jq > tmp && mv` rewrite — the largest write here and
+# the first to hit ENOSPC when a concurrent run-tests.sh batch transiently
+# exhausts the shared tmpfs. Unchecked, that failed rewrite leaves the store at
+# its pre-takeaway value while the stub still exits 0, so every field() read
+# below sees stale state and the quiesce assertions FALSELY fault gc-helm.sh.
+# The stub records this flag instead, and live_store_intact turns it into a
+# distinct infra abort. Sited in $TMP, not $LIVE, so it still lands when $LIVE
+# is the directory that cannot be written.
+export LIVE_WRITE_FAILED="$TMP/live-store-write-failed"
 SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
 
@@ -1983,7 +2018,10 @@ cat > "$LIVE/bin/gc" <<'GCL'
 #!/usr/bin/env bash
 # A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
 # answers the state the earlier write left behind.
-sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE"; }
+# Fail CLOSED: an unchecked `jq > … && mv` drops the write silently when the
+# rewrite cannot land (ENOSPC under disk pressure) and still returns success, so
+# the SUT reads back pre-write state. Record the flag the suite checks instead.
+sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE" && return 0; : >> "$LIVE_WRITE_FAILED"; return 1; }
 case "$1 ${2:-}" in
   "rig list") printf '{"rigs":[{"name":"gc-toolkit","path":"/nonexistent-rig","prefix":"tk"}]}\n' ;;
   "bd list")
@@ -2033,7 +2071,18 @@ case "$1 ${2:-}" in
         *)                shift ;;
       esac
     done ;;
-  "bd dep") printf 'dep %s\n' "$*" >> "$LIVE_LOG" ;;
+  "bd dep")
+    printf 'dep %s\n' "$*" >> "$LIVE_LOG"
+    # reverse `tracks`: the convoys tracking this bead, from LIVE_CONVOYS — the
+    # quiesce resolves the released molecule from its anchor this way.
+    if [ "${3:-}" = "list" ]; then
+      case "$*" in
+        *--direction=up*)
+          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$LIVE_CONVOYS" \
+            | jq -Rnc '[inputs | select(length > 0) | {id: .}]' ;;
+        *) printf '[]\n' ;;
+      esac
+    fi ;;
 esac
 exit 0
 GCL
@@ -2041,9 +2090,21 @@ chmod +x "$LIVE/bin/gc"
 
 field() { jq -r --arg i "$1" --arg k "$2" '.[] | select(.id==$i) | (if $k=="status" then .status elif $k=="assignee" then (.assignee // "") else (.metadata[$k] // "") end)' "$LIVE_STORE"; }
 
+# Call after each mutating run, at TOP LEVEL (never inside a $(field …), where an
+# exit would only leave the subshell). A write the stub could not land leaves the
+# store stale; reading it as a gc-helm.sh verdict would be the false failure this
+# guards against, so stop with a distinct infra message the gate can tell from a
+# real fault.
+live_store_intact() {
+  [ -e "$LIVE_WRITE_FAILED" ] || return 0
+  echo "ABORT(disk-pressure): a LIVE fixture-store write did not land (ENOSPC on the filesystem backing $TMP); the assertions below neither fault nor exonerate gc-helm.sh. Re-run with free tmp space." >&2
+  exit 1
+}
+
 SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
 RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
+live_store_intact   # the quiesce writes landed, or this is disk pressure not a verdict
 
 eq "$(field L-live assignee)" "$SESSION" \
    "(LIVESTEP) the step the release runs FROM keeps its assignee"
@@ -2090,6 +2151,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 SCRC=0
 SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
 eq "$(field L-live status)" "closed" \
    "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
@@ -2104,6 +2166,7 @@ FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-FOLD "superseded by A-CARRIER; the pour raced the fold" \
      --by proactive --release 2>"$LIVE/folderr")" || FOLDRC=$?
 FOLDERR="$(cat "$LIVE/folderr")"
+live_store_intact   # the fold reap's writes landed, or this is disk pressure not a verdict
 eq "$FOLDRC" "0" "(FOLDSTORE) the release on a folded anchor succeeds"
 eq "$(field A-FOLD status)" "closed" \
    "(FOLDSTORE) the anchor is still CLOSED — its disposition was not resurrected"
@@ -2138,6 +2201,30 @@ grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
 grep -q 'anchor left closed' <<< "$FOLDOUT" \
   && ok "(FOLDSTORE) …and reports a quiesce, not a release" \
   || bad "(FOLDSTORE) the run claimed a release (stdout: $FOLDOUT)"
+
+# ── the disk-pressure guard itself ───────────────────────────────────────────
+# The quiesce assertions above read the store back through field(); a stub write
+# the host could not land (ENOSPC under a concurrent run-tests.sh batch) would
+# leave that store stale and read as a false gc-helm.sh failure — the flake this
+# guard removes. Prove both halves so a regression that re-swallows the write is
+# caught: the stub FLAGS a write it could not land, and the flag ABORTS the block
+# distinctly instead of rendering a verdict on stale state. A store directory
+# with no write bit is the hermetic stand-in for a full disk: jq's temp-file
+# create fails exactly as ENOSPC would, while $LIVE stays readable/traversable so
+# the stub still runs and the flag (in $TMP) still lands.
+rm -f "$LIVE_WRITE_FAILED"
+chmod 555 "$LIVE"
+GUARD_WROTE="$("$LIVE/bin/gc" bd update A-LIVE --status=open 2>&1 || true)"
+chmod 755 "$LIVE"
+[ -e "$LIVE_WRITE_FAILED" ] \
+  && ok "(DISKGUARD) a stub store write that cannot land is flagged, not dropped silently" \
+  || bad "(DISKGUARD) a failed store write was swallowed (out: $GUARD_WROTE)"
+GRC=0; GOUT="$(live_store_intact 2>&1)" || GRC=$?
+rm -f "$LIVE_WRITE_FAILED"
+eq "$GRC" "1" "(DISKGUARD) the flag aborts the LIVE block, not a verdict on stale state"
+grep -q 'disk-pressure' <<< "$GOUT" \
+  && ok "(DISKGUARD) …and the abort names disk pressure, not a gc-helm.sh fault" \
+  || bad "(DISKGUARD) the abort is unexplained (out: $GOUT)"
 PATH="$SAVED_PATH"
 
 # ── demand: what a person owes, as a bead the work is blocked by ──────────────
@@ -2581,6 +2668,88 @@ eq "$(d_gate)$(d_update)" "" "(CAPREFRESH) …touching nothing: no second gate, 
 grep -q 'cap is 140' <<< "$DERR" \
   && ok "(CAPREFRESH) …and the refusal names the cap" \
   || bad "(CAPREFRESH) refusal is silent: $DERR"
+printf '[]\n' > "$D_LIST"
+
+# ── demand --topic: one open demand per (gated bead, topic) ───────────────────
+# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
+# files a demand on it. Keyed on the gated bead alone, the second refreshes the
+# first's gate in place and overwrites the operator question it holds. --topic
+# scopes the demand to the sitting (its escalation_key), so each keeps its own.
+
+# (TOPICFILE) a fresh topic-scoped demand records its topic and a topic-scoped
+# recovery marker, so an unstamped orphan is later recoverable under that topic
+# alone rather than colliding with a sibling's on the same bucket.
+printf '[]\n' > "$D_LIST"
+printf 'tk-demTA\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick backend (finding A)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICFILE) a topic-scoped demand succeeds"
+grep -qE -- '--await-id=gc-demand:tk-kid:finding-a( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICFILE) …the gate's recovery marker carries the topic" \
+  || bad "(TOPICFILE) await-id is not topic-scoped: $(d_gate)"
+grep -q -- 'gc.demand_topic=finding-a' <<< "$(d_update)" \
+  && ok "(TOPICFILE) …and the demand records its topic" \
+  || bad "(TOPICFILE) gc.demand_topic missing: $(d_update)"
+grep -q -- 'gc.demand_for=tk-kid' <<< "$(d_update)" \
+  && ok "(TOPICFILE) …alongside the gated bead it blocks" \
+  || bad "(TOPICFILE) gc.demand_for missing: $(d_update)"
+
+# (TOPICISOLATE) two demands on ONE gated bead, one per topic. A re-state under
+# topic A refreshes only A's demand — never the sibling's, and files no new gate
+# — so a sitting on one bucket cannot overwrite another's operator question.
+printf '[{"id":"tk-demA","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-a"}},{"id":"tk-demB","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-b"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: pick backend (finding A, restated)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICISOLATE) a topic-scoped re-state succeeds beside a sibling demand on the same bead"
+eq "$(d_gate)" "" "(TOPICISOLATE) …without filing a second gate"
+grep -q '^bd update tk-demA ' <<< "$(d_update)" \
+  && ok "(TOPICISOLATE) …refreshing its own topic's demand" \
+  || bad "(TOPICISOLATE) topic A's demand was not refreshed: $(d_update)"
+grep -q '^bd update tk-demB ' <<< "$(d_update)" \
+  && bad "(TOPICISOLATE) the sibling topic's demand was overwritten: $(d_update)" \
+  || ok "(TOPICISOLATE) …and the sibling topic's demand is left untouched"
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-demA" \
+   "(TOPICISOLATE) …and it names topic A's demand"
+printf '[]\n' > "$D_LIST"
+
+# (TOPICNONE) a demand with no --topic keeps the pre-topic shape: a bare
+# gc-demand:<gated> marker and no gc.demand_topic key, so every other caller of
+# the verb is unchanged.
+printf 'tk-demNT\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend" --by converse
+eq "$DRC" "0" "(TOPICNONE) a demand with no topic succeeds"
+grep -qE -- '--await-id=gc-demand:tk-kid( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICNONE) …with a bare, topic-free recovery marker" \
+  || bad "(TOPICNONE) await-id is not the bare marker: $(d_gate)"
+grep -q -- 'gc.demand_topic' <<< "$(d_update)" \
+  && bad "(TOPICNONE) a gc.demand_topic key was written without a topic: $(d_update)" \
+  || ok "(TOPICNONE) …and no gc.demand_topic key is written"
+printf 'tk-dem1\n' > "$D_NEXTID"
+printf '[]\n' > "$D_LIST"
+
+# (TOPICRECOVERY) the topic variant of RECOVERYREAD/RECOVERYRETRY. A topic-scoped
+# create writes an unstamped orphan — its await_id carries the topic, but
+# gc.demand_topic is not stamped yet — then fails before returning its id. A later
+# retry under the SAME topic must adopt that orphan by its await_id and file no
+# second gate. The await_id already encodes the topic, so the adoption lookup keys
+# on it rather than on a gc.demand_topic the orphan does not carry; a lookup that
+# demanded gc.demand_topic here would miss the orphan and duplicate the gate.
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=lookup-fail
+printf 'tk-TOPICorphan\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recover later (finding A)" --by converse --topic finding-a
+eq "$DRC" "4" "(TOPICRECOVERY) a topic-scoped recovery read failure fails closed"
+eq "$(jq -r '.[0].await_id' "$D_LIST")" "gc-demand:tk-kid:finding-a" \
+   "(TOPICRECOVERY) the unstamped orphan retains the topic-scoped marker"
+rm "$D_LIST_FAIL"
+demand_run tk-kid "operator: recover later (finding A)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICRECOVERYRETRY) a later retry adopts the unstamped topic orphan"
+eq "$(d_gate)" "" "(TOPICRECOVERYRETRY) adoption creates no second gate"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(TOPICRECOVERYRETRY) adoption completes the stamp on the gated bead"
+grep -q -- 'gc.demand_topic=finding-a' <<< "$(d_update)" \
+  && ok "(TOPICRECOVERYRETRY) …recording the topic on the adopted gate" \
+  || bad "(TOPICRECOVERYRETRY) gc.demand_topic not stamped on adoption: $(d_update)"
+unset D_CREATE_MODE
+printf 'tk-dem1\n' > "$D_NEXTID"
 printf '[]\n' > "$D_LIST"
 
 # ── the rig-enumeration helper restores the caller's trap table ──────────────

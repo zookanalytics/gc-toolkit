@@ -88,7 +88,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
   fi
   # One row per legacy marker: <id> <key> <old value> <new state> <blocked_reason> <declared>.
   # An `exception@` carries the empty new state; the park arm below recognises it.
-  # <declared> is "1" when the key names a gate in the anchor's own check_set,
+  # <declared> is "1" when the key names a check in the anchor's own check_set,
   # "0" otherwise — an undeclared key is reported, never rewritten or parked.
   rows=$(printf '%s' "$raw" | jq -r '
       .[]? | (.metadata // {}) as $m
@@ -111,7 +111,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
       | (if ($declared | contains(",\($g),")) then "1" else "0" end) as $decl
       | [$id, .key, $v, $to, $why, $decl] | join("\u001f")' 2>/dev/null)
   if [ -z "$rows" ]; then
-    echo "$label: no legacy gate markers; nothing to migrate"
+    echo "$label: no legacy check markers; nothing to migrate"
     continue
   fi
 
@@ -120,11 +120,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$id" ] || continue
 
     if [ "$decl" != "1" ]; then
-      # check_set does not name this gate: no reader dispatches or merges
+      # check_set does not name this check: no reader dispatches or merges
       # against it, and nothing here may rewrite it either. gate-ensure's
       # stray-marker sweep (or a hand unset) retires it; this is not our call.
       undeclared=$((undeclared + 1))
-      echo "$label $id: $key=\"$was\" names a gate outside check_set; left as an undeclared legacy marker for gate-ensure's sweep (or a hand unset)"
+      echo "$label $id: $key=\"$was\" names a check outside check_set; left as an undeclared legacy marker for gate-ensure's sweep (or a hand unset)"
       continue
     fi
 

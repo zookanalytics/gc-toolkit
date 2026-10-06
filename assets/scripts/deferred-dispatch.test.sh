@@ -38,6 +38,10 @@
 #     in the first place;
 #   * the QUIET PATH — an empty store still passes, so the guard above did not
 #     strand the ordinary no-work case;
+#   * the ARG_MAX guard — a large armed set still enumerates and dispatches. A
+#     snapshot handed to jq as one argv value dies past the kernel per-argument
+#     cap, which silently strands the whole backlog; the fixture is sized to
+#     prove the old argv pass fails before asserting the SUT survives it;
 #   * a POSITIVE CONTROL over the shipped order file, so a passing suite cannot
 #     mean the cadence that consumes these records was quietly un-shipped;
 #   * SCRATCH CLEANUP — every verb that stages a temp file leaves none behind.
@@ -526,6 +530,36 @@ eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead dep-
 eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead show call — fields come from the cached snapshot"
 eq "$(grep -c '^list' "$STUB_BD_LOG")" "3" "the whole set costs three list reads (all + ready + one blocker-status batch), not one per bead"
 unset STUB_BD_LOG
+
+# --- the ARG_MAX fix: a large armed set enumerates, never dies on argv --------
+# armed_rows used to hand the whole --ready snapshot to jq as a single --argjson
+# value. That snapshot carries one row per armed bead, and a single argv
+# argument past the kernel's per-argument size cap (128 KiB on Linux) aborts jq
+# with "argument list too long" — so once the armed backlog held a few dozen
+# full-body rows EVERY enumeration failed and nothing dispatched. The snapshots
+# now reach jq over stdin, which has no such cap. The fixture is sized so the
+# old argv pass provably dies (the positive control below), then the SUT must
+# still enumerate and dispatch the whole set. The stub ignores --brief, so it
+# feeds the SUT full-body rows — the payload the stdin path has to survive.
+echo "# a large armed set enumerates and dispatches (no argv size cap)"
+big_store="$(jq -nc '[ range(0;40)
+  | {id:("big-\(.)"), status:"open", assignee:"",
+     metadata:{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},
+     notes:("x" * 8000), _ready:true} ]')"
+store "$big_store"
+ready_payload="$(gc bd list --has-metadata-key gc.dispatch_when_ready --ready --json --limit 0)"
+if jq -n --argjson r "$ready_payload" '1' >/dev/null 2>&1; then
+  bad "scale fixture too small: the --ready snapshot fits in one argv value, so it cannot exercise the cap"
+else
+  ok "scale fixture exceeds the kernel per-argument cap (the pre-fix --argjson pass dies here)"
+fi
+out="$("$SUT" list 2>&1)"; rc=$?
+eq "$rc" 0 "list enumerates a large armed set without an argv failure"
+hasnt "$out" "could not enumerate" "a large armed set does not read as 'could not enumerate'"
+eq "$(printf '%s\n' "$out" | grep -c ' -> rig/pool ')" "40" "list reports every bead in the large armed set"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "reconcile completes a pass over a large armed set"
+eq "$(slings)" "40" "reconcile dispatches every ready arm in the large set"
 
 echo "# reconcile keeps the record when the sling fails"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'

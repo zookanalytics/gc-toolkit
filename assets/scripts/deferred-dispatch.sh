@@ -373,19 +373,28 @@ resolve_own_cleared() { # all_json  cand_id...  ->  "<id>\t<0|1>" per candidate
 # instead of a `bd show` per bead.
 armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<own_cleared 0|1>" per bead; caches the snapshot to all_out
     local out="$1" all_out="$2" all ready_ids base id status ready cand_ids=() cleared_map=""
-    all="$(bd_ list --has-metadata-key "$K_TARGET" --all --json --limit 0 2>/dev/null)" || return 1
+    # --brief on both reads: this function and its cache consumers use only id,
+    # status, assignee, metadata and dependency edges, all of which --brief
+    # keeps; it drops only the free-form text that makes a row heavy on the
+    # shared store.
+    all="$(bd_ list --has-metadata-key "$K_TARGET" --all --brief --json --limit 0 2>/dev/null)" || return 1
     [ -n "$all" ] || return 1
     printf '%s' "$all" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
 
-    ready_ids="$(bd_ list --has-metadata-key "$K_TARGET" --ready --json --limit 0 2>/dev/null)" || return 1
+    ready_ids="$(bd_ list --has-metadata-key "$K_TARGET" --ready --brief --json --limit 0 2>/dev/null)" || return 1
     [ -n "$ready_ids" ] || return 1
     printf '%s' "$ready_ids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
 
     printf '%s' "$all" | scrub > "$all_out" || return 1
 
-    base="$(printf '%s' "$all" | jq -r --argjson r "$ready_ids" '
-        ($r | map(.id)) as $ready
-        | .[] | [ .id, (.status // ""), (if (.id as $i | $ready | index($i)) then "1" else "0" end) ]
+    # Both snapshots grow with the armed set, and a single --argjson value past
+    # the kernel per-argument size cap fails the whole enumeration. Both reach
+    # jq over stdin instead: `input` is the ready snapshot, `inputs` the --all
+    # snapshot.
+    base="$( { printf '%s' "$ready_ids"; printf '\n'; printf '%s' "$all"; } | jq -rn '
+        (input | map(.id)) as $ready
+        | inputs | .[]
+        | [ .id, (.status // ""), (if (.id as $i | $ready | index($i)) then "1" else "0" end) ]
         | @tsv' 2>/dev/null)" || return 1
 
     while IFS=$'\t' read -r id status ready; do
