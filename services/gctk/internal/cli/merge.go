@@ -1229,13 +1229,15 @@ type reviewSummary struct {
 	approver string
 }
 
-// reviewState reproduces the review-grouping jq: the latest state-bearing review
-// per non-self reviewer decides veto and approver. An approval stands across
-// later pushes until someone dismisses it, so the commit a review was given at
-// is not read. ok=false is an unreadable history: `jq -cs` slurps the whole
-// stream or nothing, so one row that will not decode makes all of it
-// unreadable, because the veto or the only approval may be that row or follow
-// it.
+// reviewState reproduces the review-grouping jq: each non-self reviewer's latest
+// APPROVED or CHANGES_REQUESTED review decides veto and approver, taken after
+// every DISMISSED review is dropped, so a dismissed approval does not count and
+// a dismissed CHANGES_REQUESTED does not hide its author's older approval. An
+// approval stands across later pushes until someone dismisses it, so the commit
+// a review was given at is not read. ok=false is an unreadable history:
+// `jq -cs` slurps the whole stream or nothing, so one row that will not decode
+// makes all of it unreadable, because the veto or the only approval may be that
+// row or follow it.
 func reviewState(raw []byte, self string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
@@ -1266,14 +1268,15 @@ func reviewState(raw []byte, self string) (reviewSummary, bool) {
 	}
 
 	var summary reviewSummary
-	// Group the state-bearing, non-self reviews by login; keep the latest per
-	// reviewer by (submitted_at, id).
+	// Group the non-self APPROVED and CHANGES_REQUESTED reviews by login and keep
+	// the latest per reviewer by (submitted_at, id). A DISMISSED row is dropped
+	// before the latest is taken.
 	groups := map[string][]reviewRow{}
 	for _, r := range all {
 		if r.Login == self {
 			continue
 		}
-		if r.State != "APPROVED" && r.State != "CHANGES_REQUESTED" && r.State != "DISMISSED" {
+		if r.State != "APPROVED" && r.State != "CHANGES_REQUESTED" {
 			continue
 		}
 		groups[r.Login] = append(groups[r.Login], r)
