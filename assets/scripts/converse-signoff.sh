@@ -81,9 +81,18 @@ fi
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
-ITEM=$(gc bd show "$VISIT" --json \
-  | scrub | jq -r '.[0].metadata.stall_root // ""')
+V=$(gc bd show "$VISIT" --json | scrub)
+ITEM=$(printf '%s' "$V" | jq -r '.[0].metadata.stall_root // ""')
 ITEM="${ITEM:-$SUBJECT}"
+# The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
+# on a shared standing-scope bucket (same item, distinct escalation_key) keeps its
+# own demand: this sign-off neither resolves it nor overwrites its operator
+# question with a re-state. escalation_key is that per-sitting discriminator,
+# empty on an ordinary visit — which keeps the pre-topic behaviour. An array so
+# an empty topic expands to no argument under zsh.
+TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
+DEMAND_TOPIC=()
+[ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
 HELM=""
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
@@ -114,15 +123,34 @@ gc bd show "$ITEM" --json | scrub \
 # ITEM; a sitting may have filed either or both. --include-gates: a demand is a
 # human gate, hidden from `bd list` by default, so the discharge would otherwise
 # never find it.
+HELD_DEMAND=$(printf '%s' "$V" | jq -r '.[0].metadata["gc.hold_demand"] // ""')
 DEMANDS_JSON=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 | scrub)
-# The open, unassigned demand gating a given bead, or empty. An empty target
-# would match every bead that carries no gc.demand_for at all, so the caller
-# guards against passing one.
+# The open, unassigned demand THIS sitting filed on a given bead, or empty. Under
+# a standing scope sibling sittings share the item and each holds its own
+# topic-keyed demand on it, so a first match on gc.demand_for alone would resolve
+# or re-state a sibling's operator question. converse-hold stamps the
+# conversation demand's id as gc.hold_demand on the visit, so that exact demand
+# wins wherever it gates this bead. Any other demand (the merge hold, which
+# carries no stamp, or a hold predating the stamp) is matched under this
+# sitting's topic, and the topic-encoding await_id recovers an orphan whose
+# gc.demand_for stamp never landed. An empty topic keeps the pre-topic match on
+# the bead alone. An empty target would match every bead that carries no
+# gc.demand_for at all, so it returns nothing.
 demand_on() {
   [ -n "$1" ] || { printf ''; return; }
+  local aid
+  if [ -n "$TOPIC" ]; then aid="gc-demand:$1:$TOPIC"; else aid="gc-demand:$1"; fi
   printf '%s' "$DEMANDS_JSON" \
-    | jq -r --arg i "$1" '[ .[]? | select((.metadata["gc.demand_for"] // "") == $i)
-                           | select((.assignee // "") == "") | .id ] | first // empty'
+    | jq -r --arg i "$1" --arg d "$HELD_DEMAND" --arg t "$TOPIC" --arg aid "$aid" '
+        [ .[]? | select((.assignee // "") == "") ] as $open
+        | ([ $open[] | select($d != "" and .id == $d
+                              and (.metadata["gc.demand_for"] // "") == $i) | .id ] | first)
+          // ([ $open[] | select(
+                  ((.metadata["gc.demand_for"] // "") == $i
+                     and ($t == "" or (.metadata["gc.demand_topic"] // "") == $t))
+                  or (.issue_type == "gate" and .await_type == "human"
+                     and (.await_id // "") == $aid)) | .id ] | first)
+          // empty'
 }
 if [ "$RULED" = yes ]; then
   # SETTLED — the operator ruled in this thread. Resolve each gate where it
@@ -157,10 +185,12 @@ else
   # cannot carry that wait: the visit is this sitting's record and converse-settle
   # closes it next, stranding any demand left on it as a gate on closed work that
   # gate-visit-sweep names on stderr forever and `gate resolve` readies nothing.
-  # So move it — close the visit demand, re-state the wait on the ITEM (idempotent:
-  # one open demand per gated bead, so an anchor already holding the opt-in merge
-  # demand is simply refreshed). A sitting that filed NO demand re-states none:
-  # the discharge records only the waits the hold actually took.
+  # So move it — close the visit demand, re-state the wait on the ITEM under this
+  # sitting's topic (idempotent: one open demand per gated bead and topic, so an
+  # anchor already holding this sitting's opt-in merge demand is simply refreshed,
+  # and a sibling sitting's demand on a shared bucket is left alone). A sitting
+  # that filed NO demand re-states none: the discharge records only the waits the
+  # hold actually took.
   VD=""
   [ "$VISIT" != "$ITEM" ] && VD=$(demand_on "$VISIT")
   ID=$(demand_on "$ITEM")
@@ -173,7 +203,7 @@ else
       || echo "COULD NOT STAMP the moved-wait note on $VD — the board may still show its question"
   fi
   if [ -n "$VD" ] || [ -n "$ID" ]; then
-    "$HELM" demand "$ITEM" "$STILL_OWED" --by converse
+    "$HELM" demand "$ITEM" "$STILL_OWED" --by converse "${DEMAND_TOPIC[@]}"
   fi
 fi
 # `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
