@@ -1,0 +1,19 @@
+# build-scratch-reap — reclaim the build and test scratch a killed or crashed
+# run left behind, before the per-uid tmpfs quota is exhausted and every agent's
+# Bash output capture fails. scratch-reap owns the Claude Code session scratch;
+# this owns the Go toolchain trees, the gc.test per-run trees, and the templated
+# tool temp that no EXIT trap reclaimed.
+#
+# City scope: the scratch roots are per-uid, shared by every rig on the host, so
+# one pass serves them all. The script also takes a per-uid lock, so a second
+# dispatcher cannot double the sweep. It removes only entries with no live holder
+# (and, for pid-named trees, a dead pid), so a skipped or cut-short pass costs
+# only the reclaim the next pass takes instead.
+[order]
+description = "Reclaim build/test scratch (go-build*, go-link*, gct<pid>, run.<pid>, gctk-*) left by killed or crashed runs, gated on no live holder; one host-level pass under a lock"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/build-scratch-reap.sh"
+timeout = "300s"
+scope = "city"
+idempotent = true
