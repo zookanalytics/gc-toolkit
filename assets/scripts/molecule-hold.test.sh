@@ -324,6 +324,21 @@ eq "$(jq -r '[ .[] | select((.status == "open" or .status == "in_progress") and 
 eq "$(jq -r '[ .[] | select(((.metadata["gc.root_bead_id"] // "") == "root-1") and ((.metadata["gc.routed_to"] // "") != "") and (((.metadata["gc.step_ref"] // "") | endswith(".workflow-finalize")) | not)) ] | length' "$FAKE_STORE")" \
    "0" "no step of the held molecule is left routed, except finalize"
 
+echo "== an open+assigned sibling with no route is still unassigned (the empty route column must not collapse the split) =="
+reset_store
+# Strip s-impl's route so it is open + assigned + UNROUTED — the one sibling shape
+# the loop-anchor fixture never builds. Its empty route column is what a tab split
+# collapses, shifting the assignee out of $swho so the unassign is skipped.
+jq -c 'map(if .id == "s-impl" then (.metadata |= del(.["gc.routed_to"])) else . end)' \
+  "$FAKE_STORE" > "$TMP/s" && mv "$TMP/s" "$FAKE_STORE"
+OUT=$("$SCRIPT" --step "$STEP" --reason "unrouted sibling" 2>&1); RC=$?
+eq "$RC" "0" "the hold still exits 0"
+eq "$(bassignee s-impl)" "" "the unrouted-but-assigned sibling is UNASSIGNED — an empty route column must not shift the assignee out of its field"
+eq "$(bstatus s-impl)"   "open" "and it keeps its status"
+eq "$(jq -r '[ .[] | select((.status == "open" or .status == "in_progress") and (.assignee // "") != "" and ((.metadata["gc.root_bead_id"] // "") == "root-1")) ] | length' "$FAKE_STORE")" \
+   "0" "no step of the held molecule is left open-or-in_progress AND assigned, including the unrouted one"
+hasnt "$(gclog)" "--status=closed" "nothing is closed on this path either"
+
 echo "== idempotence =="
 OUT=$("$SCRIPT" --step "$STEP" --reason "same reason" 2>&1); RC=$?
 eq "$RC" "0" "a re-run over an already-held molecule exits 0"
