@@ -386,6 +386,7 @@ unset FAKE_POOL_DEAD FAKE_SHOW_JSON FAKE_DEPS_JSON
 # ── ruling: the human gate is the wait, filed by the exit itself ─────────────
 #   (RUL)      the exit files the gate through gc-helm.sh demand, the takeaway
 #              as its question, and holds the subject on it
+#   (RULTOPIC) the gate is filed under the topic first-reaction
 #   (RULORDER) record, then gate, then release: the gate is the act
 #   (RULGATE)  a gate that did not file, or that demand did not name, fails
 #              the exit before the release, and the record stands for a re-run
@@ -398,8 +399,14 @@ export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
     --takeaway "needs a ruling: which default"
 eq "$RC" "0" "(RUL) a ruling disposition succeeds"
-has "HELM demand tk-sub needs a ruling: which default --by proactive --body" "$LOG" \
+has "HELM demand tk-sub needs a ruling: which default --by proactive --topic first-reaction --body" "$LOG" \
    "(RUL) it files the human gate, the takeaway as the gate's question"
+# gc-helm.sh demand keeps one open gate per gated bead and topic. With no topic
+# it matches on the subject alone: it refreshes a converse sitting's lone demand
+# on the subject in place, overwriting the question that sitting holds, and stops
+# on a subject that carries two. The reaction's own topic files beside them.
+has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
+   "(RULTOPIC) the gate is filed under the first reaction's own topic"
 # The body spans lines, so read the demand call up to the release that follows
 # it; the record UPDATE that also carries the reason sits before this range.
 has "the trade-off is the operator's" "$(sed -n '/^HELM demand/,/^HELM takeaway/p' "$FAKE_LOG")" \
@@ -478,6 +485,8 @@ has "gc.recommended_formula=mol-x" "$LOG" "(RECO) the recommended formula is sta
 has "gc.first_reaction=recommend" "$LOG" "(RECO) …alongside the disposition record"
 has "HELM demand tk-sub recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" "$LOG" \
    "(RECO) …it files the human gate, as ruling does"
+has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
+   "(RECO) …under the first reaction's own topic"
 has "--waiting-on tk-gate1" "$LOG" "(RECO) …and the gate holds the subject, the ruling shape"
 RECO_UL=$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1)
 RECO_DL=$(grep -n -m1 '^HELM demand' "$FAKE_LOG" | cut -d: -f1)
@@ -817,12 +826,15 @@ has "the prior act did not land" "$ERR" "(RESUME) …announcing the resume"
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
 eq "$RC" "0" "(RESUME) …and every exit resumes, not just actionable"
 has "HELM takeaway tk-sub" "$LOG" "(RESUME) …the ruling act is re-attempted"
-# A partial whose gate already filed resumes through demand again, which
-# refreshes the one open gate on the subject instead of filing a second.
+# A partial whose gate already filed resumes through demand again, under the
+# same topic, which refreshes the gate the first run filed instead of filing a
+# second.
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 run tk-sub --disposition ruling --reason "r" --takeaway "t"
 eq "$RC" "0" "(RESUME) the gate form resumes"
 has "HELM demand tk-sub" "$LOG" "(RESUME) …asking demand for the subject's gate again"
+has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
+   "(RESUME) …under the topic the first run filed it under"
 has "HELM takeaway tk-sub" "$LOG" "(RESUME) …and re-attempting the release"
 export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
 unset FAKE_SHOW_JSON

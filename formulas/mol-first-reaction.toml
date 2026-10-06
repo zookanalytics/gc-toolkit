@@ -348,9 +348,9 @@ re-dispose on every exit before it writes anything, and the human gate the
 `ruling` and `recommend` exits file is filed inside that script, after the
 refusal, so a re-run files no second gate. A run that died part-way, before
 `gc.proactive_reaction=1` landed, is not a landed reaction: its re-run resumes,
-and `gc-helm.sh demand` refreshes the one open gate on the subject rather than
-filing another. So check first, ahead of the exit blocks: if the reaction has
-landed, run no exit — close this step and drain.
+and `gc-helm.sh demand` refreshes the gate the first run filed under the
+reaction's topic rather than filing another. So check first, ahead of the exit
+blocks: if the reaction has landed, run no exit — close this step and drain.
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -486,12 +486,14 @@ honest conclusion is that there is nothing to do take 1c.
 
 `first-reaction-dispose.sh` files the gate itself, through `gc-helm.sh demand`:
 your `--takeaway` is the gate's question and your `--reason` rides its body. It
-holds the bead on the gate and records the gate as the disposition's target. One
-open gate stands per bead, so a re-run after a partial refreshes that gate rather
-than filing a second. The gate is the escalation's state, and a visit is how it
-resolves: `orders/gate-visit-sweep.toml` files the visit on the bead on its next
-pass, a 2-minute cooldown, so for up to one pass the bead waits on a gate with no
-visit. You file no visit here. The gate resolves when the operator answers it:
+holds the bead on the gate and records the gate as the disposition's target. The
+gate is filed under the topic `first-reaction`, and one open gate stands per bead
+and topic, so a re-run after a partial refreshes that gate rather than filing a
+second, and a demand a converse sitting already holds on the bead keeps its own
+question. The gate is the escalation's state, and a visit is how it resolves:
+`orders/gate-visit-sweep.toml` files the visit on the bead on its next pass, a
+2-minute cooldown, so for up to one pass the bead waits on a gate with no visit.
+You file no visit here. The gate resolves when the operator answers it:
 Accept resolves it as it runs the recommended mol, and a sitting resolves it when
 the operator rules.
 

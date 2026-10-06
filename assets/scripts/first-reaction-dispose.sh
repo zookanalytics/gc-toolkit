@@ -93,11 +93,13 @@ Usage:
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (assets/scripts/deferred-dispatch.sh).
   ruling and recommend put the subject to the operator as a native human gate:
-  the script files it with gc-helm.sh demand, the takeaway as its question,
-  and holds the subject on it. One open gate stands per subject, so a re-run
-  refreshes the gate rather than filing a second. orders/gate-visit-sweep files
-  the visit that resolves the gate on its next pass (a 2-minute cooldown), so
-  the subject waits up to one pass with a gate and no visit.
+  the script files it with gc-helm.sh demand under the topic first-reaction,
+  the takeaway as its question, and holds the subject on it. One open gate
+  stands per subject and topic, so a re-run refreshes the reaction's gate
+  rather than filing a second, and a demand a sitting already holds on the
+  subject is left alone. orders/gate-visit-sweep files the visit that resolves
+  the gate on its next pass (a 2-minute cooldown), so the subject waits up to
+  one pass with a gate and no visit.
   --visit (ruling, recommend) holds the subject on a visit the caller already
   filed instead, and files no gate.
   --recommended-formula (recommend only, required) names the execution mol the
@@ -532,8 +534,13 @@ fi
 # The next move is the operator's, and what a person owes is a native human gate
 # that blocks the subject (gc-helm.sh demand; docs/gascity-human-engagement.md).
 # The takeaway is its question, the same sentence the board shows on the
-# subject. demand keeps one open gate per gated bead, so a re-run after a
-# partial refreshes the gate a prior run filed instead of filing a second.
+# subject. demand keeps one open gate per gated bead and topic, and this gate is
+# filed under the topic first-reaction. So a re-run after a partial refreshes
+# the gate a prior run filed instead of filing a second, and a demand a converse
+# sitting already holds on the subject keeps its own question. With no topic,
+# demand matches on the subject alone: it would refresh a sitting's lone demand
+# in place and overwrite its question, and it would stop on a subject that
+# carries two.
 #
 # It is filed after the recommendation read-back above because the gate is what
 # brings the visit: orders/gate-visit-sweep files the visit that resolves it on
@@ -541,7 +548,7 @@ fi
 # runs, the subject waits on a gate with no visit.
 GATE=""
 if { [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; } && [ -z "$VISIT" ]; then
-    DEMAND_OUT=$("$HELM" demand "$BEAD" "$TAKEAWAY" --by "$BY" --body "Filed by a first reaction on $BEAD ($DISPOSITION), which waits on it.
+    DEMAND_OUT=$("$HELM" demand "$BEAD" "$TAKEAWAY" --by "$BY" --topic first-reaction --body "Filed by a first reaction on $BEAD ($DISPOSITION), which waits on it.
 
 $REASON
 
