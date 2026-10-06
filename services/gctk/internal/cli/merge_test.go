@@ -3,6 +3,11 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +17,9 @@ import (
 )
 
 // merge.test.sh drives `gctk merge` end to end through stubbed gc/gh; these pin
-// the pure pieces whose fail-closed reading is easy to lose in a refactor.
+// the pure pieces whose fail-closed reading is easy to lose in a refactor, and
+// the supervisor-API read seam, which that suite cannot reach because its
+// harness pins GC_NO_API.
 
 // `jq -cs` slurps the reviews stream whole or not at all. A stream that stops
 // decoding after two good rows is unreadable, not a two-row history: the row
@@ -132,5 +139,52 @@ func TestIsLiveDefaultsOnlyANullStatusToOpen(t *testing.T) {
 		if got := stuckHolder(b) != ""; got != tc.live {
 			t.Errorf("stuckHolder(%s) holds = %v, want %v", tc.row, got, tc.live)
 		}
+	}
+}
+
+// The merge decides off the anchor's live row, so both re-reads take it from
+// the store, never from the supervisor API's cache: a merge_hold written after
+// the daemon cached the bead must still hold the merge. The fake supervisor
+// serves the anchor without the hold and the stubbed `gc` serves it with one.
+// The Show control proves the daemon path is live here, so the anchorRow
+// assertion cannot pass on a client that never consulted the daemon.
+func TestAnchorRowReadsTheStoreNotTheSupervisorCache(t *testing.T) {
+	const cached = `{"id":"H1","status":"open","metadata":{"merge_result":"pull_request","pr_number":"60"}}`
+	const stored = `[{"id":"H1","status":"open","metadata":{"merge_result":"pull_request","pr_number":"60","merge_hold":"true"}}]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, cached)
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	toml := fmt.Sprintf("[supervisor]\nbind = %q\nport = %s\n", host, port)
+	if err := os.WriteFile(filepath.Join(home, "supervisor.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	stub := "#!/bin/sh\ncat <<'GCEOF'\n" + stored + "\nGCEOF\n"
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_NO_API", "")
+	t.Setenv("GC_HOME", home)
+	t.Setenv("GC_CITY_PATH", filepath.Join(t.TempDir(), "testcity"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	c := gcbd.New()
+	if b := c.Show("H1"); b == nil || b.Meta("pr_number") != "60" || b.Meta("merge_hold") != "" {
+		t.Fatalf("control: Show = %+v; want the supervisor's cached row, without merge_hold", b)
+	}
+	m := &merger{client: c}
+	b, ok := m.anchorRow("H1")
+	if !ok || b.Meta("merge_hold") != "true" {
+		t.Fatalf("anchorRow = (%+v, %v); want the stored row, merge_hold=true, not the supervisor's cached row", b, ok)
 	}
 }

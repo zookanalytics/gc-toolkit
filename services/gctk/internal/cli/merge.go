@@ -658,9 +658,13 @@ func (m *merger) ghOrigin(args ...string) ([]byte, int) {
 }
 
 // anchorRow reads the anchor's live row; ok=false on an unreadable bead or one
-// whose metadata is null — never an all-default row.
+// whose metadata is null — never an all-default row. Both re-reads decide the
+// merge off this row, so it takes the authoritative `gc bd show` path that
+// merge.sh's anchor_row reads, never the supervisor API: the daemon's cache can
+// lag a fresh write, and a merge_hold, an unanswered-comment posture or a
+// retarget written just before the pass would read as absent.
 func (m *merger) anchorRow(id string) (*gcbd.Bead, bool) {
-	b := m.client.Show(id)
+	b := m.client.ShowDirect(id)
 	if b == nil || b.Metadata == nil {
 		return nil, false
 	}
