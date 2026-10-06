@@ -13,6 +13,11 @@
 #   (SLING-SKIP) sling refuses a marked bead as a no-op (exit RC_ALREADY_REACTED)
 #                and names gc.reaction_owned, filing nothing
 #   (SLING-GO)   …while an unmarked bead proceeds to the dispatch
+# A standing record (a task_kind assets/scripts/standing-kinds.sh lists) is open,
+# unrouted and unassigned by design and never closes, so a first reaction has no
+# disposition to make on it:
+#   (STANDING-DROP) scan_precision_filter drops a bead of every standing kind
+#   (STANDING-KEEP) …while a raw input beside them is still a candidate
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
 # bash, not sh.
@@ -58,6 +63,28 @@ echo "# scan_precision_filter drops a live-intake subject, keeps a raw input"
 IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
 has "$IDS" "tk-plain"  "(SCAN-KEEP) an unmarked raw input bead is still a candidate"
 hasnt "$IDS" "tk-intake" "(SCAN-DROP) a marked live-intake subject is dropped from the scan"
+
+# One bead per standing kind, each passing every other clause (task type, a
+# description, unrouted, unmarked, top-level), beside one raw input. The kinds
+# are read from the shared definition, so a kind added there is covered here
+# with no edit to this file.
+# shellcheck source=../assets/scripts/standing-kinds.sh
+. "$HERE/../assets/scripts/standing-kinds.sh"
+KINDS="$(jq -nr "$STANDING_KINDS_JQ"'standing_kinds[]')"
+[ -n "$KINDS" ] && ok "(STANDING) the shared definition lists the standing kinds" \
+    || bad "(STANDING) the shared definition lists the standing kinds (read back empty)"
+jq -n --arg kinds "$KINDS" '
+  [{"id":"tk-raw", "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}}]
+  + [ $kinds | split("\n")[] | select(length > 0)
+      | {"id": ("tk-standing-" + .), "issue_type": "task", "description": "a standing record",
+         "title": ("standing " + .), "metadata": {"task_kind": .}} ]' > "$TMP/scan.json"
+
+echo "# scan_precision_filter drops every standing kind, keeps a raw input"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-raw" "(STANDING-KEEP) a raw input beside the standing records is still a candidate"
+for k in $KINDS; do
+    hasnt "$IDS" "tk-standing-$k" "(STANDING-DROP) a task_kind=$k standing record is not a scan candidate"
+done
 
 # beads.json: the metadata the sling guard reads per bead.
 cat > "$TMP/beads.json" <<'JSON'
