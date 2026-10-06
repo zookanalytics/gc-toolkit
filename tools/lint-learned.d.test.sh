@@ -947,7 +947,8 @@ eq "$OUT" "" "and nothing is printed"
 # substitution it is data, and after a backslash it continues the line, so the
 # list runs on into the next line, and an unsplit expansion there is still a
 # finding. Each finding is reported once, at the line its for-statement starts
-# on, and that includes a loop that starts a later line inside a substitution.
+# on, and that includes a loop that starts a later line inside a substitution,
+# with or without a backslash continuation before it.
 cat > "$TMP/formulas/spans-multiline.toml" <<'FIX'
 ```bash
 for x in $(printf 'a\n'
@@ -965,19 +966,23 @@ for x in $LIST $(for y in $LIST; do
   printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
 for x in a \
   $LIST; do printf '[%s]' "$x"; done
+for x in a \
+  $(printf b
+for y in $LIST; do printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
 ```
 FIX
 runf "$TMP/formulas/spans-multiline.toml"
 eq "$RC" 1 "an expansion after a line break inside a span or after a backslash is a finding"
-for n in 2 4 7 9 12 13 15; do
+for n in 2 4 7 9 12 13 15 19; do
     has "$OUT" "spans-multiline.toml:$n:" "spans-multiline.toml line $n is reported"
 done
-eq "$(printf '%s\n' "$OUT" | grep -c .)" 7 "and each is reported once, at the line its for-statement starts on"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 8 "and each is reported once, at the line its for-statement starts on"
 
 # A line break exposes nothing on its own. An expansion inside the span that
 # holds the break is still data, and a top-level newline still ends a list,
 # nested or not, so an unquoted $y or $x in the loop body after it is not a
-# finding.
+# finding. A line that opens with `#` holds no loop, whether it is a comment
+# inside a substitution or data inside a quote.
 cat > "$TMP/formulas/spans-multiline-clean.toml" <<'FIX'
 ```bash
 for x in $(printf '%s\n' $LIST
@@ -989,10 +994,16 @@ do printf '[%s]' $x; done
 for x in $(printf a
 for y in b c
 do printf '<%s>' $y; done); do printf '[%s]' "$x"; done
+for x in $(printf a
+# was: a; for y in $LIST; do :
+); do printf '[%s]' "$x"; done
+for x in "a
+# b; for y in $LIST; do :
+c"; do printf '[%s]' "$x"; done
 ```
 FIX
 runf "$TMP/formulas/spans-multiline-clean.toml"
-eq "$RC" 0 "data in a multi-line span, and a body after a top-level newline, are not findings"
+eq "$RC" 0 "data in a multi-line span, a body after a top-level newline, and a #-led line are not findings"
 eq "$OUT" "" "and nothing is printed"
 
 # The shells are the ground truth. Each loop in the four fixtures above, one

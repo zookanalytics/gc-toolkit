@@ -94,25 +94,27 @@ function list_of(s,   m, e) {
     list_open = (mask_open && e > length(m))
     return substr(m, 1, e - 1)
 }
-function newlines(s) { return gsub(/\n/, "", s) }
-# Judge text, a logical line whose first line is line start. For each of its
-# lines where a for-statement lists an unsplit expansion, print that line's
-# number once. Every for-statement is judged, one nested inside another's
-# list or starting a later line of text included: each search resumes just
-# after the previous `in`. While a list is still open at the end of text and
-# last is unset, so more of the block follows, print nothing and return 1:
-# the caller appends the next line and judges the whole again.
-function judge(text, last,   flat, remain, list, at, seen, hits) {
-    if (text ~ /^[[:space:]]*#/) return 0
+# Judge text, a logical line whose first line is line start and whose kth
+# newline is followed by line lineof[k]. For each of its lines where a
+# for-statement lists an unsplit expansion, print that line's number once.
+# Every for-statement is judged, one nested inside another's list or starting
+# a later line of text included: each search resumes just after the previous
+# `in`. A line that opens with `#` holds no for-statement, whether it is a
+# comment or data inside a span. While a list is still open at the end of
+# text and last is unset, so more of the block follows, print nothing and
+# return 1: the caller appends the next line and judges the whole again.
+function judge(text, last,   flat, remain, k, seg, list, at, seen, hits) {
     flat = text
     gsub(/\n/, " ", flat)
     sub(/^[[:space:]]+/, "", flat)
     remain = text; seen = 0; hits = ""
     while (match(remain, /(^|\n|[;&|(){}]|\$\(|[[:space:]](do|then|else))[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]/)) {
         remain = substr(remain, RSTART + RLENGTH)
+        k = split(substr(text, 1, length(text) - length(remain)), seg, "\n") - 1
+        if (seg[k + 1] ~ /^[[:space:]]*#/) continue
         list = list_of(remain)
         if (list_open && !last) return 1
-        at = start + newlines(substr(text, 1, length(text) - length(remain)))
+        at = k ? lineof[k] : start
         if (list ~ /\$([A-Za-z_0-9]|\{)/ && at != seen) { hits = hits at ":" flat "\n"; seen = at }
     }
     printf "%s", hits
@@ -131,8 +133,12 @@ function judge(text, last,   flat, remain, list, at, seen, hits) {
 {
     # Join backslash continuations with a space, and the lines an open list
     # runs on into with the newline that separates them, so a spread-out list
-    # is judged whole.
-    if (pending != "") { text = pending sep $0 } else { text = $0; start = FNR }
+    # is judged whole. A space join adds no newline, so the line after each
+    # newline is recorded in lineof.
+    if (pending != "") {
+        text = pending sep $0
+        if (sep == "\n") lineof[++nl] = FNR
+    } else { text = $0; start = FNR; nl = 0 }
     if (text ~ /\\+[[:space:]]*$/) { sub(/\\+[[:space:]]*$/, "", text); pending = text; sep = " "; next }
     pending = judge(text, 0) ? text : ""
     sep = "\n"
