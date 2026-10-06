@@ -134,8 +134,9 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | checks armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 6) | every marker-bearing check in `check_set` reads `green` |
-| pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 6) | every `pre-open` check in `check_set` reads `green`; the PR opens as a draft when `check_set` names an `open-as-draft` check, else ready |
+| pull_request draft → ready | `pr-open.sh` (cadence arm 6, draft-to-ready) | every `pre-open` and `open-as-draft` check reads `green`; `gh pr ready` surfaces it. GitHub `isDraft` flips; `merge_result` stays `pull_request` |
+| pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated (incl. the universal approval rule; a draft PR is skipped); close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 7) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
@@ -159,12 +160,14 @@ recorded onto the integration branch, and no hold or branch vetoes.
 ## Checks
 
 **Vocabulary.** The anchor declares its checks in `check_set`, a comma list of
-check names. Three of those names are not review checks, and every reader of
-`check_set` knows them by name. `none` and `off` are sentinels that declare no
-check at all. `none` is the spelling the rest of this pack uses. `approval` is
-satisfied by GitHub's own review state. `gate-ensure.sh` and `pr-facts.sh`
-skip all three instead of dispatching a review, and `merge.sh` drops them
-before it looks for markers.
+check names. `none` and `off` are sentinels that declare no check at all (`none`
+is the spelling the rest of this pack uses). `approval` is a third name a
+check_set may carry, but it is a universal merge rule, not a check (below). The
+one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase>`,
+drops all three and returns the checks whose phase gates `<phase>`, so no reader
+re-derives that drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
+`review-outcome.sh` and `liveness-sweep.sh` all ask it rather than tokenizing
+`check_set` themselves.
 
 Every other name is opaque to the machinery: gate-ensure dispatches whatever
 it finds there, `signoff.sh` writes `check.<name>`, and `merge.sh` requires
@@ -177,15 +180,23 @@ The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
 [authority-map.md](authority-map.md).
 
-`codex` is one such review check, opaque like the rest. Both transitions read
-the same declared list: `pr-open.sh` publishes once every marker-bearing check
-in `check_set` reads `green`, and `merge.sh` merges under the same
-condition. `none`/`off` and `approval` are dropped from both — the first is
-the checkless-by-choice sentinel, and the second is evidenced by an external
-GitHub review, which cannot exist before the PR does and which `merge.sh`
-enforces at the merge. An empty `check_set` is not the opt-out at either
-transition: it means never normalized, and gate-ensure stamps the default
-earlier in the same pass.
+`correctness` is one such review check, opaque like the rest, and it declares a
+**phase** in the index: the stage transition by which it must read green. The
+four phases are ordered `pre-open < open-as-draft < ready-for-review < merge`,
+each fixed by what the check consumes — a check that reads only the diff is
+`pre-open`, one that needs the deployed preview is `open-as-draft`. The stage
+transitions gate on the checks their phase reaches, not one shared list:
+`pr-open.sh` publishes once every `pre-open` check reads green; the
+draft-to-ready flip waits on the `open-as-draft` checks too; and `merge.sh`
+merges once every check, of every phase, reads green. An empty `check_set` is
+not the opt-out at any transition: it means never normalized, and gate-ensure
+stamps the default earlier in the same pass. A `check_set` whose checks are all
+`pre-open` (gc-toolkit today) opens its PR ready at once — the draft stage
+appears only when a check names a later phase. A name the index does not
+declare takes `pre-open`, and so does every name in a repo that keeps no index,
+so it gates every transition. A declared phase outside the four is an index
+error: every transition whose check_set names that check holds until the index
+is fixed.
 
 Each check is a **lane**, and its marker carries one bare state word — a state
 of the lane, never a claim about a commit:
@@ -209,10 +220,13 @@ validator writes; `fixing` is also what the retired `reconcile-gate-verdicts.sh`
 left behind, migrated. The full lane state machine is
 [specs/tk-ztapg/review-cycle-architecture.md](../specs/tk-ztapg/review-cycle-architecture.md).
 
-`approval` takes no marker of its own. `merge.sh` satisfies it from an
-external APPROVED review at the live head, never from the city's own account
-and never from a `check.approval` marker. `lifecycle/lifecycle.toml` records
-that rule. What the *reviewer* did short of a verdict is posture, not a check:
+`approval` takes no marker of its own and is not a check: it is a **universal
+merge rule**. `merge.sh` requires every PR to carry a latest APPROVED review at
+the live head by an account other than the city's, with a standing
+CHANGES_REQUESTED from any other account a veto — no `check.approval` marker and
+no `check_set` token arms it or opts out, and GitHub branch protection is an
+extra layer, not the authority. `lifecycle/lifecycle.toml` records the rule.
+What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check
 verdicts** (component-model I7). A verdict binds to no commit: the reviewed oid
 is recorded on the review bead and named in the posted artifact, and nothing
@@ -305,9 +319,11 @@ than silently releasing a park a human is relying on.
 
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
-an unnormalized anchor holds); every check named in `check_set` reads `green`; no
-unclosed rework or review child; PR base equals `merged_target`; GitHub reports
-CLEAN; no holds (`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
+an unnormalized anchor holds); every check named in `check_set` reads `green`; a
+latest APPROVED review at the live head from a non-city account, with no standing
+CHANGES_REQUESTED (the universal approval rule); no unclosed rework or review
+child; PR base equals `merged_target`; GitHub reports CLEAN; no holds
+(`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
 pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
 fails closed. One anchor per PR is asserted structurally by
 `doctor/check-one-anchor-per-pr`; `merge.sh` still refuses a second anchor on
@@ -429,8 +445,11 @@ commit ([Green survives new commits](#checks), the bug tk-4zsj1p) cannot read th
 label settled.
 
 The label is workflow state and never says a PR may merge: machine readiness
-rides `pr.machine`, and the draft flag is a CI-cost lever rather than a second
-signal ([specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md)).
+rides `pr.machine`. The draft flag is a phase signal, not a merge signal — a PR
+opens as a draft when its `check_set` names an `open-as-draft` check, and
+`pr-open.sh` flips it to ready once every `pre-open` and `open-as-draft` check
+reads green ([Checks](#checks)); merge readiness waits on every phase and the
+universal approval besides.
 `assets/scripts/pr-status-label.sh` is the single writer; `pr-open.sh` sets it at
 open, `signoff.sh` flips it on each verdict, and `pr-facts.sh` reconciles it every
 pass so a missed event self-heals. Every write is pinned to the origin, and a

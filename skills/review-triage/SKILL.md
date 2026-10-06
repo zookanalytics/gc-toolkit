@@ -47,9 +47,10 @@ done
 [ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$INDEX"
 ```
 
-Each row gives you the check, its method, and one line of purpose. When a check
-applies is a judgment its method states — read the method, do not expect an
-applies-when column in the index.
+Each row gives you the check, its method, one line of purpose, and its phase —
+the stage transition by which it must read green. When a check applies is a
+judgment its method states, so read the method; the phase is fixed per check and
+not triage's to choose, and there is no applies-when column in the index.
 
 A commit that carries no index is the no-index case below, not a reason to reach
 for the pack's copy or the tree you happen to be in. `signoff.sh` resolves it the

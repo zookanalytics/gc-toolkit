@@ -870,8 +870,9 @@ title-scoped startup reconcile is the backstop, not the fix). Burning this
 wisp is folded in right after the assign so it precedes the wait: a session
 reset during that wait has already poured and assigned its successor and
 burned itself, so the next boot adopts the successor instead of orphaning this
-wisp. Forward every declared var — a --root-only pour materializes no
-defaults. Keep each gc command on ONE line (TOML eats a trailing backslash).
+wisp. Forward every declared var, so a value chosen at the startup pour is
+not silently replaced by the formula default from the next cycle on. Keep
+each gc command on ONE line (TOML eats a trailing backslash).
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
 current wisp has to work: a wisp is an EPHEMERAL molecule, which means
