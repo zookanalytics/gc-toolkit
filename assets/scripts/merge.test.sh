@@ -40,7 +40,7 @@ harness_init
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
-  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh"
+  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
@@ -76,6 +76,15 @@ visit() { # id anchor [status]
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"visit: %s","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
     "$1" "${3:-open}" "$2" "$2"
 }
+# A non-city APPROVED review at the live head (sha-<num>), which the UNIVERSAL
+# approval merge rule requires of every PR. A test whose anchor should reach the
+# CLEAN/BLOCKED/re-read/merge stages must carry one; a test that holds before the
+# approval gate (merge_hold, duplicate, retarget, non-green lane, unclosed child,
+# tracking_only) never reads it, so one is harmless there too.
+approved() { # num [oid]
+  printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-%s","submitted_at":"2026-08-20T01:00:00Z","id":1}]' \
+    "${2:-$1}" > "$GH_DIR/reviews_$1.json"
+}
 
 # TWO ARMS, ONE BODY. The merge writer exists twice during the gctk migration —
 # `gctk merge` (services/gctk) and the shell fallback in merge.sh — and a caller
@@ -88,7 +97,7 @@ suite() {
 echo "# happy path"
 store "[$(anchor M1 10), $(rev M1)]"
 printf '%s' "$(prview 10 OPEN CLEAN)" > "$GH_DIR/pr_view_10.json"
-echo '[]' > "$GH_DIR/reviews_10.json"
+approved 10
 out=$("$SUT" 2>&1); rc=$?
 eq "$rc" 0 "a clean merge pass exits 0"
 has "$out" "merged + recorded M1" "the merge is reported"
@@ -101,10 +110,27 @@ eq "$(meta M1 merged_sha)" "merged-sha-10" "merged_sha recorded from mergeCommit
 has "$(notes M1)" "Merged to main at merged-s" "the close reason names the landing"
 eq "$(grep -c '^bd update M1' "$STUB_GC_LOG" || true)" "1" "ONE lifecycle update carried close+record"
 
+echo "# a resolver that dies mid-run holds the merge (never reads empty as 'no lanes')"
+# first_notgreen_lane captures the resolver's exit status: a crash prints nothing,
+# and an empty lane list would read as all-green and merge on approval alone. Here
+# the lane IS backed green and the PR IS approved, so ONLY the resolver's failure
+# can hold it — proving the merge does not proceed on approval alone when it dies.
+store "[$(anchor MR1 61), $(rev MR1)]"
+printf '%s' "$(prview 61 OPEN CLEAN)" > "$GH_DIR/pr_view_61.json"
+approved 61
+cp "$SD/review-checks.sh" "$TMP/review-checks.real"
+printf '#!/usr/bin/env bash\nexit 3\n' > "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+has "$out" "lane state unreadable" "a resolver crash holds the merge as lane-state-unreadable"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 61" "the PR is NOT merged on approval alone when the resolver died"
+eq "$(bstatus MR1)" "open" "the anchor stays open"
+
 echo "# merge_hold"
 store "[$(anchor M2 11 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 11 OPEN CLEAN)" > "$GH_DIR/pr_view_11.json"
-echo '[]' > "$GH_DIR/reviews_11.json"
+approved 11
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate); merge held" "merge_hold holds"
@@ -113,7 +139,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 echo "# one-anchor-per-PR holds + escalates once"
 store "[$(anchor M3 12), $(anchor M3b 12)]"
 printf '%s' "$(prview 12 OPEN CLEAN)" > "$GH_DIR/pr_view_12.json"
-echo '[]' > "$GH_DIR/reviews_12.json"
+approved 12
 : > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "claimed by more than one open anchor" "the duplicate holds every anchor"
@@ -128,7 +154,7 @@ has "$(cat "$STUB_ESC_LOG")" "--subject M3 --key one-anchor-per-pr.12" "escalate
 echo "# one-anchor-per-PR: a same-number anchor with no pr_url still holds"
 store "[$(anchor M3c 42), $(printf '%s' "$(anchor M3d 42)" | jq -c 'del(.metadata.pr_url)')]"
 printf '%s' "$(prview 42 OPEN CLEAN)" > "$GH_DIR/pr_view_42.json"
-echo '[]' > "$GH_DIR/reviews_42.json"
+approved 42
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "claimed by more than one open anchor" "an anchor of this number whose pr_url is ABSENT names no repository and still holds"
@@ -137,7 +163,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and neither anchor merged"
 echo "# one-anchor-per-PR: a same-number anchor with an unparseable pr_url still holds"
 store "[$(anchor M3e 43), $(printf '%s' "$(anchor M3f 43)" | jq -c '.metadata.pr_url = "TBD"')]"
 printf '%s' "$(prview 43 OPEN CLEAN)" > "$GH_DIR/pr_view_43.json"
-echo '[]' > "$GH_DIR/reviews_43.json"
+approved 43
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "claimed by more than one open anchor" "an anchor of this number whose pr_url is UNPARSEABLE still holds"
@@ -146,7 +172,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and neither anchor merged"
 echo "# one-anchor-per-PR: a same-number anchor in ANOTHER repository does not hold"
 store "[$(anchor M3g 44), $(rev M3g), $(printf '%s' "$(anchor M3h 44)" | jq -c '.metadata.pr_url = "https://github.com/other/repo/pull/44"')]"
 printf '%s' "$(prview 44 OPEN CLEAN)" > "$GH_DIR/pr_view_44.json"
-echo '[]' > "$GH_DIR/reviews_44.json"
+approved 44
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M3g" "a same-number anchor whose pr_url names a DIFFERENT repository is a different PR and does not hold"
@@ -159,7 +185,7 @@ has "$out" "merged + recorded M3g" "a same-number anchor whose pr_url names a DI
 echo "# one-anchor-per-PR: a URL-less THIS anchor is the wildcard against a foreign same-number anchor"
 store "[$(printf '%s' "$(anchor M3i 45)" | jq -c 'del(.metadata.pr_url)'), $(printf '%s' "$(anchor M3j 45)" | jq -c '.metadata.pr_url = "https://github.com/other/repo/pull/45"')]"
 printf '%s' "$(prview 45 OPEN CLEAN)" > "$GH_DIR/pr_view_45.json"
-echo '[]' > "$GH_DIR/reviews_45.json"
+approved 45
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "open anchor (M3i + M3j)" "this anchor's OWN absent pr_url makes it the wildcard that holds against a foreign same-number anchor"
@@ -168,13 +194,16 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and the URL-less anchor is not merg
 echo "# retarget holds"
 store "[$(anchor M4 13)]"
 printf '%s' "$(prview 13 OPEN CLEAN)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_13.json"
-echo '[]' > "$GH_DIR/reviews_13.json"
+approved 13
 out=$("$SUT" 2>&1)
 has "$out" "base 'release' != merged_target 'main'" "a retargeted PR holds"
 
 echo "# a lane short of green holds"
 store "[$(anchor M5 14)]"
 printf '%s' "$(prview 14 OPEN CLEAN)" > "$GH_DIR/pr_view_14.json"
+# No approver: the lane gate precedes the approval gate, and a GitHub approval
+# would back this bead-less lane green through the fallback (the M5c case), hiding
+# the hold this tests.
 echo '[]' > "$GH_DIR/reviews_14.json"
 out=$("$SUT" 2>&1)
 has "$out" "lane 'correctness' does not derive green" "an unreviewed lane holds"
@@ -199,20 +228,20 @@ has "$out" "merged + recorded M5c" "an operator's GitHub approval backs the corr
 echo "# unclosed children hold: metadata key, dep edge, tracking_only opt-out"
 store "[$(anchor M6 16), $(rev M6), {\"id\":\"rw-1\",\"status\":\"blocked\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"16\"}}]"
 printf '%s' "$(prview 16 OPEN CLEAN)" > "$GH_DIR/pr_view_16.json"
-echo '[]' > "$GH_DIR/reviews_16.json"
+approved 16
 out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead rw-1 (blocked)" "a pr_number child holds (blocked counts)"
 
 store "[$(anchor M7 17), $(rev M7), {\"id\":\"rw-2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"pre_open_gate\"}}]"
 printf '%s' "$(prview 17 OPEN CLEAN)" > "$GH_DIR/pr_view_17.json"
-echo '[]' > "$GH_DIR/reviews_17.json"
+approved 17
 printf 'rw-2|blocks|M7\n' > "$STUB_DEPS"
 out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead rw-2" "a dep-edge blocker holds even carrying merge_result"
 
 store "[$(anchor M8 18), $(rev M8), {\"id\":\"trk-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"18\",\"tracking_only\":\"true\"}}]"
 printf '%s' "$(prview 18 OPEN CLEAN)" > "$GH_DIR/pr_view_18.json"
-echo '[]' > "$GH_DIR/reviews_18.json"
+approved 18
 : > "$STUB_DEPS"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M8" "a tracking_only pr_number reference does not hold"
@@ -222,14 +251,14 @@ has "$out" "merged + recorded M8" "a tracking_only pr_number reference does not 
 # back would be a cycle, and pr_number is what is left to hold on.
 store "[$(anchor M9 19), $(rev M9), {\"id\":\"vis-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"19\",\"task_kind\":\"visit\",\"anchor_bead\":\"M9\"}}]"
 printf '%s' "$(prview 19 OPEN CLEAN)" > "$GH_DIR/pr_view_19.json"
-echo '[]' > "$GH_DIR/reviews_19.json"
+approved 19
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead vis-1" "an open visit stamped with the PR holds the merge"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 19" "…and nothing merged"
 store "[$(anchor M9b 20), $(rev M9b), {\"id\":\"vis-2\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"20\",\"task_kind\":\"visit\",\"anchor_bead\":\"M9b\"}}]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
-echo '[]' > "$GH_DIR/reviews_20.json"
+approved 20
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M9b" "closing the visit is the release, and it performs"
 
@@ -244,13 +273,13 @@ kid() { # id num extra-metadata-json
 : > "$STUB_DEPS"
 store "[$(anchor Q1 24), $(rev Q1), $(kid fgn-1 24 ',"pr_url":"https://github.com/other/repo/pull/24"')]"
 printf '%s' "$(prview 24 OPEN CLEAN)" > "$GH_DIR/pr_view_24.json"
-echo '[]' > "$GH_DIR/reviews_24.json"
+approved 24
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded Q1" "a same-numbered bead in ANOTHER repository does not hold this merge"
 
 store "[$(anchor Q2 25), $(rev Q2), $(kid loc-1 25 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/25"')]"
 printf '%s' "$(prview 25 OPEN CLEAN)" > "$GH_DIR/pr_view_25.json"
-echo '[]' > "$GH_DIR/reviews_25.json"
+approved 25
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead loc-1" "a child carrying THIS repository's pr_url still holds"
@@ -261,7 +290,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge 25" "…and nothing merged"
 # repository without matching it byte for byte stay holders.
 store "[$(anchor Q3 26), $(rev Q3), $(kid case-1 26 ',"pr_url":"https://GitHub.com/Zook/GC-Toolkit/pull/26"')]"
 printf '%s' "$(prview 26 OPEN CLEAN)" > "$GH_DIR/pr_view_26.json"
-echo '[]' > "$GH_DIR/reviews_26.json"
+approved 26
 out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead case-1" "repository identity is case-insensitive, so a differently-cased url holds"
 # …and the case can differ on the checkout's side just as well: the repository
@@ -270,13 +299,13 @@ store "[$(printf '%s' "$(anchor Q3b 29)" | jq -c '.metadata.pr_url = "https://gi
 printf '%s' "$(prview 29 OPEN CLEAN)" \
   | jq -c '.url = "https://github.com/Zook/GC-Toolkit/pull/29"
            | .headRepositoryOwner.login = "Zook" | .headRepository.name = "GC-Toolkit"' > "$GH_DIR/pr_view_29.json"
-echo '[]' > "$GH_DIR/reviews_29.json"
+approved 29
 out=$(STUB_ORIGIN_URL="https://github.com/Zook/GC-Toolkit" "$SUT" 2>&1)
 has "$out" "unclosed rework/review bead case-2" "…and a differently-cased ORIGIN matches the url a bead carries"
 
 store "[$(anchor Q4 27), $(rev Q4), $(kid junk-1 27 ',"pr_url":"TBD"')]"
 printf '%s' "$(prview 27 OPEN CLEAN)" > "$GH_DIR/pr_view_27.json"
-echo '[]' > "$GH_DIR/reviews_27.json"
+approved 27
 out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead junk-1" "an unparseable pr_url names no repository and still holds"
 
@@ -284,7 +313,7 @@ has "$out" "unclosed rework/review bead junk-1" "an unparseable pr_url names no 
 # is never qualified by the url it happens to carry.
 store "[$(anchor Q5 28), $(rev Q5), $(kid dep-fgn 28 ',"pr_url":"https://github.com/other/repo/pull/28"')]"
 printf '%s' "$(prview 28 OPEN CLEAN)" > "$GH_DIR/pr_view_28.json"
-echo '[]' > "$GH_DIR/reviews_28.json"
+approved 28
 printf 'dep-fgn|blocks|Q5\n' > "$STUB_DEPS"
 out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead dep-fgn" "a dep-edge blocker holds whatever repository its url names"
@@ -297,7 +326,7 @@ echo "# an open must-fix finding holds the merge, and the hold names it"
 store "[$(anchor MF1 46), $(rev MF1), $(finding fnd-mf1 MF1)]"
 printf 'fnd-mf1|blocks|MF1\n' > "$STUB_DEPS"
 printf '%s' "$(prview 46 OPEN CLEAN)" > "$GH_DIR/pr_view_46.json"
-echo '[]' > "$GH_DIR/reviews_46.json"
+approved 46
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "held by must-fix finding fnd-mf1" "the hold names the finding by its disposition"
@@ -319,7 +348,7 @@ echo "# an OPEN visit on the anchor holds the merge (finalize gate), and the hol
 store "[$(anchor MV1 47), $(rev MV1), $(visit vis-mv1 MV1)]"
 printf 'vis-mv1|tracks|MV1\n' > "$STUB_DEPS"
 printf '%s' "$(prview 47 OPEN CLEAN)" > "$GH_DIR/pr_view_47.json"
-echo '[]' > "$GH_DIR/reviews_47.json"
+approved 47
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "held by open visit vis-mv1" "an open visit holds the merge, naming the visit"
@@ -330,7 +359,7 @@ echo "# a CLOSED visit on the anchor does not hold the merge"
 store "[$(anchor MV2 48), $(rev MV2), $(visit vis-mv2 MV2 closed)]"
 printf 'vis-mv2|tracks|MV2\n' > "$STUB_DEPS"
 printf '%s' "$(prview 48 OPEN CLEAN)" > "$GH_DIR/pr_view_48.json"
-echo '[]' > "$GH_DIR/reviews_48.json"
+approved 48
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded MV2" "a closed visit is no hold: the merge lands"
@@ -345,7 +374,7 @@ echo "# a visit filed mid-pass is caught by the terminal re-read (a visit does n
 store "[$(anchor MV3 49), $(rev MV3)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 49 OPEN CLEAN)" > "$GH_DIR/pr_view_49.json"
-echo '[]' > "$GH_DIR/reviews_49.json"
+approved 49
 MV3_HOOK_COUNT="$TMP/hookcount_mv3"; : > "$MV3_HOOK_COUNT"
 cat > "$TMP/hook_mv3.sh" <<HOOK
 #!/usr/bin/env bash
@@ -365,39 +394,33 @@ has "$out" "held by open visit vis-mv3" "…and names the mid-pass visit"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 49" "…and nothing merged"
 : > "$STUB_DEPS"
 
-echo "# approval arms"
-store "[$(anchor A1 20 ',"check_set":"correctness,approval"'), $(rev A1)]"
+echo "# approval is a UNIVERSAL merge rule: every PR needs a non-city APPROVED at the live head"
+store "[$(anchor A1 20), $(rev A1)]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
 echo '[]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review at the live head" "check_set approval with no review holds"
+has "$out" "no external APPROVED review at the live head" "a correctness-only anchor with no approval holds — the rule is universal, not a check_set token"
 
-printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
+approved 20
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded A1" "an external APPROVED at the live head satisfies it"
 
-printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
-store "[$(anchor A1 20 ',"check_set":"correctness,approval"'), $(rev A1)]"
+approved 20 OLD
+store "[$(anchor A1 20), $(rev A1)]"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review at the live head" "an approval of an OLD head does not count"
 
 printf '[{"user":{"login":"gc-city-bot"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
-store "[$(anchor A1 20 ',"check_set":"correctness,approval"'), $(rev A1)]"
+store "[$(anchor A1 20), $(rev A1)]"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review" "a self-approval never counts"
+has "$out" "no external APPROVED review" "a self-approval by the city account never counts"
 
-echo "# signoff_dismissed and an own DISMISSED review arm the requirement"
-store "[$(anchor A2 21 ',"signoff_dismissed":"r9@sha-21"'), $(rev A2)]"
+echo "# the universal rule arms for every PR with no check_set token and no opt-out"
+store "[$(anchor A2 21), $(rev A2)]"
 printf '%s' "$(prview 21 OPEN CLEAN)" > "$GH_DIR/pr_view_21.json"
 echo '[]' > "$GH_DIR/reviews_21.json"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review" "signoff_dismissed arms the approval requirement"
-
-store "[$(anchor A3 22), $(rev A3)]"
-printf '%s' "$(prview 22 OPEN CLEAN)" > "$GH_DIR/pr_view_22.json"
-printf '[{"user":{"login":"gc-city-bot"},"state":"DISMISSED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_22.json"
-out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review" "our own DISMISSED review arms it from the GitHub side"
+has "$out" "no external APPROVED review" "a plain correctness anchor, never opted in, is held for approval just the same"
 
 echo "# a standing CHANGES_REQUESTED vetoes every candidate"
 store "[$(anchor A4 23), $(rev A4)]"
@@ -409,7 +432,7 @@ has "$out" "standing CHANGES_REQUESTED" "the veto holds a correctness-only ancho
 echo "# BLOCKED where thread resolution is required names the unresolved-thread cause"
 store "[$(anchor U1 30), $(rev U1)]"
 printf '%s' "$(prview 30 OPEN BLOCKED)" > "$GH_DIR/pr_view_30.json"
-echo '[]' > "$GH_DIR/reviews_30.json"
+approved 30
 echo '{"threads":[{"id":"t1","isResolved":false},{"id":"t2","isResolved":false}]}' > "$GH_DIR/threads_30.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 : > "$STUB_GH_LOG"
@@ -421,7 +444,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and a BLOCKED PR is never merged"
 echo "# BLOCKED where thread resolution is OFF names the approval, never the open thread"
 store "[$(anchor U1a 39), $(rev U1a)]"
 printf '%s' "$(prview 39 OPEN BLOCKED)" > "$GH_DIR/pr_view_39.json"
-echo '[]' > "$GH_DIR/reviews_39.json"
+approved 39
 echo '{"threads":[{"id":"t1","isResolved":false},{"id":"t2","isResolved":false}]}' > "$GH_DIR/threads_39.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
@@ -431,7 +454,7 @@ hasnt "$out" "PR#39 is BLOCKED by branch protection: 2 unresolved review thread(
 echo "# BLOCKED with every thread resolved names the approval wait instead"
 store "[$(anchor U1b 33), $(rev U1b)]"
 printf '%s' "$(prview 33 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_33.json"
-echo '[]' > "$GH_DIR/reviews_33.json"
+approved 33
 echo '{"threads":[{"id":"t1","isResolved":true}]}' > "$GH_DIR/threads_33.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
@@ -441,7 +464,7 @@ has "$out" "merge held (anchor U1b)" "…and still holds"
 echo "# BLOCKED whose reviewThreads cannot be read (thread resolution required) is named, never guessed"
 store "[$(anchor U1c 34), $(rev U1c)]"
 printf '%s' "$(prview 34 OPEN BLOCKED)" > "$GH_DIR/pr_view_34.json"
-echo '[]' > "$GH_DIR/reviews_34.json"
+approved 34
 echo '{"threads":[{"id":"t1","isResolved":false}]}' > "$GH_DIR/threads_34.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$(STUB_GQL_READ_FAIL=1 "$SUT" 2>&1)
@@ -451,7 +474,7 @@ has "$out" "merge held (anchor U1c)" "…and still holds"
 echo "# BLOCKED whose branch rules cannot be read is named as such, never guessed"
 store "[$(anchor U1e 45), $(rev U1e)]"
 printf '%s' "$(prview 45 OPEN BLOCKED)" > "$GH_DIR/pr_view_45.json"
-echo '[]' > "$GH_DIR/reviews_45.json"
+approved 45
 printf '{"message":"Not Found"}' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
 has "$out" "the rules for 'main' could not be read to name the cause" "unreadable branch rules are named, not guessed"
@@ -460,13 +483,13 @@ rm -f "$GH_DIR/rules_main.json"
 
 store "[$(anchor U2 31), $(rev U2)]"
 printf '%s' "$(prview 31 OPEN UNSTABLE ',"statusCheckRollup":[]')" > "$GH_DIR/pr_view_31.json"
-echo '[]' > "$GH_DIR/reviews_31.json"
+approved 31
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded U2" "UNSTABLE with zero required contexts proceeds"
 
 store "[$(anchor U3 32), $(rev U3)]"
 printf '%s' "$(prview 32 OPEN UNSTABLE ',"statusCheckRollup":[{"name":"ci","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_32.json"
-echo '[]' > "$GH_DIR/reviews_32.json"
+approved 32
 printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"ci"}]}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
 has "$out" "a REQUIRED check is not green" "UNSTABLE with a red required check holds"
@@ -475,20 +498,20 @@ rm -f "$GH_DIR/rules_main.json"
 echo "# identity refusals"
 store "[$(anchor I1 40)]"
 printf '%s' "$(prview 40 OPEN CLEAN)" | jq -c '.headRepositoryOwner.login = "stranger" | .isCrossRepository = true' > "$GH_DIR/pr_view_40.json"
-echo '[]' > "$GH_DIR/reviews_40.json"
+approved 40
 out=$("$SUT" 2>&1)
 has "$out" "not this repository's own branch; merge held" "a fork head is refused"
 
 store "[$(anchor I2 41)]"
 printf '%s' "$(prview 41 OPEN CLEAN)" | jq -c '.headRefName = "other/branch"' > "$GH_DIR/pr_view_41.json"
-echo '[]' > "$GH_DIR/reviews_41.json"
+approved 41
 out=$("$SUT" 2>&1)
 has "$out" "records branch 'polecat/x41' but PR#41 is opened from 'other/branch'" "a head-branch mismatch is refused"
 
 echo "# terminal re-read holds on a mid-pass write"
 store "[$(anchor T1 50), $(rev T1)]"
 printf '%s' "$(prview 50 OPEN CLEAN)" > "$GH_DIR/pr_view_50.json"
-echo '[]' > "$GH_DIR/reviews_50.json"
+approved 50
 # The gh stub runs AFTER the fresh re-read: model the mid-pass write by having
 # the reviews file swap the marker via a hook — instead, simplest: drop the
 # check marker between reads is not injectable, so assert the hold via
@@ -506,7 +529,7 @@ has "$out" "merged + recorded T1" "…and a clean pass still merges"
 echo "# record failure after a merge exits non-zero loudly"
 store "[$(anchor R1 60), $(rev R1)]"
 printf '%s' "$(prview 60 OPEN CLEAN)" > "$GH_DIR/pr_view_60.json"
-echo '[]' > "$GH_DIR/reviews_60.json"
+approved 60
 out=$(STUB_UPDATE_FAIL="R1" "$SUT" 2>&1); rc=$?
 eq "$rc" 1 "a failed record exits non-zero"
 has "$out" "MERGED but the lifecycle record FAILED" "…and says the PR did land"
@@ -698,26 +721,26 @@ has "$out" "1 skipped" "a draft PR is skipped"
 echo "# empty/absent check_set holds (empty is never the 'none' opt-out)"
 store '[{"id":"E1","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"80","pr_url":"https://github.com/zook/gc-toolkit/pull/80","branch":"polecat/x80","merged_target":"main"}}]'
 printf '%s' "$(prview 80 OPEN CLEAN)" > "$GH_DIR/pr_view_80.json"
-echo '[]' > "$GH_DIR/reviews_80.json"
+approved 80
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "no normalized check_set" "an anchor with no check_set holds"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged ungated"
 store '[{"id":"E2","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"81","pr_url":"https://github.com/zook/gc-toolkit/pull/81","branch":"polecat/x81","merged_target":"main","check_set":" , "}}]'
 printf '%s' "$(prview 81 OPEN CLEAN)" > "$GH_DIR/pr_view_81.json"
-echo '[]' > "$GH_DIR/reviews_81.json"
+approved 81
 out=$("$SUT" 2>&1)
 has "$out" "no normalized check_set" "a whitespace-only check_set holds too"
 store '[{"id":"E3","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"82","pr_url":"https://github.com/zook/gc-toolkit/pull/82","branch":"polecat/x82","merged_target":"main","check_set":"none"}}]'
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
-echo '[]' > "$GH_DIR/reviews_82.json"
+approved 82
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded E3" "the explicit 'none' sentinel still opts out"
 
 echo "# empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor V1 61), $(rev V1)]"
 printf '%s' "$(prview 61 OPEN CLEAN)" | jq -c 'del(.mergeCommit)' > "$GH_DIR/pr_view_61.json"
-echo '[]' > "$GH_DIR/reviews_61.json"
+approved 61
 out=$("$SUT" 2>&1); rc=$?
 eq "$rc" 0 "the pass still exits 0 (the merge itself landed)"
 has "$out" "recording merged_sha=unverified:PR#61" "the degraded record is loud"
@@ -727,7 +750,7 @@ eq "$(bstatus V1)" "closed" "the anchor still closed"
 echo '# a recorded commented posture holds the merge'
 store "[$(anchor C1 70 ',"pr_posture":"commented@sha-70"')]"
 printf '%s' "$(prview 70 OPEN CLEAN)" > "$GH_DIR/pr_view_70.json"
-echo '[]' > "$GH_DIR/reviews_70.json"
+approved 70
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "carries review comments nothing has answered (commented@sha-70); merge held" "the posture read off the anchor holds"
@@ -738,7 +761,7 @@ eq "$(bstatus C1)" "open" "the anchor was not closed"
 echo "# …a posture pinned to an OLD head still holds — a comment survives a head move"
 store "[$(anchor C2 71 ',"pr_posture":"commented@sha-STALE"')]"
 printf '%s' "$(prview 71 OPEN CLEAN)" > "$GH_DIR/pr_view_71.json"
-echo '[]' > "$GH_DIR/reviews_71.json"
+approved 71
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "commented@sha-STALE); merge held" "the hold is not head-matched"
@@ -747,19 +770,19 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge 71" "…and nothing merged"
 echo "# …every other posture, and an ABSENT one, merge as before"
 store "[$(anchor C3 72 ',"pr_posture":"approved@sha-72"'), $(rev C3)]"
 printf '%s' "$(prview 72 OPEN CLEAN)" > "$GH_DIR/pr_view_72.json"
-echo '[]' > "$GH_DIR/reviews_72.json"
+approved 72
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded C3" "an approved posture does not hold"
 store "[$(anchor C4 73), $(rev C4)]"
 printf '%s' "$(prview 73 OPEN CLEAN)" > "$GH_DIR/pr_view_73.json"
-echo '[]' > "$GH_DIR/reviews_73.json"
+approved 73
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded C4" "an absent posture is a fact not yet recorded, never a hold"
 
 echo "# …a comment landing mid-pass is caught by the terminal re-read"
 store "[$(anchor C5 74), $(rev C5)]"
 printf '%s' "$(prview 74 OPEN CLEAN)" > "$GH_DIR/pr_view_74.json"
-echo '[]' > "$GH_DIR/reviews_74.json"
+approved 74
 PHOOK_COUNT="$TMP/phookcount"; : > "$PHOOK_COUNT"
 cat > "$TMP/phook.sh" <<HOOK
 #!/usr/bin/env bash
@@ -782,7 +805,7 @@ eq "$(bstatus C5)" "open" "the anchor was not closed"
 echo "# terminal re-read HOLDS on a real mid-pass write (hook mutates the store)"
 store "[$(anchor T2 51), $(rev T2)]"
 printf '%s' "$(prview 51 OPEN CLEAN)" > "$GH_DIR/pr_view_51.json"
-echo '[]' > "$GH_DIR/reviews_51.json"
+approved 51
 HOOK_COUNT="$TMP/hookcount"; : > "$HOOK_COUNT"
 cat > "$TMP/hook.sh" <<HOOK
 #!/usr/bin/env bash
@@ -802,14 +825,37 @@ has "$out" "merge_hold was set after validation; merge held" "the terminal re-re
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 51" "…and the merge was withheld"
 eq "$(bstatus T2)" "open" "the anchor was not closed"
 
+echo "# a signoff_dismissed stamp landing mid-pass does NOT hold the merge"
+# The marker records a dismissal; approval is a universal rule no dismissal arms or
+# relaxes, so the terminal re-read has nothing to compare it against.
+store "[$(anchor T2D 53), $(rev T2D)]"
+printf '%s' "$(prview 53 OPEN CLEAN)" > "$GH_DIR/pr_view_53.json"
+approved 53
+: > "$HOOK_COUNT"
+cat > "$TMP/hookd.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "T2D" ] || exit 0
+n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
+  jq -c 'map(if .id == "T2D" then .metadata.signoff_dismissed = "901@sha-53" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+fi
+HOOK
+chmod +x "$TMP/hookd.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/hookd.sh" "$SUT" 2>&1)
+hasnt "$out" "signoff_dismissed changed" "a mid-pass dismissal record is no hold reason"
+has "$(cat "$STUB_GH_LOG")" "pr merge 53" "…and the approved, green PR merges"
+
 echo "# terminal re-read HOLDS when a lane leaves green mid-pass — the shared lane-state derivation"
 # The lane derived green at validation (a backing approve bead); the terminal
 # re-read has to catch that SAME lane leaving green between validation and the
 # merge, off the shared lane-state derivation the hold uses. The mid-pass write
-# deletes the backing bead, which is a lane change no head move would show.
+# reopens the backing review — an in-flight review holds the lane out of green
+# ahead of any approval fallback, a lane change no head move would show.
 store "[$(anchor T3 52), $(rev T3)]"
 printf '%s' "$(prview 52 OPEN CLEAN)" > "$GH_DIR/pr_view_52.json"
-echo '[]' > "$GH_DIR/reviews_52.json"
+approved 52
 : > "$HOOK_COUNT"
 cat > "$TMP/hook3.sh" <<HOOK
 #!/usr/bin/env bash
@@ -817,7 +863,7 @@ cat > "$TMP/hook3.sh" <<HOOK
 n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
 if [ "\$n" = 2 ]; then
   tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
-  jq -c 'map(select(.id != "rev-T3"))' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+  jq -c 'map(if .id == "rev-T3" then .status = "open" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
 fi
 HOOK
 chmod +x "$TMP/hook3.sh"
@@ -849,7 +895,7 @@ export STUB_TOPLEVEL="$TMP/repo" STUB_FETCHED_HEAD="sha-80"
 
 store "[$(anchor S0 80), $(rev S0)]"
 printf '%s' "$(prview 80 OPEN CLEAN)" > "$GH_DIR/pr_view_80.json"
-echo '[]' > "$GH_DIR/reviews_80.json"
+approved 80
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded S0" "a repository carrying no rendered audit merges"
 eq "$(wc -c < "$RENDER_LOG" | tr -d ' ')" "0" "…and the freshness probe never ran"
@@ -857,7 +903,7 @@ eq "$(wc -c < "$RENDER_LOG" | tr -d ' ')" "0" "…and the freshness probe never 
 : > "$TMP/repo/generated/seed-audit/INDEX.md"
 store "[$(anchor S1 81), $(rev S1)]"
 printf '%s' "$(prview 81 OPEN CLEAN)" > "$GH_DIR/pr_view_81.json"
-echo '[]' > "$GH_DIR/reviews_81.json"
+approved 81
 export STUB_FETCHED_HEAD="sha-81"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded S1" "a current merge result merges"
@@ -866,7 +912,7 @@ has "$(cat "$RENDER_LOG")" "--check-merge refs/gc-toolkit/merge-gate/base refs/g
 
 store "[$(anchor S2 82), $(rev S2)]"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
-echo '[]' > "$GH_DIR/reviews_82.json"
+approved 82
 export STUB_FETCHED_HEAD="sha-82" STUB_RENDER_RC=1 STUB_RENDER_OUT="seed audit would be STALE at the merge"
 : > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
 out=$("$SUT" 2>&1)
@@ -881,7 +927,7 @@ eq "$(bstatus S2)" "open" "the anchor stays open"
 
 store "[$(anchor S3 83), $(rev S3)]"
 printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
-echo '[]' > "$GH_DIR/reviews_83.json"
+approved 83
 export STUB_FETCHED_HEAD="sha-83" STUB_RENDER_RC=2 STUB_RENDER_OUT="cannot tell"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
@@ -890,7 +936,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 
 store "[$(anchor S4 84), $(rev S4)]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
-echo '[]' > "$GH_DIR/reviews_84.json"
+approved 84
 export STUB_RENDER_RC=0 STUB_FETCH_RC=1
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
@@ -899,7 +945,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 
 store "[$(anchor S5 85), $(rev S5)]"
 printf '%s' "$(prview 85 OPEN CLEAN)" > "$GH_DIR/pr_view_85.json"
-echo '[]' > "$GH_DIR/reviews_85.json"
+approved 85
 export STUB_FETCH_RC="" STUB_FETCHED_HEAD="sha-moved"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
@@ -959,8 +1005,10 @@ store "[$(anchor V3 82),
 : > "$STUB_DEPS"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
 printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
+# No approver: a GitHub approval would back V3's bead-less lane green through the
+# fallback, hiding the lane-short-of-green state this records.
 echo '[]' > "$GH_DIR/reviews_82.json"
-echo '[]' > "$GH_DIR/reviews_83.json"
+approved 83
 out=$("$SUT" 2>&1)
 eq "$(pinned V3)" "progressing@sha-82" "a lane short of green is a check a review is due to raise"
 eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold=signoff_cap with signoff_cap beside it is the convergence cap's wedge"
@@ -970,7 +1018,7 @@ eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold=signoff_cap with signoff
 echo "# an operator hold with no cap stamp records no wedge"
 store "[$(anchor V4b 90 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 90 OPEN CLEAN)" > "$GH_DIR/pr_view_90.json"
-echo '[]' > "$GH_DIR/reviews_90.json"
+approved 90
 out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate)" "the hold holds the merge"
 eq "$(pinned V4b)" "<absent>" "…and nothing records it as the cap's wedge"
@@ -981,14 +1029,16 @@ eq "$(pinned V4b)" "<absent>" "…and nothing records it as the cap's wedge"
 echo "# an operator hold beside a STALE orphan signoff_cap is not the cap's wedge"
 store "[$(anchor V4c 91 ',"merge_hold":"true","signoff_cap":"correctness"')]"
 printf '%s' "$(prview 91 OPEN CLEAN)" > "$GH_DIR/pr_view_91.json"
-echo '[]' > "$GH_DIR/reviews_91.json"
+approved 91
 out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate)" "the hold still holds the merge"
 eq "$(pinned V4c)" "<absent>" "…but the orphaned signoff_cap does not make it the cap's wedge"
 
 echo "# checks green and waiting on a person: settled, not wedged"
-store "[$(anchor V5 84 ',"check_set":"correctness,approval"'), $(rev V5)]"
+store "[$(anchor V5 84), $(rev V5)]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
+# Correctness is green (local backing), so the only thing left is the universal
+# approval: no approver here, so the cadence settles waiting on a person.
 echo '[]' > "$GH_DIR/reviews_84.json"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review" "the approval hold fires"
@@ -998,7 +1048,7 @@ echo "# recording a verdict moves no route"
 store "[$(anchor V8 87 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
-echo '[]' > "$GH_DIR/reviews_87.json"
+approved 87
 out=$("$SUT" 2>&1)
 eq "$(pinned V8)" "wedged-exception@sha-87" "the verdict is recorded"
 eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the park route the cap gave it"
@@ -1011,8 +1061,8 @@ store "[$(anchor V6 85), $(rev V6),
 printf 'rw-v6|blocks|V6\ndm-v7|blocks|V7\n' > "$STUB_DEPS"
 printf '%s' "$(prview 85 OPEN CLEAN)" > "$GH_DIR/pr_view_85.json"
 printf '%s' "$(prview 86 OPEN CLEAN)" > "$GH_DIR/pr_view_86.json"
-echo '[]' > "$GH_DIR/reviews_85.json"
-echo '[]' > "$GH_DIR/reviews_86.json"
+approved 85
+approved 86
 out=$("$SUT" 2>&1)
 eq "$(pinned V6)" "progressing@sha-85" "a pool-routed rework child is an actor that will act"
 # The demand bead that makes an anchor `asking` blocks it the same way and has
@@ -1031,7 +1081,7 @@ store "[$(anchor BK1 92), $(rev BK1),
         {\"id\":\"rw-bk1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
 printf 'rw-bk1|blocks|BK1\n' > "$STUB_DEPS"
 printf '%s' "$(prview 92 OPEN CLEAN)" > "$GH_DIR/pr_view_92.json"
-echo '[]' > "$GH_DIR/reviews_92.json"
+approved 92
 out=$("$SUT" 2>&1)
 eq "$(pinned BK1)" "blocked@sha-92" "an unrouted blocker no automated actor will clear records blocked, not silence"
 has "$(reason BK1)" "rw-bk1" "…and the reason names the blocking bead"
@@ -1040,7 +1090,7 @@ echo "# a BLOCKED PR held by an unresolved review thread records blocked with th
 store "[$(anchor BK2 93), $(rev BK2)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 93 OPEN BLOCKED)" > "$GH_DIR/pr_view_93.json"
-echo '[]' > "$GH_DIR/reviews_93.json"
+approved 93
 echo '{"threads":[{"id":"t1","isResolved":false}]}' > "$GH_DIR/threads_93.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
@@ -1050,7 +1100,7 @@ has "$(reason BK2)" "unresolved review thread" "…and the reason names the thre
 echo "# a BLOCKED PR merely awaiting an approving review stays settled (awaiting-review)"
 store "[$(anchor BK3 94), $(rev BK3)]"
 printf '%s' "$(prview 94 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_94.json"
-echo '[]' > "$GH_DIR/reviews_94.json"
+approved 94
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned BK3)" "settled@sha-94" "awaiting an approving review is the review wait, not a block"
@@ -1060,7 +1110,7 @@ echo "# a base gone BEHIND records blocked; the branch must be brought current"
 store "[$(anchor BK4 95), $(rev BK4)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 95 OPEN BEHIND)" > "$GH_DIR/pr_view_95.json"
-echo '[]' > "$GH_DIR/reviews_95.json"
+approved 95
 out=$("$SUT" 2>&1)
 eq "$(pinned BK4)" "blocked@sha-95" "a base gone BEHIND is a blocked hold, not settled"
 has "$(reason BK4)" "moved ahead" "…and the reason says to bring the branch current"
@@ -1074,7 +1124,7 @@ echo "# a branch gone CONFLICTING (DIRTY) with nothing in flight records blocked
 store "[$(anchor BK5 97), $(rev BK5)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 97 OPEN DIRTY)" > "$GH_DIR/pr_view_97.json"
-echo '[]' > "$GH_DIR/reviews_97.json"
+approved 97
 out=$("$SUT" 2>&1)
 eq "$(pinned BK5)" "blocked@sha-97" "a conflicting branch with nothing in flight is a blocked hold, not settled"
 has "$(reason BK5)" "conflicts" "…and the reason names the conflict and says to bring the branch current"
@@ -1087,7 +1137,7 @@ store "[$(anchor BK6 99), $(rev BK6),
         {\"id\":\"rw-bk6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\",\"task_kind\":\"rework\",\"anchor_bead\":\"BK6\",\"branch\":\"polecat/x99\"}}]"
 printf 'rw-bk6|blocks|BK6\n' > "$STUB_DEPS"
 printf '%s' "$(prview 99 OPEN DIRTY)" > "$GH_DIR/pr_view_99.json"
-echo '[]' > "$GH_DIR/reviews_99.json"
+approved 99
 out=$("$SUT" 2>&1)
 eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed merge-in in flight is the city's move, not a wedge"
 : > "$STUB_DEPS"
