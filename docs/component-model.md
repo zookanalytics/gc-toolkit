@@ -69,7 +69,10 @@ A bead's kind is `metadata.task_kind`. Every reader that branches on kind
 reads that key and nothing else — `visit`, `review`, `triage-subject`,
 `observation` and the standing kinds are all resolved this way, in the
 liveness sweeps, the gate scripts, the doctor checks, and `helm`'s visit
-filter.
+filter. The standing kinds name a record that is open, unrouted and unassigned
+by design and never closes. Their one definition is
+`assets/scripts/standing-kinds.sh`, which a reader sources for the list and
+for the `is_standing_kind` test.
 
 A label naming the same word is **not** the kind. It is a listing narrowing:
 `gc bd list -l observation` is cheaper than reading every bead's metadata, and
