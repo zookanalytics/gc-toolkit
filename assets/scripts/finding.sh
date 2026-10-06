@@ -32,9 +32,9 @@
 #   must-fix   finding --blocks anchor    holds the merge and the close until the
 #                                         fix unit answering it lands; then closed
 #   deferred   closed; a follow-up bead   the objection is not fixed in this PR — the
-#              --discovered-from anchor,  follow-up carries the later work and is armed
+#              gated behind the anchor,   follow-up carries the later work and is armed
 #              armed to its fix pool,     to dispatch to the fix pool once the anchor
-#              gated behind the anchor    merges; the finding closes holding nothing
+#              --discovered-from finding  merges; the finding closes holding nothing
 #   declined   closed, no edge            not an objection: closed with the reason
 #   needs-you  stays open, no edge        only the operator can judge it — a visit
 #                                         carries the decision and the open finding
@@ -47,8 +47,9 @@
 # declined finding closes, so the human review it belongs to auto-dismisses once
 # every finding clears (pr-facts.sh); a needs-you finding stays open, which is
 # what holds that review until the operator rules its visit. The discovered-from
-# edge records provenance on the follow-up — a dispatchable bead — never on a finding
-# left open holding nothing.
+# edge is the follow-up's own — a dispatchable bead — and points at the finding it
+# carries forward. bd keeps one edge per (issue, depends_on) pair, and the
+# follow-up/anchor pair is the gate's.
 #
 # The route never lives on a finding. A finding states an objection; the bead
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
@@ -349,12 +350,11 @@ cmd_set_disposition() {
       ;;
     deferred)
       # A real objection not fixed in this PR: it becomes tracked later-work. File a
-      # follow-up bead carrying the objection and the deferral reason, hang its
-      # provenance onto the anchor (discovered-from, now on a dispatchable bead rather
-      # than an orphan finding), record the follow-up id as the reply the raiser's
-      # thread receives, and CLOSE the finding. The close is what lets the human
-      # review auto-dismiss once every finding clears; a deferral holds neither the
-      # merge nor the review.
+      # follow-up bead carrying the objection and the deferral reason, gate it behind
+      # the anchor, hang its discovered-from provenance onto the finding, record the
+      # follow-up id as the reply the raiser's thread receives, and CLOSE the finding.
+      # The close is what lets the human review auto-dismiss once every finding
+      # clears; a deferral holds neither the merge nor the review.
       #
       # The follow-up must be a DISPATCHABLE unit, not a bare open task: pool workers
       # consume only routed or armed work, so a plain `gc bd create` leaves the
@@ -396,8 +396,6 @@ cmd_set_disposition() {
       followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
       [ -n "$followup" ] \
         || { warn "could not file a follow-up bead for deferred finding $finding; NOT closing (a deferral with no tracked later-work is the orphan this retires)"; exit 2; }
-      gc bd dep add "$followup" "$anchor" --type discovered-from >/dev/null 2>&1 \
-        || warn "could not wire follow-up $followup --discovered-from $anchor (provenance only)"
       # Make the follow-up wait for the merge, then dispatch itself: the anchor
       # --blocks the follow-up, so bd holds it unready until the anchor closes on
       # merge-push, and deferred-dispatch's reconcile slings it to the fix pool
@@ -406,10 +404,17 @@ cmd_set_disposition() {
       # the arm does not land, and read the arm back off the bead — an un-gated or
       # un-armed follow-up is the unclaimable orphan again, and the finding is about
       # to close off the validator's unvalidated set where nothing re-attempts it.
+      #
+      # bd keeps one dependency per (issue, depends_on) pair and refuses a second
+      # type on a pair already taken, so the follow-up/anchor pair carries the gate
+      # and nothing else. The provenance edge points at the finding, and it is wired
+      # after the gate, so a provenance write can never cost the gate.
       gc bd dep "$anchor" --blocks "$followup" >/dev/null 2>&1 \
         || { warn "deferred $finding: could not wire anchor $anchor --blocks follow-up $followup; NOT closing"; exit 2; }
       edge_exists "$anchor" "$followup" \
         || { warn "deferred $finding: anchor $anchor does not block follow-up $followup after wiring; NOT closing"; exit 2; }
+      gc bd dep add "$followup" "$finding" --type discovered-from >/dev/null 2>&1 \
+        || warn "could not wire follow-up $followup --discovered-from $finding (provenance only)"
       "$dispatcher" arm "$followup" --target "$fixpool" --sling-arg --on --sling-arg mol-polecat-work \
         --reason "deferred from the review of anchor $anchor (finding $finding); dispatch once the anchor merges" >/dev/null 2>&1 \
         || { warn "deferred $finding: could not arm follow-up $followup to '$fixpool'; NOT closing"; exit 2; }

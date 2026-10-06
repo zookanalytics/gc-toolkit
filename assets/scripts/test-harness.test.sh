@@ -75,5 +75,33 @@ hasnt " $(down_blockers tk-blk) " " tk-kd " "...not the reverse — the first op
 gc bd dep tk-blk --blocks tk-kd
 has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> lands the same orientation as the dep add form"
 
+# The gc bd dep stub holds one edge per (issue, depends_on) pair, as real bd
+# does. A second type on a taken pair is refused with exit 1 and writes nothing,
+# whichever form wrote either edge. The same type again is a no-op that exits 0,
+# and the reversed pair is a different pair. A stub that appends every edge
+# accepts two edges on one pair, a state no real store can hold, so a writer
+# that needs both passes here and fails against bd; the rule is pinned here.
+: > "$STUB_DEPS"
+gc bd dep add tk-kd tk-blk --type discovered-from
+if err=$(gc bd dep tk-blk --blocks tk-kd 2>&1); then
+  bad "a blocks edge on a pair that already carries discovered-from was accepted"
+else
+  ok "a blocks edge on a pair that already carries discovered-from is refused"
+fi
+has "$err" "dependency tk-kd -> tk-blk already exists with type \"discovered-from\" (requested \"blocks\")" "...with bd's already-exists error naming the pair and both types"
+eq "$(cat "$STUB_DEPS")" "tk-kd|discovered-from|tk-blk" "...and the refused edge writes nothing"
+: > "$STUB_DEPS"
+gc bd dep tk-blk --blocks tk-kd
+if gc bd dep add tk-kd tk-blk --type discovered-from 2>/dev/null; then
+  bad "a discovered-from edge on a pair a blocks edge holds was accepted"
+else
+  ok "a discovered-from edge on a pair a blocks edge holds is refused (dep add form)"
+fi
+eq "$(cat "$STUB_DEPS")" "tk-blk|blocks|tk-kd" "...and the refused edge writes nothing"
+if gc bd dep add tk-kd tk-blk --type blocks; then ok "re-adding a pair with the type it carries exits 0"; else bad "re-adding a pair with the type it carries failed"; fi
+eq "$(grep -c . "$STUB_DEPS")" "1" "...and leaves one edge on the pair"
+if gc bd dep add tk-blk tk-kd --type related; then ok "the reversed pair is a different pair: a related edge lands beside the blocks edge"; else bad "the reversed pair was refused as if it were the same pair"; fi
+has "$(cat "$STUB_DEPS")" "tk-blk|related|tk-kd" "...and is stored"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
