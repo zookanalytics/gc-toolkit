@@ -395,21 +395,16 @@ Rules:
   formula you chose when you frame the choice. File the work bead as a
   sibling and wire the wait exactly as step 7 says.
 - **Which route — a bare visit, a plain work bead, or a design-convoy.**
-  Decide in order. First, is there executable work at all? A judgment or
-  decision the operator owns with nothing to build is a bare visit, nothing
-  to dispatch. Then, does the work need a design settled before or beside the
-  build, and is it large or high-blast-radius enough that one holistic review
-  beats scattered PRs? Yes: recommend `mol-design-convoy`, so design and
-  implementation graduate to the default branch as one reviewed unit and the
-  design gate catches a wrong shape before it is built. No: a plain work bead
-  on the default one-child convoy, one PR to the default branch. Recommending
-  `mol-design-convoy` is the `gc.recommended_formula` stamp the operator
-  Accepts and slings like any other subject formula; `docs/design-convoy.md`
-  carries the full rubric and the design-gated default.
+  Decide with the questions under "Choosing a design-convoy" below. When they
+  point at a design-convoy, recommend `mol-design-convoy`: the
+  `gc.recommended_formula` stamp the operator Accepts and slings like any other
+  subject formula.
 - **Filing a visit on another subject:** use the marked block in
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
+
+{{ template "design-convoy-routing" . }}
 
 {{ template "context-discipline" . }}
 

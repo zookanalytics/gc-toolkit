@@ -123,10 +123,15 @@ that artifact on it; without it the branch starts equal to the default.
 
 ```bash
 # Create the convoy, cut + push its integration branch, seed the artifact onto
-# it. --json emits {convoy_id, branch}. You run city-scoped, so name the rig.
-# convoy-seed.sh scopes the convoy to GC_RIG, the same rig you sling to.
-CONVOY=$(GC_RIG=<rig> assets/scripts/convoy-seed.sh --name "<initiative>" \
-    --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
+# it. --json emits {convoy_id, branch}. You run city-scoped, so name the rig
+# twice: GC_RIG scopes the convoy to the rig you sling to, and --rig-root binds
+# the cut and push to that rig's checkout and its origin. Your home is not a
+# checkout of the rig, and without --rig-root the script falls back to
+# GC_RIG_ROOT and then to the repository your working directory sits in.
+RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
+[ -d "$RIG_ROOT" ] || { echo "no checkout found for rig <rig>; not seeding" >&2; exit 1; }
+CONVOY=$(GC_RIG=<rig> "[[PACK-ROOT]]/assets/scripts/convoy-seed.sh" --rig-root "$RIG_ROOT" \
+    --name "<initiative>" --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
 # File child work beads in the rig's store under the convoy and sling normally.
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
@@ -134,13 +139,15 @@ gc bd dep add "$WORK" "$CONVOY" --type=parent-child
 gc sling <rig>/gc-toolkit.polecat "$WORK"   # inherits metadata.target via convoy walk
 ```
 
-A **design-first initiative** — executable work that needs a design settled
-before or beside the build — rides `mol-design-convoy` instead of a bare seed:
-it runs the same branch cut, then files the design child and, under the
-design-gated default, arms implementation behind the design's approval, so
-design and implementation graduate as one reviewed unit. Recommend it from a
-converse sitting, or sling it directly on the initiative with
-`--on mol-design-convoy --var issue=<initiative>` (`docs/design-convoy.md`).
+A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
+and "Choosing a design-convoy" below is the test for one. The molecule runs the
+same branch cut from a pool session, then files the design child and, under the
+design-gated default, arms implementation behind the design's approval. Sling it
+on an initiative bead in the rig's store:
+
+```bash
+gc sling <rig>/gc-toolkit.polecat <initiative> --on mol-design-convoy --var issue=<initiative>
+```
 
 Children inherit `metadata.target = integration/<convoy-id>` via the
 convoy-ancestor walk in `gc sling`: polecats branch from the integration
@@ -159,6 +166,29 @@ points one dispatch at any ref; explicit `--var` wins over the auto-compute.
 branch by itself, with no convoy above it. Catching this shape is a dispatch
 judgment here, not a downstream gate, so seed the artifact on the convoy's
 integration branch as above.
+
+
+## Choosing a design-convoy
+
+A design-convoy (`mol-design-convoy`) stands up an owned integration convoy for
+one initiative. A design child lands its doc on the convoy's integration branch,
+implementation builds there, and the whole unit graduates to the default branch
+as one reviewed PR. Choose the route for a follow-up by asking, in order:
+
+1. Is there executable work at all? No: a bare visit (`mol-visit`). A judgment
+   or decision the operator owns, with nothing to build, has nothing to
+   dispatch.
+2. Does the work need a design settled before or beside the build, and is it
+   large or high-blast-radius enough that one holistic review beats scattered
+   PRs? Yes: a design-convoy, so design and implementation land as one reviewed
+   unit and the design gate catches a wrong shape before it is built. No: a
+   plain work bead on the default one-child convoy, one PR to the default
+   branch.
+
+`design_gated` defaults to `true`, which holds implementation until the operator
+approves the design's PR. `docs/design-convoy.md` describes the gates and when
+all-in-one (`--var design_gated=false`) fits.
+
 
 ## Scope-miss recovery: amend the open PR
 
