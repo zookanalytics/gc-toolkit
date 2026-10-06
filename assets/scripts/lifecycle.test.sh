@@ -289,10 +289,10 @@ writes_when() { # <label> <bead-json> <args...>
   "$SUT" transition "$@" >/dev/null 2>&1
   eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "$label"
 }
-# BASE carries no assignee, the resting shape n-1 models. Every case below
-# enters a detached state at status=open, which clears a stale assignee, and
-# that clear writes by itself. A case built on a stale assignee writes whatever
-# its own field does, so it passes without testing that field. BASE must
+# BASE carries no assignee, the resting shape n-1 models. Every case built on
+# it enters a detached state at status=open, which clears a stale assignee, and
+# that clear writes by itself. With a stale assignee, a case writes no matter
+# what its own field does, so it passes without testing that field. BASE must
 # therefore be idle on its own: re-asserted unchanged, it writes nothing.
 BASE='"id":"n-2","status":"open","assignee":"","notes":""'
 store "[{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}]"
