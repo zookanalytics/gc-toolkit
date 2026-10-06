@@ -943,24 +943,110 @@ runf "$TMP/formulas/spans-clean.toml"
 eq "$RC" 0 "data in a span, the loop body, a comment, and a count are not findings"
 eq "$OUT" "" "and nothing is printed"
 
-# The shells are the ground truth. Each one-line loop in the two fixtures above
-# runs under zsh and under bash with a two-word LIST: every finding iterates
-# differently in the two shells, and every clean loop alike. Skipped where zsh
-# is not installed.
+# A newline ends a list only at the top level. Inside a quoted span or a
+# substitution it is data, and after a backslash it continues the line, so the
+# list runs on into the next line, and an unsplit expansion there is still a
+# finding. Each finding is reported once, at the line its for-statement starts
+# on, and that includes a loop that starts a later line inside a substitution.
+cat > "$TMP/formulas/spans-multiline.toml" <<'FIX'
+```bash
+for x in $(printf 'a\n'
+  ) $LIST; do printf '[%s]' "$x"; done
+for x in $(printf '%s\n' a |
+  sed 's/a/b/' |
+  cat) $LIST; do printf '[%s]' "$x"; done
+for x in "a
+b" $LIST; do printf '[%s]' "$x"; done
+for x in 'a
+b' $LIST; do printf '[%s]' "$x"; done
+for x in $(printf a
+for y in $LIST; do printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
+for x in $LIST $(for y in $LIST; do
+  printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
+for x in a \
+  $LIST; do printf '[%s]' "$x"; done
+```
+FIX
+runf "$TMP/formulas/spans-multiline.toml"
+eq "$RC" 1 "an expansion after a line break inside a span or after a backslash is a finding"
+for n in 2 4 7 9 12 13 15; do
+    has "$OUT" "spans-multiline.toml:$n:" "spans-multiline.toml line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 7 "and each is reported once, at the line its for-statement starts on"
+
+# A line break exposes nothing on its own. An expansion inside the span that
+# holds the break is still data, and a top-level newline still ends a list,
+# nested or not, so an unquoted $y or $x in the loop body after it is not a
+# finding.
+cat > "$TMP/formulas/spans-multiline-clean.toml" <<'FIX'
+```bash
+for x in $(printf '%s\n' $LIST
+  ); do printf '[%s]' "$x"; done
+for x in "a
+$LIST"; do printf '[%s]' "$x"; done
+for x in a b
+do printf '[%s]' $x; done
+for x in $(printf a
+for y in b c
+do printf '<%s>' $y; done); do printf '[%s]' "$x"; done
+```
+FIX
+runf "$TMP/formulas/spans-multiline-clean.toml"
+eq "$RC" 0 "data in a multi-line span, and a body after a top-level newline, are not findings"
+eq "$OUT" "" "and nothing is printed"
+
+# The shells are the ground truth. Each loop in the four fixtures above, one
+# line or several, runs under zsh and under bash with a two-word LIST: every
+# finding iterates differently in the two shells, and every clean loop alike.
+# Skipped where zsh is not installed.
 if command -v zsh >/dev/null 2>&1; then
-    for fx in spans spans-clean; do
-        want=alike; [ "$fx" = spans ] && want=differently
-        n=0
+    for fx in spans spans-clean spans-multiline spans-multiline-clean; do
+        case "$fx" in *-clean) want=alike ;; *) want=differently ;; esac
+        n=0; loop=""
         while IFS= read -r line; do
             n=$((n + 1))
-            case "$line" in 'for '*'; done') ;; *) continue ;; esac
-            z="$(zsh -f -c "LIST='c d'; $line" 2>&1)"
-            b="$(BASH_ENV='' bash -c "LIST='c d'; $line" 2>&1)"
+            case "$line" in '```'*) continue ;; esac
+            [ -n "$loop" ] || at=$n
+            loop="${loop:+$loop
+}$line"
+            case "$line" in *'; done') ;; *) continue ;; esac
+            z="$(zsh -f -c "LIST='c d'; $loop" 2>&1)"
+            b="$(BASH_ENV='' bash -c "LIST='c d'; $loop" 2>&1)"
+            loop=""
             got=alike; [ "$z" = "$b" ] || got=differently
-            eq "$got" "$want" "$fx.toml:$n iterates $want under zsh and bash"
+            eq "$got" "$want" "$fx.toml:$at iterates $want under zsh and bash"
         done < "$TMP/formulas/$fx.toml"
     done
 fi
+
+# A list runs on only while the list itself is open. A list that ends with its
+# line does not pull in the next line, and neither does a quote that opens
+# after the list has ended, like the apostrophe in a trailing comment, so a
+# commented-out loop on the next line stays a comment. The end of a block or
+# of the file ends a list too: a list cut off there is judged as it stands,
+# and the next block's loop is reported at its own line.
+cat > "$TMP/formulas/list-ends.toml" <<'FIX'
+```bash
+for x in a b
+# echo; for y in $LIST; do printf '[%s]' "$y"; done
+do printf '[%s]' "$x"; done
+for x in a b; do printf '[%s]' "$x"; done # don't
+# echo; for y in $LIST; do printf '[%s]' "$y"; done
+for y in $LIST; do printf '[%s]' "$y"; done
+for x in $LIST $(printf a
+```
+```bash
+for y in $LIST; do printf '[%s]' "$y"; done
+```
+```bash
+for x in $LIST \
+FIX
+runf "$TMP/formulas/list-ends.toml"
+eq "$RC" 1 "a list cut off by the end of its block or file is still judged"
+for n in 7 8 11 14; do
+    has "$OUT" "list-ends.toml:$n:" "list-ends.toml line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 4 "and nothing else is, the commented-out loops included"
 
 # Scope excludes rendered and frozen trees even when they carry the defect: the
 # fix belongs in the source they render from or froze.

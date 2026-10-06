@@ -10,9 +10,9 @@
 # and is not a finding. Words inside a substitution are argument quoting,
 # which this rule does not judge. Quoted lists, literal/glob lists, zsh's
 # explicit ${=VAR} split, and a ${#VAR} length are fine too. Quoting is read
-# left to right, so a `;`, `#` or quote character inside a quoted span, an
-# escape or a substitution is data: it neither ends the list nor hides an
-# expansion after it. Scope: fenced shell blocks in formula
+# left to right, so a `;`, `#`, quote character or line break inside a quoted
+# span, an escape or a substitution is data: it neither ends the list nor
+# hides an expansion after it. Scope: fenced shell blocks in formula
 # TOMLs, agent prompt templates, startup fragments, skills, and named
 # paste-to-run docs runbooks. Rendered (generated/, base-snapshots/) and
 # frozen (specs/) trees are excluded. Fix: capture to a file and
@@ -39,7 +39,8 @@ function is_shell_fence(l,   lang) {
 # how the list splits. Each blanked character becomes a dot, so a `;`, `#` or
 # `$` inside a span can neither end the list nor read as an unquoted
 # expansion, and a dot after a bare `$` names no parameter. An unterminated
-# span is blanked to the end of s. Context stack, top last: S single quote,
+# span is blanked to the end of s, and mask_open counts the spans still open
+# there. Context stack, top last: S single quote,
 # E $'…', D double quote, K backtick, Z ${=…} or ${#…}, C a substitution
 # opened by `(`, P a ( nested inside one. Each step reads one token of w
 # characters at i, and every token that is not unquoted top-level text is
@@ -74,42 +75,69 @@ function mask_spans(s,   out, i, n, c, nx, k, top, st, w) {
         else { out = out c; continue }
         out = out substr("...", 1, w)
     }
+    mask_open = top
     return out
 }
 # The word list of a for-statement whose `in` ends where s begins, as
-# mask_spans blanks it: s up to the first top-level `;`, or up to a `#` that
-# starts a word and so opens a comment. A newline ends a list too, and the
-# scan reads one line at a time. `do` does not end a list: the shells reserve
-# it only after the `;` or newline that does, so inside a list it is an
-# ordinary word, and the body that follows `do` is never part of the list.
+# mask_spans blanks it: s up to the first top-level `;` or newline, or up to
+# a `#` that starts a word and so opens a comment. A newline inside a span is
+# data, so when s ends inside one with no terminator before it, the list runs
+# on into the next line, and list_open is set. `do` does not end a list: the
+# shells reserve it only after the `;` or newline that does, so inside a list
+# it is an ordinary word, and the body that follows `do` is never part of the
+# list.
 function list_of(s,   m, e) {
     m = mask_spans(s)
     e = length(m) + 1
-    if (match(m, /;/)) e = RSTART
+    if (match(m, /[;\n]/)) e = RSTART
     if (match(m, /(^|[[:space:]])#/) && RSTART + RLENGTH - 1 < e) e = RSTART + RLENGTH - 1
+    list_open = (mask_open && e > length(m))
     return substr(m, 1, e - 1)
 }
+function newlines(s) { return gsub(/\n/, "", s) }
+# Judge text, a logical line whose first line is line start. For each of its
+# lines where a for-statement lists an unsplit expansion, print that line's
+# number once. Every for-statement is judged, one nested inside another's
+# list or starting a later line of text included: each search resumes just
+# after the previous `in`. While a list is still open at the end of text and
+# last is unset, so more of the block follows, print nothing and return 1:
+# the caller appends the next line and judges the whole again.
+function judge(text, last,   flat, remain, list, at, seen, hits) {
+    if (text ~ /^[[:space:]]*#/) return 0
+    flat = text
+    gsub(/\n/, " ", flat)
+    sub(/^[[:space:]]+/, "", flat)
+    remain = text; seen = 0; hits = ""
+    while (match(remain, /(^|\n|[;&|(){}]|\$\(|[[:space:]](do|then|else))[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]/)) {
+        remain = substr(remain, RSTART + RLENGTH)
+        list = list_of(remain)
+        if (list_open && !last) return 1
+        at = start + newlines(substr(text, 1, length(text) - length(remain)))
+        if (list ~ /\$([A-Za-z_0-9]|\{)/ && at != seen) { hits = hits at ":" flat "\n"; seen = at }
+    }
+    printf "%s", hits
+    return 0
+}
 /^[[:space:]]*```/ {
+    # A fence ends the block, as the end of the file does. Either one ends a
+    # line still being joined, which is judged as it stands so it cannot run
+    # on into the next block.
+    if (pending != "") judge(pending, 1)
+    pending = ""
     if (inb) { inb = 0 } else { inb = is_shell_fence($0) }
     next
 }
 !inb { next }
 {
-    # Join backslash continuations so a spread-out list is judged whole.
-    if (pending != "") { text = pending " " $0 } else { text = $0; start = FNR }
-    if (text ~ /\\+[[:space:]]*$/) { sub(/\\+[[:space:]]*$/, "", text); pending = text; next }
-    pending = ""
-    stripped = text
-    sub(/^[[:space:]]+/, "", stripped)
-    if (stripped ~ /^#/) next
-    # Every for-statement on the line is judged, one nested inside another's
-    # list included: each search resumes just after the previous `in`.
-    remain = text
-    while (match(remain, /(^|[;&|(){}]|\$\(|[[:space:]](do|then|else))[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]/)) {
-        remain = substr(remain, RSTART + RLENGTH)
-        if (list_of(remain) ~ /\$([A-Za-z_0-9]|\{)/) { print start ":" stripped; break }
-    }
+    # Join backslash continuations with a space, and the lines an open list
+    # runs on into with the newline that separates them, so a spread-out list
+    # is judged whole.
+    if (pending != "") { text = pending sep $0 } else { text = $0; start = FNR }
+    if (text ~ /\\+[[:space:]]*$/) { sub(/\\+[[:space:]]*$/, "", text); pending = text; sep = " "; next }
+    pending = judge(text, 0) ? text : ""
+    sep = "\n"
 }
+END { if (pending != "") judge(pending, 1) }
 AWKEOF
 )
 
