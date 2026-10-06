@@ -176,6 +176,8 @@ configuration, not doctrine. Two writers put them there and neither reads the
 diff: `mol-refinery-patrol` stamps its `check_set` var on every transition
 into a gating state, and `gate-ensure.sh --default` normalizes an anchor whose
 set is absent or empty, taking its value from `REFINERY_RECONCILE_CHECK_SET`.
+No patrol pour passes `check_set`, so each patrol wisp renders it from the
+formula default as it stands when that wisp is poured.
 The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
 [authority-map.md](authority-map.md).
