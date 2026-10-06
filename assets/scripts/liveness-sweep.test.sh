@@ -73,6 +73,11 @@ case "$sub" in
     printf '{"id":"tk-subj-new"}\n'; exit 0 ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$GC_CALLS"; exit 0 ;;
+  "session list")
+    # The holder-liveness read. GC_SESSION_FAIL = an outage (unreadable list).
+    [ -n "${GC_SESSION_FAIL:-}" ] && exit 1
+    if [ -n "${FAKE_SESSIONS:-}" ] && [ -f "${FAKE_SESSIONS:-}" ]; then cat "$FAKE_SESSIONS"; else printf '{"sessions":[]}\n'; fi
+    exit 0 ;;
 esac
 exit 0
 GC
@@ -209,6 +214,16 @@ cat > "$TMP/widen.json" <<'JSON'
 ]
 JSON
 export FAKE_READY="$TMP/ready.json" FAKE_LIVE="$TMP/live.json" FAKE_WIDEN="$TMP/widen.json"
+
+# The holder-liveness session set: lx-live-1 is listed (a visit it holds still
+# converses); a session absent from this set (e.g. lx-dead-9) is a gone sitting.
+# The existing visits above are all UNCLAIMED, so they cover regardless of this.
+cat > "$TMP/sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"testrig__conv-lx-live-1","agent_name":"testrig/testrig.tk-livevisit"}
+]}
+JSON
+export FAKE_SESSIONS="$TMP/sessions.json"
 
 # bd show fixtures: the worked-via-convoy and landed-husk chains.
 printf '%s\n' '[{"id":"conv-live","issue_type":"convoy","dependencies":[{"id":"c-worked","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-live.json"
@@ -635,6 +650,73 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── holder liveness gates the conversing class (readable session list) ──"
+# Two visits track two ready subjects: one held by a live session (lx-live-1 is
+# in FAKE_SESSIONS), one by a gone session (lx-dead-9 is not). A third subject is
+# a visit bead left in the ready set by that gone session. The live-held subject
+# stays covered; the dead-held subject and the stranded visit bead return to the
+# census. Self-contained fixtures — the suite above clobbers the shared ones.
+cat > "$TMP/hl-ready.json" <<'JSON'
+[
+  {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+]
+JSON
+cat > "$TMP/hl-live.json" <<'JSON'
+[
+  {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-live","status":"in_progress","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+]
+JSON
+printf '[]\n' > "$TMP/hl-widen.json"
+FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
+case ",$BL," in *",hl-live-subj,"*) bad "live-held visit over-surfaces" "hl-live-subj surfaced though lx-live-1 is alive" ;; *) ok "a live-held visit keeps its subject out of the census" ;; esac
+case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held visit returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
+case ",$BL," in *",hl-ready-deadvisit,"*) ok "a visit stranded ready by a gone session surfaces (arm 1)" ;; *) bad "stranded visit bead hidden" "hl-ready-deadvisit stayed conversing (baseline: $BL)" ;; esac
+
+echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not live ──"
+# A sitting that lingers in the list as closed/archived is dead, per helm's
+# ownerLive — its held visit must stop covering its subject. A holder listed in
+# any other state (asleep here) is live and keeps covering, so the gate excludes
+# the terminal states only, not everything that is not "active".
+cat > "$TMP/hl-term-sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
+  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
+  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+]}
+JSON
+cat > "$TMP/hl-term-ready.json" <<'JSON'
+[
+  {"id":"hl-closed-subj","title":"subject of a visit held by a CLOSED session","issue_type":"task","metadata":{}},
+  {"id":"hl-arch-subj","title":"subject of a visit held by an ARCHIVED session","issue_type":"task","metadata":{}},
+  {"id":"hl-asleep-subj","title":"subject of a visit held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
+]
+JSON
+cat > "$TMP/hl-term-live.json" <<'JSON'
+[
+  {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-closed","status":"in_progress","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-v-arch","status":"in_progress","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-v-asleep","status":"in_progress","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+]
+JSON
+FAKE_SESSIONS="$TMP/hl-term-sessions.json" FAKE_READY="$TMP/hl-term-ready.json" FAKE_LIVE="$TMP/hl-term-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BLT="$(cat "$BASELINE_FILE" 2>/dev/null)"
+case ",$BLT," in *",hl-closed-subj,"*) ok "a CLOSED but still-listed holder returns its subject to the census" ;; *) bad "closed-held subject hidden" "hl-closed-subj stayed masked (baseline: $BLT)" ;; esac
+case ",$BLT," in *",hl-arch-subj,"*) ok "an ARCHIVED but still-listed holder returns its subject to the census" ;; *) bad "archived-held subject hidden" "hl-arch-subj stayed masked (baseline: $BLT)" ;; esac
+case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held visit over-surfaces" "hl-asleep-subj surfaced though lx-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
+
+echo "── an unreadable session list keeps every visit covering (unprovable death) ──"
+GC_SESSION_FAIL=1 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BLF="$(cat "$BASELINE_FILE" 2>/dev/null)"
+for hidden in hl-dead-subj hl-ready-deadvisit hl-live-subj; do
+  case ",$BLF," in *",$hidden,"*) bad "fail-open surfaced $hidden" "an unreadable session list must hide nothing new (baseline: $BLF)" ;; *) ok "unreadable session list → $hidden keeps covering" ;; esac
+done
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"
