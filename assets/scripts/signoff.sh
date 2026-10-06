@@ -705,11 +705,14 @@ if [ "$VERDICT" = "approve" ]; then
   # reviewed commit.
   [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
     --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
-  # The lane found nothing this round, so its still-unruled findings from
-  # earlier rounds are answered: close them. Validated findings (the validator's)
-  # and any a fix unit still blocks are left alone. Best-effort — this is
-  # cleanup, never a check the verdict depends on.
-  "$FINDING" close-unvalidated --anchor "$ANCHOR" --lane "$CHECK_NAME" --reason "lane green at $REVIEWED_OID" >/dev/null 2>&1 || true
+  # signoff records the verdict; it does not resolve findings. Closing this lane's
+  # still-unvalidated findings as moot belongs to gate-ensure.sh, the single owner
+  # of stage-3 resolution: it derives the green lane state and computes quiescence,
+  # so the one reader that holds the re-gate is the one that releases it, and the
+  # two cannot disagree. The close lands on gate-ensure's next reconcile pass — or,
+  # if the anchor merges or closes before that pass, on gate-ensure's orphaned
+  # sweep, which sheds a closed anchor's still-unvalidated findings (no validator
+  # runs on closed work), so the deferral strands nothing.
   echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID$WIDEN_SUMMARY; review $REVIEW_BEAD closed"
   exit 0
 fi

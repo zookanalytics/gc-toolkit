@@ -450,10 +450,20 @@ opens as a draft when its `check_set` names an `open-as-draft` check, and
 `pr-open.sh` flips it to ready once every `pre-open` and `open-as-draft` check
 reads green ([Checks](#checks)); merge readiness waits on every phase and the
 universal approval besides.
-`assets/scripts/pr-status-label.sh` is the single writer; `pr-open.sh` sets it at
-open, `signoff.sh` flips it on each verdict, and `pr-facts.sh` reconciles it every
-pass so a missed event self-heals. Every write is pinned to the origin, and a
-label is not an approval.
+`assets/scripts/pr-status-label.sh` is the single writer. `pr-open.sh` sets the
+label when it opens a PR and when it flips a draft to ready, and `signoff.sh`
+flips it on each of the city's own verdicts. A human's review moves it in the
+merge cadence's pre-merge arms, in the pass that records the review. The posture
+arm re-derives the label for an anchor whose posture value it changes: an
+approval, a comment, a change request, or a dismissal. The feedback arm
+re-derives it for an anchor whose feedback batch it routes into live work. A
+head or merge state that moves under an unchanged posture value does not
+re-derive the label there. GitHub reports `UNKNOWN` while it computes a PR's
+mergeability, so those moves are most posture writes, and re-deriving on them
+would cost a derivation for dozens of open PRs at once. The full `pr-facts.sh`
+pass re-derives the label for every open PR, so those moves, the other inputs,
+and a missed event all self-heal there. Every write is pinned to the origin, and
+a label is not an approval.
 
 ## The base label (GitHub projection)
 
