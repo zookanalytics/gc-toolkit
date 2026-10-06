@@ -16,7 +16,8 @@
 # lane with no local review bead is backed by an operator's GitHub approval on
 # the PR, the shared fallback); approval (a UNIVERSAL merge rule armed for every
 # PR, not a check_set member — satisfied only by a latest APPROVED from an
-# account other than the city's at the live head; a standing CHANGES_REQUESTED
+# account other than the city's, given at any commit, because an approval stands
+# across later pushes until it is dismissed; a standing CHANGES_REQUESTED
 # from any other account vetoes); no unclosed rework/review
 # child or open must-fix finding (metadata keys naming this PR AND dependency
 # edges, the finding held by its own blocks edge; unreadable holds);
@@ -238,8 +239,8 @@ REPO_Q_DEF='
 # has none, from an operator's GitHub approval on the anchor's PR (an approval
 # names no check, so it backs every lane). The lane is compared to no head: green
 # is a state of the lane, and a commit landing on the branch neither clears it
-# nor buys a review. The head-bound human approval the merge separately requires
-# is the universal approval rule enforced below, required of every PR.
+# nor buys a review. The human approval the merge separately requires is the
+# universal approval rule enforced below, required of every PR.
 first_notgreen_lane() { # <anchor-id> <check_set>
   local anchor="$1" cs="$2" lane lanes
   # The resolver's exit status is load-bearing. A resolver that dies mid-run
@@ -593,14 +594,14 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
   # Latest state-bearing review per non-self reviewer (DISMISSED shadows its
-  # author's older rows); approvals count only at the live head.
-  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" --arg head "$head_oid" '
+  # author's older rows). An approval stands across later pushes until someone
+  # dismisses it, so it counts at whatever commit it was given.
+  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" '
     ([ .[] | select((.user.login // "") != $self)
        | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
      | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
     | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
-        approver: ([ $latest[] | select(.state == "APPROVED")
-                     | select((.commit_id // "") == $head) | (.user.login // "") ] | .[0] // "") }' 2>/dev/null)
+        approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") }' 2>/dev/null)
   if [ -z "$rstate" ]; then
     echo "$PROG: PR#$num reviews history unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -620,8 +621,8 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED and the cadence has run dry; merge held for re-review (anchor $id)"
     held=$((held + 1)); continue
   fi
-  # Approval is a UNIVERSAL merge rule: every PR requires an external APPROVED
-  # review at the live head by an account other than the city's, enforced here in
+  # Approval is a UNIVERSAL merge rule: every PR requires a standing external
+  # APPROVED review by an account other than the city's, enforced here in
   # city merge logic (GitHub branch protection is an extra layer only, not the
   # authority). No check_set token arms it and none opts out — the token that used
   # to arm it per-anchor left integration-branch PRs robot-merging on green, the
@@ -638,7 +639,7 @@ while IFS= read -r row; do
     # That is `settled`, and the approval clause of the owed rule is what makes
     # the row the operator's rather than nobody's.
     record_machine "$id" "settled" "$head_oid" "$aroute"
-    echo "$PROG: PR#$num no external APPROVED review at the live head $head_oid (approval is a universal merge rule); merge held (anchor $id)"
+    echo "$PROG: PR#$num no external APPROVED review stands (approval is a universal merge rule); merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
 

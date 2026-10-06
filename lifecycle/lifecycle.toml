@@ -191,12 +191,13 @@ check_set_sentinel = "none"
 # here as the declaration the state-space invariant (I2/I6) describes.
 marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # Approval is a UNIVERSAL merge rule, not a check_set member: merge.sh requires
-# every PR to carry a latest APPROVED review at the live head by an account other
-# than the city's, with a standing CHANGES_REQUESTED from any other account a
-# veto. No check.approval marker and no check_set token arm or opt out of it;
-# GitHub branch protection is an extra layer, not the authority. Declaration only,
-# like the rest of this section (the rule lives in merge.sh).
-approval_rule = "universal-nonself-head"
+# every PR to carry a latest APPROVED review by an account other than the city's,
+# standing across later pushes until it is dismissed, with a standing
+# CHANGES_REQUESTED from any other account a veto. No check.approval marker and
+# no check_set token arm or opt out of it; GitHub branch protection is an extra
+# layer, not the authority. Declaration only, like the rest of this section (the
+# rule lives in merge.sh).
+approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
 # I1 holds that a hold is a `blocks` edge to a live bead in the same store, so
