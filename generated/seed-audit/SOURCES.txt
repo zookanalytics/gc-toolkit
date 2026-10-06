@@ -72,7 +72,7 @@ formulas/mol-first-reaction.toml
 formulas/mol-polecat-work.toml
 671f0ee480d1f4d5be6fad25e8b904bcdcb99fcb37d08e6f27da0bcd406508fc
 formulas/mol-refinery-patrol.toml
-6c15a431c5972b7cfcfc2e860fd33fe1df3db779e55fef873ecb64d1dda87bd1
+aa10c02dfce57392ffde967e95249cbe252d4fab040559b72410df2716ed00ba
 formulas/mol-review-quorum-signoff.toml
 5754a2a98abc5ef77e05093a9f223311d287afd986dc7983d7623f217c3e8ba8
 formulas/mol-review.toml
@@ -84,7 +84,7 @@ f379f61f5148efeef13d8d06e78cc6115b4bafe26bd7f7940ec2f982d70051b7
 formulas/mol-visit.toml
 6736d5b27b5b6445610bcc5db9ffb094bcd985b40092ed7e7ec6e7a70c43ac01
 formulas/mol-witness-patrol.toml
-346021dd233526f3c97919929105f859602a22182da21af7a58329f78b7195df
+d9eee54068e5163ffef051d389afbbf3db03b7d727f11437922bd6a86b208d19
 pack.toml
 ad01c07323f6c18840caa35b9bbd9141c7affb6a9e3544df81f020561c31376c
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
@@ -132,7 +132,9 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 4cc4ec151e31b86d2d38f6d435d98361cc710274c5a1a884c23d45bbde434d69
 template-fragments/polecat-doctrine.template.md
-1828b55e004f20a682517992ab7ccbb81385bc5ca8c3994dfdc515c2431109ea
+9ddecf0fded638b89a4dc1e7a976ffc48371d0ede3eff3f8ec85fa4bceaf14ea
+template-fragments/pool-worker-no-consent-ui.template.md
+bdecf75ec1e37c3a47c55f1cf186240e5f71d0d13abe0d6249e786f0997da517
 template-fragments/scratch-reclaim.template.md
 f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
