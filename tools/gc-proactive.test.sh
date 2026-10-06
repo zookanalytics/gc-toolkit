@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down
-# and the fail-closed-on-unset-GC_RIG sweep guard.
+# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down, the
+# fail-closed-on-unset-GC_RIG sweep guard, and the deliverable and assignable
+# answers the first reaction's exits ask before they hand a bead on.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -163,6 +164,100 @@ set +e
 OUT="$(bash "$SCRIPT" deliverable gascity/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
 set -e
 hasnt "$OUT" "cross-store" "(XSTORE-UNREADABLE) with no rig list, the store arm does not fire"
+
+# --- assignable: a named agent addressed by assignee ------------------------
+# A named session's hook matches the bead's assignee, so `assignable <agent>
+# [<bead>]` answers no when the roster has no agent by that exact name, when it
+# is suspended, when it is a pool (absent from the merged config's
+# NamedSessions), or when a rig-scoped agent's hook reads neither the bead's
+# store nor the city's. A city-scoped agent's hook reads every rig store. The
+# fixture seam feeds agents.json, config.json and rigs.json.
+cat > "$TMP/rigs.json" <<'JSON'
+{"rigs":[
+  {"name":"loomington","prefix":"lx","path":"/x/loomington","hq":true},
+  {"name":"gc-toolkit","prefix":"tk","path":"/x/gc-toolkit","hq":false},
+  {"name":"gascity","prefix":"gc","path":"/x/gascity","hq":false}]}
+JSON
+cat > "$TMP/agents.json" <<'JSON'
+{"agents":[
+  {"name":"mechanik","qualified_name":"gc-toolkit.mechanik","scope":"city","suspended":false},
+  {"name":"deacon","qualified_name":"gc-toolkit.deacon","scope":"city","suspended":true},
+  {"name":"witness","qualified_name":"gc-toolkit/gc-toolkit.witness","dir":"gc-toolkit","scope":"rig","suspended":false},
+  {"name":"polecat","qualified_name":"gc-toolkit/gc-toolkit.polecat","dir":"gc-toolkit","scope":"rig","suspended":false}]}
+JSON
+cat > "$TMP/config.json" <<'JSON'
+{"config":{"NamedSessions":[
+  {"Template":"mechanik","Scope":"city","Dir":""},
+  {"Template":"deacon","Scope":"city","Dir":""},
+  {"Template":"witness","Scope":"rig","Dir":"gc-toolkit"}]}}
+JSON
+
+echo "# assignable answers yes for a city-scoped named agent, in any rig store"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit.mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-YES) mechanik can be handed a tk- bead"
+has "$OUT" "named session" "(ASSIGNABLE-YES) …as a registered named session"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit.mechanik gc-300fe 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-YES) …and a bead in another rig's store, which its hook also reads"
+
+echo "# assignable refuses what no hook would offer"
+set +e
+OUT="$(bash "$SCRIPT" assignable mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-ABSENT) a bare name no agent is registered under is refused"
+has "$OUT" "exact qualified name" "(ASSIGNABLE-ABSENT) …naming the address form"
+
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit.deacon tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-SUSPENDED) a suspended agent is refused"
+has "$OUT" "suspended" "(ASSIGNABLE-SUSPENDED) …naming why"
+
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-POOL) a pool is refused: its instances never match the pool name"
+has "$OUT" "--route" "(ASSIGNABLE-POOL) …pointing at the route a pool takes"
+
+echo "# assignable holds a rig-scoped agent to the stores its hook reads"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness gc-300fe 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-XSTORE) a rig-scoped agent is refused a bead in another rig's store"
+has "$OUT" "gc- store" "(ASSIGNABLE-XSTORE) …naming the store the bead lives in"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-OWNSTORE) …and answers yes for its own rig's store"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness lx-300fe 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-CITYSTORE) …and for the city store, which its hook also reads"
+
+echo "# assignable says no only on a positive finding"
+rm -f "$TMP/config.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-NOCONFIG) with no config to read, a pool is not proven a pool"
+printf '{"config":{}}' > "$TMP/config.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-NOCONFIG) …nor with a config that carries no NamedSessions list"
+rm -f "$TMP/agents.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-UNREADABLE) with no roster to read, the agent is assumed assignable"
+printf '{"error":"no city"}' > "$TMP/agents.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-UNREADABLE) …and a roster with no agent list is unreadable, not empty"
 
 echo
 echo "gc-proactive stand-down: $PASS passed, $FAIL failed"
