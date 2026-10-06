@@ -86,11 +86,20 @@ hasF "$TMP/tri.out" '--add-gates' "(CHECK) triage names the widening verdict cal
 hasF "$TMP/tri.out" 'Adding nothing is the expected common case' "(CHECK) triage states the common no-op case"
 bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
 hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
-hasF "$TMP/demo.out" 'skills/demo-capture/SKILL.md' "(CHECK) demo names its method skills"
+hasF "$TMP/demo.out" 'skills/review-demo/SKILL.md' "(CHECK) demo names its method skill"
+hasF "$TMP/demo.out" 'needs a visual to be understood' "(CHECK) demo decides need first"
+hasF "$TMP/demo.out" 'attach nothing' "(CHECK) demo approves a no-need change with a note and no attachment"
+hasF "$TMP/demo.out" 'never a block' "(CHECK) demo never blocks on a visual the city cannot produce"
+hasF "$TMP/demo.out" '--visual none|repo-artifact|screenshot|video' "(CHECK) demo names the verdict call that records its decision"
+notF "$TMP/demo.out" 'that is a finding against the change, not a' "(CHECK) an unrecordable demo is no longer a finding against the change"
+[ -r "$(cd "$HERE/../.." && pwd)/skills/review-demo/SKILL.md" ] \
+  && ok "(CHECK) the demo method skill ships where the note points" \
+  || bad "(CHECK) skills/review-demo/SKILL.md missing — the note names a method the pack does not ship"
 bash "$SCRIPT" --check-name pm > "$TMP/pm.out" 2>/dev/null
 hasF "$TMP/pm.out" '## Check: `pm`' "(CHECK) --check-name pm names the pm check"
 hasF "$TMP/pm.out" 'skills/review-pm/SKILL.md' "(CHECK) pm names its method skill"
 hasF "$TMP/pm.out" 'product lens' "(CHECK) pm carries the product lens"
+hasF "$TMP/pm.out" 'needs a visual, and delivering it, is `demo`'"'"'s' "(CHECK) pm leaves the visual decision to demo"
 bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
 hasF "$TMP/arch.out" '## Check: `arch`' "(CHECK) --check-name arch names the arch check"
 hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
