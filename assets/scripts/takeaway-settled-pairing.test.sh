@@ -13,6 +13,8 @@
 # statement — empty unless the writer means settled, which only
 # `gc-helm.sh takeaway --no-wait` does. A new writer that stamps a headline and
 # says nothing about the wait fails this suite.
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -27,6 +27,8 @@
 #     cascades into stamping nothing, and the silent failure is what
 #     tempts agents to rewrite the block instead of re-running it)
 # Hermetic: reads the repo only; no gc, no city.
+#
+# run-tests-scope: tree
 
 set -u
 
