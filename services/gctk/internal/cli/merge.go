@@ -383,7 +383,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	rs, rok := reviewState(reviewsRaw, m.selfLogin, headOid)
+	rs, rok := reviewState(reviewsRaw, m.selfLogin)
 	if !rok {
 		fmt.Fprintf(m.stdout, "%s: PR#%s reviews history unreadable; merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++
@@ -395,9 +395,9 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	// Approval is a universal merge rule: every PR needs an APPROVED review at
-	// the live head from an account other than the city's. No check_set token
-	// arms it and none opts out.
+	// Approval is a universal merge rule: every PR needs a standing APPROVED
+	// review from an account other than the city's. No check_set token arms it
+	// and none opts out.
 	if m.selfLogin == "" {
 		fmt.Fprintf(m.stdout, "%s: PR#%s approval required but the acting login is unresolved; merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++
@@ -405,7 +405,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	}
 	if rs.approver == "" {
 		m.recordMachine(id, "settled", headOid, aroute)
-		fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review at the live head %s (approval is a universal merge rule); merge held (anchor %s)\n", mergeProg, num, headOid, id)
+		fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review stands (approval is a universal merge rule); merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++
 		return
 	}
@@ -1252,7 +1252,6 @@ func stuckHolder(blockers []gcbd.Bead) string {
 type reviewRow struct {
 	Login       string
 	State       string
-	CommitID    string
 	SubmittedAt string
 	IDNum       int64
 }
@@ -1263,11 +1262,13 @@ type reviewSummary struct {
 }
 
 // reviewState reproduces the review-grouping jq: the latest state-bearing review
-// per non-self reviewer decides veto and approver. ok=false is an unreadable
-// history: `jq -cs` slurps the whole stream or nothing, so one row that will
-// not decode makes all of it unreadable, because the veto or the only approval
-// at head may be that row or follow it.
-func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
+// per non-self reviewer decides veto and approver. An approval stands across
+// later pushes until someone dismisses it, so the commit a review was given at
+// is not read: a later DISMISSED row is what retires an approval. ok=false is
+// an unreadable history: `jq -cs` slurps the whole stream or nothing, so one
+// row that will not decode makes all of it unreadable, because the veto or the
+// only approval may be that row or follow it.
+func reviewState(raw []byte, self string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
 	var all []reviewRow
@@ -1277,7 +1278,6 @@ func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
 				Login string `json:"login"`
 			} `json:"user"`
 			State       string      `json:"state"`
-			CommitID    string      `json:"commit_id"`
 			SubmittedAt string      `json:"submitted_at"`
 			ID          json.Number `json:"id"`
 		}
@@ -1292,7 +1292,6 @@ func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
 		all = append(all, reviewRow{
 			Login:       obj.User.Login,
 			State:       obj.State,
-			CommitID:    obj.CommitID,
 			SubmittedAt: obj.SubmittedAt,
 			IDNum:       numberToInt64(obj.ID),
 		})
@@ -1328,7 +1327,7 @@ func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
 		if latest.State == "CHANGES_REQUESTED" && summary.veto == "" {
 			summary.veto = l
 		}
-		if latest.State == "APPROVED" && latest.CommitID == head && summary.approver == "" {
+		if latest.State == "APPROVED" && summary.approver == "" {
 			summary.approver = l
 		}
 	}

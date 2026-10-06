@@ -16,7 +16,7 @@ import (
 
 // `jq -cs` slurps the reviews stream whole or not at all. A stream that stops
 // decoding after two good rows is unreadable, not a two-row history: the row
-// it lost may be the veto, or the only approval at head.
+// it lost may be the veto, or the only approval.
 func TestReviewStateRefusesAStreamThatStopsDecoding(t *testing.T) {
 	good := `{"user":{"login":"human1"},"state":"APPROVED","commit_id":"h","submitted_at":"2026-01-01T00:00:00Z","id":1}` +
 		`{"user":{"login":"human2"},"state":"COMMENTED","commit_id":"h","submitted_at":"2026-01-02T00:00:00Z","id":2}`
@@ -25,11 +25,11 @@ func TestReviewStateRefusesAStreamThatStopsDecoding(t *testing.T) {
 		`garbage`, // garbled
 		`"a string, not a review row"`,
 	} {
-		if _, ok := reviewState([]byte(good+tail), "bot", "h"); ok {
+		if _, ok := reviewState([]byte(good+tail), "bot"); ok {
 			t.Errorf("reviewState(two rows + %q) ok = true; want false (unreadable)", tail)
 		}
 	}
-	rs, ok := reviewState([]byte(good), "bot", "h")
+	rs, ok := reviewState([]byte(good), "bot")
 	if !ok || rs.approver != "human1" {
 		t.Fatalf("reviewState(two good rows) = (%+v, %v); want approver human1, ok", rs, ok)
 	}
@@ -39,7 +39,7 @@ func TestReviewStateRefusesAStreamThatStopsDecoding(t *testing.T) {
 // empty stream as [].
 func TestReviewStateReadsAnEmptyHistory(t *testing.T) {
 	for _, raw := range []string{"", "   \n"} {
-		rs, ok := reviewState([]byte(raw), "bot", "h")
+		rs, ok := reviewState([]byte(raw), "bot")
 		if !ok || rs != (reviewSummary{}) {
 			t.Errorf("reviewState(%q) = (%+v, %v); want the zero summary, ok", raw, rs, ok)
 		}
