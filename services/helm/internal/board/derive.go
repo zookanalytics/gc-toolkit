@@ -82,8 +82,9 @@ func (f Facts) ownerLive(assignee string) bool {
 	return st != "archived" && st != "closed"
 }
 
-// wfLive answers gc-helm.sh's `def wf_live($id)`: is this child covered by a
-// LIVE graph.v2 workflow?
+// wfLive reports whether a LIVE graph.v2 workflow stands over the bead the
+// caller names, which may be an anchor's child, a review or rework blocking the
+// anchor, or the anchor's own bead.
 //
 // `gc sling` leaves the work bead at status=open/assignee=null and puts the
 // in-flight state on the workflow, so this is the only way a polecat
@@ -93,8 +94,8 @@ func (f Facts) ownerLive(assignee string) bool {
 // polecat that drained since must stop counting at once — otherwise the fix
 // trades a false "stranded" for a false "in flight", the worse lie on a board
 // whose job is to say what needs a human.
-func (f Facts) wfLive(childID string) bool {
-	for _, name := range f.Inflight[childID] {
+func (f Facts) wfLive(beadID string) bool {
+	for _, name := range f.Inflight[beadID] {
 		if f.ownerLive(name) {
 			return true
 		}
@@ -117,8 +118,8 @@ func (f Facts) anchorInFlight(a Anchor) int {
 }
 
 // rollup is every count and id-list the derivation reads off an anchor's
-// children — the block of `as $…` bindings in the middle of gc-helm.sh's jq
-// pass, computed once so the branches below can all read from it.
+// children and its own live work, computed once so the branches below can all
+// read from it.
 type rollup struct {
 	mTotal     int
 	nClosed    int
@@ -126,9 +127,11 @@ type rollup struct {
 	inProgress int // RAW status count; 0 for a slung bead by construction
 	assigned   int
 
-	// liveHeads is the union of the two ways a child can be demonstrably
-	// moving: claimed by a live session, OR covered by a live workflow. Unioned
-	// by id, so a child matched both ways is counted once.
+	// liveHeads is every bead of this anchor that is demonstrably moving: a
+	// child claimed by a live session or covered by a live workflow, and the
+	// anchor's own bead when a live workflow stands over it. Unioned by id, so a
+	// child matched both ways is counted once. Its length is the live-work count
+	// that the band, the frontier, NEEDS and the stranded test all read.
 	liveHeads []string
 	// deadOwnerHeads is claimed, owner dead, AND no live workflow behind it.
 	// The workflow clause matters: a re-dispatched bead can carry a stale
@@ -147,8 +150,13 @@ type rollup struct {
 	parkedHeads []string
 }
 
-// rollUp derives every child-derived quantity for one anchor.
-func rollUp(children []Child, f Facts) rollup {
+// rollUp derives every child-derived quantity for one anchor, and adds the
+// anchor's own bead to the live-work heads when a live workflow stands over it
+// ([Facts.anchorInFlight]). That is the common sling shape: the anchor is itself
+// the slung work bead and its molecule stands over it rather than under a
+// child, so a scan of the children alone cannot see it.
+func rollUp(a Anchor, f Facts) rollup {
+	children := a.Children
 	r := rollup{
 		mTotal:         len(children),
 		liveHeads:      []string{},
@@ -184,6 +192,10 @@ func rollUp(children []Child, f Facts) rollup {
 		if c.Status == "in_progress" && !f.ownerLive(c.Assignee) && !wf {
 			r.deadOwnerHeads = append(r.deadOwnerHeads, c.ID)
 		}
+	}
+	if f.anchorInFlight(a) > 0 {
+		r.liveHeads = append(r.liveHeads, a.ID)
+		r.inFlightHeads = append(r.inFlightHeads, a.ID)
 	}
 
 	// Second pass: openHeads subtracts liveHeads, which is only complete once
@@ -1677,7 +1689,7 @@ func classifySection(t Tile) string {
 // generation instant, shared by every tile so one board never mixes staleness
 // measured against two different clock reads.
 func computeTile(a Anchor, now time.Time, f Facts) Tile {
-	r := rollUp(a.Children, f)
+	r := rollUp(a, f)
 	held := f.Visits[a.ID]
 	stale := staleDays(a.UpdatedAt, now)
 	closedDays := staleDays(a.ClosedAt, now)
