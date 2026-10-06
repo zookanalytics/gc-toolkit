@@ -206,8 +206,9 @@ bd_rows() {
 #   stuck      human: routed or assigned to the reserved `human` gate, a
 #                decision, a finding that needs the operator, or an anchor parked
 #                in a human state.
-#              held: neither open nor in progress (blocked, deferred, pinned), a
-#                deliberate hold no pool offers.
+#              held: any other status. Blocked, deferred and pinned are
+#                deliberate holds no pool offers; a status a store adds is one
+#                this classifier does not know, so it fails closed.
 #              approval: an open PR settled and waiting on the operator's review
 #                (review required, or changes requested) at its live head.
 #              merge-hold: an operator merge or rebase hold on an anchor.
@@ -439,14 +440,16 @@ EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" '
 # carries the subject's blockers in other stores. Its other blockers are always
 # read, whatever the budget, as the frontier has to place each one open or
 # closed. The parent-child edge is stored on the child pointing up, so children
-# come from a --parent listing, asked for with closed included or a done child
-# drops out of the count; the listing carries each child's own row, so only its
-# blockers are read, and only while its own state advances.
+# come from a --parent listing, asked for with --all. bd's default scope leaves
+# out closed and pinned children, and a --status list leaves out every status it
+# does not name, a store's own statuses included, so either would drop a child
+# from the count. The listing carries each child's own row, so only its blockers
+# are read, and only while its own state advances.
 FRONTIER_JSON=""; HORIZON_JSON=""
 if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
   CHILDREN='[]'
   if [ -n "$WANT_HORIZON" ]; then
-    CHILDREN=$(bd_json "$DB" list --parent "$BEAD" --status open,in_progress,blocked,deferred,closed --limit 0 \
+    CHILDREN=$(bd_json "$DB" list --parent "$BEAD" --all --limit 0 \
       | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
     [ -n "$CHILDREN" ] || CHILDREN='[]'
   fi

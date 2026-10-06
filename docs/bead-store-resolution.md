@@ -178,17 +178,17 @@ and, each behind an opt-in flag so a caller pays only for what it needs:
 
 `advance` answers whether the city finishes that bead without a person, and it
 is transitive. A bead is `advancing` when its own state moves and every open
-blocker beneath it advances too. Its own state moves when it is in progress,
-routed to a worker or pool, assigned to an agent, a review, rework, validation
-or finding bead of the review cycle, armed for deferred dispatch, or a merge
-anchor the cadence will act on. Anything else is `stuck`, and `stuck_on` names
-the bead that stops it, with one of these reasons:
+blocker beneath it advances too. Its own state moves when it is in progress or
+hooked, routed to a worker or pool, assigned to an agent, a review, rework,
+validation or finding bead of the review cycle, armed for deferred dispatch, or
+a merge anchor the cadence will act on. Anything else is `stuck`, and `stuck_on`
+names the bead that stops it, with one of these reasons:
 
 | `why` | The bead that stops it |
 |---|---|
 | `human` | is routed or assigned to the `human` gate, is a decision, is a finding that needs the operator, or is an anchor parked in a human state |
 | `unrouted` | is open with no route, no arm and no assignee, so nothing picks it up |
-| `held` | is neither open nor in progress (blocked, deferred, pinned) |
+| `held` | has any status but open, in progress or hooked: blocked, deferred, pinned, or a status its store adds |
 | `approval` | is a PR the cadence has settled, waiting on the operator's review (review required, or changes requested) |
 | `merge-hold` | carries an operator merge or rebase hold |
 | `wedged`, `merge-blocked` | is an anchor whose machine axis says no automated actor can move it |
@@ -235,7 +235,9 @@ is read with one reverse query the subject's own row cannot answer.
 The counts are over a bead's own edges and its direct children, never its whole
 subtree. A `parent-child` edge is stored on the child pointing up, so an epic
 carries no edge per story; `--horizon` lists the direct children by the
-`--parent` query, asked for with closed included so a done child still counts.
+`--parent` query, asked for with `--all`. bd's default scope leaves out closed
+and pinned children, and a `--status` list leaves out any status it does not
+name, so with `--all` a child in any status is counted, a done one included.
 
 The subject read passes `--brief-deps`, so a listed bead's body is never fetched
 to read its status, and a same-store closed blocker's status rides the edge at no

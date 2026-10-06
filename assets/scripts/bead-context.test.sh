@@ -8,7 +8,7 @@
 # reverse `tracks` visits — each with a count; the store that answered (E); and,
 # each behind its opt-in flag, the frontier verdict over {ready, advancing,
 # stuck} (B) and the direct-children epic-health snapshot (C). The advance enum,
-# the cross-store fold, the fail-closed unknown, the closed-scope of the child
+# the cross-store fold, the fail-closed unknown, the status scope of the child
 # listing, and the three `gc bd show --json` quirks each get a case.
 #
 # `gc` is stubbed over a file-per-bead ledger under each fake rig; a direct `bd`
@@ -246,7 +246,10 @@ J
 # whose recorded machine axis is progressing — and tk-kid-rework, a rework bead
 # whose pour cleared its route, machine work rather than a human gate. An open
 # human-gated child is stuck, and so is tk-kid-armed: armed, so it takes its
-# blocker's verdict, and its blocker is the human gate tk-hg. One done child is
+# blocker's verdict, and its blocker is the human gate tk-hg. Three children sit
+# in statuses a default or --status listing can leave out: a hooked child
+# advances, a pinned one is a hold whatever its route, and one in a status its
+# store adds is unknown to the classifier, so it fails closed. One done child is
 # counted, never listed. The epic's own blocks are none, so its frontier verdict
 # is ready. The plain unrouted-stuck case is covered by tk-stuck in the frontier
 # section above, off the same shared classifier.
@@ -277,6 +280,17 @@ bead "$R_TK" tk-kid-armed <<'J'
 {"id":"tk-kid-armed","title":"armed child","status":"open","issue_type":"task","parent":"tk-epic",
  "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},
  "dependencies":[{"id":"tk-hg","dependency_type":"blocks","status":"open","title":"human-gated blocker"}]}
+J
+bead "$R_TK" tk-kid-hooked <<'J'
+{"id":"tk-kid-hooked","title":"hooked child","status":"hooked","issue_type":"task","parent":"tk-epic","metadata":{}}
+J
+bead "$R_TK" tk-kid-pinned <<'J'
+{"id":"tk-kid-pinned","title":"pinned child","status":"pinned","issue_type":"task","parent":"tk-epic",
+ "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
+J
+bead "$R_TK" tk-kid-custom <<'J'
+{"id":"tk-kid-custom","title":"custom-status child","status":"in_review","issue_type":"task","parent":"tk-epic",
+ "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 J
 
 # lx-city lives in the HQ store, which no --rig value names — only --db reaches.
@@ -336,11 +350,12 @@ case "${1:-} ${2:-}" in
 esac
 [ "${1:-}" = bd ] || { echo "gc: unsupported ($*)" >&2; exit 1; }
 shift
-DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""
+DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --db)          DB="$2"; shift 2 ;;
     --parent)      PARENT="$2"; shift 2 ;;
+    --all)         ALL=1; shift ;;
     --id)          LIST_IDS="$2"; shift 2 ;;
     --include-gates) GATES=1; shift ;;
     --direction|--direction=*) case "$1" in *=*) DIRECTION="${1#*=}"; shift ;; *) DIRECTION="$2"; shift 2 ;; esac ;;
@@ -385,10 +400,11 @@ if [ "$SUB" = list ] && [ -n "$LIST_IDS" ]; then
 fi
 
 if [ "$SUB" = list ] && [ -n "$PARENT" ]; then
-  # Children of $PARENT, honoring --status. bd's default scope EXCLUDES closed,
-  # so a caller that wants a done child in the count must ask for it: default
-  # here to the non-closed set, and the tool must pass closed explicitly.
-  [ -n "$STATUS" ] || STATUS="open,in_progress,blocked,deferred"
+  # Children of $PARENT, scoped as real bd scopes them: --all returns every
+  # status, a store's own included; --status returns only the statuses it names;
+  # with neither, bd's default returns every built-in status but closed and
+  # pinned. So a caller that wants every child counted must pass --all.
+  if [ -z "$ALL" ] && [ -z "$STATUS" ]; then STATUS="open,in_progress,blocked,deferred,hooked"; fi
   preface; printf '['; first=1
   for d in $(stores); do
     # One grep per store narrows the files to those naming the parent; jq decides.
@@ -396,7 +412,7 @@ if [ "$SUB" = list ] && [ -n "$PARENT" ]; then
       row=$(cat "$f")
       printf '%s' "$row" | jq -e --arg p "$PARENT" '.parent == $p' >/dev/null 2>&1 || continue
       st=$(printf '%s' "$row" | jq -r '.status // ""')
-      case ",$STATUS," in *",$st,"*) ;; *) continue ;; esac
+      if [ -z "$ALL" ]; then case ",$STATUS," in *",$st,"*) ;; *) continue ;; esac; fi
       [ "$first" = 1 ] || printf ','; first=0
       printf '%s' "$row" | listrow
     done
@@ -612,12 +628,12 @@ has "$OUT" "(open, stuck: unrouted)" "  ... and a blocker that stops itself as j
 
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
-JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 7 "every direct child is counted, closed included"
-JQF='.horizon.children.open'         runj tk-epic --horizon;  eq "$JQ" 6 "  ... six are open"
-JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the tool asked for closed explicitly)"
-JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 4 "  ... pool-routed, in-progress, a progressing anchor and a pour-cleared rework child advance"
-JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 2 "  ... the human-gated child and the armed child behind the gate are stuck"
-JQF='.horizon.open | length'         runj tk-epic --horizon;  eq "$JQ" 6 "open children are listed; the done one is not"
+JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 10 "every direct child is counted, in any status"
+JQF='.horizon.children.open'         runj tk-epic --horizon;  eq "$JQ" 9 "  ... nine are open"
+JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the listing asks for every status)"
+JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 5 "  ... pool-routed, in-progress, hooked, a progressing anchor and a pour-cleared rework child advance"
+JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 4 "  ... the human-gated, armed-behind-the-gate, pinned and custom-status children are stuck"
+JQF='.horizon.open | length'         runj tk-epic --horizon;  eq "$JQ" 9 "open children are listed; the done one is not"
 JQF='[.horizon.open[].id] | index("tk-kid-done")' runj tk-epic --horizon; eq "$JQ" null "the done child is never in the open list"
 JQF='[.horizon.open[]|select(.id=="tk-kid-pool")][0].advance' runj tk-epic --horizon; eq "$JQ" advancing "a pool-routed open child advances"
 JQF='[.horizon.open[]|select(.id=="tk-kid-human")][0].advance' runj tk-epic --horizon; eq "$JQ" stuck "a human-gated open child is stuck"
@@ -626,6 +642,10 @@ kid() { jr "[.horizon.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuc
 eq "$(kid tk-kid-human)" "stuck tk-kid-human human" "  ... and names itself as the gate"
 eq "$(kid tk-kid-rework)" "advancing - -" "a pour-cleared rework child advances, with no stuck_on"
 eq "$(kid tk-kid-armed)" "stuck tk-hg human" "an armed child takes its blocker's verdict: behind a human gate it is stuck, naming the gate"
+eq "$(kid tk-kid-hooked)" "advancing - -" "a hooked child is listed and advances: an agent holds it"
+eq "$(kid tk-kid-pinned)" "stuck tk-kid-pinned held" "a pinned child is listed and stuck on its hold, though it carries a route"
+eq "$(kid tk-kid-custom)" "stuck tk-kid-custom held" "a child in a status its store adds is listed, and fails closed as held"
+eq "$(jr '[.horizon.open[] | select(.id == "tk-kid-custom")][0].status')" in_review "  ... reporting the status as the store holds it"
 eq "$(logcount 'list --id.*tk-hg')" 1 "  ... read through the listing's list-shaped edge"
 eq "$(logcount 'list --id.*tk-kid-')" 0 "  ... while the children themselves cost no read: the listing carries their rows"
 eq "$(jr '[.horizon.open[] | select(.advance == "advancing") | has("stuck_on")] | any')" false \
@@ -637,7 +657,7 @@ eq "$(jr '[.horizon.open[] | select(.advance == "advancing") | has("stuck_on")] 
 # follow-up read by the caller.
 JQF='[.subject.id, .frontier.verdict, (.horizon.children.total|tostring)] | join("|")' \
   runj tk-epic --frontier --horizon
-eq "$JQ" "tk-epic|ready|7" "one call returns subject slice, readiness verdict and epic-health snapshot together"
+eq "$JQ" "tk-epic|ready|10" "one call returns subject slice, readiness verdict and epic-health snapshot together"
 
 # --- E. Store pinning, and the object-vs-array shape ------------------------
 run tk-missing
