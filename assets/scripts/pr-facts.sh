@@ -107,9 +107,12 @@ PROG="pr-facts"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-# The single writer of the workflow-owned `status:` PR label. This pass is its
+# The single writer of the workflow-owned `status:` PR label. The full pass is its
 # authoritative reconcile: it runs for every open anchor and already mutates the
-# PR, so a label a signoff or open event missed self-heals here.
+# PR, so a label a signoff or open event missed self-heals here. Every mode also
+# re-derives the label for an anchor when it records a new posture value or routes
+# a feedback batch into live work, so a review moves the label in the arm that
+# records it rather than waiting for the full pass.
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
@@ -391,6 +394,17 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
+}
+# Re-derive one anchor's status: label through its single writer. cur_labels is
+# the anchor's label list from this pass's pinned PR read, which spares the writer
+# a read of its own; a call can change those labels, so the list is dropped after
+# it and a later call on the same anchor reads the PR afresh. Best-effort: a label
+# that does not land is left for the full pass's reconcile.
+reconcile_status_label() { # <anchor> <pr-number>
+  "$PR_STATUS_LABEL" reconcile --anchor "$1" --pr "$2" \
+    --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "${cur_labels:-}" \
+    >/dev/null 2>&1 || true
+  cur_labels=""
 }
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
   # Both stamps are re-checked here as well as queried: this id gets pr_number
@@ -1006,13 +1020,13 @@ CHILDREN_EOF
   # which a draft-early PR (specs/tk-6bji7k.1's future half) needs as much as an
   # open one, so this seam stays independent of the draft gate below. Best-effort
   # and idempotent — pr-status-label.sh derives working/needs-review/needs-attention
-  # from the anchor's own state and writes only on a change. Full pass only: the
-  # pre-merge arms record posture and touch no PR label.
+  # from the anchor's own state and writes only on a change. This sweep is the full
+  # pass's alone: it costs a derivation per anchor, which the pre-merge arms spend
+  # only where they change one of the label's inputs (the posture record and the
+  # feedback routing below).
+  cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
   if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-    cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
-    "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$num" \
-      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "$cur_labels" \
-      >/dev/null 2>&1 || true
+    reconcile_status_label "$id" "$num"
   fi
 
   [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
@@ -1144,6 +1158,15 @@ CHILDREN_EOF
       pinned=1
       postured=$((postured + 1))
       echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"
+      # The posture value is where a review on the PR lands: an approval, a
+      # comment, a change request, or a dismissal. A pass that changes it
+      # re-derives the status: label now rather than leaving it for the full
+      # pass's reconcile. A moved head or merge state alone does not. GitHub
+      # reports UNKNOWN while it computes a PR's mergeability, so most posture
+      # writes are a merge state moving into or out of UNKNOWN, often for nearly
+      # every open PR in one arm. Keying on them would buy a derivation per PR in
+      # that arm, and the full pass reconciles those.
+      [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
     else
       echo "$PROG: $id posture record failed for PR#$num; retry next pass" >&2
     fi
@@ -1965,6 +1988,10 @@ $CBODY"
          --set "pr_comment_disposition=$DISP" >/dev/null; then
       answered=$((answered + 1))
       echo "$PROG: $id — PR#$num review comments routed to $DISP (watermark: review $max_r, comment $max_c, issue $max_i)"
+      # The batch now stands on the anchor as live work: its rework child or
+      # visit, its findings, and its validation pass. The label derives from that
+      # work, so it is re-derived in the pass that routed the batch.
+      reconcile_status_label "$id" "$num"
     else
       echo "$PROG: WARN $id — PR#$num comments routed to $DISP but the watermark did NOT record; the same batch re-dispatches next pass onto $DISP" >&2
       skipped=$((skipped + 1))
