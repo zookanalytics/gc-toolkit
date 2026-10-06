@@ -8,7 +8,9 @@
 #
 # Usage: shellcheck-run.sh <file> [<file>...]
 #   Severity defaults to `warning`; override with SHELLCHECK_SEVERITY.
-#   Extra shellcheck options: SHELLCHECK_OPTS (word-split), e.g. "-x".
+#   Extra shellcheck options: SHELLCHECK_OPTS (word-split), e.g. "-f gcc".
+#   The repo-root .shellcheckrc decides how sourced files resolve, for every
+#   file under the repo.
 #
 # Exit codes:
 #   0   shellcheck ran and found nothing
@@ -30,7 +32,7 @@ Runs shellcheck on each FILE via the host binary. Exits $NO_RUNNER (fail-closed)
 when no shellcheck is on PATH: a lint that could not run is not a pass.
 
   SHELLCHECK_SEVERITY   minimum severity (default: warning)
-  SHELLCHECK_OPTS       extra shellcheck options, word-split (e.g. "-x")
+  SHELLCHECK_OPTS       extra shellcheck options, word-split (e.g. "-f gcc")
 U
 }
 
