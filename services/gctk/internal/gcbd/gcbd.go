@@ -212,13 +212,21 @@ func (c *Client) showViaExec(id string) *Bead {
 }
 
 // array runs `gc <args>` and decodes the JSON array it prints. ok is false when
-// stdout is not a JSON array: undecodable, empty, an object, or a bare null —
-// the `jq -e 'type == "array"'` test the scripts gate their reads on. strict
-// also refuses a non-zero exit, whatever was printed beside it. That is
-// bd-lib.sh's bd_list contract: a store error mid-query (a dolt timeout) can
-// print an empty or partial array and still exit 1, and a caller that read
-// those rows would act on a partial view. Without strict the status is not
-// consulted, which is how the scripts read `gc bd show`.
+// stdout does not open with a JSON array: undecodable, empty, an object, or a
+// bare null.
+//
+// strict is bd-lib.sh's bd_list contract, the `jq -e 'type == "array"'` test
+// the scripts gate their list and dependency reads on. It refuses a non-zero
+// exit whatever was printed beside it, because a store error mid-query (a dolt
+// timeout) can print an empty or partial array and still exit 1. It refuses
+// anything but whitespace after the array, because jq fails the whole stream
+// on `[]garbage`: a caller that read the array ahead of the garbage would act
+// on a view cut short. A second whole value fails too. jq -e passes `[] []`,
+// but `gc bd list` prints one array, and picking one of two would be a guess.
+//
+// Without strict, neither the status nor what follows the array is consulted.
+// That is how the scripts read `gc bd show`: `jq -c '.[0] // empty'`, its exit
+// unread, prints the first array's row before it reaches what follows.
 func (c *Client) array(strict bool, args ...string) ([]Bead, bool) {
 	out, err := exec.Command(c.bin, args...).Output()
 	if err != nil {
@@ -232,6 +240,12 @@ func (c *Client) array(strict bool, args ...string) ([]Bead, bool) {
 	var raw json.RawMessage
 	if err := dec.Decode(&raw); err != nil || len(raw) == 0 || raw[0] != '[' {
 		return nil, false
+	}
+	if strict {
+		var rest json.RawMessage
+		if err := dec.Decode(&rest); err != io.EOF {
+			return nil, false
+		}
 	}
 	rdec := json.NewDecoder(bytes.NewReader(raw))
 	rdec.UseNumber()
@@ -296,11 +310,11 @@ func gcDebug() bool {
 }
 
 // List runs `gc bd list <args>` and decodes the JSON array it prints, under the
-// strict contract of bd-lib.sh's bd_list: ok is false on a non-zero exit or on
-// output that is not an array, so a caller refuses to act rather than reading
-// a failed or partial read as an empty result. The rig-preface line rides
-// stderr, so stdout is the payload. An empty selection is a well-formed `[]` at
-// exit 0 — rows nil, ok true.
+// strict contract of bd-lib.sh's bd_list: ok is false on a non-zero exit, on
+// output that is not an array, or on anything but whitespace after the array,
+// so a caller refuses to act rather than reading a failed or partial read as an
+// empty result. The rig-preface line rides stderr, so stdout is the payload. An
+// empty selection is a well-formed `[]` at exit 0 — rows nil, ok true.
 func (c *Client) List(args ...string) (rows []Bead, ok bool) {
 	return c.array(true, append([]string{"bd", "list"}, args...)...)
 }

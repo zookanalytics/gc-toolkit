@@ -211,6 +211,25 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 			t.Error("List on empty stdout = ok true; want ok false")
 		}
 	})
+
+	// `jq -e 'type == "array"'` fails the whole stream on `[]garbage`, so bytes
+	// after the array make the read unreadable at exit 0 too: the rows ahead of
+	// them are a view cut short, whether or not the array was empty.
+	t.Run("anything after the array fails closed", func(t *testing.T) {
+		for _, arr := range []string{`[]`, `[{"id":"k1","metadata":{}}]`} {
+			for _, tail := range []string{`garbage`, `{"id":"k2","metad`, `[]`} {
+				writeGC(t, "printf '%s\\n' '"+arr+tail+"'\n")
+				if _, ok := New().List(); ok {
+					t.Errorf("List on %s%s = ok true; want ok false", arr, tail)
+				}
+			}
+		}
+		// The control: whitespace after the array is no tail.
+		writeGC(t, "printf '[{\"id\":\"k1\",\"metadata\":{}}]  \\n\\n'\n")
+		if rows, ok := New().List(); !ok || len(rows) != 1 {
+			t.Errorf("List on an array and trailing whitespace = (%d rows, ok=%v), want (1, true)", len(rows), ok)
+		}
+	})
 }
 
 // DepList shares List's decode and its strict exit contract: an edge probe that
@@ -236,6 +255,31 @@ func TestDepListFailsClosedLikeList(t *testing.T) {
 	writeGC(t, "echo 'not-json'\n")
 	if _, ok := New().DepList("a"); ok {
 		t.Error("DepList on garbage = ok true; want ok false")
+	}
+	for _, out := range []string{`[]garbage`, `[{"id":"blk","status":"open","metadata":{}}]garbage`} {
+		writeGC(t, "printf '%s\\n' '"+out+"'\n")
+		if _, ok := New().DepList("a"); ok {
+			t.Errorf("DepList on %s = ok true; want ok false (bytes after the array)", out)
+		}
+	}
+}
+
+// Show is the lenient read, the shell's `gc bd show ... | jq -c '.[0] // empty'`
+// with jq's exit unread: jq prints the first array's row before it reaches the
+// bytes after it. The same bytes fail List's strict read.
+func TestShowReadsTheFirstArrayWhateverFollowsIt(t *testing.T) {
+	t.Setenv("GC_NO_API", "1")
+	bin := t.TempDir()
+	stub := "#!/bin/sh\nprintf '%s\\n' '[{\"id\":\"b-1\",\"status\":\"open\",\"metadata\":{}}]garbage'\n"
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if b := New().Show("b-1"); b == nil || b.ID != "b-1" {
+		t.Fatalf("Show = %+v, want bead b-1: the shell's read prints it before the garbage", b)
+	}
+	if _, ok := New().List(); ok {
+		t.Error("List on the same bytes = ok true; want ok false")
 	}
 }
 
