@@ -32,6 +32,9 @@ in its arm and its skill, moved to match.
 - The decision is stamped on the review bead as `visual`, read back before
   anything is posted.
 - The posted comment names it on a `Visual:` line.
+- `visual` is registered in `lifecycle/lifecycle.toml` beside
+  `signoff_verdict`. `signoff.test.sh` fails when `signoff.sh` writes a key the
+  registry lacks.
 
 A decision held only in verdict prose depends on every reviewer remembering to
 write it. With the flag, "every demo verdict records its need decision and
@@ -39,7 +42,8 @@ modality" is enforced by the one writer of verdicts. The reasons stay in the
 verdict body, where a reader wants them: why this modality, and where it was
 delivered. The closed review beads become a queryable record of how often a
 visual is warranted and which modality fits. List them with
-`gc bd list --metadata-field check_name=demo --all` and read `.metadata.visual`.
+`gc bd list --metadata-field check_name=demo --all --limit 0` and read
+`.metadata.visual`.
 
 The flag is keyed on the token `demo`, as `--add-gates` is keyed on `triage`.
 The design leaves any rename of the token to the review-gates work, and that

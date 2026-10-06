@@ -1206,6 +1206,24 @@ eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
 eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
 eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
 
+echo "# metadata-key drift against lifecycle.toml"
+# A metadata key is state, and the registry is the exhaustive declaration
+# downstream audits read (docs/component-model.md). A key the verdict writer
+# stamps that nothing registers is state no audit can account for. A key built
+# from a variable (check.<g>) is outside this extraction and registered by hand.
+REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$HERE/../../lifecycle/lifecycle.toml" \
+  | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
+WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$SUT" \
+  | sed -E 's/^--set(-metadata|-dated)? "?//; s/=$//' | sort -u)
+if grep -qx 'visual' <<< "$WRITTEN"; then
+  ok "the extraction reads signoff.sh's metadata writes, the visual decision among them"
+else
+  bad "the extraction found no visual write in signoff.sh (got: $(tr '\n' ' ' <<< "$WRITTEN"))"
+fi
+UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
+  | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
+eq "$UNREGISTERED" "" "every metadata key signoff.sh writes is registered in lifecycle.toml"
+
 echo
 echo "signoff.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
