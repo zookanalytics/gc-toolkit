@@ -1136,6 +1136,15 @@ controller to consider this session still desired and respawn
 it." If you `kill` a named singleton whose bead is still active,
 the next reconciler patrol will materialize it again.
 
+A pool session that holds no work is not restarted after a kill.
+The bead sleeps with `sleep_reason=killed`, which is not one of the
+sleep reasons for which core frees a pool slot, so the bead keeps
+its slot with nothing running in it and the pool runs one short of
+its cap. The `pool-slot-reap` order closes such a bead once it has
+been asleep for 15 minutes with no work assigned in any store, and
+records the close in the incident ledger. To retire a pool session
+at once, use `close`.
+
 ### Stamping only `gc.routed_to` on a named singleton strands the work
 
 Named singletons run with `$GC_SESSION_ORIGIN=named`, which

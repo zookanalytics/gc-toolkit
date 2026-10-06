@@ -1,0 +1,23 @@
+# pool-slot-reap — close the asleep pool session beads that hold a pool slot
+# with no runtime and no work.
+#
+# The controller counts every open pool session bead against its pool's cap and
+# frees a slot only when the session in it sleeps for a reason on core's
+# freeable list. A pool session stopped by `gc session kill` sleeps as `killed`,
+# which is not on that list, so when it holds no work it keeps its slot with
+# nothing running in it, and the pool runs below the cap it reports. This pass
+# closes such a bead once it has stayed asleep past a grace window with no work
+# assigned in any store, leaves deliberate holds and named sessions alone, and
+# records each close as a `cleanup` entry in the incident ledger.
+#
+# City scope: session beads live in the city store and their work can sit in
+# any rig's store, so one pass reads the whole city. A pass skipped or cut short
+# costs only the close the next pass takes instead; the close is idempotent.
+[order]
+description = "Close asleep pool session beads that hold a slot with no runtime and no work past a grace window (e.g. after gc session kill); record each in the incident ledger"
+trigger = "cooldown"
+interval = "5m"
+exec = "$PACK_DIR/assets/scripts/pool-slot-reap.sh"
+timeout = "300s"
+scope = "city"
+idempotent = true
