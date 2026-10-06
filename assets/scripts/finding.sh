@@ -66,6 +66,7 @@
 #   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT] [--fix-pool POOL]
 #   finding.sh wire-fix-unit --fix-unit FU --anchor A --findings F1,F2,...
 #   finding.sh open-must-fix --anchor A [--lane L]
+#   finding.sh fix-in-flight --anchor A
 #   finding.sh close-unvalidated --anchor A --lane L | --lanes L1,L2,... [--reason R]
 #   finding.sh shed-orphaned [--reason R]
 #   finding.sh close-answered --anchor A [--reason R]
@@ -73,10 +74,12 @@
 # Callers: signoff.sh (upsert on request-changes), the validator through
 # set-disposition — which hangs the fix unit's edge onto a finding only as it
 # rules that finding must-fix, so the fix unit blocks only the findings it must
-# answer — and gate-ensure, the sole owner of stage-3 resolution (open-must-fix
-# computes quiescence; close-answered releases it once a fix unit lands;
-# close-unvalidated resolves a green lane's still-unvalidated findings as moot;
-# shed-orphaned resolves them when the anchor closes before a pass revisits it).
+# answer — pr-open.sh (open-must-fix holds a publish while the city has ruled the
+# diff must change), and gate-ensure, the sole owner of stage-3 resolution
+# (fix-in-flight names the fix unit quiescence holds on; close-answered releases
+# the finding once that fix unit lands; close-unvalidated resolves a green lane's
+# still-unvalidated findings as moot; shed-orphaned resolves them when the anchor
+# closes before a pass revisits it).
 # Exit 0 on success; a read verb exits 1 when its predicate is false, 2 when the
 # store would not read.
 set -uo pipefail
@@ -104,6 +107,7 @@ usage:
   finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you [--reason <r>] [--reply <text>] [--fix-pool <pool>]
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
+  finding.sh fix-in-flight --anchor <id>
   finding.sh close-unvalidated --anchor <id> --lane <lane> | --lanes <l,l,...> [--reason <r>]
   finding.sh shed-orphaned [--reason <r>]
   finding.sh close-answered --anchor <id> [--reason <r>]
@@ -567,6 +571,58 @@ cmd_open_must_fix() {
   return 1
 }
 
+# The fix unit in flight answering an open must-fix finding on <anchor>, the actor
+# gate-ensure's quiescence holds on. An open must-fix finding is a demand on the
+# anchor, not an actor on it: the fix unit answering it is what changes the diff.
+# A finding's blocks-blockers are its fix units (wire-fix-unit, set-disposition),
+# so a live one is the fix in flight. A finding with NO blocker edge is matched by
+# lane, through the same census close-answered disambiguates it with. A finding
+# whose blockers have all closed has no fix in flight: its fix landed, and
+# close-answered closes it. A finding no fix unit answers has none either.
+# Exit 0 prints "<fix-unit> <status> <finding>" for the first pair found. Exit 1
+# prints the open must-fix findings no fix unit is answering, one per line, and
+# nothing when no must-fix finding is open. Exit 2 means the store would not read,
+# including one finding's blockers, so a failed read never passes for "no fix unit".
+cmd_fix_in_flight() {
+  local anchor=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    *) warn "unknown arg '$1'"; usage; exit 1 ;;
+  esac; done
+  [ -n "$anchor" ] || { warn "fix-in-flight needs --anchor"; exit 1; }
+  local rows ids id blk n_all hit flane rw unanswered=""
+  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") \
+    || { warn "could not read findings on $anchor"; return 2; }
+  ids=$(printf '%s' "$rows" | jq -r '
+    [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+          | select(((.metadata["finding.disposition"] // "") | tostring) == "must-fix") ]
+    | .[].id') \
+    || { warn "could not filter must-fix findings on $anchor"; return 2; }
+  for id in $ids; do
+    blk=$(bd_json dep list "$id" --direction=down -t blocks)
+    printf '%s' "$blk" | jq -e 'type == "array"' >/dev/null 2>&1 \
+      || { warn "could not read blockers of finding $id"; return 2; }
+    n_all=$(printf '%s' "$blk" | jq -r 'length' 2>/dev/null)
+    if [ "${n_all:-0}" -gt 0 ]; then
+      hit=$(printf '%s' "$blk" | jq -r '
+        [ .[] | ((.status // "open") | tostring | ascii_downcase) as $s
+              | select($s != "closed") | "\(.id) \($s)" ] | .[0] // empty' 2>/dev/null)
+    else
+      flane=$(printf '%s' "$rows" | jq -r --arg id "$id" '.[] | select(.id == $id) | (.metadata["finding.lane"] // "") | tostring' 2>/dev/null)
+      rw=$(_anchor_reworks "$anchor" "$flane") || { warn "could not read the fix units on $anchor"; return 2; }
+      hit=$(printf '%s\n' "$rw" | awk 'NF && $2!="closed" {print $1" "$2; exit}')
+    fi
+    if [ -n "$hit" ]; then
+      printf '%s %s\n' "$hit" "$id"
+      return 0
+    fi
+    unanswered="$unanswered$id
+"
+  done
+  printf '%s' "$unanswered"
+  return 1
+}
+
 cmd_close_unvalidated() {
   local anchor="" lanes="" reason=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -731,6 +787,7 @@ case "$VERB" in
   set-disposition)   cmd_set_disposition "$@" ;;
   wire-fix-unit)     cmd_wire_fix_unit "$@" ;;
   open-must-fix)     cmd_open_must_fix "$@" ;;
+  fix-in-flight)     cmd_fix_in_flight "$@" ;;
   close-unvalidated) cmd_close_unvalidated "$@" ;;
   shed-orphaned)     cmd_shed_orphaned "$@" ;;
   close-answered)    cmd_close_answered "$@" ;;
