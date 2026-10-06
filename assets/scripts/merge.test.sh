@@ -1132,7 +1132,7 @@ store "[$(anchor RR1 130), $(rev RR1), $(anchor RR2 131), $(rev RR2), $(anchor R
 : > "$STUB_DEPS"
 for n in 130 131 132; do
   printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
-  echo '[]' > "$GH_DIR/reviews_$n.json"
+  approved "$n"
 done
 unknown_first 131; unknown_first 132
 : > "$STUB_GH_LOG"
@@ -1146,7 +1146,7 @@ eq "$(pinned_reads 130)" "1" "a PR whose pinned read is already computed is not 
 echo "# an UNKNOWN that stays UNKNOWN is read a bounded number of times, then held settled"
 store "[$(anchor RR4 133), $(rev RR4)]"
 printf '%s' "$(prview 133 OPEN UNKNOWN)" > "$GH_DIR/pr_view_133.json"
-echo '[]' > "$GH_DIR/reviews_133.json"
+approved 133
 # A sleep that records its argument and returns at once, so the suite pins the
 # wait schedule without spending it.
 mkdir -p "$TMP/sleepbin"
@@ -1164,7 +1164,7 @@ echo "# MERGE_STATE_REREADS=0 turns the re-read off"
 store "[$(anchor RR5 134), $(rev RR5)]"
 printf '%s' "$(prview 134 OPEN CLEAN)" > "$GH_DIR/pr_view_134.json"
 unknown_first 134
-echo '[]' > "$GH_DIR/reviews_134.json"
+approved 134
 : > "$STUB_GH_LOG"
 out=$(MERGE_STATE_REREADS=0 "$SUT" 2>&1)
 has "$out" "not mergeable yet (mergeStateStatus='UNKNOWN'); merge held" "with no re-reads the pinned UNKNOWN holds for the pass"
@@ -1174,7 +1174,9 @@ echo "# a re-read that finds the head moved holds: the gates passed a different 
 store "[$(anchor RR6 135), $(rev RR6)]"
 printf '%s' "$(prview 135 OPEN CLEAN)" | jq -c '.headRefOid = "sha-135-pushed"' > "$GH_DIR/pr_view_135.json"
 unknown_first 135
-echo '[]' > "$GH_DIR/reviews_135.json"
+# Approved at the pinned head, so the approval gate passes it and only the
+# re-read sees the push.
+approved 135
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "PR#135 moved between the pinned read and re-read 1 of its UNKNOWN merge state; merge held" "a head that moved between the reads holds"
@@ -1184,7 +1186,7 @@ echo "# a re-read that computes DIRTY keeps DIRTY's handling"
 store "[$(anchor RR7 136), $(rev RR7)]"
 printf '%s' "$(prview 136 OPEN DIRTY)" > "$GH_DIR/pr_view_136.json"
 unknown_first 136
-echo '[]' > "$GH_DIR/reviews_136.json"
+approved 136
 out=$("$SUT" 2>&1)
 eq "$(pinned RR7)" "blocked@sha-136" "the computed DIRTY records blocked, as a pinned DIRTY does"
 has "$(reason RR7)" "conflicts" "…and the reason names the conflict"
@@ -1194,10 +1196,13 @@ store "[$(anchor RR8 137), $(rev RR8)]"
 printf '%s' "$(prview 137 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_137.json"
 mkdir -p "$GH_DIR/pr_view_137.queue"
 printf '%s' "$(prview 137 OPEN UNKNOWN)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_137.queue/1.json"
-echo '[]' > "$GH_DIR/reviews_137.json"
+approved 137
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned RR8)" "settled@sha-137" "the re-read's REVIEW_REQUIRED makes it the approval wait, not a rule nobody named"
+# The approval gate records settled too, so the line is what proves the BLOCKED
+# arm judged the re-read.
+has "$out" "PR#137 is BLOCKED by branch protection: waiting on an approving review (1 required, reviewDecision='REVIEW_REQUIRED')" "…named at the BLOCKED arm, past the approval gate"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
