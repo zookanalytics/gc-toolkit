@@ -19,7 +19,7 @@ trap 'rm -rf "$TMP"' EXIT
 harness_init
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-stack.sh" "$HERE/pr-summary-region.sh"
+mk_sut_dir "$SD" "$HERE/pr-stack.sh" "$HERE/pr-summary-region.sh" "$HERE/review-checks.sh"
 SUT="$SD/pr-stack.sh"
 
 # An open anchor: carries merge_result, a branch and a pr_number.
@@ -313,6 +313,14 @@ opened_region() { # id branch checkset summary oldhead
     "- Gates \`$3\` signed off pre-open at \`$5\`; PR opened green." \
     '<!-- /gc:pr-summary -->'
 }
+
+# refresh_summary resolves the handoff bullet's gates through review-checks.sh at
+# the PR head. The scenarios below use synthetic head oids that no `--at` read can
+# resolve, so the resolver is pointed at a fixed index — the hermetic-test hook
+# that wins over `--at` — and the bullets name the gates that index declares.
+CHECKS_IDX="$TMP/review-checks.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.triage]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$CHECKS_IDX"
+export GC_REVIEW_CHECKS_INDEX="$CHECKS_IDX"
 
 echo "# a rework restamped the anchor summary; the open PR's gc:pr-summary region is refreshed"
 # pr-open composes the region only at pre_open_gate and the anchor never returns
