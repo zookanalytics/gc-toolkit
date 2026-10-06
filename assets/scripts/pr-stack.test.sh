@@ -305,12 +305,14 @@ anchor_sum() { # id branch num check_set pr_summary [desc]
     "$1" "$1" "${6:-}" "$2" "$3" "$4" "$5"
 }
 # A published gc:pr-summary region carrying <summary> and the open-mode pre-open
-# sign-off line at <oldhead>, as pr-open.sh composed it at open.
-opened_region() { # id branch checkset summary oldhead
+# sign-off line at <oldhead>, as pr-open.sh composed it at open. <gate-bullet>
+# replaces that last handoff bullet.
+opened_region() { # id branch checkset summary oldhead [gate-bullet]
+  local gate="- Gates \`$3\` signed off pre-open at \`$5\`. For CI status, see the PR checks."
   printf '%s\n' \
     '<!-- gc:pr-summary -->' '## Summary' '' "$4" '' \
     '## Refinery handoff' '' "- Issue: \`$1\`" "- Source branch: \`$2\`" '- Target: `main`' \
-    "- Gates \`$3\` signed off pre-open at \`$5\`; PR opened green." \
+    "${6:-$gate}" \
     '<!-- /gc:pr-summary -->'
 }
 
@@ -352,9 +354,27 @@ out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
 hasnt "$out" "summary region refreshed" "…and reports no refresh"
 
+echo "# the opened-region fixture is byte-for-byte what pr-open's composer writes at open"
+# The no-churn case below, and the stale-region cases around it, model a PR as
+# pr-open.sh opened it, so the model is pinned to the shared composer: an
+# open-mode wording this fixture does not carry fails here instead of leaving
+# those cases testing a body no writer produces.
+# shellcheck source=pr-summary-region.sh
+composed_open=$(. "$SD/pr-summary-region.sh" && {
+  printf '%s\n' "$PRS_MARK_OPEN"
+  compose_managed 'CURRENT: the summary.' '' X polecat/X main 'correctness' abcdef1234567890 '' '' open
+  printf '%s\n' "$PRS_MARK_CLOSE"
+})
+eq "$(opened_region X polecat/X 'correctness' 'CURRENT: the summary.' 'abcdef12')" "$composed_open" \
+   "the fixture matches compose_managed's open mode"
+hasnt "$composed_open" 'opened green' "…and the open-mode bullet states no CI result"
+has "$composed_open" '- Gates `correctness` signed off pre-open at `abcdef12`. For CI status, see the PR checks.' \
+    "…naming the gates' sign-off and pointing to the PR checks for CI"
+
 echo "# a PR whose region already carries the anchor summary is not churned"
-# The region matches the anchor pr_summary, so an opened-green PR keeps its
-# 'signed off pre-open' line rather than being rewritten to the refresh wording.
+# The region matches the anchor pr_summary and names the current head, so a PR as
+# pr-open opened it keeps its 'signed off pre-open' line rather than being
+# rewritten to the refresh wording.
 store "[$(anchor_sum X polecat/X 210 'correctness' 'CURRENT: the summary the region already carries.')]"
 CURR_X=$(opened_region X polecat/X 'correctness' 'CURRENT: the summary the region already carries.' 'abcdef12')
 pr 210 OPEN polecat/X "$CURR_X" abcdef12000000
@@ -362,8 +382,72 @@ before_x=$(body 210)
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the current region is left alone"
-has "$(body 210)" 'signed off pre-open' "…and its opened-green handoff line is not churned"
+has "$(body 210)" 'signed off pre-open' "…and its open-mode handoff line is not churned"
 eq "$(body 210)" "$before_x" "the body is byte-identical"
+
+echo "# a handoff bullet that says the PR opened green is refreshed at a current summary and head"
+# 'PR opened green' reads as a CI result, which a static body cannot know. The
+# summary matches and the region names the current head, so only the bullet's
+# claim makes this region behind, and the refresh drops it.
+store "[$(anchor_sum G polecat/G 270 'correctness,codex' 'CURRENT: the summary a green-claim region already carries.')]"
+GREEN_G=$(printf '%s\n\n%s' \
+  "$(opened_region G polecat/G 'correctness,codex' 'CURRENT: the summary a green-claim region already carries.' '5555aaaa' \
+     '- Gates `correctness,codex` signed off pre-open at `5555aaaa`; PR opened green.')" \
+  'Operator note: keep this line.')
+pr 270 OPEN polecat/G "$GREEN_G" 5555aaaa00000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#270 summary region refreshed" "the green-claim region is refreshed"
+b=$(body 270)
+hasnt "$b" 'opened green' "the CI claim is gone from the body"
+has "$b" '- Head `5555aaaa`; gates `correctness,codex`; see the PR checks for current status.' \
+    "the handoff bullet names the head and defers to the PR checks"
+has "$b" 'CURRENT: the summary a green-claim region already carries.' "the current summary is kept"
+has "$b" 'Operator note: keep this line.' "operator text outside the markers is preserved"
+eq "$(grep -c 'pr edit 270' "$STUB_GH_LOG")" "1" "exactly one body edit"
+
+echo "# that green-claim refresh is idempotent: a second pass writes nothing"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
+hasnt "$out" "summary region refreshed" "…and reports no refresh"
+
+echo "# the green-claim words quoted outside the handoff block never make a region stale"
+# A summary can quote the claim on a line of its own, and so can operator text
+# below the markers. Only the composed handoff bullet is the claim; reading a quote
+# as one would rewrite the region on every pass.
+GREEN_QUOTE='- Gates `correctness` signed off pre-open at `6666bbbb`; PR opened green.'
+store "[$(anchor_sum Q polecat/Q 280 'correctness' 'CURRENT: drops the line that read\n\n- Gates `correctness` signed off pre-open at `6666bbbb`; PR opened green.')]"
+CURR_Q=$(printf '%s\n\n%s\n%s' \
+  "$(opened_region Q polecat/Q 'correctness' "$(printf '%s\n\n%s' 'CURRENT: drops the line that read' "$GREEN_QUOTE")" '6666bbbb')" \
+  'Operator note quoting the old bullet:' "$GREEN_QUOTE")
+pr 280 OPEN polecat/Q "$CURR_Q" 6666bbbb00000000
+before_q=$(body 280)
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a quoted claim is not read as the region's own"
+eq "$(body 280)" "$before_q" "the body is byte-identical"
+
+echo "# the green-claim check reads only the bullets under the region's last handoff heading"
+# Each body quotes the claim where a reader might mistake it for the region's own:
+# in a region with no handoff block, under a handoff heading a summary wrote
+# above the composed one, and below the markers. The last body carries it as the
+# region's own bullet, the positive control that also proves the library sourced.
+# shellcheck source=pr-summary-region.sh
+claim_of() { ( . "$SD/pr-summary-region.sh" && prs_region_says_opened_green "$1" ) && echo claim || echo none; }
+PB="$TMP/claim-body"
+OG='- Gates `correctness` signed off pre-open at `7777cccc`; PR opened green.'
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' "$OG" '<!-- /gc:pr-summary -->' > "$PB"
+eq "$(claim_of "$PB")" none "a region with no handoff block carries no claim, whatever its summary quotes"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' "$OG" '' \
+  '## Refinery handoff' '' '- Issue: `P`' '<!-- /gc:pr-summary -->' > "$PB"
+eq "$(claim_of "$PB")" none "only the block under the last handoff heading is the composed one"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' \
+  '<!-- /gc:pr-summary -->' '' "$OG" > "$PB"
+eq "$(claim_of "$PB")" none "a claim below the markers is not the region's"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' "$OG" \
+  '<!-- /gc:pr-summary -->' > "$PB"
+eq "$(claim_of "$PB")" claim "the region's own handoff bullet is the claim"
 
 echo "# a rework moved the head but left the summary unchanged; the stale handoff line is refreshed"
 # The region's summary already matches the anchor, so the text comparison alone

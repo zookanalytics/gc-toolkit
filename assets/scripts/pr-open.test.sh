@@ -199,6 +199,30 @@ hasnt "$newbody3d" "OLD: a legacy body with nothing after the handoff." "…and 
 has "$newbody3d" "<!-- gc:pr-summary -->" "the region is now marked, so a later pass splices in place"
 has "$(cat "$STUB_GH_LOG")" "pr edit 84" "the body was edited in place"
 
+echo "# adoption re-splices a region whose handoff bullet says the PR opened green"
+# The summary is current, and the region differs from the open-mode composition
+# only in that bullet: 'PR opened green' reads as a CI result a static body cannot
+# know. Adoption writes the open-mode bullet, which names the gates' sign-off and
+# points to the PR checks, so the claim is gone before the flip.
+store "[$(pre RFG polecat/rfg ',"pr_summary":"CURRENT: the summary the region carries."')]"
+STALEG=$(printf '%s\n' \
+  '<!-- gc:pr-summary -->' '## Summary' '' 'CURRENT: the summary the region carries.' '' \
+  '<details>' '<summary>Dispatch — what this work was asked to do</summary>' '' 'd RFG' '' '</details>' '' \
+  '## Refinery handoff' '' '- Issue: `RFG`' '- Source branch: `polecat/rfg`' '- Target: `main`' \
+  '- Gates `correctness` signed off pre-open at `sha-rfg`; PR opened green.' \
+  '<!-- /gc:pr-summary -->')
+prrow 85 OPEN polecat/rfg sha-rfg main | jq --arg b "$STALEG" '. + {body:$b}' > "$GH_DIR/pr_view_85.json"
+printf '[%s]' "$(prrow 85 OPEN polecat/rfg sha-rfg main)" > "$GH_DIR/pr_list_polecat_rfg.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RFG merge_result)" "pull_request" "the anchor flips after the refresh"
+newbodyg=$(jq -r '.body' "$GH_DIR/pr_view_85.json")
+hasnt "$newbodyg" "opened green" "the CI claim is gone from the adopted body"
+has "$newbodyg" '- Gates `correctness` signed off pre-open at `sha-rfg`. For CI status, see the PR checks.' \
+    "the bullet names the gates' sign-off and points to the PR checks for CI"
+has "$newbodyg" "CURRENT: the summary the region carries." "the current summary is kept"
+eq "$(grep -c 'pr edit 85' "$STUB_GH_LOG")" "1" "the body was edited in place, once"
+
 echo "# an unreadable OPEN PR body holds the anchor rather than flipping a stale one"
 # The reworked pr_summary must reach the published body before the flip. A body
 # that cannot even be read leaves the current one possibly stale, so flipping
@@ -352,6 +376,9 @@ has "$body" "## Summary"$'\n'$'\n'"Compares heads instead of branch names, so a 
 has "$body" "<summary>Dispatch — what this work was asked to do</summary>" "the dispatch text is demoted, not dropped"
 has "$body" "d E1" "…and it is still in the body"
 has "$body" "## Refinery handoff" "the handoff block is unchanged"
+has "$body" '- Gates `correctness` signed off pre-open at `sha-e1`. For CI status, see the PR checks.' \
+    "the handoff bullet names the gates' sign-off at the head and points to the PR checks for CI"
+hasnt "$body" "opened green" "…and states no CI result"
 has "$body" "<!-- gc:pr-summary -->" "the composed body is wrapped in a managed-region marker"
 has "$body" "<!-- /gc:pr-summary -->" "…closed by its end marker, so an adoption can re-splice it"
 

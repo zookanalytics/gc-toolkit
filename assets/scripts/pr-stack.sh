@@ -14,8 +14,9 @@
 # re-renders the `gc:branch-beads` section, and lands both in one body edit.
 #
 # The summary refresh acts only on a well-formed `gc:pr-summary` marker pair whose
-# published region is behind the anchor: either its summary text lags the current
-# `pr_summary`, or its handoff bullet still names a pre-rework head. A PR merely
+# published region is behind the anchor: its summary text lags the current
+# `pr_summary`, its handoff bullet still names a pre-rework head, or that bullet
+# says the PR opened green, a CI result the static body cannot know. A PR merely
 # opened, whose summary matches and whose region already names the current head, is a
 # no-op, and a legacy markerless or malformed body is left for pr-open's adoption
 # path to establish rather than rewritten here. Its handoff bullet is composed in
@@ -201,15 +202,18 @@ append_section() { # <body-file> <section-file> <out-file>
 
 # Bring the gc:pr-summary region current with the anchor. 0 = the region was behind
 # and <out-file> now carries it refreshed; 1 = no change (no summary to publish, no
-# well-formed region, or the region already carries this summary at this head). The
-# region is behind when its summary text lags the anchor OR its handoff bullet names
-# a head other than the current one — a rework that moves the head without touching
-# the summary still restamps the "at <head>" claim. Only a well-formed marker pair
-# (prs_marker_state 0) is rewritten in place: a legacy markerless or malformed body
-# is pr-open's adoption path to establish, not this arm's to reshape. The region is
-# recomposed in `refresh` mode — the reworked head has not re-signed-off, so the
-# handoff bullet names the head and defers the check state to the PR rather than
-# repeating the pre-open sign-off claim.
+# well-formed region, or the region already carries this summary at this head and
+# states no CI result). The region is behind when its summary text lags the anchor,
+# when its handoff bullet names a head other than the current one (a rework that
+# moves the head without touching the summary still restamps the "at <head>"
+# claim), or when that bullet says the PR opened green, a CI result the static body
+# cannot know. Only a well-formed marker pair (prs_marker_state 0) is rewritten in
+# place: a legacy markerless or malformed body is pr-open's adoption path to
+# establish, not this arm's to reshape. The region is recomposed in `refresh` mode,
+# whose handoff bullet names the head and defers the check state to the PR rather
+# than repeating the pre-open sign-off claim. A reworked head has not
+# re-signed-off, and this arm reads no lane state that would show an unmoved one
+# did.
 refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
   local summary want cur desc checkset branch target phased SECTION
@@ -218,9 +222,12 @@ refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   prs_marker_state "$bin" || return 1
   want=$(strip_summary_heading "$summary")
   cur=$(prs_region_summary "$bin")
-  # Current only when the summary matches AND the region already names this head:
-  # a head-only rework leaves the summary current but the handoff bullet stale.
-  if [ "$cur" = "$want" ] && prs_region_names_head "$bin" "$head_oid"; then
+  # Current only when the summary matches, the region already names this head, and
+  # its handoff bullet does not say the PR opened green: a head-only rework leaves
+  # the summary current but the handoff bullet stale, and a bullet stating a CI
+  # result is stale at any head.
+  if [ "$cur" = "$want" ] && prs_region_names_head "$bin" "$head_oid" \
+     && ! prs_region_says_opened_green "$bin"; then
     return 1
   fi
   desc=$(printf '%s' "$row" | jq -r '.description // empty' 2>/dev/null)

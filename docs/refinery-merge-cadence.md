@@ -363,7 +363,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    arm 6 composes that region only at `pre_open_gate` and an open anchor never
    returns there, so the published `## Summary` — the merge surface, and the
    squash commit message — would otherwise keep describing superseded work. When
-   the region is a well-formed marker pair whose summary is behind the anchor's
+   the region is a well-formed marker pair whose handoff bullet names a head other
+   than the PR's or says the PR opened green (a CI result the static body cannot
+   know), or whose summary is behind the anchor's
    current `pr_summary`, this arm recomposes and re-splices it; a region already
    current, a legacy markerless body (arm 6's adoption path establishes that), or
    a malformed shape is left alone. The recompose uses `refresh` mode: the
