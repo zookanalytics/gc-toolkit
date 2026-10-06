@@ -28,11 +28,11 @@ import (
 // same writer the shell reached through lifecycle.sh. Every other seam is a
 // subprocess exactly as the script's was — gc/bd/gh/git and the sibling shell
 // helpers (escalate.sh, record-failure-cap.sh, lane-state.sh, finalize-gate.sh,
-// render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh
-// exports as merge.sh's directory before it execs this binary. That keeps the
-// stub harness, the observability and the permissions surfaces identical. Run
-// any other way, with no usable GCTK_SCRIPTS_DIR, the pass refuses (exit 1)
-// before it reads a PR.
+// review-checks.sh, render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR,
+// which gctk-resolve.sh exports as merge.sh's directory before it execs this
+// binary. That keeps the stub harness, the observability and the permissions
+// surfaces identical. Run any other way, with no usable GCTK_SCRIPTS_DIR, the
+// pass refuses (exit 1) before it reads a PR.
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
@@ -59,15 +59,22 @@ var (
 
 // Merge runs the one pass. It takes no arguments, matching the script.
 func Merge(args []string, stdout, stderr io.Writer) int {
-	// A wrong merge cannot be retried away; merging nothing costs one pass. With
-	// no gh there is nothing to drive, so exit 0 quietly, as the script does.
-	if _, err := exec.LookPath("gh"); err != nil {
-		return 0
-	}
 	scriptsDir := os.Getenv("GCTK_SCRIPTS_DIR")
 	if p := helperDirProblem(scriptsDir); p != "" {
 		fmt.Fprintf(stderr, "%s: %s; NOTHING is merged this pass\n", mergeProg, p)
 		return 1
+	}
+	// A missing check resolver would make every anchor read as having no lanes,
+	// which is merge's fail-open, so its absence holds the pass. The script runs
+	// this check before it looks for gh, so a pass without either exits 1 here.
+	if p := filepath.Join(scriptsDir, "review-checks.sh"); !isExecutable(p) {
+		fmt.Fprintf(stderr, "%s: the check resolver is missing (%s); merge held\n", mergeProg, p)
+		return 1
+	}
+	// A wrong merge cannot be retried away; merging nothing costs one pass. With
+	// no gh there is nothing to drive, so exit 0 quietly, as the script does.
+	if _, err := exec.LookPath("gh"); err != nil {
+		return 0
 	}
 	m := &merger{
 		stdout:     stdout,
@@ -82,7 +89,10 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 	// Used only to exclude our own reviews; unresolved holds the approval gate.
 	m.selfLogin = strings.TrimSpace(string(firstOut(m.ghOrigin("user", "--jq", ".login"))))
 	if m.selfLogin == "" {
-		fmt.Fprintf(stderr, "%s: WARN acting login unresolved; own-dismissed-review approval arming is unavailable this pass (signoff_dismissed still arms it)\n", mergeProg)
+		// Approval is universal, so with no acting login the city cannot tell an
+		// external approver from its own review, and the approval gate holds
+		// every PR this pass.
+		fmt.Fprintf(stderr, "%s: WARN acting login unresolved; cannot distinguish an external approver from the city's own review, so the universal approval gate holds every PR this pass\n", mergeProg)
 	}
 	return m.run()
 }
@@ -277,7 +287,6 @@ func (m *merger) handle(row *gcbd.Bead) {
 	// --- the rest of the anchor-local authorization set, off the same row -------
 	target := fresh.Meta("merged_target")
 	hold := fresh.Meta("merge_hold")
-	dismissed := fresh.Meta("signoff_dismissed")
 	checkset := fresh.Meta("check_set")
 	posture := fresh.Meta("pr_posture")
 	aroute := fresh.Meta("gc.routed_to")
@@ -386,19 +395,19 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	needsApproval := csvContains(checkset, "approval") || dismissed != "" || rs.selfDismissed != 0
-	if needsApproval {
-		if m.selfLogin == "" {
-			fmt.Fprintf(m.stdout, "%s: PR#%s approval required but the acting login is unresolved; merge held (anchor %s)\n", mergeProg, num, id)
-			m.held++
-			return
-		}
-		if rs.approver == "" {
-			m.recordMachine(id, "settled", headOid, aroute)
-			fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review at the live head %s (approval armed by: check_set/signoff_dismissed/own dismissed review); merge held (anchor %s)\n", mergeProg, num, headOid, id)
-			m.held++
-			return
-		}
+	// Approval is a universal merge rule: every PR needs an APPROVED review at
+	// the live head from an account other than the city's. No check_set token
+	// arms it and none opts out.
+	if m.selfLogin == "" {
+		fmt.Fprintf(m.stdout, "%s: PR#%s approval required but the acting login is unresolved; merge held (anchor %s)\n", mergeProg, num, id)
+		m.held++
+		return
+	}
+	if rs.approver == "" {
+		m.recordMachine(id, "settled", headOid, aroute)
+		fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review at the live head %s (approval is a universal merge rule); merge held (anchor %s)\n", mergeProg, num, headOid, id)
+		m.held++
+		return
 	}
 
 	// --- mergeStateStatus: CLEAN, or UNSTABLE decided on required contexts only ----
@@ -500,7 +509,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	freason := terminalReason(final, num, base, liveURL, headRef, dismissed)
+	freason := terminalReason(final, num, base, liveURL, headRef)
 	if freason == "OK" {
 		fcs := final.Meta("check_set")
 		if rg, ok := m.firstNotgreenLane(id, fcs); !ok {
@@ -670,12 +679,22 @@ func (m *merger) mergeCommitOid(num string) string {
 }
 
 // firstNotgreenLane returns the first declared lane that does not derive green.
-// ok=false is an unreadable lane (lane-state green exit 2), which the caller
-// holds on; an empty lane with ok=true means every declared lane is green.
+// The lanes are the ones review-checks.sh resolves for the merge, which drops
+// the non-lanes none/off and the approval merge rule. ok=false is a state the
+// caller holds on: the resolver exited non-zero, or a lane was unreadable
+// (lane-state green exit 2). A resolver that dies prints nothing, and reading
+// that as no lanes would merge on approval alone. An empty lane with ok=true
+// means every declared lane is green.
 func (m *merger) firstNotgreenLane(anchor, checkSet string) (lane string, ok bool) {
-	for _, l := range lanesOf(checkSet) {
-		rc := m.scriptRC("lane-state.sh", "green", "--anchor", anchor, "--lane", l)
-		switch rc {
+	lanes, rrc := m.scriptCapture("review-checks.sh", "--resolve", "--check-set", checkSet, "--through", "merge")
+	if rrc != 0 {
+		return "", false
+	}
+	for _, l := range strings.Split(lanes, "\n") {
+		if l == "" {
+			continue
+		}
+		switch m.scriptRC("lane-state.sh", "green", "--anchor", anchor, "--lane", l) {
 		case 0:
 			// green; next lane
 		case 1:
@@ -809,8 +828,10 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 
 // mergeRequiredHelpers are the siblings every anchor's validation runs, so a
 // pass without them would hold each anchor for a reason that is not the
-// anchor's. escalate.sh, record-failure-cap.sh and render-seed-audit.sh are
-// guarded where they are called, as merge.sh guards them.
+// anchor's. review-checks.sh is one too, but Merge checks it apart, with the
+// diagnosis merge.sh gives for it. escalate.sh, record-failure-cap.sh and
+// render-seed-audit.sh are guarded where they are called, as merge.sh guards
+// them.
 var mergeRequiredHelpers = []string{"lane-state.sh", "finalize-gate.sh"}
 
 // helperDirProblem says why dir cannot serve as the sibling-script directory,
@@ -819,7 +840,7 @@ var mergeRequiredHelpers = []string{"lane-state.sh", "finalize-gate.sh"}
 // resolve the helpers in, and a bare name would fall to a PATH lookup.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	var missing []string
 	for _, h := range mergeRequiredHelpers {
@@ -954,34 +975,6 @@ func cutAtPull(s string) string {
 		s = s[:loc[1]]
 	}
 	return s
-}
-
-// lanesOf is the declared lanes a check_set names, dropping the non-lane tokens.
-func lanesOf(checkSet string) []string {
-	var out []string
-	for _, tok := range strings.Split(checkSet, ",") {
-		tok = stripSpaces(tok)
-		if tok == "" {
-			continue
-		}
-		switch strings.ToLower(tok) {
-		case "none", "off", "approval":
-			continue
-		}
-		out = append(out, tok)
-	}
-	return out
-}
-
-// csvContains reports whether a comma list contains tok, case-insensitively,
-// matching the shell's ",$(lower)," wrap.
-func csvContains(csv, tok string) bool {
-	for _, t := range strings.Split(strings.ToLower(stripSpaces(csv)), ",") {
-		if t == tok {
-			return true
-		}
-	}
-	return false
 }
 
 func originOwner(repo string) string {
@@ -1265,17 +1258,15 @@ type reviewRow struct {
 }
 
 type reviewSummary struct {
-	veto          string
-	approver      string
-	selfDismissed int
+	veto     string
+	approver string
 }
 
 // reviewState reproduces the review-grouping jq: the latest state-bearing review
-// per non-self reviewer decides veto and approver; self_dismissed counts every
-// own DISMISSED review. ok=false is an unreadable history: `jq -cs` slurps the
-// whole stream or nothing, so one row that will not decode makes all of it
-// unreadable, because the veto or the only approval at head may be that row
-// or follow it.
+// per non-self reviewer decides veto and approver. ok=false is an unreadable
+// history: `jq -cs` slurps the whole stream or nothing, so one row that will
+// not decode makes all of it unreadable, because the veto or the only approval
+// at head may be that row or follow it.
 func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
@@ -1308,11 +1299,6 @@ func reviewState(raw []byte, self, head string) (reviewSummary, bool) {
 	}
 
 	var summary reviewSummary
-	for _, r := range all {
-		if self != "" && r.Login == self && r.State == "DISMISSED" {
-			summary.selfDismissed++
-		}
-	}
 	// Group the state-bearing, non-self reviews by login; keep the latest per
 	// reviewer by (submitted_at, id).
 	groups := map[string][]reviewRow{}
@@ -1418,12 +1404,11 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 
 // terminalReason re-derives the full stored authorization set immediately before
 // the merge, returning "OK" or the first field that moved.
-func terminalReason(final *gcbd.Bead, num, base, url, ref, dismissed string) string {
+func terminalReason(final *gcbd.Bead, num, base, url, ref string) string {
 	st := final.StatusLower()
 	mr := final.Meta("merge_result")
 	pn := final.Meta("pr_number")
 	h := final.Meta("merge_hold")
-	d := final.Meta("signoff_dismissed")
 	t := final.Meta("merged_target")
 	pu := cutAtPull(final.Meta("pr_url"))
 	br := final.Meta("branch")
@@ -1439,8 +1424,6 @@ func terminalReason(final *gcbd.Bead, num, base, url, ref, dismissed string) str
 		return "merge_hold was set after validation"
 	case strings.HasPrefix(final.Meta("pr_posture"), "commented@"):
 		return "review comments went unanswered after validation"
-	case d != dismissed:
-		return "signoff_dismissed changed after the approval gate ran"
 	case t != "" && t != base:
 		return "retargeted after validation (merged_target=" + t + ")"
 	case pu != "" && pu != url:

@@ -3,11 +3,12 @@
 # Covers: the happy path (pinned read, --squash --match-head-commit, ONE
 # lifecycle transition closing with merged_sha); every validate hold in order
 # (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
-# child via metadata AND dep edge, tracking_only opt-out, approval arms + veto,
-# CLEAN/UNSTABLE handling, BLOCKED naming its cause from reviewThreads +
-# reviewDecision); the recorded pr_posture hold, read off the anchor;
-# identity refusals (fork, url/branch mismatch); the record for a PR already
-# merged and the live anchor identity both it and the merge stand on;
+# child via metadata AND dep edge, tracking_only opt-out, the universal approval
+# rule + veto, CLEAN/UNSTABLE handling, BLOCKED naming its cause from
+# reviewThreads + reviewDecision); the check resolver, whose crash holds the
+# merge and whose absence holds the pass; the recorded pr_posture hold, read off
+# the anchor; identity refusals (fork, url/branch mismatch); the record for a PR
+# already merged and the live anchor identity both it and the merge stand on;
 # the terminal full-authorization re-read; the loud non-zero exit when the
 # record half fails after a merge; the cap that turns a record failing every
 # pass into one visit a person can claim; and the reads that fail closed when
@@ -126,6 +127,21 @@ cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks
 has "$out" "lane state unreadable" "a resolver crash holds the merge as lane-state-unreadable"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 61" "the PR is NOT merged on approval alone when the resolver died"
 eq "$(bstatus MR1)" "open" "the anchor stays open"
+
+echo "# a missing check resolver holds the whole pass before it reads a PR"
+# A pack-integrity gap, not one anchor's state: with no resolver every anchor
+# would read as having no lanes, so the pass exits 1 rather than hold each one.
+store "[$(anchor MR2 62), $(rev MR2)]"
+printf '%s' "$(prview 62 OPEN CLEAN)" > "$GH_DIR/pr_view_62.json"
+approved 62
+mv "$SD/review-checks.sh" "$TMP/review-checks.moved"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+mv "$TMP/review-checks.moved" "$SD/review-checks.sh"
+eq "$rc" 1 "a missing check resolver fails the pass"
+has "$out" "merge: the check resolver is missing ($SD/review-checks.sh); merge held" "…naming the resolver it could not find"
+eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
+eq "$(bstatus MR2)" "open" "…and the anchor stays open"
 
 echo "# merge_hold"
 store "[$(anchor M2 11 ',"merge_hold":"true"')]"
@@ -1164,7 +1180,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge 120" "…and the PR is not squashed on t
 echo "# an enumeration that exits non-zero after printing [] fails the pass loudly"
 store "[$(anchor EN1 121), $(rev EN1)]"
 printf '%s' "$(prview 121 OPEN CLEAN)" > "$GH_DIR/pr_view_121.json"
-echo '[]' > "$GH_DIR/reviews_121.json"
+approved 121
 : > "$STUB_GH_LOG"
 out=$(STUB_LIST_PARTIAL="merge_result=pull_request" "$SUT" 2>&1); rc=$?
 eq "$rc" 1 "an enumeration that exited non-zero fails the pass"
@@ -1178,7 +1194,7 @@ echo "# a referencing-bead read that exits non-zero after printing [] holds, nev
 store "[$(anchor BP1 122), $(rev BP1),
         {\"id\":\"rw-bp1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"pr_number\":\"122\",\"pr_url\":\"https://github.com/zook/gc-toolkit/pull/122\"}}]"
 printf '%s' "$(prview 122 OPEN CLEAN)" > "$GH_DIR/pr_view_122.json"
-echo '[]' > "$GH_DIR/reviews_122.json"
+approved 122
 : > "$STUB_GH_LOG"
 out=$(STUB_LIST_PARTIAL="pr_number=" "$SUT" 2>&1)
 has "$out" "PR#122 referencing-bead read failed; merge held" "a failed by_pr read holds the merge"
@@ -1187,7 +1203,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and the in-flight rework it would h
 echo "# a dependency probe that exits non-zero after printing [] holds, never reads as no blockers"
 store "[$(anchor DE1 128), $(rev DE1)]"
 printf '%s' "$(prview 128 OPEN CLEAN)" > "$GH_DIR/pr_view_128.json"
-echo '[]' > "$GH_DIR/reviews_128.json"
+approved 128
 : > "$STUB_GH_LOG"
 out=$(STUB_DEP_PARTIAL=1 "$SUT" 2>&1)
 has "$out" "PR#128 dependency probe unreadable; merge held" "a failed dependency probe holds the merge"
@@ -1198,7 +1214,7 @@ echo "# a review-thread read whose later page will not decode is unreadable, nev
 # zero count, the BLOCKED PR would fall through to the approval wait (settled).
 store "[$(anchor TH1 123), $(rev TH1)]"
 printf '%s' "$(prview 123 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_123.json"
-echo '[]' > "$GH_DIR/reviews_123.json"
+approved 123
 echo '{"threads":[]}' > "$GH_DIR/threads_123.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$(STUB_GQL_THREADS_TAIL='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNext' "$SUT" 2>&1)
@@ -1210,7 +1226,7 @@ echo "# with the reconcile cache on, the pass reads the anchor enumeration once,
 store "[$(anchor DP1 124), $(rev DP1), $(anchor DP2 125), $(rev DP2)]"
 for n in 124 125; do
   printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
-  echo '[]' > "$GH_DIR/reviews_$n.json"
+  approved "$n"
 done
 rm -rf "$TMP/bdcache"; mkdir -p "$TMP/bdcache"
 : > "$STUB_GC_LOG"
@@ -1222,7 +1238,7 @@ rm -rf "$TMP/bdcache"
 echo "# isCrossRepository: null reaches the cross-repo gate as cross=null; only an absent key is unreadable"
 store "[$(anchor XR1 126), $(rev XR1)]"
 printf '%s' "$(prview 126 OPEN CLEAN)" | jq -c '.isCrossRepository = null' > "$GH_DIR/pr_view_126.json"
-echo '[]' > "$GH_DIR/reviews_126.json"
+approved 126
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "PR#126 is opened from 'zook/gc-toolkit' (cross=null), not this repository's own branch; merge held" "a null isCrossRepository is reported by the cross-repo gate"
@@ -1237,7 +1253,7 @@ echo "# a referencing bead whose status is the empty string is not live; a null 
 store "[$(anchor ES1 127), $(rev ES1), {\"id\":\"blk-es1\",\"status\":\"\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
 printf 'blk-es1|blocks|ES1\n' > "$STUB_DEPS"
 printf '%s' "$(prview 127 OPEN CLEAN)" > "$GH_DIR/pr_view_127.json"
-echo '[]' > "$GH_DIR/reviews_127.json"
+approved 127
 out=$("$SUT" 2>&1)
 hasnt "$out" "PR#127 held by" "an empty-status blocker holds nothing"
 has "$out" "merged + recorded ES1" "…and the merge proceeds"
@@ -1282,7 +1298,7 @@ if [ -n "$GCTK_BUILT" ]; then
     # find and dropping every escalation.
     store "[$(anchor SD1 129), $(rev SD1)]"
     printf '%s' "$(prview 129 OPEN CLEAN)" > "$GH_DIR/pr_view_129.json"
-    echo '[]' > "$GH_DIR/reviews_129.json"
+    approved 129
     : > "$STUB_GH_LOG"
     out=$(env -u GCTK_SCRIPTS_DIR "$GCTK_BUILT" merge 2>&1); rc=$?
     eq "$rc" 1 "gctk merge run without GCTK_SCRIPTS_DIR exits 1"
