@@ -80,11 +80,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    GitHub, so the value it reads has to be written in the same pass. This arm
    writes `pr_posture` and `pr_merge_state` at the live head for every open
    non-draft anchor, then stops: no dispatch, no watermark, and MERGED/CLOSED
-   reconciliation stays with arm 7. Where it changes an anchor's posture value,
-   it also re-derives that PR's `status:` label, so an approval moves the label
-   in the pass that records it
-   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
-   A held merge still gets one, because
+   reconciliation stays with arm 7. A held merge still gets one, because
    recording a fact is not a dispatch, and the pass that finally merges must not
    be reading a posture from a previous tick. **A non-zero rc is the second
    interlock.** An anchor this arm could not make current — an unreadable review
@@ -92,7 +88,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    validate against a fact from an earlier tick, so the driver holds arm 4 for
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
-   other anchor's too.
+   other anchor's too. Where this arm changes an anchor's posture value, it also
+   re-derives that PR's `status:` label, so an approval moves the label in the
+   pass that records it
+   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
 
 3. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
    early, before merge. Arm 7 runs after merge and near the pass tail, so a pass

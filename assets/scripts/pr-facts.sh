@@ -1163,8 +1163,8 @@ CHILDREN_EOF
       # re-derives the status: label now rather than leaving it for the full
       # pass's reconcile. A moved head or merge state alone does not. GitHub
       # reports UNKNOWN while it computes a PR's mergeability, so most posture
-      # writes are a merge state moving into or out of UNKNOWN, often for nearly
-      # every open PR in one arm. Keying on them would buy a derivation per PR in
+      # writes are a merge state moving into or out of UNKNOWN, often for dozens
+      # of open PRs in one arm. Keying on them would buy a derivation per PR in
       # that arm, and the full pass reconciles those.
       [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
     else
