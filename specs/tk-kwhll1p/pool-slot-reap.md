@@ -7,8 +7,9 @@ description: Why a pool session killed out of band holds its pool slot forever, 
 
 Bead: `tk-kwhll1p`. Deliverable: `orders/pool-slot-reap.toml` +
 `assets/scripts/pool-slot-reap.sh` (+ its co-located test), the component-index
-rows, and the pool-session paragraph in `docs/gascity-agents.md`'s kill-vs-close
-section.
+rows, the pool-session paragraph in `docs/gascity-agents.md`'s kill-vs-close
+section, the `docs/authority-map.md` row that grants the close, and the reactive
+path it adds to `docs/architecture.md`.
 
 ## The gap
 
@@ -190,6 +191,23 @@ live city that was about 25 s for `lx-wisp-hwfu2` across six stores and three
 identities. Candidates left when `POOL_SLOT_REAP_BUDGET_S` (240) runs out are
 deferred to the next pass. A killed ghost is therefore closed between 15 and
 about 20 minutes after the kill.
+
+## The authority to close
+
+Closing a session bead is a power over sessions, so the pass holds it through a
+row in `docs/authority-map.md`, beside the runtime's own reap. The row's
+evidence is the predicate above. What it may never do is close a named or
+manual session, close a bead that holds work or a deliberate hold, close on a
+read it cannot trust, end a live session, or write to a work bead.
+
+The map's other shape, a detector that files a bead for an actuator to act on,
+was not taken because no actuator holds this power. The runtime holds the reap,
+and the beads this pass closes are the ones it left. The dog pool holds the
+kill, and its kill is a `gc session kill`, which leaves this same asleep bead
+behind when its target is a pool session. Witness orphan recovery returns a
+dead session's work to the pool and closes no session bead. A bead filed for a
+person would make every ghost cost an operator action, which is the cost the
+remedy exists to remove.
 
 ## Residual risk
 
