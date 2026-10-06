@@ -6,7 +6,9 @@
 #
 #   actionable  the bead is work -> release it TO a pool, which is the whole
 #               of "schedule an action for a bead": a routed, unassigned,
-#               open bead is what a pool's find-work offers.
+#               open bead is what a pool's find-work offers. Work that is a
+#               named agent's own (a town-repo edit is mechanik's) is released
+#               TO that agent instead, as its assignee (--assign).
 #   recommend   the action is known but warrants the operator's trigger -> file
 #               a human visit (as ruling does) AND stamp gc.recommended_formula
 #               on the subject, so the board offers Accept — which runs that mol
@@ -15,7 +17,9 @@
 #               consequential enough to confirm before it runs.
 #   blocked     the bead is waiting -> the wait becomes a `blocks` edge on a
 #               bead in the SAME store (component-model I1). Optionally arm a
-#               deferred dispatch, so the wait converts to work when it lifts.
+#               deferred dispatch, so the wait converts to work when it lifts,
+#               or assign the bead to the named agent whose work it is, whose
+#               hook offers it once the wait lifts.
 #   close       there is nothing to do -> hand the bead to a validating-closer
 #               pool (mol-validate-close), which re-checks the call and closes
 #               the bead or escalates. A first reaction never closes a bead. Run
@@ -55,12 +59,12 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   first-reaction-dispose.sh <bead> --disposition actionable --reason "<why>" --takeaway "<headline>"
-                            [--route <rig>/<agent>]
+                            [--route <rig>/<agent> | --assign <named-agent>]
   first-reaction-dispose.sh <bead> --disposition recommend --reason "<why>" --takeaway "<recommendation; why discuss>"
                             --visit <visit-bead-id> --recommended-formula <mol>
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
-                            [--then-route <rig>/<agent>]
+                            [--then-route <rig>/<agent> | --then-assign <named-agent>]
   first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
                             [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
@@ -85,6 +89,14 @@ Usage:
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (assets/scripts/deferred-dispatch.sh).
+  --assign (actionable) releases the bead to a named agent instead of a pool:
+  the agent becomes its assignee, the address its own hook matches, and no
+  route is stamped. A town-repo edit (city.toml, packs.lock) is mechanik's, so
+  it takes --assign gc-toolkit.mechanik. Refused unless the agent is a
+  registered named session whose hook reads this bead's store
+  (tools/gc-proactive.sh assignable).
+  --then-assign (blocked) assigns the held bead to a named agent in the same
+  release. Its hook offers the bead once the wait lifts, so nothing is armed.
   --recommended-formula (recommend only, required) names the execution mol the
   recommendation runs; it stamps gc.recommended_formula on the subject, which
   is what offers the operator Accept on the visit. A ruling carries no
@@ -94,6 +106,7 @@ EOF
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
+ASSIGN=""; THEN_ASSIGN=""
 DB=""; DRY=""; AFTER_WORKFLOW=""; RECOMMENDED_FORMULA=""
 WAITING=""          # space-separated bead ids
 
@@ -111,6 +124,10 @@ while [ $# -gt 0 ]; do
         --route=*)  ROUTE="${1#--route=}"; shift ;;
         --then-route)   shift; [ $# -gt 0 ] || usage_die "--then-route needs a <rig>/<agent> target"; THEN_ROUTE="$1"; shift ;;
         --then-route=*) THEN_ROUTE="${1#--then-route=}"; shift ;;
+        --assign)   shift; [ $# -gt 0 ] || usage_die "--assign needs a named-agent identity"; ASSIGN="$1"; shift ;;
+        --assign=*) ASSIGN="${1#--assign=}"; shift ;;
+        --then-assign)   shift; [ $# -gt 0 ] || usage_die "--then-assign needs a named-agent identity"; THEN_ASSIGN="$1"; shift ;;
+        --then-assign=*) THEN_ASSIGN="${1#--then-assign=}"; shift ;;
         --waiting-on)   shift; [ $# -gt 0 ] || usage_die "--waiting-on needs a bead id"; WAITING="$WAITING $1"; shift ;;
         --waiting-on=*) WAITING="$WAITING ${1#--waiting-on=}"; shift ;;
         --blocker)   shift; [ $# -gt 0 ] || usage_die "--blocker needs a title"; BLOCKER_TITLE="$1"; shift ;;
@@ -149,13 +166,20 @@ same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
 
 case "$DISPOSITION" in
     actionable)
-        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
-            || usage_die "actionable takes --route only (--waiting-on/--blocker/--then-route/--visit/--after-workflow/--recommended-formula belong to the other exits)"
-        [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
-        case "$ROUTE" in
-            */*) : ;;
-            *) usage_die "cannot rig-qualify the route target '$ROUTE': set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody." ;;
-        esac
+        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
+            || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--then-route/--then-assign/--visit/--after-workflow/--recommended-formula belong to the other exits)"
+        # A bead goes to a pool by gc.routed_to or to a named agent by assignee,
+        # never both: the assignee drops it out of the pool's unassigned claim
+        # filter, and a named agent's hook never reads the route.
+        if [ -n "$ASSIGN" ]; then
+            [ -z "$ROUTE" ] || usage_die "--route and --assign both name where $BEAD goes; pass --route for a pool or --assign for a named agent, not both"
+        else
+            [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
+            case "$ROUTE" in
+                */*) : ;;
+                *) usage_die "cannot rig-qualify the route target '$ROUTE': set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody. A named agent such as gc-toolkit.mechanik takes --assign." ;;
+            esac
+        fi
         ;;
     close)
         # close routes to a validating closer, so it takes --route like
@@ -164,8 +188,8 @@ case "$DISPOSITION" in
         # (a first reaction's own root): the closer is deferred until that root
         # closes, so it is poured as the bead's sole dispatch surface, never a
         # second one stacked on the live reaction.
-        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$RECOMMENDED_FORMULA" ] \
-            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--then-route/--visit/--recommended-formula belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$ASSIGN$THEN_ASSIGN$RECOMMENDED_FORMULA" ] \
+            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--then-route/--assign/--then-assign/--visit/--recommended-formula belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
@@ -178,7 +202,9 @@ case "$DISPOSITION" in
         fi
         ;;
     blocked)
-        [ -z "$ROUTE$VISIT$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route (--route/--visit/--after-workflow/--recommended-formula belong to the other exits)"
+        [ -z "$ROUTE$ASSIGN$VISIT$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route/--then-assign (--route/--assign/--visit/--after-workflow/--recommended-formula belong to the other exits)"
+        [ -z "$THEN_ROUTE" ] || [ -z "$THEN_ASSIGN" ] \
+            || usage_die "--then-route and --then-assign both name where $BEAD goes once its wait lifts; pass --then-route for a pool or --then-assign for a named agent, not both"
         [ -n "$WAITING" ] || [ -n "$BLOCKER_TITLE" ] \
             || usage_die "blocked needs --waiting-on <bead-id> or --blocker \"<title>\": the wait IS the edge, and prose about it holds nothing"
         if [ -n "$BLOCKER_TITLE" ]; then
@@ -203,8 +229,8 @@ case "$DISPOSITION" in
         # REQUIRES --recommended-formula (it is the disposition that stamps the
         # key the board's Accept reads); ruling REJECTS it (the operator's
         # judgment names no worker-runnable action, so the visit is Discuss-only).
-        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$AFTER_WORKFLOW" ] \
-            || usage_die "$DISPOSITION takes --visit (and --recommended-formula on recommend); --route/--waiting-on/--blocker/--then-route/--after-workflow belong to the other exits"
+        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW" ] \
+            || usage_die "$DISPOSITION takes --visit (and --recommended-formula on recommend); --route/--assign/--waiting-on/--blocker/--then-route/--then-assign/--after-workflow belong to the other exits"
         [ -n "$VISIT" ] || usage_die "$DISPOSITION needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
         [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
         same_store "$VISIT" "$BEAD" \
@@ -291,9 +317,23 @@ fi
 # (a rig-scope pool only claims beads in its own store), for any rig-qualified
 # target, and it answers no only on a positive finding — so a probe that cannot
 # run leaves the disposition alone.
-if { [ "$DISPOSITION" = "actionable" ] || [ "$DISPOSITION" = "close" ]; } && [ -x "$PROACTIVE" ]; then
+if { [ "$DISPOSITION" = "actionable" ] || [ "$DISPOSITION" = "close" ]; } && [ -n "$ROUTE" ] && [ -x "$PROACTIVE" ]; then
     DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$ROUTE" "$BEAD" 2>/dev/null)" || {
-        usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. File the visit instead (--disposition recommend or ruling)."
+        if [ "$DISPOSITION" = "actionable" ]; then
+            usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. Route it to a pool that can claim it, or address it with --assign to the named agent whose work it is (a town-repo edit is gc-toolkit.mechanik's). File the visit (--disposition recommend or ruling) only when the next move is the operator's."
+        else
+            usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. File the visit instead (--disposition recommend or ruling)."
+        fi
+    }
+fi
+# An assignment is held to the same standard: --assign and --then-assign name a
+# named agent whose own hook must offer the bead, and gc-proactive.sh
+# `assignable` answers that against the roster, the named sessions and the
+# stores the agent's hook reads, answering no only on a positive finding.
+WHO="${ASSIGN:-$THEN_ASSIGN}"
+if [ -n "$WHO" ] && [ -x "$PROACTIVE" ]; then
+    ASSIGNABLE_WHY="$("$PROACTIVE" assignable "$WHO" "$BEAD" 2>/dev/null)" || {
+        usage_die "$WHO cannot be handed this bead — ${ASSIGNABLE_WHY:-the agent answered no}. Assigning it there would leave $BEAD offered to nobody. Name the agent by its exact qualified name (gc-toolkit.mechanik for a town-repo edit), or route a pool with --route/--then-route."
     }
 fi
 # --then-route names the pool the deferred dispatch slings the bead to once its
@@ -322,9 +362,13 @@ fi
 if [ -n "$DRY" ]; then
     printf 'disposition=%s bead=%s reason=%s\n' "$DISPOSITION" "$BEAD" "$REASON"
     case "$DISPOSITION" in
-        actionable) printf 'would release %s to %s\n' "$BEAD" "$ROUTE" ;;
+        actionable) if [ -n "$ASSIGN" ]; then
+                        printf 'would release %s to named agent %s (assignee, no route)\n' "$BEAD" "$ASSIGN"
+                    else
+                        printf 'would release %s to %s\n' "$BEAD" "$ROUTE"
+                    fi ;;
         recommend)  printf 'would record visit %s on %s recommending %s\n' "$VISIT" "$BEAD" "$RECOMMENDED_FORMULA" ;;
-        blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" ;;
+        blocked)    printf 'would wait %s on:%s%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" "${THEN_ASSIGN:+, assigned to $THEN_ASSIGN}" ;;
         close)      if [ -n "$AFTER_WORKFLOW" ]; then
                         printf 'would hold %s on %s, then arm a deferred dispatch to validating closer %s (mol-validate-close) for when %s closes\n' "$BEAD" "$AFTER_WORKFLOW" "$ROUTE" "$AFTER_WORKFLOW"
                     else
@@ -379,7 +423,7 @@ fi
 # could still Accept.
 TARGET=""
 case "$DISPOSITION" in
-    actionable) TARGET="$ROUTE" ;;
+    actionable) TARGET="${ASSIGN:-$ROUTE}" ;;
     recommend)  TARGET="$VISIT" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
     close)      TARGET="$ROUTE" ;;
@@ -503,21 +547,27 @@ fi
 
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
-# --route releases the bead to a pool instead of back to the human.
+# --route releases the bead to a pool instead of back to the human, and
+# --assign releases it to a named agent as its assignee.
 #
 # Each disposition also answers the headline's own question — is anything still
 # waiting on this bead? An actionable one is not: it is moving, and the pool its
-# route names will claim it, so --no-wait says so. A blocked one names its wait
-# as an edge. A recommend or a ruling names the visit as its wait: the subject
-# is waiting on a person, and the visit bead is what carries that wait, so
-# --waiting-on stamps the blocks edge onto it. The release parks the subject and
-# the edge holds it, so it is not offered again until the visit closes, and the
-# wait is a graph state doctor/check-wait-is-an-edge reads rather than prose it
-# reports.
+# route names, or the agent it is assigned to, will take it, so --no-wait says
+# so. A blocked one names its wait as an edge, and a --then-assign rides the same
+# release, so the agent's hook offers the bead once the edge clears. A recommend
+# or a ruling names the visit as its wait: the subject is waiting on a person,
+# and the visit bead is what carries that wait, so --waiting-on stamps the
+# blocks edge onto it. The release parks the subject and the edge holds it, so
+# it is not offered again until the visit closes, and the wait is a graph state
+# doctor/check-wait-is-an-edge reads rather than prose it reports.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
-    actionable)       set -- "$@" --route "$ROUTE" --no-wait ;;
-    blocked)          for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
+    actionable)
+        if [ -n "$ASSIGN" ]; then set -- "$@" --assign "$ASSIGN" --no-wait
+        else set -- "$@" --route "$ROUTE" --no-wait; fi ;;
+    blocked)
+        for w in $WAITING; do set -- "$@" --waiting-on "$w"; done
+        if [ -n "$THEN_ASSIGN" ]; then set -- "$@" --assign "$THEN_ASSIGN"; fi ;;
     recommend|ruling) set -- "$@" --waiting-on "$VISIT" ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. The disposition record stands — clear the cause and re-run this command."
