@@ -161,6 +161,9 @@ description: <why the doc exists / when to use it>
 A description helps a reader answer "is this the right document for my
 question?" — it shouldn't restate the body, and shouldn't change often.
 
+`tools/lint-learned.d/doc-filing.sh` fails a page under `specs/` whose
+frontmatter has no `description`.
+
 ## The Scope section
 
 Every authoritative `docs/` doc carries a `## Scope` section — the doc's
@@ -197,6 +200,12 @@ A scope is **stable but not frozen**: it changes only when the doc is
 re-chartered or the scope has become inaccurate — never with ordinary content
 churn. Re-chartering is a deliberate human editorial act; agents read the
 scope as the measuring stick but do not rewrite it.
+
+The same check fails a `docs/` page with no `## Scope` section. Pages that
+lack their tier's part are named in `tools/lint-learned.d/doc-filing.gaps` and
+not reported, so whoever next edits a listed `docs/` page is not asked to
+write its charter. The list only shrinks: a page leaves it when it gains its
+part, and no page joins it.
 
 ## Cross-doc references
 
