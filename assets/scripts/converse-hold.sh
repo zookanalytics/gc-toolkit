@@ -69,9 +69,21 @@ SUBJECT="${SUBJECT:-}"
 command -v jq >/dev/null 2>&1 || { echo "converse-hold: jq is required" >&2; exit 2; }
 command -v gc >/dev/null 2>&1 || { echo "converse-hold: gc is required" >&2; exit 2; }
 
-ITEM=$(gc bd show "$VISIT" --json \
-  | scrub | jq -r '.[0].metadata.stall_root // ""')
+V=$(gc bd show "$VISIT" --json | scrub)
+ITEM=$(printf '%s' "$V" | jq -r '.[0].metadata.stall_root // ""')
 ITEM="${ITEM:-$SUBJECT}"
+# The demand's topic scopes it to THIS sitting. Under a standing scope the item
+# is a shared bucket, and two concurrent sittings on it each resolve $ITEM to
+# that bucket; without a topic the second sitting's demand on the item (the
+# conversation wait on a pre-PR item, or a --hold-merge on an anchor) refreshes
+# the first's gate in place and overwrites the operator question it is holding.
+# Every demand this sitting files carries the topic. The visit's escalation_key
+# is the per-sitting discriminator (two findings on one bucket keep their own),
+# empty on an ordinary visit — which keeps the pre-topic behaviour. An array so
+# an empty topic expands to no argument under zsh.
+TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
+DEMAND_TOPIC=()
+[ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
 HELM=""
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
@@ -116,7 +128,7 @@ esac
 # signal that the bead or the edge did not land, and any filter placed
 # downstream of the call answers with its own success instead.
 DEMAND_OUT=$("$HELM" demand "$GATED" "$NEED" \
-               --by converse)
+               --by converse "${DEMAND_TOPIC[@]}")
 DEMAND_RC=$?
 DEMAND=$(printf '%s\n' "$DEMAND_OUT" | awk '/^demand /{print $2; exit}')
 if [ "$DEMAND_RC" -ne 0 ] || [ -z "$DEMAND" ]; then
@@ -162,14 +174,15 @@ fi
 # --hold-merge pauses the PR merge. The conversation demand above gates the
 # VISIT, so by default the anchor keeps moving; this files the SECOND demand, on
 # $ITEM (the anchor), the blocks edge merge.sh / pr-facts.sh / pre-open-rebase.sh
-# honor via gc.demand_for=<anchor>. The step-7 sign-off discharges it by finding
-# the demand on $ITEM, so it needs no other marker. It is meaningful only when
-# the conversation gated the visit: on an unanchored item the single demand
-# already gates the item, so the flag is a no-op. Same fail-closed discipline as
-# the conversation demand — a requested merge hold that did not land must not be
-# framed as held.
+# honor via gc.demand_for=<anchor>. It carries this sitting's topic, so a sibling
+# sitting holding the same anchor's merge keeps its own demand, and the step-7
+# sign-off discharges it by finding this sitting's demand on $ITEM, so it needs no
+# other marker. It is meaningful only when the conversation gated the visit: on
+# an unanchored item the single demand already gates the item, so the flag is a
+# no-op. Same fail-closed discipline as the conversation demand — a requested
+# merge hold that did not land must not be framed as held.
 if [ -n "$HOLD_MERGE" ] && [ "$GATED" = "$VISIT" ]; then
-  MERGE_OUT=$("$HELM" demand "$ITEM" "$NEED" --by converse)
+  MERGE_OUT=$("$HELM" demand "$ITEM" "$NEED" --by converse "${DEMAND_TOPIC[@]}")
   MERGE_RC=$?
   MERGE_DEMAND=$(printf '%s\n' "$MERGE_OUT" | awk '/^demand /{print $2; exit}')
   if [ "$MERGE_RC" -ne 0 ] || [ -z "$MERGE_DEMAND" ]; then

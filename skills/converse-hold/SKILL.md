@@ -31,8 +31,9 @@ pre-PR (unanchored) item takes the demand on itself, because its `held`
 marker needs that edge. A ruling files unassigned and routes to the
 operator's partition; pass `--assignee <who>` to the writer only when the
 demand is work a named person must perform, and that one is theirs to
-close, never yours. One open demand per gated bead: a resumed hold
-refreshes the existing bead.
+close, never yours. A resumed hold refreshes the demand this sitting
+filed rather than filing a second. The visit's `escalation_key` scopes the
+demand, so a sibling sitting with its own key on a shared item keeps its own.
 
 **Stamp BEFORE you wait, not after.** The hold IS a demand: until the
 demand is filed nothing re-asks the question, so it lands before you hand

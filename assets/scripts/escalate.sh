@@ -65,6 +65,7 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              premise is gone; no matching open visit is a no-op success. Needs a
              durable subject.
   --subject  the bead the escalation is about; the visit tracks it (required).
+             One bead id, [A-Za-z0-9._-] only.
              On the board route the visit is filed in the store the subject's
              id prefix names, whatever GC_RIG says; only a subject whose store
              cannot be derived falls back to the GC_RIG store.
@@ -117,6 +118,17 @@ fi
 # A '=' or metacharacter in the key breaks the exact-match dedup read.
 case "$KEY" in
   *[!A-Za-z0-9._-]*) warn "--key must contain only [A-Za-z0-9._-] (got '$KEY')"; exit 2 ;;
+esac
+# The subject is one bead id. A durable subject is stamped as the visit's
+# gc.continuation_group, which the dedup and retract listings match exactly,
+# and is the far end of the tracks edge. A subject carrying a second word files
+# a visit that no later call matches and that tracks no bead. A space in it
+# usually comes from an unquoted expansion that did not word-split (zsh does
+# not), which joins the id to the word beside it.
+case "$SUBJECT" in
+  *[!A-Za-z0-9._-]*)
+    warn "--subject must be one bead id, [A-Za-z0-9._-] only (got '$SUBJECT'). An id joined to its neighbour usually comes from an unquoted \$VAR that did not word-split (zsh does not split it); read each field into its own variable, as 'while read -r SID SWHEN' does, and pass the id alone. Nothing was filed or closed."
+    exit 2 ;;
 esac
 
 # GC_RIG naming a bound rig selects the store `gc bd` reads and writes,

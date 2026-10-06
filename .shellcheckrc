@@ -1,0 +1,10 @@
+# Source paths here are relative to the sourcing script's directory: a suite
+# sources "$HERE/test-harness.sh" under the directive source=test-harness.sh.
+# By default shellcheck resolves a source path against the working directory
+# and reads only the files named on its command line, and tools/lint.sh runs it
+# from the repo root on the changed files alone. These two settings resolve each
+# source path from the sourcing script's directory and read the sourced file, so
+# a variable that a test harness exports is not reported as unused where a
+# suite assigns it.
+source-path=SCRIPTDIR
+external-sources=true

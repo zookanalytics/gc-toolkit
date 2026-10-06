@@ -19,6 +19,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pre-open-rebase-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # Captured before harness_init shadows PATH with the stub bin.
 REAL_GIT="$(command -v git)"
 # shellcheck source=test-harness.sh
@@ -42,7 +45,7 @@ chmod +x "$BIN/git"
 SRC="$TMP/src"; WORK="$TMP/work"
 git init -q -b main "$SRC"
 (
-  cd "$SRC"
+  cd "$SRC" || exit 1
   git config user.email t@t; git config user.name t
   printf 'l1\nl2\nl3\n' > f.txt
   git add f.txt; git commit -qm base
