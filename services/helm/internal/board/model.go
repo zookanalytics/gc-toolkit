@@ -394,12 +394,12 @@ type Tile struct {
 	// change shape when the watermarks land.
 	PRConversation string `json:"pr_conversation"`
 
-	// PRApproval is whether GitHub is withholding the merge for a human review:
-	// required, met, not_required, or unknown. Read from the recorded posture,
-	// which is GitHub's own requirement rather than the city's gate set — a
-	// repository can require a review that check_set never declared, and keyed
-	// on the gate set a green pull request nobody has approved reads as settled
-	// and nobody's move.
+	// PRApproval is whether this pull request still owes an external approval
+	// before it can merge: required, met, or unknown. Approval is a universal
+	// merge rule (merge.sh holds every open PR until a non-city APPROVED review
+	// stands at the live head), so only `approved` is met and every other posture
+	// owes one — the field is the city's rule, not GitHub's protection set, so a
+	// PR on an integration/* base or in a rule-less repo still reads `required`.
 	//
 	// A separate field rather than a fourth machine value, because a PR can
 	// need an approval while the cadence is still progressing, and folding the
