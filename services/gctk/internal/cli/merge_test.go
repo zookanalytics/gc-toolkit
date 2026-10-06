@@ -83,30 +83,17 @@ func TestJqHasToStringMirrorsHasThenToString(t *testing.T) {
 	}
 }
 
-// A binary run without GCTK_SCRIPTS_DIR, or with a directory missing the
-// helpers every anchor's validation runs, refuses the pass rather than holding
-// each anchor on a helper it cannot find.
-func TestHelperDirProblemRefusesAnUnusableDirectory(t *testing.T) {
+// A binary run without GCTK_SCRIPTS_DIR refuses the pass: every helper would be
+// a bare name, found through PATH if at all. A named directory is not refused
+// for a helper it lacks, because merge.sh has no such pass-level check. A
+// missing helper fails where it is called, and the pass still records a PR
+// that has already merged (merge.test.sh pins that in both arms).
+func TestHelperDirProblemRefusesOnlyAnUnsetDirectory(t *testing.T) {
 	if p := helperDirProblem(""); !strings.Contains(p, "GCTK_SCRIPTS_DIR is unset") {
 		t.Errorf("unset dir: problem = %q, want the unset diagnosis", p)
 	}
-	dir := t.TempDir()
-	if p := helperDirProblem(dir); !strings.Contains(p, "lane-state.sh or finalize-gate.sh") {
-		t.Errorf("empty dir: problem = %q, want both missing helpers named", p)
-	}
-	for _, h := range mergeRequiredHelpers {
-		if err := os.WriteFile(filepath.Join(dir, h), []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if p := helperDirProblem(dir); p != "" {
-		t.Errorf("complete dir: problem = %q, want none", p)
-	}
-	if err := os.Chmod(filepath.Join(dir, "finalize-gate.sh"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if p := helperDirProblem(dir); !strings.Contains(p, "finalize-gate.sh") || strings.Contains(p, "lane-state.sh") {
-		t.Errorf("non-executable finalize-gate.sh: problem = %q, want only it named", p)
+	if p := helperDirProblem(t.TempDir()); p != "" {
+		t.Errorf("a named dir without the helpers: problem = %q, want none", p)
 	}
 }
 

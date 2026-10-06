@@ -6,7 +6,8 @@
 # child via metadata AND dep edge, tracking_only opt-out, the universal approval
 # rule + veto, CLEAN/UNSTABLE handling, BLOCKED naming its cause from
 # reviewThreads + reviewDecision); the check resolver, whose crash holds the
-# merge and whose absence holds the pass; the recorded pr_posture hold, read off
+# merge and whose absence holds the pass; a broken lane or finalize helper,
+# which holds only its own anchor; the recorded pr_posture hold, read off
 # the anchor; identity refusals (fork, url/branch mismatch); the record for a PR
 # already merged and the live anchor identity both it and the merge stand on;
 # the terminal full-authorization re-read; the loud non-zero exit when the
@@ -144,6 +145,31 @@ eq "$rc" 1 "a missing check resolver fails the pass"
 has "$out" "merge: the check resolver is missing ($SD/review-checks.sh); merge held" "…naming the resolver it could not find"
 eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
 eq "$(bstatus MR2)" "open" "…and the anchor stays open"
+
+echo "# a broken lane or finalize helper holds its own anchor, never the pass"
+# Only the check resolver is required up front. lane-state.sh and finalize-gate.sh
+# fail where they are called, which holds that one open PR, and a PR that has
+# already merged still gets its record, which needs neither helper.
+for helper in lane-state.sh finalize-gate.sh; do
+  case "$helper" in
+    lane-state.sh) why="PR#63 lane state unreadable on anchor HM1; merge held" ;;
+    finalize-gate.sh) why="PR#63 finalize gate refused (fail-closed); merge held (anchor HM1)" ;;
+  esac
+  store "[$(anchor HM1 63), $(rev HM1), $(anchor HM2 64)]"
+  printf '%s' "$(prview 63 OPEN CLEAN)" > "$GH_DIR/pr_view_63.json"
+  printf '%s' "$(prview 64 MERGED CLEAN)" > "$GH_DIR/pr_view_64.json"
+  approved 63
+  chmod -x "$SD/$helper"
+  : > "$STUB_GH_LOG"
+  out=$("$SUT" 2>&1); rc=$?
+  chmod +x "$SD/$helper"
+  eq "$rc" 0 "a non-executable $helper leaves the pass at exit 0"
+  has "$out" "merge: $why" "…holding the open PR at the $helper call"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr merge 63" "…which does not merge"
+  has "$out" "merge: recovered HM2" "…while the PR already merged gets its record"
+  eq "$(bstatus HM2)" "closed" "…and its anchor closes"
+  has "$out" "merge: 0 merged, 1 recovered, 1 held, 0 skipped, 0 record-failed" "…in one pass that reads both anchors"
+done
 
 echo "# merge_hold"
 store "[$(anchor M2 11 ',"merge_hold":"true"')]"
@@ -1369,8 +1395,8 @@ if [ -n "$GCTK_BUILT" ]; then
     has "$out" "SENTINEL-GCTK merge" "GC_CITY_PATH alone resolves the deployed binary through merge.sh"
 
     # Run directly, the binary has no merge.sh to name the helper directory. It
-    # refuses the pass rather than holding every anchor on a helper it cannot
-    # find and dropping every escalation.
+    # refuses the pass rather than resolving every helper as a bare name through
+    # PATH. A named directory that lacks a helper is the shared body's case.
     store "[$(anchor SD1 129), $(rev SD1)]"
     printf '%s' "$(prview 129 OPEN CLEAN)" > "$GH_DIR/pr_view_129.json"
     approved 129
@@ -1380,10 +1406,6 @@ if [ -n "$GCTK_BUILT" ]; then
     has "$out" "GCTK_SCRIPTS_DIR is unset" "…naming the missing directory"
     has "$out" "NOTHING is merged this pass" "…and saying nothing merged"
     eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
-    mkdir -p "$TMP/no-helpers"
-    out=$(GCTK_SCRIPTS_DIR="$TMP/no-helpers" "$GCTK_BUILT" merge 2>&1); rc=$?
-    eq "$rc" 1 "a GCTK_SCRIPTS_DIR without the helpers exits 1 too"
-    has "$out" "holds no executable lane-state.sh or finalize-gate.sh" "…naming the helpers it lacks"
     out=$(GCTK_SCRIPTS_DIR="$SD" "$GCTK_BUILT" merge 2>&1)
     has "$out" "merged + recorded SD1" "the control: the same direct run with the helper directory named merges"
 elif [ "$GO_PRESENT" -eq 0 ]; then

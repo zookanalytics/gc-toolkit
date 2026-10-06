@@ -20,9 +20,9 @@ import (
 // `gctk merge` is the port of assets/scripts/merge.sh: arm 4 of the merge
 // cadence, THE single writer of merged truth. The CLI is contract-preserving —
 // it takes no flags, emits the same stdout grammar, and exits 0 except when
-// the gating anchors cannot be enumerated or a record half failed after a
-// merge (exit 1) — because refinery-reconcile.sh invokes it as an opaque
-// command and must not notice which language answers.
+// the check resolver is missing, the gating anchors cannot be enumerated, or a
+// record half failed after a merge (exit 1) — because refinery-reconcile.sh
+// invokes it as an opaque command and must not notice which language answers.
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
 // same writer the shell reached through lifecycle.sh. Every other seam is a
@@ -31,8 +31,8 @@ import (
 // review-checks.sh, render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR,
 // which gctk-resolve.sh exports as merge.sh's directory before it execs this
 // binary. That keeps the stub harness, the observability and the permissions
-// surfaces identical. Run any other way, with no usable GCTK_SCRIPTS_DIR, the
-// pass refuses (exit 1) before it reads a PR.
+// surfaces identical. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass
+// refuses (exit 1) before it reads a PR.
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
@@ -830,30 +830,18 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 
 // --- sibling-script helpers -----------------------------------------------------
 
-// mergeRequiredHelpers are the siblings every anchor's validation runs, so a
-// pass without them would hold each anchor for a reason that is not the
-// anchor's. review-checks.sh is one too, but Merge checks it apart, with the
-// diagnosis merge.sh gives for it. escalate.sh, record-failure-cap.sh and
-// render-seed-audit.sh are guarded where they are called, as merge.sh guards
-// them.
-var mergeRequiredHelpers = []string{"lane-state.sh", "finalize-gate.sh"}
-
 // helperDirProblem says why dir cannot serve as the sibling-script directory,
 // or "" when it can. merge.sh exports its own directory as GCTK_SCRIPTS_DIR
 // before it execs this binary; a binary run any other way has no directory to
-// resolve the helpers in, and a bare name would fall to a PATH lookup.
+// resolve the helpers in, and a bare name would fall to a PATH lookup. A named
+// directory missing a helper is not refused here. merge.sh checks only the
+// check resolver up front (Merge does the same), and every other helper fails
+// where it is called: lane-state.sh and finalize-gate.sh hold that anchor,
+// escalate.sh, record-failure-cap.sh and render-seed-audit.sh are skipped, and
+// the pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
 		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
-	}
-	var missing []string
-	for _, h := range mergeRequiredHelpers {
-		if !isExecutable(filepath.Join(dir, h)) {
-			missing = append(missing, h)
-		}
-	}
-	if len(missing) > 0 {
-		return "GCTK_SCRIPTS_DIR=" + dir + " holds no executable " + strings.Join(missing, " or ")
 	}
 	return ""
 }
