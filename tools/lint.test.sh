@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Hermetic test for lint.sh — the rig's shell + go lint entry point.
+# Hermetic test for lint.sh — the rig's shell, go vet and gofmt lint entry point.
 #
 # The defects it guards against: a linter that could not run reads as a clean
-# pass (fail-closed violated), shell findings get swallowed into 0, or a go
-# module is silently skipped.
+# pass (fail-closed violated), shell findings get swallowed into 0, a go
+# module is silently skipped, or a Go file gofmt would rewrite passes.
 #
 # Hermetic: a throwaway git repo holds a stub shellcheck-run.sh whose exit code
 # the test sets and a tracked go.mod, and lint.sh runs with PATH pointing at a
-# stub bin — so whether shellcheck and go "ran" and what they returned is the
-# test's to decide. No real shellcheck or go toolchain is required.
+# stub bin — so whether shellcheck, go and gofmt "ran" and what they returned
+# is the test's to decide. No real shellcheck or go toolchain is required.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +30,7 @@ mkdir -p "$REPO/assets/scripts" "$REPO/services/foo"
 git -C "$REPO" init -q
 git -C "$REPO" config user.email t@t
 git -C "$REPO" config user.name t
+git -C "$REPO" config commit.gpgsign false
 printf 'module foo\n\ngo 1.27\n' > "$REPO/services/foo/go.mod"
 printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/subject.sh"
 git -C "$REPO" add -A
@@ -49,8 +50,9 @@ EOF
 }
 
 # --- Stub bin: only the externals lint.sh reaches for. -----------------------
-# lint.sh needs git, basename and dirname; go is stubbed so its presence and
-# exit code are the test's to set. Everything else lint.sh uses is a builtin.
+# lint.sh needs git, basename and dirname; go and gofmt are stubbed so their
+# presence and exit codes are the test's to set. Everything else lint.sh uses is
+# a builtin.
 STUB="$TMP/bin"; mkdir -p "$STUB"
 for t in git basename dirname; do ln -s "$(command -v "$t")" "$STUB/$t"; done
 
@@ -142,6 +144,90 @@ grep -q 'script-noext' "$TMP/wrapper.log" \
 grep -qi 'no shell files given' "$TMP/out" \
   && ok "non-shell shebang: reported skipped" \
   || bad "non-shell shebang: not reported skipped"
+
+# --- Gofmt: a tracked Go file, judged by a stub gofmt. -----------------------
+# Real gofmt -l prints each file it would rewrite and exits 0, and exits 2 when
+# it cannot read or parse a file. The stub logs its argv, prints the files the
+# test names, and exits the code the test sets.
+printf 'package foo\n' > "$REPO/services/foo/foo.go"
+git -C "$REPO" add services/foo/foo.go
+git -C "$REPO" commit -qm 'add a Go file'
+
+make_gofmt() {  # $1 = exit code; further args = files to list as not gofmt-clean
+  local code=$1 f; shift
+  {
+    echo '#!/bin/sh'
+    echo "echo \"stub-gofmt ran: \$*\" >> \"$TMP/gofmt.log\""
+    for f in "$@"; do echo "echo '$f'"; done
+    echo "exit $code"
+  } > "$STUB/gofmt"
+  chmod +x "$STUB/gofmt"
+}
+
+# --- K: gofmt clean -> exit 0, over the whole tracked tree, listing only. ----
+# lint.sh is handed subject.sh alone, so foo.go reaching gofmt is the whole-tree
+# scope. An untracked Go file is not part of the merge and stays out.
+make_wrapper 0; make_go 0; make_gofmt 0; : > "$TMP/gofmt.log"
+printf 'package foo\n' > "$REPO/services/foo/scratch.go"
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "gofmt clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "gofmt clean: expected 0, got $rc"; }
+grep -q 'gofmt: 1 Go file(s) clean' "$TMP/out" && ok "gofmt clean: reported clean" \
+  || bad "gofmt clean: no clean line in the report"
+grep -q '^stub-gofmt ran: -l .*services/foo/foo.go' "$TMP/gofmt.log" \
+  && ok "gofmt clean: gofmt -l received a tracked Go file lint.sh was not handed" \
+  || bad "gofmt clean: gofmt -l never received services/foo/foo.go"
+grep -q -- ' -w' "$TMP/gofmt.log" \
+  && bad "gofmt clean: gofmt was asked to rewrite files (-w)" \
+  || ok "gofmt clean: gofmt only lists, never rewrites"
+grep -q 'scratch.go' "$TMP/gofmt.log" \
+  && bad "gofmt clean: an untracked Go file was checked" \
+  || ok "gofmt clean: an untracked Go file is out of scope"
+rm -f "$REPO/services/foo/scratch.go"
+
+# --- L: gofmt lists a file -> exit 1, and the report names it. ---------------
+make_wrapper 0; make_go 0; make_gofmt 0 services/foo/foo.go
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "gofmt drift: exit 1" || bad "gofmt drift: expected 1, got $rc"
+grep -q 'services/foo/foo.go is not gofmt-clean' "$TMP/out" \
+  && ok "gofmt drift: report names the file" \
+  || bad "gofmt drift: report does not name services/foo/foo.go"
+
+# --- M: gofmt cannot parse a file (exit 2, nothing listed) -> exit 1. --------
+# The listing is empty, so only the exit code shows a file went unchecked.
+make_wrapper 0; make_go 0; make_gofmt 2
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "gofmt error: exit 1, not read as clean" || bad "gofmt error: expected 1, got $rc"
+grep -q 'gofmt exit 2' "$TMP/out" && ok "gofmt error: report names the gofmt exit" \
+  || bad "gofmt error: report is silent about the gofmt exit"
+
+# --- N: no gofmt on PATH while Go files are tracked -> exit 1, fail-closed. --
+make_wrapper 0; make_go 0; rm -f "$STUB/gofmt"
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "gofmt missing: exit 1 (fail-closed)" || bad "gofmt missing: expected 1, got $rc"
+grep -q "'gofmt' not on PATH" "$TMP/out" && ok "gofmt missing: report names the missing gofmt" \
+  || bad "gofmt missing: report is silent about the missing gofmt"
+
+# --- O: the Go-file listing fails -> structural error (exit 2). --------------
+# An empty list from a failed git ls-files reads exactly like a tree with no Go
+# in it, which skips gofmt and passes. The git wrapper refuses only that listing
+# and hands every other git call to the real binary.
+make_wrapper 0; make_go 0; make_gofmt 0
+REAL_GIT="$(command -v git)"
+rm -f "$STUB/git"
+cat > "$STUB/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" ls-files "*"*.go"*) echo "stub-git: ls-files refused" >&2; exit 128 ;;
+esac
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$STUB/git"
+run_sut subject.sh
+[ "$rc" -eq 2 ] && ok "Go listing fails: structural error (exit 2)" || bad "Go listing fails: expected 2, got $rc"
+grep -q 'cannot enumerate tracked Go files' "$TMP/err" \
+  && ok "Go listing fails: error names the failed listing" \
+  || bad "Go listing fails: error is silent about the listing"
+rm -f "$STUB/git"; ln -s "$REAL_GIT" "$STUB/git"
 
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"
