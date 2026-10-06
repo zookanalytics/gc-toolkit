@@ -385,6 +385,54 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "with both listings readable the same bead passes — the warning was the probe, not the bead"
 clear_stores
 
+# --- 13. the cross-store arm: a live address that reads another store ---------
+# A rig-scope pool claims only beads in its own rig's store, so a bead routed at a
+# pool whose rig does not own the bead's store is offered by nobody however valid
+# the address — even while it sits in its own store's `bd ready`. Arm 1 (address
+# is live) and the offerable test (bead is in ITS store's ready/blocked) both miss
+# this; the store-reachability arm catches it. The roster carries each agent's
+# scope so the arm can tell which store an identity reads.
+cat > "$TMP/agents-scoped.json" <<EOF
+{"city_path":"$CITY","agents":[
+  {"qualified_name":"alpha/pack.polecat","scope":"rig"},
+  {"qualified_name":"beta/pack.polecat","scope":"rig"},
+  {"qualified_name":"pack.keeper","scope":"city"}]}
+EOF
+# A bead in the BETA store routed at alpha/pack.polecat (which reads ALPHA), and
+# offerable in its own (beta) store's `bd ready`: the false pass this arm closes.
+store beta "$(routed x-1 alpha/pack.polecat)"
+ready_store beta "$(routed x-1 alpha/pack.polecat)"; blocked_store beta
+OUT=$(AGENTS_JSON="$TMP/agents-scoped.json" run_check); RC=$?
+eq "$RC" "2" "a bead routed at a rig-scope pool that reads another store is an ERROR"
+has "$OUT" "x-1" "the cross-store finding names the bead"
+has "$OUT" "CrossStoreRouteError" "the finding ties it to the sling guard it mirrors"
+hasnt "$OUT" "no pool offers it and no queue shows it waiting" "it does not misreport an offerable bead with the generic stranded message"
+clear_stores
+
+# a same-store rig-scope route is not a cross-store finding (positive finding only)
+store alpha "$(routed x-2 alpha/pack.polecat)"
+ready_store alpha "$(routed x-2 alpha/pack.polecat)"; blocked_store alpha
+OUT=$(AGENTS_JSON="$TMP/agents-scoped.json" run_check); RC=$?
+eq "$RC" "0" "a same-store rig-scope route passes the cross-store arm"
+clear_stores
+
+# a city-scope identity reads the city store, so a rig-store bead routed at it
+# is cross-store too — the arm catches the reverse direction.
+store alpha "$(routed x-3 pack.keeper)"
+ready_store alpha "$(routed x-3 pack.keeper)"; blocked_store alpha
+OUT=$(AGENTS_JSON="$TMP/agents-scoped.json" run_check); RC=$?
+eq "$RC" "2" "a rig-store bead routed at a city-scope identity (reads the city store) is an ERROR"
+has "$OUT" "x-3" "the city-scope cross-store finding names the bead"
+clear_stores
+
+# an identity with no resolvable scope is not judged cross-store: the unscoped
+# roster of every case above never fired this arm, which is why those cases stand.
+store alpha "$(routed x-4 alpha/pack.polecat)"
+ready_store alpha "$(routed x-4 alpha/pack.polecat)"; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "with an unscoped roster the cross-store arm makes no finding"
+clear_stores
+
 echo
 echo "check-routed-work-claimable: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
