@@ -8,11 +8,12 @@
 #
 # Runs the REAL pool-slot-reap.sh with a stubbed `gc` (POOL_SLOT_REAP_GC) and a
 # stubbed incident ledger (POOL_SLOT_REAP_LEDGER): no live city, sessions, or
-# store. The stub answers `session list` and `rig list` from fixture files,
-# `bd show <id>` from a per-bead fixture (a `.second.json` fixture answers every
-# read after the first), and `bd list --db <store> --assignee <who>` from a
-# per-(store, assignee) fixture, `[]` when there is none. It records every
-# `session close` and every work query; the ledger stub records each append.
+# store. The stub answers `session list`, `rig list` and `config show` from
+# fixture files, `bd show <id>` from a per-bead fixture (a `.second.json`
+# fixture answers every read after the first), and `bd list --db <store>
+# --assignee <who>` from a per-(store, assignee) fixture, `[]` when there is
+# none. It records every `session close`, every work query and every config
+# read; the ledger stub records each append.
 # Covered:
 #   (KILLED)    a killed pool session asleep past the grace window is closed and
 #               recorded as one cleanup entry in the city ledger
@@ -31,6 +32,18 @@
 #   (WORK)      work open or in_progress under the id, session_name, alias, or a
 #               prior alias, in any store, keeps the bead
 #   (SLOTNAME)  work under the numbered slot name alone does not keep it
+#   (SLOTALIAS) a slotted bead of an ordinary numbered pool (no namepool, a cap
+#               other than 1, a dir-less template too) is closed when only its
+#               alias or a prior alias holds work, and those are never searched;
+#               its id still keeps it
+#   (STABLE)    a namepool member's alias (an overflow slot name included), a
+#               canonical singleton's alias, the alias of a template matching
+#               agents of both kinds or no agent, and the alias of an unslotted
+#               bead all keep the bead
+#   (CFGFAIL)   an agent config that cannot be read (garbled, not ok, no agent
+#               table) or that fails core's validation leaves every alias an
+#               owner and the pass running
+#   (CFGCITY)   the config is read from the roster's city
 #   (SESSIONROW) a session bead under the id is not work
 #   (QUERY)     the work query asks every store for open,in_progress with
 #               --include-infra --include-ephemeral --limit 0
@@ -68,9 +81,9 @@ hasnt(){ case "$1" in *"$2"*) bad "$3 (unexpected '$2' in: $1)" ;; *) ok "$3" ;;
 command -v jq >/dev/null 2>&1 || { bad "jq required for this test"; exit 1; }
 
 mkdir -p "$TMP/bin" "$TMP/beads" "$TMP/work"
-export SESSIONS_FILE="$TMP/sessions.json" ROSTER_FILE="$TMP/roster.json"
+export SESSIONS_FILE="$TMP/sessions.json" ROSTER_FILE="$TMP/roster.json" CONFIG_FILE="$TMP/config.json"
 export BEADS_DIR="$TMP/beads" WORK_DIR="$TMP/work"
-export CALLS="$TMP/calls" QUERIES="$TMP/queries" LEDGER_CALLS="$TMP/ledger"
+export CALLS="$TMP/calls" QUERIES="$TMP/queries" LEDGER_CALLS="$TMP/ledger" CONFIG_CALLS="$TMP/config-calls"
 export POOL_SLOT_REAP_GC="$TMP/bin/gc" POOL_SLOT_REAP_LEDGER="$TMP/bin/ledger"
 
 # --- gc stub ------------------------------------------------------------------
@@ -85,6 +98,15 @@ case "$1 ${2:-}" in
     printf 'rig list\n' >> "$CALLS"
     if [ -n "${ROSTER_BROKEN:-}" ]; then echo "gc: not json here"; exit 0; fi
     cat "$ROSTER_FILE" ;;
+  "config show")
+    printf '%s\n' "$all" >> "$CONFIG_CALLS"
+    case "${CONFIG_BROKEN:-}" in
+      garbled)  echo "gc: not json here"; exit 0 ;;
+      notok)    jq -n '{ok: false, error: {code: "city_resolve_failed"}}'; exit 1 ;;
+      noagents) jq -n '{ok: true, config: {}, validation: {ok: true}}'; exit 0 ;;
+      invalid)  jq '.validation = {ok: false, errors: ["agent \"x\": invalid"]}' "$CONFIG_FILE"; exit 0 ;;
+    esac
+    cat "$CONFIG_FILE" ;;
   "bd show")
     id="$3"
     n="$(cat "$BEADS_DIR/$id.reads" 2>/dev/null || echo 0)"; n=$((n + 1))
@@ -156,11 +178,25 @@ sessions() { # <id:state:closed>...
     printf ']}'; } > "$SESSIONS_FILE"
 }
 reset_world() {
-  : > "$CALLS"; : > "$QUERIES"; : > "$LEDGER_CALLS"
+  : > "$CALLS"; : > "$QUERIES"; : > "$LEDGER_CALLS"; : > "$CONFIG_CALLS"
   rm -f "$BEADS_DIR"/* "$WORK_DIR"/*
   jq -n '{city_path: "/city", rigs: [{name: "city", path: "/city", hq: true},
                                      {name: "a", path: "/city/rigs/a"},
                                      {name: "b", path: "/city/rigs/b"}]}' > "$ROSTER_FILE"
+  # The configured agents, in `gc config show --json`'s shape: polecat,
+  # unbounded and the city-scoped dog are ordinary numbered pools; crew and
+  # crew-list are namepools (by file, by list); solo is a canonical singleton;
+  # twin is the same dir and name under two bindings, one of each kind.
+  jq -n '{ok: true, validation: {ok: true, warnings: [], errors: []}, config: {Agents: [
+    {Dir: "rig", Name: "polecat",   Namepool: "", NamepoolNames: null, MaxActiveSessions: 4},
+    {Dir: "rig", Name: "unbounded", Namepool: "", NamepoolNames: null, MaxActiveSessions: null},
+    {Name: "dog",                   Namepool: "", NamepoolNames: null, MaxActiveSessions: 2},
+    {Dir: "rig", Name: "crew",      Namepool: "/pack/namepool.txt", NamepoolNames: null, MaxActiveSessions: 4},
+    {Dir: "rig", Name: "crew-list", Namepool: "", NamepoolNames: ["max"], MaxActiveSessions: 4},
+    {Dir: "rig", Name: "solo",      Namepool: "", NamepoolNames: null, MaxActiveSessions: 1},
+    {Dir: "rig", Name: "twin",      Namepool: "", NamepoolNames: null, MaxActiveSessions: 3},
+    {Dir: "rig", Name: "twin",      Namepool: "/pack/namepool.txt", NamepoolNames: ["ripley"], MaxActiveSessions: 3}
+  ]}}' > "$CONFIG_FILE"
 }
 run() { OUT="$(bash "$SUT" "$@" 2>"$TMP/stderr")"; RC=$?; ERR="$(cat "$TMP/stderr")"; CLOSED="$(cat "$CALLS")"; }
 
@@ -270,6 +306,85 @@ has "$(grep -- '--assignee s-killed ' "$QUERIES" | head -1)" "--status open,in_p
 hasnt "$Q" "--assignee rig/pack.polecat-2 " "the numbered slot name is never searched as an owner"
 has "$Q" "--assignee rig__polecat-s-killed " "the session_name is searched"
 has "$Q" "--assignee old/one " "every prior alias is searched"
+
+# (CFGCITY) the agent config is read once, from the city the roster names.
+eq "$(grep -c . "$CONFIG_CALLS")" "1" "the agent config is read once per pass"
+has "$(cat "$CONFIG_CALLS")" "config show --json --city /city" "the agent config is read from the roster's city"
+hasnt "$ERR" "could not read a valid agent config" "a readable, valid config raises no warning"
+
+# --- (SLOTALIAS / STABLE) which aliases name the session ------------------------
+# Every bead here is asleep past the window with work under its alias or a prior
+# alias only, except s-slot-id, whose work is under its id. Whether that alias
+# is searched turns on the pool its configured agent runs, not on its shape:
+# s-slot-alias, s-solo, s-np-over and s-twin all carry <template>-<slot>.
+reset_world
+pool_bead s-slot-alias '{"pool_slot":"2","alias":"rig/pack.polecat-2"}'
+pool_bead s-slot-hist  '{"pool_slot":"3","agent_name":"rig/pack.polecat-3","alias":"","alias_history":"rig/pack.polecat-1,rig/pack.polecat-3"}'
+pool_bead s-unbounded  '{"pool_slot":"2","template":"rig/pack.unbounded","agent_name":"rig/pack.unbounded-2","alias":"rig/pack.unbounded-2"}'
+pool_bead s-citydog    '{"pool_slot":"1","template":"pack.dog","agent_name":"pack.dog-1","alias":"pack.dog-1"}'
+pool_bead s-slot-id    '{"pool_slot":"5","agent_name":"rig/pack.polecat-5","alias":"rig/pack.polecat-5"}'
+pool_bead s-np-alias   '{"pool_slot":"1","template":"rig/pack.crew","agent_name":"rig/pack.furiosa","alias":"rig/pack.furiosa"}'
+pool_bead s-np-over    '{"pool_slot":"3","template":"rig/pack.crew","agent_name":"rig/pack.crew-3","alias":"rig/pack.crew-3"}'
+pool_bead s-np-list    '{"pool_slot":"2","template":"rig/pack.crew-list","agent_name":"rig/pack.crew-list-2","alias":"rig/pack.crew-list-2"}'
+pool_bead s-solo       '{"pool_slot":"1","template":"rig/pack.solo","agent_name":"rig/pack.solo-1","alias":"rig/pack.solo-1"}'
+pool_bead s-twin       '{"pool_slot":"2","template":"rig/pack.twin","agent_name":"rig/pack.twin-2","alias":"rig/pack.twin-2"}'
+pool_bead s-unknown    '{"pool_slot":"2","template":"rig/pack.gone","agent_name":"rig/pack.gone-2","alias":"rig/pack.gone-2"}'
+pool_bead s-noslot     '{"agent_name":"rig/pack.polecat-4","alias":"rig/pack.polecat-4"}'
+work /city/rigs/a/.beads rig/pack.polecat-2    tk-slot-alias
+work /city/rigs/b/.beads rig/pack.polecat-1    tk-slot-hist
+work /city/.beads        rig/pack.unbounded-2  tk-unbounded
+work /city/.beads        pack.dog-1            tk-citydog
+work /city/rigs/a/.beads s-slot-id             tk-held-id
+work /city/rigs/a/.beads rig/pack.furiosa      tk-np-alias
+work /city/rigs/b/.beads rig/pack.crew-3       tk-np-over
+work /city/.beads        rig/pack.crew-list-2  tk-np-list
+work /city/rigs/a/.beads rig/pack.solo-1       tk-solo
+work /city/rigs/a/.beads rig/pack.twin-2       tk-twin
+work /city/rigs/b/.beads rig/pack.gone-2       tk-unknown
+work /city/rigs/a/.beads rig/pack.polecat-4    tk-noslot
+SLOT_CASES=(s-slot-alias s-slot-hist s-unbounded s-citydog s-slot-id s-np-alias s-np-over
+  s-np-list s-solo s-twin s-unknown s-noslot)
+specs=()
+for id in "${SLOT_CASES[@]}"; do specs+=("$id:asleep:false"); done
+sessions "${specs[@]}"
+run
+eq "$RC" "0" "the alias pass exits 0"
+for id in s-slot-alias s-slot-hist s-unbounded s-citydog; do
+  has "$CLOSED" "close $id" "$id, whose only work is under its slot alias, is closed"
+done
+for id in s-slot-id s-np-alias s-np-over s-np-list s-solo s-twin s-unknown s-noslot; do
+  hasnt "$CLOSED"$'\n' "close $id"$'\n' "$id is not closed"
+done
+eq "$(grep -c '^close ' "$CALLS")" "4" "exactly the four numbered-pool beads are closed"
+has "$OUT" "closed 4, kept 8, skipped 0, deferred 0" "the alias pass counts four closed and eight kept"
+has "$OUT" "s-slot-id rig/pack.polecat-5 kept: work tk-held-id is assigned to it" "a numbered-pool bead's id still keeps it"
+has "$OUT" "s-np-alias rig/pack.furiosa kept: work tk-np-alias is assigned to it" "a namepool name keeps its bead"
+has "$OUT" "s-np-over rig/pack.crew-3 kept: work tk-np-over is assigned to it" "a namepool overflow slot name keeps its bead"
+has "$OUT" "s-np-list rig/pack.crew-list-2 kept: work tk-np-list is assigned to it" "a namepool given as a name list keeps its bead"
+has "$OUT" "s-solo rig/pack.solo-1 kept: work tk-solo is assigned to it" "a canonical singleton's alias keeps its bead"
+has "$OUT" "s-twin rig/pack.twin-2 kept: work tk-twin is assigned to it" "a template matching agents of both kinds keeps its alias"
+has "$OUT" "s-unknown rig/pack.gone-2 kept: work tk-unknown is assigned to it" "a template matching no agent keeps its alias"
+has "$OUT" "s-noslot rig/pack.polecat-4 kept: work tk-noslot is assigned to it" "an unslotted bead's alias keeps it"
+Q="$(cat "$QUERIES")"
+for who in rig/pack.polecat-2 rig/pack.polecat-1 rig/pack.polecat-3 rig/pack.unbounded-2 pack.dog-1 rig/pack.polecat-5; do
+  hasnt "$Q" "--assignee $who " "a numbered pool's slot alias $who is never searched"
+done
+has "$Q" "--assignee rig__polecat-s-slot-alias " "a numbered-pool bead's session_name is still searched"
+
+# --- (CFGFAIL) an unreadable agent config leaves every alias an owner -----------
+for mode in garbled notok noagents invalid; do
+  reset_world
+  pool_bead s-slot-alias '{"pool_slot":"2","alias":"rig/pack.polecat-2"}'
+  pool_bead s-clean
+  work /city/rigs/a/.beads rig/pack.polecat-2 tk-slot-alias
+  sessions s-slot-alias:asleep:false s-clean:asleep:false
+  CONFIG_BROKEN=$mode run
+  eq "$RC" "0" "a $mode config does not fail the pass"
+  has "$OUT" "s-slot-alias rig/pack.polecat-2 kept: work tk-slot-alias is assigned to it" \
+    "with a $mode config the slot alias is still searched as an owner"
+  has "$CLOSED" "close s-clean" "with a $mode config a bead with no work under any identity still closes"
+  has "$ERR" "could not read a valid agent config" "a $mode config is named on stderr"
+done
 
 # --- (STOREFAIL) an unreadable store skips the bead -----------------------------
 reset_world

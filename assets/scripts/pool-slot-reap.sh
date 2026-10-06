@@ -25,7 +25,8 @@
 #     context-churn or rate_limit sleep, no held_until, quarantined_until or
 #     wait_hold marker, and no pin_awake;
 #   - no bead in any rig's store is open or in_progress under its id, its
-#     session_name, its alias, its configured named identity, or a prior alias;
+#     session_name, its configured named identity, or, unless it sits in an
+#     ordinary numbered pool (below), its alias or a prior alias;
 #   - a second read just before the close finds the same lifecycle facts.
 #
 # Runtime liveness comes from the persisted state. The controller heals a row
@@ -44,6 +45,11 @@
 # an identity this pass searches for work. The slot passes to whichever session
 # holds it next, and core's own work guards never treat it as an owner. Work
 # assigned under it belongs to the slot, and it is the slot this close frees.
+# An older bead of an ordinary numbered pool can also carry the slot name as its
+# alias or a prior alias, so for such a bead neither is searched. The configured
+# agent decides, as it does for core's guards: a slotted bead whose agent has no
+# namepool and a cap other than 1 is in an ordinary numbered pool. A namepool
+# name or a canonical singleton's name stays with its session, so it is searched.
 #
 # Blocked work does not keep a bead open either. It is parked behind a hold a
 # human or an edge releases, and nothing executes it until that release
@@ -61,7 +67,10 @@
 #
 # Bias: an unreadable probe closes NOTHING. A bead that cannot be read, a store
 # that cannot be queried, or a second read that differs from the first leaves
-# the bead open for a later pass.
+# the bead open for a later pass. An alias the pass cannot place in a pool kind
+# is searched as an owner. That covers every alias when the agent config cannot
+# be read or fails core's validation, and the aliases of a bead whose template
+# matches no configured agent or agents of both kinds.
 #
 # Environment:
 #   POOL_SLOT_REAP_GRACE_S   seconds a bead must have been asleep (default 900)
@@ -83,7 +92,7 @@ DRY_RUN=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
-        -h|--help) sed -n '2,77p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,/^set -u/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//;/^set -u/d'; exit 0 ;;
         *) echo "$PROG: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -156,6 +165,25 @@ if [ -z "$CITY_PATH" ] || [ "${#STORE_LIST[@]}" -eq 0 ]; then
     exit 1
 fi
 
+# The same city's configured agents, each marked stable when its pool members
+# keep their names (a namepool, or a cap of 1) and not when its slots rebind.
+# identities() reads this to tell an ordinary numbered pool's slot alias from a
+# name that stays with its session. An answer with no agent list fails the read,
+# and a failed read leaves AGENTS null, so every alias is searched as an owner.
+# So does a config that fails core's validation, because the controller refuses
+# to load one and keeps running the config it had.
+cfg_json="$(call "$GC" config show --json --city "$CITY_PATH" 2>/dev/null)" || cfg_json=""
+AGENTS="$(printf '%s' "$cfg_json" | jq -c '
+    if .validation.ok == true then
+        [.config.Agents[] | {dir: ((.Dir // "") | tostring), name: ((.Name // "") | tostring),
+            stable: ((((.Namepool // "") | tostring) != "") or (((.NamepoolNames // []) | length) > 0)
+                     or (.MaxActiveSessions == 1))}]
+    else null end' 2>/dev/null)" || AGENTS=""
+if [ -z "$AGENTS" ] || [ "$AGENTS" = "null" ]; then
+    AGENTS="null"
+    echo "$PROG: could not read a valid agent config (gc config show --json) — every alias is searched as an owner this pass" >&2
+fi
+
 # One bead's lifecycle verdict, read from a `gc bd show --json` answer:
 #   <verdict>\x1f<detail>\x1f<slot>\x1f<sleep_reason>\x1f<slept_at>\x1f<fingerprint>
 # verdict is eligible, or keep/skip with the reason in detail. The fingerprint
@@ -203,14 +231,26 @@ classify() { # <bead-id> <show-json>
 }
 
 # The identities work can be assigned to this session under: its id, its
-# session_name, its alias, its configured named identity, and any prior alias.
+# session_name, its configured named identity, and its alias and any prior
+# alias. The aliases are left out for a bead in an ordinary numbered pool: one
+# with a pool_slot whose template names only agents AGENTS marks not stable. A
+# template names an agent by its dir, the part before the last "/", and its
+# name, the part after the last "." (agent names hold no dot). The binding
+# between them is not in the config read, so agents of two bindings can match,
+# and the aliases are left out only when none of them is stable.
 identities() { # <bead-id> <show-json>
-    printf '%s' "$2" | jq -r --arg id "$1" '
+    printf '%s' "$2" | jq -r --arg id "$1" --argjson agents "$AGENTS" '
         (if type == "array" then (map(select((.id // "") == $id)) | first)
          elif type == "object" and (.id // "") == $id then . else null end) as $b
         | ($b.metadata // {}) as $m
-        | ([$b.id, $m.session_name, $m.alias, $m.configured_named_identity]
-           + ((($m.alias_history // "") | tostring) | split(",")))
+        | def s(k): ($m[k] // "") | tostring | gsub("^\\s+|\\s+$"; "");
+        (s("template")) as $t
+        | ($t | if test("/") then sub("/[^/]*$"; "") else "" end) as $dir
+        | ($t | sub("^.*/"; "") | sub("^.*\\."; "")) as $name
+        | [($agents // [])[] | select(.dir == $dir and .name == $name)] as $cfg
+        | (s("pool_slot") != "" and ($cfg | length) > 0 and ($cfg | all(.stable | not))) as $numbered
+        | ([$b.id, s("session_name"), s("configured_named_identity")]
+           + (if $numbered then [] else [s("alias")] + (s("alias_history") | split(",")) end))
         | map((. // "") | tostring | gsub("^\\s+|\\s+$"; "")) | map(select(. != "")) | unique | .[]' 2>/dev/null
 }
 
