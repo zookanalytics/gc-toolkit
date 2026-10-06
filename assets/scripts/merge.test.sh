@@ -439,6 +439,19 @@ echo '[]' > "$GH_DIR/reviews_21.json"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review" "a plain correctness anchor, never opted in, is held for approval just the same"
 
+echo "# an unresolved acting login holds even an approved, green PR"
+# With no login the city cannot tell an external approver from its own review,
+# so the universal rule holds every PR rather than count an approval it cannot
+# attribute.
+store "[$(anchor A3 63), $(rev A3)]"
+printf '%s' "$(prview 63 OPEN CLEAN)" > "$GH_DIR/pr_view_63.json"
+approved 63
+: > "$STUB_GH_LOG"
+out=$(STUB_SELF_LOGIN="" "$SUT" 2>&1)
+has "$out" "merge: WARN acting login unresolved; cannot distinguish an external approver from the city's own review" "an unresolved login warns that the approval gate holds every PR"
+has "$out" "PR#63 approval required but the acting login is unresolved; merge held (anchor A3)" "…and holds the approved, green PR"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
 echo "# a standing CHANGES_REQUESTED vetoes every candidate"
 store "[$(anchor A4 23), $(rev A4)]"
 printf '%s' "$(prview 23 OPEN CLEAN)" > "$GH_DIR/pr_view_23.json"
