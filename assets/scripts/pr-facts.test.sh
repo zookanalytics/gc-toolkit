@@ -3224,18 +3224,14 @@ eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same
 # records the new posture value, and --route-comments-only routes the feedback
 # into live work on the anchor. Each re-derives the label there, so the PR list
 # shows the review without waiting for the full pass at the tail. These cases run
-# the real writer over the real derivation (gctk pr-status), so the label read
-# back off the PR fixture is what the shared code path decided. The writer gets
-# the built gctk through a wrapper, because an exported GCTK_BIN would also swap
-# lifecycle.sh onto its gctk port; the wrapper is removed after these cases.
+# the real writer over the real derivation (gctk pr-status, from the binary
+# harness_build_gctk built), so the label read back off the PR fixture is what
+# the shared code path decided. The scripts dir carries no label writer, so
+# elsewhere in this file pr-facts.sh's best-effort label call finds nothing to
+# run. A wrapper that execs the real writer is put there for these cases and
+# removed after them.
 echo "# the status: label moves in the arm that records a review"
-if command -v go >/dev/null 2>&1 \
-   && ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1; then
-  ok "gctk built for the label derivation"
-else
-  bad "gctk did not build; the status: label is derived by gctk alone, so the label cases below were NOT exercised — $(tail -3 "$TMP/gctk-build.log" 2>/dev/null | tr '\n' ' ')"
-fi
-printf '#!/usr/bin/env bash\nGCTK_BIN=%q exec %q "$@"\n' "$TMP/gctk" "$HERE/pr-status-label.sh" > "$SD/pr-status-label.sh"
+printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$HERE/pr-status-label.sh" > "$SD/pr-status-label.sh"
 chmod +x "$SD/pr-status-label.sh"
 # The labels on a PR view fixture, sorted and comma-joined.
 pv_labels() { jq -r '[.labels[]?.name] | sort | join(",")' "$GH_DIR/pr_view_$1.json"; }
