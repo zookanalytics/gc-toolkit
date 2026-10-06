@@ -259,13 +259,13 @@ id = "arm-implementation"
 title = "File the implementation child and arm it behind the design"
 needs = ["arm-design"]
 description = """
-File one implementation child that builds the initiative per the approved design.
+File one implementation child that builds the initiative per the design.
 For `design_gated=true`, hold it behind the design child with a `blocks` edge and
 arm a deferred dispatch, so the design's closure is what sends it to the pool.
 For `design_gated=false`, sling it now to run in parallel.
 
 One implementation child, not a fan-out: the design defines the breakdown, so the
-implementation child carries "split into multiple beads if the approved design
+implementation child carries "split into multiple beads if the design
 calls for it" and splits itself when it runs — the design does not exist yet to
 enumerate the pieces here.
 

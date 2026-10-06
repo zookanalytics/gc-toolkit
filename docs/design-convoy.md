@@ -53,8 +53,8 @@ only after every setup write it made has landed and read back. A link or
 unstamped, so the resume re-runs that arm rather than skipping it.
 
 The implementation is one child, not a fan-out: the design defines the
-breakdown, so the child carries "split into multiple beads if the approved
-design calls for it" and splits itself when it runs. Enumerating pieces here
+breakdown, so the child carries "split into multiple beads if the design
+calls for it" and splits itself when it runs. Enumerating pieces here
 would guess at a breakdown the design has not settled yet.
 
 ### convoy-seed.sh — the branch cut
