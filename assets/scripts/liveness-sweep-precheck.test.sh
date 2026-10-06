@@ -771,6 +771,31 @@ eq "$MISSING" "" "every classifier candidate also survives the precheck (contain
     && ok "the precheck is the LOOSER filter ($PRE_N survivors vs $CLASSIFY_N candidates)" \
     || bad "the precheck is the LOOSER filter" "precheck $PRE_N, classifier $CLASSIFY_N — the non-local exclusions are not showing up"
 
+echo "── the no-resolver census reads each lane's marker under its token's own case ──"
+# The extracted block runs with HAVE_RESOLVER=0, the sweep's fallback, which takes
+# the gates from the check_set itself. A mixed-case token reads check.<Token> —
+# the key signoff stamps — so an all-green anchor is gated, while the same anchor
+# missing that marker is still a candidate (the positive control).
+MFIX="$TMP/mfix"; mkdir -p "$MFIX"
+cat > "$MFIX/ready.json" <<'JSON'
+[
+  {"id":"f-mixed-green","title":"pre-open, mixed-case lanes green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}},
+  {"id":"f-mixed-red","title":"pre-open, mixed-case lane not green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green"}}
+]
+JSON
+READY="$MFIX/ready.json"; export READY
+# shellcheck disable=SC1090
+. "$TMP/classify.sh"
+MIXED_IDS=",$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")'),"
+case "$MIXED_IDS" in
+  *",f-mixed-green,"*) bad "an all-green mixed-case anchor is gated, not a candidate" "candidates: $MIXED_IDS" ;;
+  *) ok "an all-green mixed-case anchor is gated, not a candidate" ;;
+esac
+case "$MIXED_IDS" in
+  *",f-mixed-red,"*) ok "…while one missing its check.Arch marker is still a candidate" ;;
+  *) bad "…while one missing its check.Arch marker is still a candidate" "candidates: $MIXED_IDS" ;;
+esac
+
 echo "── holder liveness gates the visit exclusions (mirrors liveness-sweep.sh) ──"
 # A live-held visit excludes its subject (the pass can skip it); a dead-held
 # visit does not, so its subject survives and the pass runs. A visit bead left
