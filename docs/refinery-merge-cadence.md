@@ -170,7 +170,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    the created PR by number, refuse a moved head, replay the verdict as a comment
    (never an approval), then one `lifecycle.sh` transition carrying
    `pr_url`/`pr_number`/`merged_target`. A later pass flips a draft to ready once
-   its `open-as-draft` checks are green. Each anchor's head comes from one fetch
+   its `open-as-draft` checks are green. That draft-to-ready walk runs after the
+   pre-open walk, under the same deadline, and rotates on `pr-open.cursor.ready`
+   with at least one draft visited every pass, because a draft the arm holds
+   stays a candidate. Each anchor's head comes from one fetch
    of origin's branches per pass, with the API answering when that fetch could
    not and confirming the head before any create, so an anchor parked on a red
    lane costs no API read for its head. Its gates are resolved once at that

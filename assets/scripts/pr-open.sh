@@ -26,7 +26,8 @@
 # Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
 # anchors gate-ensure last recorded as settled are visited first and the rest
 # after them, each group in a rotation of its own, and no new anchor starts
-# past the deadline.
+# past the deadline. The draft-to-ready arm's walk is paced the same way, on a
+# rotation of its own.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
 
@@ -719,16 +720,32 @@ fi
 # reads it again and gate-ensure dispatches its later phases. A store that would
 # not enumerate fails the arm loudly (exit 1 after the summary), the way the
 # pre-open arm does, rather than report nothing to ready.
+# This walk runs after the pre-open walk, under the same deadline, and rotates on
+# a cursor of its own (pace-lib.sh). A draft this arm holds stays a candidate (an
+# operator's hold, a must-fix finding, a gate not yet green), so in a fixed order
+# the same drafts would lead every pass while the deadline kept the drafts behind
+# them waiting. One draft is always visited, so this walk still makes progress on
+# a pass whose pre-open walk reached the deadline.
 READY_FAILED=""
 if ! READY_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request); then
   echo "$PROG: could not enumerate pull_request anchors; the draft-to-ready arm did not run, failing loudly rather than reporting nothing to ready" >&2
   READY_FAILED=1; READY_ANCHORS="[]"
 fi
 readied=0
-# One jq does the prefilter and pulls the fields, unit-separated so an empty field
-# (an unset hold) keeps its place.
+# One jq does the prefilter, the candidates are put in walk order, and a second jq
+# pulls the fields, unit-separated so an empty field (an unset hold) keeps its
+# place.
+READY_CURSOR="${CURSOR:+$CURSOR.ready}"
+ready_rows=$(printf '%s' "$READY_ANCHORS" | jq -c '
+    .[]?
+    | select(((.metadata.opened_as_draft // "") | tostring) != ""
+             and ((.metadata.draft_readied // "") | tostring) == "")' 2>/dev/null \
+  | pace_order "$READY_CURSOR")
+ready_n=$(printf '%s' "$ready_rows" | awk 'NF { n++ } END { print n + 0 }')
+pace_start "$READY_CURSOR" "$DEADLINE"
 while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
   [ -n "$rid" ] && [ -n "$rnum" ] || continue
+  pace_visit rest "$rid"; case $? in 1) continue ;; 2) break ;; esac
   # A disposed PR is pr-facts.sh's to close; it is never surfaced.
   [ -z "$rdisp" ] || continue
   # It may be a draft: ask GitHub (the one read this arm pays, bounded to
@@ -790,15 +807,20 @@ RGATESEOF
     echo "$PROG: $rid PR#$rnum draft gates green but 'gh pr ready' did not land; stays draft (retry next pass)" >&2
   fi
 done <<READY_EOF
-$(printf '%s' "$READY_ANCHORS" | jq -r '
-    .[]?
-    | select(((.metadata.opened_as_draft // "") | tostring) != ""
-             and ((.metadata.draft_readied // "") | tostring) == "")
-    | [ (.id // ""), (.metadata.check_set // ""), (.metadata.pr_number // ""),
-        (.metadata.merge_hold // ""), (.metadata.rebase_hold // ""),
-        (.metadata["gc.pr_close_disposition_kind"] // "") ]
+$(printf '%s\n' "$ready_rows" | jq -r '
+    [ (.id // ""), (.metadata.check_set // ""), (.metadata.pr_number // ""),
+      (.metadata.merge_hold // ""), (.metadata.rebase_hold // ""),
+      (.metadata["gc.pr_close_disposition_kind"] // "") ]
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)
 READY_EOF
+pace_end
+if [ "$ready_n" -gt 0 ]; then
+  if [ -n "$PACE_RESUME_AT" ]; then
+    echo "$PROG: visited $PACE_VISITED of $ready_n draft PRs before the deadline; the next pass resumes at $PACE_RESUME_AT"
+  else
+    echo "$PROG: visited $PACE_VISITED of $ready_n draft PRs"
+  fi
+fi
 
 echo "$PROG: $opened opened, $flipped flipped, $readied readied, $held held, $skipped skipped"
 [ -z "$READY_FAILED" ] || exit 1

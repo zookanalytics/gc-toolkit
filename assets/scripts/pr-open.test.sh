@@ -783,6 +783,43 @@ out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 eq "$(meta dh1 draft_readied)" "sha-dh1" "a held anchor whose PR reads ready records draft_readied"
 hasnt "$(cat "$STUB_GH_LOG")" "pr ready 89" "…and nothing is flipped"
 
+echo "# pacing: the draft-to-ready walk rotates on a cursor of its own under --deadline/--cursor"
+# Three drafts the refinery opened, each held, so a visit reads the PR and leaves
+# it a candidate. A pre-open anchor shares the store, so the pre-open walk runs
+# first under the same deadline. A deadline of epoch 1 has always passed, so a
+# pass visits one pre-open anchor and then one draft.
+for n in 111 112 113; do
+  printf '%s' "$(prrow "$n" OPEN "polecat/pd$n" "sha-pd$n" main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_$n.json"
+done
+store "[$(pre PQ1 polecat/pq1),
+        $(pr_anchor pd111 polecat/pd111 111 'correctness,demo' sha-pd111 | jq -c '.metadata.merge_hold="true"'),
+        $(pr_anchor pd112 polecat/pd112 112 'correctness,demo' sha-pd112 | jq -c '.metadata.merge_hold="true"'),
+        $(pr_anchor pd113 polecat/pd113 113 'correctness,demo' sha-pd113 | jq -c '.metadata.merge_hold="true"')]"
+RCUR="$TMP/ready.cursor"; rm -f "$RCUR" "$RCUR.first" "$RCUR.ready"
+drafts() { grep -o 'pr view 11[1-3]' "$STUB_GH_LOG" | awk '{print $3}' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1); rc=$?
+eq "$rc" 0 "a paced pass over drafts exits 0"
+has "$out" "visited 1 of 1 pre-open anchors" "the pre-open walk visits its anchor first"
+eq "$(drafts)" "111" "past the deadline the draft walk still visits one draft"
+has "$out" "visited 1 of 3 draft PRs before the deadline; the next pass resumes at pd112" "the pass names the draft walk's pacing and where it resumes"
+eq "$(cat "$RCUR.ready" 2>/dev/null)" "pd111" "the draft walk records its progress on a cursor of its own"
+eq "$(cat "$RCUR" 2>/dev/null)" "PQ1" "…apart from the pre-open walk's"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1)
+eq "$(drafts)" "112" "the next pass resumes after the cursor, so a held draft does not lead every pass"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1)
+eq "$(drafts)" "113" "the third pass reaches the last draft"
+has "$out" "the next pass resumes at pd111" "…and the rotation wraps to the lowest id"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline "$(( $(date +%s) + 600 ))" --cursor "$RCUR" 2>&1)
+eq "$(drafts)" "111,112,113" "a deadline that has not passed visits every draft"
+has "$out" "visited 3 of 3 draft PRs" "…and reports the whole walk"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(drafts)" "111,112,113" "with no pacing args the draft walk is unbounded"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
