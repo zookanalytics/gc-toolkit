@@ -1,6 +1,6 @@
 ---
 name: finalize-gate
-description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — and the open-visit clause that holds finalization while a conversation is owed on that bead.
+description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — with the open-visit clause that holds finalization while a conversation is owed on that bead, and the orphan-gate clause that holds it while a human gate on the bead has lost its conversation.
 ---
 
 # The finalize gate
@@ -54,6 +54,34 @@ any open `task_kind=visit` covers the bead:
 A `tracks` edge is non-blocking. So the gate holds only this bead's finalization:
 it never consults the bead's readiness, and it never reaches the bead's children.
 A visit on an epic holds the epic's own close and leaves every child free to move.
+
+### Clause: no orphan gate
+
+An orphan human gate on this bead refuses its finalization too. A converse hold
+can leave a human demand gate that names this bead in `gc.demand_for`, and the
+bead's work blocks on it. The gate's `gc.gate_visit` names the visit that
+carries its decision, and `gate-visit-sweep` never re-offers a gate that carries
+that stamp. So when the visit closes without a decision, the gate stays open,
+keeps blocking the bead, and has no conversation left to ask for one. The
+no-open-visit clause cannot see this case, because the visit is already closed.
+
+The clause lists every open, in-progress or blocked bead carrying
+`gc.demand_for`, with `--include-gates`, since a plain `gc bd list` hides gates.
+It keeps the unassigned ones that name this bead, because an assigned gate is a
+person's task and not a decision a visit carries. A kept gate is an orphan when
+its `gc.gate_visit` names a visit that is neither open nor in progress: closed,
+missing, or unreadable. A gate with no `gc.gate_visit` is not an orphan, since
+the sweep will offer it a visit. Neither is a gate stamped `skip`, the
+operator's suppression, or `filed`, the sweep's stamp for a visit it filed
+without learning its id.
+
+The refusal names the two ways to clear an orphan. Re-ask it with
+`gc bd update <gate> --unset-metadata gc.gate_visit`, so the sweep offers a fresh
+visit, or resolve it with `gc bd gate resolve <gate>`. `gc-helm.sh dismiss`
+holds until each linked gate is resolved or re-asked, and applies those
+decisions before it closes the visit. This clause is the backstop for any other
+path that closes a visit and leaves its gate. A gate list that does not read, or
+does not answer with a JSON array, refuses the finalization.
 
 ## Fail closed
 
