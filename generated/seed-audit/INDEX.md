@@ -71,7 +71,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 5,569 | 1,392 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,085 | 1,521 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
@@ -83,7 +83,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,130 | 782 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,446 | 861 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
