@@ -58,5 +58,17 @@ Blast radius was those two lanes; every other open gating anchor carried a
 modern `signoff_verdict=approve` backing or a GitHub approval, so no legitimate
 green was withdrawn.
 
+## The documented rule
+
+Three documents still stated the removed inference: the `signoff_verdict` entry
+in the registry (`lifecycle/lifecycle.toml`), the I7 invariant row in
+`docs/component-model.md`, and the check's own description
+(`doctor/check-gate-marker-provenance/doctor.toml`). The operator ruled (visit
+tk-rc4qbm7) that the registry and the I7 text be amended in place before merge.
+The check's description states the same I7 rule, so it was amended with them.
+All three now state the rule the readers enforce. A close with no
+`signoff_verdict` backs no lane locally, and only an APPROVED GitHub review
+corroborates a lane resting on one.
+
 Follows [[../tk-snb0di/decision.md]] (the two-arm repurpose of this check) and
 the lane model in [[../tk-ztapg/review-cycle-architecture.md]].
