@@ -58,11 +58,12 @@ visit() { # id anchor [status]
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"visit: %s","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
     "$1" "${3:-open}" "$2" "$2"
 }
-# A non-city APPROVED review at the live head (sha-<num>), which the UNIVERSAL
-# approval merge rule requires of every PR. A test whose anchor should reach the
-# CLEAN/BLOCKED/re-read/merge stages must carry one; a test that holds before the
-# approval gate (merge_hold, duplicate, retarget, non-green lane, unclosed child,
-# tracking_only) never reads it, so one is harmless there too.
+# A non-city APPROVED review, given at the live head (sha-<num>) unless [oid]
+# names another commit. The UNIVERSAL approval merge rule requires one standing
+# on every PR, whatever commit it was given at. A test whose anchor should reach
+# the CLEAN/BLOCKED/re-read/merge stages must carry one; a test that holds before
+# the approval gate (merge_hold, duplicate, retarget, non-green lane, unclosed
+# child, tracking_only) never reads it, so one is harmless there too.
 approved() { # num [oid]
   printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-%s","submitted_at":"2026-08-20T01:00:00Z","id":1}]' \
     "${2:-$1}" > "$GH_DIR/reviews_$1.json"
@@ -368,21 +369,40 @@ has "$out" "held by open visit vis-mv3" "…and names the mid-pass visit"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 49" "…and nothing merged"
 : > "$STUB_DEPS"
 
-echo "# approval is a UNIVERSAL merge rule: every PR needs a non-city APPROVED at the live head"
+echo "# approval is a UNIVERSAL merge rule: every PR needs a standing non-city APPROVED"
 store "[$(anchor A1 20), $(rev A1)]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
 echo '[]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review at the live head" "a correctness-only anchor with no approval holds — the rule is universal, not a check_set token"
+has "$out" "no external APPROVED review stands" "a correctness-only anchor with no approval holds — the rule is universal, not a check_set token"
 
 approved 20
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded A1" "an external APPROVED at the live head satisfies it"
 
+echo "# an approval stands across later pushes until it is dismissed"
+# Approved at an older head, then pushed again (a rework, a merge-in, a CI fix)
+# with every other gate green.
 approved 20 OLD
 store "[$(anchor A1 20), $(rev A1)]"
+: > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "no external APPROVED review at the live head" "an approval of an OLD head does not count"
+has "$out" "merged + recorded A1" "an approval given at an older head still satisfies the rule after a push"
+has "$(cat "$STUB_GH_LOG")" "pr merge 20 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-20" "…and the merge is pinned to the live head it validated, not the approved commit"
+
+printf '[{"user":{"login":"human1"},"state":"DISMISSED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
+store "[$(anchor A1 20), $(rev A1)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "no external APPROVED review stands" "a dismissed approval holds the PR"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 20" "…and nothing merged"
+
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1},{"user":{"login":"human1"},"state":"DISMISSED","commit_id":"sha-20","submitted_at":"2026-08-21T01:00:00Z","id":2}]' > "$GH_DIR/reviews_20.json"
+store "[$(anchor A1 20), $(rev A1)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "no external APPROVED review stands" "a later dismissed review shadows its author's older approval"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 20" "…and nothing merged"
 
 printf '[{"user":{"login":"gc-city-bot"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
 store "[$(anchor A1 20), $(rev A1)]"
@@ -402,6 +422,15 @@ printf '%s' "$(prview 23 OPEN CLEAN)" > "$GH_DIR/pr_view_23.json"
 printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_23.json"
 out=$("$SUT" 2>&1)
 has "$out" "standing CHANGES_REQUESTED" "the veto holds a correctness-only anchor too"
+
+# A standing approval does not outrank a veto: human1's approval from an older
+# head still stands, and human2's CHANGES_REQUESTED still holds the PR.
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-old","submitted_at":"2026-08-18T00:00:00Z","id":1},{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":2}]' > "$GH_DIR/reviews_23.json"
+store "[$(anchor A4 23), $(rev A4)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "reviewer 'human2' has a standing CHANGES_REQUESTED" "a standing CHANGES_REQUESTED vetoes an approval that stands from an older head"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 23" "…and nothing merged"
 
 echo "# BLOCKED where thread resolution is required names the unresolved-thread cause"
 store "[$(anchor U1 30), $(rev U1)]"
