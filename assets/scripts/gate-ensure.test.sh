@@ -48,7 +48,7 @@ harness_init
 # finding.sh (open must-fix), copied in unstubbed so the fixtures exercise the
 # real derivation, plus a body-emitter stub (interface unchanged).
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh"
+mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
 printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 chmod +x "$SD/review-dispatch-body.sh"
 # escalate.sh stub: records subject/key/message so the wedge arm's one-visit
@@ -1129,6 +1129,41 @@ if [ "$uncached" -gt 1 ] && [ "$cached" -lt "$uncached" ]; then
 else
   bad "the cache did not reduce the arm's anchor_bead reads (uncached=$uncached cached=$cached)"
 fi
+
+echo "# a resolver that dies mid-run dispatches nothing (never reads empty as 'no gates')"
+# gate-ensure captures the resolver's exit status: a crash prints nothing, and an
+# empty gate list would dispatch nothing AND let the anchor settle while a lane is
+# short of green. It must skip the whole anchor instead.
+store "[$(anchor RX pull_request correctness "" polecat/rx)]"
+oid rx > "$GH_DIR/head_polecat_rx"
+cp "$SD/review-checks.sh" "$TMP/review-checks.real"
+printf '#!/usr/bin/env bash\nexit 3\n' > "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+: > "$STUB_GC_LOG"
+out=$(run); rc=$?
+cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+has "$out" "gate resolver failed" "a resolver crash is caught and named"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "nothing is dispatched when the resolver dies"
+
+echo "# the dispatch stage advances with the PR: ready-for-review checks dispatch only once ready"
+# A controlled index: correctness reads the diff (pre-open), rfr is a
+# ready-for-review-phase check. The old dispatch was hardcoded to --through
+# open-as-draft, so rfr was NEVER dispatched and merge.sh greened it on the
+# approval fallback with the check never run.
+RFR_IDX="$TMP/rfr-index.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.rfr]\nmethod="m"\npurpose="p"\nphase="ready-for-review"\n' > "$RFR_IDX"
+# A draft PR (opened_as_draft set, not yet readied) dispatches only through
+# open-as-draft, so the ready-for-review check is NOT yet dispatched.
+store "[$(anchor GD pull_request 'correctness,rfr' "" polecat/gd ',"opened_as_draft":"'"$(oid gd)"'"')]"
+oid gd > "$GH_DIR/head_polecat_gd"
+out=$(GC_REVIEW_CHECKS_INDEX="$RFR_IDX" run)
+has "$out" "for check 'correctness'" "a draft dispatches its pre-open check"
+hasnt "$out" "for check 'rfr'" "a draft does NOT dispatch the later-phase ready-for-review check"
+# Once ready (draft_readied set) every remaining phase dispatches, so the
+# ready-for-review check gets a review bead rather than the approval fallback.
+store "[$(anchor GR pull_request 'correctness,rfr' "" polecat/gr ',"draft_readied":"'"$(oid gr)"'"')]"
+oid gr > "$GH_DIR/head_polecat_gr"
+out=$(GC_REVIEW_CHECKS_INDEX="$RFR_IDX" run)
+has "$out" "for check 'rfr'" "a readied PR dispatches the ready-for-review check (no longer never-dispatched)"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
