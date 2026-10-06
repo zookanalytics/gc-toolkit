@@ -1120,6 +1120,92 @@ eq "$rc" 2 "a check_set write that did not read back exits 2 (review left open)"
 has "$out" "did not read back" "the failure names the read-back"
 eq "$(meta tk-anc "check.triage")" "<absent>" "no green marker is stamped when the widening did not persist"
 
+# --- --visual: the demo check records its visual decision ---------------------------
+DEMO='{"id":"rv-demo","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"demo","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat"},"notes":"demo body: the board reads better seen"}'
+
+echo "# a demo approve with no visual needed records none and attaches nothing"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual none 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying --visual none exits 0"
+eq "$(meta rv-demo visual)" "none" "the no-need decision is stamped on the review bead"
+has "$(cat "$STUB_GH_BODY")" "Visual: none" "the posted artifact names the decision"
+has "$(cat "$STUB_GH_BODY")" "Anchor: tk-anc — check.demo @" "…beside the anchor trailer"
+eq "$(meta tk-anc check.demo)" "green" "the demo lane reads green"
+eq "$(status rv-demo)" "closed" "the review bead is closed recorded"
+
+echo "# a demo approve that delivered a visual records its modality"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying --visual screenshot exits 0"
+eq "$(meta rv-demo visual)" "screenshot" "the modality is stamped on the review bead"
+has "$(cat "$STUB_GH_BODY")" "Visual: screenshot" "the posted artifact names the modality"
+
+echo "# the decision is case- and space-insensitive and recorded canonical"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual ' Repo-Artifact ' 2>&1); rc=$?
+eq "$rc" 0 "a mixed-case --visual is accepted"
+eq "$(meta rv-demo visual)" "repo-artifact" "…and stamped lowercase"
+
+echo "# a demo request-changes records the modality whose capture showed the defect"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict request-changes --visual video 2>&1); rc=$?
+eq "$rc" 0 "a demo request-changes carrying --visual video exits 0"
+eq "$(meta rv-demo visual)" "video" "the modality is stamped on the review bead"
+has "$(cat "$STUB_GH_BODY")" "Visual: video" "the posted artifact names the modality"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "1" "the request-changes still files its one rework child"
+
+echo "# pre-open, the decision reaches the notes the PR replays"
+reset "$ANCHOR_PRE" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 0 "a pre-open demo approve exits 0"
+has "$(notes rv-demo)" "Visual: screenshot" "the pre-open notes carry the decision"
+eq "$(meta rv-demo visual)" "screenshot" "…and the review bead records it"
+
+echo "# a demo verdict without the decision is refused, nothing written"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a demo verdict without --visual exits 1"
+has "$out" "--visual none|repo-artifact|screenshot|video" "the refusal names the values to pass"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open"
+eq "$(cat "$STUB_GH_BODY")" "" "no artifact is posted"
+
+echo "# an unknown decision is refused, nothing written"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual gif 2>&1); rc=$?
+eq "$rc" 1 "an unknown --visual value exits 1"
+has "$out" "--visual must be none, repo-artifact, screenshot or video" "the refusal names the closed set"
+eq "$(meta rv-demo visual)" "<absent>" "no decision is stamped"
+
+echo "# none records with approve only"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict request-changes --visual none 2>&1); rc=$?
+eq "$rc" 1 "request-changes with --visual none exits 1"
+has "$out" "nothing to block on" "the refusal names the approve-only rule"
+eq "$(cat "$STUB_CREATED")" "" "no rework child is filed"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open"
+
+echo "# only the demo check records a visual decision"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 1 "a correctness verdict carrying --visual exits 1"
+has "$out" "only the 'demo' check records a visual decision" "the refusal names the owning check"
+eq "$(meta tk-anc check.correctness)" "<absent>" "no marker is stamped"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a correctness verdict needs no --visual"
+hasnt "$(cat "$STUB_GH_BODY")" "Visual:" "…and its artifact carries no Visual line"
+eq "$(meta rv-1 visual)" "<absent>" "…and its review bead no visual stamp"
+
+echo "# the decision is read back before anything is posted"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$(STUB_DROP_KEYS="rv-demo:visual" "$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 2 "a decision that did not read back exits 2 (review left open)"
+has "$out" "visual decision did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
+
 echo
 echo "signoff.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
