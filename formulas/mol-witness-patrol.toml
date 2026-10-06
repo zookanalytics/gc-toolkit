@@ -3,8 +3,14 @@ Witness patrol loop — rig work-health RECOVERY only. Poured as a root-only
 wisp on startup (the agent prompt's startup reconcile adopts before it
 pours):
 
-  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
+  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}'
   gc bd update $WISP --assignee=$GC_AGENT
+
+The pour passes the binding prefix and nothing else, so the cycle wait is the
+formula's default as it stood when this wisp was poured. It is rendered here
+for the step that reads it:
+
+  event_timeout={{event_timeout}}
 
 Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
 pour the next iteration. Steps are not materialized; read each description
@@ -45,7 +51,7 @@ description = "Agent identity prefix, including trailing dot when bound."
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it."
+description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
 default = "600"
 
 [[steps]]
@@ -883,8 +889,10 @@ title-scoped startup reconcile is the backstop, not the fix). Burning this
 wisp is folded in right after the assign so it precedes the wait: a session
 reset during that wait has already poured and assigned its successor and
 burned itself, so the next boot adopts the successor instead of orphaning this
-wisp. Forward every declared var, so a value chosen at the startup pour is
-not silently replaced by the formula default from the next cycle on. Keep
+wisp. Pass exactly the vars the startup pour passes, which is binding_prefix
+alone, and nothing else. An omitted var renders the formula's current default
+on the new wisp, while a passed one keeps the first wisp's value for as long
+as the chain runs, so a default changed on main would never reach it. Keep
 each gc command on ONE line (TOML eats a trailing backslash).
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
@@ -898,7 +906,7 @@ CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-witness-patrol")][0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
   exit 1
