@@ -201,7 +201,8 @@ finish() {
 # process-group reap as the parallel path. Used after the parallel wave to tell
 # a parallel-contention false failure from a real one.
 rerun_serial() {
-  local idx="$1" t="${TESTS[$idx]}" log="$LOGDIR/$idx.log" pid rc
+  local idx="$1" pid rc
+  local t="${TESTS[$idx]}" log="$LOGDIR/$idx.log"
   if [ "$TIMEOUT" -gt 0 ]; then
     ( cd "$ROOT" && exec timeout -k 5 -s TERM "$TIMEOUT" bash "$t" ) >"$log" 2>&1 &
   else
