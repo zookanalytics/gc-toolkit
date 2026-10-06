@@ -91,7 +91,7 @@
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
 # Args: --fix-pool <pool>; --posture-only (the cheap pre-merge arm: record
-# posture and stop); --route-comments-only (the pre-merge arm that routes
+# posture and stop); --route-comments-only (the early arm that routes
 # operator feedback and stops after it, skipping the write-back sweep and every
 # non-feedback arm, so a pass killed before the full arm has still picked the
 # feedback up); --deadline <epoch-secs> and --cursor <file> pace the per-anchor
@@ -767,7 +767,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 # still clears its visits, and in every rig's cadence so each store cleans its own.
 # Fail closed on an unreadable subject: a visit whose anchor cannot be read this
 # pass is left for the next, never retired on a read that did not land.
-# The pre-merge arms (--posture-only, --route-comments-only) write nothing here.
+# The early arms (--posture-only, --route-comments-only) write nothing here.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if av_visits=$(bd_list --status=open --metadata-field "escalation_key=merge-blocked-approval"); then
     while IFS="$(printf '\t')" read -r avid avsubj; do
@@ -853,7 +853,7 @@ while IFS= read -r row; do
   [ -n "$target" ] || target="$base"
 
   # --- PR merged (out-of-band, or a died record): record it ----------------------
-  # Reconciliation is the full pass's; the pre-merge arms (--posture-only,
+  # Reconciliation is the full pass's; the early arms (--posture-only,
   # --route-comments-only) reconcile no terminal state, so a MERGED or CLOSED
   # anchor falls through to the OPEN filter.
   if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
@@ -1035,7 +1035,7 @@ CHILDREN_EOF
   # open one, so this seam stays independent of the draft gate below. Best-effort
   # and idempotent — pr-status-label.sh derives working/needs-review/needs-attention
   # from the anchor's own state and writes only on a change. This sweep is the full
-  # pass's alone: it costs a derivation per anchor, which the pre-merge arms spend
+  # pass's alone: it costs a derivation per anchor, which the early arms spend
   # only where they change one of the label's inputs (the posture record and the
   # feedback routing below).
   cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
@@ -1210,7 +1210,7 @@ CHILDREN_EOF
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   if [ -n "$rec_target" ] && [ -n "$base" ] && [ "$rec_target" != "$base" ]; then
-    # A pre-merge arm defers retarget handling to the full pass. A retargeted
+    # An early arm defers retarget handling to the full pass. A retargeted
     # anchor does not merge this pass, and its feedback is not routed while it
     # sits on the wrong base, so the early feedback arm skips it.
     [ "$ROUTE_ONLY" != 1 ] || continue
@@ -1402,7 +1402,7 @@ REAP_EOF
       skipped=$((skipped + 1)); continue
     fi
     # Past the skip guards, the anchor is dispatchable. When it also owes
-    # unanswered feedback, or on a pre-merge routing pass (--route-comments-only),
+    # unanswered feedback, or on an early routing pass (--route-comments-only),
     # this arm files no merge-in child: the feedback arm below dispatches a
     # prepare_mode=merge child that brings this same branch current (a MERGE of
     # origin/$base on resume) as it answers, so a merge-in child here would only
@@ -2456,7 +2456,7 @@ acked=0; replied=0; resolved=0
 owe() { local i; for i in $(printf '%s' "$1" | tr ',' ' '); do
   case " $wowing " in *" $i "*) : ;; *) wowing="$wowing $i" ;; esac
 done; }
-# The pre-merge arms answer for the merge arm (--posture-only) or route feedback
+# The early arms answer for the merge arm (--posture-only) or route feedback
 # early (--route-comments-only) and write nothing to GitHub; the full pass that
 # follows them carries the write-back.
 if [ "$POSTURE_ONLY" = 1 ] || [ "$ROUTE_ONLY" = 1 ]; then

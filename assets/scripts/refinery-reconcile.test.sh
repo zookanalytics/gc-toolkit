@@ -116,7 +116,7 @@ case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
 esac
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
-# The full pr-facts arm: --fix-pool and no pre-merge mode flag (the posture arm
+# The full pr-facts arm: --fix-pool and no early-arm mode flag (the posture arm
 # carries neither, the feedback arm carries --route-comments-only).
 facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool' | grep -v -- '--route-comments-only')
 eq "$(printf '%s\n' "$facts_line" | wc -l | tr -d ' ')" 1 "the full pr-facts arm ran exactly once"

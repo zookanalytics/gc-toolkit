@@ -20,7 +20,7 @@
 # anchor it could not make current in its EXIT CODE, which is what holds
 # merge.sh for that pass);
 # Also covers the status: label moving in the arm that records a review: each
-# pre-merge arm re-derives it for an anchor whose posture value it changes or
+# early arm re-derives it for an anchor whose posture value it changes or
 # whose feedback batch it routes, a merge state moving alone is left to the full
 # pass, and the full pass's own re-derive reads the labels its sweep just wrote;
 # Also covers the POSTURE record and the comment watermark: the declared
@@ -3186,7 +3186,7 @@ out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" \
   "the full pass dispatches the conflict-rework on the same fixture"
 
-echo "# …but a CONFLICTING anchor WITH feedback is routed pre-merge — not deferred while it conflicts (tk-f9x2nb, #861)"
+echo "# …but a CONFLICTING anchor WITH feedback is routed early — not deferred while it conflicts (tk-f9x2nb, #861)"
 # The complement of RC9: route-comments-only still files no merge-in child, but a
 # conflicting anchor that owes feedback now falls through to the feedback arm and
 # routes it, so operator feedback is picked up before the merge rather than
@@ -3197,7 +3197,7 @@ echo '[]' > "$GH_DIR/reviews_161.json"
 printf '[{"id":16100,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/comments_161.json"
 : > "$STUB_SESSION_LOG"
 out=$(run_route)
-has "$(meta CF2 pr_comment_disposition)" "rework:" "route-comments-only routes the conflicting anchor's feedback pre-merge"
+has "$(meta CF2 pr_comment_disposition)" "rework:" "route-comments-only routes the conflicting anchor's feedback early"
 eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))] | length' "$STUB_STORE")" "0" \
   "…and files no merge-in child (the full pass owns that; the feedback child brings the branch current)"
 VP2=$(vpass_id CF2)
@@ -3217,7 +3217,7 @@ out=$(run)
 eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
 
 # ---- the status: label moves in the arm that records a review ----------------
-# A human's review changes the label's inputs in the pre-merge arms: --posture-only
+# A human's review changes the label's inputs in the early arms: --posture-only
 # records the new posture value, and --route-comments-only routes the feedback
 # into live work on the anchor. Each re-derives the label there, so the PR list
 # shows the review without waiting for the full pass at the tail. These cases run
