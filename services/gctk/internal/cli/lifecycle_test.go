@@ -91,8 +91,8 @@ func TestValueTakingFlagRejectsAMissingValue(t *testing.T) {
 }
 
 // An explicitly supplied empty argument is a real token, not a missing one, and
-// is preserved: --assignee '' clears the assignee (a request the atomic update
-// must carry) and --expect '' parses to the empty expectation the guard reads as
+// is preserved: --assignee "" clears the assignee (a request the atomic update
+// must carry) and --expect "" parses to the empty expectation the guard reads as
 // no compare-and-swap. Only the total absence of a following token is malformed.
 func TestExplicitEmptyArgumentIsPreserved(t *testing.T) {
 	o, err := parseTransition([]string{"--to", "merged", "--expect", "", "--assignee", "", "--close"})
