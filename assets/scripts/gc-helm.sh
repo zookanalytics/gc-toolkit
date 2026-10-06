@@ -42,7 +42,7 @@ Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue) and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
@@ -95,7 +95,13 @@ CLOSED the reopen would resurrect a landed disposition, so it is skipped and
 only the quiesce runs; --route <rig>/<agent> releases it TO a pool instead of
 back to the human, in the same write, and is refused on a closed anchor and on
 a bead blocked by anything but its own demand, since the work is then on the
-blocker and a pool has nothing to perform here; --waiting-on (repeatable)
+blocker and a pool has nothing to perform here; --assign <named-agent> releases
+it TO a named agent instead, in the same write, as its assignee and with no
+route, because a named agent's hook matches its assignee and never reads
+gc.routed_to. --assign is refused beside --route and on a closed anchor, and
+without --waiting-on also on a bead blocked by anything but its own demand;
+with --waiting-on the named waits gate the hand-off, since the agent's hook
+offers the bead only once bd reports it ready; --waiting-on (repeatable)
 records the wait as a `blocks` edge beside the prose so the board can re-ask
 whether it landed. --no-wait is the other answer to the same question: this
 sitting settled the subject and nothing is waiting on it. It stamps
@@ -154,6 +160,14 @@ meta_now() {
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
         | jq -r --arg k "$2" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
+}
+
+# assignee_now <bead> — the bead's top-level assignee as the store reads it now,
+# empty when unassigned or unreadable. Same pinned store as meta_now.
+assignee_now() {
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+        | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null || printf ''
 }
 
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
@@ -847,6 +861,14 @@ quiesce_release_molecule_steps() (
 # nobody and sits forever; on a closed anchor the route is refused outright. It
 # also names a bead that is itself the work, so a bead blocked by anything but
 # its own demand is refused.
+# --assign names a NAMED agent to release TO, written as the assignee with no
+# route: a named session's hook matches its assignee and skips the routed tier,
+# so a route alone never reaches it (docs/gascity-routing-model.md, Lane 2). A
+# bead is addressed one way or the other, never both. --assign is refused on a
+# closed anchor like --route, and so is a blocker the caller did not name: with
+# no --waiting-on it takes the --route blocker guard; with --waiting-on the
+# caller has named the waits, and the hook offers the bead only once bd reports
+# it ready.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
@@ -875,10 +897,11 @@ quiesce_release_molecule_steps() (
 # says there is none — UNLESS the bead already carries an open blocker whose edge
 # holds it. Neither flag on a bead with no blocker is the silent prose-only park
 # refused below, the unedged hold the I1 backlog exists to drain. A --release
-# --route DISPATCHES to a pool instead (moving, not held), a closed anchor takes
-# only the quiesce, and a bare headline (no --release) parks nothing — all exempt.
+# --route DISPATCHES to a pool instead (moving, not held), as --assign does to a
+# named agent, a closed anchor takes only the quiesce, and a bare headline (no
+# --release) parks nothing — all exempt.
 cmd_takeaway() {
-    bead=""; text=""; by="host"; release=""; route=""; npos=0
+    bead=""; text=""; by="host"; release=""; route=""; assign=""; npos=0
     waiting_ids=""; no_wait=""; subj_branch=""; real_waits=""; skipped_riders=""
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -891,6 +914,8 @@ cmd_takeaway() {
             --release) release=1; shift ;;
             --route=*) route="${1#--route=}"; shift ;;
             --route)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --route requires a <rig>/<agent> target" >&2; exit 2; }; route="$1"; shift ;;
+            --assign=*) assign="${1#--assign=}"; shift ;;
+            --assign)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --assign requires a named-agent identity" >&2; exit 2; }; assign="$1"; shift ;;
             -h|--help) usage; exit 0 ;;
             -*) echo "$PROG: takeaway: unknown flag '$1'" >&2; exit 2 ;;
             *)
@@ -927,6 +952,13 @@ cmd_takeaway() {
             */*) : ;;
             *) echo "$PROG: takeaway: --route '$route' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare agent name routes to nobody and the bead sits forever. Use <rig>/<agent>." >&2; exit 2 ;;
         esac
+    fi
+    # --assign rides --release for the same reason, and it excludes --route: an
+    # assignee drops the bead out of a pool's unassigned claim filter, and a
+    # named agent's hook never reads the route.
+    if [ -n "$assign" ]; then
+        [ -n "$release" ] || { echo "$PROG: takeaway: --assign needs --release (it names who the bead is released TO)" >&2; exit 2; }
+        [ -z "$route" ] || { echo "$PROG: takeaway: --assign and --route both name where $bead goes. A bead is addressed to a named agent by its assignee or to a pool by gc.routed_to, never both. Pass one. Nothing was written." >&2; exit 2; }
     fi
 
     path=$(rig_path_for_bead "$bead")
@@ -976,10 +1008,11 @@ cmd_takeaway() {
     # A park for a person states its disposition, UNLESS the bead is already held
     # by an open blocker — then the wait is an existing edge and a bare --release
     # parks it beside that edge, not a prose-only hold. --release reopens a
-    # standing anchor and either DISPATCHES it (a --route to a pool, moving) or
-    # PARKS it for a person (no route: open, unassigned, at rest). A held park
-    # names its wait: --waiting-on writes it as a `blocks` edge, --no-wait says
-    # nothing waits and stamps gc.takeaway_settled. Neither, on a bead carrying NO
+    # standing anchor and either DISPATCHES it (a --route to a pool or an
+    # --assign to a named agent, moving) or PARKS it for a person (neither:
+    # open, unassigned, at rest). A held park names its wait: --waiting-on
+    # writes it as a `blocks` edge, --no-wait says nothing waits and stamps
+    # gc.takeaway_settled. Neither, on a bead carrying NO
     # open blocker, is the silent prose-only park — a headline holding it with no
     # edge and no settled mark, the shape doctor/check-wait-is-an-edge reports and
     # the I1 backlog drains, refilled by parks faster than closes drain it. Any
@@ -992,7 +1025,7 @@ cmd_takeaway() {
     # fails open on the same probe where this one fails closed; a closed anchor
     # took no park (release_park cleared above); a bare headline (no --release)
     # parks nothing; a converse sitting stamps one beside a demand that holds it.
-    if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
+    if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$assign" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         park_held=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
             | jq -er 'if type == "array" then
@@ -1030,8 +1063,14 @@ cmd_takeaway() {
     # as it is to every other reader of this graph. A closed anchor is not this
     # refusal's case: its route is refused below on the disposition itself,
     # after the headline and the quiesce a folded anchor still needs have
-    # landed.
-    if [ -n "$route" ] && [ -n "$release_park" ]; then
+    # landed. An --assign takes the same guard, since a named agent offered a
+    # bead whose work sits on a blocker has nothing to perform either, unless
+    # the call names its waits with --waiting-on: the agent's hook offers the
+    # bead only once bd reports it ready, so the named waits gate the hand-off.
+    dest=""; dest_flag=""
+    if [ -n "$route" ]; then dest="$route"; dest_flag="--route"
+    elif [ -n "$assign" ] && [ -z "$waiting_ids" ]; then dest="$assign"; dest_flag="--assign"; fi
+    if [ -n "$dest" ] && [ -n "$release_park" ]; then
         probe_read=1
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         blocked_by=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
@@ -1043,10 +1082,14 @@ cmd_takeaway() {
                  else error("not an edge array") end' 2>/dev/null) || probe_read=""
         if [ -z "$probe_read" ]; then
             blocked_by=""
-            echo "$PROG: takeaway: could not read the blockers on $bead ('gc bd dep list' failed, or answered with something other than an edge array), so --route '$route' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$route' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+            echo "$PROG: takeaway: could not read the blockers on $bead ('gc bd dep list' failed, or answered with something other than an edge array), so $dest_flag '$dest' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$dest' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+        fi
+        if [ -n "$blocked_by" ] && [ "$dest_flag" = "--route" ]; then
+            echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            exit 2
         fi
         if [ -n "$blocked_by" ]; then
-            echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: first-reaction-dispose.sh --disposition blocked --then-assign '$assign'." >&2
             exit 2
         fi
     fi
@@ -1115,9 +1158,10 @@ cmd_takeaway() {
     # gc.execution_routed_to. A release drops it best-effort, so a finished pour's
     # provenance does not linger on a bead the pour no longer drives.
     #
-    # The park unassigns the bead, so the identity the last executor stamped goes
-    # with the assignee: gc.session_name and gc.session_id name the session that
-    # held it, and an unassigned bead has no executor for them to name. A
+    # The park unassigns the bead, or assigns it to the --assign agent, so the
+    # identity the last executor stamped goes with the old assignee:
+    # gc.session_name and gc.session_id name the session that held it, and the
+    # bead no longer has that executor for them to name. A
     # gc.session_name left behind is residue the moment the bead next carries a
     # route its stamp does not match — the shape doctor/executor-identity-residue
     # reports on an open, routed bead — and a gc.session_id left behind is the
@@ -1127,7 +1171,7 @@ cmd_takeaway() {
     # the route and the completion proof beside them are: a silent multi-pair drop
     # would otherwise report a successful release while the very residue
     # doctor/executor-identity-residue exists to catch survives on the bead.
-    [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
+    [ -n "$release_park" ] && set -- "$@" --status=open --assignee="$assign" \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
                --unset-metadata gc.session_name --unset-metadata gc.session_id \
                --set-metadata "gc.proactive_reaction=1"
@@ -1154,6 +1198,24 @@ cmd_takeaway() {
                 echo "$PROG: takeaway: the route repair landed on $bead" >&2
             else
                 route_missed=1
+            fi
+        fi
+    fi
+    # An --assign is read back on the same terms. The assignee is the one field a
+    # named agent's hook matches, so one that did not land leaves the bead open,
+    # unassigned and unrouted, offered to nobody.
+    assign_missed=""
+    if [ -n "$assign" ] && [ -n "$release_park" ]; then
+        assign_got=$(assignee_now "$bead")
+        if [ "$assign_got" != "$assign" ]; then
+            echo "$PROG: takeaway: the assignee on $bead read back as '$assign_got', expected '$assign' — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --assignee="$assign" >/dev/null 2>&1 || true
+            assign_got=$(assignee_now "$bead")
+            if [ "$assign_got" = "$assign" ]; then
+                echo "$PROG: takeaway: the assignee repair landed on $bead" >&2
+            else
+                assign_missed=1
             fi
         fi
     fi
@@ -1293,6 +1355,10 @@ cmd_takeaway() {
         echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is open, unassigned and visible to no pool. The headline, the release and the edges are written; stamp the route by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.routed_to=$route" >&2
         exit 4
     fi
+    if [ -n "$assign_missed" ]; then
+        echo "$PROG: takeaway: $bead is released but NOT assigned to '$assign' (it reads '$assign_got') — it is open and unrouted, so no agent's hook offers it. The headline, the release and the edges are written; assign it by hand: gc bd update $bead${db:+ --db $db} --assignee $assign" >&2
+        exit 4
+    fi
     # Reported at its read-back above; the exit waits until here so the edges
     # and the quiesce still run, the way the route miss does.
     if [ -n "$settled_missed" ]; then
@@ -1336,9 +1402,13 @@ cmd_takeaway() {
         echo "$PROG: takeaway: $bead is closed, so it was NOT routed to '$route' — a pool that claimed it would work a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
         exit 4
     fi
+    if [ -n "$assign" ] && [ -z "$release_park" ]; then
+        echo "$PROG: takeaway: $bead is closed, so it was NOT assigned to '$assign' — the agent would be handed a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
+        exit 4
+    fi
     rel_note=""
     if [ -n "$release" ]; then
-        if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}]"
+        if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}${assign:+ to $assign}]"
         else rel_note=" [quiesced; anchor left closed]"; fi
     fi
     echo "takeaway set on $bead (by $by)$rel_note: $text"
