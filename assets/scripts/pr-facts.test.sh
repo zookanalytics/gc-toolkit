@@ -1209,7 +1209,7 @@ store "[$(anchor AE1 170)]"
 printf '%s' "$(prview 170 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_170.json"
 echo '[]' > "$GH_DIR/reviews_170.json"
 printf '[{"id":5001,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":3}]' > "$GH_DIR/comments_170.json"
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-170","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-170","databaseId":5001,"author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_170.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-170","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-170","databaseId":5001,"fullDatabaseId":"5001","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_170.json"
 : > "$STUB_SESSION_LOG"
 out=$(run)
 eq "$(meta_pinned AE1 pr_posture)" "review_required@sha-170" "a resolved-thread comment falls back to the standing posture, not commented"
@@ -1226,7 +1226,7 @@ store "[$(anchor AE2 171)]"
 printf '%s' "$(prview 171 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_171.json"
 echo '[]' > "$GH_DIR/reviews_171.json"
 printf '[{"id":5101,"user":{"login":"human1"},"body":"still open","path":"a.sh","line":1},{"id":5109,"user":{"login":"human1"},"body":"answered","path":"b.sh","line":2}]' > "$GH_DIR/comments_171.json"
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-171a","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171a","databaseId":5101,"author":{"login":"human1"},"body":"still open","reactionGroups":[]}]}},{"id":"T-171b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171b","databaseId":5109,"author":{"login":"human1"},"body":"answered","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_171.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-171a","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171a","databaseId":5101,"fullDatabaseId":"5101","author":{"login":"human1"},"body":"still open","reactionGroups":[]}]}},{"id":"T-171b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171b","databaseId":5109,"fullDatabaseId":"5109","author":{"login":"human1"},"body":"answered","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_171.json"
 out=$(run)
 eq "$(meta_pinned AE2 pr_posture)" "commented@sha-171" "the unresolved comment still makes the PR commented"
 has "$out" "routed to rework" "…and it routes"
@@ -1239,11 +1239,25 @@ store "[$(anchor AE3 172)]"
 printf '%s' "$(prview 172 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_172.json"
 echo '[]' > "$GH_DIR/reviews_172.json"
 printf '[{"id":5201,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1}]' > "$GH_DIR/comments_172.json"
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-172","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-172","databaseId":5201,"author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_172.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-172","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-172","databaseId":5201,"fullDatabaseId":"5201","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_172.json"
 out=$(STUB_GQL_READ_FAIL=1 run)
 has "$out" "review-thread resolution unreadable" "the failed read is reported"
 has "$out" "routed to rework" "…and the comment is counted unfiltered and routes — never dropped on a failed read"
 eq "$(meta AE3 pr_comment_watermark)" "5201" "…and the watermark advances"
+
+echo "# a comment id past 2^31 is matched by fullDatabaseId, not the 32-bit databaseId"
+# Review-comment ids already exceed a GraphQL Int. The thread here carries the id
+# only as fullDatabaseId (a BigInt string) with databaseId null, the shape GitHub
+# leaves once it retires the deprecated field, so a reader of databaseId matches
+# nothing and routes the answered comment.
+store "[$(anchor AE4 173)]"
+printf '%s' "$(prview 173 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_173.json"
+echo '[]' > "$GH_DIR/reviews_173.json"
+printf '[{"id":4203522112,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1}]' > "$GH_DIR/comments_173.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-173","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-173","databaseId":null,"fullDatabaseId":"4203522112","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_173.json"
+out=$(run)
+eq "$(meta_pinned AE4 pr_posture)" "review_required@sha-173" "the answered comment past 2^31 is dropped: not commented"
+hasnt "$out" "routed to rework" "…and it routes nothing"
 
 echo "# a feedback batch past the OS per-argument limit still renders"
 # tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's

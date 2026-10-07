@@ -776,9 +776,12 @@ ANSWERED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
-      nodes{isResolved comments(first:100){nodes{databaseId}}}}}}}'
-# The inline-comment databaseIds that sit on a resolved thread, as a JSON array on
-# stdout. Non-zero without output when the thread connection could not be read, so
+      nodes{isResolved comments(first:100){nodes{fullDatabaseId}}}}}}}'
+# The ids of the inline comments that sit on a resolved thread, as a JSON array of
+# numbers on stdout, comparable with the REST rows' `id`. The id is read as
+# fullDatabaseId, a BigInt GitHub serializes as a string: databaseId is a 32-bit
+# Int GitHub has deprecated for that reason, and review-comment ids already pass
+# 2^31. Non-zero without output when the thread connection could not be read, so
 # a failed read leaves the batch counted unfiltered rather than dropping an
 # objection — the direction live_comments fails in too.
 answered_comment_ids() { # <pr-number>
@@ -791,7 +794,7 @@ answered_comment_ids() { # <pr-number>
     | if ($rt | length) == 0 then error("no reviewThreads in response")
       else [ $rt[].nodes[]?
              | select((.isResolved // false) == true)
-             | (.comments.nodes // [])[] | (.databaseId // empty) ]
+             | (.comments.nodes // [])[] | (.fullDatabaseId // empty) | tonumber ]
            | unique
       end' 2>/dev/null || return 1
 }
