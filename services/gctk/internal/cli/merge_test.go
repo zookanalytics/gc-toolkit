@@ -83,6 +83,61 @@ func TestJqHasToStringMirrorsHasThenToString(t *testing.T) {
 	}
 }
 
+// A re-read of an UNKNOWN merge state may differ from the pinned read only in
+// the mergeability facts, and the hold names every other field that changed.
+// The comparison is gh_pr_view_settled's jq `!=`, so key order and number
+// spelling are no change, and a key one read lacks reads as null. Each want is
+// what that jq prints for the same two reads.
+func TestChangedFieldsMirrorsTheScriptsComparison(t *testing.T) {
+	row := func(raw string) map[string]json.RawMessage {
+		var r map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	pinned := row(`{"state":"OPEN","headRefOid":"a","headRepository":{"name":"r","id":1},"mergeStateStatus":"UNKNOWN","mergeable":"UNKNOWN","reviewDecision":""}`)
+	for _, tc := range []struct{ again, want string }{
+		{`{"state":"OPEN","headRefOid":"a","headRepository":{"id":1.0,"name":"r"},"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","reviewDecision":"APPROVED"}`, ""},
+		{`{"state":"MERGED","headRefOid":"b","headRepository":{"name":"r","id":1}}`, `headRefOid 'a' -> 'b', state 'OPEN' -> 'MERGED'`},
+		{`{"state":"OPEN","headRefOid":"a","headRepository":{"name":"s","id":1}}`, `headRepository '{"name":"r","id":1}' -> '{"name":"s","id":1}'`},
+		{`{"state":"OPEN","headRepository":{"name":"r","id":1}}`, `headRefOid 'a' -> 'null'`},
+	} {
+		if got := changedFields(pinned, row(tc.again)); got != tc.want {
+			t.Errorf("changedFields(again=%s) = %q, want %q", tc.again, got, tc.want)
+		}
+	}
+}
+
+// `(.mergeStateStatus // "") | tostring`: a missing, null or false state reads
+// as "", which the re-read spends like an UNKNOWN; any other value is computed.
+func TestJqAltStringMirrorsAlternativeThenToString(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{``, ""}, {`null`, ""}, {`false`, ""}, {`"CLEAN"`, "CLEAN"}, {`true`, "true"}, {`5`, "5"},
+	} {
+		if got := jqAltString(json.RawMessage(tc.raw)); got != tc.want {
+			t.Errorf("jqAltString(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// MERGE_STATE_REREADS and MERGE_STATE_REREAD_SECS take their default unless the
+// value is all digits, as bd-lib.sh's case guard does, so a negative or garbled
+// value cannot lift the pass's re-read budget.
+func TestEnvCountTakesTheDefaultUnlessAllDigits(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want int
+	}{
+		{"", 3}, {"0", 0}, {"7", 7}, {"-1", 3}, {"2x", 3}, {" 4", 3},
+	} {
+		t.Setenv("GCTK_TEST_COUNT", tc.val)
+		if got := envCount("GCTK_TEST_COUNT", 3); got != tc.want {
+			t.Errorf("envCount(%q) = %d, want %d", tc.val, got, tc.want)
+		}
+	}
+}
+
 // A binary run without GCTK_SCRIPTS_DIR refuses the pass: every helper would be
 // a bare name, found through PATH if at all. A named directory is not refused
 // for a helper it lacks, because merge.sh has no such pass-level check. A
