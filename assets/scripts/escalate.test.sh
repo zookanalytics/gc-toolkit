@@ -111,7 +111,7 @@ case "${1:-}" in
       *) case "$title" in *"$STUB_CREATE_FAIL_MATCH"*) echo "bd: refused" >&2; exit 1 ;; esac ;;
     esac
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
-    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX")
+    tmp=$(mktemp "${STUB_TMP:-${TMPDIR:-/tmp}}/gctk-escalate-test.XXXXXX")
     # The real `gc bd create` stamps --metadata (a JSON object) into the bead
     # atomically with the create; model that so the create carries the identity
     # the same way, and a run whose follow-up writes are lost still leaves a
@@ -127,7 +127,7 @@ case "${1:-}" in
       "") : ;;
       *) case "$*" in *"$STUB_UPD_FAIL_MATCH"*) exit 1 ;; esac ;;
     esac
-    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX"); cp "$STORE" "$tmp"
+    tmp=$(mktemp "${STUB_TMP:-${TMPDIR:-/tmp}}/gctk-escalate-test.XXXXXX"); cp "$STORE" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
@@ -174,6 +174,9 @@ chmod +x "$BIN/visit-close.sh"
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
+# The stub keeps its scratch here, so a case that points the SUT's TMPDIR at a
+# missing directory breaks only the SUT's own temp files, not the stub store.
+export STUB_TMP="$TMP"
 export GC_ESCALATE_VISIT_CLOSE_TOOL="$BIN/visit-close.sh" STUB_VISIT_CLOSE_LOG="$TMP/visit-close.log"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
       STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL \
@@ -283,7 +286,10 @@ run_city() { # <caller GC_RIG, empty = unset> <escalate args...>
   fi
 }
 city_visits() { jq -r '[.[] | select(.metadata.task_kind == "visit") | .metadata["gc.continuation_group"]] | join(",")' "$CITY_STORE"; }
-pinned_to_city() { [ "$(grep -c ' bd ' "$STUB_GC_LOG")" = "$(grep ' bd ' "$STUB_GC_LOG" | grep -c -- '--db /city/.beads')" ]; }
+# A logged call runs onto further lines when an argument carries newlines, as an
+# ephemeral subject's visit body does, so each entry is rejoined before it is read.
+bd_calls() { awk '/^\[[^]]*\] /{if (c != "") print c; c=$0; next} {c=c " " $0} END{if (c != "") print c}' "$STUB_GC_LOG" | grep ' bd '; }
+pinned_to_city() { [ "$(bd_calls | grep -c .)" = "$(bd_calls | grep -c -- '--db /city/.beads')" ]; }
 for caller in gc-toolkit loomington ""; do
   label="GC_RIG=${caller:-<unset>}"
   reset; printf '[]' > "$CITY_STORE"
@@ -299,15 +305,22 @@ reset; printf '[]' > "$CITY_STORE"
 out=$(run_city gc-toolkit --subject lx-hq1 --key k1 --message m 2>&1)
 has "$out" "lives in rig 'loomington'" "a rig caller's GC_RIG is overridden with a warning that names the subject's rig"
 
-echo "# a rig-less board-route caller whose subject resolves to no rig REFUSES"
-# Fail before filing: a visit written to the ambient store is severed from its
-# subject — the silent mute escalate exists to end.
+echo "# a board-route caller whose subject names no placeable bead redirects it to triage"
+# zz-a is a bead-shaped id whose prefix no readable rig carries: escalation-rig
+# PROVES it is no bead (exit 1), distinct from a store it merely could not read.
+# There is no durable subject to scope a visit to and a tracks edge to it would
+# fail, so it is ephemeral. The old path refused outright with GC_RIG unset,
+# dropping the escalation; now it files on the standing triage subject in the
+# ambient store — a duplicate-or-ambient visit beats a silent mute.
 reset
 out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "an unresolvable subject prefix on the board route exits 1"
-eq "$(visits)" "0" "and files nothing"
-has "$out" "could not be proven" "and says the store could not be proven"
-has "$out" "no rig carries the prefix 'zz'" "with escalation-rig's reason (an unknown prefix, not an unreadable rig set)"
+eq "$rc" 0 "a proven-no-bead subject files rather than refusing"
+eq "$(visits)" "2" "the standing triage subject is minted alongside the visit"
+eq "$(meta vis-1 task_kind)" "triage-subject" "the minted bead is the standing triage subject"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on the triage subject, not zz-a"
+eq "$(meta vis-2 escalation_raised_by)" "zz-a" "and zz-a survives as provenance"
+hasnt "$(cat "$STUB_DEPS")" "|zz-a|" "no tracks edge is wired to the non-bead subject"
+has "$out" "is ephemeral and cannot receive" "the redirect is announced"
 
 echo "# a rig-less board-route caller REFUSES when the rig set is unreadable"
 reset
@@ -316,14 +329,58 @@ eq "$rc" 1 "an unreadable rig set on the board route exits 1 (fail closed)"
 eq "$(visits)" "0" "and files nothing"
 has "$out" "could not read" "and says the rig set was unreadable, not that the prefix is unknown"
 
-echo "# a board-route caller whose subject has no rig prefix keeps its own GC_RIG"
-# An ephemeral or prefix-less subject cannot disprove the caller's pin, so the
-# pinned store files as before.
+echo "# a store helper that cannot run proves nothing, so a real subject is never redirected"
+# escalation-rig's exit 1 proves the subject names no bead, and that subject is
+# redirected onto the triage subject by --key alone. A bead-store.sh that cannot
+# be run asked no store, so tk-a may still be a real bead: the board route with
+# GC_RIG unset refuses, and a pinned GC_RIG files on tk-a itself.
 reset
-out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key k1 --message m 2>&1); rc=$?
-eq "$rc" 0 "a prefix-less subject under a pinned GC_RIG still files"
-eq "$(visits)" "1" "the visit exists"
+out=$(env -u GC_RIG GC_BEAD_STORE_TOOL="$TMP/no-such-bead-store.sh" "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unrunnable store helper on the board route exits 1 (fail closed)"
+eq "$(visits)" "0" "and files nothing, on the triage subject or anywhere else"
+has "$out" "cannot execute" "and the refusal says why the store is unproven"
+
+reset
+out=$(GC_RIG=gc-toolkit GC_BEAD_STORE_TOOL="$TMP/no-such-bead-store.sh" "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "with GC_RIG pinned it files under the pin"
+eq "$(visits)" "1" "one visit, and no triage subject minted"
+eq "$(meta vis-1 gc.continuation_group)" "tk-a" "the visit hangs on tk-a, not on the triage subject"
+has "$(cat "$STUB_DEPS")" "vis-1|tk-a|tracks" "and tracks tk-a"
+
+echo "# a stderr capture that cannot be opened proves nothing, so a real subject keeps its own dedup"
+# bash runs no command whose redirection it cannot open and reports exit 1, the
+# code escalation-rig gives a subject proven to name no bead. With TMPDIR missing,
+# tk-a is still classified by escalation-rig's own answer: deduped on tk-a, not on
+# the key alone, so an open visit for another subject under the same key does not
+# swallow it.
+reset '[{"id":"vis-o","status":"open","assignee":"","title":"visit: tk-other — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"k1","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
+out=$(TMPDIR="$TMP/no-such-tmpdir" "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "filing with an unusable TMPDIR exits 0"
+eq "$(visits)" "1" "a visit is filed for tk-a, not deduped against tk-other's under the same key"
+eq "$(meta vis-1 gc.continuation_group)" "tk-a" "on tk-a itself, not on the triage subject"
+has "$(cat "$STUB_DEPS")" "vis-1|tk-a|tracks" "and it tracks tk-a"
+
+echo "# the empty-identity fallback subject ('refinery') redirects to triage, never drops"
+# mol-refinery-patrol's validate-identity step escalates with
+# --subject "${GC_SESSION_ID:-refinery}"; with GC_SESSION_ID empty the literal
+# "refinery" is no bead at all (no <prefix>-<id> shape). Filing a visit on it
+# severed its tracks edge, and on the board route with GC_RIG unset the old path
+# dropped the escalation outright — the exact silent mute this very escalation
+# exists to report. It is ephemeral now: redirected onto the standing triage
+# subject, under the pinned store or, failing that, the ambient one.
+reset
+out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 0 "a bare non-bead subject files"
+eq "$(visits)" "2" "redirected onto a freshly-minted triage subject"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on the triage subject, not 'refinery'"
+hasnt "$(cat "$STUB_DEPS")" "|refinery|" "and no tracks edge is wired to the non-bead literal"
 hasnt "$(cat "$STUB_GC_LOG")" "--db" "with no store path to pin, every call answers from the GC_RIG store"
+
+reset
+out=$(env -u GC_RIG "$SUT" --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 0 "and with GC_RIG unset it still files — the empty-identity drop is closed"
+eq "$(visits)" "2" "on the standing triage subject in the ambient store"
+eq "$(meta vis-2 escalation_raised_by)" "refinery" "the fallback literal survives as provenance"
 
 echo "# a rig that reports no path has no store to pin"
 # The prefix names a rig, but a rig with no path cannot be addressed by --db,
@@ -334,6 +391,27 @@ out=$(env -u GC_RIG STUB_RIGS='{"rigs":[{"name":"gc-toolkit","prefix":"tk","path
 eq "$rc" 1 "a rig-less caller refuses a subject whose rig reports no path"
 eq "$(visits)" "0" "  ... and files nothing"
 has "$out" "reports no path" "  ... naming why the store could not be proven"
+
+echo "# a wisp subject files in the store its prefix names, and is never refused"
+# A wisp is ephemeral whatever its prefix resolves to, so its visit hangs on the
+# standing triage subject. When the prefix names a store, every call is pinned to
+# it by path, as for a durable subject: an lx- wisp's triage visit lands in the
+# city store whatever the caller's GC_RIG. When no store can be derived, the
+# visit files in the ambient store rather than being refused, even with GC_RIG
+# unset.
+reset; printf '[]' > "$CITY_STORE"
+out=$(run_city gc-toolkit --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "an lx- wisp subject's escalation files"
+eq "$(jq -r '[.[] | .metadata.task_kind] | join(",")' "$CITY_STORE")" "triage-subject,visit" "  ... its triage subject and its visit are in the city store"
+eq "$(jq 'length' "$STUB_STORE")" "0" "  ... and nothing landed in the caller's rig store"
+if pinned_to_city; then ok "  ... every bd call was pinned to the city store by path"
+else bad "  ... every bd call was pinned to the city store by path ($(bd_calls | grep -v -- '--db /city/.beads' | head -n 1))"; fi
+
+reset
+out=$(env -u GC_RIG STUB_RIG_LIST_FAIL=1 "$SUT" --subject tk-wisp-aaa --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a wisp whose store cannot be derived still files with GC_RIG unset"
+eq "$(visits)" "2" "  ... on a standing triage subject in the ambient store"
+hasnt "$(cat "$STUB_GC_LOG")" "--db" "  ... unpinned, since no store path was proven"
 
 echo "# an unroutable --pool is refused before anything is created"
 # A --pool that names no live agent is refused BEFORE anything is created: a
@@ -984,12 +1062,24 @@ eq "$(vccount)" "0" "and does not close the claimed visit"
 has "$out" "no open visit" "treating a claimed visit as none to retract"
 
 echo "# --retract refuses an ephemeral subject"
-# A wisp's visits hang on the standing triage bucket keyed by --key alone, so
-# there is no one subject-scoped visit to retract.
+# An ephemeral subject's visits hang on the standing triage bucket keyed by
+# --key alone, so there is no one subject-scoped visit to retract.
 reset '[]'
 out=$("$SUT" --retract --subject tk-wisp-abc --key k --message m 2>&1); rc=$?
 eq "$rc" 2 "retract on an ephemeral subject is a usage error"
 eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+
+# A subject proven to name no bead is ephemeral in the same way: its visit was
+# filed on the standing triage subject, so a subject-scoped lookup finds nothing
+# and would report "no open visit" while that visit stays open. It is refused
+# like a wisp, with and without a pinned GC_RIG.
+reset "[$STANDING,"'{"id":"vis-5","status":"open","assignee":"","title":"visit: sub-0 — empty identity","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"refinery-empty-identity","gc.continuation_group":"sub-0","escalation_raised_by":"refinery","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 2 "retract on a subject proven to name no bead is a usage error"
+eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+hasnt "$out" "no open visit" "rather than reporting nothing to retract while the triage visit stays open"
+out=$(env -u GC_RIG "$SUT" --retract --subject refinery --key refinery-empty-identity --message m 2>&1); rc=$?
+eq "$rc" 2 "and with GC_RIG unset it is the same usage error"
 
 echo "# --retract reports a close that did not land"
 # visit-close.sh guards its own close; a non-zero exit means the visit stays open

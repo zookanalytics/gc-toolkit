@@ -325,12 +325,20 @@ if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
   FILED="unfiled — duplicate probe unreadable"
 else
   FILED=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
-  [ -n "$FILED" ] || FILED=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json | jq -r '.id // .[0].id')
+  if [ -z "$FILED" ]; then
+    FILED_JSON=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json)
+    FILED=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+    if [ -z "$FILED" ]; then
+      CREATE_ERR=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+      FILED="unfiled — bd create returned no id${CREATE_ERR:+: $CREATE_ERR}"
+    fi
+  fi
 fi
 echo "$FILED"
 ```
-An unreadable probe files nothing. Say so in the verdict rather than filing
-blind, and the next round re-probes.
+An unreadable probe files nothing, and neither does a create that returns no
+id. Say so in the verdict rather than filing blind, and the next round
+re-probes.
 
 **6. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step:
