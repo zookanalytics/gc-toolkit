@@ -69,9 +69,13 @@ ITEM="$SUBJECT"
 # decides sameness, and it is not always a bead: an escalate.sh visit
 # carries its situation in escalation_key, which is the only stamp that
 # tells two findings of one bucket apart. The `key:` prefix keeps a key
-# and a bead id from ever comparing equal.
-TOPIC=$(printf '%s' "$V" | jq -r '(.[0].metadata.escalation_key // "")
-  | if . != "" then "key:" + . else "" end')
+# and a bead id from ever comparing equal. This one definition computes
+# the topic of this visit and of every sibling it is compared against.
+TOPIC_JQ='
+  def topic($subject):
+    (.metadata.escalation_key // "") as $k
+    | if $k != "" then "key:" + $k else $subject end;'
+TOPIC=$(printf '%s' "$V" | jq -r --arg s "$SUBJECT" "$TOPIC_JQ"'(.[0] // {}) | topic($s)')
 TOPIC="${TOPIC:-$SUBJECT}"
 if [ -z "$SUBJECT" ]; then
   # Neither recording resolved. With an empty $s every predicate below
@@ -83,10 +87,7 @@ if [ -z "$SUBJECT" ]; then
 else
   HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
     | scrub \
-    | jq -r --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" "$VISIT_IDENTITY_JQ"'
-        def topic($fallback):
-          (.metadata.escalation_key // "") as $k
-          | if $k != "" then "key:" + $k else $fallback end;
+    | jq -r --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" "$VISIT_IDENTITY_JQ$TOPIC_JQ"'
         [ .[]
           | select((.metadata.task_kind // "")=="visit")
           # a sibling wears the same flaky stamp: read ITS subject the shared way
