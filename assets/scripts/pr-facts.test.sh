@@ -1554,6 +1554,19 @@ has "$out" "review-thread resolution unreadable" "the failed read is reported"
 has "$out" "routed to rework" "…and the comment is counted unfiltered and routes — never dropped on a failed read"
 eq "$(meta AE3 pr_comment_watermark)" "5201" "…and the watermark advances"
 
+echo "# the write-back's awaiting answer in a resolved thread answers nothing, so the comment before it routes"
+# An awaiting answer says the comments before it wait on a person. A comment the
+# routing arm had not reached when it was posted sits before it, and a thread
+# someone then resolved must not read that comment as answered.
+store "[$(anchor AEA 486)]"
+printf '%s' "$(prview 486 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_486.json"
+echo '[]' > "$GH_DIR/reviews_486.json"
+printf '[{"id":5751,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":3},{"id":5752,"user":{"login":"gc-city-bot"},"body":"❓ Awaiting a person — visit V1.\\n<!-- gc-writeback -->\\n<!-- gc-writeback-mark:awaiting:V1 -->\\n\\n<!-- gc:city -->","path":"a.sh","line":3,"in_reply_to_id":5751}]' > "$GH_DIR/comments_486.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-486","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-486","databaseId":5751,"fullDatabaseId":"5751","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-486b","databaseId":5752,"fullDatabaseId":"5752","author":{"login":"gc-city-bot"},"body":"❓ Awaiting a person — visit V1.\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:awaiting:V1 -->\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_486.json"
+out=$(run)
+has "$out" "routed to rework" "the comment before the awaiting answer routes"
+eq "$(meta AEA pr_comment_watermark)" "5751" "…and the watermark advances to it"
+
 echo "# a comment id past 2^31 is matched by fullDatabaseId, not the 32-bit databaseId"
 # Review-comment ids already exceed a GraphQL Int. The thread here carries the id
 # only as fullDatabaseId (a BigInt string) with databaseId null, the shape GitHub

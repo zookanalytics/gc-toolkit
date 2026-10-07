@@ -1054,8 +1054,11 @@ UTGATES
 # resolution time to place that comment before or after the resolve; the
 # write-back likewise reads a post after its own as a live conversation.
 # A thread resolved with no reply of ours answers nothing here, so a hand
-# resolution alone still routes. Only inline comments sit on a thread; a review
-# body and a Conversation comment carry none and stay on the mark.
+# resolution alone still routes. The write-back's awaiting answer (its mark line
+# names awaiting:<visit>) says only that the comments before it wait on a
+# person, so it is not a reply here either. Only inline comments sit on a
+# thread; a review body and a Conversation comment carry none and stay on the
+# mark.
 # The ids of the inline comments RT_NODES shows answered, as a JSON array of
 # numbers on stdout, comparable with the REST rows' `id`: in each resolved thread,
 # every comment up to and including the last reply of ours. The thread read's
@@ -1067,7 +1070,9 @@ answered_comment_ids() {
   printf '%s' "$RT_NODES" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
     [ .[] | select((.isResolved // false) == true)
       | (.comments.nodes // []) as $cs
-      | ([ $cs | to_entries[] | select(.value | gc_city_own($self; $since)) | .key ] | max) as $last
+      | ([ $cs | to_entries[] | select(.value | gc_city_own($self; $since))
+           | select((.value.body // "") | contains("<!-- gc-writeback-mark:awaiting:") | not)
+           | .key ] | max) as $last
       | select($last != null)
       | $cs[0:($last + 1)][] | (.fullDatabaseId // empty) | tonumber ]
     | unique' 2>/dev/null
@@ -3228,10 +3233,11 @@ WB_LONG_THREADS
   #             or its finding was declined or deferred and its owed reply answers it
   #   looked    anything else: routed and acknowledged, not yet answered
   # The routing arm leaves out of its batch what the review threads already
-  # answered: an inline comment in a resolved thread with a later post of the
-  # city's that is not one of these answers, and a review body whose every inline
-  # comment is one. Such a comment sits inside the batch's range, but the batch's
-  # bead never saw it, so unless a finding names it, it stays looked.
+  # answered: an inline comment in a resolved thread with a later reply of the
+  # city's, and a review body whose every inline comment is one. Such a comment
+  # sits inside the batch's range, but the batch's bead never saw it. Unless a
+  # finding names it, it stays looked when that later reply is not one of these
+  # answers.
   # The lines it emits:
   #   R <node-id>                       react EYES: routed, carrying neither reaction
   #   T <thread> <reply> <why> <body> <swaps>
