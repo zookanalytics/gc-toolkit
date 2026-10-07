@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -42,6 +43,12 @@ import (
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
+
+// prFields is the pinned read's field set, PR_FIELDS in bd-lib.sh, which the
+// script and pr-facts.sh read it from. A re-read asks for the same set, so the
+// two answers compare field for field. merge.test.sh pins the exact set for
+// both implementations.
+const prFields = "state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
 
 // The statuses a referencing bead is "in flight" at: open plus every other
 // not-closed state a live worker or a wait can hold it at.
@@ -101,6 +108,8 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 		scriptsDir: scriptsDir,
 		deadline:   deadline,
 		cursor:     cursor,
+		rereads:    envCount("MERGE_STATE_REREADS", 3),
+		rereadSecs: envCount("MERGE_STATE_REREAD_SECS", 5),
 	}
 	m.repoRoot = strings.TrimSpace(runOut("git", "rev-parse", "--show-toplevel"))
 	if rc, done := m.resolveOrigin(); done {
@@ -152,6 +161,13 @@ type merger struct {
 	// deadline and cursor pace the anchors the visit order does not put first.
 	deadline string
 	cursor   string
+
+	// The UNKNOWN re-read's bounds, MERGE_STATE_REREADS and
+	// MERGE_STATE_REREAD_SECS as bd-lib.sh reads them, and the re-reads this
+	// pass has spent on UNKNOWN answers.
+	rereads      int
+	rereadSecs   int
+	rereadsSpent int
 
 	merged       int
 	recovered    int
@@ -371,8 +387,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	num := row.Meta("pr_number")
 
 	// --- pinned PR read --------------------------------------------------------
-	prRaw := firstOut(m.gh("pr", "view", num, "--repo", m.originRepoQ, "--json",
-		"state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"))
+	prRaw := firstOut(m.gh("pr", "view", num, "--repo", m.originRepoQ, "--json", prFields))
 	if len(bytes.TrimSpace(prRaw)) == 0 {
 		fmt.Fprintf(m.stdout, "%s: PR#%s view failed; merge held (anchor %s, retry next pass)\n", mergeProg, num, id)
 		m.held++
@@ -599,6 +614,44 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 
+	// --- UNKNOWN: GitHub has not computed this PR against its current base -------
+	// A merge this arm makes moves the base under every later candidate on that
+	// base, so their pinned reads answer UNKNOWN. The pinned read started the
+	// computation, so read it again before deciding, within the pass's re-read
+	// budget. Every read here comes after the latest merge this pass made, because
+	// merges happen only at the end of an anchor's turn. A computed answer is
+	// judged below like any pinned one, so BEHIND and DIRTY keep their own
+	// handling. Every pinned field outside the mergeability facts was validated
+	// above, so a re-read that changes one is a different PR from the one those
+	// gates passed. A re-read that fails is held like a failed pinned read and
+	// records nothing.
+	unknownNote := ""
+	if mergeState == "UNKNOWN" && m.rereads > 0 {
+		outcome, reads, again, state, changed := m.prViewSettled(num, prRaw)
+		switch outcome {
+		case settledComputed:
+			var re prViewRow
+			_ = json.Unmarshal(gcbd.Scrub(again), &re)
+			pr = re
+			mergeState = state
+			fmt.Fprintf(m.stdout, "%s: PR#%s answered UNKNOWN on the pinned read and %s on re-read %d (anchor %s)\n", mergeProg, num, mergeState, reads, id)
+		case settledChanged:
+			fmt.Fprintf(m.stdout, "%s: PR#%s changed between the pinned read and re-read %d of its UNKNOWN merge state (%s); merge held (anchor %s)\n", mergeProg, num, reads, changed, id)
+			m.held++
+			return
+		case settledFailed:
+			fmt.Fprintf(m.stdout, "%s: PR#%s view failed on re-read %d of its UNKNOWN merge state; merge held (anchor %s, retry next pass)\n", mergeProg, num, reads, id)
+			m.held++
+			return
+		default:
+			if reads > 0 {
+				unknownNote = fmt.Sprintf(" after %d re-read(s); the pass's re-read budget is spent", reads)
+			} else {
+				unknownNote = "; not re-read, the pass's re-read budget is spent"
+			}
+		}
+	}
+
 	// --- mergeStateStatus: CLEAN, or UNSTABLE decided on required contexts only ----
 	switch mergeState {
 	case "CLEAN":
@@ -646,7 +699,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		if msState == "" {
 			msState = "unknown"
 		}
-		fmt.Fprintf(m.stdout, "%s: PR#%s not mergeable yet (mergeStateStatus='%s'); merge held (anchor %s)\n", mergeProg, num, msState, id)
+		fmt.Fprintf(m.stdout, "%s: PR#%s not mergeable yet (mergeStateStatus='%s'%s); merge held (anchor %s)\n", mergeProg, num, msState, unknownNote, id)
 		m.held++
 		return
 	}
@@ -869,6 +922,59 @@ func (m *merger) mergeCommitOid(num string) string {
 	}
 	_ = json.Unmarshal(gcbd.Scrub(raw), &v)
 	return v.MergeCommit.Oid
+}
+
+// settledOutcome is how prViewSettled ended: gh_pr_view_settled's return code
+// in bd-lib.sh.
+type settledOutcome int
+
+const (
+	settledComputed settledOutcome = iota // a re-read answered a computed state
+	settledUnknown                        // still UNKNOWN, and the pass's re-reads are spent
+	settledChanged                        // a re-read changed a field outside the mergeability facts
+	settledFailed                         // a re-read failed
+)
+
+// prViewSettled is bd-lib.sh's gh_pr_view_settled. It reads again a PR whose
+// pinned read, pinnedRaw asked with --json prFields, answered an UNKNOWN merge
+// state. A re-read that answers a computed state decides the PR and spends
+// nothing. One that answers UNKNOWN again spends one of the pass's m.rereads,
+// and once they are spent no PR is re-read for the rest of the pass. A PR's
+// first re-read goes out at once, because its pinned read already started the
+// computation, and each later one waits m.rereadSecs. The wait is a `sleep`
+// subprocess, as the script's is, so the suite's stub sleep records the
+// schedule.
+//
+// reads is the number of re-reads made. On settledComputed, raw is that answer
+// and state its mergeStateStatus. On settledChanged, changed names each field
+// outside the mergeability facts that differs, with its pinned and re-read
+// values. A re-read that fails, or answers something other than a JSON object,
+// says nothing about the merge state, so it spends nothing.
+func (m *merger) prViewSettled(num string, pinnedRaw []byte) (outcome settledOutcome, reads int, raw []byte, state, changed string) {
+	var pinned map[string]json.RawMessage
+	pinnedErr := json.Unmarshal(gcbd.Scrub(pinnedRaw), &pinned)
+	for m.rereadsSpent < m.rereads {
+		if reads > 0 {
+			runRC("sleep", strconv.Itoa(m.rereadSecs))
+		}
+		reads++
+		out, rc := m.gh("pr", "view", num, "--repo", m.originRepoQ, "--json", prFields)
+		if rc != 0 || len(bytes.TrimSpace(out)) == 0 {
+			return settledFailed, reads, nil, "", ""
+		}
+		var again map[string]json.RawMessage
+		if pinnedErr != nil || pinned == nil || json.Unmarshal(gcbd.Scrub(out), &again) != nil || again == nil {
+			return settledFailed, reads, nil, "", ""
+		}
+		if c := changedFields(pinned, again); c != "" {
+			return settledChanged, reads, nil, "", c
+		}
+		if ms := jqAltString(again["mergeStateStatus"]); ms != "" && ms != "UNKNOWN" {
+			return settledComputed, reads, out, ms, ""
+		}
+		m.rereadsSpent++
+	}
+	return settledUnknown, reads, nil, "", ""
 }
 
 // firstNotgreenLane returns the first declared lane that does not derive green.
@@ -1120,6 +1226,20 @@ func allDigits(s string) bool {
 	return true
 }
 
+// envCount reads a count from the environment as bd-lib.sh's case guard does: a
+// value that is empty or not all digits takes the default.
+func envCount(name string, def int) int {
+	v := os.Getenv(name)
+	if !allDigits(v) {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
 // isHeld mirrors is_held: a value is held unless it is one of the "unset" forms.
 func isHeld(v string) bool {
 	switch v {
@@ -1262,6 +1382,69 @@ func jqHasToString(raw json.RawMessage) string {
 		return ""
 	}
 	return buf.String()
+}
+
+// jqToString is jq's `.[$k] | tostring`: a missing key reads as null, a string
+// is its text, and any other value is its JSON spelling.
+func jqToString(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return "null"
+	}
+	return jqHasToString(raw)
+}
+
+// jqAltString is jq's `(.k // "") | tostring`: a missing key, null and false
+// read as "", a string is its text, and any other value is its JSON spelling.
+func jqAltString(raw json.RawMessage) string {
+	switch v := bytes.TrimSpace(raw); string(v) {
+	case "", "null", "false":
+		return ""
+	default:
+		return jqHasToString(v)
+	}
+}
+
+// mergeabilityFacts are the fields a re-read may change, because GitHub computes
+// them against the PR's base. Every other pinned field was validated before the
+// re-read.
+var mergeabilityFacts = map[string]bool{"mergeStateStatus": true, "mergeable": true, "reviewDecision": true}
+
+// changedFields names each field outside the mergeability facts whose value
+// differs between two reads, as `key 'pinned' -> 're-read'`, in key order and
+// joined by ", ". Empty means the reads agree. Values compare as JSON values, as
+// jq's != does, so key order and number spelling are not a change, and a key one
+// read lacks reads as null.
+func changedFields(pinned, again map[string]json.RawMessage) string {
+	seen := map[string]bool{}
+	var keys []string
+	for _, row := range []map[string]json.RawMessage{pinned, again} {
+		for k := range row {
+			if !mergeabilityFacts[k] && !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+	sort.Strings(keys)
+	var out []string
+	for _, k := range keys {
+		if !jsonEqual(pinned[k], again[k]) {
+			out = append(out, k+" '"+jqToString(pinned[k])+"' -> '"+jqToString(again[k])+"'")
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// jsonEqual compares two raw values as decoded JSON. A missing value is null.
+func jsonEqual(a, b json.RawMessage) bool {
+	var va, vb any
+	if len(bytes.TrimSpace(a)) > 0 && json.Unmarshal(a, &va) != nil {
+		return false
+	}
+	if len(bytes.TrimSpace(b)) > 0 && json.Unmarshal(b, &vb) != nil {
+		return false
+	}
+	return reflect.DeepEqual(va, vb)
 }
 
 type gqlThreadsPage struct {
