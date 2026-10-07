@@ -158,3 +158,31 @@ from gate-ensure's mark.
 Not measured: the pass length in production. That shows in pass.log once this
 lands, as the posture arm's `done in <n>s` and its
 `<k> unchanged since the basis they were derived from, <r> read per PR` line.
+
+## Merged with main's answered-thread read
+
+While this branch was in flight, main gained an answered-thread read in
+pr-facts.sh (tk-91ftmj, #1053). A derivation now drops an inline comment, or a
+review body, that a resolved review thread answered with a reply of ours. It
+records in `pr_comment_answered` and `pr_review_answered` how far the threads
+answered past each watermark, so the next derivation drops the same feedback by
+the mark without reading the threads. The two sides conflicted at one spot. The
+branch rewrote the `pace_visit` call so that it records the visit's mark, and
+main added the per-visit reset of the thread cache after that call. The merge
+keeps both.
+
+The posture basis leaves the marks out. Only a derivation writes them. A
+derivation that records them and derives `approved`, `review_required` or `none`
+has every feedback id above the watermarks under a mark, so a derivation from
+the same basis reads no threads and derives the same posture. A
+`changes_requested` posture follows the review decision whatever the threads
+say.
+
+A derivation whose marks write failed was the exception. Main reads the threads
+again on the next pass in that case, but a basis confirmed on two such
+derivations would have skipped that read for as long as the PR stayed still.
+Such a derivation now keeps no basis. The pacing part's case refuses the marks
+write for two passes and proves the third derives the posture again and reads
+the threads. It then lets the marks land. The next derivation records them, the
+one after confirms the basis without a thread read, and the pass after that
+reads no PR.

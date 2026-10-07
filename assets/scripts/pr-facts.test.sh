@@ -4083,6 +4083,43 @@ eq "$(meta_pinned PB3 pr_posture),$(meta_pinned PB4 pr_posture)" "commented@sha-
 out=$(run_basis)
 eq "$(pf_views)" "303,304" "…and both are read whole again on the next pass"
 
+echo "# posture basis: a derivation whose answered marks did not record keeps none, so the threads are read again"
+# PB7's only inline comment is answered in its resolved thread, so its posture is
+# none. The answered marks are what let the next derivation drop that comment
+# without reading the threads. While they fail to record, each derivation reads
+# the threads again, and a basis kept on two such derivations would skip the read.
+store "[$(anchor PB7 307 "$UTCUT")]"
+printf '%s' "$(prview 307 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_307.json"
+echo '[]' > "$GH_DIR/reviews_307.json"; echo '[]' > "$GH_DIR/issue_comments_307.json"
+printf '[{"id":9701,"user":{"login":"human1"},"body":"answered comment","path":"a.md","line":1},{"id":9702,"user":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","path":"a.md","line":1,"in_reply_to_id":9701}]' > "$GH_DIR/comments_307.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-307a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-307a","databaseId":9701,"fullDatabaseId":"9701","author":{"login":"human1"},"body":"answered comment","reactionGroups":[]},{"id":"NC-307b","databaseId":9702,"fullDatabaseId":"9702","author":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_307.json"
+open_prs "$(open_node 307)"
+# A lifecycle.sh that refuses only the answered-marks write and passes every
+# other transition, the posture record included, to the real one.
+mv "$SD/lifecycle.sh" "$SD/lifecycle.real.sh"
+cat > "$SD/lifecycle.sh" <<'LCW'
+#!/usr/bin/env bash
+case " $* " in *" pr_comment_answered="*) echo "lifecycle (stub): answered marks refused" >&2; exit 1 ;; esac
+exec "$(dirname "$0")/lifecycle.real.sh" "$@"
+LCW
+chmod +x "$SD/lifecycle.sh"
+rm -f "$BASIS"
+out=$(run_basis)
+eq "$(meta_pinned PB7 pr_posture)" "none@sha-307" "the answered comment holds nothing"
+has "$out" "answered marks did not record" "…and the marks that did not record are named"
+run_basis >/dev/null
+out=$(run_basis)
+eq "$(pf_views)" "307" "the pass after two derivations whose marks did not record derives the posture again"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "1" "…and reads the threads again"
+mv "$SD/lifecycle.real.sh" "$SD/lifecycle.sh"
+out=$(run_basis)
+eq "$(meta PB7 pr_comment_answered)" "9701" "once the marks record"
+out=$(run_basis)
+eq "$(pf_views)" "307" "…the next pass derives the posture again to confirm the basis"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "0" "…dropping the answered comment by its mark, with no thread read"
+out=$(run_basis)
+eq "$(pf_views)" "" "…and the pass after keeps the posture on its confirmed basis"
+
 echo "# posture basis: a changes_requested posture keeps its basis"
 store "[$(anchor PB5 305 "$UTCUT")]"
 printf '%s' "$(prview 305 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_305.json"

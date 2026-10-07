@@ -1183,7 +1183,7 @@ while IFS= read -r tagged; do
   # the batched read then stands in for the pinned read, and the posture below is
   # kept rather than derived again. A candidate's "?<posture>" names no posture
   # the case below accepts, so a candidate keeps nothing.
-  SHORT=0; SHORT_P=""; PFP=""; UH_CANDIDATE=0; b_seen=""
+  SHORT=0; SHORT_P=""; PFP=""; UH_CANDIDATE=0; MARKS_UNRECORDED=0; b_seen=""
   if [ "$POSTURE_ONLY" = 1 ] && [ -n "${OPEN_PR[$num]-}" ]; then
     IFS=$'\x1f' read -r b_since b_rwm b_cwm b_iwm b_have <<< "$(printf '%s' "$row" | jq -r '
       (.metadata // {}) as $m
@@ -1550,6 +1550,7 @@ CHILDREN_EOF
             [ "$ram_new" = "$ram" ] || marks+=(--set "pr_review_answered=$ram_new")
             if [ "${#marks[@]}" -gt 0 ] && ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                  "${marks[@]}" >/dev/null; then
+              MARKS_UNRECORDED=1
               echo "$PROG: $id — PR#$num answered marks did not record; the threads are read again next pass" >&2
             fi
           else
@@ -1662,17 +1663,20 @@ CHILDREN_EOF
   # The basis a current posture earns, kept by --seen: only one the batched read
   # describes (the head this posture is pinned to), and only a value the PR's own
   # facts decide. A `commented` posture, or one an unengaged-thread candidate had
-  # a say in, can change with nothing on the PR moving, so it keeps none. A
-  # derivation confirms the candidate the last pass recorded when it reads the
+  # a say in, can change with nothing on the PR moving, so it keeps none. Nor
+  # does a derivation whose answered marks did not record: the marks are what let
+  # the next derivation drop answered feedback without reading the threads, so
+  # until they land the threads are read again, and a basis would skip that read.
+  # A derivation confirms the candidate the last pass recorded when it reads the
   # same basis and derives the same posture; otherwise it records its own
   # candidate. A posture kept on a confirmed basis keeps that basis.
   if [ "$POSTURE_ONLY" = 1 ] && [ "$pinned" = 1 ] && [ -n "$PFP" ] \
      && [ "$head_oid" = "${OPEN_ACT[$num]%%|*}" ]; then
     case "$posture" in
       approved|review_required|none|changes_requested)
-        if [ "$SHORT" = 1 ] || { [ "$UH_CANDIDATE" != 1 ] && [ "$b_seen" = "?$posture#$PFP" ]; }; then
+        if [ "$SHORT" = 1 ] || { [ "$UH_CANDIDATE" != 1 ] && [ "$MARKS_UNRECORDED" != 1 ] && [ "$b_seen" = "?$posture#$PFP" ]; }; then
           pace_seen_mark "$posture#$PFP"
-        elif [ "$UH_CANDIDATE" != 1 ]; then
+        elif [ "$UH_CANDIDATE" != 1 ] && [ "$MARKS_UNRECORDED" != 1 ]; then
           pace_seen_mark "?$posture#$PFP"
         fi ;;
     esac

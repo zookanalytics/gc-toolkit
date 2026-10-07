@@ -78,6 +78,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    fails. A `commented` posture keeps no basis, because a routing or a visit can
    release it with nothing on the PR moving, and neither does a posture an
    unengaged-thread candidate decided, because that answer turns on bead state.
+   A derivation whose answered marks (`pr_comment_answered`,
+   `pr_review_answered`) did not record keeps none either. The marks let the
+   next derivation drop answered feedback without reading the review threads, so
+   until they land each derivation reads the threads again. The marks stay out of
+   the basis, because only a derivation writes them.
    `updatedAt` cannot stand in for the counts: GitHub can leave it at the first
    of several reviews submitted seconds apart. The batched read and the per-PR
    reads are separate requests, and GitHub can answer one of them from a moment
