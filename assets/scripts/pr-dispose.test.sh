@@ -30,12 +30,12 @@ SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-dispose.sh"
 SUT="$SD/pr-dispose.sh"
 
-# gh: pr-dispose reads the PR (state + url) and closes it, both pinned to the
-# --repo it derives from the anchor's pr_url. The harness gh stub cats a whole
-# fixture and has no `close`, so override it with a minimal one that serves a
-# canned state (per PR, default OPEN) and a url built from the pinned --repo, and
-# logs the closing comment and the close, honouring the refusal knobs. Written
-# after harness_init so it wins on PATH.
+# gh: pr-dispose reads the PR (state, url and comments) and closes it, both
+# pinned to the --repo it derives from the anchor's pr_url. The harness gh stub
+# cats a whole fixture and has no `close`, so override it with a minimal one that
+# serves a canned state (per PR, default OPEN), a url built from the pinned
+# --repo and a canned conversation, and logs the closing comment and the close,
+# honouring the refusal knobs. Written after harness_init so it wins on PATH.
 cat > "$BIN/gh" <<'GH'
 #!/usr/bin/env bash
 set -u
@@ -57,7 +57,8 @@ case "$v" in
          # pr_url), so its identity check certifies the live PR against the
          # anchor. STUB_PR_URL forces a mismatch to exercise that refusal.
          url="${STUB_PR_URL:-https://$repo/pull/$num}"
-         printf '{"state":"%s","url":"%s"}\n' "$st" "$url" ;;
+         # STUB_PR_COMMENTS is the PR's conversation, as a JSON array.
+         printf '{"state":"%s","url":"%s","comments":%s}\n' "$st" "$url" "${STUB_PR_COMMENTS:-[]}" ;;
   comment) exit "${STUB_PR_COMMENT_RC:-0}" ;;
   close) exit "${STUB_PR_CLOSE_RC:-0}" ;;
   *)     echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
@@ -206,6 +207,34 @@ eq "$(meta A12 'gc.pr_close_disposition_kind')" "duplicate" "the marker is recor
 has "$(cat "$STUB_GH_LOG")" "pr comment 81" "the comment was attempted"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed without its closing comment"
 has "$out" "still OPEN" "reports the PR is still open and needs closing"
+
+echo "# a re-run after a failed close leaves one closing comment, not two"
+# The first run posts the notice and dies on the close. The re-run finds that
+# notice on the PR, posts nothing, and closes.
+store "[$(anchor A27 97), $(succ S27)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_CLOSE_RC=1 "$SUT" --anchor A27 --successor S27 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "the first run dies on the failed close"
+eq "$(grep -c '^pr comment 97 ' "$STUB_GH_LOG")" "1" "…after posting the closing comment"
+POSTED_BODY=$(printf 'Closing as duplicate: disposition recorded on anchor A27 (successor S27). The refinery disposes the anchor from this close; no rework-or-close decision is owed.\n\n<!-- gc:city -->')
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_COMMENTS="$(jq -cn --arg b "$POSTED_BODY" '[{author:{login:"gc-city-bot"},body:$b}]')" \
+      "$SUT" --anchor A27 --successor S27 --kind duplicate 2>&1); rc=$?
+eq "$rc" 0 "the re-run closes the PR"
+hasnt "$(cat "$STUB_GH_LOG")" "pr comment" "…without posting the closing comment again"
+has "$(cat "$STUB_GH_LOG")" "pr close 97" "…and the close is made"
+has "$out" "already carries this disposition's closing comment" "…and says why it posted nothing"
+
+echo "# …but a notice that is not this disposition's, or carries no mark, posts a fresh one"
+store "[$(anchor A28 98), $(succ S28)]"
+: > "$STUB_GH_LOG"
+OTHER=$(jq -cn '[{body:"Closing as duplicate: disposition recorded on anchor A280 (successor S28).\n\n<!-- gc:city -->"},
+                 {body:"Closing as re-homed: disposition recorded on anchor A28 (successor S28).\n\n<!-- gc:city -->"},
+                 {body:"Closing as duplicate: disposition recorded on anchor A28 (successor S28). quoted by hand"}]')
+out=$(STUB_PR_COMMENTS="$OTHER" "$SUT" --anchor A28 --successor S28 --kind duplicate 2>&1); rc=$?
+eq "$rc" 0 "exits 0"
+eq "$(grep -c '^pr comment 98 ' "$STUB_GH_LOG")" "1" "another anchor's notice, another kind's, or an unmarked copy does not count as posted"
+has "$(cat "$STUB_GH_LOG")" "pr close 98" "…and the PR is closed"
 
 echo "# gh calls follow the anchor's pr_url repo, NOT the checkout origin"
 # The reviewed bug: #NUM was aimed at the checkout's origin, so an anchor read

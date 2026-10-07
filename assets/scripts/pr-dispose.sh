@@ -204,7 +204,7 @@ command -v gh >/dev/null 2>&1 \
 # while the PR may still be OPEN, a false success: pr-facts never sees a CLOSED
 # PR to consummate the disposition. pipefail (set above) makes the pipe carry
 # gh's non-zero status when gh fails.
-PR_JSON=$(gh pr view "$PRNUM" --repo "$PR_REPO_Q" --json state,url 2>/dev/null | scrub); rc=$?
+PR_JSON=$(gh pr view "$PRNUM" --repo "$PR_REPO_Q" --json state,url,comments 2>/dev/null | scrub); rc=$?
 if [ "$rc" -ne 0 ] || [ -z "$PR_JSON" ]; then
   die "the marker is recorded but PR#$PRNUM state could not be read from $PR_REPO_Q (gh pr view failed); the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
 fi
@@ -219,12 +219,26 @@ PR_STATE=$(printf '%s' "$PR_JSON" | jq -r '.state // ""')
 [ -n "$PR_STATE" ] || die "the marker is recorded but PR#$PRNUM returned no state from $PR_REPO_Q; the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
 # Idempotent: never reopen or re-close a PR already closed.
 if [ "$PR_STATE" = "OPEN" ]; then
-  CMT="Closing as $KIND: disposition recorded on anchor $ANCHOR (successor $SUCCESSOR). The refinery disposes the anchor from this close; no rework-or-close decision is owed."
+  CLEAD="Closing as $KIND: disposition recorded on anchor $ANCHOR "
+  CMT="${CLEAD}(successor $SUCCESSOR). The refinery disposes the anchor from this close; no rework-or-close decision is owed."
   [ -n "$NOTE" ] && CMT="$CMT $NOTE"
   # The comment is posted first and gates the close, so the PR never closes
-  # without the reason it was closed for.
-  "$PR_POST" comment --repo "$PR_REPO_Q" --pr "$PRNUM" --body "$CMT" >/dev/null 2>&1 \
-    || die "the marker is recorded but the closing comment could not be posted on PR#$PRNUM, so the PR was NOT closed and is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+  # without the reason it was closed for. A re-run after a failed close finds the
+  # notice its first run posted, so it closes without posting a second one. The
+  # notice is this disposition's when it opens with the same kind and anchor and
+  # carries the city's mark. The recorded marker cannot stand in for that test: a
+  # run whose comment failed recorded the marker too.
+  CMARK=$("$PR_POST" mark 2>/dev/null) || CMARK=""
+  POSTED=$(printf '%s' "$PR_JSON" | jq -r --arg lead "$CLEAD" --arg mark "$CMARK" '
+    [ (.comments // [])[] | ((.body // "") | tostring) as $b
+      | select(($mark != "") and ($b | startswith($lead)) and ($b | contains($mark))) ] | length' 2>/dev/null)
+  case "$POSTED" in ''|*[!0-9]*) POSTED=0 ;; esac
+  if [ "$POSTED" -gt 0 ]; then
+    echo "$PROG: PR#$PRNUM already carries this disposition's closing comment; closing it without posting another"
+  else
+    "$PR_POST" comment --repo "$PR_REPO_Q" --pr "$PRNUM" --body "$CMT" >/dev/null 2>&1 \
+      || die "the marker is recorded but the closing comment could not be posted on PR#$PRNUM, so the PR was NOT closed and is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+  fi
   if gh pr close "$PRNUM" --repo "$PR_REPO_Q" >/dev/null 2>&1; then
     echo "$PROG: closed PR#$PRNUM as $KIND; pr-facts auto-disposes $ANCHOR on its next pass"
   else
