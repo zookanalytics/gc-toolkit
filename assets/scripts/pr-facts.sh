@@ -647,35 +647,64 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
               | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
                   comment_id: ((.id // 0) | tostring), review_id: "" } ])' 2>/dev/null
 }
-# The highest id among <rows-json> written by a login other than ours, or 0. The
+# The ids in <rows-json> written by a login other than ours, as a JSON array. The
 # comment and Conversation spaces count feedback by this one rule, so the read
-# that decides whether to ask the threads and the count that routes cannot
-# disagree about whose comment is whose.
-max_foreign_id() { # <rows-json>
-  local n
-  n=$(printf '%s' "$1" | jq -r --arg self "$SELF_LOGIN" '
-    [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  printf '%s' "$n"
+# that decides whether to ask the threads, the marks that record what they
+# answered, and the count that routes cannot disagree about whose comment is
+# whose.
+foreign_ids() { # <rows-json>
+  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" '
+    [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ]' 2>/dev/null
 }
-# The highest id among the reviews in <reviews-json> whose body counts as
-# feedback, or 0: written by a login other than ours, COMMENTED or
-# CHANGES_REQUESTED, and carrying a body. A review with an empty body carries
-# only its inline comments, which the comment space already sees; counting it
-# would leave a posture no comment id can ever answer. CHANGES_REQUESTED counts
-# beside COMMENTED: an operator uses it to mean "change this", and it is the
-# feedback the loop most has to answer. A dismissed review is in neither state,
-# so a dismissal takes its ids out of the batch.
-max_counted_review_id() { # <reviews-json>
-  local n
-  n=$(printf '%s' "$1" | jq -r --arg self "$SELF_LOGIN" '
+# The ids of the reviews in <reviews-json> whose body counts as feedback, as a
+# JSON array: written by a login other than ours, COMMENTED or CHANGES_REQUESTED,
+# and carrying a body. A review with an empty body carries only its inline
+# comments, which the comment space already sees; counting it would leave a
+# posture no comment id can ever answer. CHANGES_REQUESTED counts beside
+# COMMENTED: an operator uses it to mean "change this", and it is the feedback the
+# loop most has to answer. A dismissed review is in neither state, so a dismissal
+# takes its ids out of the batch.
+counted_review_ids() { # <reviews-json>
+  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" '
     [ .[] | select(((.user.login // "") | tostring) != $self)
       | (((.state // "") | tostring)) as $st
       | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
       | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
-      | (.id // 0) ] | max // 0' 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+      | (.id // 0) ]' 2>/dev/null
+}
+# The highest id in a one-line JSON id array on stdin, or 0. Read in the shell: it
+# runs on every anchor of every pass, and the array is the flat `[1,2,3]` the two
+# readers above print.
+max_id() {
+  local ids="" i n=0
+  IFS= read -r ids || true
+  ids=${ids#\[}; ids=${ids%\]}
+  local IFS=,
+  for i in $ids; do
+    case "$i" in ''|*[!0-9]*) continue ;; esac
+    [ "$i" -gt "$n" ] && n="$i"
+  done
   printf '%s' "$n"
+}
+max_foreign_id() { foreign_ids "$1" | max_id; } # <rows-json>
+max_counted_review_id() { counted_review_ids "$1" | max_id; } # <reviews-json>
+# The ids in the JSON id array <ids-json> above <lo> and at or below <hi>.
+ids_within() { # <ids-json> <lo> <hi>
+  printf '%s' "$1" | jq -c --argjson lo "$2" --argjson hi "$3" \
+    '[ .[] | select(. > $lo and . <= $hi) ]' 2>/dev/null
+}
+# How far the review threads have answered past <mark>: walking the ids in
+# <ids-json> above the mark in order, the last one reached before the first id
+# not in <answered-json>, or <mark> itself when the first is not answered. The
+# feedback through that id is all answered, so a later pass whose newest feedback
+# sits at or below it has nothing for the threads to say.
+answered_through() { # <mark> <ids-json> <answered-json>
+  { printf '%s\n' "$2"; printf '%s\n' "$3"; } | jq -nr --argjson mark "$1" '
+    (input) as $ids | (input) as $ans
+    | (reduce $ans[] as $a ({}; .[$a | tostring] = true)) as $done
+    | reduce ([ $ids[] | select(. > $mark) ] | sort)[] as $i ({m: $mark, open: true};
+        if .open and $done[$i | tostring] == true then .m = $i else .open = false end)
+    | .m' 2>/dev/null
 }
 # The reviews whose bodies the review threads have answered, as a JSON array of
 # ids: each carries at least one inline comment, and every one of those is in
@@ -1216,28 +1245,58 @@ CHILDREN_EOF
       # Drop the feedback the review threads have answered, so feedback answered
       # off the watermark stops reading as unanswered and holding the merge: an
       # inline comment its thread answered, and a review whose every inline
-      # comment was. The threads are read only when feedback sits above a
-      # watermark, where the batch would otherwise fire, and a read that cannot
-      # answer leaves the batch unfiltered: an unreadable read never drops an
-      # objection. cmts_live stays whole for unengaged_holds, which reads it below.
+      # comment was. Nothing routes answered feedback, so nothing moves a
+      # watermark past it, and the threads would be re-read on every pass until
+      # the PR merged. A read records how far the threads have answered past each
+      # watermark (cam, cwm's answered mark; ram, rwm's), and a pass whose newest
+      # feedback sits at or below both marks skips the read and drops what they
+      # cover. A read that cannot answer drops only what the marks cover: an
+      # unreadable read never drops an objection. A mark is a confirmation the way
+      # a watermark is a routing, so a thread unresolved after the mark passed its
+      # comment routes nothing until a new comment brings the read back, the same
+      # as an unresolve under the watermark, and a reply always carries a new id
+      # above the mark. cmts_live stays whole for unengaged_holds, which reads it
+      # below.
       cmts_open="$cmts_live"; revs_open="$revs_raw"
-      raw_max_c=$(max_foreign_id "$cmts_live")
-      raw_max_r=$(max_counted_review_id "$revs_raw")
+      c_ids=$(foreign_ids "$cmts_live"); r_ids=$(counted_review_ids "$revs_raw")
+      raw_max_c=$(printf '%s' "$c_ids" | max_id); raw_max_r=$(printf '%s' "$r_ids" | max_id)
+      max_c="$raw_max_c"; max_r="$raw_max_r"
       if [ "$raw_max_c" -gt "$cwm" ] || [ "$raw_max_r" -gt "$rwm" ]; then
-        if review_threads_load "$num" && ans_c=$(answered_comment_ids); then
-          if ans_r=$(answered_review_ids "$revs_raw" "$cmts_live" "$ans_c") \
-             && c_kept=$(drop_ids "$cmts_live" "$ans_c") && [ -n "$c_kept" ] \
-             && r_kept=$(drop_ids "$revs_raw" "$ans_r") && [ -n "$r_kept" ]; then
-            cmts_open="$c_kept"; revs_open="$r_kept"
+        cam=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_answered // "") | tostring')
+        ram=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_answered // "") | tostring')
+        case "$cam" in ''|*[!0-9]*) cam=0 ;; esac
+        case "$ram" in ''|*[!0-9]*) ram=0 ;; esac
+        [ "$cam" -ge "$cwm" ] || cam="$cwm"
+        [ "$ram" -ge "$rwm" ] || ram="$rwm"
+        ans_c=$(ids_within "$c_ids" "$cwm" "$cam"); ans_r=$(ids_within "$r_ids" "$rwm" "$ram")
+        if [ "$raw_max_c" -gt "$cam" ] || [ "$raw_max_r" -gt "$ram" ]; then
+          if review_threads_load "$num" && read_c=$(answered_comment_ids) \
+             && read_r=$(answered_review_ids "$revs_raw" "$cmts_live" "$read_c"); then
+            ans_c="$read_c"; ans_r="$read_r"
+            cam_new=$(answered_through "$cwm" "$c_ids" "$ans_c")
+            ram_new=$(answered_through "$rwm" "$r_ids" "$ans_r")
+            case "$cam_new" in ''|*[!0-9]*) cam_new="$cam" ;; esac
+            case "$ram_new" in ''|*[!0-9]*) ram_new="$ram" ;; esac
+            marks=()
+            [ "$cam_new" = "$cam" ] || marks+=(--set "pr_comment_answered=$cam_new")
+            [ "$ram_new" = "$ram" ] || marks+=(--set "pr_review_answered=$ram_new")
+            if [ "${#marks[@]}" -gt 0 ] && ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                 "${marks[@]}" >/dev/null; then
+              echo "$PROG: $id — PR#$num answered marks did not record; the threads are read again next pass" >&2
+            fi
           else
-            echo "$PROG: $id — PR#$num could not drop answered feedback; counting the batch unfiltered" >&2
+            echo "$PROG: $id — PR#$num review-thread resolution unreadable; counting the feedback above the answered marks unfiltered" >&2
           fi
+        fi
+        if c_kept=$(drop_ids "$cmts_live" "$ans_c") && [ -n "$c_kept" ] \
+           && r_kept=$(drop_ids "$revs_raw" "$ans_r") && [ -n "$r_kept" ]; then
+          cmts_open="$c_kept"; revs_open="$r_kept"
+          max_r=$(max_counted_review_id "$revs_open")
+          max_c=$(max_foreign_id "$cmts_open")
         else
-          echo "$PROG: $id — PR#$num review-thread resolution unreadable; counting the feedback batch unfiltered" >&2
+          echo "$PROG: $id — PR#$num could not drop answered feedback; counting the batch unfiltered" >&2
         fi
       fi
-      max_r=$(max_counted_review_id "$revs_open")
-      max_c=$(max_foreign_id "$cmts_open")
       # An issue comment carries no review state and no inline path; every one
       # under a login other than ours is feedback the loop has to answer, the
       # same test the inline space uses. Its ids are a separate range, so it

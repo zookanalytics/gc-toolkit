@@ -711,6 +711,14 @@ keys = [
   # only when a later head still carries the threads, so the same head never
   # re-files.
   "pr_unengaged_threads",
+  # How far the review threads have answered past pr_comment_watermark and
+  # pr_review_watermark: every inline comment (or counted review body) above the
+  # watermark through this id was confirmed answered by the last thread read.
+  # pr-facts.sh writes them when a read moves them and skips the read on a pass
+  # whose newest feedback sits at or below both, so feedback answered off the
+  # watermark is not re-read on every pass. They never stand in for the
+  # watermarks: a routing writes those, and the write-back reads only those.
+  "pr_comment_answered", "pr_review_answered",
 ]
 
 [metadata.pr_round_trip]

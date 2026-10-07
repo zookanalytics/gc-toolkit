@@ -347,6 +347,8 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_merge_state` | `<mergeStateStatus>@<oid>` | GitHub's own value, verbatim and uppercase |
 | `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
 | `pr_review_watermark` | `<id>` | highest routed `pulls/N/reviews` id |
+| `pr_comment_answered` | `<id>` | every inline comment above `pr_comment_watermark`, through this id, was answered by its thread at the last read |
+| `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 
 The postures, in the precedence the derivation applies:
@@ -400,6 +402,14 @@ a thread resolved with no reply from the city answers nothing. A review body
 above its watermark is answered once the thread read has answered every inline
 comment the review carries, since the body frames those comments. A review with
 no inline comment has no thread to answer it and stays on the watermark.
+
+Nothing routes answered feedback, so nothing moves a watermark past it. Each
+thread read records how far it found the feedback answered past each watermark,
+in `pr_comment_answered` and `pr_review_answered`, and a pass whose newest
+feedback sits at or below both skips the read. The answered marks never move the
+watermarks, which only a routing writes. A thread unresolved after its answered
+mark passed it routes nothing until a new comment brings the read back, the same
+as an unresolve under the watermark.
 
 A `changes_requested` posture reads and watermarks the same ids a `commented`
 one does. The veto holds the merge; it answers nothing, and the objections
