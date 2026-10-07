@@ -5,9 +5,9 @@
 # (merge.sh) or closing the bead (bead-rehome.sh). This gate is the single place
 # that answers, for one bead, whether every precondition for that act holds. It
 # is a SET of independent clauses run in order; the first to refuse stops the set
-# and names why. The set is two clauses — no-open-visit, and epic-ruling-recorded
-# (an epic closes by a recorded hypothesis ruling, not its last unit merging) —
-# and a later precondition is one more `clause_* "$1" || return 1` line in
+# and names why. The set is two clauses: no-open-visit, and epic-ruling-recorded
+# (a stewarded epic closes only on the close ruling, not its last unit merging).
+# A later precondition is one more `clause_* "$1" || return 1` line in
 # finalize_gate_check.
 #
 # Clause no-open-visit: an OPEN visit whose SUBJECT is this bead refuses the
@@ -38,8 +38,9 @@
 # Usage:
 #   finalize-gate.sh check <bead-id>
 #     exit 0 — every clause passed; the bead may be finalized (no output)
-#     exit 1 — a clause refuses (an open visit, or a probe that failed closed);
-#              the one-line reason is printed to stdout for the caller to log
+#     exit 1 — a clause refuses (an open visit, a stewarded epic not ruled
+#              closed, or a probe that failed closed); the one-line reason is
+#              printed to stdout for the caller to log
 #     exit 2 — usage error
 #
 # Sourcing the script (BASH_SOURCE != $0) defines finalize_gate_check without
@@ -127,16 +128,20 @@ clause_no_open_visit() {
     return 0
 }
 
-# clause_epic_ruling_recorded <bead-id> — holds finalization of an
-# issue_type=epic bead that carries no epic_ruling. An epic closes by a recorded
-# ruling on its hypothesis — persevere, pivot, or close — after a validation
-# step, never as a side effect of its last unit merging (docs/epics.md). This
-# refuses the close paths that run the gate (bead-rehome.sh's close-with-
-# successor, and merge.sh were an epic ever an anchor) until that ruling is
-# recorded; epic-steward.sh files the visit that asks for it, and
-# doctor/check-epic-closed-implies-ruled is the after-the-fact backstop for a
-# bare `gc bd close` that never reaches this gate. A non-epic bead passes
-# untouched. FAIL CLOSED: an unreadable probe refuses.
+# clause_epic_ruling_recorded <bead-id> — holds finalization of a stewarded epic
+# (issue_type=epic carrying an epic_hypothesis) until its hypothesis is ruled
+# closed. An epic closes on a ruling, never as a side effect of its last unit
+# merging (docs/epics.md). The ruling is continue, shift, or close, and only close
+# is terminal: continue and shift keep the epic open, so they hold it here as an
+# absent ruling does. A close ruling carries its outcome (epic_ruling_reason), and
+# one recorded without it holds too. A non-epic bead passes untouched. FAIL
+# CLOSED: an unreadable probe refuses.
+#
+# Neither finalize path wired today reaches an undisposed epic. merge.sh
+# finalizes merge anchors, and bead-rehome.sh stamps the epic's disposition before
+# it runs the gate, which this clause passes. The clause therefore holds only a
+# gate-running close that reaches an undisposed epic. A bare `gc bd close` runs no
+# gate, and doctor/check-epic-closed-implies-ruled (I14) reports it after the fact.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     # This probe runs for EVERY finalize (every merge.sh and bead-rehome.sh close,
@@ -149,38 +154,46 @@ clause_epic_ruling_recorded() {
         echo "epic-ruling probe unreadable ('gc bd show' failed) — refusing finalize on $_fgr_bead (fail-closed)"
         return 1
     }
-    # One jq emission reads the four fields the clause needs, unit-separated (\037).
+    # One jq emission reads the five fields the clause needs, unit-separated (\037).
     # A non-array (bd returns an object when nothing resolves) aborts jq non-zero,
-    # read as unreadable. The hypothesis is emitted as a presence flag, not its
-    # text: a value may hold a newline that jq -r would decode to a real newline
-    # and split the read across lines, dropping the ruling and falsely holding; the
-    # disposition and ruling are id/enum values with any newline stripped likewise.
+    # read as unreadable. The hypothesis and the ruling's reason are emitted as
+    # presence flags, not their text: a value may hold a newline that jq -r would
+    # decode to a real newline and split the read across lines, dropping the
+    # ruling and falsely holding; the disposition and ruling are id/enum values
+    # with any newline stripped likewise. A reason of whitespace alone is absent.
     _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r '
         if type != "array" then error("not an array")
         else [ (.[0].issue_type // .[0].type // ""),
                (.[0].metadata.epic_hypothesis // "" | tostring | length > 0 | tostring),
                (.[0].metadata["gc.superseded_by"] // "" | tostring | gsub("[\\n\\r]"; " ")),
-               (.[0].metadata.epic_ruling // "" | tostring | gsub("[\\n\\r]"; " ")) ]
+               (.[0].metadata.epic_ruling // "" | tostring | gsub("[\\n\\r]"; " ")),
+               (.[0].metadata.epic_ruling_reason // "" | tostring | test("\\S") | tostring) ]
              | join("\u001f") end' 2>/dev/null) || {
         echo "epic-ruling probe unreadable (field read failed) — refusing finalize on $_fgr_bead (fail-closed)"
         return 1
     }
-    IFS=$'\037' read -r _fgr_type _fgr_hashyp _fgr_disposed _fgr_ruling <<< "$_fgr_fields"
+    IFS=$'\037' read -r _fgr_type _fgr_hashyp _fgr_disposed _fgr_ruling _fgr_hasreason <<< "$_fgr_fields"
     [ "$_fgr_type" = "epic" ] || return 0   # not an epic: this clause does not apply
-    # The same rule doctor/check-epic-closed-implies-ruled (I14) applies: an epic
-    # is held only once it has entered stewardship (carries a hypothesis) and is
-    # neither ruled nor disposed. An epic that never carried a hypothesis predates
+    # The predicate doctor/check-epic-closed-implies-ruled (I14) applies to a
+    # closed epic: an epic is held once it carries a hypothesis, unless it is
+    # disposed or ruled closed. An epic that never carried a hypothesis predates
     # the model, and a disposition pointer (bead-rehome's gc.superseded_by) is a
-    # recorded terminal reason — both pass.
+    # recorded terminal reason, so both pass.
     [ "$_fgr_hashyp" = true ] || return 0
     [ -n "$_fgr_disposed" ] && return 0
-    # The ruling must be one docs/epics.md defines (persevere|pivot|close). A
-    # present-but-off-enum value — a draft like "pending", a typo — is not a
-    # ruling, so the gate holds: otherwise an epic could close "ruled" on a value
-    # that is not a ruling, and the I14 doctor backstop would report OK. The same
-    # enum the steward's retract arm and doctor/check-epic-closed-implies-ruled use.
-    case "$_fgr_ruling" in persevere|pivot|close) return 0 ;; esac
-    echo "held: epic $_fgr_bead carries a hypothesis but no valid epic_ruling (found '${_fgr_ruling:-<none>}') — a stewarded epic closes by a recorded hypothesis ruling (persevere/pivot/close), not by its last unit merging (docs/epics.md)"
+    # Only the close ruling, with its outcome recorded, releases the epic. A
+    # non-terminal ruling and a value outside the enum (a draft like "pending", a
+    # typo) both hold, each with its own reason, so an epic never closes "ruled"
+    # on a value that does not end it.
+    case "$_fgr_ruling" in
+        close)
+            [ "$_fgr_hasreason" = true ] && return 0
+            echo "held: epic $_fgr_bead is ruled close but carries no epic_ruling_reason — a close ruling carries its outcome (the hypothesis held, was disproven, stalled, or ran past its cost) (docs/epics.md)" ;;
+        continue|shift)
+            echo "held: epic $_fgr_bead carries the non-terminal ruling '$_fgr_ruling' — continue and shift keep an epic open, and it closes only on the close ruling (docs/epics.md)" ;;
+        *)
+            echo "held: epic $_fgr_bead carries a hypothesis but no valid epic_ruling (found '${_fgr_ruling:-<none>}') — a stewarded epic closes on the close ruling (continue/shift/close, only close is terminal), not by its last unit merging (docs/epics.md)" ;;
+    esac
     return 1
 }
 
@@ -188,6 +201,11 @@ clause_epic_ruling_recorded() {
 # refuse prints its reason (on stdout) and stops the set.
 finalize_gate_check() {
     [ -n "${1:-}" ] || { echo "$PROG: check requires a bead id" >&2; return 2; }
+    # Every clause reads the store as it stands now. A refinery pass memoizes
+    # bd_list (GC_RECONCILE_BD_CACHE, bd-lib.sh), and merge.sh re-asserts this gate
+    # in the terminal window to catch a visit filed after its first check; a probe
+    # served from that cache would answer the re-assert with the first check's rows.
+    local GC_RECONCILE_BD_CACHE=""
     clause_no_open_visit "$1" || return 1
     clause_epic_ruling_recorded "$1" || return 1
     # A further precondition is one more `clause_* "$1" || return 1` here.

@@ -1,129 +1,157 @@
 ---
 name: Epic steward — design record (tk-isd5sa)
-description: The design decisions behind the epic-steward order and driver — why an exec order, rig scope, bare metadata keys, the visit-workflow placement, and the three-layer before-close enforcement — plus the arms deferred to follow-on beads and the cost of waiting. The authoritative mechanism doc is docs/epic-stewardship.md.
+description: Why the epic steward ships as a gate-only v1 — the continue/shift/close ruling with close terminal and carrying its outcome, the finalize-gate clause, and the I14 invariant — what the operator ruling removed from the first build and why, and what the follow-on epic owns, with the cost of waiting. The authoritative mechanism doc is docs/epic-stewardship.md.
 ---
 
 # Epic steward — design record
 
-This bead (tk-isd5sa) built the epic steward: the mechanism that gives the city
-its tendency to elaborate and advance epics. It is the central audit the epic
-decomposition named — "the central audit that runs on create and on a queued
-schedule" (specs/tk-xgj2ko/membership-mechanics.md). The authoritative
-description of what shipped is [docs/epic-stewardship.md](../../docs/epic-stewardship.md);
-this record is why it is shaped the way it is, and what it deliberately left for
-later.
+This bead (tk-isd5sa) set out to build the mechanism that gives the city its
+tendency to elaborate and advance epics. It ships as a v1 that enforces one
+thing: an epic that carries a hypothesis closes only on a recorded close ruling
+with its outcome. [docs/epic-stewardship.md](../../docs/epic-stewardship.md)
+describes what shipped. This record is why it has that shape, what the first
+build carried that v1 does not, and what is deferred.
 
 ## Inputs this descends from
 
-- **tk-c5atcz** — the epic contract (docs/epics.md). The five fields and the
-  hypothesis-answered closure model are what the steward reads and enforces.
-- **tk-ged0zz** — the survey pre-read. Its two maps settled the shape: the
-  before-close architecture (where closure validation hooks into the existing
-  machinery) and the stewardship-of-X pattern (audit-on-create, queued re-audit,
-  sling forward), with the ruling that the mechanism must not ride doctor.
-- **tk-xgj2ko** — the membership mechanics. It defines membership and the repair
-  primitive the deferred membership arm will call; this unit builds the audit,
-  not a second definition.
+- **tk-c5atcz** — the epic contract (docs/epics.md): the five fields and the
+  hypothesis-answered closure model.
+- **tk-ged0zz** — the survey pre-read: the before-close architecture, and the
+  ruling that the mechanism must not ride doctor.
+- **tk-xgj2ko** — the membership mechanics, which own membership and its repair
+  primitive.
+- **tk-089mt7x** — the operator sitting that settled the model and pared this
+  bead's PR (#977) to v1, 2026-10-07.
+- **tk-yaor8a** — the goal primitive spec, which the sitting folded into the epic
+  model.
+
+## What the sitting ruled
+
+The first build of #977 (through 213cb356) was a proactive steward: a rig-scoped
+exec order (`orders/epic-steward.toml`, `assets/scripts/epic-steward.sh`) whose
+floor, contract and ruling arms filed and retracted operator visits, plus the
+gate clause and I14. Its ruling arm counted an epic's `parent-child` children,
+filed a visit once every one had closed, and asked for persevere, pivot, or
+close; any of the three satisfied the gate. Review kept finding defects in the
+proactive arms: arms firing out of contract order, visits never retracted, a
+stale persevere satisfying the gate after later units landed, per-pass cost
+that starved the tail of the epic list, and a floor visit for every
+pre-stewardship epic on first run. The PR then stalled behind a merge conflict.
+
+The sitting settled the model rather than patch the arms:
+
+- The ruling is **continue / shift / close**. continue and shift are non-terminal
+  and aim the next body of work; close is terminal and carries its reason or
+  outcome. The operator chose this over enumerating complete and abandon,
+  because the outcome on the close says which one it was.
+- "Every unit landed" is the wrong trigger. Whether an epic is done is decided
+  by a ruling at a checkpoint, never by a count.
+- The epic is delivered through Features (SAFe's bounded delivery window), each
+  followed by an operator-judged Epic Checkpoint whose judge is never the
+  worker. "Checkpoint" stays as a family of qualified terms (Epic, PR, Bead
+  Checkpoint). The goal primitive folds into the epic.
+- v1 is the mechanical close gate, renamed to the new vocabulary, plus the I14
+  invariant. The proactive layer comes back as the follow-on epic tk-wmwcdlc,
+  after the checkpoint motion is proven by hand.
 
 ## Decisions
 
-**An exec order, not a judgment formula.** A pass is an enumeration, a set of
-metadata-presence gates, and a deduped visit per owed decision — no LLM judgment
-runs in the pass. The judgment an epic needs (drafting a hypothesis, ruling on
-it) is the operator's, surfaced at the visit. This matches deferred-dispatch's
-stance ("one bd list + one sling … needs no LLM") and keeps the steward cheap
-enough to run often. Generating the draft itself (an LLM arm) is deferred, not
-designed in.
+**v1 is enforcement only.** The order, the driver, its three arms and their
+tests are removed. `doctor/check-cadence-live` reads `orders/*.toml` by glob, so
+removing the order needed no change there. Nothing in v1 files a visit about an
+epic; the operator calls the sitting.
 
-**scope=rig.** An epic is a durable per-rig anchor (services/helm), so one
-registration, store and clock per importing rig, each reading its own epics —
-the same scope the refinery runs at. The survey speculated city scope; the epic
-model is per-rig, so rig scope is correct until epics are shown to cross rigs.
+**Only close releases an epic, and close carries its outcome.** The approved v1
+item read "an epic can't close without a close ruling + reason". The gate runs
+before the close, so it can read only what is already on the bead. The outcome
+is therefore recorded with the ruling as `epic_ruling_reason`, rather than left
+to bd's close reason, which the close itself writes. Each ruling overwrites
+`epic_ruling` and `epic_ruling_reason`, so a continue recorded at an earlier
+sitting never stands in for a later close. A reason of whitespace alone counts
+as absent.
 
-**Cadence is a heartbeat.** Every arm is idempotent and every visit is deduped by
-(epic, concern) and retracted when the concern clears, so a frequent pass
-re-files nothing. Frequency only shortens how long a new epic waits for its first
-audit — the create-time half. A short interval (1h default, tunable) approximates
-"audit on create" without a separate create-time trigger; the exact create-time
-arm is deferred (below).
+**One predicate, two readers.** `finalize-gate.sh clause_epic_ruling_recorded`
+and `doctor/check-epic-closed-implies-ruled` apply the same predicate: an epic
+that carries a hypothesis, is not disposed, and is not ruled close with an
+outcome is held (gate) or is an error once closed (I14). A continue or shift
+ruling and an off-enum value each get their own message. Each reader's test
+pins the predicate, and a mutant that accepts continue or shift, or drops the
+outcome, fails in both suites. The steward script carried a third copy of the
+enum, which left with it.
 
-**Bare `epic_*` metadata keys.** The contract fields are recorded as bare keys
-(`epic_hypothesis`, `epic_ruling`, …), matching the refinery's bare
-managed-domain convention (`merge_result`, `check_set`, `pr_posture`) rather than
-the `gc.`-prefixed runtime/routing namespace. Registered in
-lifecycle/lifecycle.toml `[metadata.epic_stewardship]` per the "a metadata key is
-state" rule (component-model.md). They are the operator's to ratify — no pack
-script writes them — so the steward reads a floor/ruling the operator stamped.
+**The clause holds no close path wired today; I14 is the enforcement that sees
+every close.** Review of #977 (thread on finalize-gate.sh:176) showed that
+neither gate-running path reaches an undisposed epic. `merge.sh` finalizes merge
+anchors, and `bead-rehome.sh` stamps `gc.superseded_by` before it gates, which
+the clause exempts. The exemption is intended: the operator's directive names
+"a stewarded epic (carries a hypothesis, not disposed)". So the clause stays as
+the precondition a gate-running close of an epic inherits, with the checkpoint
+layer's close path the expected first one, and no doc claims it holds
+bead-rehome. Its cost is one `gc bd show` per finalize, failing closed like the
+visit clause's two probes. Taking the bead's type from the caller would save
+that read, but it widens the gate's interface across merge.sh, its gctk port,
+and bead-rehome.sh, which v1 leaves alone.
 
-**Placed in the visit workflow (component-model.md §4).** The steward's product
-is the operator decisions an epic owes, surfaced as visits; it is the per-epic
-analog of first-reaction's per-bead intake, which also sits in visit. The
-cadence/order shape rhymes with the patrol orders (convoy-check, liveness-sweep)
-and the refinery, but placement follows product, not mechanism, and the product
-is operator decisions — visit. This is the placement worth arguing about; a
-reviewer who reads the product as "fleet/structure health" would move it to
-patrol.
+**The gate reads past the refinery's `bd_list` cache.** Moving the visit clause
+onto bd-lib's readers, so the `gc bd:` notice strip lives in one place, put its
+`gc.continuation_group` probe behind `GC_RECONCILE_BD_CACHE`, which a refinery
+pass exports to merge.sh. merge.sh's terminal re-assert then read its first
+check's rows and could pass a visit filed between the two. `finalize_gate_check`
+now runs every clause with the cache off (`local GC_RECONCILE_BD_CACHE=""`), and
+finalize-gate.test.sh case 21 reproduces the stale re-assert, failing without
+the fix.
 
-## The before-close enforcement, and why three layers
+**I14's remedy is bd's.** `lifecycle.sh reopen` refuses a closed bead with no
+`merge_result`, which is every epic. The finding now names the write that clears
+it (record `epic_ruling=close` and `epic_ruling_reason` on the closed epic) and
+bd's own reopen for an epic that should go on.
 
-The survey asked where epic validate-before-close hooks in. The load-bearing
-finding, derived by reading the close paths rather than inheriting the contract's
-wording: **there is no automatic transition to intercept.** No parent→child close
-cascade exists for `parent-child` edges (merge.sh closes only the merged anchor;
-lifecycle.sh has no cascade; bd enforces the opposite, an open-children hold). The
-only native auto-close is convoy-scoped (it walks `gc.input_convoy_id` /
-workflow roots) and structurally cannot fire on an `issue_type=epic`. So
-epics.md's "never a last-unit auto-close" is a guardrail against building one, and
-an epic reaches closed only through an explicit act.
+**`single-flight.sh` is not extracted.** The extraction existed so
+refinery-reconcile.sh and epic-steward.sh shared one lock implementation. With
+the steward removed it had one consumer, so refinery-reconcile.sh keeps main's
+own lock and v1 does not touch the merge cadence.
 
-finalize-gate.sh is wired into only merge.sh and bead-rehome.sh, so a clause
-there catches the disposition close but not a bare `gc bd close` or a lifecycle
-transition. No single layer covers every close, so enforcement is three layers:
+**Kept from the first build.** Bare `epic_*` metadata keys registered in
+lifecycle/lifecycle.toml `[metadata.epic_stewardship]`, now with
+`epic_ruling_reason`; bd-lib.sh's strip of the `gc bd:` notice line in
+`bd_json` and `bd_list`, and `bd_json`'s stdin guard, which the gate reads
+through; the harness's `STUB_SHOW_NOTICE`.
 
-1. The steward's ruling visit surfaces the decision to the operator (who performs
-   the close) and holds the gate via its tracks edge.
-2. `clause_epic_ruling_recorded` in finalize-gate.sh refuses the gate-running
-   close paths.
-3. `doctor/check-epic-closed-implies-ruled` (I14) is the after-the-fact backstop
-   for any path that bypasses the gate.
+**There is no automatic transition to intercept.** No parent→child close cascade
+exists for `parent-child` edges (merge.sh closes only the merged anchor;
+lifecycle.sh has no cascade; bd enforces the opposite, an open-children hold).
+The only native auto-close is convoy-scoped and cannot fire on an
+`issue_type=epic`. So epics.md's "never a last-unit auto-close" is a guardrail
+against building one, and an epic reaches closed only through an explicit act.
 
 ## Deferred, with cost
 
-The deliverable that shipped is the running mechanism (floor, contract, ruling
-arms + the before-close trio). One extension is committed work, tracked as a
-follow-on bead; the rest are scope boundaries the shipped design makes
-unnecessary today, recorded here with what would reopen each.
+Tracked:
 
-Tracked as a follow-on bead:
+- **The Feature and Epic Checkpoint layer** — tk-wmwcdlc, the follow-on epic,
+  blocked by this bead. It builds the Feature level, the formula that prepares
+  and files the operator-judged checkpoint sitting after a Feature lands, and
+  the goals consolidation: measured and graded criteria and the anti-gaming
+  invariant in the epic contract, with specs/tk-yaor8a retired as a separate
+  primitive. docs/epics.md states the model as direction. Cost while deferred:
+  nothing prompts a ruling. An epic whose work has landed waits for the operator
+  to call a sitting, so an answered or stalled epic stays open until someone
+  looks. The close requirement holds meanwhile, through I14.
+- **Membership scope-reading audit** — tk-lt585p, blocked on the repair
+  primitive tk-8bzuc2 and on a scope classification that is LLM judgment. It was
+  framed as a fourth steward arm in epic-steward.sh; with that script removed,
+  its home is decided when it unblocks. Cost: misfiled work is not swept, and
+  membership drifts as work is filed.
 
-- **Membership scope-reading arm** — the fourth arm (re-home work that drifted
-  outside its epic). Tracked as **tk-lt585p**, blocked on the repair primitive
-  **tk-8bzuc2** (re-parent a bead, refusing a cascade-unsafe re-parent) and on a
-  scope classification the shell pass cannot do (which sibling belongs under which
-  epic is LLM judgment). Cost while deferred: misfiled work is not swept and
-  membership drifts as work is filed — the same cost the membership spec records
-  for this audit.
+The first build also recorded three scope boundaries of its cadence: an exact
+create-time audit, an LLM drafting arm, and city scope. They were properties of
+the removed order, and the checkpoint layer decides them afresh.
 
-Scope boundaries, not separately tracked — the shipped design covers the need,
-and each names what would reopen it:
+## Follow-on beads
 
-- **Exact create-time audit** — a first-reaction-style arm that reacts the moment
-  an epic is filed, rather than on the next cadence tick. The short cadence
-  approximates audit-on-create, and coordination roles file epics directly
-  (tk-xgj2ko notes), so the periodic audit is the robust backstop. Reopen if the
-  up-to-one-interval wait for a new epic's first audit proves too long.
-- **LLM drafting arm** — generate the proposed hypothesis/closure draft for the
-  operator to ratify, rather than asking the operator to draft it. The operator
-  drafts the floor at the visit today and the elaboration still happens; an LLM
-  arm would only reduce operator effort. Reopen if drafting effort becomes the
-  bottleneck.
-- **City scope** — one registration spanning rigs rather than one per rig. Epics
-  are per-rig, so rig scope is correct and the cost today is none. Reopen only if
-  epics are shown to span rigs.
-
-## Follow-on beads filed
-
-- Membership scope-reading arm — **tk-lt585p** (blocked on tk-8bzuc2).
-- Doctor-check-count drift in docs/architecture.md and docs/component-model.md —
-  **tk-td0fpz** (prose predating the current 23→24 check count), found while
-  adding I14; left untouched here as out of scope.
+- tk-wmwcdlc — the Feature and Epic Checkpoint layer (filed by sitting
+  tk-089mt7x).
+- tk-lt585p — the membership audit; its notes record that the steward it would
+  have extended is gone.
+- tk-td0fpz — doctor-check-count drift in docs/architecture.md and
+  docs/component-model.md, found while adding I14 and left out of scope.

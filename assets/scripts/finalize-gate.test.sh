@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # finalize-gate.test.sh — the composable finalize gate over the hermetic bd stub.
 # Seeds visits as store beads plus a `VISIT|tracks|SUBJECT` edge and asserts the
-# gate refuses (exit 1) only for an OPEN visit tracking the subject, allows
-# (exit 0) otherwise, and fails closed (exit 1) on an unreadable probe.
+# gate refuses (exit 1) only for an OPEN visit tracking the subject or a
+# stewarded epic not ruled closed, allows (exit 0) otherwise, and fails closed
+# (exit 1) on an unreadable probe.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/finalize-gate-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -114,10 +115,30 @@ eq "$rc" 1 "stewarded epic without a ruling: exit 1"
 has "$out" "epic_ruling" "unruled epic: names the missing ruling"
 has "$out" "E1" "unruled epic: names the epic"
 
-# 14. An epic carrying a ruling may finalize.
-store "[$(epic_bead E2 open '{"epic_hypothesis":"h","epic_ruling":"persevere"}')]"; : > "$STUB_DEPS"
+# 14. An epic ruled close, its outcome recorded, may finalize.
+store "[$(epic_bead E2 open '{"epic_hypothesis":"h","epic_ruling":"close","epic_ruling_reason":"held: the signal moved"}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E2 2>/dev/null); rc=$?
-eq "$rc" 0 "ruled epic: exit 0"
+eq "$rc" 0 "epic ruled close with its outcome: exit 0"
+
+# 14a. A close ruling carries its outcome: one recorded without epic_ruling_reason,
+# or with a reason of whitespace alone, holds and names the missing field.
+store "[$(epic_bead E2nr open '{"epic_hypothesis":"h","epic_ruling":"close"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E2nr 2>/dev/null); rc=$?
+eq "$rc" 1 "epic ruled close without its outcome: exit 1"
+has "$out" "epic_ruling_reason" "the close-without-outcome hold names the missing field"
+store "[$(epic_bead E2ws open '{"epic_hypothesis":"h","epic_ruling":"close","epic_ruling_reason":"  "}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E2ws 2>/dev/null); rc=$?
+eq "$rc" 1 "a whitespace-only epic_ruling_reason is no outcome: exit 1"
+
+# 14b. continue and shift are rulings, but not terminal ones: each keeps the epic
+# open, so the gate holds it as it holds an unruled one, naming the ruling.
+for r in continue shift; do
+  store "[$(epic_bead "E2$r" open "{\"epic_hypothesis\":\"h\",\"epic_ruling\":\"$r\"}")]"; : > "$STUB_DEPS"
+  out=$("$SUT" check "E2$r" 2>/dev/null); rc=$?
+  eq "$rc" 1 "epic ruled $r (non-terminal): exit 1"
+  has "$out" "non-terminal ruling '$r'" "the $r hold names the non-terminal ruling"
+  has "$out" "close ruling" "the $r hold names the ruling that releases it"
+done
 
 # 15. An empty epic_ruling is not a ruling.
 store "[$(epic_bead E3 open '{"epic_hypothesis":"h","epic_ruling":""}')]"; : > "$STUB_DEPS"
@@ -125,12 +146,12 @@ out=$("$SUT" check E3 2>/dev/null); rc=$?
 eq "$rc" 1 "epic with an empty ruling: exit 1"
 
 # 15b. A present-but-off-enum ruling ("pending", a typo) is not a ruling either —
-# the enum is persevere|pivot|close (docs/epics.md), so the gate still holds and
+# the enum is continue|shift|close (docs/epics.md), so the gate still holds and
 # an epic cannot close "ruled" on a value that is not a ruling.
 store "[$(epic_bead E3off open '{"epic_hypothesis":"h","epic_ruling":"pending"}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E3off 2>/dev/null); rc=$?
 eq "$rc" 1 "epic with an off-enum ruling ('pending'): exit 1"
-has "$out" "persevere/pivot/close" "the refusal names the allowed ruling set"
+has "$out" "continue/shift/close" "the refusal names the allowed ruling set"
 
 # 16. A pre-stewardship epic (no hypothesis) is exempt — it predates the model.
 store "[$(epic_bead E3b open '{}')]"; : > "$STUB_DEPS"
@@ -148,7 +169,7 @@ out=$("$SUT" check W1 2>/dev/null); rc=$?
 eq "$rc" 0 "non-epic bead is untouched by the epic-ruling clause: exit 0"
 
 # 19. The clauses are independent: an open visit still holds a ruled epic.
-store "[$(epic_bead E4 open '{"epic_hypothesis":"h","epic_ruling":"close"}'), $(visit VE4 open)]"
+store "[$(epic_bead E4 open '{"epic_hypothesis":"h","epic_ruling":"close","epic_ruling_reason":"held"}'), $(visit VE4 open)]"
 printf 'VE4|tracks|E4\n' > "$STUB_DEPS"
 out=$("$SUT" check E4 2>/dev/null); rc=$?
 eq "$rc" 1 "a ruled epic under an open visit is still held by the visit clause"
@@ -158,13 +179,27 @@ has "$out" "VE4" "the visit clause names the visit, first refusal stops the set"
 # gate strips it like bead-context.sh. This probe runs for EVERY finalize, so
 # without the strip one notice line would error jq and fail every merge/close in
 # the rig closed — epics and plain work beads alike.
-store "[$(epic_bead EN open '{"epic_hypothesis":"h","epic_ruling":"persevere"}')]"; : > "$STUB_DEPS"
+store "[$(epic_bead EN open '{"epic_hypothesis":"h","epic_ruling":"close","epic_ruling_reason":"held"}')]"; : > "$STUB_DEPS"
 out=$(STUB_SHOW_NOTICE=alpha "$SUT" check EN 2>/dev/null); rc=$?
-eq "$rc" 0 "ruled epic behind a gc bd: notice on stdout: exit 0 (notice stripped, not failed-closed)"
+eq "$rc" 0 "epic ruled close behind a gc bd: notice on stdout: exit 0 (notice stripped, not failed-closed)"
 store "[$(epic_bead EM open '{"epic_hypothesis":"h"}')]"; : > "$STUB_DEPS"
 out=$(STUB_SHOW_NOTICE=alpha "$SUT" check EM 2>/dev/null); rc=$?
 eq "$rc" 1 "unruled epic behind a gc bd: notice: still held"
 has "$out" "no valid epic_ruling" "the hold is the real refusal, not a probe-unreadable error"
+
+# 21. Every check reads the store as it stands, even inside a refinery pass that
+# memoizes bd_list (GC_RECONCILE_BD_CACHE). merge.sh re-asserts the gate in the
+# terminal window to catch a visit filed after its first check; here the visit
+# lands between the two checks stamped but not yet edged (escalate.sh's create,
+# then a separate dep add), the case the continuation_group probe exists for.
+mkdir -p "$TMP/bd-cache"
+store "[$(work A21 open)]"; : > "$STUB_DEPS"
+out=$(GC_RECONCILE_BD_CACHE="$TMP/bd-cache" "$SUT" check A21 2>/dev/null); rc=$?
+eq "$rc" 0 "first check under a pass cache, no visit yet: exit 0"
+store "[$(work A21 open), $(visit_cg V21 open A21)]"; : > "$STUB_DEPS"
+out=$(GC_RECONCILE_BD_CACHE="$TMP/bd-cache" "$SUT" check A21 2>/dev/null); rc=$?
+eq "$rc" 1 "re-assert under the same pass cache sees the visit filed since: exit 1"
+has "$out" "V21" "the re-assert names the visit the cache would have hidden"
 
 # 12. Usage.
 "$SUT" check >/dev/null 2>&1; eq "$?" 2 "check without a bead id: exit 2"

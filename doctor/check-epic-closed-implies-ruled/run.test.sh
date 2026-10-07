@@ -45,11 +45,11 @@ run_check() { : > "$BD_ARGS"; RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash
 epic() { printf '{"id":"%s","issue_type":"epic","status":"%s","metadata":%s}' "$1" "$2" "$3"; }
 store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.json"; }
 
-# --- 1. a ruled closed epic passes, and the query is scoped to epics -----------
-store "$(epic E1 closed '{"epic_ruling":"persevere"}')" \
+# --- 1. a closed epic ruled close passes, and the query is scoped to epics ----
+store "$(epic E1 closed '{"epic_hypothesis":"for X","epic_ruling":"close","epic_ruling_reason":"held"}')" \
       "$(epic E2 closed '{"epic_ruling":"close"}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "closed epics carrying a ruling pass"
+eq "$RC" "0" "closed epics ruled close pass"
 has "$OUT" "OK:" "the pass message is the OK line"
 ARGS=$(cat "$BD_ARGS")
 has "$ARGS" "--type=epic" "the scan asks only for epics"
@@ -61,8 +61,31 @@ store "$(epic E3 closed '{"epic_hypothesis":"for X, Y, signal Z"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a stewarded closed epic carrying no epic_ruling is an ERROR"
 has "$OUT" "E3" "the unruled epic is named"
+has "$OUT" "update E3 --set-metadata epic_ruling=close --set-metadata epic_ruling_reason=" "the remedy records the close ruling and its outcome on the closed epic"
 has "$OUT" "reopen E3" "the remedy offers reopening to rule"
+hasnt "$OUT" "lifecycle.sh reopen" "the remedy does not offer lifecycle.sh reopen, which refuses an epic"
+has "$OUT" "--db $TMP/alpha/.beads" "the remedy names the store the epic lives in"
 has "$OUT" "docs/epics.md" "the finding cites the contract"
+
+# --- 2a. a close ruling carries its outcome: a closed epic ruled close with no
+# epic_ruling_reason, or one of whitespace alone, is an ERROR naming the field --
+store "$(epic E3nr closed '{"epic_hypothesis":"for X","epic_ruling":"close"}')" \
+      "$(epic E3ws closed '{"epic_hypothesis":"for X","epic_ruling":"close","epic_ruling_reason":" "}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a closed epic ruled close with no outcome is an ERROR"
+has "$OUT" "E3nr" "the outcome-less epic is named"
+has "$OUT" "E3ws" "the whitespace-outcome epic is named"
+has "$OUT" "no outcome (epic_ruling_reason)" "the finding names the missing outcome field"
+
+# --- 2b. continue and shift keep an epic open: a closed epic carrying either was
+# closed on a ruling that does not end it, an ERROR naming the ruling ---------
+for r in continue shift; do
+  store "$(epic "E3$r" closed "{\"epic_hypothesis\":\"for X\",\"epic_ruling\":\"$r\"}")"
+  OUT=$(run_check); RC=$?
+  eq "$RC" "2" "a closed epic ruled $r (non-terminal) is an ERROR"
+  has "$OUT" "E3$r" "the $r-ruled epic is named"
+  has "$OUT" "non-terminal ruling '$r'" "the finding names the non-terminal ruling"
+done
 
 # --- 3. an empty epic_ruling reads the same as an absent one ------------------
 store "$(epic E4 closed '{"epic_hypothesis":"for X","epic_ruling":""}')"
@@ -71,7 +94,7 @@ eq "$RC" "2" "an epic_ruling stamped EMPTY is not a ruling"
 has "$OUT" "E4" "the empty-ruling epic is named"
 
 # --- 3b. a present-but-off-enum ruling ("pending", a typo) is not a ruling: the
-# enum is persevere|pivot|close (docs/epics.md), so I14 reads it as unruled. ----
+# enum is continue|shift|close (docs/epics.md), so I14 reads it as unruled. -----
 store "$(epic E4off closed '{"epic_hypothesis":"for X","epic_ruling":"pending"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an off-enum epic_ruling ('pending') reads as unruled"
@@ -98,7 +121,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "an open, unruled epic is not a finding — the ruling is owed only at close"
 
 # --- 7. mixed: only the stewarded unruled one is reported --------------------
-store "$(epic E7 closed '{"epic_hypothesis":"for X","epic_ruling":"pivot"}')" \
+store "$(epic E7 closed '{"epic_hypothesis":"for X","epic_ruling":"close","epic_ruling_reason":"disproven"}')" \
       "$(epic E8 closed '{"epic_hypothesis":"for X"}')" \
       "$(epic E9 closed '{}')"
 OUT=$(run_check); RC=$?

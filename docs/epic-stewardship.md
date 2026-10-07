@@ -1,165 +1,107 @@
 ---
-name: Epic Stewardship — the cadence that elaborates and advances epics
-description: The epic-steward order and driver — how the city audits every open epic on a cadence, surfaces the floor contract, the rest of the contract, and the hypothesis ruling each epic owes as operator visits, and enforces that an epic closes only on a recorded ruling. Names the metadata fields an epic carries and the before-close trio. Read it to run, tune, or extend the steward; the contract an epic carries is epics.md.
+name: Epic Stewardship — holding an epic open until its hypothesis is ruled closed
+description: How the pack holds an epic open until its hypothesis is ruled close with its outcome — the ruling fields an epic carries, the finalize-gate clause that holds a gate-running close, and the doctor invariant that reports a close made without the ruling — plus the Epic Checkpoint layer that is direction, not built. Read it to rule on or close an epic, or to extend the enforcement; the contract an epic carries is epics.md.
 ---
 
 # Epic Stewardship
 
-The city has a natural tendency to elaborate and advance its epics: it reads
-each one against its contract, surfaces the decision the epic now owes to the
-operator, and holds an epic open until its hypothesis is ruled on. Epic
-stewardship is the mechanism behind that tendency. It is the second steward in
-the pack after the refinery and wears the same shape — a cadence that enumerates
-the object it stewards, runs independent arms over each, and surfaces the
-follow-up — applied to epics rather than pull requests.
-
-It is deliberately not a doctor check. Doctor is already over-leveraged, so the
-steward is an ordinary exec order; doctor's only role here is asserting that
-order is live ([component-model.md](component-model.md) I10,
-`check-cadence-live`) and that a closed epic was ruled (I14,
-`check-epic-closed-implies-ruled`).
+Epic stewardship holds an epic to its contract. An epic that carries a
+hypothesis stays open until the operator rules it closed and records the
+outcome ([epics.md](epics.md)). The pack enforces that with a finalize-gate
+clause and a doctor invariant. It does not yet prompt the rulings themselves:
+the Epic Checkpoint layer that will is direction, described at the end of this
+doc and built by the follow-on epic *Epic Checkpoints & Features*.
 
 ## Scope
 
-**Mandate.** The mechanism that elaborates and advances epics: the cadence that
-audits every open epic, the decisions it surfaces to the operator, the fields an
-epic carries that it reads, and the enforcement that an epic closes only on a
-recorded hypothesis ruling.
+**Mandate.** The enforcement that an epic closes only on a recorded close
+ruling: the ruling fields an epic carries, the finalize-gate clause, the doctor
+invariant, and the direction the stewardship grows in.
 
-**Boundaries.** Not the contract an epic carries or when it closes — that is
-[epics.md](epics.md), which this mechanism reads and enforces. Not how a bead
-becomes a member of an epic; membership classification and repair are a separate
-concern (see [Membership](#membership-deferred)). Not the merge cadence
-([refinery-merge-cadence.md](refinery-merge-cadence.md)), whose shape this
-rhymes with. Not the invariant catalog or the finalize gate's full contract
-([component-model.md](component-model.md), [finalize-gate.md](finalize-gate.md)).
+**Boundaries.** Not the contract an epic carries or what each ruling means —
+that is [epics.md](epics.md). Not how a bead becomes a member of an epic;
+membership classification and repair are a separate concern. Not the finalize
+gate's full contract ([finalize-gate.md](finalize-gate.md)) or the invariant
+catalog ([component-model.md](component-model.md)).
 
-## The audit
+## Recording a ruling
 
-`orders/epic-steward.toml` runs `assets/scripts/epic-steward.sh` on a cadence
-(`scope=rig`: an epic is a per-rig anchor). One pass enumerates every non-closed
-`issue_type=epic` in the rig — `open`, `in_progress`, `blocked`, `deferred`,
-`hooked`, and `pinned`, the same live set the finalize gate holds — and runs
-three arms over each. Each
-arm detects whether the epic owes a particular decision and, when it does, files
-exactly one operator visit through `escalate.sh`, keyed by concern; when the
-decision has since been made, it retracts the visit it filed. `escalate.sh`
-dedups by (subject, key), so
-a visit that is already open is refreshed, not duplicated, and its `tracks` edge
-to the epic holds the epic's finalize until the conversation is answered. The
-judgment each visit asks for is the operator's; the pass only detects what is
-owed.
+The operator rules at a sitting on the epic, and the ruling is recorded on the
+epic bead as metadata: `epic_ruling` is `continue`, `shift`, or `close`, and
+`epic_ruling_reason` says why. On a close ruling the reason is the outcome (the
+hypothesis held, was disproven, cannot be met as stated, stalled, or ran past
+its cost), and the close requires it. Each ruling overwrites the last, so the
+epic carries its latest ruling, and a continue recorded at an earlier sitting
+never stands in for the close.
 
-A per-rig flock serialises passes, so a long pass cannot overlap the next tick
-and race `escalate.sh`'s find-or-file read. The lock lives in the shared
-`assets/scripts/single-flight.sh`, so this order and the refinery's reconcile
-cadence hold their passes the same way. The pass fails closed: with no usable
-lock it runs no arm, and a lock held past the stall bound is reported as a wedged
-pass rather than skipped silently every tick.
+```bash
+gc bd update <epic> --set-metadata epic_ruling=close \
+  --set-metadata epic_ruling_reason="<the outcome>" \
+  --set-metadata epic_ruling_evidence=<visit bead of the sitting>
+```
 
-### Floor
-
-An epic whose floor contract is incomplete — missing any of its handle
-(`epic_handle`), its one-sentence hypothesis (`epic_hypothesis`), or its
-boundaries (`epic_boundaries`) — cannot have work classified into it and cannot
-be judged complete. The floor arm files a visit naming the missing field(s) and
-asking the operator to draft and ratify them. This is the contract's own closure
-condition that "the city proposes a contract for an epic that lacks one"
-([epics.md](epics.md)). A rough hypothesis is enough to start; once all three
-floor fields are recorded the arm retracts any floor visit it filed.
-
-### Rest of the contract
-
-Once an epic's floor is set (all three floor fields recorded) but it is missing
-its closure condition (`epic_closure_condition`) or its leading indicators
-(`epic_indicators`), the contract arm files a visit asking for whichever is
-absent. The floor is enough to start work; the rest of the contract gives the
-epic an agreed test of done and an in-flight signal to steer by. The arm stays
-silent while the floor is partial, a hypothesis alone included. The rest of the
-contract is elaborated on top of the floor ([epics.md](epics.md)), and closure
-checks and indicators test an outcome inside the epic's boundaries, so the floor
-visit comes first. Once both are recorded the arm retracts the contract visit.
-
-### Hypothesis ruling
-
-When every unit under an epic has landed (every `parent-child` child closed) and
-no ruling is recorded (`epic_ruling` absent), the ruling arm files a visit: the
-epic is complete but cannot close until its hypothesis is answered. An epic
-closes by a ruling — persevere, pivot, or close — after a validation step, never
-as a side effect of its last unit merging ([epics.md](epics.md)). A ruling
-presupposes a hypothesis, so the arm stays silent on an epic that has none. It
-keys on the hypothesis alone, not the whole floor, because that is the trigger
-the finalize gate's ruling requirement uses: every epic the gate would hold for
-want of a ruling is asked for one once its units have landed. Once a ruling is
-recorded, the arm retracts the visit, releasing the finalize hold so the epic can
-close.
-
-### Membership (deferred)
-
-Re-homing work that has drifted outside its epic — the periodic scope-reading
-audit — is a designed fourth arm that is not yet built. It needs a repair
-primitive that re-parents a bead and a scope classification the shell pass cannot
-do; both are tracked separately with the membership mechanism. Until it lands,
-membership drift is not swept. See `specs/tk-isd5sa/` for the deferral and its
-cost.
-
-## The fields an epic carries
-
-An epic's contract ([epics.md](epics.md)) is recorded on the epic bead as
-metadata, registered in [`lifecycle/lifecycle.toml`](../lifecycle/lifecycle.toml)
-`[metadata.epic_stewardship]`. The fields are the operator's to ratify: they are
-stamped when the operator confirms a floor or a ruling at the visit the steward
-files, the dated decision [epics.md](epics.md) calls for. No pack script writes
-them; the steward, the finalize gate, and the doctor check read them.
+The fields are registered in
+[`lifecycle/lifecycle.toml`](../lifecycle/lifecycle.toml)
+`[metadata.epic_stewardship]`. They are the operator's: stamped when the
+operator confirms a contract field or rules, the dated decision
+[epics.md](epics.md) calls for. No pack script writes them; the finalize gate and
+the doctor check read the hypothesis, the ruling, and its reason.
 
 | Field | Meaning |
 |---|---|
 | `epic_handle` | the 3–5 word handle |
-| `epic_hypothesis` | the one-sentence hypothesis — a floor field, and the trigger for the finalize gate's ruling requirement |
+| `epic_hypothesis` | the one-sentence hypothesis — a floor field, and what brings an epic under the close requirement |
 | `epic_boundaries` | the epic's boundaries |
 | `epic_closure_condition` | the 3–6 operator-runnable closure checks |
 | `epic_indicators` | the 1–3 leading indicators |
-| `epic_ruling` | the hypothesis ruling: `persevere`, `pivot`, or `close` |
-| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when, who, and the visit that carried the ruling |
+| `epic_ruling` | the latest ruling: `continue`, `shift`, or `close` |
+| `epic_ruling_reason` | why the latest ruling was made; on `close`, the outcome |
+| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when, who, and the visit of the sitting that carried the ruling |
 
 ## Closing an epic: the before-close enforcement
 
 There is no automatic transition to intercept. No parent→child close cascade
-exists for `parent-child` edges; the only native auto-close is convoy-scoped and
-cannot fire on an `issue_type=epic`. So the "never a last-unit auto-close"
-discipline ([epics.md](epics.md)) is a guardrail against building such a cascade,
-and an epic reaches closed only through an explicit act: a bare `gc bd close`, a
-`lifecycle.sh` transition, or `bead-rehome.sh`'s close-with-successor.
+exists for `parent-child` edges, and the only native auto-close is
+convoy-scoped and cannot fire on an `issue_type=epic`. So the "never a last-unit
+auto-close" discipline ([epics.md](epics.md)) is a guardrail against building
+such a cascade, and an epic reaches closed only through an explicit act, such
+as a bare `gc bd close` or `bead-rehome.sh`'s close-with-successor.
 
-Three layers enforce the ruling, because no single one covers every close:
+Two layers enforce the ruling, and they apply one predicate. An epic that
+carries a hypothesis may close only once it is ruled close with its outcome
+recorded. A continue or shift ruling holds it as an absent ruling does. An epic
+with no hypothesis predates the model and is exempt, and a disposed epic
+(`gc.superseded_by`, written by `bead-rehome.sh`) carries a recorded terminal
+reason and passes.
 
-1. **The steward's ruling visit** surfaces the decision to the operator — the one
-   who performs the close — and holds the finalize gate through its `tracks` edge.
-2. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
-   refuses to finalize an epic carrying no `epic_ruling`. It covers the close
-   paths that run the gate: `bead-rehome.sh`, and `merge.sh` were an epic ever an
-   anchor. A bare `gc bd close` runs neither, so the clause is not a universal
-   choke point.
-3. **The doctor invariant** (I14, `doctor/check-epic-closed-implies-ruled`) is the
-   after-the-fact backstop: a closed epic with no `epic_ruling` and no explicit
-   disposition (`gc.superseded_by`) is an error, whatever path closed it.
+1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
+   refuses to finalize an epic the predicate holds, on every close path that
+   runs the gate. Neither path wired today reaches an undisposed epic:
+   `merge.sh` finalizes merge anchors, and `bead-rehome.sh` records its
+   disposition before it gates. The clause is the precondition any gate-running
+   close of an epic inherits, not a choke point on today's closes.
+2. **The doctor invariant** (I14, `doctor/check-epic-closed-implies-ruled`) sees
+   every close after the fact. A closed epic the predicate would have held is an
+   error, whatever path closed it. A bare `gc bd close` is the ordinary way an
+   epic closes, and I14 is what reports one closed without its ruling. Its
+   remedy is to record the ruling on the closed epic, or to reopen the epic
+   (`gc bd reopen`) when it should go on.
 
-## Cadence and tuning
+## Direction: the Epic Checkpoint layer
 
-The interval is a heartbeat, not the cadence. Every arm is idempotent and every
-visit is deduped, so a frequent pass re-files nothing; frequency only shortens
-how long a newly created epic waits for its first audit — the create-time half,
-which a short interval approximates until a dedicated create-time arm makes it
-exact. Tune the interval from `city.toml` `[[orders.overrides]]`, not the order
-file.
+Not built. The model is in [epics.md](epics.md#direction-features-and-epic-checkpoints):
+after each Feature lands, an Epic Checkpoint rules continue, shift, or close.
+The follow-on epic *Epic Checkpoints & Features* builds the layer that runs it.
+When a Feature has landed and no checkpoint is open on its epic, a formula
+gathers the evidence and analysis the ruling needs and files the checkpoint
+sitting for the operator to judge. The ruling that sitting records is the one
+the gate and I14 read. It is a formula, not a doctor check: doctor is already
+over-leveraged, and its role here stays the after-the-fact invariant. The first
+checkpoints run by hand, and the machinery is built from what they show.
 
-A pass audits the whole live set — epics are a coarse per-rig anchor, so there is
-no per-pass cap; a cap taking the first N in a stable order would never advance to
-the rest. The order's own `timeout` and the single-flight flock bound how long one
-pass runs.
+Until it lands, nothing asks for a ruling. An epic whose work has landed waits
+for the operator to call a sitting on it, so an answered or stalled epic stays
+open until someone looks.
 
-- `EPIC_STEWARD_STATE_DIR` overrides where the per-rig flock lives (tests isolate
-  it here).
-- `EPIC_STEWARD_LOCK_STALL_SECS` overrides the age past which a held lock reads as
-  a wedged pass rather than a slow one (default 900).
-- `GC_ESCALATE_TOOL` overrides the `escalate.sh` path (tests capture visits here).
+Membership (re-homing work that drifted outside its epic) is a separate concern
+with its own deferral, recorded in `specs/tk-isd5sa/design.md`.

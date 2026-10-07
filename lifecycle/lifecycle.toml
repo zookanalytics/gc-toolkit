@@ -809,36 +809,41 @@ keys = [
 #   A store ref.
 
 [metadata.epic_stewardship]
-# An epic's contract, recorded on the epic bead (issue_type=epic). docs/epics.md
-# is the contract these fields make machine-readable; docs/epic-stewardship.md is
-# the mechanism that reads them. They are the operator's to ratify — stamped when
-# the operator confirms a floor or a ruling at the visit epic-steward.sh files,
-# recorded as the dated decision docs/epics.md calls for — so no pack script
-# writes them; epic-steward.sh, finalize-gate.sh (clause_epic_ruling_recorded)
-# and doctor/check-epic-closed-implies-ruled read them.
+# An epic's contract and the ruling on its hypothesis, recorded on the epic bead
+# (issue_type=epic). docs/epics.md is the contract these fields make
+# machine-readable, and docs/epic-stewardship.md is the enforcement that reads
+# them. They are the operator's: stamped when the operator confirms a contract
+# field or rules at a sitting on the epic, the dated decision docs/epics.md calls
+# for. No pack script writes them. finalize-gate.sh (clause_epic_ruling_recorded)
+# and doctor/check-epic-closed-implies-ruled read epic_hypothesis, epic_ruling and
+# epic_ruling_reason.
 keys = [
   "epic_handle", "epic_hypothesis", "epic_boundaries",
   "epic_closure_condition", "epic_indicators",
-  "epic_ruling", "epic_ruling_at", "epic_ruling_by", "epic_ruling_evidence",
+  "epic_ruling", "epic_ruling_reason",
+  "epic_ruling_at", "epic_ruling_by", "epic_ruling_evidence",
 ]
 # epic_handle / epic_hypothesis / epic_boundaries — the elaboration floor
 #   (docs/epics.md): a 3-5 word handle, a one-sentence hypothesis, and the
-#   boundaries. epic-steward.sh's floor arm owes a floor contract until all three
-#   are recorded, naming the ones still absent; a rough hypothesis is enough to
-#   start. epic_hypothesis is also the finalize gate's trigger — its presence is
-#   what brings an epic under the ruling requirement (clause_epic_ruling_recorded).
+#   boundaries. epic_hypothesis is also the close gate's trigger: its presence
+#   brings an epic under the ruling requirement (clause_epic_ruling_recorded).
 # epic_closure_condition / epic_indicators — the rest of the contract (3-6
-#   closure checks, 1-3 leading indicators). epic-steward.sh's contract arm asks
-#   for whichever is absent once the floor is set. Absent means unrecorded.
-# epic_ruling — the hypothesis ruling that closes an epic: `persevere`, `pivot`,
-#   or `close` (docs/epics.md). Its PRESENCE is the gate: epic-steward.sh's
-#   ruling arm asks for it once every unit has landed and retracts the ask once
-#   it is set; clause_epic_ruling_recorded holds an epic's finalize until it is
-#   present; check-epic-closed-implies-ruled errors on a closed epic without it.
-#   Absent means the hypothesis is unanswered. Not cleared once recorded.
-# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the ruling was
-#   recorded, who recorded it, and the visit bead that carried it. Bookkeeping
-#   beside epic_ruling; absent leaves the provenance unstated.
+#   closure checks, 1-3 leading indicators). Absent means unrecorded.
+# epic_ruling — the latest ruling on the hypothesis: `continue`, `shift`, or
+#   `close` (docs/epics.md). continue and shift keep the epic open; close is the
+#   one terminal ruling. Each later ruling overwrites the last.
+#   clause_epic_ruling_recorded holds a stewarded epic's finalize until it reads
+#   close with an outcome, and check-epic-closed-implies-ruled errors on a closed
+#   stewarded epic that lacks either. Absent means the hypothesis has not been
+#   ruled on.
+# epic_ruling_reason — why the latest ruling was made, written with it. On a close
+#   ruling it is the outcome, and the close requires it: the hypothesis held, was
+#   disproven, cannot be met as stated, stalled, or ran past its cost. On continue
+#   or shift it says what the next body of work is aimed at. Absent or whitespace
+#   alone reads as unrecorded.
+# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the latest ruling
+#   was recorded, who recorded it, and the visit bead of the sitting that carried
+#   it. Bookkeeping beside epic_ruling; absent leaves the provenance unstated.
 
 [metadata.human_surface]
 keys = [

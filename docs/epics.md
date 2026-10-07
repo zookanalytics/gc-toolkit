@@ -1,6 +1,6 @@
 ---
 name: Epics — what an epic is, what it carries, and when it closes
-description: gc-toolkit's stance on epics — the contract an epic carries (hypothesis, Belongs/Boundaries, closure condition, leading indicators), the hypothesis-answered closure model, epic mortality, the unit an epic lands as, and progressive elaboration. Read it to write or judge an epic. Not how a bead becomes a member of one — that is membership.
+description: gc-toolkit's stance on epics — the contract an epic carries (hypothesis, Belongs/Boundaries, closure condition, leading indicators), the continue/shift/close ruling that answers its hypothesis, epic mortality, the unit an epic lands as, progressive elaboration, and the Feature and Epic Checkpoint model epics are headed toward. Read it to write or judge an epic. Not how a bead becomes a member of one — that is membership.
 ---
 
 # Epics
@@ -16,7 +16,8 @@ BMAD-Method's epic template, and Shape Up's ban on standing containers.
 
 **Mandate.** What makes a body of work an epic: the contract every epic
 carries, how an epic closes, the unit of work it lands as, and how it is
-elaborated — the form every epic follows.
+elaborated — the form every epic follows — and the Feature and Epic Checkpoint
+model it is headed toward.
 
 **Boundaries.** The form of an epic, not the scope content of any particular
 epic: a given epic's own Belongs/Boundaries is authored on that epic, not here.
@@ -68,7 +69,7 @@ beads.
 
 **Leading indicators.** One to three signals, watched while the epic is in
 flight, that say whether the hypothesis is being borne out. They inform the
-pivot-or-persevere call before the full cost is spent. They are not a progress
+continue-or-shift call before the full cost is spent. They are not a progress
 bar of closed tickets.
 
 The floor for an epic to exist is lower than the full contract: a handle, a
@@ -82,19 +83,38 @@ improve through the work, and nothing here is meant as a major gate on filing.
 
 An epic closes when its hypothesis is answered, following SAFe's model, never as
 a side effect of its last PR merging. Units land, then get evaluated against the
-hypothesis, and the close is a ruling that follows a validation step. This holds
+hypothesis, and the close is a ruling that follows that evaluation. This holds
 for a single-unit epic too: the one unit lands, the hypothesis is judged, and
 only then does the epic close. An epic is never closed by the automatic
 transition that closes an ordinary bead when its last child merges.
 
-The ruling can be persevere, pivot, or close. An epic whose hypothesis is
-disproven closes just as validly as one whose hypothesis holds. Its surviving
-work is not swept back into ordinary flow by default: work begun to serve a
-disproven hypothesis is evaluated deliberately, and work that still coheres
-around a hypothesis is rehomed onto an epic that owns it rather than scattered.
-What the disproven case warrants in full is its own question, left to epic
-stewardship — the same concern that runs the validation and slings an epic's
-next unit, separate from this contract.
+Each evaluation ends in one of three rulings:
+
+- **continue** — the hypothesis is not yet answered and the course holds. The
+  next body of work aims at what is still short.
+- **shift** — the evidence calls for a different course. The approach changes,
+  the hypothesis may be re-aimed with it, and the next body of work follows the
+  new direction.
+- **close** — the hypothesis is answered. This is the only terminal ruling, and
+  it carries its outcome: the hypothesis held, it was disproven, it cannot be
+  met as stated, it stalled, or it ran past what it was worth.
+
+A continue or shift ruling keeps the epic open, and only close ends it. An epic
+whose hypothesis is disproven closes just as validly as one whose hypothesis
+holds. The ruling is the operator's, made on evidence read directly, such as the
+landed work and the measures re-run. The worker that built the units under
+judgment never rules on them, because a worker's account of its own work is not
+evidence.
+
+A disproven epic's surviving work is not swept back into ordinary flow by
+default: work begun to serve a disproven hypothesis is evaluated deliberately,
+and work that still coheres around a hypothesis is rehomed onto an epic that
+owns it rather than scattered.
+
+The latest ruling and its reason are recorded on the epic (`epic_ruling`,
+`epic_ruling_reason`). An epic that carries a hypothesis stays open until it is
+ruled close with its outcome recorded, which
+[epic stewardship](epic-stewardship.md) enforces.
 
 ## Epics are mortal
 
@@ -141,14 +161,66 @@ written down. When an epic is elaborated into a product brief, or a spec that
 spans its units, that artifact is a committed repo document under `specs/`, the
 same as any other durable record ([file-structure.md](file-structure.md)).
 
-The city has a natural tendency to elaborate: it generates the elaboration work
-itself and surfaces drafts for operator review, rather than waiting for a human
-to write the contract up front. Create-time classification proposes an epic's
-hypothesis, boundaries, and closure condition; the operator confirms, recorded
-as a dated decision on the epic. A periodic scope-reading audit re-reads the
-epic against completed work and proposes updates in place. That generation-and-
-audit machinery is [epic stewardship](epic-stewardship.md), authored separately
-from this contract.
+Elaboration is meant to come from the city rather than wait for a human to
+write the contract up front: create-time classification proposing an epic's
+hypothesis, boundaries, and closure condition for the operator to confirm,
+recorded as a dated decision on the epic, and a periodic scope-reading audit
+re-reading the epic against completed work and proposing updates in place.
+Neither is built. Today the operator records the contract on the epic, and
+[epic stewardship](epic-stewardship.md) enforces only the ruling that closes it.
+
+## Direction: Features and Epic Checkpoints
+
+This model is the direction and is not built. The pack today records the ruling
+and holds an epic's close until it is ruled close
+([epic-stewardship.md](epic-stewardship.md)). Nothing prompts an evaluation when
+work lands, so one happens when the operator calls a sitting on the epic. The
+follow-on epic *Epic Checkpoints & Features* builds the rest, and runs the first
+checkpoints by hand before any machinery grows around them.
+
+**Epic, Feature, Story.** An epic is delivered through Features, and a Feature
+through Stories. A Feature is a bounded delivery window in SAFe's sense: a group
+of Stories, worked in parallel where they can be, whose landing says something
+about the hypothesis. A Story is one unit as defined above, one PR or a few.
+Most epics are answered over several Features, not one.
+
+**The Epic Checkpoint.** After a Feature lands, the epic is evaluated against
+its hypothesis at a sitting the operator judges, and the checkpoint rules
+continue, shift, or close ([How an epic closes](#how-an-epic-closes)). A
+continue or shift ruling aims the next Feature, and close ends the epic with its
+outcome. Every checkpoint has the same shape whatever it rules; only the next
+action differs. Stories run in parallel, but an epic's checkpoints come one at a
+time. The checkpoint arrives with the evidence the ruling needs and re-reads it,
+the landed work and the measures re-run, rather than taking the worker's
+account. The judge is never the worker that built the Feature.
+
+**A checkpoint is always qualified.** A checkpoint is any point where the city
+evaluates something, and its qualifier names what is evaluated. An Epic
+Checkpoint evaluates an epic after a Feature lands. A PR Checkpoint is the merge
+workflow's checkpoint, a pull request that lands a phase of work on a convoy's
+integration branch for review ([state-machine.md](state-machine.md)). A Bead
+Checkpoint evaluates a single bead.
+
+**Goals fold into the epic.** A goal is not a separate primitive. Its design
+record (`specs/tk-yaor8a/`) already carried a goal at epic altitude, with no
+bead or metadata of its own, so the epic is its home. The epic contract takes
+four of its ideas:
+
+- The checkpoint shape. Work advances in bounded batches, each closed by an
+  evaluation that aims the next; here that is the Feature and its Epic
+  Checkpoint.
+- Judge independence. The worker never renders the verdict on its own work.
+- Measured and graded criteria. The closure condition holds numbers where
+  reality has numbers, a baseline and a target the judge re-runs, and grades
+  where it does not, qualities the operator grades at each checkpoint. A
+  measured target met while a graded quality regressed does not answer the
+  hypothesis.
+- The anti-gaming invariant. A backstop holds throughout, so no capability is
+  deleted to move a measure.
+
+The goal verdicts collapse into the ruling: not-yet becomes continue, and met,
+impossible, stalled, and exhausted each become close, with the one that applied
+recorded as the close's outcome.
 
 ## Worked example: this epic
 

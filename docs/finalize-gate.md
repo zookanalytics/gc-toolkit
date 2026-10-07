@@ -1,6 +1,6 @@
 ---
 name: finalize-gate
-description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — and the open-visit clause that holds finalization while a conversation is owed on that bead.
+description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — with the open-visit clause that holds finalization while a conversation is owed on that bead, and the epic-ruling clause that holds an epic until its hypothesis is ruled closed.
 ---
 
 # The finalize gate
@@ -55,11 +55,33 @@ A `tracks` edge is non-blocking. So the gate holds only this bead's finalization
 it never consults the bead's readiness, and it never reaches the bead's children.
 A visit on an epic holds the epic's own close and leaves every child free to move.
 
+### Clause: epic ruling recorded
+
+An epic that carries a hypothesis (`epic_hypothesis`) refuses finalization until
+it is ruled close with its outcome recorded (`epic_ruling=close` and
+`epic_ruling_reason`). A continue or shift ruling keeps an epic open, so it holds
+the epic as an absent ruling does, and so does a value outside the enum. An epic
+with no hypothesis predates the model, and a disposed epic (`gc.superseded_by`)
+carries a recorded terminal reason, so both pass. A non-epic bead is untouched
+([epic-stewardship.md](epic-stewardship.md)). The clause reads the bead itself
+(`gc bd show`), so that read runs for every finalize, epic or not.
+
+Neither finalize path wired today reaches an undisposed epic: `merge.sh`
+finalizes merge anchors, and `bead-rehome.sh` stamps the disposition before it
+runs the gate. A bare `gc bd close` runs no gate, and the doctor invariant I14
+(`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
+without its ruling.
+
 ## Fail closed
 
-A tracker list that does not read, or does not answer with a JSON array, refuses
-the finalization. An unreadable probe is never an all-clear: the act it guards —
-a squash-merge, a close — cannot be taken back.
+A probe that does not read, or does not answer with a JSON array, refuses the
+finalization. An unreadable probe is never an all-clear: the act it guards — a
+squash-merge, a close — cannot be taken back.
+
+Every probe reads the store as it stands. A refinery pass memoizes its
+`bd_list` reads (`GC_RECONCILE_BD_CACHE`, `assets/scripts/bd-lib.sh`), and the
+gate turns that cache off for its own reads, because the terminal re-assert
+below exists to see a visit filed after the first check.
 
 ## Where it is wired
 
@@ -79,6 +101,6 @@ merge is gated before it happens, in `merge.sh`, not at that close.
 
 ## Composability
 
-The gate is a set so a later precondition — an epic's goal-met, for instance — is
-one more clause in `finalize_gate_check`. A caller never learns which clause held:
-it reads the one-line reason and holds.
+The gate is a set, so a further precondition is one more clause in
+`finalize_gate_check`. A caller never learns which clause held: it reads the
+one-line reason and holds.

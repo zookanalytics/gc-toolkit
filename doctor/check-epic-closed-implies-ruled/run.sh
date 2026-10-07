@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# doctor/check-epic-closed-implies-ruled — I14: a closed epic was ruled. An epic
-# closes by a recorded ruling on its hypothesis — persevere, pivot, or close —
-# after a validation step, never as a side effect of its last unit merging
-# (docs/epics.md). A CLOSED issue_type=epic carrying no epic_ruling therefore
-# either auto-closed when its last child merged (the transition epics.md forbids)
-# or was closed by hand without the ruling (error); epic-steward.sh and the
-# finalize-gate clause guard the live paths, and this is the after-the-fact
-# backstop for a bare `gc bd close` that reaches neither.
+# doctor/check-epic-closed-implies-ruled — I14: a closed epic was ruled closed.
+# An epic closes on a ruling on its hypothesis, never as a side effect of its last
+# unit merging (docs/epics.md). The ruling is continue, shift, or close, and only
+# close is terminal; a close ruling carries its outcome (epic_ruling_reason). A
+# CLOSED issue_type=epic carrying a hypothesis but not the close ruling with its
+# outcome was therefore closed by hand without its ruling, on a ruling that keeps
+# it open, or with no outcome (error). finalize-gate.sh
+# clause_epic_ruling_recorded applies the same predicate to the close paths that
+# run the gate, and this is the after-the-fact backstop for a bare `gc bd close`,
+# which runs no gate.
 # One shape is out of scope: an epic carrying gc.superseded_by was retired into a
 # successor by bead-rehome.sh, which IS an explicit terminal state (the same
 # exemption check-closed-implies-landed makes) — a deliberate disposition, not a
@@ -117,25 +119,39 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | ((($m.epic_ruling // "") | tostring)) as $ruling
         | ((($m.epic_hypothesis // "") | tostring)) as $hyp
         | ((($m["gc.superseded_by"] // "") | tostring)) as $disposed
-        # "ruled" only for a ruling docs/epics.md defines (persevere|pivot|close);
-        # an off-enum value — "pending", a typo — is not a ruling and reads as
-        # unruled, the same enum the finalize gate and the steward enforce.
-        | (if ($ruling == "persevere" or $ruling == "pivot" or $ruling == "close") then "ruled"
+        | ((($m.epic_ruling_reason // "") | tostring | test("\\S"))) as $reasoned
+        # "ruled" only for the close ruling with its outcome recorded: close is the
+        # one terminal ruling docs/epics.md defines, and it carries its outcome. A
+        # close with no outcome is "noreason"; continue and shift keep an epic open,
+        # so a closed epic carrying either is "nonterminal"; an off-enum value
+        # ("pending", a typo) is not a ruling and reads as unruled. The finalize
+        # gate applies the same predicate.
+        | (if ($ruling == "close" and $reasoned) then "ruled"
            elif $disposed != "" then "exempt-disposed"
-           elif $hyp != "" then "unruled"
-           else "exempt-legacy" end) as $verdict
-        | [$verdict, $id] | join("\u001f")' 2>/dev/null)
+           elif $hyp == "" then "exempt-legacy"
+           elif $ruling == "close" then "noreason"
+           elif ($ruling == "continue" or $ruling == "shift") then "nonterminal"
+           else "unruled" end) as $verdict
+        | [$verdict, $id, ($ruling | gsub("[[:cntrl:]]"; " "))] | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: closed-epic listing from $rig_path/.beads could not be parsed — this store was NOT checked")
         continue
     fi
     [ -n "$rows" ] || continue
     n_disposed=0; n_legacy=0
-    while IFS=$'\037' read -r kind id; do
+    while IFS=$'\037' read -r kind id ruling; do
         [ -n "$kind" ] || continue
+        # Recording the ruling on the closed epic clears the finding; no reopen is
+        # needed for that. An epic is not a merge anchor, so lifecycle.sh refuses
+        # to reopen it, and the reopen offered here is bd's own.
+        remedy="If the close stands, record its ruling and outcome: \`gc bd --db $rig_path/.beads update $id --set-metadata epic_ruling=close --set-metadata epic_ruling_reason=\"<outcome>\"\`. If the epic should go on, reopen it (\`gc bd --db $rig_path/.beads reopen $id\`) and record continue or shift. If it was retired into a successor, record that disposition (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)."
         case "$kind" in
             unruled)
-                errors+=("$label epic $id: CLOSED carrying a hypothesis but no epic_ruling — an epic closes by a recorded hypothesis ruling (persevere/pivot/close) after a validation step, never by its last unit merging (docs/epics.md). Reopen it to rule (\`lifecycle.sh reopen $id\` then record epic_ruling), or if it was retired into a successor, record that disposition (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)") ;;
+                errors+=("$label epic $id: CLOSED carrying a hypothesis but no close ruling (epic_ruling '${ruling:-<none>}') — an epic closes on the close ruling, the one terminal ruling of continue/shift/close, never by its last unit merging (docs/epics.md). $remedy") ;;
+            noreason)
+                errors+=("$label epic $id: CLOSED on the close ruling but no outcome (epic_ruling_reason) — a close ruling carries its outcome: the hypothesis held, was disproven, stalled, or ran past its cost (docs/epics.md). $remedy") ;;
+            nonterminal)
+                errors+=("$label epic $id: CLOSED on the non-terminal ruling '$ruling' — continue and shift keep an epic open, and it closes only on the close ruling (docs/epics.md). $remedy") ;;
             exempt-disposed) n_disposed=$((n_disposed + 1)) ;;
             exempt-legacy)   n_legacy=$((n_legacy + 1)) ;;
         esac
@@ -164,6 +180,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every closed epic carries a recorded hypothesis ruling or an explicit disposition"
+echo "OK: every closed epic that carries a hypothesis was ruled closed with its outcome, or carries an explicit disposition"
 detail ${notes[@]+"${notes[@]}"}
 exit 0
