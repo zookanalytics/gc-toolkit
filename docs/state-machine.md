@@ -371,6 +371,8 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_merge_state` | `<mergeStateStatus>@<oid>` | GitHub's own value, verbatim and uppercase |
 | `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
 | `pr_review_watermark` | `<id>` | highest routed `pulls/N/reviews` id |
+| `pr_comment_answered` | `<id>` | every inline comment above `pr_comment_watermark`, through this id, was answered by its thread at the last read |
+| `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 | `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
 
@@ -379,7 +381,7 @@ The postures, in the precedence the derivation applies:
 | Posture | When | Merge effect |
 |---|---|---|
 | `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
-| `commented` | a review comment sits above its watermark, and no veto stands | holds |
+| `commented` | an unanswered review comment sits above its watermark, and no veto stands | holds |
 | `approved` | GitHub reports `APPROVED` | none |
 | `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
@@ -414,6 +416,26 @@ empty body raises nothing in the review space — the inline comments underneath
 it are what the comment space already sees, and counting the review would leave
 a posture no comment id can answer. A plain conversation comment on the PR is an
 issue comment, carries no review, and raises no posture.
+
+An inline comment above the watermark is not outstanding once its review thread
+has answered it: the thread is resolved, and it holds a reply written after the
+comment that is the city's own post. That is how feedback answered by a path
+other than this arm, such as a sitting that replies in-thread and resolves the
+thread, stops holding the merge. A comment written after the city's last reply in
+the thread stays outstanding, because a reply does not reopen a resolved thread,
+and a thread resolved with no reply from the city answers nothing. An unmarked
+reply under the city's login after the cutover is feedback, not an answer. A review body
+above its watermark is answered once the thread read has answered every inline
+comment the review carries, since the body frames those comments. A review with
+no inline comment has no thread to answer it and stays on the watermark.
+
+Nothing routes answered feedback, so nothing moves a watermark past it. Each
+thread read records how far it found the feedback answered past each watermark,
+in `pr_comment_answered` and `pr_review_answered`, and a pass whose newest
+feedback sits at or below both skips the read. The answered marks never move the
+watermarks, which only a routing writes. A thread unresolved after its answered
+mark passed it routes nothing until a new comment brings the read back, the same
+as an unresolve under the watermark.
 
 A `changes_requested` posture reads and watermarks the same ids a `commented`
 one does. The veto holds the merge; it answers nothing, and the objections

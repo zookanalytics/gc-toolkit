@@ -33,18 +33,18 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse`](agents/converse.md) | 34,370 | 8,592 |
-| [`converse-codex`](agents/converse-codex.md) | 34,370 | 8,592 |
-| [`converse-fable`](agents/converse-fable.md) | 34,370 | 8,592 |
-| [`converse-opus`](agents/converse-opus.md) | 34,370 | 8,592 |
+| [`converse`](agents/converse.md) | 34,273 | 8,568 |
+| [`converse-codex`](agents/converse-codex.md) | 34,273 | 8,568 |
+| [`converse-fable`](agents/converse-fable.md) | 34,273 | 8,568 |
+| [`converse-opus`](agents/converse-opus.md) | 34,273 | 8,568 |
 | [`deacon`](agents/deacon.md) | 13,533 | 3,383 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
-| [`keeper`](agents/keeper.md) | 23,569 | 5,892 |
+| [`keeper`](agents/keeper.md) | 23,590 | 5,897 |
 | [`mechanik`](agents/mechanik.md) | 28,668 | 7,167 |
-| [`polecat`](agents/polecat.md) | 27,091 | 6,772 |
-| [`polecat-codex`](agents/polecat-codex.md) | 27,121 | 6,780 |
+| [`polecat`](agents/polecat.md) | 27,101 | 6,775 |
+| [`polecat-codex`](agents/polecat-codex.md) | 27,131 | 6,782 |
 | [`proactive`](agents/proactive.md) | 12,122 | 3,030 |
 | [`refinery`](agents/refinery.md) | 10,950 | 2,737 |
 | [`witness`](agents/witness.md) | 15,605 | 3,901 |
@@ -59,9 +59,9 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,247 | 811 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,386 | 846 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
-| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,247 | 811 |
+| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,429 | 857 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
@@ -71,7 +71,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 5,878 | 1,469 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,179 | 1,544 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
@@ -83,7 +83,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,285 | 821 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,466 | 866 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
