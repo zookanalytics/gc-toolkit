@@ -10,20 +10,22 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-test-harness-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 
-# Seed the environment a polecat/agent session exports, plus a port binary path
-# a suite builds before sourcing the harness (the lifecycle.test.sh pattern:
-# GCTK_BUILT is set pre-init because the stub git must not answer the Go build).
+# Seed the environment a polecat/agent session exports, an inherited gctk
+# binary path and forced fallback, and the build a suite makes before
+# harness_init (harness_build_gctk sets GCTK_BUILT pre-init because the stub git
+# must not answer the Go build).
 export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=loomington
 export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=lx-live
 export GC_TRIGGER_BEAD_ID=tk-live GC_RIG_ROOT=/live/rigs/gc-toolkit
 export BEADS_DIR=/live/beads BEADS_ACTOR=live-actor
+export GCTK_BIN=/live/city/.gc/services/gctk/bin/gctk GCTK_FALLBACK=merge
 GCTK_BUILT="$TMP/gctk"
 
 # Capture the seed before harness_init runs — it is the call under test AND it
 # resets PASS/FAIL, so every assertion has to come after it. The captures let a
 # post-init assertion prove the seed was really set, so "cleared" is a real
 # transition and not a variable that was never there.
-SEED_GC_RIG="${GC_RIG:-}"; SEED_BEADS_DIR="${BEADS_DIR:-}"
+SEED_GC_RIG="${GC_RIG:-}"; SEED_BEADS_DIR="${BEADS_DIR:-}"; SEED_GCTK_FALLBACK="${GCTK_FALLBACK:-}"
 
 harness_init
 
@@ -46,10 +48,25 @@ resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF GC_NO_API || true)"
 if [ -z "$resid" ]; then ok "no GC_/BEADS_ variable survives harness_init"; else bad "residual city vars: $resid"; fi
 eq "${GC_NO_API:-}" "1" "harness_init pins GC_NO_API=1 so a gctk read hits the stub, not the live daemon"
 
-# GCTK_* is out of scope: the port pin stays, and a pre-init build path is not
-# collateral — a blanket GC* unset would have taken GCTK_BUILT with it.
-eq "$GCTK_BIN"   "none"       "harness_init pins GCTK_BIN=none"
+# GCTK_* is out of that sweep: the pre-init build path is not collateral — a
+# blanket GC* unset would have taken GCTK_BUILT with it — and GCTK_BIN is pinned
+# to that build, never to the binary an inherited GCTK_BIN names.
 eq "$GCTK_BUILT" "$TMP/gctk"  "harness_init preserves a pre-init GCTK_BUILT"
+eq "$GCTK_BIN"   "$TMP/gctk"  "harness_init pins GCTK_BIN to the suite's own build, over an inherited one"
+# An inherited GCTK_FALLBACK would put a port onto its shell in a suite that
+# meant to test the binary, so harness_init clears it.
+eq "$SEED_GCTK_FALLBACK" "merge" "seed: GCTK_FALLBACK was set before harness_init"
+eq "${GCTK_FALLBACK-<unset>}" "<unset>" "harness_init clears an inherited GCTK_FALLBACK"
+
+# A suite that built nothing reaches no binary at all: lifecycle.sh refuses
+# under GCTK_BIN=none, and that refusal is what such a suite sees.
+eq "$(unset GCTK_BUILT; harness_init >/dev/null; printf '%s' "$GCTK_BIN")" "none" \
+   "with no build, harness_init pins GCTK_BIN=none"
+# A build that did not happen is named as the suite's first failure, rather
+# than surfacing as every lifecycle transition the suite makes being refused.
+out=$(GCTK_BUILT="" GCTK_BUILD_ERR="gctk did not build — fixture" harness_init; echo "fails=$FAIL")
+has "$out" "FAIL - gctk did not build — fixture" "harness_init reports a build that did not happen"
+has "$out" "fails=1" "…as one counted failure"
 
 # The hermetic stub environment is still installed.
 case "$STUB_STORE" in "$TMP"/*) ok "STUB_STORE points into TMP" ;; *) bad "STUB_STORE not under TMP: $STUB_STORE" ;; esac
@@ -59,6 +76,28 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 # A suite that WANTS a rig sets it after harness_init returns.
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
+
+# STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
+# refuses a bead assigned to another actor unless --force is passed, an
+# unassigned bead or the actor's own closes plainly, and `bd update
+# --status=closed` never runs the check. A caller that drops its --force passes
+# against a stub that refuses nothing, so the refusal is pinned here, and so is
+# the default: with the knob unset any actor closes, as every other suite expects.
+store '[{"id":"tk-held","status":"in_progress","assignee":"lx-sitting","title":"h","notes":"","metadata":{}},{"id":"tk-free","status":"open","assignee":"","title":"f","notes":"","metadata":{}},{"id":"tk-mine","status":"open","assignee":"rig/refinery","title":"m","notes":"","metadata":{}},{"id":"tk-upd","status":"in_progress","assignee":"lx-sitting","title":"u","notes":"","metadata":{}},{"id":"tk-off","status":"in_progress","assignee":"lx-sitting","title":"o","notes":"","metadata":{}}]'
+as_refinery() { STUB_ENFORCE_CLOSE_OWNER=1 BEADS_ACTOR=rig/refinery gc bd "$@" >/dev/null 2>&1; }
+as_refinery close tk-held --reason r; rc=$?
+eq "$rc" "1" "close: a bead assigned to another actor is refused without --force"
+eq "$(bstatus tk-held)" "in_progress" "...and is left as it was"
+as_refinery close tk-held --reason r --force
+eq "$(bstatus tk-held)" "closed" "close --force overrides the ownership check"
+as_refinery close tk-free --reason r
+eq "$(bstatus tk-free)" "closed" "close: an unassigned bead closes for any actor"
+as_refinery close tk-mine --reason r
+eq "$(bstatus tk-mine)" "closed" "close: the actor's own bead closes without --force"
+as_refinery update tk-upd --status=closed
+eq "$(bstatus tk-upd)" "closed" "update --status=closed never runs the close verb's ownership check"
+gc bd close tk-off --reason r >/dev/null 2>&1
+eq "$(bstatus tk-off)" "closed" "with the knob unset, a plain close lands whoever holds the bead"
 
 # The gc bd dep stub mirrors real bd's blocks orientation. Real `dep add
 # <blocked> <blocker> --type blocks` makes the SECOND operand the blocker — the
@@ -150,6 +189,61 @@ if gc bd dep add tk-kd tk-blk --type blocks; then ok "re-adding a pair with the 
 eq "$(grep -c . "$STUB_DEPS")" "1" "...and leaves one edge on the pair"
 if gc bd dep add tk-blk tk-kd --type related; then ok "the reversed pair is a different pair: a related edge lands beside the blocks edge"; else bad "the reversed pair was refused as if it were the same pair"; fi
 has "$(cat "$STUB_DEPS")" "tk-blk|related|tk-kd" "...and is stored"
+
+# The gc bd update stub stores a --set-metadata value with real bd's typing. A
+# value that parses as a JSON number, true, false or null is stored typed, so
+# `k=1` reads back as the number 1, and a jq compare of it against the string
+# "1" is false. Every other value is stored as its raw text. A stub that stored
+# only strings would pass a script whose jq compares a stamp to a string
+# literal, and the real store would fail it, so the typing is pinned value by
+# value. Numbers are pinned by type alone: jq versions print a number literal
+# such as 1e3 differently.
+store '[{"id":"tk-md","status":"open","assignee":"","title":"m","notes":"","metadata":{}}]'
+stored_type() { jq -r --arg k "$1" '.[] | select(.id == "tk-md") | .metadata | if has($k) then (.[$k] | type) else "<absent>" end' "$STUB_STORE"; }
+stored_json() { jq -c --arg k "$1" '.[] | select(.id == "tk-md") | .metadata[$k]' "$STUB_STORE"; }
+gc bd update tk-md --set-metadata one=1 --set-metadata pr=1025 --set-metadata neg=-1 \
+  --set-metadata frac=1.5 --set-metadata exp=1e3 --set-metadata padded=" 1" \
+  --set-metadata yes=true --set-metadata no=false --set-metadata nul=null \
+  --set-metadata word=main --set-metadata lead0=0123 --set-metadata zeros=00 \
+  --set-metadata plus=+1 --set-metadata dot=.5 --set-metadata nan=NaN --set-metadata cap=True \
+  --set-metadata quoted='"x"' --set-metadata arr='[1]' --set-metadata obj='{}' --set-metadata empty= >/dev/null
+eq "$(stored_json one)" '1' "k=1 is stored as the number 1, not the string \"1\""
+for k in pr neg frac exp padded; do
+  eq "$(stored_type "$k")" "number" "a JSON number ($k) is stored as a number"
+done
+eq "$(stored_json yes)" 'true'  "k=true is stored as the boolean true"
+eq "$(stored_json no)"  'false' "k=false is stored as the boolean false"
+eq "$(stored_type nul)" "null"  "k=null is stored as JSON null, with the key present"
+eq "$(stored_json word)"   '"main"'  "a word is stored as a string"
+eq "$(stored_json lead0)"  '"0123"'  "a leading-zero number is not JSON, so it stays a string"
+eq "$(stored_json zeros)"  '"00"'    "00 stays a string"
+eq "$(stored_json plus)"   '"+1"'    "+1 stays a string"
+eq "$(stored_json dot)"    '".5"'    ".5 stays a string"
+eq "$(stored_json nan)"    '"NaN"'   "NaN stays a string"
+eq "$(stored_json cap)"    '"True"'  "True stays a string: only lowercase true and false are booleans"
+eq "$(stored_json quoted)" '"\"x\""' "a quoted JSON string keeps its quotes"
+eq "$(stored_json arr)"    '"[1]"'   "a JSON array is stored as its raw text"
+eq "$(stored_json obj)"    '"{}"'    "a JSON object is stored as its raw text"
+eq "$(stored_json empty)"  '""'      "an empty value is stored as the empty string"
+
+# part: tools/run-tests.sh runs a suite with parts once per part, exporting the
+# run's part and every declared one. Each probe runs in a subshell, so the
+# failure an undeclared name records is read back from its output rather than
+# counted against this suite.
+out=$(unset RUN_TESTS_PART RUN_TESTS_PARTS; part alpha; echo "alpha=$?"; part beta; echo "beta=$?")
+has "$out" "alpha=0" "part: run directly, every part runs"
+has "$out" "beta=0" "…the second part too"
+out=$(export RUN_TESTS_PART=beta RUN_TESTS_PARTS="alpha beta"; base=$FAIL
+      part alpha; echo "alpha=$?"; part beta; echo "beta=$? declared-fails=$((FAIL - base))"
+      part gamma; echo "gamma=$? undeclared-fails=$((FAIL - base))")
+has "$out" "alpha=1" "part: under run-tests a run skips every other part"
+has "$out" "beta=0 declared-fails=0" "…executes its own, and records no failure for a declared name"
+has "$out" "gamma=1 undeclared-fails=1" "…while a group under a name the header never declared fails the run"
+has "$out" "part 'gamma' is not declared" "…naming that group"
+out=$(export RUN_TESTS_PART=beta; unset RUN_TESTS_PARTS; base=$FAIL
+      part gamma; echo "gamma=$? fails=$((FAIL - base))"; part beta; echo "beta=$?")
+has "$out" "gamma=1 fails=0" "part: one part picked by hand, with no declared list, skips the others without failing"
+has "$out" "beta=0" "…and runs the part it names"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for mol-polecat-work's workspace-setup work_dir stamp.
+# Hermetic test for mol-polecat-work's workspace-setup work_dir + gc.work_branch
+# stamp.
 #
 # `self-review` and `submit-and-exit` read `metadata.work_dir` from the work
 # bead to locate its checkout; an unstamped path fails both closed (self-review
@@ -9,12 +10,23 @@
 # the create arm's own stamp covers only the first. This guard records the
 # worktree on EVERY path by stamping the directory the polecat is in now.
 #
+# gc.work_branch is stamped the same way and for a parallel reason: the claim
+# (hookClaimIdentityPatch) records it from the pool worktree's base checkout,
+# never the branch the work lands on, so the close gate's reachability check
+# (gc.work_commit on gc.work_branch) false-fires on every polecat-branch close
+# until this block finalizes it to the branch HEAD is actually on here.
+#
 # What it holds:
 #   1. PATH-AGNOSTIC — the stamp records `$(pwd)`, not a create-arm variable, so
 #      it is correct wherever the worktree was resolved. A revert to
 #      `work_dir="$WORKTREE_PATH"` (unset outside the create arm) is caught.
 #   2. RECORDS THE ACTUAL CWD — run from any directory, it stamps that
 #      directory, so reuse and the anchor-adopt path land the right value.
+#   3. RECORDS THE REAL WORK BRANCH — gc.work_branch is stamped from the branch
+#      HEAD is on, finalizing the claim-time base-checkout value so the close
+#      gate checks gc.work_commit against the branch the work actually landed on.
+#   4. SKIPS A DETACHED/UNRESOLVED HEAD — records no branch rather than blanking
+#      the key, which would trip the gate's "shipped requires a branch" arm.
 #
 # EXECUTES the real snippet extracted verbatim from the formula against a fake
 # `gc`, so the test cannot drift from the shipped instruction. No live city,
@@ -89,13 +101,23 @@ esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
+
+# Fake git: resolves the work branch the block records. FAKE_BRANCH drives it so
+# the detached ("HEAD") and unresolved ("") cases are reproducible with no repo.
+cat > "$TMP/bin/git" <<'GIT'
+#!/usr/bin/env bash
+[ "$1" = "rev-parse" ] && { printf '%s\n' "${FAKE_BRANCH:-}"; exit 0; }
+exit 0
+GIT
+chmod +x "$TMP/bin/git"
 export PATH="$TMP/bin:$PATH"
 
-# run_from <dir> -> prints the single `gc bd update` argv the block emitted.
-#   The block stamps $(pwd), so running it from <dir> must stamp <dir>.
+# run_from <dir> [branch] -> prints the single `gc bd update` argv the block
+#   emitted. The block stamps $(pwd), so running it from <dir> must stamp <dir>;
+#   [branch] is what the fake git reports for the work branch (default none).
 run_from() {
   : > "$TMP/update"
-  ( cd "$1" && WORK_BEAD_ID=tk-work FAKE_UPDATE="$TMP/update" bash "$TMP/block.sh" )
+  ( cd "$1" && WORK_BEAD_ID=tk-work FAKE_BRANCH="${2:-}" FAKE_UPDATE="$TMP/update" bash "$TMP/block.sh" )
   cat "$TMP/update"
 }
 
@@ -114,6 +136,26 @@ has "$OUT_ADOPTED" "work_dir=$ADOPTED" "anchor-adopt path: stamps the adopted wo
 
 # Exactly one stamp per run — the block records once, idempotently.
 eq "$(run_from "$CREATED" | grep -c 'work_dir=')" "1" "one work_dir stamp per run"
+
+# --- 3. gc.work_branch records the real branch, finalizing the claim-time stamp.
+# The claim records gc.work_branch from the pool worktree's base checkout (main),
+# never the branch the work lands on; recording the branch HEAD is on here is what
+# the close gate's reachability check reads. The stamp rides the same update as
+# work_dir, so one `gc bd update` carries both.
+OUT_BRANCH="$(run_from "$CREATED" "polecat/tk-work")"
+has "$OUT_BRANCH" "gc.work_branch=polecat/tk-work" "on a branch: records the real work branch"
+has "$OUT_BRANCH" "work_dir=$CREATED"              "…in the same update as work_dir"
+no  "$OUT_BRANCH" "gc.work_branch=main"            "…not the claim-time base branch"
+eq  "$(run_from "$CREATED" "polecat/tk-work" | grep -c 'gc.work_branch=')" "1" \
+    "one gc.work_branch stamp per run"
+
+# --- 4. A detached or unresolved HEAD records no branch rather than blanking it.
+# A blank gc.work_branch trips the gate's "shipped requires a branch" arm, a
+# different false-fire; the guard must skip the stamp, not write an empty value.
+no  "$(run_from "$CREATED" "HEAD")" "gc.work_branch"   "detached HEAD: records no branch"
+has "$(run_from "$CREATED" "HEAD")" "work_dir=$CREATED" "detached HEAD: still records work_dir"
+no  "$(run_from "$CREATED" "")"     "gc.work_branch"   "unresolved HEAD: records no branch"
+has "$(run_from "$CREATED" "")"     "work_dir=$CREATED" "unresolved HEAD: still records work_dir"
 
 # --- Summary. -----------------------------------------------------------------
 echo "----"

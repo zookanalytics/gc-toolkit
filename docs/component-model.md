@@ -43,7 +43,7 @@ in the discard list below it.
 | **Anchor** | the single open bead that owns a PR and carries its checks | N claimants on one PR ⇒ the weakest check-set decides the merge |
 | **Convoy** | tracked set with one landing target | no unit larger than a bead can land, and integration branches cannot graduate |
 | **Formula + step bead** | a workflow materialised as beads | a crashed session resumes by reconstructing intent from prose |
-| **Check-set + check marker** | declared merge preconditions, each bound to a commit | merges depend on whoever remembers to look |
+| **Check-set + check lane** | the merge preconditions an anchor declares in `check_set`, one lane per check. A lane's `check.<g>` marker carries one bare state word that names no commit, and the reviewed commit is recorded on the review bead as `reviewed_oid`. `lane-state.sh` derives a lane's green from its reviews. [state-machine.md](state-machine.md#checks) owns the vocabulary. | merges depend on whoever remembers to look |
 | **Pool + route** | demand addressed to a role, not to a session | dispatch names a mortal process |
 | **Order** | controller-owned recurring pass, no LLM | cadence becomes an invisible daemon |
 | **Agent session** | one mortal executor with an identity | nothing can be claimed, and nothing can be recycled |
@@ -130,9 +130,10 @@ The machine itself — states, transitions, writers, checks — is drawn once, i
   the same writer, and the write is idempotent.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
-  commit, but the anchor-local authorization set — `check.*`, `merge_hold`,
-  `pr_posture`, `merged_target` — does not move the head; the pre-merge
-  re-read is what catches a mid-pass write to any of them.
+  commit, but the authorization set — `merge_hold`, `pr_posture`,
+  `merged_target`, and every declared lane's derived green — does not move
+  the head; the pre-merge re-read, which re-derives each lane through
+  `lane-state.sh`, is what catches a mid-pass change to any of them.
 
 ---
 
@@ -316,7 +317,7 @@ city executes, with nothing unplaced and no row carrying any other value.
 **The placement rule.** A component belongs to the workflow whose product it
 advances, not the one whose name it carries. `mol-refinery-patrol` is merge
 because what it produces is merge decisions. `gate-ensure.sh` is review even
-though it runs as arm 1 of the merge cadence, because what it produces is a
+though it runs as arm 6 of the merge cadence, because what it produces is a
 raisable check and a routed review bead. Patrol is the workflow whose product
 is a fleet that can still run the other five.
 
@@ -334,9 +335,10 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
-| `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
+| `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
+| `assets/scripts/review-workspace.sh` | review | A review's directory on disk, named for its review bead: makes the worktree the review tests in, removes the directory at the verdict step, and, as the review-workspace-reap order's pass, removes the directories of reviews that closed some other way. |
 | `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up that the anchor `blocks` and that is `discovered-from` the finding, then closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
 | `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every check reader agrees without a stored `check.<lane>` marker. |
 | `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined, or needs-you — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker and never touches the anchor. |
@@ -346,10 +348,11 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
-| `assets/scripts/merge.sh` | merge | Arm 4: the single writer of merged truth. |
+| `assets/scripts/pace-lib.sh` | merge | The visit order and time budget of a cadence arm that walks the gating set: visit in id order after the anchor the last pass finished, wrapping, and start no new anchor past the arm's deadline. The paced arms source it, and `gctk merge` carries the same rotation. |
+| `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. |
 | `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 5: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
-| `assets/scripts/pr-open.sh` | merge | Arm 6: `pre_open_gate` to `pull_request`. |
+| `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
@@ -393,6 +396,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `orders/build-scratch-reap.toml` | patrol | Fires the build/test scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
+| `orders/review-workspace-reap.toml` | patrol | Fires the review-workspace reaper hourly, city-wide. |
 | `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
 | `orders/dolt-reclaim.toml` | patrol | Fires the Dolt reclaim pass daily, city-wide: runs `gc dolt compact --gc-only` on each store whose noms size is over the per-database line. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
@@ -405,7 +409,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
 | `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
-| `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
+| `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions that have ended, and of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/build-scratch-reap.sh` | patrol | Removes build and test scratch (Go toolchain trees, gc.test per-run trees, templated tool temp) that a killed or crashed run left behind, gated on no live holder and — for pid-named trees — a dead pid, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
 | `assets/scripts/notification-wisp-reap.sh` | patrol | Closes a city-store "Human gate awaiting you" notice once its gate is no longer open, and collapses duplicate "ESCALATION" copies to one open notice — the notification wisps core mails and never retires. |

@@ -13,6 +13,28 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
+# Build gctk from THIS checkout, for a suite whose scripts reach lifecycle.sh.
+# lifecycle.sh execs `gctk lifecycle` and has no other implementation, so such a
+# suite needs a binary, and the one it needs is built from the tree under test.
+# Call this BEFORE harness_init: the stub git harness_init puts on PATH answers
+# nothing, and the build must not read a fixture. -buildvcs=false keeps the
+# toolchain off git entirely; no assertion reads the binary's version.
+# A build that does not happen is recorded in GCTK_BUILD_ERR, and harness_init
+# turns it into the suite's first failure. Otherwise the suite would fail every
+# lifecycle transition and never name the cause.
+harness_build_gctk() {
+  GCTK_BUILT=""; GCTK_BUILD_ERR=""; GCTK_BUILD_LOG="$TMP/gctk-build.log"
+  local mod
+  mod="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../services/gctk" && pwd)"
+  if ! command -v go >/dev/null 2>&1; then
+    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh had nothing to exec in this suite"
+  elif ( cd "$mod" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
+    GCTK_BUILT="$TMP/gctk"
+  else
+    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+  fi
+}
+
 harness_init() {
   PASS=0; FAIL=0
   # These suites run from a tree inside a live city, whose session environment
@@ -21,18 +43,23 @@ harness_init() {
   # a logged sling argv, so an inherited value would settle a hermetic assertion
   # on the operator's shell rather than on the code. Clear both namespaces so the
   # harness owns the environment; a suite that wants a rig exports it after
-  # harness_init returns. GCTK_* is left alone: GCTK_BIN is pinned just below,
-  # and a suite may build a port binary before harness_init (lifecycle.test.sh).
+  # harness_init returns. GCTK_* is left out of that sweep, because GCTK_BUILT
+  # carries the binary harness_build_gctk left; GCTK_BIN and GCTK_FALLBACK are
+  # pinned just below.
   unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
-  # Pin the merge cadence to its shell implementations. The scripts prefer a
-  # deployed `gctk` binary, resolved from the ambient GC_CITY — and these suites
-  # run from a tree INSIDE a live city, so left alone a suite would silently
-  # test whichever implementation that city last built. A suite that means to
-  # exercise the port says so by overriding this after harness_init, the way
-  # lifecycle.test.sh does for its second arm.
-  export GCTK_BIN=none
+  # Pin gctk to the binary this suite built from the checkout, or to none. The
+  # scripts resolve a deployed `gctk` from the ambient city otherwise, and these
+  # suites run from a tree INSIDE a live city, so left alone a suite would test
+  # whichever binary that city last built. A suite that built nothing reaches no
+  # binary at all: lifecycle.sh refuses under GCTK_BIN=none, and
+  # pr-status-label.sh derives nothing. No port's shell is forced either: a
+  # suite that tests one sets GCTK_FALLBACK after harness_init, the way
+  # merge.test.sh's shell arm does.
+  export GCTK_BIN="${GCTK_BUILT:-none}"
+  unset GCTK_FALLBACK
+  [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
   # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
   # bead reads prefer the running supervisor's API, and these suites run inside
   # a live city whose supervisor is up, so left alone a read would answer from
@@ -61,6 +88,8 @@ harness_init() {
   # behaviour every existing suite relies on); a file path serves that roster;
   # STUB_SESSION_LIST_RC models the read the liveness guard must fail closed on.
   export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
+  # The `close` verb's ownership check (see its handler). Off = any actor closes.
+  export STUB_ENFORCE_CLOSE_OWNER=""
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
@@ -81,15 +110,17 @@ mk_sut_dir() { # <dir> <file>...
   mkdir -p "$d"
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
-  # bd-lib.sh is the shared bead-store read library many SUTs source by sibling
-  # path, and gctk-resolve.sh is what every ported script (lifecycle.sh among
-  # them) sources the same way; copy both beside them so those sources resolve
-  # in the private dir. They sit beside this harness, so they are found whatever
-  # the SUT's own directory is.
+  # bd-lib.sh (the shared bead-store reads) and pace-lib.sh (the cadence arms'
+  # visit order and time budget) are libraries SUTs source by sibling path, and
+  # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
+  # the same way; copy them beside the SUT so those sources resolve in the
+  # private dir. They sit beside this harness, so they are found whatever the
+  # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/gctk-resolve.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
+  return 0
 }
 
 _write_gc_stub() {
@@ -289,8 +320,19 @@ case "$verb" in
     for kv in ${sets[@]+"${sets[@]}"}; do
       k="${kv%%=*}"; v="${kv#*=}"
       case ",$drops," in *",$k,"*) continue ;; esac
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
-        'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+      # bd stores a value that parses as a JSON number, true, false or null as
+      # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
+      # boolean. Every other value, a quoted JSON string included, is stored as
+      # its raw text. The number grammar is JSON's, which is stricter than jq's
+      # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
+      jq -c --arg id "$id" --arg k "$k" --arg v "$v" '
+        ($v | gsub("^[ \t\r\n]+|[ \t\r\n]+$"; "")) as $t
+        | (if ($t | test("^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$")) then ($t | tonumber)
+           elif $t == "true" then true
+           elif $t == "false" then false
+           elif $t == "null" then null
+           else $v end) as $stored
+        | map(if .id == $id then .metadata[$k] = $stored else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
     done
     for k in ${unsets[@]+"${unsets[@]}"}; do
       case ",$drops," in *",$k,"*) continue ;; esac
@@ -334,6 +376,17 @@ case "$verb" in
   close)
     id="${1:-}"
     case " ${STUB_CLOSE_FAIL:-} " in *" $id "*) echo "gc: simulated close refusal" >&2; exit 1 ;; esac
+    # STUB_ENFORCE_CLOSE_OWNER: bd's close-ownership check. The close verb refuses
+    # a bead assigned to someone other than the actor (BEADS_ACTOR) unless --force
+    # is passed, and an unassigned bead closes for anyone. `update --status=closed`
+    # never runs this check, so the update handler does not model it.
+    if [ -n "${STUB_ENFORCE_CLOSE_OWNER:-}" ]; then
+      _forced=0; for _a in "$@"; do [ "$_a" = "--force" ] && _forced=1; done
+      _asg=$(jq -r --arg id "$id" '(.[] | select(.id == $id) | .assignee) // ""' "$S")
+      if [ "$_forced" = 0 ] && [ -n "$_asg" ] && [ "$_asg" != "${BEADS_ACTOR:-}" ]; then
+        echo "gc: cannot close $id: assignee is \"$_asg\", actor is \"${BEADS_ACTOR:-}\"; reclaim or use --force to override" >&2; exit 1
+      fi
+    fi
     if [ -n "${STUB_ENFORCE_BLOCKS:-}" ]; then
       for _b in $(awk -F'|' -v id="$id" '$2=="blocks" && $3==id {print $1}' "$D"); do
         _bst=$(jq -r --arg b "$_b" '(.[] | select(.id == $b) | .status) // "open"' "$S")
@@ -598,6 +651,16 @@ case "$sub" in
         return 1
       }
       case "$gqquery" in
+        *pullRequests\(states:OPEN*)
+          # merge.sh's visit-order read: every open PR, served as one page from
+          # open_prs.json (a list of PR nodes). No fixture is an empty list, in
+          # which every anchor's PR has left the open list.
+          [ -z "${STUB_OPEN_PRS_FAIL:-}" ] || exit 1
+          of="$G/open_prs.json"
+          if [ -s "$of" ]; then nodes=$(cat "$of"); else nodes='[]'; fi
+          printf '%s' "$nodes" | jq -c '{data: {repository: {pullRequests: {
+              pageInfo: {hasNextPage: false, endCursor: null}, nodes: .}}}}' || exit 1
+          exit 0 ;;
         *addReaction*)
           [ "${STUB_REACT_RC:-0}" = "0" ] || exit "${STUB_REACT_RC:-0}"
           sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
@@ -814,4 +877,21 @@ case "$*" in
   *) exit 0 ;;
 esac
 STUB
+}
+
+# Whether this run executes the named part of a suite that declares parts with
+# a `# run-tests-parts:` header (tools/run-tests.sh). The suite wraps each group
+# of sections in `if part <name>; then ... fi`. Run directly, with
+# RUN_TESTS_PART unset, every part runs. Under run-tests.sh only the run's own
+# part does, and a group under a name the header does not declare fails every
+# run, because no run would ever execute its sections.
+part() { # <name>
+  [ -n "${RUN_TESTS_PART:-}" ] || return 0
+  if [ -n "${RUN_TESTS_PARTS:-}" ]; then
+    case " $RUN_TESTS_PARTS " in
+      *" $1 "*) ;;
+      *) bad "part '$1' is not declared in this suite's run-tests-parts header"; return 1 ;;
+    esac
+  fi
+  [ "$RUN_TESTS_PART" = "$1" ]
 }
