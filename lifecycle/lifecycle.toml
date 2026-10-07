@@ -425,7 +425,10 @@ keys = [
 #   workspace-setup writes it on the anchor; pr-facts.sh writes it on a rework
 #   child (the branch that child reworks). Read by merge.sh (the live head must
 #   match it), pr-open.sh, pr-facts.sh and gate-ensure.sh. Absent leaves those
-#   checks unarmed and pr-open skips the anchor. Never cleared. Shape
+#   checks unarmed and pr-open skips the anchor. The gc runtime's
+#   detached-handoff orphan sweep reads it too: it restores the pool route on an
+#   open, unassigned, unrouted bead only when the bead carries branch and a
+#   session pin (gc.session_id or gc.session_name). Never cleared. Shape
 #   `polecat/<bead-id>` for fresh work.
 # target — the landing branch the work merges into: the polecat records it at
 #   submit, the refinery stamps it on a rework child (pr-facts.sh,
@@ -1093,9 +1096,14 @@ keys = [
 #   branch, written by the gascity binary on the claim/close path (gc.work_branch
 #   by hookClaimIdentityPatch at claim time). duplicate-sweep.sh reads gc.work_dir
 #   and gc.work_commit — with the pack-written bare work_dir defined in
-#   merge_identity — as proof a run produced work before disposing a duplicate,
-#   and gc.work_branch is the key the runtime's detached-handoff orphan sweep
-#   matches on. Absent means no such product was recorded. A path, a sha, a branch.
+#   merge_identity — as proof a run produced work before disposing a duplicate.
+#   mol-polecat-work's workspace-setup also writes gc.work_branch, with the branch
+#   the work lands on, since the claim stamps the pool worktree's base checkout.
+#   The runtime's work-record close gate reads it: a `shipped` close needs
+#   gc.work_commit reachable on gc.work_branch (warn-only by default).
+#   No pack script reads gc.work_branch, and the runtime's detached-handoff
+#   orphan sweep reads the bare branch defined in merge_identity, not this key.
+#   Absent means no such product was recorded. A path, a sha, a branch.
 # gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
 #   (produced nothing) or `shipped` (landed work). A pack component stamps
 #   `no-op` — dead-molecule-dispose.sh, and converse by hand — while its meaning
