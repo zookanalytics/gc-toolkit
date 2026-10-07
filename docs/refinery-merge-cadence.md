@@ -297,14 +297,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    `review-wedge` key rather than holding the anchor in silence. It escalates
    on the second consecutive sighting, because `mol-review`'s failure arm
    closes its chain before it restores the bead's route. No dispatch goes out
-   while anything is acting on the anchor — an open `must-fix` finding on any
-   lane, a fix unit in flight, a validation pass in flight, or a full review
-   already in flight on the lane — which is the QUIESCENCE predicate one
-   authority computes so it cannot disagree with itself about whether a review
-   was already out. The same authority also releases that hold: it closes a
-   `must-fix` finding once every fix unit answering it has closed, so a fix that
-   has landed on the branch stops holding the re-gate rather than wedging the
-   anchor at `pre_open_gate`. A review that read a mid-change diff would raise
+   while anything is acting on the anchor — a fix unit in flight (including the
+   one answering an open `must-fix` finding on any lane), a validation pass in
+   flight, or a full review already in flight on the lane — which is the
+   QUIESCENCE predicate one authority computes so it cannot disagree with itself
+   about whether a review was already out. The hold names the actor. A
+   `must-fix` finding no fix unit answers is a demand on the anchor, not an
+   actor: it holds the merge through its `blocks` edge and keeps the anchor
+   `progressing`, but it does not hold the dispatch, and the arm reports it as
+   unanswered. The same authority also releases a finding: on the first pass
+   after every fix unit answering a `must-fix` finding has closed, it closes the
+   finding, so a fix that has landed on the branch stops holding the publish
+   and the merge. A review that read a mid-change diff would raise
    only the no-op rework the declination texts are full of. There is no dispatch
    ceiling: quiescence forbids the redundant round a ceiling would have bounded,
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
@@ -434,10 +438,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 2 merged or arm 7 recorded on this pass is
    disposable on the same tick.
-12. **pr-stack.sh** — keeps an open PR's body current with its anchor in both
-   managed regions. No merge authority, and the only arm that writes no bead. A
-   body is composed once, by arm 3, out of one anchor; then two things drift it,
-   and this arm lands both fixes in one body edit.
+12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
+   body regions and in its title. No merge authority, and the only arm that
+   writes no bead. A body is composed once, by arm 3, out of one anchor; then two
+   things drift it, and this arm lands both fixes in one body edit.
 
    It walks the open PRs in a rotation under its share of the pass budget.
 
@@ -462,8 +466,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    reworked head has not re-signed-off, so the handoff bullet names the head and
    defers to the PR's checks rather than repeating arm 3's pre-open sign-off line.
 
-   The title is left alone: it names the anchor, and the body is where a reviewer
-   reads scope. Idempotence for each region is its rendered content compared
+   The title: arm 3 writes it once, at create, composed from the anchor's title
+   (a conventional-commit type, the title, then the bead id), and the squash
+   merge takes its commit subject from it. A rework that retitles the anchor
+   would otherwise merge under the superseded name. For a `pull_request` anchor
+   this arm composes the title the same way and edits the PR when its words
+   differ; whitespace alone is never a difference. The anchor owns the title, so
+   a retitle is made on the anchor: a title edited on the PR alone is composed
+   back on the next pass. A stacked bead never renames the PR, because the title
+   names the anchor and the body is where a reviewer reads scope. The title is an
+   edit of its own, so one that fails never holds back a body refresh.
+
+   Idempotence for each region is its rendered content compared
    against what the body carries, never the whole body, and the body is read
    `\r`-stripped: GitHub stores a body it re-wrapped with CRLF, and a marker
    line carrying a trailing CR would match nothing and append a second section

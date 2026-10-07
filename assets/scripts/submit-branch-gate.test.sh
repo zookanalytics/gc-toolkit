@@ -169,6 +169,9 @@ case "$1 $2" in
     # and held.
     shift 2
     id="$1"; argv="$*"
+    # $FAKE_TITLE_REFUSE refuses any title write, as bd refuses a title it will
+    # not store, so the handoff can be shown to survive a refused retitle.
+    case " $argv " in *' --title '*) [ -n "${FAKE_TITLE_REFUSE:-}" ] && { printf 'Error: title refused\n' >&2; exit 1; } ;; esac
     cur_status=in_progress; cur_assignee=lx-holder
     if [ -s "${FAKE_LOG:-/dev/null}" ]; then
       beadlines=$(grep -F "UPDATE|$id " "$FAKE_LOG" 2>/dev/null || true)
@@ -727,6 +730,40 @@ eq "$(run_consume_anchor "$TMP/summary-empty.txt" tk-anchor)" \
 eq "$(run_consume_anchor "$TMP/summary.txt" '')" \
    "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "fresh work: the summary rides the metadata write, then status=open, then assignee"
+
+# --- 3e. A retitle follows the anchor. ----------------------------------------
+# The merge cadence composes the PR title from the anchor's title, so a retitle
+# written to a rework child is never read, the same as a summary would not be.
+# It is a write of its own ahead of the handoff, so a title bd refuses cannot
+# roll the handoff back.
+# run_consume_title <anchor-title> <gating-anchor> -> "<rc>|<log>"
+run_consume_title() {
+  : > "$TMP/log"
+  printf 'set -euo pipefail\n' > "$TMP/title-consume.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/title-consume.sh"
+  local rc=0
+  LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
+    GATING_ANCHOR="$2" ANCHOR_TITLE="$1" bash "$TMP/title-consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+HANDOFF3="UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;"
+
+eq "$(run_consume_title 'Compare heads, not names' tk-anchor)" \
+   "0|UPDATE|tk-anchor --title Compare heads, not names;$HANDOFF3" \
+   "child: the retitle is written to the anchor, ahead of the three handoff writes"
+
+eq "$(run_consume_title 'Compare heads, not names' '')" \
+   "0|UPDATE|tk-work --title Compare heads, not names;$HANDOFF3" \
+   "fresh work: the claimed bead is the anchor, retitled in a write of its own ahead of the handoff"
+
+eq "$(run_consume_title '' tk-anchor)" "0|$HANDOFF3" \
+   "no retitle composed: no title write at all"
+
+eq "$(run_consume_title '   ' tk-anchor)" "0|$HANDOFF3" \
+   "a whitespace-only title is no retitle"
+
+eq "$(FAKE_TITLE_REFUSE=1 run_consume_title 'Compare heads, not names' tk-anchor)" "0|$HANDOFF3" \
+   "a refused retitle costs the title, and the handoff still lands whole"
 
 # A hold that did not land must not drain. molecule-hold.sh exits non-zero when
 # it cannot resolve the step, when duplicate step beads make that ambiguous,
