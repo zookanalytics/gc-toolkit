@@ -268,7 +268,8 @@ published: an inline comment from its review's submission, not from its draft,
 so a review drafted before the instant and submitted after it is feedback whole.
 Without the instant, or with a stamp that is not a UTC instant, every post under
 that login is the city's own. `tools/lint-learned.d/pr-post-bypass.sh` fails any
-post in the pack that does not go through the helper.
+post in the pack that does not go through the helper, and the agents' gh guard
+refuses an unmarked one an agent types ([gh-origin-guard.md](gh-origin-guard.md)).
 
 `pr-facts.sh` records each batch once: it opens the validation pass, routes the
 batch, and advances the watermark, which stops the batch being re-read once its
