@@ -20,7 +20,7 @@
 # anchor it could not make current in its EXIT CODE, which is what holds
 # merge.sh for that pass);
 # Also covers the status: label moving in the arm that records a review: each
-# pre-merge arm re-derives it for an anchor whose posture value it changes or
+# early arm re-derives it for an anchor whose posture value it changes or
 # whose feedback batch it routes, a merge state moving alone is left to the full
 # pass, and the full pass's own re-derive reads the labels its sweep just wrote;
 # Also covers the POSTURE record and the comment watermark: the declared
@@ -59,6 +59,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# pr-facts.sh records what it observes through lifecycle.sh, which execs gctk.
+harness_build_gctk
 harness_init
 
 # The value@oid half of a dated key. pr_posture carries a third @<since>
@@ -73,7 +75,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -193,21 +195,22 @@ eq "$PR_POSTURES" "$TOML_POSTURES" "postures match lifecycle.toml [posture]"
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration
 # downstream audits read (docs/component-model.md). A key these scripts write
-# but nothing registers is state no audit can account for. pr-dispose.sh is
-# covered alongside pr-facts.sh: it WRITES the disposition marker pr-facts only
-# reads, so a drift check scanning pr-facts alone would never see those writes.
+# but nothing registers is state no audit can account for. pr-dispose.sh and
+# demo-deliver.sh are covered alongside pr-facts.sh: each WRITES a key pr-facts
+# only reads — the PR-close disposition marker and artifact_url — so a drift
+# check scanning pr-facts alone would never see those writes.
 REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$ROOT/lifecycle/lifecycle.toml" \
   | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
 # pr-facts.sh writes anchor metadata through three flags: bd's --set-metadata,
 # and lifecycle.sh transition's --set and --set-dated. All three are state the
 # registry must declare, so the extraction reads every one — a key written only
 # through lifecycle would otherwise drift unseen.
-WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" \
+WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" "$HERE/demo-deliver.sh" \
   | sed -E 's/^--set(-metadata|-dated)? "?//; s/=$//' | sort -u)
-[ -n "$WRITTEN" ] && ok "metadata-key writes extracted" || bad "no metadata-key writes found in pr-facts.sh/pr-dispose.sh"
+[ -n "$WRITTEN" ] && ok "metadata-key writes extracted" || bad "no metadata-key writes found in pr-facts.sh/pr-dispose.sh/demo-deliver.sh"
 UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
   | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
-eq "$UNREGISTERED" "" "every metadata key pr-facts.sh and pr-dispose.sh write is registered in lifecycle.toml"
+eq "$UNREGISTERED" "" "every metadata key pr-facts.sh, pr-dispose.sh and demo-deliver.sh write is registered in lifecycle.toml"
 
 echo "# out-of-band merge is recorded"
 store "[$(anchor F1 10)]"
@@ -290,7 +293,22 @@ out=$(run)
 eq "$(bstatus F2b)" "closed" "the anchor is disposed"
 eq "$(bstatus V22)" "closed" "the stale visit is retired"
 eq "$(meta V22 'gc.outcome')" "moot" "…closed moot — the question it asked is answered"
+has "$(meta V22 'gc.outcome_reason')" "F2b disposed (not-needed -> tk-vis)" "…with a reason, which the board shows as the sitting's headline"
 has "$out" "retired stale visit V22" "the retirement is reported"
+
+# The sitting that recorded the disposition can still hold the visit. bd's close
+# verb refuses a bead assigned to another actor, and pr-facts holds no visit, so
+# the retire passes --force. STUB_ENFORCE_CLOSE_OWNER makes the stub refuse a
+# plain close the way bd does, so this case fails if the --force is dropped.
+echo "# a pre-recorded disposition retires the rework-or-close visit a sitting still holds"
+store "[$(anchor F2n 39 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-vn"'), {\"id\":\"VN\",\"status\":\"in_progress\",\"assignee\":\"lx-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"pr-abandoned.39\",\"gc.continuation_group\":\"F2n\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+printf '%s' "$(prview 39 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_39.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_ENFORCE_CLOSE_OWNER=1 run)
+eq "$(bstatus VN)" "closed" "the held visit is retired over the sitting's claim"
+eq "$(meta VN 'gc.outcome')" "moot" "…closed moot"
+has "$(meta VN 'gc.outcome_reason')" "F2n disposed (not-needed -> tk-vn)" "…with its reason"
+eq "$(bstatus F2n)" "closed" "the anchor is disposed in the same pass"
 
 echo "# a disposition bead-rehome refused (human needed) -> distinct escalation, anchor left open"
 store "[$(anchor F2c 23 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-c"')]"
@@ -715,6 +733,10 @@ has "$out" "adopting unstamped rework orphan new-2" "the next pass adopts the or
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
 eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
+# The adoption re-stamps the identity with --set-metadata, which stores
+# pr_number as a number, and the read-back still verifies the child.
+eq "$(jq -r '.[] | select(.id == "new-2") | .metadata.pr_number | type' "$STUB_STORE")" "number" \
+  "…its re-stamped pr_number reads back as the number bd stores, and the identity still verifies"
 
 echo "# …atomic birth: a stamp that keeps the branch but drops rejection_reason is UNMADE, never a husk"
 # The defect this bead fixes: a child left able to veto (branch + open) but not
@@ -1023,12 +1045,31 @@ eq "$rc" 0 "the pass still exits 0"
 has "$out" "no gating anchors" "the sweep ran ahead of the no-anchors early-exit"
 eq "$(bstatus AV1)" "closed" "a visit whose PR merged (anchor closed) is retired"
 eq "$(meta AV1 'gc.outcome')" "moot" "…closed moot — the premise it asked about is dead"
+has "$(meta AV1 'gc.outcome_reason')" "a required approving review is state" "…with a reason, which the board shows as the sitting's headline"
 has "$out" "retired stale merge-blocked-approval visit AV1" "the retirement is reported"
 eq "$(bstatus AV2)" "closed" "a visit for a still-open PR is retired too — a required approving review is state, not a visit"
+eq "$(meta AV2 'gc.outcome')" "moot" "…closed moot"
+has "$(meta AV2 'gc.outcome_reason')" "Subject MO1 is open" "…with a reason naming its own subject's state"
 eq "$(bstatus AV3)" "open" "a visit whose subject is unreadable this pass is left, never retired on a read that did not land"
+eq "$(meta AV3 'gc.outcome')" "<absent>" "…and nothing is stamped on it"
 has "$out" "subject MX1 unreadable" "…and the fail-closed skip is reported"
 eq "$(bstatus ATV)" "open" "a genuine unresolved-thread visit (different key) is untouched by the approval sweep"
 eq "$(cat "$STUB_ESC_LOG")" "" "the sweep files nothing — it only retires"
+
+# pr-facts holds none of the visits it retires, so this retire passes --force as
+# well: an open visit still assigned to a sitting closes like an unassigned one.
+# STUB_ENFORCE_CLOSE_OWNER makes the stub refuse a plain close the way bd does.
+# A close that does not land leaves its visit open and reported, and the sweep
+# goes on to the next visit.
+echo "# the approval retire closes an assigned visit, and a refused close leaves it for the next pass"
+store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, {\"id\":\"AV4\",\"status\":\"open\",\"assignee\":\"lx-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV5\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV6\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+out=$(STUB_ENFORCE_CLOSE_OWNER=1 STUB_CLOSE_FAIL="AV5" run); rc=$?
+eq "$rc" 0 "a refused retire does not fail the pass"
+eq "$(bstatus AV4)" "closed" "an approval visit still assigned to a sitting is retired over the claim"
+has "$(meta AV4 'gc.outcome_reason')" "Subject MC2 is closed" "…with its reason"
+eq "$(bstatus AV5)" "open" "a visit whose close is refused stays open for the next pass"
+has "$out" "could not retire stale merge-blocked-approval visit AV5" "…and the refusal is reported"
+eq "$(bstatus AV6)" "closed" "…while the sweep goes on to retire the next visit"
 
 echo "# dismissal of our OWN superseded CHANGES_REQUESTED"
 store "[$(anchor D1 20)]"
@@ -1972,6 +2013,9 @@ wb_rmeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","
 # the Conversation-tab variant: dispositioned, with only the issue-comment watermark raised
 wb_imeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","pr_review_watermark":"0","pr_issue_comment_watermark":"%s"' "$1" "${2:-50}"; }
 child()   { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{}}' "$1" "$2"; }
+# an artifact fix unit: closed by demo-deliver on attach, carrying the attached
+# comment's URL as artifact_url (what the write-back cites in place of a commit).
+child_artifact() { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{"artifact_url":"%s"}}' "$1" "$2" "$3"; }
 gh_since() { tail -n +"$1" "$STUB_GH_LOG"; }
 # advance one bead between passes, the way a later pass of the city would
 bmut() { # <id> <jq-expression over that bead>
@@ -2029,6 +2073,21 @@ hasnt "$(gh_since "$mark")" "REPLY" "no second reply"
 hasnt "$(gh_since "$mark")" "RESOLVE" "no second resolve"
 has "$out" "0 comments acknowledged, 0 threads replied, 0 threads resolved" "the repeat pass reports no writes"
 eq "$(jq -r '[ .threads[].comments.nodes[] ] | length' "$GH_DIR/threads_41.json")" "2" "the thread still carries exactly one reply"
+
+echo "# an artifact fix unit cites the delivered artifact, not a commit, then resolves"
+# demo-deliver closed this fix unit on attach and recorded the attached comment's
+# URL as artifact_url. The write-back cites that URL and never a head commit the
+# artifact did not make, and still resolves the thread behind the reply.
+store "[$(anchor WART 47 "$(wb_meta rework:KART)"), $(child_artifact KART closed https://github.com/zook/gc-toolkit/pull/47#issuecomment-900)]"
+printf '%s' "$(prview 47 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_47.json"
+threads 47 "$(one_thread 47)"
+out=$(run)
+eq "$(reacted 47 NC-47)" "true" "the comment is acknowledged"
+has "$(treply 47 T-47)" "issuecomment-900" "the reply cites the delivered artifact's URL"
+hasnt "$(treply 47 T-47)" "Addressed in sha-47" "…and never claims a commit the artifact did not make"
+has "$(treply 47 T-47)" "KART" "the reply names the fix unit that carried the work"
+eq "$(tresolved 47 T-47)" "true" "the thread is resolved behind the artifact reply"
+has "$out" "1 threads replied, 1 threads resolved" "the pass reports both writes"
 
 echo "# a comment nothing acted on is never touched"
 store "[$(anchor W3 42)]"
@@ -2305,6 +2364,31 @@ out=$(run)
 has "$(treply 59 T-59)" "KM1" "the reply names the earlier batch's bead"
 has "$(treply 59 T-59)" "KM2" "…and the later one"
 eq "$(tresolved 59 T-59)" "true" "…and the thread is resolved behind it"
+eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
+
+echo "# a thread two MIXED-form batches touched names each by its own landing form"
+# One batch's fix unit lands a commit; the other's lands an artifact (a demo
+# closed on attach, carrying artifact_url). The single reply must cite the commit
+# for the commit unit and the delivered URL for the artifact unit — never a commit
+# the demo never made, nor a demo the commit never was. Collapsing both to the
+# last record's form (the pre-fix bug) would claim one for the other.
+store "[$(anchor WX 60 "$(wb_meta rework:KC1)"), $(child KC1 open), $(child KA2 open)]"
+printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_60.json"
+threads 60 "$(one_thread 60)"
+out=$(run)
+bmut WX '.metadata += {"pr_comment_disposition":"rework:KA2","pr_comment_watermark":"200"}'
+threads 60 "$(tfile 60 | jq -c '.threads[0].comments.nodes += [
+  {"id":"NC-60b","databaseId":200,"author":{"login":"johnzook"},"body":"and this","reactionGroups":[]}]')"
+out=$(run)
+bmut KC1 '.status = "closed"'
+out=$(run)
+eq "$(treply 60 T-60)" "" "the thread waits while the artifact unit is still open"
+bmut KA2 '.status = "closed" | .metadata += {"artifact_url":"https://github.com/zook/gc-toolkit/pull/60#issuecomment-600"}'
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+has "$(treply 60 T-60)" "Addressed in sha-60 on this PR (KC1)" "the commit unit is cited by its landing commit"
+has "$(treply 60 T-60)" "issuecomment-600 (KA2)" "the artifact unit is cited by its delivered URL, not a commit"
+eq "$(tresolved 60 T-60)" "true" "the thread is resolved behind the one mixed-form reply"
 eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
 
 echo "# a batch with no bead of its own never holds a thread back"
@@ -3107,11 +3191,10 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "tracked as a follow-up for after the merge" "…the dismiss message names the deferral"
 
-# ---- --route-comments-only: route operator feedback early, before merge --------
-# The tk-8qtkvv divergence: --posture-only stamps commented/changes_requested on
-# the cheap pre-merge tick, but routing lived only in the full arm at the pass
-# TAIL (after merge). A pass the timeout killed in between left the feedback
-# stamped-as-seen yet unrouted for hours. This mode routes on the early tick too:
+# ---- --route-comments-only: route operator feedback early in the pass ----------
+# --posture-only stamps commented/changes_requested on the pre-merge tick, and
+# the full arm routes only at the pass TAIL. A pass the timeout killed in between
+# would leave the feedback stamped-as-seen yet unrouted. This mode routes early:
 # it does the SAME routing the full arm does, then stops — no write-back sweep,
 # no MERGED/CLOSED reconciliation, none of the non-feedback arms.
 # The `new-N` bead counter is high this late in the run, so the child id is read
@@ -3187,7 +3270,7 @@ out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" \
   "the full pass dispatches the conflict-rework on the same fixture"
 
-echo "# …but a CONFLICTING anchor WITH feedback is routed pre-merge — not deferred while it conflicts (tk-f9x2nb, #861)"
+echo "# …but a CONFLICTING anchor WITH feedback is routed early — not deferred while it conflicts (tk-f9x2nb, #861)"
 # The complement of RC9: route-comments-only still files no merge-in child, but a
 # conflicting anchor that owes feedback now falls through to the feedback arm and
 # routes it, so operator feedback is picked up before the merge rather than
@@ -3198,7 +3281,7 @@ echo '[]' > "$GH_DIR/reviews_161.json"
 printf '[{"id":16100,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/comments_161.json"
 : > "$STUB_SESSION_LOG"
 out=$(run_route)
-has "$(meta CF2 pr_comment_disposition)" "rework:" "route-comments-only routes the conflicting anchor's feedback pre-merge"
+has "$(meta CF2 pr_comment_disposition)" "rework:" "route-comments-only routes the conflicting anchor's feedback early"
 eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))] | length' "$STUB_STORE")" "0" \
   "…and files no merge-in child (the full pass owns that; the feedback child brings the branch current)"
 VP2=$(vpass_id CF2)
@@ -3218,22 +3301,18 @@ out=$(run)
 eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
 
 # ---- the status: label moves in the arm that records a review ----------------
-# A human's review changes the label's inputs in the pre-merge arms: --posture-only
+# A human's review changes the label's inputs in the early arms: --posture-only
 # records the new posture value, and --route-comments-only routes the feedback
 # into live work on the anchor. Each re-derives the label there, so the PR list
 # shows the review without waiting for the full pass at the tail. These cases run
-# the real writer over the real derivation (gctk pr-status), so the label read
-# back off the PR fixture is what the shared code path decided. The writer gets
-# the built gctk through a wrapper, because an exported GCTK_BIN would also swap
-# lifecycle.sh onto its gctk port; the wrapper is removed after these cases.
+# the real writer over the real derivation (gctk pr-status, from the binary
+# harness_build_gctk built), so the label read back off the PR fixture is what
+# the shared code path decided. The scripts dir carries no label writer, so
+# elsewhere in this file pr-facts.sh's best-effort label call finds nothing to
+# run. A wrapper that execs the real writer is put there for these cases and
+# removed after them.
 echo "# the status: label moves in the arm that records a review"
-if command -v go >/dev/null 2>&1 \
-   && ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1; then
-  ok "gctk built for the label derivation"
-else
-  bad "gctk did not build; the status: label is derived by gctk alone, so the label cases below were NOT exercised — $(tail -3 "$TMP/gctk-build.log" 2>/dev/null | tr '\n' ' ')"
-fi
-printf '#!/usr/bin/env bash\nGCTK_BIN=%q exec %q "$@"\n' "$TMP/gctk" "$HERE/pr-status-label.sh" > "$SD/pr-status-label.sh"
+printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$HERE/pr-status-label.sh" > "$SD/pr-status-label.sh"
 chmod +x "$SD/pr-status-label.sh"
 # The labels on a PR view fixture, sorted and comma-joined.
 pv_labels() { jq -r '[.labels[]?.name] | sort | join(",")' "$GH_DIR/pr_view_$1.json"; }
@@ -3303,6 +3382,66 @@ run >/dev/null 2>&1          # the branch-dedup probe refetches (invalidated) an
 unset GC_RECONCILE_BD_CACHE
 twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
+
+echo "# pacing: --deadline stops the per-anchor walk after one anchor and --cursor resumes after it"
+# Three clean OPEN PRs, enumerated out of id order. A deadline of epoch 1 has
+# always passed, so a paced pass reads exactly one PR; the posture-only mode
+# ignores the pacing pair, because merge.sh needs every posture current.
+store "[$(anchor PP3 83), $(anchor PP1 81), $(anchor PP2 82)]"
+for n in 81 82 83; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+PFCUR="$TMP/pr-facts.cursor"; rm -f "$PFCUR"
+pf_views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "81" "a passed deadline reads the lowest id's PR and no other"
+has "$out" "visited 1 of 3 PR anchors before the deadline; the next pass resumes at PP2" "…and names where the next pass resumes"
+eq "$(cat "$PFCUR" 2>/dev/null)" "PP1" "the cursor records the anchor finished"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "82" "the full mode resumes after the cursor the same way"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --posture-only --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "83,81,82" "the posture-only mode reads every PR, in the enumerated order, whatever pacing it is handed"
+hasnt "$out" "visited " "…and reports no pacing"
+
+echo "# pacing: an anchor the walk skips for free does not spend its one visit past the deadline"
+# PQ1 names no PR number, so the walk passes it without a read. It leads the
+# rotation and the deadline has passed, so the visit the walk is owed goes to
+# PQ2.
+store "[$(anchor PQ1 x), $(anchor PQ2 84)]"
+printf '%s' "$(prview 84 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_84.json"
+rm -f "$PFCUR"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "84" "the visit goes to the first anchor that costs a read"
+has "$out" "visited 1 of 2 PR anchors" "…counted once"
+
+echo "# pacing: the write-back sweep rotates on a cursor of its own under the same deadline"
+# Three anchors carry a routed comment batch, enumerated out of id order. A
+# deadline of epoch 1 has always passed, so the sweep acknowledges one anchor's
+# comments per pass, on a rotation apart from the walk's. The PR numbers are
+# ones no earlier section uses, and each PR's issue comments are emptied too,
+# because the walk visits the same anchors and would route a comment an earlier
+# section left behind, which changes what the sweep owes.
+store "[$(anchor WP3 193 "$(wb_meta rework:KP3)"), $(anchor WP1 191 "$(wb_meta rework:KP1)"),
+        $(anchor WP2 192 "$(wb_meta rework:KP2)"), $(child KP1 open), $(child KP2 open), $(child KP3 open)]"
+for n in 191 192 193; do
+  printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"
+  threads "$n" "$(one_thread "$n")"
+  printf '[]' > "$GH_DIR/issue_comments_$n.json"
+done
+WBCUR="$TMP/pr-facts-wb.cursor"; rm -f "$WBCUR" "$WBCUR.writeback"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
+eq "$(reacted 191 NC-191),$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false,false" "past the deadline the sweep still acknowledges one anchor, the lowest id"
+has "$out" "write-back visited 1 of 3 anchors with routed comments before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
+eq "$(cat "$WBCUR.writeback" 2>/dev/null)" "WP1" "the sweep records its progress on a cursor of its own"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
+eq "$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false" "the next pass resumes the sweep after its cursor"
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(( $(date +%s) + 600 ))" --cursor "$WBCUR" 2>&1)
+eq "$(reacted 193 NC-193)" "true" "a deadline that has not passed lets the sweep reach every anchor"
+has "$out" "write-back visited 3 of 3 anchors with routed comments" "…and reports the whole sweep"
+out=$("$SUT" --fix-pool "$FIX" 2>&1)
+hasnt "$out" "write-back visited" "an unpaced pass reports no write-back pacing"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

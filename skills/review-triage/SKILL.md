@@ -42,7 +42,7 @@ done
 INDEX=$(mktemp); FOUND=""
 for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
   [ -n "$c" ] || continue
-  git -C "$c" show "$REVIEWED_OID:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
+  git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
 done
 [ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$INDEX"
 ```
@@ -120,7 +120,7 @@ gc bd update "$OBS" --set-metadata task_kind=observation \
   --set-metadata obs.category=review-index-gap \
   --set-metadata "obs.scope=repo:${GC_RIG:-unknown}" \
   --set-metadata obs.source=self --set-metadata obs.directive=standing \
-  --set-metadata "obs.provenance=bead:$ANCHOR:turn:$(date -u +%Y-%m-%d)" \
+  --set-metadata "obs.provenance=bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
   --set-metadata gc.outcome=recorded --status=closed
 ```
 

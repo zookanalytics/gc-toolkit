@@ -4,7 +4,7 @@
 #
 # `approval` was a check_set token that armed merge.sh's human-approval
 # requirement. That requirement is now a UNIVERSAL merge rule — every PR needs a
-# non-city APPROVED review at the live head, armed for every anchor — so the token
+# standing non-city APPROVED review, armed for every anchor — so the token
 # arms nothing and names no lane. The resolver already drops it, so a stale token
 # is harmless; this removes it so a check_set names only real lanes:
 #   check_set  the `approval` token is dropped (the comma list and its order kept)

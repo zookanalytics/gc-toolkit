@@ -14,9 +14,9 @@
 # services/gctk SUBTREE's tree hash, not the repo HEAD: it moves exactly when a
 # committed input of this module changes, so a docs-only merge does not
 # republish the binary under the cadence's feet.
-# Exit: 0 current (or built), or --deploy on a city without a Go toolchain (the
-# shell fallbacks keep serving) · 1 build failed (the previous binary is left
-# exactly as it was) · 2 usage.
+# Exit: 0 current (or built) · 1 build failed, including a build owed on a
+# city with no Go toolchain (the previous binary is left exactly as it was) ·
+# 2 usage. A current binary needs no toolchain.
 # Env: GC_SERVICE_STATE_ROOT / GC_CITY_PATH / GC_CITY / GC_CITY_ROOT (state
 # root), else `gc service list --json`'s city_path; GC_GO_BIN, GC_GCTK_GOTMP,
 # GC_GCTK_GC_BIN. Caller: orders/gctk-build.
@@ -27,10 +27,9 @@
 # the board reads one record format for every component.
 set -euo pipefail
 
-DEPLOY=0
 for arg in "$@"; do
     case "$arg" in
-        --deploy) DEPLOY=1 ;;
+        --deploy) ;;
         *) echo "gc-gctk-build: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -68,22 +67,11 @@ BIN_DIR="$STATE_ROOT/bin"
 BIN="$BIN_DIR/gctk"
 mkdir -p "$BIN_DIR"
 
-# Go toolchain: override, PATH, then the conventional system install.
+# Go toolchain: override, PATH, then the conventional system install. It is
+# needed only once there is something to build, below.
 GO="${GC_GO_BIN:-}"
 if [ -z "$GO" ]; then
     if command -v go >/dev/null 2>&1; then GO="go"; else GO="/usr/local/go/bin/go"; fi
-fi
-# A city with no toolchain is the supported fallback state for the length of
-# the migration, not a failing build order: without this arm every 5-minute
-# tick would record last_build_rc=1 and the board would carry a HIGH row for a
-# component the shell fallbacks are serving perfectly well.
-if ! command -v "$GO" >/dev/null 2>&1; then
-    if [ "$DEPLOY" -eq 1 ]; then
-        echo "gc-gctk-build: no Go toolchain ($GO); nothing to build — the shell fallbacks keep serving"
-        exit 0
-    fi
-    echo "gc-gctk-build: no Go toolchain ($GO); set GC_GO_BIN" >&2
-    exit 1
 fi
 
 # The build-status record, in the same shape and the same place as every other
@@ -160,6 +148,16 @@ if [ "$need_build" -eq 0 ]; then
     echo "gc-gctk-build: $BIN is up to date"
     write_status 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
     exit 0
+fi
+
+# A build is owed and nothing can perform it: that is a failed build, recorded
+# like any other so the board's PACK row reports it. lifecycle.sh has nothing
+# but this binary to exec, so a city that never gets one refuses every
+# transition, and a city that has one keeps it — $BIN is not touched here.
+if ! command -v "$GO" >/dev/null 2>&1; then
+    echo "gc-gctk-build: BUILD FAILED — no Go toolchain ($GO) to build $MOD; set GC_GO_BIN. $BIN left unchanged" >&2
+    write_status 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
+    exit 1
 fi
 
 # Keep linker/cgo scratch off the size-capped shared /tmp; GOCACHE stays at its
