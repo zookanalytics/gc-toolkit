@@ -51,6 +51,12 @@
 # a file that fails serially too is a real failure. --no-retry (or --retry 0)
 # reports the raw parallel result.
 #
+# Every file runs with commit and tag signing off, added after any
+# GIT_CONFIG_COUNT entries the caller already exported. A test that commits
+# does so in a throwaway repo, and on a host whose git config signs every
+# commit each of those commits needs a reachable signing agent. No test may
+# depend on one.
+#
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error.
 
@@ -183,6 +189,17 @@ if [ "${#TESTS[@]}" -eq 0 ]; then
   echo "run-tests: no matching *.test.sh for the given paths — nothing to run"
   exit 0
 fi
+
+# Signing off for every file (see the header). The entries go after the
+# caller's own, so a GIT_CONFIG_COUNT the caller exported still applies. A count
+# that is not a number is replaced, since git refuses to run with it.
+case "${GIT_CONFIG_COUNT:-}" in
+  ''|*[!0-9]*) cfg_n=0 ;;
+  *)           cfg_n=$((10#$GIT_CONFIG_COUNT)) ;;
+esac
+export "GIT_CONFIG_KEY_$cfg_n=commit.gpgsign" "GIT_CONFIG_VALUE_$cfg_n=false" \
+       "GIT_CONFIG_KEY_$((cfg_n + 1))=tag.gpgsign" "GIT_CONFIG_VALUE_$((cfg_n + 1))=false" \
+       "GIT_CONFIG_COUNT=$((cfg_n + 2))"
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$LOGDIR"' EXIT

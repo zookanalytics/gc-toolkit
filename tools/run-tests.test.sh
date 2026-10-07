@@ -18,7 +18,10 @@
 #   - --no-retry and --retry 0 report the raw parallel result;
 #   - --retry N bounds the serial attempts;
 #   - the serial run's log, not the parallel one, is what the failure dump shows;
-#   - --retry rejects a non-integer.
+#   - --retry rejects a non-integer;
+#   - every file commits and tags with signing off, under a git config that
+#     signs both with a signer that always fails, and a git config entry the
+#     caller exported still reaches it.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -43,6 +46,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Ambient git config and the env knobs the runner reads must not reach it, so
 # the default behaviour under test is the runner's own, not the host's.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+unset GIT_CONFIG_COUNT "${!GIT_CONFIG_KEY_@}" "${!GIT_CONFIG_VALUE_@}"
 unset TEST_JOBS TEST_TIMEOUT TEST_RETRY
 
 # The runner derives its root from its own location, so give it a git repo to
@@ -259,6 +263,48 @@ echo "── 8. --retry rejects a non-integer ──"
 run --retry abc "$FIX/pass.test.sh"
 eq "$RC" 2 "a non-integer --retry is a usage error"
 has "$OUT" "--retry must be a non-negative integer" "and says why"
+
+echo "── 9. every file runs with commit and tag signing off ──"
+# A git config that signs commits and tags with a signer that always fails
+# stands in for a host whose signing agent is unreachable. The probe entry is
+# the caller's own GIT_CONFIG_COUNT config, which must survive the runner's.
+cat > "$TMP/signing.gitconfig" <<'G'
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = true
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	program = false
+[user]
+	signingkey = /nonexistent/signing-key.pub
+G
+cat > "$FIX/signing.test.sh" <<'F'
+#!/usr/bin/env bash
+set -e
+r="$(mktemp -d "$RUNTESTS_FIXTURE_STATE/repo.XXXXXX")"
+git init -q "$r"
+git -C "$r" -c user.email=t@t -c user.name=t commit -q --allow-empty -m c
+git -C "$r" -c user.email=t@t -c user.name=t tag -m t t1
+probe="$(git config --get gctk.probe || true)"
+echo "probe=$probe"
+[ "$probe" = kept ]
+F
+signing_env() {
+  GIT_CONFIG_GLOBAL="$TMP/signing.gitconfig" \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=gctk.probe GIT_CONFIG_VALUE_0=kept "$@"
+}
+reset_state
+signing_env run "$FIX/signing.test.sh"
+eq "$RC" 0 "a file commits and tags with signing off, keeping the caller's config"
+has "$OUT" "1 passed, 0 failed" "and passes in the parallel wave"
+# The same file run directly, with the same config, fails at its commit: the
+# pass above is the runner's doing, not a config that never signed.
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" signing_env bash "$FIX/signing.test.sh" 2>&1)"; RC=$?
+if [ "$RC" -ne 0 ]; then ok "the file run directly fails"; else bad "the file run directly fails" "it exited 0"; fi
+has "$OUT" "failed to write commit object" "because the commit could not be signed"
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
