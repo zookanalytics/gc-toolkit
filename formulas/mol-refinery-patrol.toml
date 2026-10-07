@@ -33,8 +33,8 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
-preexisting-failure-dedup, one-anchor-per-pr, patrol-wisp-reconcile,
-patrol-pour-vars) — keep
+preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
+patrol-wisp-reconcile, patrol-pour-vars) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes)."""
 formula = "mol-refinery-patrol"
@@ -92,7 +92,7 @@ description = "After a direct merge, best-effort fast-forward the rig's canonica
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a non-city APPROVED review at the live head), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured, and a changed default reaches the next wisp."
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a standing non-city APPROVED review), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured, and a changed default reaches the next wisp."
 default = "correctness,triage"
 
 [[steps]]
@@ -270,14 +270,26 @@ duplicate):
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
 # >>> mr-aware-rejection
-LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+LC=""; POOL_ROUTE=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -z "$LC" ] && [ -x "$c/assets/scripts/lifecycle.sh" ] && LC="$c/assets/scripts/lifecycle.sh"
+  [ -z "$POOL_ROUTE" ] && [ -x "$c/assets/scripts/pool-route.sh" ] && POOL_ROUTE="$c/assets/scripts/pool-route.sh"
 done
 if [ -z "$LC" ]; then
   echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
+if [ -z "$POOL_ROUTE" ]; then
+  echo "pool-route.sh not found — NOT repooling $WORK to an address no pool is proved to claim; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+POLECAT_ROUTE=$("$POOL_ROUTE" {{binding_prefix}}polecat) || {
+  echo "no live polecat pool claims {{binding_prefix}}polecat — repooling the rejection there strands it unclaimed with a rejection_reason nobody reads; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+}
 BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
   echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
@@ -285,7 +297,7 @@ if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/nul
   exit 1
 fi
 PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-"$LC" transition "$WORK" --to unanchored --assignee "" --route "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
+"$LC" transition "$WORK" --to unanchored --assignee "" --route "$POLECAT_ROUTE" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
 # <<< mr-aware-rejection
 ```
 
@@ -341,14 +353,26 @@ the same fail-closed lifecycle repool as the rebase step:
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="<failure summary>"
 # >>> mr-aware-rejection
-LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+LC=""; POOL_ROUTE=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -z "$LC" ] && [ -x "$c/assets/scripts/lifecycle.sh" ] && LC="$c/assets/scripts/lifecycle.sh"
+  [ -z "$POOL_ROUTE" ] && [ -x "$c/assets/scripts/pool-route.sh" ] && POOL_ROUTE="$c/assets/scripts/pool-route.sh"
 done
 if [ -z "$LC" ]; then
   echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
+if [ -z "$POOL_ROUTE" ]; then
+  echo "pool-route.sh not found — NOT repooling $WORK to an address no pool is proved to claim; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+POLECAT_ROUTE=$("$POOL_ROUTE" {{binding_prefix}}polecat) || {
+  echo "no live polecat pool claims {{binding_prefix}}polecat — repooling the rejection there strands it unclaimed with a rejection_reason nobody reads; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+}
 BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
   echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
@@ -356,7 +380,7 @@ if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/nul
   exit 1
 fi
 PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-"$LC" transition "$WORK" --to unanchored --assignee "" --route "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
+"$LC" transition "$WORK" --to unanchored --assignee "" --route "$POLECAT_ROUTE" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
 # <<< mr-aware-rejection
 # >>> rejection-branch-keep
 # $BEAD_JSON is the read the repool above shape-validated, so an unreadable

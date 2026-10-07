@@ -117,13 +117,17 @@ no card and run no dispose: close this step, let the claim loop carry you to
 `advance-and-drain`, and take its step-2 chain-close and drain.
 
 ```bash
+# >>> first-reaction-reacted-check
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r '(.[0].metadata // {}) | ((.["gc.first_reaction"] // "") != "" or (.["gc.proactive_reaction"] // "") == "1")' 2>/dev/null || printf 'false')
+# gc.proactive_reaction reads back as the number 1 or the string "1", so it is
+# compared as a string.
+REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r '(.[0].metadata // {}) | ((.["gc.first_reaction"] // "") != "" or ((.["gc.proactive_reaction"] // "") | tostring) == "1")' 2>/dev/null || printf 'false')
 if [ "$REACTED" = "true" ]; then
   echo "ALREADY REACTED: $WORK_BEAD_ID has a completed first reaction — do not write a card, do not dispose; close the step chain and drain."
 fi
+# <<< first-reaction-reacted-check
 ```
 
 Do the ONE cheap reaction the bead invites — usually research→spec, or "read
@@ -351,10 +355,13 @@ blocks: if the reaction has landed, run no exit and file no visit — close this
 step and drain.
 
 ```bash
+# >>> advance-and-drain-reacted-guard
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r '((.[0].metadata // {})["gc.proactive_reaction"] // "") == "1"' 2>/dev/null || printf 'false')
+# gc.proactive_reaction reads back as the number 1 or the string "1", so it is
+# compared as a string.
+REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r '(((.[0].metadata // {})["gc.proactive_reaction"] // "") | tostring) == "1"' 2>/dev/null || printf 'false')
 if [ "$REACTED" = "true" ]; then
   echo "ALREADY REACTED: $WORK_BEAD_ID carries gc.proactive_reaction=1 — the reaction has landed. Running no exit and filing no visit; closing this step and draining."
   SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -364,6 +371,7 @@ if [ "$REACTED" = "true" ]; then
   gc runtime drain-ack
   exit 0
 fi
+# <<< advance-and-drain-reacted-guard
 ```
 
 If it prints ALREADY REACTED, you are done: do not run any exit block below.
