@@ -715,6 +715,10 @@ has "$out" "adopting unstamped rework orphan new-2" "the next pass adopts the or
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
 eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
+# The adoption re-stamps the identity with --set-metadata, which stores
+# pr_number as a number, and the read-back still verifies the child.
+eq "$(jq -r '.[] | select(.id == "new-2") | .metadata.pr_number | type' "$STUB_STORE")" "number" \
+  "…its re-stamped pr_number reads back as the number bd stores, and the identity still verifies"
 
 echo "# …atomic birth: a stamp that keeps the branch but drops rejection_reason is UNMADE, never a husk"
 # The defect this bead fixes: a child left able to veto (branch + open) but not

@@ -501,7 +501,9 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
   # refinery a rework of no PR, which it resolves to merge_strategy=direct and a
   # push straight to the target branch — the same partial-write wedge one field
   # over. merge_strategy is always minted "mr"; the PR keys must read back the
-  # values this child was minted with.
+  # values this child was minted with. pr_number is compared as a string: the
+  # create payload stores it as one, and a --set-metadata re-stamp stores it as
+  # a number.
   gc bd show "$1" --json 2>/dev/null | scrub | jq -r \
     --arg ab "$2" --arg br "$3" --arg tg "$4" --arg rr "$5" --arg pm "$6" --arg ep "$7" --arg pn "$8" '
     (.[0].metadata // {}) as $m
@@ -510,7 +512,7 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
        and ($m.rejection_reason // "") == $rr and ($m.prepare_mode // "") == $pm
        and ($m.merge_strategy // "") == "mr"
        and ($m.existing_pr // "") == $ep and ($m.pr_url // "") == $ep
-       and ($m.pr_number // "") == $pn) | tostring' 2>/dev/null
+       and (($m.pr_number // "") | tostring) == $pn) | tostring' 2>/dev/null
 }
 
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
