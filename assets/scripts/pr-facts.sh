@@ -1061,9 +1061,12 @@ CHILDREN_EOF
   # post under our own login from before this instant stays the city's own
   # (gc_city_own). Stamped once, the first time any arm reads the open PR, drafts
   # included, so a PR opened later records an instant before anyone could post on
-  # it unmarked. An unrecorded or malformed stamp leaves PSINCE empty, which reads
-  # every post under our login as the city's own for the pass: the routing this
-  # arm had before marking, never a burst of the city's own notices as feedback.
+  # it unmarked. An unrecorded stamp leaves PSINCE empty, and gc_city_cutover
+  # reads a malformed one as empty too; either way every post under our login
+  # reads as the city's own for the pass: the routing this arm had before
+  # marking, never a burst of the city's own notices as feedback. The stamp is
+  # passed on as found, so the shape test lives in the definition alone, and a
+  # malformed one is named here for a person to fix.
   PSINCE=$(printf '%s' "$row" | jq -r '(.metadata.pr_provenance_since // "") | tostring')
   if [ -z "$PSINCE" ]; then
     pnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -1073,12 +1076,9 @@ CHILDREN_EOF
     else
       echo "$PROG: $id — PR#$num provenance cutover did not record; every post under our login reads as the city's own this pass (retry next pass)" >&2
     fi
+  elif [ -z "$(jq -rn --arg s "$PSINCE" "$CITY_OWN_DEF"'gc_city_cutover($s)' 2>/dev/null)" ]; then
+    echo "$PROG: $id — PR#$num pr_provenance_since '$PSINCE' is not a UTC instant; every post under our login reads as the city's own" >&2
   fi
-  case "$PSINCE" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z|'') : ;;
-    *) echo "$PROG: $id — PR#$num pr_provenance_since '$PSINCE' is not a UTC instant; every post under our login reads as the city's own" >&2
-       PSINCE="" ;;
-  esac
 
   # --- status label: project the human-attention axis onto the PR list ----------
   # Above the draft-skip on purpose: the label projects the city's workflow state,
@@ -2556,12 +2556,9 @@ while IFS= read -r wrow; do
   case "$wiwm" in ''|*[!0-9]*) wiwm=0 ;; esac
   # The same provenance cutover the routing arm read: what it routed as feedback
   # is what this sweep acknowledges and answers. Unrecorded or malformed reads
-  # every post under our login as the city's own, as it does there.
+  # every post under our login as the city's own, as it does there; the shape
+  # test is gc_city_cutover's, so the stamp is passed on as found.
   wsince=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_provenance_since // "") | tostring')
-  case "$wsince" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
-    *) wsince="" ;;
-  esac
 
   # The watermark is cumulative and pr_comment_disposition holds one batch at a
   # time, so a thread an earlier batch left unresolved still sits at or below the

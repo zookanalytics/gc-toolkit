@@ -177,6 +177,17 @@ eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"Addressed in abc.\n<!-- gc
   "the write-back reply marker counts as the city's mark"
 eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"<!-- gc:visit:tk-v -->\n### Visit","created_at":"2026-10-08T00:00:00Z"}')" true \
   "the visit-comment marker counts as the city's mark"
+# The cutover's shape is tested inside the definition, so a reader passes the
+# stamp as it found it and a malformed one fails open the same way everywhere.
+eq "$(own bot "2026-10-07" '{"user":{"login":"bot"},"body":"anything","created_at":"2026-10-09T00:00:00Z"}')" true \
+  "a cutover that is not a UTC instant reads as none: every post under our login is ours"
+eq "$(own bot "1970-01-01 00:00:00" '{"user":{"login":"bot"},"body":"anything","created_at":"2026-10-09T00:00:00Z"}')" true \
+  "a misshapen cutover reads as none, never as a lexical bound"
+cutover() { jq -rn --arg s "$1" "$DEF"'gc_city_cutover($s)'; }
+eq "$(cutover "$CUT")" "$CUT" "gc_city_cutover passes a UTC instant through"
+eq "$(cutover "2026-10-07T00:00:00+00:00")" "" "gc_city_cutover drops an offset form"
+eq "$(cutover " $CUT")" "" "gc_city_cutover drops a padded stamp"
+eq "$(cutover "")" "" "gc_city_cutover of nothing is nothing"
 eq "$(marked '{"body":"plain"}')" false "an unmarked body carries no mark"
 eq "$(marked '{"body":null}')" false "a null body carries no mark"
 eq "$(marked "{\"body\":\"x $MARK\"}")" true "gc_city_marked reads the body alone"

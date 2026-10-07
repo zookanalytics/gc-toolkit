@@ -546,11 +546,8 @@ dismiss_superseded() {
   handle=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
   [ -n "$handle" ] || return 0
   owndef=$("$PR_POST" own-def 2>/dev/null) && [ -n "$owndef" ] || return 0
+  # Passed on as found: gc_city_cutover reads a malformed stamp as no cutover.
   since=$(row_meta "$ANCHOR_ROW" pr_provenance_since)
-  case "$since" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
-    *) since="" ;;
-  esac
   live=$(live_head)
   [ "$live" = "$REVIEWED_OID" ] || return 0
   raw=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json autoMergeRequest 2>/dev/null) || return 0

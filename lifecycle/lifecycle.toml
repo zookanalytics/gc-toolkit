@@ -294,7 +294,8 @@ issue_comment_watermark_key = "pr_issue_comment_watermark"
 # city's own post carries the mark pr-post.sh appends, or is an unmarked post
 # under the city's login from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ),
 # when its posts did not yet carry one. pr-facts.sh stamps it the first time it
-# reads the open PR; absent, every post under the city's login is the city's own.
+# reads the open PR; absent or malformed, every post under the city's login is
+# the city's own.
 provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child) or "visit:<bead-id>" (a human already holds this anchor). Either holds

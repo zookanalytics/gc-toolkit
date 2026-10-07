@@ -34,9 +34,9 @@
 #   pr-post.sh reply   --host <host> --thread <thread node id> (--body <text> | --body-file <path>)
 #   pr-post.sh edit    --repo <host/owner/name> --comment <id> (--body <text> | --body-file <path>)
 #   pr-post.sh mark      print the provenance marker
-#   pr-post.sh own-def   print the jq definitions gc_city_marked and
-#                        gc_city_own($self; $since), for a reader to prepend to
-#                        its program
+#   pr-post.sh own-def   print the jq definitions gc_city_marked,
+#                        gc_city_cutover($since) and gc_city_own($self; $since),
+#                        for a reader to prepend to its program
 #
 # gh's own output passes through on stdout, so a caller that reads the posted
 # comment's URL still gets it.
@@ -53,18 +53,26 @@ MARK='<!-- gc:city -->'
 # review, created_at for a REST comment, and the camelCase pair for a GraphQL
 # node. All are UTC in the same YYYY-MM-DDTHH:MM:SSZ shape the cutover stamp is
 # written in, so a string comparison orders them.
+#
+# gc_city_cutover owns the cutover's shape test. A stamp that is not a UTC
+# instant reads as no cutover at all, which makes every post under the city's
+# login its own, so a reader passes the stamp as it found it.
 OWN_DEF='def gc_city_marked:
   ((.body // "") | tostring) as $b
   | ($b | contains("<!-- gc:city -->"))
     or ($b | contains("<!-- gc-writeback -->"))
     or ($b | contains("<!-- gc:visit:"));
+def gc_city_cutover($since):
+  ($since | tostring) as $s
+  | if ($s | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) then $s else "" end;
 def gc_city_own($self; $since):
-  ($self != "")
-  and (((.user.login // .author.login // "") | tostring) == $self)
-  and (gc_city_marked
-       or ($since == "")
-       or ((((.submitted_at // .submittedAt // .created_at // .createdAt // "") | tostring)) as $t
-           | ($t != "") and ($t < $since)));
+  gc_city_cutover($since) as $cut
+  | ($self != "")
+    and (((.user.login // .author.login // "") | tostring) == $self)
+    and (gc_city_marked
+         or ($cut == "")
+         or ((((.submitted_at // .submittedAt // .created_at // .createdAt // "") | tostring)) as $t
+             | ($t != "") and ($t < $cut)));
 '
 
 usage() { sed -n '/^# Usage:/,/^# gh.s own output/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
