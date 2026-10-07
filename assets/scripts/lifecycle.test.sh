@@ -806,6 +806,23 @@ eq "$(bstatus c-7)" "open" "and closes nothing"
 eq "$(meta c-7 merged_sha)" "<absent>" "no merged_sha is left behind"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "no bd update was attempted"
 
+# --to is merge_result's only writer on the unset side too. The update stamps the
+# state ahead of every --unset, so an explicit --unset merge_result clears what
+# the same write records: this call would close a live pull_request anchor with
+# merge_result absent. That is the one-step close the current-state guard below
+# refuses on --to unanchored --close, reached by another route, and it drops the
+# bead from every reader that enumerates anchors by merge_result. Refused before
+# any write.
+store '[{"id":"c-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-8 --to merged --expect pull_request --close --set merged_sha=abc --unset merge_result 2>&1)"; rc=$?
+eq "$rc" 1 "--unset merge_result exits 1"
+has "$out" "never by --unset" "the refusal names merge_result's only writer"
+eq "$(meta c-8 merge_result)" "pull_request" "the refused call writes nothing"
+eq "$(bstatus c-8)" "open" "and closes nothing"
+eq "$(meta c-8 merged_sha)" "<absent>" "no merged_sha is left behind"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "no bd update was attempted"
+
 # `unanchored` is the non-anchor's terminal: lifecycle.toml declares its status
 # open|closed, so --to unanchored --close is the one close that is not a
 # closed_state. It clears merge_result and closes in ONE atomic write — the path

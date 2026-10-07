@@ -160,6 +160,11 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"--set gc.routed_to", []string{"b-1", "--to", "pull_request", "--set", "gc.routed_to=x"}, "route via --route"},
 		{"--set gc.takeaway", []string{"b-1", "--to", "abandoned", "--set", "gc.takeaway=x"}, "written by --takeaway"},
 		{"--set-dated merge_result", []string{"b-1", "--to", "pull_request", "--set-dated", "merge_result=x@oid"}, "written by --to"},
+		// --to is merge_result's only writer on the unset side too: an explicit
+		// --unset clears the state the same write records, so a merged close would
+		// leave a closed anchor with no merge_result for any reader to enumerate.
+		{"--unset merge_result on a merged close", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha=abc", "--unset", "merge_result"}, "never by --unset"},
+		{"--unset merge_result on an open state", []string{"b-1", "--to", "pull_request", "--unset", "merge_result"}, "never by --unset"},
 		{"--set-dated with no oid", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled"}, "<value>@<oid>"},
 		{"--set-dated carrying its own instant", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled@oid@2026-01-01T00:00:00Z"}, "<value>@<oid>"},
 		{"--set-dated with no '='", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine"}, "is not k=<value>@<oid>"},

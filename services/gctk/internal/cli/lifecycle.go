@@ -373,6 +373,20 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	// --to is merge_result's only writer on the unset side too. The update stamps
+	// merge_result=<to> (or clears it for unanchored) ahead of every --unset, so
+	// an explicit --unset merge_result clears the state the same write records.
+	// `--to merged --close --set merged_sha=<oid> --unset merge_result` would
+	// then close a live pull_request anchor with no merge_result: the one-step
+	// close the current-state guard refuses on --to unanchored --close, reached
+	// by another route and invisible to every reader that enumerates anchors by
+	// merge_result, doctor/check-closed-implies-landed included.
+	for _, u := range o.unsets {
+		if u == "merge_result" {
+			fmt.Fprintf(stderr, "%s: merge_result is written by --to, never by --unset\n", prog)
+			return 1
+		}
+	}
 	// A dated key's ARGUMENT carries the two components its writer decided; this
 	// command owns the third. Refusing a malformed one here is what keeps the
 	// preserve rule decidable: it compares on value and oid, and cannot find them
