@@ -204,10 +204,10 @@ export interface Tile {
    * Whether this pull request still owes an external approval before it can
    * merge: `'required'`, `'met'`, or `'unknown'`. Approval is a universal merge
    * rule — the city holds every open pull request until a non-city `APPROVED`
-   * review stands at the live head — so only an approved row is `'met'` and every
-   * other posture owes one. It is the city's rule, not GitHub's protection set,
-   * so a pull request on an `integration/*` base or in a repo with no
-   * required-review rule reads `'required'` too.
+   * review stands, and one given at any commit stands until dismissed — so only
+   * an approved row is `'met'` and every other posture owes one. It is the city's
+   * rule, not GitHub's protection set, so a pull request on an `integration/*`
+   * base or in a repo with no required-review rule reads `'required'` too.
    */
   pr_approval: string;
   /**
