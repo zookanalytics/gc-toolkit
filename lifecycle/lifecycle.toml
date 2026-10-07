@@ -344,7 +344,8 @@ since_format = "RFC 3339 UTC"
 # The metadata-key registry: every key the pack writes, grouped and defined. A
 # key absent from the groups below is not pack state (docs/component-model.md
 # §2-§3), and doctor/check-state-space flags a bead carrying a key whose writer
-# was retired. Each key's definition names five things a reader needs and only
+# was retired (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it
+# there). Each key's definition names five things a reader needs and only
 # two of which the value shows: what WRITES it, what READS it, what its ABSENCE
 # means, how it is CLEARED, and its value TYPE. Prose is spent where a reader
 # cannot recover those from the group and the sections above; a key whose
