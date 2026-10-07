@@ -56,9 +56,10 @@ skip_file() {
 # The one logical statement CONTAINING <file>:<line>: the lines it continues
 # onto with a trailing backslash, and the lines of an argument list still
 # inside an open `(`. Both shapes ship — `gc bd update ... \` in a script and
-# `ARGS+=(--set-metadata ...` in lifecycle.sh — and a match can land on any
-# line of either. TOML """ blocks collapse backslash continuations at parse
-# time, so the same join reads a formula's shell too.
+# the `updateArgs = append(updateArgs, ...` list in gctk's lifecycle writer —
+# and a match can land on any line of either. TOML """ blocks collapse
+# backslash continuations at parse time, so the same join reads a formula's
+# shell too.
 statement() { # <file> <line>
   awk -v line="$2" '
     function opens(s) { return gsub(/\(/, "(", s) > gsub(/\)/, ")", s) }
@@ -85,7 +86,8 @@ while IFS=: read -r f n _; do
   stmt=$(statement "$f" "$n")
   checked=$((checked + 1))
   has "$stmt" "$SETTLED=" "$f:$n writes $SETTLED in the same statement"
-done < <(grep -rn -- "--set-metadata" --include='*.sh' --include='*.toml' --include='*.md' . 2>/dev/null \
+done < <(grep -rn --include='*.sh' --include='*.toml' --include='*.md' --include='*.go' \
+             -e "--set-metadata" . 2>/dev/null \
            | grep -v '^\./\.git/' | grep -F "$MARKER=")
 
 [ "$checked" -gt 0 ] && ok "headline writers found and checked ($checked)" \
@@ -99,7 +101,8 @@ while IFS=: read -r f n _; do
   [ -n "$f" ] || continue
   skip_file "$f" && continue
   bad "$f:$n hardcodes a settled disposition; it is $SETTLED's writer only under --no-wait"
-done < <(grep -rn -F -- "$SETTLED=1" --include='*.sh' --include='*.toml' --include='*.md' . 2>/dev/null \
+done < <(grep -rn -F --include='*.sh' --include='*.toml' --include='*.md' --include='*.go' \
+             -e "$SETTLED=1" . 2>/dev/null \
            | grep -v '^\./\.git/')
 ok "no site outside the verb stamps a settled disposition of its own"
 
@@ -109,11 +112,13 @@ has "$(cat "$HELM")" "$SETTLED=\$no_wait" "…and the flag is the only source of
 CONTRA=$(awk '/-n "\$no_wait" \] && \[ -n "\$waiting_ids" \]/,/^    fi$/' "$HELM")
 has "${CONTRA:-<none>}" "exit 2" "…and a takeaway claiming both refuses before it writes"
 
-# lifecycle.sh owns the stamp behind --takeaway, so --set must not be a second
-# door to one half of it.
-LC="$HERE/lifecycle.sh"
-GUARD=$(grep -n -A1 -F "gc.takeaway|gc.takeaway_at" "$LC" | head -4)
-has "${GUARD:-<none>}" "$SETTLED" "lifecycle.sh refuses --set on the settled-key too"
+# The lifecycle writer owns the stamp behind --takeaway, so --set must not be a
+# second door to one half of it. gctk lifecycle is that writer's only
+# implementation; lifecycle.sh execs it.
+PORT="$ROOT/services/gctk/internal/cli/lifecycle.go"
+GUARD=$(grep -n -A1 -F '"gc.takeaway", "gc.takeaway_at"' "$PORT" | head -4)
+has "${GUARD:-<none>}" "\"$SETTLED\"" "gctk lifecycle refuses --set on the settled-key too"
+has "${GUARD:-<none>}" "never by --set" "…with the refusal that names --takeaway as the stamp's writer"
 
 echo
 echo "takeaway settled-key pairing: $PASS passed, $FAIL failed"

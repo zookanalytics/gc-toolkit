@@ -33,6 +33,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # membership), kept per the tk-fhlqce ruling, not part of this identity.
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
+# The one definition of the standing kinds, shared with liveness-recheck.sh, the
+# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
+# classify block splices in.
+# shellcheck source=standing-kinds.sh
+. "$HERE/standing-kinds.sh" || { echo "$PROG: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -362,7 +367,8 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   def pr_age:
     (try (((.updated // "") | tostring) | fromdateiso8601) catch null)
     | if . == null then null else (($nowepoch - .) / 86400 | floor) end;
-  def standing_kinds: ["triage-subject", "feedback-pattern"];
+  # standing_kinds, from standing-kinds.sh:
+  '"$STANDING_KINDS_JQ"'
   # A workflow root, a scope latch and a step-spec sidecar carry a route and no
   # executable body. The route names the run, it is not an offer. Both readers
   # that serve or count pool work refuse them on gc.kind: the hook at
@@ -377,7 +383,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     (.issue_type // "") == "convoy"
     and ((((.title // "") | startswith("sling-"))
           or ((.title // "") | startswith("input convoy for"))
-          or ((.metadata["gc.synthetic"] // "") == "true")));
+          or (((.metadata["gc.synthetic"] // "") | tostring) == "true")));
   # The tracking bead of an order is a wisp: issue_type task, no metadata
   # until it closes, and no edges, so its id and its title are the only
   # durable structural signals it carries. Both are machine-minted and
@@ -580,8 +586,8 @@ stale_escalations
 
 # --- landed-fix wedge: a must-fix finding whose fix landed but did not close ---
 # gate-ensure closes a must-fix finding once its fix unit lands, which releases
-# the re-gate the open finding held. If that close is ever missed the finding
-# stays open, holds the re-gate through quiescence forever, and wedges the
+# the publish and the merge the open finding held. If that close is ever missed
+# the finding stays open, holds the publish (pr-open.sh) forever, and wedges the
 # anchor at pre_open_gate with the fix already on the branch — the silent
 # multi-day strand this backstop exists to make loud. Two shapes reach it: the
 # finding's fix-unit edge is present and all closed, and the finding carries NO
@@ -637,12 +643,12 @@ wedged_fix_escalations() {
         fi
         if [ -n "$edgeless" ]; then
             body="landed-fix wedge (edge-less): anchor $anchor is held at pre_open_gate by must-fix finding $fid, which carries NO fix-unit edge, yet its lane ($lane) fix unit has already closed — the fix is on the branch.
-The missing close-ordering edge hides the landed fix from the normal close, so the finding stays open and the anchor cannot re-gate or open its PR until $fid closes.
-Disposition: close $fid to release the re-gate (its fix landed, matched by lane), then find why the close-ordering edge was never hung (finding.sh set-disposition / anchor_fix_unit)."
+The missing close-ordering edge hides the landed fix from the normal close, so the finding stays open and the anchor cannot open its PR until $fid closes.
+Disposition: close $fid to release the publish (its fix landed, matched by lane), then find why the close-ordering edge was never hung (finding.sh set-disposition / anchor_fix_unit)."
         else
             body="landed-fix wedge: anchor $anchor is held at pre_open_gate by must-fix finding $fid whose fix unit has already closed — the fix is on the branch.
-gate-ensure closes such a finding each pass so the re-gate proceeds; this one is still open, so that close is not running, and the anchor cannot re-gate or open its PR until $fid closes.
-Disposition: close $fid to release the re-gate (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
+gate-ensure closes such a finding each pass so the publish proceeds; this one is still open, so that close is not running, and the anchor cannot open its PR until $fid closes.
+Disposition: close $fid to release the publish (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
         fi
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "$PROG: dry-run: would escalate $anchor [landed-fix-wedge] (finding $fid)"
@@ -722,15 +728,25 @@ sweep_visit() {
     # Re-file guard: an agenda a sitting already closed out `dispositioned` is
     # not news. The test is the id SET; a cut-short or unreadable prior files.
     # Fail-open on a non-zero read even when it printed a matching array.
+    #
+    # Resolve the prior visit's subject by the shared visit identity
+    # (visit_covers: the tracks edge, else the gc.continuation_group stamp), the
+    # same union the live-visit guard above uses — never the stamp alone. A visit
+    # whose stamp landed empty still carries the tracks edge, so a stamp-keyed
+    # server query cannot see it and re-files an agenda already settled. The
+    # listing narrows to visits by task_kind (a field independent of the stamp)
+    # and applies visit_covers client-side, because the edge is not a
+    # metadata-field the server can match on.
     local new_key prior_rc prior refile=""
     new_key=$(printf '%s' "$NEW" | jq -r '[.[].id] | sort | join(",")')
     prior_rc=0
-    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; else gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
+    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field task_kind=visit --limit=0 --json; else gc bd list --status=closed --metadata-field task_kind=visit --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
     if [ "$prior_rc" -eq 0 ]; then
-        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" '
+        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" --arg s "$SWEEP_SUBJECT" "$VISIT_IDENTITY_JQ"'
             if type == "array" then
               [ .[]
                 | select(((.metadata // {}).task_kind // "") == "visit")
+                | select(visit_covers($s))
                 | select((((.metadata // {})["gc.outcome"] // "") | tostring) == "dispositioned")
                 | select(((((.metadata // {})["sweep.new_ids"] // "") | tostring)
                           | split(",") | map(select(length > 0)) | sort | join(",")) == $key)
