@@ -54,7 +54,8 @@
 #       --deadline stops the pass from starting another anchor once the clock
 #       reaches it. One anchor is always visited, so a pass started past its
 #       deadline still makes progress. --cursor names the file holding the last
-#       anchor this arm finished: a pass visits anchors in id order starting
+#       anchor this arm finished: a pass visits first the anchors that owe a
+#       dispatch (the visit order below), then the rest in id order starting
 #       after that one, wrapping, and records each anchor as it finishes it. A
 #       pass the deadline stopped, or a kill interrupted, therefore resumes
 #       where it left off rather than revisiting the same anchors first.
@@ -534,15 +535,90 @@ done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
 total=$(printf '%s' "$ROWS" | awk 'NF { n++ } END { print n + 0 }')
 
-# --- visit order: id order, starting after the anchor the last pass finished ---
+# --- visit order: the anchors that owe a dispatch first, the rest in rotation ---
 # The deadline can stop a pass part-way, so the visits rotate (pace-lib.sh):
-# every gating anchor is reached within a bounded number of passes.
-ROWS=$(printf '%s' "$ROWS" | pace_order "$CURSOR")
-
+# every gating anchor is reached within a bounded number of passes. Most of the
+# set is settled or waiting on work already in flight, so a paced pass first
+# visits the anchors this arm can act on. Those are an anchor with no check_set
+# (it owes the stamp), one with no machine verdict yet (gate-ensure has never
+# visited it; a check_set of none or off never gets one), and one whose mark
+# moved since this arm last visited it. The mark joins merge_result, the draft
+# markers pr-open records and check_set, which decide the lanes a stage
+# dispatches, with the ids of the anchor's live children: a review, validation
+# pass, finding or fix unit opening or closing is what turns a waiting lane into
+# one owed a dispatch or a validator, and a review closing is what lets the
+# anchor settle. A review this arm opens is added to the mark its visit records,
+# so its own dispatch does not bring the anchor back first. An anchor recorded
+# `progressing` whose children have not moved is waiting on them, so it rotates
+# with the rest. First anchors rotate on <cursor>.first, the rest on <cursor>,
+# and <cursor>.seen holds the marks. A walk with no marks yet records them all
+# and puts first only the anchors that owe a stamp or have no verdict. A child
+# list that does not read leaves those two rules and records no marks.
+# Unpaced, the walk keeps the enumerated order.
 stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
 pace_start "$CURSOR" "$DEADLINE"
-while IFS= read -r row; do
-  [ -n "${row:-}" ] || continue
+pace_seen_start "${CURSOR:+$CURSOR.seen}"
+first_rows=""; rest_rows=""; first_n=0
+declare -A GE_MARK=() GE_KIDS=()
+# ge_mark_child <anchor> <child-id>: the review this visit opened joins the mark
+# it records, in the order bd_live_children sorts ids (C collation).
+ge_mark_child() {
+  local k="${GE_KIDS[$1]-}"
+  [ -n "${GE_MARK[$1]-}" ] || return 0
+  k=$(printf '%s\n' ${k//,/ } "$2" | awk 'NF' | LC_ALL=C sort -u | paste -sd, -)
+  GE_KIDS["$1"]="$k"
+  GE_MARK["$1"]="${GE_MARK[$1]%|*}|$k"
+  pace_seen_mark "${GE_MARK[$1]}"
+}
+if [ -n "$CURSOR" ]; then
+  ge_kids_ok=0
+  if kid_lines=$(bd_live_children); then
+    ge_kids_ok=1
+    while IFS=$'\t' read -r ka kids _krw; do
+      [ -n "$ka" ] && GE_KIDS["$ka"]="$kids"
+    done <<< "$kid_lines"
+  else
+    echo "$PROG: WARN the anchors' live children did not read; only anchors with no check_set or no verdict go first this pass" >&2
+  fi
+  while IFS=$'\x1f' read -r cid cdisp cmach ccs cmark arow; do
+    [ -n "${arow:-}" ] || continue
+    grp=rest
+    if [ -z "$cdisp" ]; then
+      if [ "$ge_kids_ok" = 1 ]; then
+        GE_MARK["$cid"]="$cmark|${GE_KIDS[$cid]-}"
+        pace_seen_changed "$cid" "${GE_MARK[$cid]}" && grp=first
+        [ "$PACE_SEEN_FRESH" != 1 ] || pace_seen_put "$cid" "${GE_MARK[$cid]}"
+      fi
+      case "$(cs_canon "$ccs")" in
+        '') grp=first ;;
+        none|off) : ;;
+        *) [ -n "$cmach" ] || grp=first ;;
+      esac
+    fi
+    if [ "$grp" = first ]; then
+      first_rows="$first_rows$arow"$'\n'; first_n=$((first_n + 1))
+    else
+      rest_rows="$rest_rows$arow"$'\n'
+    fi
+  done <<SPLIT_EOF
+$(printf '%s' "$ROWS" | jq -r '
+    . as $row | (.metadata // {}) as $m
+    | [ (.id // ""), ($m["gc.pr_close_disposition_kind"] // ""), ($m["pr.machine"] // ""),
+        ($m.check_set // ""),
+        ([ $m.merge_result, $m.opened_as_draft, $m.draft_readied, $m.check_set ]
+         | map((. // "") | tostring) | join("|")) ]
+    | map(tostring | gsub("[\u001f\n]"; " ")) + [ $row | tojson ] | join("\u001f")' 2>/dev/null)
+SPLIT_EOF
+  first_rows=$(printf '%s' "$first_rows" | pace_order "$PACE_FIRST_CURSOR")
+  rest_rows=$(printf '%s' "$rest_rows" | pace_order "$CURSOR")
+else
+  rest_rows="$ROWS"
+fi
+
+while IFS= read -r tagged; do
+  [ -n "${tagged:-}" ] || continue
+  group="${tagged%%$'\t'*}"
+  row="${tagged#*$'\t'}"
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   [ -n "$id" ] || continue
   # A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind when its PR
@@ -559,7 +635,7 @@ while IFS= read -r row; do
     echo "$PROG: $id carries a PR-close disposition (gc.pr_close_disposition_kind=$disposition); disposed, awaiting pr-facts terminal close — no review or validation dispatched"
     disposed=$((disposed + 1)); continue
   fi
-  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
+  pace_visit "$group" "$id" "${GE_MARK[$id]-}"; case $? in 1) continue ;; 2) break ;; esac
   branch=$(meta_of "$row" branch)
   target=$(meta_of "$row" merged_target)
   [ -n "$target" ] || target=$(meta_of "$row" target)
@@ -1020,6 +1096,7 @@ STRAY
       echo "$PROG: WARN review $RID did not record anchor_bead=$id; not slung, merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
+    ge_mark_child "$id" "$RID"
     # One sling, no retry: a re-pour mints a second workflow root. A pour that
     # does not read back is held; the next pass's stranded arm probes for its
     # tracking convoy before deciding to re-sling.
@@ -1102,15 +1179,18 @@ GATES
     fi
   fi
 done <<ROWS_EOF
-$ROWS
+$(printf '%s\n' "$first_rows" | awk 'NF { print "first\t" $0 }')
+$(printf '%s\n' "$rest_rows" | awk 'NF { print "rest\t" $0 }')
 ROWS_EOF
 pace_end
 
-if [ -n "$PACE_RESUME_AT" ]; then
-  echo "$PROG: visited $PACE_VISITED of $total gating anchors before the deadline; the next pass resumes at $PACE_RESUME_AT"
-else
-  echo "$PROG: visited $PACE_VISITED of $total gating anchors"
+paced="visited $PACE_VISITED of $total gating anchors ($first_n needing action first)"
+if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
+  paced="$paced before the deadline"
+  [ -z "$PACE_RESUME_AT" ] || paced="$paced; the next pass resumes at $PACE_RESUME_AT"
+  [ "$PACE_FIRST_SKIPPED" -eq 0 ] || paced="$paced; $PACE_FIRST_SKIPPED needing action wait for the next pass"
 fi
+echo "$PROG: $paced"
 echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh with no check_set; merge.sh holds each on its own read; exiting rc=$UNSAFE_RC" >&2
