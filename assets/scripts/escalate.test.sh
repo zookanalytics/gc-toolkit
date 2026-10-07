@@ -22,6 +22,27 @@ cat > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
 printf '[%s] %s\n' "${GC_RIG:-<unset>}" "$*" >> "${STUB_GC_LOG:?}"
+# A --db path selects the store a bd call reads and writes, ahead of GC_RIG and
+# the working directory, as it does for the real gc bd. Without one the call
+# answers from the ambient store, STUB_STORE. STUB_DBS maps each rig's .beads
+# path to its store file, and a path it does not map is refused the way bd
+# refuses a store it cannot open. The pair is lifted out before the dispatch
+# below, so positional arguments keep their places.
+if [ "${1:-}" = "bd" ]; then
+  db=""; rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --db)   db="${2:-}"; shift; shift || true ;;
+      --db=*) db="${1#--db=}"; shift ;;
+      *)      rest+=("$1"); shift ;;
+    esac
+  done
+  set -- ${rest[@]+"${rest[@]}"}
+  if [ -n "$db" ]; then
+    STORE=$(printf '%s' "${STUB_DBS:-}" | jq -r --arg p "$db" '.[$p] // empty' 2>/dev/null)
+    [ -n "$STORE" ] || { echo "bd: no beads database at $db" >&2; echo '{"error":"no beads database"}'; exit 1; }
+  fi
+fi
 if [ "${1:-}" = "agent" ] && [ "${2:-}" = "list" ]; then
   [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
   printf '%s\n' "${STUB_AGENTS:-}"
@@ -117,7 +138,8 @@ case "${1:-}" in
     done
     mv "$tmp" "$STORE"; echo "updated $id" ;;
   dep)
-    [ "${2:-}" = "add" ] && printf '%s|%s|%s\n' "$3" "$4" "${5#--type=}" >> "$DEPS"
+    # bd writes an edge into the store the call addressed, so the line names it.
+    [ "${2:-}" = "add" ] && printf '%s|%s|%s|%s\n' "$3" "$4" "${5#--type=}" "$(basename "$STORE")" >> "$DEPS"
     echo "dep added" ;;
 esac
 STUB
@@ -125,8 +147,9 @@ chmod +x "$BIN/gc"
 
 # Fake visit-close.sh for the --retract path: record each call as
 # `<visit>|<subject>|<outcome>|<reason>` and, so the not-closed arm can be
-# exercised, exit non-zero when STUB_VISIT_CLOSE_FAIL is set — as the real
-# visit-close.sh exits non-zero when the close does not land. escalate.sh reaches
+# exercised, exit non-zero when STUB_VISIT_CLOSE_FAIL is set, or for the one
+# visit STUB_VISIT_CLOSE_FAIL_ID names — as the real visit-close.sh exits
+# non-zero when the close does not land. escalate.sh reaches
 # it through the GC_ESCALATE_VISIT_CLOSE_TOOL override, so the real one beside the
 # SUT is never touched.
 cat > "$BIN/visit-close.sh" <<'VC'
@@ -144,6 +167,7 @@ while [ $# -gt 0 ]; do
 done
 printf '%s|%s|%s|%s\n' "$visit" "$subject" "$outcome" "$reason" >> "${STUB_VISIT_CLOSE_LOG:?}"
 [ -n "${STUB_VISIT_CLOSE_FAIL:-}" ] && exit 4
+[ -n "${STUB_VISIT_CLOSE_FAIL_ID:-}" ] && [ "$visit" = "$STUB_VISIT_CLOSE_FAIL_ID" ] && exit 4
 exit 0
 VC
 chmod +x "$BIN/visit-close.sh"
@@ -160,8 +184,11 @@ export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse
   {"qualified_name":"myrig/gc-toolkit.converse"},{"qualified_name":"other/rig.converse"},
   {"qualified_name":"gc-toolkit.dog"}]}'
 # The city's rigs, keyed by id prefix. The subject in these cases is tk-a, so a
-# rig-less board-route caller derives its store from prefix 'tk' -> gc-toolkit.
+# board-route caller derives its store from prefix 'tk' -> gc-toolkit, and pins
+# every call to that rig's .beads path, which maps to the ambient store file:
+# a case below that seeds STUB_STORE seeds the store the subject lives in.
 export STUB_RIGS='{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/nonexistent-rig"}]}'
+export STUB_DBS="{\"/nonexistent-rig/.beads\":\"$STUB_STORE\"}"
 # Most cases below are a rig-bound caller; the rig-less ones drop GC_RIG themselves.
 export GC_RIG=gc-toolkit
 
@@ -173,7 +200,7 @@ STANDING='{"id":"sub-0","status":"open","assignee":"","title":"triage: escalatio
 reset() {
   printf '%s' "${1:-[]}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  : > "$STUB_VISIT_CLOSE_LOG"; unset STUB_VISIT_CLOSE_FAIL 2>/dev/null || true
+  : > "$STUB_VISIT_CLOSE_LOG"; unset STUB_VISIT_CLOSE_FAIL STUB_VISIT_CLOSE_FAIL_ID 2>/dev/null || true
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 field()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
@@ -205,34 +232,76 @@ reset
 GC_RIG=other "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse >/dev/null 2>&1
 eq "$(meta vis-1 gc.routed_to)" "other/rig.converse" "--pool overrides the default"
 
-echo "# a board-route caller whose GC_RIG is not the subject's rig REFUSES"
-# The old converse default was verified against the live agent set, which also
-# proved GC_RIG named a real rig. `human` needs no agent match, and `gc bd`
-# only WARNS on a GC_RIG that names no bound rig before filing into the ambient
-# store — so a stale or misspelled export would file the visit on a board the
-# subject never reaches, exit 0. The subject's own rig (tk -> gc-toolkit) is
-# the store the visit must land in; a pin that disagrees is refused.
+echo "# a board-route caller whose GC_RIG is not the subject's rig files in the subject's store"
+# `human` names no store, and `gc bd` only WARNS on a GC_RIG that names no bound
+# rig before answering from the working directory, so a stale or misspelled
+# export cannot be trusted to select the store. The subject's own rig
+# (tk -> gc-toolkit) is the store the visit belongs in, and every call is pinned
+# there by path, so the caller's GC_RIG is overridden, loudly, not obeyed.
 reset
 out=$(GC_RIG=myrig "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "GC_RIG naming a rig other than the subject's exits 1"
-eq "$(visits)" "0" "and files nothing"
-has "$out" "lives in rig 'gc-toolkit'" "and names the rig the subject lives in"
+eq "$rc" 0 "GC_RIG naming a rig other than the subject's still files"
+eq "$(visits)" "1" "the visit exists"
+eq "$(meta vis-1 gc.continuation_group)" "tk-a" "in the store the subject lives in"
+has "$out" "lives in rig 'gc-toolkit'" "and the override names the rig the subject lives in"
+eq "$(grep -c ' bd ' "$STUB_GC_LOG")" "$(grep ' bd ' "$STUB_GC_LOG" | grep -c -- '--db /nonexistent-rig/.beads')" "every bd call is pinned to the subject's store by path"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "and GC_RIG is rebound to the subject's rig for the calls it reaches"
+
 echo "# a rig-less board-route caller pins the store to the subject's own rig"
 # The board route ('human') names no store, so a rig-less caller cannot let the
-# create fall to the ambient store — the visit would land on the wrong board and
-# its tracks edge would miss the subject. escalate derives the store from the
-# subject's id prefix (tk -> gc-toolkit) and files there.
+# create fall to the ambient store — the visit and its tracks edge would land
+# severed from the subject. escalate derives the store from the subject's id
+# prefix (tk -> gc-toolkit) and files there.
 reset
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "a rig-less board-route caller files once it derives the subject's rig"
 eq "$(visits)" "1" "the visit exists"
 eq "$(meta vis-1 gc.routed_to)" "human" "routed to the board"
 has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "the create runs under the derived rig, not the ambient store"
+has "$(cat "$STUB_GC_LOG")" "bd create -t task --title visit: tk-a" "the visit create is the one pinned"
+has "$(grep 'bd create' "$STUB_GC_LOG")" "--db /nonexistent-rig/.beads" "  ... to the subject's store by path"
 has "$out" "deriving rig 'gc-toolkit'" "and says which store it pinned"
 
+echo "# a city-store subject's visit lands in the city store, wherever the caller sits"
+# The city's own store has no rig name `gc bd` honors: GC_RIG set to the city's
+# rig name draws a warning and is ignored, and the call answers from the
+# caller's working directory. Only a path selects it. The ambient store stands
+# in for a caller's rig checkout here, so whether the caller's GC_RIG is its own
+# rig (gc-toolkit), the city's rig name as escalation-rig.sh prints it, or
+# unset, the visit, its tracks edge and every read must reach the city store
+# by path.
+CITY_STORE="$TMP/city.json"
+CITY_RIGS='{"rigs":[{"name":"loomington","prefix":"lx","path":"/city","hq":true},
+  {"name":"gc-toolkit","prefix":"tk","path":"/nonexistent-rig"}]}'
+CITY_DBS="{\"/nonexistent-rig/.beads\":\"$STUB_STORE\",\"/city/.beads\":\"$CITY_STORE\"}"
+run_city() { # <caller GC_RIG, empty = unset> <escalate args...>
+  local rig="$1"; shift
+  if [ -n "$rig" ]; then
+    GC_RIG="$rig" STUB_RIGS="$CITY_RIGS" STUB_DBS="$CITY_DBS" "$SUT" "$@"
+  else
+    env -u GC_RIG STUB_RIGS="$CITY_RIGS" STUB_DBS="$CITY_DBS" "$SUT" "$@"
+  fi
+}
+city_visits() { jq -r '[.[] | select(.metadata.task_kind == "visit") | .metadata["gc.continuation_group"]] | join(",")' "$CITY_STORE"; }
+pinned_to_city() { [ "$(grep -c ' bd ' "$STUB_GC_LOG")" = "$(grep ' bd ' "$STUB_GC_LOG" | grep -c -- '--db /city/.beads')" ]; }
+for caller in gc-toolkit loomington ""; do
+  label="GC_RIG=${caller:-<unset>}"
+  reset; printf '[]' > "$CITY_STORE"
+  out=$(run_city "$caller" --subject lx-hq1 --key k1 --message m 2>&1); rc=$?
+  eq "$rc" 0 "$label: an lx- subject's escalation files"
+  eq "$(city_visits)" "lx-hq1" "  ... its visit is in the city store"
+  eq "$(jq 'length' "$STUB_STORE")" "0" "  ... and nothing landed in the caller's rig store"
+  has "$(cat "$STUB_DEPS")" "vis-1|lx-hq1|tracks|city.json" "  ... the tracks edge is written in the city store, beside its subject"
+  if pinned_to_city; then ok "  ... every bd call was pinned to the city store by path"
+  else bad "  ... every bd call was pinned to the city store by path ($(grep ' bd ' "$STUB_GC_LOG" | grep -v -- '--db /city/.beads' | head -n 1))"; fi
+done
+reset; printf '[]' > "$CITY_STORE"
+out=$(run_city gc-toolkit --subject lx-hq1 --key k1 --message m 2>&1)
+has "$out" "lives in rig 'loomington'" "a rig caller's GC_RIG is overridden with a warning that names the subject's rig"
+
 echo "# a rig-less board-route caller whose subject resolves to no rig REFUSES"
-# Fail before filing: a visit written to the ambient store lands on the wrong
-# board and severs the tracks edge — the silent mute escalate exists to end.
+# Fail before filing: a visit written to the ambient store is severed from its
+# subject — the silent mute escalate exists to end.
 reset
 out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 1 "an unresolvable subject prefix on the board route exits 1"
@@ -254,6 +323,17 @@ reset
 out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "a prefix-less subject under a pinned GC_RIG still files"
 eq "$(visits)" "1" "the visit exists"
+hasnt "$(cat "$STUB_GC_LOG")" "--db" "with no store path to pin, every call answers from the GC_RIG store"
+
+echo "# a rig that reports no path has no store to pin"
+# The prefix names a rig, but a rig with no path cannot be addressed by --db,
+# and `gc bd` ignores an unbound rig's name as GC_RIG. Its store is unproven.
+reset
+out=$(env -u GC_RIG STUB_RIGS='{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":""}]}' \
+  "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "a rig-less caller refuses a subject whose rig reports no path"
+eq "$(visits)" "0" "  ... and files nothing"
+has "$out" "reports no path" "  ... naming why the store could not be proven"
 
 echo "# an unroutable --pool is refused before anything is created"
 # A --pool that names no live agent is refused BEFORE anything is created: a
@@ -522,8 +602,7 @@ eq "$(meta vis-0 gc.routed_to)" "human" "the key-only match is repointed too —
 has "$out" "repointed" "and says so"
 
 echo "# an ephemeral subject is filed on a durable standing subject"
-# The sitting writes its outcome to the subject and its takeaway to the item,
-# which is the subject when the visit names no stall_root
+# The sitting writes its outcome and its takeaway to the subject
 # (agents/converse/prompt.template.md step 7). A wisp is burned at the end of
 # its iteration, so a visit filed on one carries both writes to a bead that is
 # gone before anyone claims it.
@@ -553,10 +632,9 @@ eq "$(meta vis-1 escalation_raised_by)" "lx-wisp-bbbbb" "with this cycle's wisp 
 
 echo "# two findings share the bucket but keep their own escalation_key"
 # The subject no longer tells them apart, so the key is the only thing that
-# does. The converse fold check resolves a visit's topic as stall_root, else
-# the key, else the subject, and a redirected visit names no stall_root
-# (agents/converse/prompt.template.md). A visit that reached the bucket
-# without its own key would fold into its sibling and close unread.
+# does. The converse fold check (converse-fold.sh) resolves a visit's topic as
+# the key, else the subject. A visit that reached the bucket without its own
+# key would fold into its sibling and close unread.
 reset "[$STANDING]"
 "$SUT" --subject lx-wisp-aaaaa --key doctor-dolt-noms-size --message m >/dev/null 2>&1
 "$SUT" --subject lx-wisp-bbbbb --key doctor-check-cadence-live --message m >/dev/null 2>&1
@@ -920,6 +998,72 @@ reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — x
 out=$(STUB_VISIT_CLOSE_FAIL=1 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
 eq "$rc" 1 "retract exits 1 when visit-close.sh does not close the visit"
 has "$out" "did not close" "and says the visit stays open"
+
+# A visit for the situation, open, with whoever is engaged in it.
+rvisit() { # <id> [<assignee>] [<gc.session_name>]
+  printf '{"id":"%s","status":"open","assignee":"%s","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"%s}}' \
+    "$1" "${2:-}" "${3:+,\"gc.session_name\":\"$3\"}"
+}
+
+echo "# --retract closes every open visit of the situation, twins included"
+# The filing dedup files a second visit when its listing is unreadable. The
+# premise the caller judged gone is gone for both, so neither is left behind.
+reset "[$(rvisit vis-1), $(rvisit vis-2)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when it closes every twin"
+eq "$(vccount)" "2" "retract calls visit-close.sh once per twin"
+has "$out" "retracted visit vis-1 on tk-sub" "reports the first twin"
+has "$out" "retracted visit vis-2 on tk-sub" "reports the second twin"
+
+echo "# --retract leaves an open visit engage has bound, by assignee or by session"
+# Engage binds the visit while it is still open, before the sitting's claim
+# promotes it. The board reads that as engaged, and so does retract.
+reset "[$(rvisit vis-3 lx-sitting)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when the only match is bound by assignee"
+eq "$(vccount)" "0" "and does not close the bound visit"
+has "$out" "vis-3 on tk-sub [reconcile-diverged-alpha] is engaged (lx-sitting)" "and names who holds it"
+reset "[$(rvisit vis-4 "" s-lx-sitting)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$(vccount)" "0" "a visit bound by session is not closed either"
+has "$out" "is engaged (session s-lx-sitting)" "and the session is named"
+
+echo "# --retract closes the unengaged twin beside an engaged one"
+reset "[$(rvisit vis-5 lx-sitting), $(rvisit vis-6)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0"
+eq "$(vclog)" "vis-6|tk-sub|moot|m" "only the unengaged twin is closed"
+
+echo "# --retract tries every twin and reports a close that did not land"
+reset "[$(rvisit vis-7), $(rvisit vis-8)]"
+out=$(STUB_VISIT_CLOSE_FAIL_ID=vis-7 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 1 "retract exits 1 when one twin did not close"
+eq "$(vccount)" "2" "and still tries the other"
+has "$out" "did not close vis-7" "names the visit that stays open"
+has "$out" "retracted visit vis-8 on tk-sub" "and reports the one that closed"
+
+echo "# the city store's own visits answer the dedup, the verdict window and --retract"
+# Each of these reads the store before it writes, and the ambient store holds
+# none of the city's visits, so an unpinned read answers 'nothing there': it
+# files a duplicate beside a visit already open, re-files a situation a sitting
+# ruled moot, or retracts nothing.
+CITY_OPEN='[{"id":"lx-v1","status":"open","assignee":"","title":"visit: lx-hq1 — m","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"k1","gc.continuation_group":"lx-hq1","gc.routed_to":"human"}}]'
+reset; printf '%s' "$CITY_OPEN" > "$CITY_STORE"
+out=$(run_city gc-toolkit --subject lx-hq1 --key k1 --message again 2>&1); rc=$?
+eq "$rc" 0 "an open city-store visit dedups a rig caller's repeat"
+eq "$(visits)" "0" "  ... nothing is filed in either store"
+has "$out" "visit lx-v1 already open" "  ... the city store's visit is the one found"
+
+reset; printf '[%s]' "$(closed_visit lx-v1 k1 lx-hq1 moot 3600)" > "$CITY_STORE"
+out=$(run_city gc-toolkit --subject lx-hq1 --key k1 --message again 2>&1); rc=$?
+eq "$rc" 0 "a moot verdict in the city store answers a rig caller's re-file"
+eq "$(visits)" "0" "  ... nothing is filed"
+eq "$(jq -r '.[0].metadata["escalation.recurrences"] // "<absent>"' "$CITY_STORE")" "1" "  ... and the recurrence is tallied on the city store's visit"
+
+reset; printf '%s' "$CITY_OPEN" > "$CITY_STORE"
+out=$(run_city gc-toolkit --retract --subject lx-hq1 --key k1 --message "resolved" 2>&1); rc=$?
+eq "$rc" 0 "--retract from a rig caller exits 0"
+eq "$(vclog)" "lx-v1|lx-hq1|moot|resolved" "  ... having found the city store's open visit and closed it as moot"
 
 echo
 echo "escalate.test.sh: $PASS passed, $FAIL failed"
