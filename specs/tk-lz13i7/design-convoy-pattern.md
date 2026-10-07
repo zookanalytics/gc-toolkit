@@ -89,13 +89,14 @@ refinery -> integration/<id> -> default-branch graduation PR -> operator approve
 ```
 
 Every PR the pattern produces, onto the integration branch or into the default
-branch, merges only with an operator's APPROVED review at its live head.
-`merge.sh` enforces that as a universal merge rule (Section 3.1). Design-gated
+branch, merges only with a standing APPROVED review from an account other than
+the city's, which counts until it is dismissed. `merge.sh` enforces that as a
+universal merge rule (Section 3.1). Design-gated
 work has two operator gates, the two approvals that decide what moves next.
 Gate 1 is the checkpoint PR into the integration branch: the operator reviews
 the design on-branch before any implementation starts. The design child cannot
-close, and the deferred implementation cannot dispatch, until the operator's
-APPROVED review stands at the checkpoint PR's live head and the PR merges. Gate 2
+close, and the deferred implementation cannot dispatch, until an operator's
+APPROVED review stands on the checkpoint PR and the PR merges. Gate 2
 is the graduation PR from the integration branch to the default branch: the
 operator reviews the whole unit, design and implementation together, before it
 lands. All-in-one work has only gate 2. Its implementation starts beside the
@@ -151,10 +152,11 @@ two do not collide.
 ### 3.1 The gates under the universal approval rule
 
 Gate 1 has to be a hold the merge machinery enforces, not a convention. The city
-lands every anchor's PR through `merge.sh`, and `merge.sh` requires an
-operator's APPROVED review at the live head of every PR, from an account other
-than the city's, with a standing CHANGES_REQUESTED from any other account as a
-veto (`assets/scripts/merge.sh`, its approval check). The rule is universal: no
+lands every anchor's PR through `merge.sh`, and `merge.sh` requires a standing
+APPROVED review on every PR from an account other than the city's. The approval
+counts at whatever commit it was given and stands across later pushes until
+someone dismisses it, and a standing CHANGES_REQUESTED from any other account is
+a veto (`assets/scripts/merge.sh`, its approval check). The rule is universal: no
 `check_set` token arms it and none opts out, and GitHub branch protection is an
 extra layer, not the authority. So the design child's checkpoint PR waits for
 the operator with no stamp on the child, which carries whatever `check_set` the
@@ -171,8 +173,8 @@ implementation.
 
 Gate 2 is enforced the same way. `convoy-graduate.sh` turns the finished convoy
 into an mr work bead whose PR runs from the integration branch to the default
-branch, and `merge.sh` holds that graduation PR until the operator's APPROVED
-review stands at its live head, as it holds every other PR.
+branch, and `merge.sh` holds that graduation PR until an operator's APPROVED
+review stands on it, as it holds every other PR.
 
 All-in-one (`design_gated=false`) slings the implementation child beside the
 design child, with no `blocks` edge. Each child's PR still waits for the
@@ -236,8 +238,8 @@ Design-gated is the default; all-in-one is an operator-selectable override
 through the `design_gated` var.
 
 - **Design-gated** (`design_gated=true`): the universal approval rule holds the
-  checkpoint PR until an operator's APPROVED review stands at its live head
-  (Section 3.1). The design child closes only when that PR merges, and
+  checkpoint PR until an operator's APPROVED review stands on it (Section 3.1).
+  The design child closes only when that PR merges, and
   implementation is armed behind that closure, so implementation dispatches only
   after the operator approves. Two gates. Use it when the design decision
   genuinely gates the implementation shape, the blast radius is high, or the

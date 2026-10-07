@@ -78,13 +78,22 @@ the first commit.
 
 ## The two operator gates
 
-Every PR a design-convoy produces merges only with an operator's APPROVED review
-at its live head, from an account other than the city's. `merge.sh` enforces
-that as a universal merge rule: it is armed for every PR and named by no
+Every PR a design-convoy produces merges only with a standing APPROVED review
+from an account other than the city's. The approval counts at whatever commit
+it was given and stands across later pushes until someone dismisses it, so a
+push to an approved PR does not wait for a second approval. A standing
+CHANGES_REQUESTED from any other account vetoes the merge. `merge.sh` enforces
+this as a universal merge rule: it is armed for every PR and named by no
 `check_set` token (`assets/scripts/merge.sh`), and GitHub branch protection is
 an extra layer, not the authority. The design child's checkpoint PR, each
 child's PR onto the integration branch, and the graduation PR all pass through
 it. The pattern's two gates are the two approvals that decide what moves next.
+
+The rule is the default branch's `merge.sh`, the copy the refinery runs from
+its deployed pack, and it gates PRs onto an integration branch as well. An
+integration branch's own copy of `merge.sh` can predate the rule. The refinery
+never runs that copy, and a convoy that changes no `merge.sh` leaves the default
+branch's version in place when it graduates.
 
 **Gate 1, the design checkpoint** (design-gated only). The design child's doc
 lands on the integration branch through a checkpoint PR onto that branch, and
@@ -99,9 +108,8 @@ records at least one landing on the integration branch, `convoy-graduate.sh`
 rewrites the convoy into an mr work bead (`branch = integration/<id>`,
 `target = default`), and the refinery opens the graduation PR from the
 integration branch to the default branch. The same universal rule holds that PR
-until the operator approves it at its live head, so the operator reviews the
-whole unit, design and implementation together, before the default branch
-moves.
+until an operator's approval stands on it, so the operator reviews the whole
+unit, design and implementation together, before the default branch moves.
 
 ## Design-gated versus all-in-one
 

@@ -16,8 +16,9 @@ its own step bead through assets/scripts/step-close.sh — resolved by
 hook-claim names a different step.
 
 Every PR this convoy produces, the design child's checkpoint PR included, merges
-only with an operator's APPROVED review at its live head: merge.sh enforces that
-as a universal rule, so no check_set token arms it. design_gated (var, default
+only with a standing APPROVED review from an account other than the city's,
+which counts until it is dismissed: merge.sh enforces that as a universal rule,
+so no check_set token arms it. design_gated (var, default
 true) chooses when implementation starts. Gated: the implementation child is
 armed behind the design child's closure, so the operator's approval of the
 design's PR is what releases it. All-in-one (design_gated=false): design and
@@ -26,7 +27,7 @@ first reviews them as one unit.
 
 
 Variables:
-  {{design_gated}}: true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs an operator APPROVED review at its live head (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator overrides per initiative at Accept with --var design_gated=false. (default=true)
+  {{design_gated}}: true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator overrides per initiative at Accept with --var design_gated=false. (default=true)
 
 Steps (6):
   ├── mol-design-convoy.load-context: Read the initiative and resolve the convoy shape

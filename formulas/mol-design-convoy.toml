@@ -16,8 +16,9 @@ its own step bead through assets/scripts/step-close.sh — resolved by
 hook-claim names a different step.
 
 Every PR this convoy produces, the design child's checkpoint PR included, merges
-only with an operator's APPROVED review at its live head: merge.sh enforces that
-as a universal rule, so no check_set token arms it. design_gated (var, default
+only with a standing APPROVED review from an account other than the city's,
+which counts until it is dismissed: merge.sh enforces that as a universal rule,
+so no check_set token arms it. design_gated (var, default
 true) chooses when implementation starts. Gated: the implementation child is
 armed behind the design child's closure, so the operator's approval of the
 design's PR is what releases it. All-in-one (design_gated=false): design and
@@ -30,7 +31,7 @@ formula = "mol-design-convoy"
 formula_compiler = ">=2.0.0"
 
 [vars.design_gated]
-description = "true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs an operator APPROVED review at its live head (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator overrides per initiative at Accept with --var design_gated=false."
+description = "true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator overrides per initiative at Accept with --var design_gated=false."
 default = "true"
 
 [[steps]]
@@ -171,8 +172,9 @@ description = """
 File the design child, link it to the convoy, and sling it to the polecat pool.
 The child branches from the integration branch, lands its design doc there, and
 the refinery opens the checkpoint PR onto that branch. That PR merges only with
-the operator's APPROVED review at its live head, under `merge.sh`'s universal
-approval rule, so the child carries no check_set stamp of its own.
+a standing APPROVED review from an account other than the city's, under
+`merge.sh`'s universal approval rule, so the child carries no check_set stamp of
+its own.
 
 **Idempotent on resume** via two markers on the subject: `gc.design_child` (the
 child was filed) and `gc.design_armed` (it was linked and slung).
