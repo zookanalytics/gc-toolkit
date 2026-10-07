@@ -343,8 +343,11 @@ WB_MARKER="<!-- gc-writeback -->"
 # outstanding comment in a single pass. It holds the batch's replies and
 # resolves back with the comments it defers, since a thread answered before its
 # comment is acknowledged claims the city acted on something it never showed it
-# had picked up.
-WB_REACT_CAP=50
+# had picked up. PR_FACTS_REACT_CAP overrides the cap. Anything but a positive
+# integer written without a leading zero keeps 50, because a cap of 0 would
+# hold every batch's answers forever.
+WB_REACT_CAP="${PR_FACTS_REACT_CAP:-50}"
+case "$WB_REACT_CAP" in *[!0-9]*|0*) WB_REACT_CAP=50 ;; esac
 # <<< pr-writeback-contract
 
 gh_graphql() { # <query> [gh -f/-F args...]; non-zero = "could not tell"
@@ -2580,19 +2583,31 @@ while IFS= read -r wrow; do
   if [ "$wbatch_ok" = 1 ]; then
     while IFS='|' read -r rdisp rlo rhi; do
       [ -n "${rdisp:-}" ] || continue
-      rchild=""; rlanded=""
+      rchild=""; rlanded=""; rartifact=""
       case "$rdisp" in
         rework:*)
           rchild="${rdisp#rework:}"
           if [ -n "$rchild" ]; then
-            rcst=$(gc bd show "$rchild" --json 2>/dev/null | scrub \
-              | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
-            [ "$rcst" = "closed" ] && [ -n "$whead" ] && rlanded="$whead"
+            rcjson=$(gc bd show "$rchild" --json 2>/dev/null | scrub)
+            rcst=$(printf '%s' "$rcjson" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+            if [ "$rcst" = "closed" ]; then
+              # An artifact fix unit (one demo-deliver closed on attach) carries its
+              # delivery evidence and lands no commit: that evidence IS its landed
+              # signal and what the reply cites. A commit fix unit lands at the PR
+              # head, cited as before. rartifact flags the form so the reply does
+              # not truncate a URL or claim a commit the fix never made.
+              rart=$(printf '%s' "$rcjson" | jq -r '.[0].metadata.artifact_url // ""' 2>/dev/null)
+              if [ -n "$rart" ]; then
+                rlanded="$rart"; rartifact="1"
+              elif [ -n "$whead" ]; then
+                rlanded="$whead"
+              fi
+            fi
           fi ;;
       esac
       wbrecs=$(printf '%s' "$wbrecs" | jq -c --argjson lo "$rlo" --argjson hi "$rhi" \
-        --arg child "$rchild" --arg landed "$rlanded" \
-        '. + [ { lo: $lo, hi: $hi, child: $child, landed: $landed } ]')
+        --arg child "$rchild" --arg landed "$rlanded" --arg artifact "$rartifact" \
+        '. + [ { lo: $lo, hi: $hi, child: $child, landed: $landed, artifact: $artifact } ]')
     done <<WB_RECORDS
 $(printf '%s' "$wbwant" | tr ';' '\n')
 WB_RECORDS
@@ -2649,10 +2664,13 @@ WB_LONG_THREADS
 
   # One jq pass decides everything, so the shell below only performs writes.
   #   R <node-id>                          react: routed, not yet reacted to
-  #   T <thread-id> <reply> <why> <beads>  the thread, once the work of EVERY
-  #     <commit> <records>                 batch it holds has landed. why is ok,
+  #   T <thread-id> <reply> <why> <body>   the thread, once the work of EVERY
+  #     <ready> <records>                  batch it holds has landed. why is ok,
   #                                        live (a human answered after us), or
-  #                                        norights (cannot resolve).
+  #                                        norights (cannot resolve). body is the
+  #                                        rendered reply naming each record by its
+  #                                        own landing form; ready is "-" until all
+  #                                        have landed, "ok" once they have.
   # A comment ABOVE the watermark was never routed and earns nothing: reacting to
   # it would teach the operator that the mark means something it does not. It is
   # still outstanding in the thread it sits in, so a thread holding one waits.
@@ -2717,14 +2735,34 @@ WB_LONG_THREADS
         | (if $after > 0 then 0
            else [ $cs[] | select(foreign) | select((.databaseId // 0) > $mark) ]
                 | length end) as $unrouted
+        # Ready only when every record this thread holds has landed and nothing
+        # above the mark is still unrouted; until then the thread waits.
         | (if ([ $orecs[] | select(.landed == "") ] | length) > 0 or $unrouted > 0
-           then "-" else $orecs[-1].landed end) as $landed
+           then "-" else "ok" end) as $ready
+        # One reply names every record this thread holds, each by ITS OWN landing
+        # form: a commit fix unit by the head commit, an artifact fix unit by its
+        # delivered URL. Records that share a form and a landing are named
+        # together in one clause. A mixed-form thread thus never claims a commit a
+        # demo made, nor a demo a commit made — the per-record evidence collected
+        # above is rendered per record, not collapsed to the last one.
+        # Non-empty even when not ready: IFS=tab collapses an empty middle field,
+        # which would shift every field after it, so the unlanded case emits the
+        # same "-" sentinel $ready carries. The shell gates on $ready and never
+        # reads the body then.
+        | (if $ready == "-" then "-"
+           else [ $orecs
+                  | group_by([.artifact, .landed])[]
+                  | ([ .[].child ] | join(", ")) as $who
+                  | (if (.[0].artifact // "") == "1"
+                     then "Addressed by the demo delivered on this PR: " + .[0].landed + " (" + $who + ")."
+                     else "Addressed in " + (.[0].landed[0:8]) + " on this PR (" + $who + ")." end) ]
+                 | join(" ") end) as $body
         | (if $after > 0 then "live"
            elif (($t.viewerCanResolve // false) != true) then "norights"
            else "ok" end) as $why
         | "T\t" + $t.id + "\t" + ($needreply | tostring) + "\t" + $why
-          + "\t" + ([ $orecs[] | .child ] | join(", "))
-          + "\t" + $landed
+          + "\t" + $body
+          + "\t" + $ready
           + "\t" + ($own | map(tostring) | join(",")) ]
     ) | .[]' 2>/dev/null) && wplan_ok=1 || { wplan=""; wplan_ok=0; }
 
@@ -2760,14 +2798,15 @@ WB_REACTIONS
   if [ "$wack_ok" != 1 ] && [ "$wtees" -gt 0 ]; then
     echo "$PROG: $wid — PR#$wnum still has comments awaiting their pickup reaction; nothing replied or resolved this pass" >&2
   fi
-  while IFS="$(printf '\t')" read -r act a1 a2 a3 a4 a5 a6; do  # a3: ok | live | norights
+  while IFS="$(printf '\t')" read -r act a1 a2 a3 a4 a5 a6; do  # a3: ok|live|norights; a4: reply body; a5: ready ("-"=unlanded)
     [ "${act:-}" = "T" ] || continue
     # A tab is IFS whitespace, so read collapses runs of it: every field the plan
     # emits has to be non-empty, and "-" is a batch whose work has not landed.
     if [ "$a5" = "-" ] || [ "$wack_ok" != 1 ]; then owe "$a6"; continue; fi
-    wshort=$(printf '%.8s' "$a5")
     if [ "$a2" = "1" ]; then
-      wbody="Addressed in $wshort on this PR (${a4:-no bead recorded}).
+      # The plan rendered the body with each record's own landing form; post it
+      # once over the thread, the marker on its own line.
+      wbody="${a4:-Addressed on this PR (no bead recorded).}
 $WB_MARKER"
       if gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
            -f t="$a1" -f b="$wbody" >/dev/null; then

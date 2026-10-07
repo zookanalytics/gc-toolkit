@@ -52,6 +52,11 @@
 # and the answers held back whenever a pass cannot finish the batch's pickup
 # reactions, whether the cap or a failed write left them owing, or a comment in
 # the thread sits above the mark with no batch covering it yet.
+#
+# The sections run in the parts declared below, each wrapped in an `if part`
+# block. tools/run-tests.sh runs each part as its own run under its own
+# timeout; run directly, the file runs every part in order.
+# run-tests-parts: reconcile posture feedback writeback checks
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -156,6 +161,7 @@ export STUB_REHOME_LOG="$TMP/rehome.log"; : > "$STUB_REHOME_LOG"
 SUT="$SD/pr-facts.sh"
 FIX="rig/gc-toolkit.polecat"; REV="rig/gc-toolkit.polecat-codex"
 run() { "$SUT" --fix-pool "$FIX" --review-pool "$REV" 2>&1; }
+run_posture() { "$SUT" --posture-only 2>&1; }
 
 anchor() { # id num extra [branch]
   printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"correctness","check.correctness":"green"%s}}' \
@@ -185,6 +191,18 @@ child() { # id branch [extra-metadata] [status] [assignee]
 
 ROOT="$(cd "$HERE/../.." && pwd)"
 
+# ==== part reconcile: merged, closed, retargeted and conflicting PRs ====
+if part reconcile; then
+
+echo "# every section sits inside a part"
+# A run executes only its own part's block, so a section outside every block
+# would run once per part. Blocks open with `if part <name>; then` and close
+# with `fi # part <name>`, both at the start of a line.
+OUTSIDE=$(awk '/^if part [A-Za-z0-9_-]+; then$/ { inside = 1; next }
+               /^fi # part [A-Za-z0-9_-]+$/ { inside = 0; next }
+               /^echo "# / && !inside { print NR ": " $0 }' "$HERE/pr-facts.test.sh")
+eq "$OUTSIDE" "" "no section header sits outside a part"
+
 echo "# posture vocabulary drift against lifecycle.toml"
 BLOCK="$(awk '/# >>> pr-posture-vocabulary/{f=1;next} /# <<< pr-posture-vocabulary/{f=0} f' "$HERE/pr-facts.sh")"
 [ -n "$BLOCK" ] && ok "posture-vocabulary block extracted" || bad "posture-vocabulary markers missing"
@@ -195,21 +213,22 @@ eq "$PR_POSTURES" "$TOML_POSTURES" "postures match lifecycle.toml [posture]"
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration
 # downstream audits read (docs/component-model.md). A key these scripts write
-# but nothing registers is state no audit can account for. pr-dispose.sh is
-# covered alongside pr-facts.sh: it WRITES the disposition marker pr-facts only
-# reads, so a drift check scanning pr-facts alone would never see those writes.
+# but nothing registers is state no audit can account for. pr-dispose.sh and
+# demo-deliver.sh are covered alongside pr-facts.sh: each WRITES a key pr-facts
+# only reads — the PR-close disposition marker and artifact_url — so a drift
+# check scanning pr-facts alone would never see those writes.
 REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$ROOT/lifecycle/lifecycle.toml" \
   | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
 # pr-facts.sh writes anchor metadata through three flags: bd's --set-metadata,
 # and lifecycle.sh transition's --set and --set-dated. All three are state the
 # registry must declare, so the extraction reads every one — a key written only
 # through lifecycle would otherwise drift unseen.
-WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" \
+WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" "$HERE/demo-deliver.sh" \
   | sed -E 's/^--set(-metadata|-dated)? "?//; s/=$//' | sort -u)
-[ -n "$WRITTEN" ] && ok "metadata-key writes extracted" || bad "no metadata-key writes found in pr-facts.sh/pr-dispose.sh"
+[ -n "$WRITTEN" ] && ok "metadata-key writes extracted" || bad "no metadata-key writes found in pr-facts.sh/pr-dispose.sh/demo-deliver.sh"
 UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
   | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
-eq "$UNREGISTERED" "" "every metadata key pr-facts.sh and pr-dispose.sh write is registered in lifecycle.toml"
+eq "$UNREGISTERED" "" "every metadata key pr-facts.sh, pr-dispose.sh and demo-deliver.sh write is registered in lifecycle.toml"
 
 echo "# out-of-band merge is recorded"
 store "[$(anchor F1 10)]"
@@ -967,6 +986,12 @@ hasnt "$out" "filed re-review" "no re-review child is filed"
 hasnt "$out" "is stale" "…and nothing here calls a moved head stale"
 hasnt "$(cat "$STUB_GC_LOG")" "--on mol-review" "…and no review formula is poured from this arm"
 
+fi # part reconcile
+
+# ==== part posture: BLOCKED, dismissals, the posture record, the comment
+# watermark, --posture-only and a sitting's hold ====
+if part posture; then
+
 echo "# BLOCKED on unresolved threads (thread resolution required): merge-blocked-threads"
 store "[$(anchor B1 35)]"
 printf '%s' "$(prview 35 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_35.json"
@@ -1344,7 +1369,6 @@ echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
 # runs AFTER merge, so a comment that arrived since the last pass would be
 # invisible to the merge it should have held. This mode closes that window: it
 # records, and dispatches nothing.
-run_posture() { "$SUT" --posture-only 2>&1; }
 store "[$(anchor PO1 60)]"
 printf '%s' "$(prview 60 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
 echo '[]' > "$GH_DIR/reviews_60.json"
@@ -1501,6 +1525,12 @@ printf '[{"id":8200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
+
+fi # part posture
+
+# ==== part feedback: validation passes, review bodies, CHANGES_REQUESTED and
+# the reads that record nothing ====
+if part feedback; then
 
 # --- operator feedback opens a validation pass on the anchor --------------------
 # A human feedback batch is review the branch has never been answered against, so
@@ -1980,6 +2010,11 @@ echo "# unreadable enumeration fails loudly"
 out=$(STUB_LIST_FAIL=1 run); rc=$?
 eq "$rc" 1 "an unreadable enumeration exits non-zero"
 
+fi # part feedback
+
+# These helpers sit outside every part: parts writeback and checks both use
+# them, and child() here replaces the rework-child helper above for the rest of
+# the file, in every run.
 # ---- PR write-back: acknowledge on pickup, reply and resolve on landing -------
 # STUB_SELF_LOGIN is gc-city-bot, so "johnzook" is the operator throughout.
 # A write-back fixture states the WHOLE PR, not just its review threads. The
@@ -2012,12 +2047,18 @@ wb_rmeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","
 # the Conversation-tab variant: dispositioned, with only the issue-comment watermark raised
 wb_imeta() { printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"0","pr_review_watermark":"0","pr_issue_comment_watermark":"%s"' "$1" "${2:-50}"; }
 child()   { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{}}' "$1" "$2"; }
+# an artifact fix unit: closed by demo-deliver on attach, carrying the attached
+# comment's URL as artifact_url (what the write-back cites in place of a commit).
+child_artifact() { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{"artifact_url":"%s"}}' "$1" "$2" "$3"; }
 gh_since() { tail -n +"$1" "$STUB_GH_LOG"; }
 # advance one bead between passes, the way a later pass of the city would
 bmut() { # <id> <jq-expression over that bead>
   local t="$TMP/bmut.json"
   jq -c --arg id "$1" "[ .[] | if .id == \$id then $2 else . end ]" "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"
 }
+
+# ==== part writeback: acknowledge, reply and resolve on the PR ====
+if part writeback; then
 
 echo "# a comment that produced a rework bead is acknowledged in the same pass"
 store "[$(anchor W1 40 "$(wb_meta rework:K1)"), $(child K1 open)]"
@@ -2069,6 +2110,21 @@ hasnt "$(gh_since "$mark")" "REPLY" "no second reply"
 hasnt "$(gh_since "$mark")" "RESOLVE" "no second resolve"
 has "$out" "0 comments acknowledged, 0 threads replied, 0 threads resolved" "the repeat pass reports no writes"
 eq "$(jq -r '[ .threads[].comments.nodes[] ] | length' "$GH_DIR/threads_41.json")" "2" "the thread still carries exactly one reply"
+
+echo "# an artifact fix unit cites the delivered artifact, not a commit, then resolves"
+# demo-deliver closed this fix unit on attach and recorded the attached comment's
+# URL as artifact_url. The write-back cites that URL and never a head commit the
+# artifact did not make, and still resolves the thread behind the reply.
+store "[$(anchor WART 47 "$(wb_meta rework:KART)"), $(child_artifact KART closed https://github.com/zook/gc-toolkit/pull/47#issuecomment-900)]"
+printf '%s' "$(prview 47 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_47.json"
+threads 47 "$(one_thread 47)"
+out=$(run)
+eq "$(reacted 47 NC-47)" "true" "the comment is acknowledged"
+has "$(treply 47 T-47)" "issuecomment-900" "the reply cites the delivered artifact's URL"
+hasnt "$(treply 47 T-47)" "Addressed in sha-47" "…and never claims a commit the artifact did not make"
+has "$(treply 47 T-47)" "KART" "the reply names the fix unit that carried the work"
+eq "$(tresolved 47 T-47)" "true" "the thread is resolved behind the artifact reply"
+has "$out" "1 threads replied, 1 threads resolved" "the pass reports both writes"
 
 echo "# a comment nothing acted on is never touched"
 store "[$(anchor W3 42)]"
@@ -2347,6 +2403,31 @@ has "$(treply 59 T-59)" "KM2" "…and the later one"
 eq "$(tresolved 59 T-59)" "true" "…and the thread is resolved behind it"
 eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
 
+echo "# a thread two MIXED-form batches touched names each by its own landing form"
+# One batch's fix unit lands a commit; the other's lands an artifact (a demo
+# closed on attach, carrying artifact_url). The single reply must cite the commit
+# for the commit unit and the delivered URL for the artifact unit — never a commit
+# the demo never made, nor a demo the commit never was. Collapsing both to the
+# last record's form (the pre-fix bug) would claim one for the other.
+store "[$(anchor WX 60 "$(wb_meta rework:KC1)"), $(child KC1 open), $(child KA2 open)]"
+printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_60.json"
+threads 60 "$(one_thread 60)"
+out=$(run)
+bmut WX '.metadata += {"pr_comment_disposition":"rework:KA2","pr_comment_watermark":"200"}'
+threads 60 "$(tfile 60 | jq -c '.threads[0].comments.nodes += [
+  {"id":"NC-60b","databaseId":200,"author":{"login":"johnzook"},"body":"and this","reactionGroups":[]}]')"
+out=$(run)
+bmut KC1 '.status = "closed"'
+out=$(run)
+eq "$(treply 60 T-60)" "" "the thread waits while the artifact unit is still open"
+bmut KA2 '.status = "closed" | .metadata += {"artifact_url":"https://github.com/zook/gc-toolkit/pull/60#issuecomment-600"}'
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+has "$(treply 60 T-60)" "Addressed in sha-60 on this PR (KC1)" "the commit unit is cited by its landing commit"
+has "$(treply 60 T-60)" "issuecomment-600 (KA2)" "the artifact unit is cited by its delivered URL, not a commit"
+eq "$(tresolved 60 T-60)" "true" "the thread is resolved behind the one mixed-form reply"
+eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
+
 echo "# a batch with no bead of its own never holds a thread back"
 # The first comment was routed to a human and the second filed a rework child.
 # Only a bead can answer a thread, so the batch holding one owns it.
@@ -2456,27 +2537,45 @@ eq "$(tresolved 50 T-50)" "false" "…and the thread is left unresolved"
 echo "# over the reaction cap, the batch's answers wait for the acknowledgements"
 # The pickup reaction is what tells the operator their comment was seen. A
 # thread replied to and resolved while the cap left its comment unacknowledged
-# answers a comment the city never showed it picked up.
+# answers a comment the city never showed it picked up. PR_FACTS_REACT_CAP sets
+# the cap low, so six threads cross it.
 store "[$(anchor WJ 56 "$(wb_meta rework:KJ)"), $(child KJ closed)]"
 printf '%s' "$(prview 56 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_56.json"
-threads 56 "$(jq -cn '{reviews: [], threads: [ range(60) | {
+threads 56 "$(jq -cn '{reviews: [], threads: [ range(6) | {
   id: ("T-56-" + tostring), isResolved: false, viewerCanResolve: true,
   comments: {nodes: [{id: ("NC-56-" + tostring), databaseId: 100,
     author: {login: "johnzook"}, body: "please fix", reactionGroups: []}]}} ]}')"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
-out=$(run)
-has "$out" "has 60 comments awaiting a pickup reaction" "the cap is reported"
-eq "$(gh_since "$mark" | grep -c '^REACT')" "50" "exactly the capped 50 acknowledgements land"
+out=$(PR_FACTS_REACT_CAP=5 run)
+has "$out" "has 6 comments awaiting a pickup reaction; acknowledging 5 this pass" "the cap is reported"
+eq "$(gh_since "$mark" | grep -c '^REACT')" "5" "exactly the capped 5 acknowledgements land"
 has "$out" "nothing replied or resolved this pass" "the answers are deferred with them"
 hasnt "$(gh_since "$mark")" "REPLY" "no thread is answered over an unacknowledged comment"
 hasnt "$(gh_since "$mark")" "RESOLVE" "…and none is resolved"
 
 echo "# …and the pass that finishes the acknowledgements answers every thread"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
-out=$(run)
-eq "$(gh_since "$mark" | grep -c '^REACT')" "10" "the comments the cap held over are acknowledged"
-eq "$(gh_since "$mark" | grep -c '^REPLY')" "60" "every thread in the batch gets its reply"
-eq "$(gh_since "$mark" | grep -c '^RESOLVE')" "60" "…and is resolved behind it"
+out=$(PR_FACTS_REACT_CAP=5 run)
+eq "$(gh_since "$mark" | grep -c '^REACT')" "1" "the comment the cap held over is acknowledged"
+eq "$(gh_since "$mark" | grep -c '^REPLY')" "6" "every thread in the batch gets its reply"
+eq "$(gh_since "$mark" | grep -c '^RESOLVE')" "6" "…and is resolved behind it"
+
+echo "# a reaction cap override that is not a positive integer keeps the default cap"
+# A cap of 0 would hold every batch's answers forever, so an override that is
+# not a positive integer falls back to the default, and one comment is
+# acknowledged and answered in a single pass.
+store "[$(anchor WJ0 80 "$(wb_meta rework:KJ0)"), $(child KJ0 closed)]"
+printf '%s' "$(prview 80 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_80.json"
+threads 80 "$(one_thread 80)"
+out=$(PR_FACTS_REACT_CAP=0 run)
+eq "$(reacted 80 NC-80)" "true" "a zero override still acknowledges the comment"
+eq "$(tresolved 80 T-80)" "true" "…and the thread is answered behind it"
+store "[$(anchor WJ1 81 "$(wb_meta rework:KJ1)"), $(child KJ1 closed)]"
+printf '%s' "$(prview 81 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_81.json"
+threads 81 "$(one_thread 81)"
+out=$(PR_FACTS_REACT_CAP=five run)
+eq "$(reacted 81 NC-81)" "true" "a non-numeric override still acknowledges the comment"
+eq "$(tresolved 81 T-81)" "true" "…and the thread is answered behind it"
 
 echo "# a pickup reaction that failed to land holds the answer back too"
 store "[$(anchor WK 57 "$(wb_meta rework:KK)"), $(child KK closed)]"
@@ -2587,6 +2686,13 @@ out=$(STUB_GQL_READ_FAIL=1 run_posture); rc=$?
 eq "$rc" 1 "…and the pre-merge posture pass holds the merge (posture uncurrent, exits non-zero)"
 has "$out" "posture is not current" "…naming the anchor merge must not read this pass"
 eq "$(meta UT5 pr_posture)" "<absent>" "…recording no review_required posture merge.sh would clear against"
+
+fi # part writeback
+
+# ==== part checks: merge-hold order, the Conversation tab, red required checks,
+# self-heal, review re-requests, the route-comments-only pass, the status:
+# label and pacing ====
+if part checks; then
 
 echo "# ORDER: the merge-hold is set in the PRE-MERGE posture pass, not after merge"
 # refinery-reconcile runs pr-facts --posture-only, then merge.sh, then the full
@@ -3398,6 +3504,8 @@ eq "$(reacted 193 NC-193)" "true" "a deadline that has not passed lets the sweep
 has "$out" "write-back visited 3 of 3 anchors with routed comments" "…and reports the whole sweep"
 out=$("$SUT" --fix-pool "$FIX" 2>&1)
 hasnt "$out" "write-back visited" "an unpaced pass reports no write-back pacing"
+
+fi # part checks
 
 echo
 echo "passed: $PASS  failed: $FAIL"
