@@ -85,11 +85,14 @@
 # which is then resolved. A review body or a Conversation comment has no thread,
 # so a PR comment linking to it carries its answer. A needs-you finding waits on
 # a person through its own owed reply, and a declined or deferred one is handled
-# by its owed reply, so the batch never answers over either. The reactions are
-# written first, and a pass that cannot finish them posts no answer, so no comment
-# is answered before it is acknowledged. A thread a human answered after the
-# city's reply is left open, and so is one holding a comment above the mark: no
-# batch covers that comment, so nothing has answered it yet.
+# by its owed reply, so the batch never answers over either. Feedback the routing
+# arm left out of a batch because its review threads had already answered it sits
+# inside that batch's range all the same; it is acknowledged, and the batch's
+# bead never answers or marks it. The reactions are written first, and a pass
+# that cannot finish them posts no answer, so no comment is answered before it
+# is acknowledged. A thread a human answered after the city's reply is left
+# open, and so is one holding a comment above the mark: no batch covers that
+# comment, so nothing has answered it yet.
 # The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
 # as GitHub's own blocking signal until someone clears it; once every finding a
 # particular human review raised has closed — a must-fix fixed and landed, a
@@ -2905,7 +2908,8 @@ fi
 # nested query, and neither carries a second cursor for it to choose between.
 # Every node carries its author, body and creation instant, and a thread comment
 # its review's submission: the facts gc_city_own reads to tell the city's own
-# post from feedback.
+# post from feedback. A thread comment also names its review, which ties a review
+# body to the inline comments it carries.
 #
 # Those reads cost at least four GitHub calls an anchor, so the sweep is paced
 # like the walk above (pace-lib.sh): the same deadline, a rotation on a cursor
@@ -2943,14 +2947,14 @@ WB_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
         pageInfo{hasNextPage endCursor}
         nodes{id isResolved viewerCanResolve
           comments(first:100){nodes{id databaseId author{login} body createdAt
-            pullRequestReview{submittedAt}
+            pullRequestReview{databaseId submittedAt}
             reactionGroups{content viewerHasReacted}}}}}}}}'
 WB_THREAD_COMMENTS_QUERY='query($id:ID!,$endCursor:String){
   node(id:$id){... on PullRequestReviewThread{
     comments(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
       nodes{id databaseId author{login} body createdAt
-        pullRequestReview{submittedAt}
+        pullRequestReview{databaseId submittedAt}
         reactionGroups{content viewerHasReacted}}}}}}'
 # The nested `first:` above, named. A thread that comes back holding this many
 # comments is one the top-up has to re-read; change either without the other and
@@ -3223,6 +3227,11 @@ WB_LONG_THREADS
   #   resolved  its batch's bead closed and its finding, if it has one, closed;
   #             or its finding was declined or deferred and its owed reply answers it
   #   looked    anything else: routed and acknowledged, not yet answered
+  # The routing arm leaves out of its batch what the review threads already
+  # answered: an inline comment in a resolved thread with a later post of the
+  # city's that is not one of these answers, and a review body whose every inline
+  # comment is one. Such a comment sits inside the batch's range, but the batch's
+  # bead never saw it, so unless a finding names it, it stays looked.
   # The lines it emits:
   #   R <node-id>                       react EYES: routed, carrying neither reaction
   #   T <thread> <reply> <why> <body> <swaps>
@@ -3269,18 +3278,24 @@ WB_LONG_THREADS
     # A reply of ours carrying neither a mark line nor a finding line answered
     # the thread it sits in.
     def legacy: ours and (((.body // "") | test("<!-- gc-writeback-(mark|finding):")) | not);
+    # A post that answers the comments above it in a resolved thread, as the
+    # routing arm reads them: a post of the city (gc_city_own), and not one of
+    # our own answers, whose mark lines say what they answered.
+    def covers: (foreign | not) and (ours | not);
     def rec_at($s; $d): first($led[$s] | to_entries[] | select(.value.lo < $d and $d <= .value.hi) | .key) // null;
     def fspace: if .rid != "" and .rid == .cid then "r" elif .rid != "" then "c" else "ci" end;
     def finding_at($s; $d): ($d | tostring) as $k
       | first($fnd[] | select(.cid == $k)
               | select(fspace as $f | $f == $s or ($f == "ci" and ($s == "c" or $s == "i")))) // null;
-    def cstate($s; $d):
+    # $off: the routing arm read this comment as already answered in its threads,
+    # so a batch whose range holds it did not carry it unless a finding names it.
+    def cstate($s; $d; $off):
       finding_at($s; $d) as $f | rec_at($s; $d) as $ri
       | (if $ri == null then null else $led[$s][$ri] end) as $r
       | if $f != null and $f.open and $f.disp == "needs-you" then { st: "awaiting", by: "finding", ri: $ri }
         elif $f != null and ($f.open | not) and ($f.disp == "declined" or $f.disp == "deferred") and $f.reply
           then { st: "resolved", by: "finding", posted: ($f.posted == "1"), ri: $ri }
-        elif $r == null then { st: "looked", ri: null }
+        elif $r == null or ($f == null and $off) then { st: "looked", ri: null }
         elif $r.kind == "visit" and $r.state == "open" then { st: "awaiting", by: "batch", visit: $r.bead, ri: $ri }
         elif $r.state == "closed" and ($r.kind == "visit" or $r.landed != "") and ($f == null or ($f.open | not))
           then { st: "resolved", by: "batch", disp: $r.disp, ri: $ri }
@@ -3306,6 +3321,19 @@ WB_LONG_THREADS
       + (if rg(.rgs; $reaction) or (rg(.rgs; $handled) | not) then "1" else "0" end);
     def swaps: [ .[] | swap | select(endswith(":0:0") | not) ] | if length > 0 then join(",") else "-" end;
     . as $v
+    # What the routing arm read as already answered in its threads, and so left
+    # out of the batch whose range holds it: an inline comment in a resolved
+    # thread with a covering post after it, and a review body whose every inline
+    # comment is one.
+    | (reduce ($v.threads[] | select(.isResolved // false) | (.comments.nodes // []) as $cs
+         | ([ $cs | to_entries[] | select(.value | covers) | .key ] | max) as $last
+         | select($last != null) | $cs[0:$last][] | (.databaseId // 0) | select(. > 0))
+         as $d ({}; .[$d | tostring] = true)) as $offc
+    | ([ $v.threads[] | (.comments.nodes // [])[]
+         | { r: ((.pullRequestReview.databaseId // 0) | tostring), d: ((.databaseId // 0) | tostring) }
+         | select(.r != "0") ]
+       | group_by(.r) | map(select(all(.[]; $offc[.d] == true)) | { key: .[0].r, value: true })
+       | from_entries) as $offr
     | ([ $v.issue_comments[] | select(ours) | marks[] ]) as $tm
     | ([ 0, ($led.c[] | .hi) ] | max) as $mark
     | [ $v.threads[] | . as $t | ($t.comments.nodes // []) as $cs
@@ -3317,7 +3345,7 @@ WB_LONG_THREADS
         | [ $cs | to_entries[] | .key as $k | .value
             | select(foreign) | select((.databaseId // 0) > 0 and .databaseId <= $cwm)
             | { id, s: "c", d: .databaseId, k: $k, rgs: (.reactionGroups // []),
-                mres: $mres, tres: $tres, canres: $canres, after: $after } + cstate("c"; .databaseId) ] as $fc
+                mres: $mres, tres: $tres, canres: $canres, after: $after } + cstate("c"; .databaseId; ($offc[.databaseId | tostring] == true)) ] as $fc
         | { id: $t.id, fc: $fc, held: [ $fc[] | select(.ri != null) ], mres: $mres, after: $after,
             res: $tres, canres: $canres, sts: [ $cs[] | select(ours) | marks[] | .st ],
             unr: ([ $cs[] | select(foreign) | select((.databaseId // 0) > $mark) ] | length) } ] as $T
@@ -3331,7 +3359,7 @@ WB_LONG_THREADS
        + [ $v.issue_comments[] | select(foreign)
          | select((.databaseId // 0) > 0 and .databaseId <= $iwm)
          | { id, s: "i", d: .databaseId, url: (.url // ""), rgs: (.reactionGroups // []) } ]
-       | map(. + cstate(.s; .d) + { tok: (.s + (.d | tostring)) })) as $tops
+       | map(. + cstate(.s; .d; (.s == "r" and $offr[.d | tostring] == true)) + { tok: (.s + (.d | tostring)) })) as $tops
     | ([ $T[] | .fc[] ] + $tops) as $items
     | def tmarked($st; $tok): any($tm[]; .st == $st and ((.toks | index($tok)) != null));
       # Is the answer that resolves this comment already posted?

@@ -388,7 +388,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    answered once every routed comment in it is resolved, by one reply naming
    each bead, and is resolved behind that reply. A review body or a Conversation
    comment has no thread, so a Conversation comment of the city's links to the
-   comments one bead answers and carries their answer. A record is dropped once
+   comments one bead answers and carries their answer. The routing arm leaves
+   out of a batch the feedback the review threads already answered: an inline
+   comment in a resolved thread with a later post of the city's, or a review
+   body whose every inline comment is one. Such feedback sits inside the
+   batch's range, but the batch's bead never saw it, so unless a finding names
+   it, it is acknowledged and never marked. A record is dropped once
    every comment it covers carries its final mark. The reactions are written
    first and bounded per pass; when the cap or a failed write leaves one owing,
    that pass posts no answer, so no comment is answered before it is

@@ -3616,6 +3616,65 @@ out=$(run)
 out=$(run)
 eq "$(meta WTC pr_issue_comment_batch)" "rework:KTC2|50|50" "…and retired once the comment it held is resolved and marked"
 
+# ---- feedback the threads answered before routing is not the batch's ----------
+# The routing arm leaves out of its batch what the review threads already
+# answered: a comment in a resolved thread with a later post of the city's (a
+# sitting's reply, say). The batch's range still holds it, but its bead never saw
+# it, so it is acknowledged and never answered or marked by that bead.
+# answered_thread <num> <suffix> <comment-id> <review-id> — a resolved thread: an
+# operator comment, then the city's marked reply to it
+answered_thread() {
+  printf '{"id":"T-%s%s","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-%s%s","databaseId":%s,"author":{"login":"johnzook"},"body":"rename this","pullRequestReview":{"databaseId":%s},"reactionGroups":[]},{"id":"NC-%s%ss","databaseId":%s,"author":{"login":"gc-city-bot"},"body":"Renamed in the sitting.\\n\\n<!-- gc:city -->","pullRequestReview":{"databaseId":99},"reactionGroups":[]}]}}' \
+    "$1" "$2" "$1" "$2" "$3" "$4" "$1" "$2" "$(( $3 + 1 ))"
+}
+open_thread() { # <num> <suffix> <comment-id> — an unresolved thread holding one operator comment
+  printf '{"id":"T-%s%s","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-%s%s","databaseId":%s,"author":{"login":"johnzook"},"body":"please fix","reactionGroups":[]}]}}' \
+    "$1" "$2" "$1" "$2" "$3"
+}
+
+echo "# a landed batch answers the comment it carried, never one a sitting answered before routing"
+store "[$(anchor WTD 323 "$(wb_meta rework:KTD)"), $(child KTD closed)]"
+printf '%s' "$(prview 323 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_323.json"
+threads 323 "{\"reviews\":[],\"threads\":[$(answered_thread 323 a 90 55),$(open_thread 323 b 100)]}"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+has "$(treply 323 T-323b)" "✅ Resolved in sha-323 on this PR (KTD)." "the carried comment's thread is answered by the batch"
+eq "$(treply 323 T-323a)" "" "the thread the sitting answered gets no answer naming the batch"
+eq "$(gh_since "$mark" | grep -c '^REPLY')" "1" "…so the pass posts one reply"
+eq "$(reacted 323 NC-323a),$(thumbed 323 NC-323a)" "true,false" "…and that comment is acknowledged, never marked resolved"
+eq "$(thumbed 323 NC-323b)" "true" "the carried comment is marked resolved"
+
+echo "# an open visit's awaiting answer skips the comment a sitting answered before routing"
+store "[$(anchor WTE 324 "$(wb_meta visit:VTE)"), $(child VTE open)]"
+printf '%s' "$(prview 324 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_324.json"
+threads 324 "{\"reviews\":[],\"threads\":[$(answered_thread 324 a 90 55),$(open_thread 324 b 100)]}"
+out=$(run)
+has "$(treply 324 T-324b)" "❓ Awaiting a person — visit VTE." "the carried comment waits on the visit"
+eq "$(treply 324 T-324a)" "" "the comment a sitting answered is not marked awaiting"
+
+echo "# a review body whose inline comments a sitting answered is left out of the batch's answer"
+store "[$(anchor WTF 325 "$(wb_tmeta rework:KTF 56 0 'rework:KTF|0|56' '')"), $(child KTF closed)]"
+printf '%s' "$(prview 325 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_325.json"
+threads 325 "$(printf '%s' "{\"reviews\":[],\"threads\":[$(answered_thread 325 a 90 55)],\"issue_comments\":[]}" | jq -c '.reviews = [
+  {"id":"RV-325a","databaseId":55,"state":"COMMENTED","body":"two renames","url":"https://github.com/zook/gc-toolkit/pull/325#pullrequestreview-55","author":{"login":"johnzook"},"reactionGroups":[]},
+  {"id":"RV-325b","databaseId":56,"state":"COMMENTED","body":"rethink the cap","url":"https://github.com/zook/gc-toolkit/pull/325#pullrequestreview-56","author":{"login":"johnzook"},"reactionGroups":[]}]')"
+out=$(run)
+has "$(pcomments 325)" "✅ Resolved in sha-325 on this PR (KTF). In reply to https://github.com/zook/gc-toolkit/pull/325#pullrequestreview-56." \
+  "the batch answers the review it carried"
+hasnt "$(pcomments 325)" "pullrequestreview-55" "…and not the review whose every inline comment a sitting answered"
+eq "$(reacted 325 RV-325a),$(thumbed 325 RV-325a)" "true,false" "that review is acknowledged, never marked resolved"
+eq "$(thumbed 325 RV-325b)" "true" "the carried review is marked resolved"
+
+echo "# a finding still places its comment under the batch when the thread holds a later city post"
+# The fixer answered in the thread and someone resolved it, but the comment was
+# routed: its finding says so, and the batch's bead answers it.
+store "[$(anchor WTG 326 "$(wb_meta rework:KTG)"), $(child KTG closed), $(hfind FTG WTG 90 55 must-fix closed)]"
+printf '%s' "$(prview 326 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_326.json"
+threads 326 "{\"reviews\":[],\"threads\":[$(answered_thread 326 a 90 55)]}"
+out=$(run)
+has "$(treply 326 T-326a)" "✅ Resolved in sha-326 on this PR (KTG)." "the routed comment is answered by its batch"
+eq "$(thumbed 326 NC-326a)" "true" "…and marked resolved"
+
 echo "# an unmarked review under our OWN login from before the cutover leaves threads arm 7 never routes"
 # The gap: an outside review agent (or an operator-run review) posted findings on
 # a green PR under the automation's own login before the city marked its posts.
