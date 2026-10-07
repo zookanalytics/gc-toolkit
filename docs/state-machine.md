@@ -354,7 +354,7 @@ The postures, in the precedence the derivation applies:
 | Posture | When | Merge effect |
 |---|---|---|
 | `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
-| `commented` | a review comment sits above its watermark, and no veto stands | holds |
+| `commented` | an unanswered review comment sits above its watermark, and no veto stands | holds |
 | `approved` | GitHub reports `APPROVED` | none |
 | `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
@@ -389,6 +389,14 @@ empty body raises nothing in the review space — the inline comments underneath
 it are what the comment space already sees, and counting the review would leave
 a posture no comment id can answer. A plain conversation comment on the PR is an
 issue comment, carries no review, and raises no posture.
+
+An inline comment above the watermark is not outstanding once its review thread
+has answered it: the thread is resolved, and it holds a reply from the city's own
+login written after the comment. That is how feedback answered by a path other
+than this arm, such as a sitting that replies in-thread and resolves the thread,
+stops holding the merge. A comment written after the city's last reply in the
+thread stays outstanding, because a reply does not reopen a resolved thread, and
+a thread resolved with no reply from the city answers nothing.
 
 A `changes_requested` posture reads and watermarks the same ids a `commented`
 one does. The veto holds the merge; it answers nothing, and the objections

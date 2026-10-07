@@ -779,24 +779,36 @@ UTGATES
 # >>> answered-threads-body
 # The comment path reads "unanswered" off max_c exceeding the comment watermark,
 # and that watermark advances only when arm 7 routes (the lifecycle transition
-# below). A comment answered by any other path — a sitting that replies in-thread
-# and resolves the thread, an operator who resolves it by hand — never moves the
-# watermark, so it reads unanswered on every pass and files a visit carrying
-# pr_number that holds the merge. A resolved review thread is the answered signal
-# GitHub keeps whoever acted, and this script already reads it elsewhere.
-# Resolution, not a bare reply, is the signal: the unengaged arm below counts
-# exactly the UNRESOLVED threads a reply of ours left open, so reading a reply here
-# would only move the hold from this arm to that one. Only inline comments sit on a
-# thread; a review body and a Conversation comment carry none and stay on the mark.
-# The ids of the inline comments that sit on a resolved thread in RT_NODES, as a
-# JSON array of numbers on stdout, comparable with the REST rows' `id`. Non-zero
-# without output on a projection that does not yield one, and the caller then
-# counts the batch unfiltered rather than dropping an objection — the direction
-# live_comments fails in too.
+# below). A comment answered by any other path, such as a sitting that replies
+# in-thread and resolves the thread, never moves the watermark, so it reads
+# unanswered on every pass and files a visit carrying pr_number that holds the
+# merge. A resolved review thread with a reply of ours in it is the answered
+# signal, whoever replied and whoever resolved.
+# A thread is answered through the last reply of ours in it, and only once it is
+# resolved. A bare reply is not enough: unengaged_holds counts exactly the
+# unresolved threads a reply of ours left open, so reading a reply here would only
+# move the hold from one arm to the other. A comment after our last reply stays
+# outstanding. A reply does not reopen a resolved thread, and GitHub records no
+# resolution time to place that comment before or after the resolve; the
+# write-back likewise reads a human reply after its own as a live conversation.
+# A thread resolved with no reply of ours answers nothing here, so a hand
+# resolution alone still routes. Only inline comments sit on a thread; a review
+# body and a Conversation comment carry none and stay on the mark.
+# The ids of the inline comments RT_NODES shows answered, as a JSON array of
+# numbers on stdout, comparable with the REST rows' `id`: in each resolved thread,
+# every comment up to and including the last one $SELF_LOGIN wrote. The thread
+# read's 100-comment cut can hide only a later reply of ours, so it answers less,
+# never more. Non-zero without output on a projection that does not yield one, and
+# the caller then counts the batch unfiltered rather than dropping an objection —
+# the direction live_comments fails in too.
 answered_comment_ids() {
-  printf '%s' "$RT_NODES" | jq -c '
-    [ .[] | select((.isResolved // false) == true)
-      | (.comments.nodes // [])[] | (.fullDatabaseId // empty) | tonumber ]
+  printf '%s' "$RT_NODES" | jq -c --arg self "$SELF_LOGIN" '
+    [ .[] | select($self != "") | select((.isResolved // false) == true)
+      | (.comments.nodes // []) as $cs
+      | ([ $cs | to_entries[]
+           | select(((.value.author.login // "") | tostring) == $self) | .key ] | max) as $last
+      | select($last != null)
+      | $cs[0:($last + 1)][] | (.fullDatabaseId // empty) | tonumber ]
     | unique' 2>/dev/null
 }
 # <<< answered-threads-body

@@ -1208,8 +1208,8 @@ echo "# a comment answered elsewhere (its thread resolved) is NOT unanswered —
 store "[$(anchor AE1 170)]"
 printf '%s' "$(prview 170 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_170.json"
 echo '[]' > "$GH_DIR/reviews_170.json"
-printf '[{"id":5001,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":3}]' > "$GH_DIR/comments_170.json"
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-170","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-170","databaseId":5001,"fullDatabaseId":"5001","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_170.json"
+printf '[{"id":5001,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":3},{"id":5002,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.sh","line":3,"in_reply_to_id":5001}]' > "$GH_DIR/comments_170.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-170","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-170","databaseId":5001,"fullDatabaseId":"5001","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-170b","databaseId":5002,"fullDatabaseId":"5002","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_170.json"
 : > "$STUB_SESSION_LOG"
 out=$(run)
 eq "$(meta_pinned AE1 pr_posture)" "review_required@sha-170" "a resolved-thread comment falls back to the standing posture, not commented"
@@ -1225,8 +1225,8 @@ echo "# a resolved comment is dropped even when a higher-id unresolved one remai
 store "[$(anchor AE2 171)]"
 printf '%s' "$(prview 171 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_171.json"
 echo '[]' > "$GH_DIR/reviews_171.json"
-printf '[{"id":5101,"user":{"login":"human1"},"body":"still open","path":"a.sh","line":1},{"id":5109,"user":{"login":"human1"},"body":"answered","path":"b.sh","line":2}]' > "$GH_DIR/comments_171.json"
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-171a","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171a","databaseId":5101,"fullDatabaseId":"5101","author":{"login":"human1"},"body":"still open","reactionGroups":[]}]}},{"id":"T-171b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171b","databaseId":5109,"fullDatabaseId":"5109","author":{"login":"human1"},"body":"answered","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_171.json"
+printf '[{"id":5101,"user":{"login":"human1"},"body":"still open","path":"a.sh","line":1},{"id":5109,"user":{"login":"human1"},"body":"answered","path":"b.sh","line":2},{"id":5110,"user":{"login":"gc-city-bot"},"body":"fixed","path":"b.sh","line":2,"in_reply_to_id":5109}]' > "$GH_DIR/comments_171.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-171a","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171a","databaseId":5101,"fullDatabaseId":"5101","author":{"login":"human1"},"body":"still open","reactionGroups":[]}]}},{"id":"T-171b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-171b","databaseId":5109,"fullDatabaseId":"5109","author":{"login":"human1"},"body":"answered","reactionGroups":[]},{"id":"NC-171c","databaseId":5110,"fullDatabaseId":"5110","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_171.json"
 out=$(run)
 eq "$(meta_pinned AE2 pr_posture)" "commented@sha-171" "the unresolved comment still makes the PR commented"
 has "$out" "routed to rework" "…and it routes"
@@ -1238,8 +1238,8 @@ echo "# a thread read that fails counts the batch unfiltered — a failed read n
 store "[$(anchor AE3 172)]"
 printf '%s' "$(prview 172 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_172.json"
 echo '[]' > "$GH_DIR/reviews_172.json"
-printf '[{"id":5201,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1}]' > "$GH_DIR/comments_172.json"
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-172","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-172","databaseId":5201,"fullDatabaseId":"5201","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_172.json"
+printf '[{"id":5201,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1},{"id":5202,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.sh","line":1,"in_reply_to_id":5201}]' > "$GH_DIR/comments_172.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-172","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-172","databaseId":5201,"fullDatabaseId":"5201","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-172b","databaseId":5202,"fullDatabaseId":"5202","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_172.json"
 out=$(STUB_GQL_READ_FAIL=1 run)
 has "$out" "review-thread resolution unreadable" "the failed read is reported"
 has "$out" "routed to rework" "…and the comment is counted unfiltered and routes — never dropped on a failed read"
@@ -1253,8 +1253,8 @@ echo "# a comment id past 2^31 is matched by fullDatabaseId, not the 32-bit data
 store "[$(anchor AE4 173)]"
 printf '%s' "$(prview 173 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_173.json"
 echo '[]' > "$GH_DIR/reviews_173.json"
-printf '[{"id":4203522112,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1}]' > "$GH_DIR/comments_173.json"
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-173","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-173","databaseId":null,"fullDatabaseId":"4203522112","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_173.json"
+printf '[{"id":4203522112,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1},{"id":4203522150,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.sh","line":1,"in_reply_to_id":4203522112}]' > "$GH_DIR/comments_173.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-173","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-173","databaseId":null,"fullDatabaseId":"4203522112","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-173b","databaseId":null,"fullDatabaseId":"4203522150","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_173.json"
 out=$(run)
 eq "$(meta_pinned AE4 pr_posture)" "review_required@sha-173" "the answered comment past 2^31 is dropped: not commented"
 hasnt "$out" "routed to rework" "…and it routes nothing"
@@ -1273,6 +1273,36 @@ printf '%s\n' '{"reviews":[],"threads":[{"id":"T-174","isResolved":true,"viewerC
 out=$(run_posture)
 eq "$(meta_pinned AE5 pr_posture)" "review_required@sha-174" "the answered comment and the resolved thread hold nothing"
 eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "1" "…and the two readers took one thread read between them"
+
+echo "# a comment written after our last reply in a resolved thread is still outstanding"
+# A reply does not reopen a resolved thread. The reviewer's "no, still broken"
+# (5503) came after the city's reply (5502), so it is not answered, while the
+# comment that reply answered (5501) is. The batch routes, and its mark stops at
+# the outstanding comment.
+store "[$(anchor AE6 175)]"
+printf '%s' "$(prview 175 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_175.json"
+echo '[]' > "$GH_DIR/reviews_175.json"
+printf '[{"id":5501,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1},{"id":5502,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.sh","line":1,"in_reply_to_id":5501},{"id":5503,"user":{"login":"human1"},"body":"no, this is still broken","path":"a.sh","line":1,"in_reply_to_id":5501}]' > "$GH_DIR/comments_175.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-175","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-175a","databaseId":5501,"fullDatabaseId":"5501","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-175b","databaseId":5502,"fullDatabaseId":"5502","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]},{"id":"NC-175c","databaseId":5503,"fullDatabaseId":"5503","author":{"login":"human1"},"body":"no, this is still broken","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_175.json"
+out=$(run)
+eq "$(meta_pinned AE6 pr_posture)" "commented@sha-175" "the comment after our reply makes the PR commented"
+has "$out" "routed to rework" "…and it routes"
+eq "$(meta AE6 pr_comment_watermark)" "5503" "…through the outstanding comment"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AE6") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "no, this is still broken" "the work order carries the outstanding comment"
+hasnt "$CB" "(comment 5501)" "…and not the one our reply answered"
+
+echo "# a thread resolved with no reply of ours answers nothing"
+# Resolution alone does not say the city answered: the comment routes as it would
+# have with no thread read at all.
+store "[$(anchor AE7 176)]"
+printf '%s' "$(prview 176 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_176.json"
+echo '[]' > "$GH_DIR/reviews_176.json"
+printf '[{"id":5601,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1}]' > "$GH_DIR/comments_176.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-176","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-176","databaseId":5601,"fullDatabaseId":"5601","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_176.json"
+out=$(run)
+eq "$(meta_pinned AE7 pr_posture)" "commented@sha-176" "a resolved thread with no reply of ours stays commented"
+eq "$(meta AE7 pr_comment_watermark)" "5601" "…and its comment routes"
 
 echo "# a feedback batch past the OS per-argument limit still renders"
 # tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
