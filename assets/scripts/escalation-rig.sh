@@ -19,7 +19,15 @@
 # store files the visit where its subject cannot be reached, which reads as an
 # escalation nobody ever receives. --db also refuses a rig that reports no
 # path, since there is no store to pin.
-# Exit: 0 resolved, answer on stdout · 1 unresolvable · 2 usage
+# Exit: 0 resolved, answer on stdout · 1 the subject names no placeable bead
+# — no <prefix>-<id> shape, or a prefix the readable rig set does not carry · 2
+# usage · 3 unproven — bead-store.sh could not be run, the rig set was
+# unreadable, the prefix is carried by two rigs, or (--db) the rig carrying it
+# reports no path. 1 is a proof, so only bead-store.sh's own answer may exit 1;
+# a helper that cannot be run has proven nothing and exits 3. A caller that
+# only binds GC_RIG treats 1 and 3 alike (nothing to bind); one that must act
+# differently on a non-bead subject than on an unreadable store reads them
+# apart.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,11 +54,13 @@ case "$BEAD" in -*) usage; exit 2 ;; esac
 
 [ -x "$BEAD_STORE" ] || {
   echo "escalation-rig: cannot execute $BEAD_STORE, so the store for $BEAD is unproven and nothing may be filed against it" >&2
-  exit 1
+  exit 3
 }
 
-# bead-store.sh separates a prefix no rig carries from a store it could not
-# read, which have different repairs; both are the one refusal here, because a
-# caller binding GC_RIG=$(...) or --db "$(...)" has the same nothing to bind
-# either way.
-"$BEAD_STORE" ${MODE:+"$MODE"} "$BEAD" || exit 1
+# bead-store.sh separates a prefix no rig carries (exit 1) from a store it could
+# not read (exit 3), which have different repairs. Its exit code passes straight
+# through: a caller binding GC_RIG=$(...) or --db "$(...)" has the same nothing
+# to bind for either, but escalate.sh reads exit 1 as a subject that is provably
+# no bead (redirect it to the triage subject) and exit 3 as a possibly-real bead
+# whose store is unproven (fail closed).
+"$BEAD_STORE" ${MODE:+"$MODE"} "$BEAD"
