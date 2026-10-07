@@ -442,12 +442,38 @@ case "$sub" in
       view)
         n="${1:-}"; shift || true
         f="$G/pr_view_$n.json"
-        [ -s "$f" ] || { echo "gh: no such pr" >&2; exit 1; }
         # Honour -q/--jq like real gh, so a caller reading one field (e.g.
         # `--json labels -q '.labels[].name'`) gets that field, not the whole row.
-        vq=""
-        while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; vq="${1:-}" ;; esac; shift || true; done
-        if [ -n "$vq" ]; then jq -r "$vq" "$f"; else cat "$f"; fi ;;
+        vq=""; vj=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -q|--jq) shift; vq="${1:-}" ;;
+            --json) shift; vj="${1:-}" ;;
+            --json=*) vj="${1#--json=}" ;;
+          esac
+          shift || true
+        done
+        # pr_view_<n>.queue/<fields>/ answers the reads that ask for exactly
+        # `--json <fields>`, ahead of the fixture. Each such read takes the first
+        # file there in glob order and removes it, and the fixture answers once
+        # the queue is empty. That scripts a PR whose answer changes between two
+        # reads, the way GitHub's lazily computed merge state does, and a read of
+        # any other field set never takes an answer queued for this one. Glob
+        # order puts 10.json before 2.json, so number the files at one width
+        # (01.json, 02.json). An empty file is a read that fails, and it is
+        # consumed like any other.
+        qf=""
+        if [ -n "$vj" ]; then
+          for qf in "$G/pr_view_$n.queue/$vj"/*.json; do break; done
+        fi
+        if [ -f "$qf" ]; then f="$qf"; else qf=""; fi
+        if [ ! -s "$f" ]; then
+          [ -z "$qf" ] || rm -f "$qf"
+          echo "gh: no such pr" >&2; exit 1
+        fi
+        if [ -n "$vq" ]; then jq -r "$vq" "$f"; else cat "$f"; fi; vrc=$?
+        [ -z "$qf" ] || rm -f "$qf"
+        exit "$vrc" ;;
       list)
         br=""
         while [ $# -gt 0 ]; do
