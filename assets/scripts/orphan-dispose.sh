@@ -2,10 +2,19 @@
 # orphan-dispose.sh — dispose of ONE bead that orphan recovery classified as
 # orphaned, by the kind of thing the bead is.
 #
-# Four kinds reach this script and only two of them are returned to the pool:
+# Each kind is disposed by what it is; the rule for each is below. Some kinds
+# return a bead to a pool to be claimed again, and some of those return it only
+# when its work has not already reached a downstream court.
 #
 #   visit          release the assignee and NOTHING else. A visit's metadata
 #                  (route, continuation group, task_kind) is its identity.
+#   review         a review bead is the source bead of its own mol-review
+#                  molecule and carries no worktree of its own, so it disposes by
+#                  the source contract below (delete-source is a no-op on an
+#                  input-convoy root, reopen-source returns it to its review
+#                  pool). It is recognised by task_kind before the source arm the
+#                  way a visit is, and the witness salvage scope gate skips its
+#                  worktree salvage and merge-verify for the same reason.
 #   workflow-root  skip. A graph.v2 root is not schedulable work: nothing
 #                  claims it, and it closes when its workflow-finalize step
 #                  closes. Setting it open+unassigned+routed is what makes a
@@ -15,9 +24,29 @@
 #                  step keeps gc.routed_to, gc.step_ref, gc.root_bead_id and
 #                  its dependency edges, so the molecule resumes at the same
 #                  step under whichever pool member claims it next.
+#   workflow-step-dead
+#                  the step's root has CLOSED, so there is no molecule left to
+#                  resume and releasing it would offer a finished chain to a
+#                  pool as fresh work. Delegate to dead-molecule-dispose.sh,
+#                  which de-routes the whole chain before it closes anything.
+#   workflow-step-unresolved
+#                  the step names a root that will not read. An unreadable root
+#                  is not a live one, so nothing is written: the step stays
+#                  owned and returns next cycle.
 #   source         delegate to `gc workflow delete-source --apply` plus
-#                  `gc workflow reopen-source`, which is the contract those
-#                  commands were built for.
+#                  `gc workflow reopen-source`, the contract those commands were
+#                  built for, then clear the session pins so the pooled bead
+#                  stops naming a dead owner, and restore gc.routed_to from the
+#                  durable gc.execution_routed_to stamp so the reopened bead is
+#                  offered again rather than left bd-ready but unrouted. EXCEPT
+#                  when the work already reached a downstream court — an in-flight
+#                  PR (merge_result pre_open_gate/pull_request) the refinery owns
+#                  landing, or a human gate (gc.routed_to=human) a person owns
+#                  clearing: reopening would return that work to the pool — skip it.
+#
+# The root read is what separates the two step arms, and it is a read of the
+# root itself — not of the input convoy, and not of the anchors it tracks. A
+# closed root cannot produce work whatever those say.
 #
 # `delete-source` matches workflow roots on gc.source_bead_id. A root poured
 # from an input convoy never carries that key, so it reports already_clean for
@@ -77,13 +106,18 @@ done
 command -v jq >/dev/null 2>&1 || { echo "orphan-dispose: jq is required" >&2; exit 1; }
 
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 read_bead() { gc bd show "$1" --json 2>/dev/null | scrub; }
+
+# Resolved from $0 so a copy of this script runs against the copy beside it.
+HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+DEAD_DISPOSE="${GC_DEAD_MOLECULE_TOOL:-$HERE/dead-molecule-dispose.sh}"
 
 BEAD_JSON="$(read_bead "$BEAD")"
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
@@ -102,19 +136,40 @@ CONTRACT="$(mval gc.formula_contract)"
 STEP_REF="$(mval gc.step_ref)"
 ROOT_ID="$(mval gc.root_bead_id)"
 ROUTED="$(mval gc.routed_to)"
+MERGE_RESULT="$(mval merge_result)"
 
-# Classification order matters. A visit is the source bead of its own mol-visit
-# molecule, so it must be recognised before the source arm would claim it. Root
-# before step: gascity's own IsWorkflowRoot is gc.kind=workflow OR
-# gc.formula_contract=graph.v2, and a step carries neither.
+# Classification order matters. A visit and a review are each the source bead of
+# their own molecule (mol-visit, mol-review), so both must be recognised by
+# task_kind before the source arm would claim them. Root before step: gascity's
+# own IsWorkflowRoot is gc.kind=workflow OR gc.formula_contract=graph.v2, and a
+# step carries neither.
 if [ "$TASK_KIND" = "visit" ]; then
     CLASS="visit"
+elif [ "$TASK_KIND" = "review" ]; then
+    CLASS="review"
 elif [ "$KIND" = "workflow" ] || [ "$CONTRACT" = "graph.v2" ]; then
     CLASS="workflow-root"
 elif [ -n "$STEP_REF" ]; then
     CLASS="workflow-step"
 else
     CLASS="source"
+fi
+
+# A step is only worth resuming while its molecule can still produce work, and
+# the root's own status settles that. Releasing a step whose root has CLOSED
+# does not resume anything — it hands a finished molecule back to a pool as
+# fresh work. So the root is read before the release arm, and an unreadable
+# root is not a live one: it withholds the release rather than guessing.
+ROOT_STATUS=""
+if [ "$CLASS" = "workflow-step" ] && [ -n "$ROOT_ID" ]; then
+    ROOT_JSON="$(read_bead "$ROOT_ID")"
+    if printf '%s' "$ROOT_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        ROOT_STATUS="$(printf '%s' "$ROOT_JSON" | jq -r '.[0].status // ""')"
+        [ "$ROOT_STATUS" = "closed" ] && CLASS="workflow-step-dead"
+    else
+        ROOT_STATUS="unreadable"
+        CLASS="workflow-step-unresolved"
+    fi
 fi
 
 # The assignee guard is the assignee read a moment ago, never --owner. Orphan
@@ -130,20 +185,57 @@ REPORT_OWNER="$ASSIGNEE"
 
 FAILED=""
 LANDED=""
+EXPECT_ROUTE=""
 
 note_failed() { FAILED="${FAILED:+$FAILED,}$1"; }
 note_landed() { LANDED="${LANDED:+$LANDED,}$1"; }
 
-# clear_pins removes the routing pins that name a session. Metadata writes do
-# not go through the claim guard, so this half always lands.
+# clear_pins removes every pin that names a session. Orphan recovery resolves a
+# bead's owner as the first non-empty of gc.session_id, the assignee, then
+# gc.session_name, so one pin left behind keeps resolving the dead session as
+# the owner once the bead is unassigned — and re-detects it every cycle. Metadata
+# writes do not go through the claim guard, so this half always lands.
 clear_pins() {
     if gc bd update "$BEAD" \
         --unset-metadata gc.session_id \
         --unset-metadata gc.session_affinity \
-        --unset-metadata gc.continuation_group >/dev/null 2>&1; then
+        --unset-metadata gc.continuation_group \
+        --unset-metadata gc.session_name >/dev/null 2>&1; then
         note_landed pins
     else
         note_failed pins
+    fi
+}
+
+# restore_route puts gc.routed_to back on a source bead reopen-source returned
+# to the pool. reopen-source reopens the bead but preserves the route it finds,
+# and a bead reaches recovery with gc.routed_to already emptied by its own claim,
+# so the reopened bead lands open, unassigned and unrouted. gc.routed_to is half
+# a pool's offer predicate, so that bead is bd-ready yet never offered again —
+# the strand this restore prevents. The claim that emptied gc.routed_to left
+# gc.execution_routed_to, the durable dispatch route stamped at the pour, in
+# place, so the offer route is restored from it. A route already present is left
+# alone: reopen-source or a source-id workflow may have set one, and a live route
+# is never clobbered. With no execution route to copy the bead cannot be offered,
+# and leaving it silent recreates the strand, so that case is a failed release
+# the patrol surfaces rather than a clean disposal. Metadata bypasses the claim
+# guard, so the write always lands; verify confirms it against EXPECT_ROUTE.
+restore_route() {
+    local after routed_now exec_route
+    after="$(read_bead "$BEAD")"
+    printf '%s' "$after" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || { note_failed route-reread; return; }
+    routed_now="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.routed_to"] // ""')"
+    [ -n "$routed_now" ] && return 0
+    exec_route="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.execution_routed_to"] // ""')"
+    if [ -z "$exec_route" ]; then
+        note_failed route-unrecoverable
+        return
+    fi
+    if gc bd update "$BEAD" --set-metadata gc.routed_to="$exec_route" >/dev/null 2>&1; then
+        note_landed route
+        EXPECT_ROUTE="$exec_route"
+    else
+        note_failed route
     fi
 }
 
@@ -167,7 +259,15 @@ open_bead() {
 # orphan recovery already established this owner is gone.
 release_assignee() {
     [ -z "$ASSIGNEE" ] && return 0
-    if gc bd update "$BEAD" --assignee "" --if-assignee "$GUARD" >/dev/null 2>&1; then
+    # Attach the guard value (--if-assignee=$GUARD), never space-separate it. A
+    # spaced value is its own argv element, and the gc wrapper's store-scope
+    # scanner reads any element that does not begin with '-' as a candidate bead
+    # id; a session-id assignee resolves as a real session bead in the city
+    # store, so the whole command retargets there and $BEAD, which lives in the
+    # rig store, reports as not found. The =form keeps the value behind a leading
+    # '-' so only $BEAD selects the store. bare bd below parses flags directly
+    # and is unaffected, so its guard stays space-separated.
+    if gc bd update "$BEAD" --assignee "" --if-assignee="$GUARD" >/dev/null 2>&1; then
         note_landed assignee
         return 0
     fi
@@ -189,13 +289,29 @@ verify() {
         note_failed reread
         return
     }
-    local st asg sid
+    local st asg sid sname
     st="$(printf  '%s' "$after" | jq -r '.[0].status // ""')"
     asg="$(printf '%s' "$after" | jq -r '.[0].assignee // ""')"
     sid="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_id"] // ""')"
+    sname="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_name"] // ""')"
     [ "$st"  = "open" ] || note_failed "status(still=$st)"
     [ -z "$asg" ]       || note_failed "assignee(still=$asg)"
-    [ "$CLASS" = "workflow-step" ] && [ -n "$sid" ] && note_failed "gc.session_id(still=$sid)"
+    # The arms that clear session pins — workflow-step, source and review — must
+    # land it: a surviving pin is exactly what makes orphan recovery re-detect the
+    # bead.
+    case "$CLASS" in
+        workflow-step|source|review)
+            [ -n "$sid" ]   && note_failed "gc.session_id(still=$sid)"
+            [ -n "$sname" ] && note_failed "gc.session_name(still=$sname)"
+            ;;
+    esac
+    # A restored route must survive the re-read: a gc.routed_to that reports set
+    # and rolls back would strand the reopened bead exactly as before.
+    if [ -n "$EXPECT_ROUTE" ]; then
+        local rt
+        rt="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.routed_to"] // ""')"
+        [ "$rt" = "$EXPECT_ROUTE" ] || note_failed "gc.routed_to(want=$EXPECT_ROUTE,got=${rt:-empty})"
+    fi
     return 0
 }
 
@@ -227,24 +343,128 @@ case "$CLASS" in
             verify
         fi
         ;;
-    source)
-        ACTION="delegate-source-workflow"
+    workflow-step-dead)
+        # The molecule is over. The chain, not this bead, is the disposal unit:
+        # closing one step readies the next, so a per-bead close here would be
+        # the partial teardown that offers a successor of a finished molecule
+        # to a pool. dead-molecule-dispose.sh de-routes the whole chain before
+        # it closes anything, and refuses a chain holding a work bead.
+        #
+        # A 0 exit does not by itself mean the chain is gone. The disposer
+        # exits 0 for a real teardown (result=disposed) or an already-empty
+        # chain (result=clean), and equally for a refusal that wrote nothing:
+        # result=refused when the chain still holds a work bead, result=live_root
+        # when the root was no longer closed on re-read. Reading every 0 as a
+        # landed disposal reports a recovery that never happened and loses the
+        # reason it was refused. Discriminate on result — only disposed/clean is
+        # a landing; a refusal is a skip that carries the disposer's result and
+        # detail, leaving the bead owned to be re-examined next cycle.
+        #
+        # Exit 3 is a chain left half torn down — some members de-routed or
+        # closed, some not. The witness patrol escalates that partial write
+        # (witness-partial-release) rather than retrying, so it must survive the
+        # wrapper as this script's own exit-3 partial carrying the member detail
+        # the disposer named. Any other nonzero is a plain failed=dead-chain.
+        ACTION="dispose-dead-chain"
+        DETAIL="root_closed"
         if [ "$APPLY" = "1" ]; then
-            if gc workflow delete-source "$BEAD" --apply >/dev/null 2>&1; then
-                note_landed delete-source
+            if [ -x "$DEAD_DISPOSE" ]; then
+                DEAD_OUT="$("$DEAD_DISPOSE" "$BEAD" --apply --json 2>/dev/null)"
+                DEAD_RC=$?
+                DEAD_RESULT="$(printf '%s' "$DEAD_OUT" | jq -r '.result // ""' 2>/dev/null)"
+                DEAD_DETAIL="$(printf '%s' "$DEAD_OUT" | jq -r '(.detail // .members // "") | select(. != "")' 2>/dev/null)"
+                case "$DEAD_RC" in
+                    0)
+                        case "$DEAD_RESULT" in
+                            disposed|clean) note_landed dead-chain ;;
+                            *)
+                                ACTION="skip"
+                                DETAIL="root_closed;not-disposed=${DEAD_RESULT:-no-result}"
+                                [ -n "$DEAD_DETAIL" ] && DETAIL="$DETAIL;$DEAD_DETAIL"
+                                ;;
+                        esac
+                        ;;
+                    3)
+                        note_landed dead-chain
+                        note_failed dead-chain-incomplete
+                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
+                        ;;
+                    *)
+                        note_failed dead-chain
+                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
+                        ;;
+                esac
             else
-                note_failed delete-source
+                note_failed "dead-molecule-dispose-missing"
             fi
-            case ",$FAILED," in
-                *,delete-source,*) ;;
-                *)
-                    if gc workflow reopen-source "$BEAD" >/dev/null 2>&1; then
-                        note_landed reopen-source
-                    else
-                        note_failed reopen-source
-                    fi
-                    ;;
-            esac
+        fi
+        ;;
+    workflow-step-unresolved)
+        # Root named but unreadable. Releasing would resume a molecule that may
+        # already be over; the step stays owned and returns next cycle, which
+        # is the recoverable direction.
+        ACTION="skip"
+        DETAIL="root_unreadable"
+        ;;
+    source|review)
+        # A review bead shares this arm: it is the source of its own mol-review
+        # molecule, carries no merge_result of its own and is routed to a review
+        # pool rather than a human gate, so neither skip below fires and it is
+        # always reopened to that pool. It reaches here as class=review only so
+        # the witness salvage scope gate can skip its worktree salvage and
+        # merge-verify; the disposal it needs is exactly the source contract.
+        # A source work bead whose work already reached a downstream court is not
+        # lost, so delete-source + reopen-source must not return it to the pool
+        # (every cycle would re-detect and re-recover it, stamping a recovery the
+        # crash-loop signal reads as a RATE, escalating a moot visit). Two states
+        # name a downstream court, the same set mol-witness-patrol's
+        # downstream-court-skip filter drops upstream: an in-flight PR (merge_result
+        # pre_open_gate/pull_request) the refinery owns landing, or a human gate
+        # (gc.routed_to=human) a person owns clearing. This is the correctness
+        # boundary at the disposal itself, the last step before the irreversible
+        # reopen — a source bead that moves onto a human gate after that filter, or
+        # reaches this script by recovery or manual replay, is still skipped here.
+        # pr.machine is not read: a progressing stamp is written only with an anchor
+        # merge_result (which the first arm catches), and unanchoring leaves it
+        # behind, so on a repooled bead it is stale. The merge_result arm mirrors
+        # the in-flight guard in liveness-sweep.sh and gate-ensure.sh.
+        if [ "$MERGE_RESULT" = "pre_open_gate" ] || [ "$MERGE_RESULT" = "pull_request" ]; then
+            ACTION="skip"
+            DETAIL="inflight_pr(merge_result=${MERGE_RESULT:-none})"
+        elif [ "$ROUTED" = "human" ]; then
+            ACTION="skip"
+            DETAIL="human_gate(routed_to=human)"
+        else
+            ACTION="delegate-source-workflow"
+            if [ "$APPLY" = "1" ]; then
+                if gc workflow delete-source "$BEAD" --apply >/dev/null 2>&1; then
+                    note_landed delete-source
+                else
+                    note_failed delete-source
+                fi
+                case ",$FAILED," in
+                    *,delete-source,*) ;;
+                    *)
+                        if gc workflow reopen-source "$BEAD" >/dev/null 2>&1; then
+                            note_landed reopen-source
+                            # reopen-source returns the bead to the pool but leaves the
+                            # session pins its dead claim stamped, so without this the
+                            # bead keeps naming that dead session as its owner and
+                            # orphan recovery re-detects it every cycle. verify catches a
+                            # pin that reports cleared and rolled back.
+                            clear_pins
+                            # reopen-source also preserves the route it finds, and the
+                            # dead session's own claim already emptied it, so the
+                            # reopened bead is unrouted and unofferable until the route
+                            # is put back from the durable execution stamp.
+                            restore_route
+                            verify
+                        else
+                            note_failed reopen-source
+                        fi
+                        ;;
+                esac
+            fi
         fi
         ;;
 esac
@@ -264,15 +484,18 @@ if [ "$WANT_JSON" = "1" ]; then
         --arg bead "$BEAD" --arg class "$CLASS" --arg action "$ACTION" \
         --arg result "$RESULT" --arg root "$ROOT_ID" --arg step_ref "$STEP_REF" \
         --arg routed "$ROUTED" --arg owner "$REPORT_OWNER" \
+        --arg root_status "$ROOT_STATUS" \
         --arg landed "$LANDED" --arg failed "$FAILED" --arg detail "$DETAIL" \
         '{bead: $bead, class: $class, action: $action, result: $result,
-          root: $root, step_ref: $step_ref, routed: $routed, owner: $owner,
+          root: $root, root_status: ($root_status | select(. != "") // null),
+          step_ref: $step_ref, routed: $routed, owner: $owner,
           landed: ($landed | select(. != "") // null),
           failed: ($failed | select(. != "") // null),
           detail: ($detail | select(. != "") // null)}'
 else
     printf 'result=%s bead=%s class=%s action=%s' "$RESULT" "$BEAD" "$CLASS" "$ACTION"
     [ -n "$ROOT_ID" ] && printf ' root=%s' "$ROOT_ID"
+    [ -n "$ROOT_STATUS" ] && printf ' root_status=%s' "$ROOT_STATUS"
     [ -n "$STEP_REF" ] && printf ' step_ref=%s' "$STEP_REF"
     [ -n "$LANDED" ] && printf ' landed=%s' "$LANDED"
     [ -n "$FAILED" ] && printf ' failed=%s' "$FAILED"

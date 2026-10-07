@@ -8,6 +8,17 @@ description: What was built for tk-ghlg1e on both surfaces (the helm board's DON
 Work record for `tk-ghlg1e`, filed from the 2026-08 cutover runbook
 (`specs/2026-08-rewrite/cutover-runbook.md`, step 9 item 6).
 
+> **⚠ SUPERSEDED IN PART — the board's explicit dismiss-clear is gone.**
+> The DONE band below had two bounds: the `GC_HELM_DONE_WINDOW` clock, and an
+> explicit `gc.dismissed_at` row-clear written by `gc-helm dismiss`. `tk-7cb4l2`
+> removed the explicit clear — the `dismissed()` helper, the two closed-pass
+> skips, and the subject writes in `cmd_dismiss` — so the band now carries no
+> per-row state and a closed row leaves only by ageing out of the window.
+> `dismiss` still ends the sitting by closing the subject's open visit; it no
+> longer touches the board. The layout-stability rule this bead is named for,
+> the window bound and the tradeoff it accepts, and the whole tmux half below
+> stand unchanged. Current design: `specs/tk-7cb4l2/collapse.md`.
+
 The rule the operator stated is one sentence: an item they are looking at
 must not disappear on its own. Sinking is acceptable, vanishing is not.
 Two surfaces broke it in the same shape and for unrelated reasons, which

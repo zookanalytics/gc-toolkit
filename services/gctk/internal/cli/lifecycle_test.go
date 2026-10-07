@@ -71,8 +71,7 @@ func TestUnknownArgumentIsRefused(t *testing.T) {
 // A value-taking flag with no following token is a malformed invocation and is
 // refused. The empty string it would otherwise take drops --expect's
 // compare-and-swap guard, so `--to pull_request --expect` with nothing after it
-// would transition unguarded. lifecycle.sh hangs on this input instead (its
-// `shift 2` underflows at $# = 1); a refusal is the behavior worth keeping.
+// would transition unguarded.
 func TestValueTakingFlagRejectsAMissingValue(t *testing.T) {
 	for _, flag := range []string{
 		"--to", "--expect", "--set", "--set-dated", "--unset",
@@ -91,8 +90,8 @@ func TestValueTakingFlagRejectsAMissingValue(t *testing.T) {
 }
 
 // An explicitly supplied empty argument is a real token, not a missing one, and
-// is preserved: --assignee '' clears the assignee (a request the atomic update
-// must carry) and --expect '' parses to the empty expectation the guard reads as
+// is preserved: --assignee "" clears the assignee (a request the atomic update
+// must carry) and --expect "" parses to the empty expectation the guard reads as
 // no compare-and-swap. Only the total absence of a following token is malformed.
 func TestExplicitEmptyArgumentIsPreserved(t *testing.T) {
 	o, err := parseTransition([]string{"--to", "merged", "--expect", "", "--assignee", "", "--close"})

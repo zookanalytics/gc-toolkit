@@ -42,15 +42,30 @@ interrupted pour leaves a wisp with no assignee that only a title sweep can
 collect.
 
 ```bash
-# One patrol wisp: adopt in-progress first, then open; burn any surplus.
-WISP_IDS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-refinery-patrol") | .id'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-refinery-patrol") | .id'
+# One patrol wisp: adopt the newest (the freshest pour); burn any surplus.
+# >>> patrol-wisp-reconcile
+# Scope to THIS rig. Several rigs run this pack and pour the same patrol
+# title into one shared store, so a title-only sweep collides across rigs —
+# keeping a foreign rig's wisp and burning this rig's as surplus. Keep a
+# wisp only when its rig — the assignee's rig segment, or the gc.rig its
+# pour stamps — is this rig's or unset; a not-yet-assigned orphan carries
+# neither and is still collected.
+WISP_ROWS=$(
+  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-refinery-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
+  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-refinery-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
 )
-WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
-for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
+# Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
+# awaiting burn beside the fresh successor it poured, the successor is always
+# the newer created_at — a cycle pours its successor only at its terminal step.
+# Selecting by status adopts the completed (in_progress) cycle and drops the
+# fresh (open) successor.
+WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
+WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
+for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
+# <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch=main --var rig_name=gc-toolkit --var binding_prefix='gc-toolkit.' --json | jq -r '.new_epic_id')
+  gc bd update "$WISP" --set-metadata gc.rig="$GC_RIG"  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
 ```
@@ -142,10 +157,6 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -160,6 +171,24 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by the system-class roles: deacon,
+     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
+     standards for that class only; universal standards live in
+     work-quality-base. -->
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.
 
 
 

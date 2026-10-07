@@ -3,12 +3,13 @@
 # Covers: the happy path (assignee/branch/target/merge_strategy/graduation);
 # the non-vacuous-completion guard (no recorded merge onto the branch = no
 # graduation); operator holds on the convoy bead and on a separate bead naming
-# the branch; a live branch owner; idempotency via metadata.branch; fail-closed
-# skips on unreadable probes; and the GC_AGENT-unset skip.
+# the branch; a live branch owner; idempotency via metadata.branch; a ## Summary
+# seeded from the landed members with an existing summary left intact;
+# fail-closed skips on unreadable probes; and the GC_AGENT-unset skip.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-convoy-graduate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -99,6 +100,66 @@ echo "# GC_AGENT unset skips"
 out=$(env -u GC_AGENT "$SUT" 2>&1); rc=$?
 eq "$rc" 0 "no identity exits 0"
 has "$out" "GC_AGENT unset; skip" "…and says why"
+
+echo "# graduation seeds the ## Summary from the landed members"
+convoys "{\"convoys\":[$(cv cv-s integration/syn 2 2)]}"
+store "[$(cbead cv-s),
+  {\"id\":\"m-1\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"Add the widget\",\"notes\":\"\",\"metadata\":{\"merged_target\":\"integration/syn\",\"merge_result\":\"merged\",\"pr_summary\":\"Adds a widget to the toolbar.\"}},
+  {\"id\":\"m-2\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"Wire the widget\",\"notes\":\"\",\"metadata\":{\"merged_target\":\"integration/syn\",\"merge_result\":\"merged\",\"pr_summary\":\"Wires the widget to the store.\"}}]"
+out=$("$SUT" --target main 2>&1); rc=$?
+eq "$rc" 0 "seeded graduation exits 0"
+has "$out" "graduating cv-s" "the convoy graduates"
+ps="$(meta cv-s pr_summary)"
+has "$ps" "landing the work of these beads" "a seed summary is composed from the members"
+has "$ps" "m-1" "…names the first landed member"
+has "$ps" "m-2" "…and every other landed member"
+has "$ps" "Adds a widget to the toolbar." "…and carries each member's own reviewed pr_summary"
+
+echo "# an already-authored summary is preserved (read-modify-write)"
+convoys "{\"convoys\":[$(cv cv-k integration/keep 1 1)]}"
+store "[$(cbead cv-k '"pr_summary":"Operator-written summary."'),
+  {\"id\":\"m-3\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"Some work\",\"notes\":\"\",\"metadata\":{\"merged_target\":\"integration/keep\",\"merge_result\":\"merged\",\"pr_summary\":\"member summary\"}}]"
+out=$("$SUT" --target main 2>&1)
+has "$out" "graduating cv-k" "the convoy graduates"
+eq "$(meta cv-k pr_summary)" "Operator-written summary." "an existing summary is not overwritten by the seed"
+
+echo "# disk pressure: a failed mktemp aborts non-zero, never a false all-clear"
+# The CANDS guard proves the candidate list non-empty, so a loop that then runs
+# zero times can only be a silently-failed <<< temp file. The remedy routes the
+# loop through an explicit mktemp; force THAT to fail and the pass must abort
+# loudly rather than print "0 graduating, …" + exit 0. A failing mktemp binary on
+# PATH is the hermetic stand-in for a full disk (bash's own <<< temp file is
+# internal and cannot be stubbed, which is exactly why the remedy replaces it).
+convoys "{\"convoys\":[$(cv cv-df integration/df 1 1)]}"
+store "[$(cbead cv-df), $(landed w-df integration/df)]"
+mkdir -p "$TMP/failbin"
+cat > "$TMP/failbin/mktemp" <<'MK'
+#!/usr/bin/env bash
+echo "mktemp: failed to create file via template: Disk quota exceeded" >&2
+exit 1
+MK
+chmod +x "$TMP/failbin/mktemp"
+df_rc=0
+PATH="$TMP/failbin:$PATH" "$SUT" --target main >"$TMP/df.out" 2>"$TMP/df.err" || df_rc=$?
+eq "$([ "$df_rc" -ne 0 ] && echo nonzero || echo zero)" "nonzero" "a mktemp failure aborts the pass non-zero"
+# The forged summary would land on STDOUT; the abort announcement on STDERR. Check
+# each on its own stream, so the summary text quoted inside the abort message is
+# not mistaken for the summary line itself.
+hasnt "$(cat "$TMP/df.out")" "graduating" "no summary line reaches stdout under disk pressure"
+has "$(cat "$TMP/df.err")" "ABORTING non-zero" "…the blackout is announced on stderr"
+
+echo "# a failed/empty convoy list is could-not-enumerate, not an empty city"
+convoys ""
+out=$("$SUT" 2>&1); rc=$?
+eq "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)" "nonzero" "an unreadable convoy list aborts non-zero"
+has "$out" "could not list convoys" "…and says it could not enumerate"
+hasnt "$out" "graduating" "…never a forged summary"
+
+echo "# a malformed convoy list is could-not-enumerate at the jq render"
+convoys "this is not json"
+out=$("$SUT" 2>&1); rc=$?
+eq "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)" "nonzero" "a jq parse failure aborts non-zero"
+has "$out" "could not render candidates" "…and says it could not enumerate"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

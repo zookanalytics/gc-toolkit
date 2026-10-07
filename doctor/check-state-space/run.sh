@@ -6,10 +6,15 @@
 # an open bead in a declared detached state is held by nobody and offered to no
 # pool. The merge cadence drives those states, so its assignee must be empty and
 # its gc.routed_to must be empty or the declared park_route sentinel that no
-# pool claims; any other value is a second driver racing the cadence. Finally,
-# no open bead carries a metadata key from the deleted healer-bookkeeping
-# registry — those keys have no writer any more, so their presence means a
-# retired repair pass is still writing state.
+# pool claims; any other value is a second driver racing the cadence. A detached
+# anchor must also stay open: the cadence readers (pr-open, merge, pr-facts,
+# gate-ensure) enumerate --status=open, so one claimed or held into any other
+# live status drops out of every one of them until the claim resolves. The
+# open-scoped scan misses that end-state for the same reason the cadence does, so
+# a second probe reads the non-open live statuses to report it. Finally, no open
+# bead carries a metadata key from the deleted healer-bookkeeping registry —
+# those keys have no writer any more, so their presence means a retired repair
+# pass is still writing state.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Live probes are bounded; an UNREADABLE probe warns (1),
 # never passes.
@@ -88,10 +93,11 @@ budget_init
 # <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
@@ -105,6 +111,25 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     exit 1
 fi
 
+# A `<<<` here-string is backed by a temp file in $TMPDIR; under disk pressure
+# that file cannot be created, the redirection fails silently (this check is
+# set -u, not set -e), and the loop it feeds runs zero times — a non-empty set
+# read as empty, which this check would otherwise report as a clean all-clear.
+# Each enumeration below is staged into a file under this checked, templated temp
+# dir and read with a plain `< "$file"`, which keeps the loop in the current
+# shell so the finding arrays survive it; a staging failure is loud, never a
+# forged all-clear. The dir and its files die with this process.
+ENUM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-state-space.XXXXXX" 2>/dev/null) || {
+    echo "cannot determine whether the state space holds (I2)"
+    detail "could not create a temp directory to stage the store enumerations (mktemp -d failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+}
+trap 'rm -rf "$ENUM_TMP" 2>/dev/null' EXIT
+if ! printf '%s\n' "$scopes" > "$ENUM_TMP/scopes"; then
+    echo "cannot determine whether the state space holds (I2)"
+    detail "could not stage the store enumeration (temp-file write failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+fi
 while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
@@ -143,7 +168,47 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: open-bead listing from $rig_path/.beads could not be parsed — this store was NOT checked")
         continue
     fi
+
+    # A detached anchor that has been claimed or held into a non-open live status
+    # is invisible to the open-scoped scan above AND to every cadence reader
+    # (pr-open, merge, pr-facts, gate-ensure), all of which enumerate
+    # --status=open — so it stalls in the pipeline unseen until the claim
+    # resolves. Read the non-open live statuses, narrowed to merge_result-bearing
+    # beads, so this end-state has a reader. A live claim is not overwritten here;
+    # it is surfaced, the same escalate-not-overwrite the cadence itself keeps.
+    craw=$(run_bounded gc bd list --db "$rig_path/.beads" \
+        --status in_progress,blocked,deferred,hooked,pinned \
+        --has-metadata-key merge_result --json --limit 0 2>/dev/null); crc=$?
+    if [ "$crc" -ne 0 ] || [ -z "$craw" ]; then
+        warnings+=("$label: could not list claimed/held anchors in $rig_path/.beads (rc=$crc) — the detached-state claim check did NOT run for this store")
+    else
+        crows=$(printf '%s' "$craw" | scrub | jq -r --argjson detached "$detached_json" '
+            def clean: tostring | gsub("[[:cntrl:]]"; " ");
+            .[]? | . as $b | ($b.metadata // {}) as $m
+            | (($b.id // "?") | clean) as $id
+            | (($b.status // "") | clean) as $st
+            | (($m.merge_result // "") | tostring) as $mr
+            | select(($detached | index($mr)) != null)
+            | [$id, $mr, $st] | join("\u001f")' 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            warnings+=("$label: claimed/held anchor listing from $rig_path/.beads could not be parsed — the detached-state claim check did NOT run for this store")
+        elif [ -n "$crows" ]; then
+            if printf '%s\n' "$crows" > "$ENUM_TMP/crows"; then
+                while IFS=$'\037' read -r id mr st; do
+                    [ -n "$id" ] || continue
+                    errors+=("$label bead $id: merge_result=$mr is a detached state (lifecycle/lifecycle.toml detached_states) but the bead is status=$st, not open — a detached anchor rests open so the merge cadence can drive it, and every cadence reader (pr-open, merge, pr-facts, gate-ensure) enumerates --status=open, so this claimed/held anchor has dropped out of the pipeline unseen until the claim resolves")
+                done < "$ENUM_TMP/crows"
+            else
+                warnings+=("$label: could not stage the detached-state claim enumeration (temp-file write failed — e.g. /tmp under disk pressure) — the detached-state claim check did NOT run for this store")
+            fi
+        fi
+    fi
+
     [ -n "$rows" ] || continue
+    if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
+        warnings+=("$label: could not stage the state-space enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
+        continue
+    fi
     while IFS=$'\037' read -r kind id val extra; do
         [ -n "$kind" ] || continue
         case "$kind" in
@@ -153,8 +218,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             detachedassignee) errors+=("$label bead $id: merge_result=$val carries assignee=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states) and rests unheld; a holder here is a second driver racing the cadence on one anchor") ;;
             healer)     errors+=("$label bead $id: carries deleted healer-bookkeeping key \"$val\" — lifecycle/lifecycle.toml removed it with its writer, so something retired is still writing state") ;;
         esac
-    done <<< "$rows"
-done <<< "$scopes"
+    done < "$ENUM_TMP/rows"
+done < "$ENUM_TMP/scopes"
 
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
@@ -172,6 +237,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every open bead's merge_result is a declared state, every detached state rests unheld and offered to no pool, and no deleted healer key survives"
+echo "OK: every open bead's merge_result is a declared state, every detached-state anchor is open and rests unheld and offered to no pool, and no deleted healer key survives"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

@@ -13,10 +13,11 @@
 set -uo pipefail
 
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 usage() {
@@ -74,7 +75,7 @@ inventory_files() {
     local f
     for f in "$REPO"/template-fragments/learned-conventions-*.template.md \
              "$REPO"/template-fragments/operator-profile.template.md \
-             "$REPO"/template-fragments/work-quality.template.md \
+             "$REPO"/template-fragments/work-quality-*.template.md \
              "$REPO"/template-fragments/learning-exemplars.template.md \
              "$REPO"/formulas/mol-review.toml; do
       [ -r "$f" ] && printf '%s\n' "${f#"$REPO"/}"
@@ -110,7 +111,7 @@ fi
 # --- the observation corpus ----------------------------------------------
 # Fail closed on an unreadable store: a recurrence number computed over part
 # of the city reads as improvement.
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-learning-recurrence.XXXXXX"); trap 'rm -rf "$TMP"' EXIT
 RIGSET="$TMP/rigs"
 gc rig list --json 2>/dev/null \
   | jq -r '.rigs[]? | select((.name // "") != "") | [.name, (.path // "")] | @tsv' 2>/dev/null > "$RIGSET"

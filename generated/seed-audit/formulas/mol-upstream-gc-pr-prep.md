@@ -23,12 +23,17 @@ Required vars:
 Optional vars:
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)
   {{branch_name}}: Explicit name for the assembled PR branch. Empty (default): a single SHA yields upstream-pr/<short-sha>, multiple SHAs yield upstream-pr/<issue> (stable + unique). Set: used verbatim, e.g. upstream-pr/test-env-isolation. (default=)
-  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip. (default=)
-  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip. (default=)
+  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{escalation_target}}: Mail recipient for help and escalation mail. Defaults to the reserved `human`
+alias, which resolves in every city. Cities that staff a work-health role
+(e.g. the gastown pack's witness) can point this at it, for example
+`escalation_target = "<rig>/witness"`.
+ (default=human)
+  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{origin_remote}}: Git remote name pointing at the city's fork (default=origin)
-  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip. (default=)
+  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{test_command}}: Test command run after cherry-pick + scrub (default=make test)
-  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip. (default=)
+  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{upstream_branch}}: Branch the eventual upstream PR will target (default=main)
   {{upstream_remote}}: Git remote name pointing at the upstream gascity repository (default=upstream)
 

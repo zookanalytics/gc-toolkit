@@ -3,12 +3,16 @@ package source
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
@@ -34,6 +38,11 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 			writeJSON(w, `{"items":[{"id":"tk-epic","title":"Big epic","status":"open","issue_type":"epic","priority":2}],"total":1}`)
 		case path == base+"/beads" && r.URL.Query().Get("type") == "decision":
 			writeJSON(w, `{"items":[{"id":"sl-dec","title":"Pick a path","status":"open","issue_type":"decision","priority":1}],"total":1}`)
+		// The source pages gates separately (type=gate) as a guard against an
+		// API default that hides them. Empty in the shared fixture; the
+		// gate-demand case has its own test.
+		case path == base+"/beads" && r.URL.Query().Get("type") == "gate":
+			writeJSON(w, `{"items":[],"total":0}`)
 		case path == base+"/beads/graph/tk-epic":
 			writeJSON(w, `{"root":{"id":"tk-epic","status":"open","issue_type":"epic"},
 				"beads":[{"id":"tk-epic","status":"open"},{"id":"tk-a","status":"open"},{"id":"tk-b","status":"closed"}],
@@ -373,6 +382,62 @@ func TestGatherRefusesNonWorkBeads(t *testing.T) {
 	}
 }
 
+// TestGatherAdmitsGateBackedHumanDemand: a human demand is now a native gate
+// (issue_type=gate, gc.routed_to=human, from gc-helm.sh `demand`). The live
+// API returns gates on the bare status=open scan AND on the type=gate page the
+// source adds as a guard, so the mock serves the gate rows on both: the union
+// must admit the demand as exactly ONE `human` anchor — matching the
+// in-process backend, whose metadata-keyed query has no default type
+// exclusion. A gate WITHOUT the marker is not an anchor: the type is not the
+// key, the marker is.
+func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
+	const base = "/v0/city/testcity"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		switch {
+		case r.URL.Path == base+"/rigs":
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
+		case r.URL.Path == base+"/beads" && (q.Get("type") == "gate" || q.Get("type") == ""):
+			// Served on the bare open scan and the gate page alike, as the
+			// live API does; the union must not double the anchor.
+			writeJSON(w, `{"items":[
+				{"id":"tk-gate-demand","title":"operator: pick the backend","status":"open","issue_type":"gate","priority":1,
+				 "metadata":{"gc.routed_to":"human","gc.demand_for":"tk-work"}},
+				{"id":"tk-gate-bare","title":"a gate carrying no demand marker","status":"open","issue_type":"gate"}
+			],"total":2}`)
+		default:
+			// Every other Gather leg — the typed scans, the convoy feed — reads
+			// empty, isolating the gate path.
+			writeJSON(w, `{"items":[]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	res, err := newTestSource(t, srv).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Partial {
+		t.Errorf("unexpected partial: %v", res.PartialErrors)
+	}
+	// The gate-backed demand reaches the human filter exactly once, although
+	// both pages returned it — the dedupe is what keeps the union one row.
+	if got := kindsOf(res, "tk-gate-demand"); !reflect.DeepEqual(got, []string{"human"}) {
+		t.Errorf("tk-gate-demand kinds = %v, want [human] — a gate-backed human demand must gather", got)
+	}
+	human := anchorOf(res, "tk-gate-demand", "human")
+	if human == nil {
+		t.Fatal("tk-gate-demand missing")
+	}
+	if human.Rig != "gc-toolkit" || human.Prefix != "tk" {
+		t.Errorf("rig/prefix = %s/%s, want gc-toolkit/tk", human.Rig, human.Prefix)
+	}
+	if got := kindsOf(res, "tk-gate-bare"); len(got) != 0 {
+		t.Errorf("a gate without gc.routed_to=human is not an anchor, got %v", got)
+	}
+}
+
 // TestOpenBeadsPagesToTheEnd: tk-boolmd lives on page two. A gather that stopped
 // at the first page would look healthy and silently lose every bead past the
 // hundredth.
@@ -568,5 +633,182 @@ func TestOpenBeadsCarriesTheSupervisorsOwnPartial(t *testing.T) {
 	}
 	if !named {
 		t.Errorf("the rig that did not answer must be named: %v", res.PartialErrors)
+	}
+}
+
+// TestGatherFetchesConvoyChildrenConcurrently asserts the per-convoy child
+// fetches (the N+1 fan-out) run concurrently. Each fetch blocks in the mock
+// until enough of them are in flight at once, so a concurrent gather sails
+// through and a serial one — which never gets a second request in flight —
+// falls out on the barrier timeout at a max concurrency of 1 and fails the
+// assertion.
+func TestGatherFetchesConvoyChildrenConcurrently(t *testing.T) {
+	const nConvoys = 6
+	const wantConcurrent = 3 // < nConvoys and <= maxGatherFanout, so it is reachable
+
+	var (
+		mu          sync.Mutex
+		inFlight    int
+		maxInFlight int
+	)
+	release := make(chan struct{})
+	var once sync.Once
+
+	const base = "/v0/city/testcity"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == base+"/rigs":
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "epic":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "decision":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "gate":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("status") == "open":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/convoys":
+			items := make([]string, nConvoys)
+			for i := range items {
+				items[i] = fmt.Sprintf(`{"id":"tk-cv%d","title":"convoy %d","status":"open","issue_type":"convoy","parent":""}`, i, i)
+			}
+			writeJSON(w, `{"items":[`+strings.Join(items, ",")+`],"total":`+strconv.Itoa(nConvoys)+`}`)
+		case strings.HasPrefix(r.URL.Path, base+"/convoy/"):
+			mu.Lock()
+			inFlight++
+			if inFlight > maxInFlight {
+				maxInFlight = inFlight
+			}
+			if inFlight >= wantConcurrent {
+				once.Do(func() { close(release) })
+			}
+			mu.Unlock()
+			// Proceed once enough fetches are concurrent; the timeout keeps a
+			// serialized gather from hanging the test — it fails on maxInFlight.
+			select {
+			case <-release:
+			case <-time.After(2 * time.Second):
+			}
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			id := strings.TrimPrefix(r.URL.Path, base+"/convoy/")
+			writeJSON(w, `{"convoy":{"id":"`+id+`","status":"open"},"children":[{"id":"`+id+`-c","status":"open"}]}`)
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	res, err := newTestSource(t, srv).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	mu.Lock()
+	got := maxInFlight
+	mu.Unlock()
+	if got < wantConcurrent {
+		t.Fatalf("max concurrent convoy fetches = %d, want >= %d (the per-convoy fan-out is serialized)", got, wantConcurrent)
+	}
+
+	var convoys int
+	for _, a := range res.Anchors {
+		if a.Kind == "convoy" {
+			convoys++
+		}
+	}
+	if convoys != nConvoys {
+		t.Errorf("gathered %d convoy anchors, want %d — concurrency must not drop any", convoys, nConvoys)
+	}
+}
+
+// TestGatherFetchesEpicChildrenConcurrently is the epic half of the same
+// guard TestGatherFetchesConvoyChildrenConcurrently gives the convoy half: the
+// per-epic child graph fetches (the other half of the N+1 fan-out) must run
+// concurrently. Each graph fetch blocks in the mock until enough are in flight
+// at once, so a concurrent gather sails through and a serial one — which never
+// gets a second request in flight — falls out on the barrier timeout at a max
+// concurrency of 1 and fails the assertion.
+func TestGatherFetchesEpicChildrenConcurrently(t *testing.T) {
+	const nEpics = 6
+	const wantConcurrent = 3 // < nEpics and <= maxGatherFanout, so it is reachable
+
+	var (
+		mu          sync.Mutex
+		inFlight    int
+		maxInFlight int
+	)
+	release := make(chan struct{})
+	var once sync.Once
+
+	const base = "/v0/city/testcity"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == base+"/rigs":
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "epic":
+			items := make([]string, nEpics)
+			for i := range items {
+				items[i] = fmt.Sprintf(`{"id":"tk-ep%d","title":"epic %d","status":"open","issue_type":"epic","parent":""}`, i, i)
+			}
+			writeJSON(w, `{"items":[`+strings.Join(items, ",")+`],"total":`+strconv.Itoa(nEpics)+`}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "decision":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("type") == "gate":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && r.URL.Query().Get("status") == "open":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/convoys":
+			writeJSON(w, `{"items":[],"total":0}`)
+		case strings.HasPrefix(r.URL.Path, base+"/beads/graph/"):
+			mu.Lock()
+			inFlight++
+			if inFlight > maxInFlight {
+				maxInFlight = inFlight
+			}
+			if inFlight >= wantConcurrent {
+				once.Do(func() { close(release) })
+			}
+			mu.Unlock()
+			// Proceed once enough fetches are concurrent; the timeout keeps a
+			// serialized gather from hanging the test — it fails on maxInFlight.
+			select {
+			case <-release:
+			case <-time.After(2 * time.Second):
+			}
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			id := strings.TrimPrefix(r.URL.Path, base+"/beads/graph/")
+			writeJSON(w, `{"root":{"id":"`+id+`","status":"open"},"beads":[{"id":"`+id+`-c","status":"open"}],"deps":[{"from":"`+id+`","to":"`+id+`-c","kind":"parent-child"}]}`)
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	res, err := newTestSource(t, srv).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	mu.Lock()
+	got := maxInFlight
+	mu.Unlock()
+	if got < wantConcurrent {
+		t.Fatalf("max concurrent epic graph fetches = %d, want >= %d (the per-epic fan-out is serialized)", got, wantConcurrent)
+	}
+
+	var epics int
+	for _, a := range res.Anchors {
+		if a.Kind == "epic" {
+			epics++
+		}
+	}
+	if epics != nEpics {
+		t.Errorf("gathered %d epic anchors, want %d — concurrency must not drop any", epics, nEpics)
 	}
 }

@@ -52,11 +52,19 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; exit 1; }
 
+# The one definition of the standing kinds, shared with liveness-sweep.sh, the
+# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
+# classify block splices in.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=standing-kinds.sh
+. "$HERE/standing-kinds.sh" || { echo "liveness-recheck: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
+
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # Split on commas/whitespace, drop empties, keep first-seen order.
@@ -122,7 +130,7 @@ CARRIED_JSON=$(to_json_array "$CARRIED_IDS")
 # --- read 1: every listed bead in ONE call, closed ones included (--all is
 # what makes the resolved bucket possible). Into a FILE: hundreds of rows on
 # argv would meet ARG_MAX as a truncation rather than an error.
-BEADFILE=$(mktemp)
+BEADFILE=$(mktemp "${TMPDIR:-/tmp}/gctk-liveness-recheck.XXXXXX")
 trap 'rm -f "$BEADFILE"' EXIT
 gc bd list --id "$ID_CSV" --all --brief --json --limit=0 2>/dev/null | scrub > "$BEADFILE"
 if ! jq -e 'type == "array"' "$BEADFILE" >/dev/null 2>&1; then
@@ -154,7 +162,9 @@ fi
 # Best-effort like the ready set: unread means no bead is held, which lists
 # beads rather than hiding them.
 DEMAND_STATE=verified
-DEMAND_RAW=$(gc bd list --has-metadata-key gc.demand_for \
+# --include-gates: a demand is a human gate (issue_type=gate), which `bd list`
+# hides by default, so the person's wait would otherwise read as no hold.
+DEMAND_RAW=$(gc bd list --has-metadata-key gc.demand_for --include-gates \
     --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json 2>/dev/null | scrub)
 if printf '%s' "$DEMAND_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
     DEMAND_JSON=$(printf '%s' "$DEMAND_RAW" | jq -c '
@@ -195,9 +205,9 @@ CENSUS=$(jq -n \
     --arg demand_state "$DEMAND_STATE" '
   def meta: (.metadata // {});
   def mv($k): ((meta[$k] // "") | tostring);
-  # Standing-record idioms (never claimable, never close) — the SAME list as
-  # standing_kinds in liveness-sweep.sh; liveness-recheck.test.sh pins the pair.
-  def standing_kinds: ["triage-subject", "feedback-pattern"];
+  # Standing-record idioms (never claimable, never close): standing_kinds,
+  # from standing-kinds.sh, the list liveness-sweep.sh classifies by.
+  '"$STANDING_KINDS_JQ"'
   (($beadfile[0] // []) | map({key: .id, value: .}) | from_entries) as $by
   | (if $ready == null then null
      else ($ready | map({key: ., value: true}) | from_entries) end) as $readyset
@@ -212,10 +222,14 @@ CENSUS=$(jq -n \
                      + (if ($b | mv("merge_result")) != "" then ["merge_result=" + ($b | mv("merge_result"))] else [] end)
                      + (if ($b | mv("pr_number"))   != "" then ["pr=" + ($b | mv("pr_number"))] else [] end))
                     | join("  ")}
-         elif ((($b.assignee // "") != "") or (($b | mv("gc.routed_to")) != "")) then
+         # A work bead under execution carries gc.execution_routed_to while
+         # assignee and gc.routed_to are empty, so a worked test on those two
+         # alone misreads in-flight work as idle and a sitting re-dispatches it.
+         elif ((($b.assignee // "") != "") or (($b | mv("gc.routed_to")) != "") or (($b | mv("gc.execution_routed_to")) != "")) then
            {verdict: "worked",
             detail: ((if ($b.assignee // "") != "" then ["assignee=" + $b.assignee] else [] end)
-                     + (if ($b | mv("gc.routed_to")) != "" then ["routed_to=" + ($b | mv("gc.routed_to"))] else [] end))
+                     + (if ($b | mv("gc.routed_to")) != "" then ["routed_to=" + ($b | mv("gc.routed_to"))] else [] end)
+                     + (if ($b | mv("gc.execution_routed_to")) != "" then ["execution_routed_to=" + ($b | mv("gc.execution_routed_to"))] else [] end))
                     | join("  ")}
          elif ((standing_kinds | index($b | mv("task_kind"))) != null) then
            {verdict: "standing",

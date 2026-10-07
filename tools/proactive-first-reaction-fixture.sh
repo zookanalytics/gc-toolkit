@@ -24,8 +24,10 @@
 #   • THE mr-INVARIANT — `sling` bakes in --on mol-first-reaction --merge mr and
 #     HARD-REFUSES --merge direct (the security invariant).
 #   • THE FORMULA CONTRACT — mol-first-reaction writes the fixed card shape,
-#     ends in ONE of three dispositions (route it, hold it, ask), records which
-#     one and why, flags the bead onto the board, and NEVER closes the target.
+#     ends in ONE of five dispositions (route it, recommend an action for the
+#     operator to trigger, hold it, close it via a validating closer, or ask),
+#     records which one and why, flags the bead onto the board, and NEVER closes
+#     the target itself.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
 #     (max 2-3, the pool's only throttle), it defaults to mr, and one
 #     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
@@ -59,7 +61,7 @@ for f in "$FORMULA_TOML" "$AGENT_TOML" "$PROMPT_MD"; do
 done
 command -v jq >/dev/null 2>&1 || { echo "fixture: jq required" >&2; exit 2; }
 
-FXDIR="$(mktemp -d)"
+FXDIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 # shellcheck disable=SC2329  # invoked indirectly via the EXIT trap
 cleanup() { rm -rf "$FXDIR"; }
 trap cleanup EXIT
@@ -84,17 +86,32 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 # priority (P3), so a board-weight rank must place it LAST — a plain
 # oldest-first sort would put it first. JSON order here is intentionally NOT
 # the expected ranked order, so a no-op (unranked) tool fails the assertions.
+# px-root is a graph.v2 topology ROOT (gc.kind=workflow): routed but never
+# claimable, so demand must DROP it. Its priority/age would rank it FIRST if it
+# leaked through, so the ranking assertions below double as an exclusion probe.
 cat > "$FXDIR/ready.json" <<'JSON'
 [
   {"id":"px-old-lo","title":"oldest but low priority","priority":3,"created_at":"2026-01-01T00:00:00Z"},
   {"id":"px-new-hi","title":"newest, high priority","priority":1,"created_at":"2026-03-01T00:00:00Z"},
-  {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"}
+  {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"},
+  {"id":"px-root","title":"graph.v2 topology root — routed but NEVER claimable","priority":1,"created_at":"2026-01-15T00:00:00Z","metadata":{"gc.kind":"workflow"}}
 ]
 JSON
+# px-lo/px-hi are allowlisted top-level inputs the scan KEEPS; the rest are
+# each dropped by one precision filter (disallowed type, topology root,
+# feedback-pattern machinery, already-ruled, non-top-level child, a dispatched
+# review lane, an implementation branch/PR anchor).
 cat > "$FXDIR/scan.json" <<'JSON'
 [
-  {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z"},
-  {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z"}
+  {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z","issue_type":"task"},
+  {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug"},
+  {"id":"px-spec","title":"disallowed type (spec is an output, not an input)","description":"an output artifact","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"spec"},
+  {"id":"px-wf","title":"topology root wearing issue_type task","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.kind":"workflow"}},
+  {"id":"px-fb","title":"feedback-pattern distiller machinery","description":"a learned pattern","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
+  {"id":"px-ruled","title":"a sitting already ruled this","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.takeaway":"ruled: do X"}},
+  {"id":"px-child","title":"a parent-child CHILD (work-in-flight, not top-level)","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","dependencies":[{"dependency_type":"parent-child","issue_id":"px-child","depends_on_id":"px-parent"}]},
+  {"id":"px-review","title":"a dispatched review bead (work-in-flight, not input)","description":"VERDICT pending on a branch","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"px-anchor"}},
+  {"id":"px-anchor","title":"an implementation anchor: branch/merge_result, no task_kind, allowlisted type","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug","metadata":{"branch":"polecat/px-anchor","merge_result":"pre_open_gate","work_dir":"/tmp/wt/px-anchor"}}
 ]
 JSON
 
@@ -108,10 +125,13 @@ echo "── demand is always on: routed work flows with no flag and no shed ─
 # No enable flag, no city-cap env — routed demand must simply flow. (The
 # leading `unset` guards against ambient GC_PROACTIVE_* in the test env: the
 # tool must not read them at all any more.)
-eq "demand flows the routed beads unconditionally (3)" "3" \
+eq "demand flows the routed beads (3 of 4: the topology root is dropped)" "3" \
    "$(unset GC_PROACTIVE_ENABLED GC_PROACTIVE_CITY_CAP; P demand | jq 'length')"
 eq "demand output is a valid JSON array (work_query contract)" "array" \
    "$(P demand | jq -r 'type')"
+# The never-claimable topology root must not be counted as demand — counting it
+# spawns a worker gc hook --claim will hand nothing (the churn fix).
+absent "demand drops the never-claimable graph.v2 topology root" "px-root" "$(P demand)"
 # The retired clamps must be GONE from the tool, not merely defaulted open.
 absent "the tool no longer reads the enable gate"  "GC_PROACTIVE_ENABLED"  "$(cat "$PROACTIVE")"
 absent "the tool no longer reads the city cap"     "GC_PROACTIVE_CITY_CAP" "$(cat "$PROACTIVE")"
@@ -210,7 +230,7 @@ extract_toml_block() {
     done < "$AGENT_TOML"
 }
 WQ="$(extract_toml_block work_query | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
-POISON="$(mktemp -d)"
+POISON="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
 : > "$POISON/called"
@@ -226,6 +246,10 @@ else
 fi
 eq "work_query: degrades to [] when gc fails (valid answer, not garbage)" "[]" "$wq_out"
 rm -rf "$POISON"
+# work_query must strip graph.v2 topology roots inline — the gc default query
+# does, and a custom query that omits it counts unclaimable roots as demand.
+has "work_query strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' \
+    "$(extract_toml_block work_query)"
 
 echo "── scale_check is the same demand in COUNT form (agent.toml) ──"
 # The reconciler's pool SPAWN decision runs scale_check, NOT work_query
@@ -238,7 +262,11 @@ has "scale_check answers in COUNT form (0 fallback)" "printf '0'"           "$SC
 absent "scale_check carries no enable gate"         "GC_PROACTIVE_ENABLED"  "$SC_RAW"
 absent "scale_check carries no city-cap clamp"      "GC_PROACTIVE_CITY_CAP" "$SC_RAW"
 has "scale_check rig-qualifies the same route"      '{{.Rig}}/gc-toolkit.proactive' "$SC_RAW"
-POISON="$(mktemp -d)"
+# The spawn predicate MUST carry work_query's topology-root exclusion, or it
+# counts a root gc hook --claim never offers and spawns a worker with nothing
+# to claim — the churn this pool hit.
+has "scale_check strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' "$SC_RAW"
+POISON="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
 : > "$POISON/called"
@@ -254,6 +282,61 @@ else
 fi
 eq "scale_check: degrades to 0 when gc fails (no spurious spawn)" "0" "$sc_out"
 rm -rf "$POISON"
+
+echo "── churn guard: work_query and scale_check agree across the page bound ──"
+# The bug this locks out: work_query paged `gc bd ready` to its first N rows and
+# THEN dropped topology roots in jq, while scale_check dropped them over the
+# whole --limit-0 set. With more routed topology roots than the page holds ahead
+# of one claimable step, the page is all roots — work_query returned [] while
+# scale_check counted 1, so the reconciler spawned a worker that could claim
+# nothing and drained (the churn). Both blocks run here against a gc stub that
+# honors `gc bd ready`'s --limit/--sort, over 21 roots (older) ahead of 1 step:
+# 21 exceeds the 20-row page, so a page-then-filter query is empty while a
+# filter-then-slice query keeps the step.
+CHURN="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
+jq -n '[ range(1;22) as $d
+          | { id: "root-\($d)", title: "topology root \($d)", priority: 1,
+              created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: { "gc.kind": "workflow" } } ]
+        + [ { id: "claimable-step", title: "the one routed non-topology step",
+              priority: 1, created_at: "2026-12-01T00:00:00Z",
+              metadata: { "gc.kind": "step" } } ]' > "$CHURN/ready.json"
+cat > "$CHURN/gc" <<'SH'
+#!/bin/sh
+# Faithful-enough `gc bd ready`: honor --limit (0 = all) and --sort oldest over
+# the canned set, so a paged query and a full-set count are comparable.
+[ "$1" = bd ] && [ "$2" = ready ] || { printf '[]'; exit 0; }
+lim=0; srt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) shift; lim="$1" ;;
+    --limit=*) lim="${1#--limit=}" ;;
+    --sort) shift; srt="$1" ;;
+    --sort=*) srt="${1#--sort=}" ;;
+  esac
+  shift
+done
+jq --argjson lim "${lim:-0}" --arg srt "$srt" '
+  (if $srt == "oldest" then sort_by(.created_at // "") else . end)
+  | (if $lim == 0 then . else .[0:$lim] end)' "$GC_STUB_DATA"
+SH
+chmod +x "$CHURN/gc"
+churn_env() { env -u GC_PROACTIVE_ENABLED PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" "$@"; }
+sc_churn="$(churn_env sh -c "$SC" 2>/dev/null || true)"
+eq "scale_check counts the step behind 21 topology roots"                 "1" "$sc_churn"
+wq_churn="$(churn_env sh -c "$WQ" 2>/dev/null || true)"
+eq "work_query returns that step, not [] (filter before the page bound)"  "1" \
+   "$(printf '%s' "$wq_churn" | jq 'length' 2>/dev/null)"
+has "…and it is the claimable step, not a leaked root" "claimable-step" "$wq_churn"
+# The tools/gc-proactive.sh `demand` mirror must filter-before-bound too: driven
+# live (no fixture) against the same stub, it keeps the step the page buried.
+dem_churn="$(env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
+              PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" \
+              "$PROACTIVE" demand gc-toolkit/gc-toolkit.proactive 2>/dev/null || true)"
+eq "demand mirror keeps the step behind the page of roots"                "1" \
+   "$(printf '%s' "$dem_churn" | jq 'length' 2>/dev/null)"
+has "…and it is the claimable step"                    "claimable-step" "$dem_churn"
+rm -rf "$CHURN"
 
 echo "── the security invariant: proactive output is mr-only, never direct ──"
 ec=0; GC_PROACTIVE_MERGE=direct P sling px-1 --dry-run >/dev/null 2>&1 || ec=$?
@@ -283,10 +366,75 @@ has "an already-qualified pool target needs no GC_RIG" "altrig/gc-toolkit.proact
     "$(env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" GC_PROACTIVE_POOL=altrig/gc-toolkit.proactive \
         "$PROACTIVE" sling px-1 --dry-run 2>&1 || true)"
 
+echo "── a first reaction happens once: a reacted bead is not re-slung ──"
+# The actionable exit releases its subject on a bare gc.routed_to — a legitimate
+# pool claim a worker picks up directly. A SECOND sling of mol-first-reaction
+# retires that route at workflow-start (gascity retireInputConvoyClaimRoutes)
+# and drives nothing in its place, stranding the bead disposed-looking but
+# offered to no pool. So the sling skips a bead that already carries a reaction,
+# keyed on either marker a completed one leaves: gc.first_reaction (stamped by
+# the dispose) or gc.proactive_reaction (stamped by the release). A bead with
+# neither still slings. beads.json feeds the guard the subject state the way
+# agents.json feeds the deliverable probe; it lists only these beads, so every
+# other sling test above (px-1) reads as un-reacted and is unaffected.
+cat > "$FXDIR/beads.json" <<'JSON'
+{
+  "px-reacted":  {"metadata": {"gc.first_reaction": "actionable", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+  "px-released": {"metadata": {"gc.proactive_reaction": "1"}},
+  "px-fresh":    {"metadata": {}}
+}
+JSON
+REACTED_OUT="$(P sling px-reacted --dry-run 2>&1 || true)"
+absent "a reacted bead is NOT re-slung (no sling command emitted)" "gc sling" "$REACTED_OUT"
+has    "…and the skip names the cause"                             "already carries a first reaction" "$REACTED_OUT"
+# The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so
+# a cross-process caller (gc-helm react, gc-visit-open) can tell it from a
+# dispatch and file its own visit rather than wait for a reaction that never
+# ran. In-process (cmd_scan --sling) the same skip stays a return-0 no-op that
+# does not spend the cap — proved by the sweep tests below.
+rec=0; P sling px-reacted --dry-run >/dev/null 2>&1 || rec=$?
+eq     "…and the CLI skip exits RC_ALREADY_REACTED (3), not a dispatch"  "3" "$rec"
+absent "a released bead (gc.proactive_reaction=1) is NOT re-slung" "gc sling" \
+       "$(P sling px-released --dry-run 2>&1 || true)"
+rel=0; P sling px-released --dry-run >/dev/null 2>&1 || rel=$?
+eq     "…and a released bead's skip exits RC_ALREADY_REACTED (3) too"    "3" "$rel"
+has    "an un-reacted bead still slings mol-first-reaction"        "--on mol-first-reaction" \
+       "$(P sling px-fresh --dry-run 2>&1 || true)"
+fec=0; P sling px-fresh --dry-run >/dev/null 2>&1 || fec=$?
+eq     "…and a dispatched (un-reacted) sling exits 0"              "0" "$fec"
+has    "a bead absent from the store reads as un-reacted, slings"  "--on mol-first-reaction" \
+       "$(P sling px-1 --dry-run 2>&1 || true)"
+rm -f "$FXDIR/beads.json"
+
 echo "── the process-scan trigger (movable-forward beads, board-ranked) ──"
 eq  "scan --json ranks the high-priority candidate first" "px-hi" "$(P scan --json | jq -r '.[0].id')"
 eq  "scan --json ranks the low-priority candidate last"   "px-lo" "$(P scan --json | jq -r '.[1].id')"
 has "scan (human) lists a candidate"                      "px-hi" "$(P scan)"
+
+echo "── scan precision: only top-level allowlisted INPUT beads, no machinery ──"
+# A fresh reaction is for un-triaged input beads. Each drop below is a distinct
+# precision filter; the survivors are exactly the two allowlisted top-level
+# inputs. A candidate leaks through only if its filter regresses.
+SCAN_IDS="$(P scan --json | jq -r '.[].id' | tr '\n' ' ')"
+has    "keeps an allowlisted task"                       "px-lo"    "$SCAN_IDS"
+has    "keeps an allowlisted bug"                        "px-hi"    "$SCAN_IDS"
+absent "drops a disallowed type (spec, an output)"       "px-spec"  "$SCAN_IDS"
+absent "drops a topology root wearing issue_type task"   "px-wf"    "$SCAN_IDS"
+absent "drops feedback-pattern distiller machinery"      "px-fb"    "$SCAN_IDS"
+absent "drops a bead a sitting already ruled (takeaway)" "px-ruled" "$SCAN_IDS"
+absent "drops a non-top-level parent-child child"        "px-child" "$SCAN_IDS"
+# The two work-in-flight populations the scan must never sling a fresh reaction
+# at. px-review is a dispatched review lane (task_kind=review + check_name +
+# anchor_bead). px-anchor is the discriminating case: an allowlisted issue_type
+# with a body, top-level, and NO task_kind — every other clause passes it, so
+# only the durable-marker denylist (branch/merge_result/work_dir) can drop it.
+absent "drops a dispatched review bead (work-in-flight)"  "px-review" "$SCAN_IDS"
+absent "drops an implementation branch/PR anchor"         "px-anchor" "$SCAN_IDS"
+eq     "keeps exactly the two allowlisted top-level inputs" "2" "$(P scan --json | jq 'length')"
+# The allowlist is a per-rig config var (GC_PROACTIVE_TYPES), tunable without a
+# code change: widening it to include spec surfaces px-spec.
+has    "GC_PROACTIVE_TYPES widens the allowlist" "px-spec" \
+       "$(GC_PROACTIVE_TYPES=task,bug,feature,spike,spec P scan --json | jq -r '.[].id' | tr '\n' ' ')"
 
 echo "── one sweep is CAPPED: a reaction can end in a dispatch ──"
 # A first reaction may route its bead to an implementation pool, so an
@@ -304,6 +452,112 @@ absent "…and a sweep inside the cap reports nothing left" "left for the next s
 ec=0; GC_PROACTIVE_SLING_CAP=many P scan --sling >/dev/null 2>&1 || ec=$?
 eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
 has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
+
+echo "── a reacted bead never spends the sling cap (filter + loop) ──"
+# The bug: scan_precision_filter kept a bead carrying gc.first_reaction but no
+# gc.proactive_reaction, so it reached the loop; cmd_sling's guard skipped it
+# but returned success, and the loop counted the skip against the cap. Enough
+# stale first_reaction-only records could spend the whole cap every sweep while
+# no new reaction was slung. Two layers close it: the filter drops a reacted
+# bead (common case), and the loop refuses to count a guard-skip (the race).
+cat > "$FXDIR/scan.json" <<'JSON'
+[
+  {"id":"px-fr-only","title":"reacted: gc.first_reaction stamped, release pending","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.first_reaction":"actionable"}},
+  {"id":"px-clean","title":"an un-reacted input","description":"has a body","priority":1,"created_at":"2026-05-01T00:00:00Z","issue_type":"task"}
+]
+JSON
+FR_SCAN="$(P scan --json | jq -r '.[].id' | tr '\n' ' ')"
+absent "the precision filter drops a gc.first_reaction-only candidate" "px-fr-only" "$FR_SCAN"
+has    "…and keeps the un-reacted input"                               "px-clean"   "$FR_SCAN"
+
+# The race the filter cannot close: a candidate is clean when the scan selects
+# it (scan.json) but has reacted by the time the sling runs (beads.json feeds
+# the guard). cmd_sling skips it, returning success and flagging SLING_SKIPPED,
+# and the loop must not spend a cap slot on that skip. With cap 1 and the
+# reacted bead ranked first (older), the fresh bead must still be the one slung.
+cat > "$FXDIR/scan.json" <<'JSON'
+[
+  {"id":"px-race","title":"clean at selection, reacted before the sling","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug"},
+  {"id":"px-fresh2","title":"a genuinely fresh input","description":"has a body","priority":0,"created_at":"2026-06-01T00:00:00Z","issue_type":"task"}
+]
+JSON
+cat > "$FXDIR/beads.json" <<'JSON'
+{
+  "px-race":   {"metadata": {"gc.first_reaction": "actionable"}},
+  "px-fresh2": {"metadata": {}}
+}
+JSON
+RACE_SLINGS="$(GC_PROACTIVE_SLING_CAP=1 P scan --sling 2>/dev/null || true)"
+RACE_LOG="$(GC_PROACTIVE_SLING_CAP=1 P scan --sling 2>&1 >/dev/null || true)"
+absent "a raced (reacted-at-guard) candidate emits no sling"         "px-race"   "$RACE_SLINGS"
+has    "…and the fresh candidate is slung instead"                   "px-fresh2" "$RACE_SLINGS"
+eq     "exactly one real sling under cap 1 (the skip did not count)" "1" "$(printf '%s\n' "$RACE_SLINGS" | grep -c '^gc sling')"
+has    "the loop names the uncounted reacted skip"                   "already reacted" "$RACE_LOG"
+rm -f "$FXDIR/beads.json"
+
+echo "── scan filters BEFORE the page bound (live path), and 0 = unbounded ──"
+# The bug this locks out: scan_candidates paged each `gc bd ready` to its first
+# SCAN_LIMIT rows and THEN ran scan_precision_filter. When more than a page of
+# work-in-flight beads (branch/PR anchors, review lanes) sort ahead of a raw
+# input, the page is all now-dropped rows: the filter empties the union and
+# `scan --json` returns [] while a claimable input sits one row past the bound,
+# so `scan --sling` schedules nothing. The GC_PROACTIVE_FIXTURE path cannot
+# catch this — it bypasses the live `gc bd ready --limit` calls — so drive the
+# real path against a `gc bd ready` stub that honors --limit/--sort.
+SCANB="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
+# (1) 21 anchors carrying a work-in-flight marker (older) ahead of 1 raw input
+# (newest): 21 exceeds the 20-row page, so a page-then-filter scan is empty
+# while a filter-then-slice scan keeps the input.
+jq -n '[ range(1;22) as $d
+          | { id: "wip-\($d)", title: "work-in-flight anchor \($d)",
+              description: "has a body", issue_type: "task", priority: 1,
+              created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: { "merge_result": "pull_request" } } ]
+        + [ { id: "buried-input", title: "the one raw input past the page bound",
+              description: "a real un-triaged input", issue_type: "task",
+              priority: 1, created_at: "2026-12-01T00:00:00Z", metadata: {} } ]' \
+    > "$SCANB/buried.json"
+# (2) 22 clean inputs: the default page caps at 20 while SCAN_LIMIT=0 returns
+# all 22 — a plain .[0:$n] slice would read 0 as "take none", so this pins the
+# unbounded arm and the cap together.
+jq -n '[ range(1;23) as $d
+          | { id: "in-\($d)", title: "clean input \($d)",
+              description: "a body", issue_type: "task", priority: 2,
+              created_at: ("2026-02-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: {} } ]' > "$SCANB/many.json"
+cat > "$SCANB/gc" <<'SH'
+#!/bin/sh
+# Faithful-enough `gc bd ready`: honor --limit (0 = all) and --sort oldest over
+# the canned set, so a paged scan and a full-set scan are comparable.
+[ "$1" = bd ] && [ "$2" = ready ] || { printf '[]'; exit 0; }
+lim=0; srt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) shift; lim="$1" ;;
+    --limit=*) lim="${1#--limit=}" ;;
+    --sort) shift; srt="$1" ;;
+    --sort=*) srt="${1#--sort=}" ;;
+  esac
+  shift
+done
+jq --argjson lim "${lim:-0}" --arg srt "$srt" '
+  (if $srt == "oldest" then sort_by(.created_at // "") else . end)
+  | (if $lim == 0 then . else .[0:$lim] end)' "$GC_STUB_DATA"
+SH
+chmod +x "$SCANB/gc"
+scanb() { env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
+    PATH="$SCANB:$PATH" GC_STUB_DATA="$1" "${@:2}"; }
+sb_buried="$(scanb "$SCANB/buried.json" "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "scan keeps the input the page of anchors buried (filter before bound)" "1" \
+    "$(printf '%s' "$sb_buried" | jq 'length' 2>/dev/null)"
+has "…and it is the raw input, not a leaked work-in-flight anchor" "buried-input" "$sb_buried"
+sb_cap="$(scanb "$SCANB/many.json" "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "scan caps the filtered set at SCAN_LIMIT (20 of 22)" "20" \
+    "$(printf '%s' "$sb_cap" | jq 'length' 2>/dev/null)"
+sb_all="$(scanb "$SCANB/many.json" env GC_PROACTIVE_SCAN_LIMIT=0 "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "SCAN_LIMIT=0 returns the whole filtered set, unbounded (22 of 22)" "22" \
+    "$(printf '%s' "$sb_all" | jq 'length' 2>/dev/null)"
+rm -rf "$SCANB"
 
 echo "── usage/parser agree: no advertised-but-unimplemented flags ──"
 # Finding: usage advertised `sling --reason R` but the parser rejected it.
@@ -351,7 +605,7 @@ has "formula attributes the takeaway to proactive"      "--by proactive"        
 has "formula collapses stamp+release into one --release call" "--release"         "$F"
 has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
 
-echo "── the terminal step has THREE exits, not one hardcoded visit ──"
+echo "── the terminal step has FIVE exits, not one hardcoded visit ──"
 # The defect this replaces: every bead a reaction touched became a request for
 # the operator's attention, whatever the bead actually needed. The exits are
 # named in the formula and performed by one script, so the choice is a branch
@@ -360,27 +614,39 @@ DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
 [ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
 has "exit: actionable — route the bead to a pool"  "--disposition actionable" "$F"
+has "exit: recommend — file a visit that carries an action to Accept" "--disposition recommend" "$F"
 has "exit: blocked — record the wait as an edge"   "--disposition blocked"    "$F"
+has "exit: close — route to a validating closer"   "--disposition close"      "$F"
 has "exit: ruling — file the visit"                "--disposition ruling"     "$F"
 has "the exits are performed by one script"        "first-reaction-dispose.sh" "$F"
 has "the blocked exit names an existing wait"      "--waiting-on"             "$F"
 has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
+has "the close exit defers behind the reaction's own root" "--after-workflow" "$F"
 has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
+# recommend is the bridge between actionable and ruling: it files a visit like
+# ruling, but names the execution mol the operator Accepts — the flag ruling
+# rejects and recommend requires, so its presence discriminates the two exits.
+has "the recommend exit names the execution mol to Accept" "--recommended-formula" "$F"
 has "every exit records WHY it was chosen"         "--reason"                 "$F"
-# The three exits must be distinguishable to the reader, not one exit with
-# three labels: the actionable exit routes to the pool that does the work.
+# The five exits must be distinguishable to the reader, not one exit with five
+# labels: the actionable exit routes to the pool that does the work, and the
+# close exit routes to the pool that validates and closes it.
 has "the actionable exit names the pool that works it" "polecat pool"         "$F"
+has "the close exit names the validating closer formula" "mol-validate-close" "$F"
 D="$(cat "$DISPOSE")"
 has "…and the route default lives in the script, once" "gc-toolkit.polecat"   "$D"
 has "the script records the choice on the bead"    "gc.first_reaction="       "$D"
 has "…and the reason beside it"                    "gc.first_reaction_reason=" "$D"
 has "…and what the choice named"                   "gc.first_reaction_target=" "$D"
 has "the blocked exit refuses a cross-store edge"  "another store"            "$D"
-# The operator-intake contract: a topic a human typed is a conversation, and
-# routing it silently answers a question nobody asked
-# (docs/gascity-human-engagement.md, gc-visit-open's react path).
-has "an operator-commissioned subject is always the visit" "gc.origin=operator" "$D"
-has "…and the formula says so before the script refuses"   "gc.origin=operator" "$F"
+has "the close exit hands the bead to the validating closer" "mol-validate-close" "$D"
+# Origin does not decide the exit: an operator capture is triaged on its merits
+# like any other bead, and the guardrail (a genuine fork, an irreversible or
+# destructive action, or a policy call goes to a human) lives in the reacting
+# agent's rubric, not an origin gate on the script
+# (docs/gascity-human-engagement.md, Lever 1).
+has "the script does not gate the exit on origin"           "Origin does not decide the exit" "$D"
+has "…and the formula's rubric says origin does not decide"  "does not decide the exit"        "$F"
 absent "no exit closes the work bead"              "bd close"                 "$D"
 # A disposition that did not land is not a disposition. The script fails
 # non-zero when the route never stamped or the wait never became an edge, and
@@ -388,6 +654,28 @@ absent "no exit closes the work bead"              "bd close"                 "$
 # recorded as routed or waiting and is neither.
 has "the formula reads the exit code before it closes" "exited zero"          "$F"
 has "…naming the two ways a disposition fails to land" "never became a"     "$F"
+
+echo "── the terminal step drains a re-offered LANDED reaction before any exit ──"
+# A reaction that has landed carries gc.proactive_reaction=1. When advance-and-drain
+# is re-offered after that (a first session disposed, then drained before closing
+# this step), running an exit again is wrong on all five — and on the ruling and
+# recommend exits the gate-visit block files a SECOND visit before
+# first-reaction-dispose.sh can refuse the re-dispose, leaving a duplicate the
+# board carries. So a reacted-guard sits AHEAD of the exit blocks and drains
+# instead of running one. Extract the
+# last step and assert the guard is there, keyed on the landed marker, and that its
+# drain precedes the first exit block (1a) — so a re-offer never reaches the
+# gate-visit create. assets/scripts/first-reaction-reacted-guard.test.sh runs the
+# guard against each stored form of the marker; this checks its place in the step.
+AD_STEP="$(awk '/^id = "advance-and-drain"/{f=1} f' "$FORMULA_TOML")"
+has "advance-and-drain guards on the landed reaction marker" "gc.proactive_reaction" "$AD_STEP"
+DRAINS="$(printf '%s\n' "$AD_STEP" | grep -c 'gc runtime drain-ack')"
+eq  "advance-and-drain has three drain paths (the reaction-owned stand-down, the reacted-guard, and the terminal close)" "3" "$DRAINS"
+GUARD_DRAIN_LINE="$(printf '%s\n' "$AD_STEP" | awk '/# >>> advance-and-drain-reacted-guard/{f=1} f && /gc runtime drain-ack/{print NR; exit}')"
+EXIT1A_LINE="$(printf '%s\n' "$AD_STEP" | grep -n '1a. ACTIONABLE' | head -1 | cut -d: -f1)"
+{ [ -n "$GUARD_DRAIN_LINE" ] && [ -n "$EXIT1A_LINE" ] && [ "$GUARD_DRAIN_LINE" -lt "$EXIT1A_LINE" ]; } \
+  && ok "the reacted-guard drains before the first exit block (no gate-visit on a re-offer)" \
+  || bad "the reacted-guard drains before the first exit block" "guard_drain < exit1a" "guard_drain=$GUARD_DRAIN_LINE exit1a=$EXIT1A_LINE"
 
 echo "── the pool budget (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"
@@ -430,19 +718,28 @@ has "prompt names the formula"                  "mol-first-reaction"     "$PM"
 has "prompt forbids closing the target"         "Close the target"       "$PM"
 has "prompt keeps code on the mr path"          "mr path only"           "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
-has "prompt stamps the board takeaway on every exit"    "--takeaway"              "$PM"
-has "prompt attributes the takeaway to proactive"      "--by proactive"          "$PM"
-has "prompt teaches the actionable exit"               "--disposition actionable" "$PM"
-has "prompt teaches the blocked exit"                  "--disposition blocked"    "$PM"
-has "prompt teaches the ruling exit"                   "--disposition ruling"     "$PM"
+# Doctrine, not mechanics: the prompt NAMES the five exits and defers the dispose
+# commands (--disposition/--takeaway/--by proactive/--release) to the formula,
+# which the formula-contract assertions above already lock. Asserting the command
+# strings against the prompt too is what made the two surfaces duplicate.
+has "prompt names the actionable exit"                 "**actionable**"           "$PM"
+has "prompt names the recommend exit"                  "**recommend**"            "$PM"
+has "prompt names the blocked exit"                    "**blocked**"              "$PM"
+has "prompt names the close exit"                      "**close**"                "$PM"
+has "prompt names the ruling exit"                     "**ruling**"               "$PM"
+# The defect this branch fixes was that the prompt never taught the recommendation
+# path, so a render that names recommend but drops the action-to-mol menu leaves it
+# unusable. Pin the menu itself: the framing line and both of its action→mol rows,
+# so a future render that drops the menu fails here rather than passing silently.
+has "prompt teaches the recommend action-to-mol menu"  "name the mol that runs it" "$PM"
+has "…mapping a bead's own work to mol-polecat-work"   "do the work a bead describes" "$PM"
+has "…and an operator-authority action to its roster mol" "operator-authority action" "$PM"
 has "prompt says a visit is the minority case"         "minority case"            "$PM"
-has "prompt carries the operator-commission rule"     "gc.origin=operator"       "$PM"
-has "prompt collapses stamp+release into one --release call" "--release"         "$PM"
-has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1" "$PM"
+has "prompt triages origin on its merits, not a gate"  "triaged on its merits"    "$PM"
 absent "prompt has no separate --status=open release update" "--status=open"     "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"
-UFX="$(mktemp -d)"
+UFX="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$UFX/u1.show.json" <<'JSON'
 [{"id":"u1","title":"u","description":"trusted seed body","status":"open","issue_type":"task","parent":"","metadata":{"pr_number":"5"},"notes":"n","comment_count":1,"dependencies":[]}]
 JSON

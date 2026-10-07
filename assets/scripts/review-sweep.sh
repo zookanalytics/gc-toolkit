@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-sweep — arm 6 of the merge cadence; caller: refinery-reconcile.sh.
+# review-sweep — arm 9 of the merge cadence; caller: refinery-reconcile.sh.
 # Closes a dispatched review that has no reviewable surface left: its anchor is
 # closed AND its review_branch is absent from origin. Both conditions are
 # required. An anchor still gating means the review is owed, and a branch that
@@ -22,24 +22,20 @@ set -u
 
 PROG="review-sweep"
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # A review is dispatched into any of these; closed ones need no sweeping.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # Guarded reads: non-zero means "could not tell", never "nothing there".
-bd_list() {
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # </dev/null on every call inside the candidate loop: that loop is fed by a
 # heredoc, and a child inheriting its stdin would consume the rows behind it.
 bd_show() {
@@ -98,7 +94,7 @@ while IFS=$'\t' read -r rid anchor branch; do
 
   gc bd update "$rid" \
     --set-metadata gc.outcome=moot \
-    --append-notes "$PROG: closed with no verdict. Anchor $anchor is closed (merge_result=${AMR:-unrecorded}) and origin has no branch $branch, so neither approve nor request-changes could bind to a commit. No gate marker was written and no rework child was filed." \
+    --append-notes "$PROG: closed with no verdict. Anchor $anchor is closed (merge_result=${AMR:-unrecorded}) and origin has no branch $branch, so neither approve nor request-changes could bind to a commit. No check marker was written and no rework child was filed." \
     --status=closed </dev/null >/dev/null 2>&1 || true
 
   if ! RROW=$(bd_show "$rid"); then

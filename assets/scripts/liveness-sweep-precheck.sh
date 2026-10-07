@@ -28,6 +28,13 @@
 # NOT set -e: every failure is handled and routed to the run-the-pass side.
 set -uo pipefail
 
+# The one definition of what subject a visit covers, shared with liveness-sweep.sh
+# and gc-helm.sh. Exposes $VISIT_IDENTITY_JQ. This precheck reads only the
+# identity (no stall_root), mirroring liveness-sweep.sh's convgroups arm.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
+
 INTERVAL="${LIVENESS_SWEEP_INTERVAL:-21600}"     # the 6h cadence lives HERE only
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -171,7 +178,7 @@ if [ "$STAMP_WRITABLE" -eq 0 ]; then
     exit 1
 fi
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-precheck.XXXXXX")"
 
 if command -v timeout >/dev/null 2>&1; then
     if timeout -k 1 1 true >/dev/null 2>&1; then
@@ -183,10 +190,11 @@ else
     bounded() { "$@"; }
 fi
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 bd_read() { # bd_read <outfile> <subcommand> <flags...>
@@ -213,8 +221,10 @@ READS_OK=1
 READ_FAIL=""
 LAST_READ_ERR=""
 bd_read "$READY" ready --unassigned --limit=0 --json || { READS_OK=0; READ_FAIL="ready: $LAST_READ_ERR"; }
-bd_read "$LIVE"  list --status=open,in_progress --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }live: $LAST_READ_ERR"; }
-bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }widen: $LAST_READ_ERR"; }
+# --include-gates: a demand is a human gate (issue_type=gate), hidden from
+# `bd list` by default; the census must carry it so $demanded names its wait.
+bd_read "$LIVE"  list --status=open,in_progress --include-gates --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }live: $LAST_READ_ERR"; }
+bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --include-gates --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }widen: $LAST_READ_ERR"; }
 if [ "$READS_OK" -eq 1 ]; then
     jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE" 2>/dev/null
     jq -e 'type == "array"' "$ALIVE" >/dev/null 2>&1 \
@@ -239,13 +249,11 @@ if [ "$READS_OK" -eq 1 ]; then
                               | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | .[0].id // ""' "$LIVE" 2>/dev/null)
         BASELINE=$(cat "$BASELINE_FILE" 2>/dev/null || true)
         N_BASELINE=$(printf '%s' "$BASELINE" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')
-        # A visit names its subject twice (gc.continuation_group stamp + tracks
-        # edge) and only the edge has proved reliable (su-ab9je): read BOTH.
-        # select(. != "") keeps an empty stamp from matching an empty subject.
-        LIVE_VISIT=$(jq -r --arg s "$SUBJECT" '[.[] | select((.metadata.task_kind // "") == "visit")
-                                                    | ((.metadata["gc.continuation_group"] // ""),
-                                                       (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
-                                                    | select(. != "")]
+        # A visit names its subject by its shared identity (tracks edge,
+        # gc.continuation_group fallback — the stamp alone has landed empty,
+        # su-ab9je). visit_identity_subjects is visit-identity.sh.
+        LIVE_VISIT=$(jq -r --arg s "$SUBJECT" "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
+                                                    | visit_identity_subjects[]]
                                                | (index($s) // "") | tostring' "$LIVE" 2>/dev/null)
     fi
 fi
@@ -257,15 +265,48 @@ fi
 # an exclusion, for the reason the sweep's classify block gives; $demanded is
 # the sweep's arm of the same name, and it has to stay in step with it or a
 # bead the sweep would report is dropped here and never reaches a pass.
+# Live sitting identities, for the holder-liveness gate the SURVIVORS jq applies
+# to visits (mirrors liveness-sweep.sh). A holder GONE from the session list is
+# dead, and so is one still listed in a terminal state (archived/closed, helm's
+# ownerLive dead states); one listed in any other state is live; an UNCLAIMED
+# visit has none and still covers.
+# Fail CLOSED here: on an unreadable list LIVENESS_KNOWN is false, so a claimed
+# visit reads not-live, its subject is not excluded, and the pass runs rather
+# than risking a skipped report.
+LIVE_SESSIONS_JSON="[]"
+LIVENESS_KNOWN=false
+SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
+if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/dev/null 2>&1; then
+    LIVE_SESSIONS_JSON=$(printf '%s' "$SESS_RAW" \
+        | jq -c '[ (.sessions // [])[]? | select((.state // "") as $s | ($s != "archived") and ($s != "closed")) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
+    if printf '%s' "$LIVE_SESSIONS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        LIVENESS_KNOWN=true
+    else
+        LIVE_SESSIONS_JSON="[]"
+    fi
+fi
+
 SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
-    SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" '
+    SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
+      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
+      # holder_live mirrors liveness-sweep.sh so this stays a SUPERSET of its
+      # census, but fails CLOSED on an unreadable session list ($livenessknown
+      # false -> not live -> subject not excluded -> the pass runs). A claim
+      # writes one of assignee / gc.session_id / gc.session_name; no holder is an
+      # unclaimed visit, a pending escalation that still covers.
+      def holder_live:
+        ([ (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "") ]
+         | map(select(. != ""))) as $holders
+        | if ($holders | length) == 0 then true
+          elif ($livenessknown | not) then false
+          else any($holders[]; . as $h | ($livesessions | index($h)) != null)
+          end;
       ([ ($live[0] // [])[]
          | select((.metadata.task_kind // "") == "visit")
-         | ((.metadata["gc.continuation_group"] // ""),
-            (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
-         | select(. != "") ]) as $convgroups
+         | select(holder_live)
+         | visit_identity_subjects[] ]) as $convgroups
       | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
       | ([ ($alive[0] // [])[]
            | .dependencies[]?
@@ -275,7 +316,7 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
            | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
       | [ ($ready[0] // [])[]
           | select((.metadata["gc.routed_to"] // "") == "")
-          | select((.metadata.task_kind // "") != "visit")
+          | select(((.metadata.task_kind // "") != "visit") or (holder_live | not))
           | select((.metadata.task_kind // "") != "triage-subject")
           | select(.id as $id | ($demanded | index($id)) | not)
           | select((.metadata["triage.hold"] // "") == "")

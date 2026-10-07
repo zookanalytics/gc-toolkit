@@ -50,17 +50,28 @@ on your hook.
 
 ```bash
 # >>> patrol-wisp-reconcile
-WISP_IDS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-witness-patrol") | .id'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-witness-patrol") | .id'
+# Scope to THIS rig. Several rigs run this pack and pour the same patrol
+# title into one shared store, so a title-only sweep collides across rigs —
+# keeping a foreign rig's wisp and burning this rig's as surplus. Keep a
+# wisp only when its rig — the assignee's rig segment, or the gc.rig its
+# pour stamps — is this rig's or unset; a not-yet-assigned orphan carries
+# neither and is still collected.
+WISP_ROWS=$(
+  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
+  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
 )
-WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')           # keep one (prefers in_progress)
-for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do  # burn any surplus
-  gc bd mol burn "$extra" --force
-done
+# Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
+# awaiting burn beside the fresh successor it poured, the successor is always
+# the newer created_at — a cycle pours its successor only at its terminal step.
+# Selecting by status adopts the completed (in_progress) cycle and drops the
+# fresh (open) successor.
+WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
+WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
+for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='gc-toolkit.' --json | jq -r '.new_epic_id')
+  gc bd update "$WISP" --set-metadata gc.rig="$GC_RIG"  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
 ```
@@ -86,27 +97,41 @@ the current wisp.
   writes there land in the enclosing repo.
 - **Preserve `metadata.branch` on recovery.** The branch is where the next
   polecat resumes from; a recovery that strips it re-does the work.
-- **Skip infrastructure**: dispatcher-routed control beads and beads owned
-  by configured named identities are not orphans. A visit whose session died
-  DOES return to the pool — respawn-and-reconstitute is the designed path.
+- **Skip infrastructure**: dispatcher-routed control beads, graph.v2 topology
+  roots (`gc.kind` workflow/scope/spec — not recoverable work; their steps carry
+  the work and the control-dispatcher's `workflow-finalize` closes the root), and
+  beads owned by configured named identities are not orphans. A visit whose
+  session died DOES return to the pool — respawn-and-reconstitute is the designed
+  path.
 
-## Escalation
+## Findings
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+A finding is a BEAD, filed through one writer that dedups repeats by
+situation key. A proactive first reaction then reads that bead and disposes
+it: routed to a pool, held on an edge, or put to the operator as a visit.
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
-Routine recoveries (pool resize, config change) are logged, not escalated.
-Escalate what genuinely needs a human: repeated recovery of one bead (crash
-loop), salvage refusals, a refinery queue that is stuck rather than merely
-waiting on the operator. Context recycling is the cycle-recycle Stop hook's
-job — never something you ask about.
+`--about` names the bead the finding is about. It narrows the dedup to that
+bead, so one key over two beads stays two findings rather than collapsing
+into one.
+
+Routine recoveries (pool resize, config change) are logged, not filed. File
+what needs someone to act: repeated recovery of one bead (crash loop),
+salvage refusals, a refinery queue that is stuck rather than merely waiting
+on the operator.
+
+An emergency that needs a human NOW and cannot wait for a disposition — a
+crash, data loss, corruption, a security problem — goes straight to a visit
+through `"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key>
+--message "<what is wrong + recommendation>"`. Context recycling is the
+cycle-recycle Stop hook's job — never something you ask about.
 
 
 ## Heartbeat Discipline — No Consent UI
@@ -146,10 +171,14 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- State a decision or an action so the operator can accept or reject it
-  without looking anything up. A bare bead id, a title, or a pointer to a
-  queue is not a decision.
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+- State an operator-facing decision, brief, or sign-off so it is
+  answerable in about a minute: lead with the plain-language stake and
+  what each option costs, keep it to one screen, and let the operator
+  accept or reject without looking anything up. An identifier — a bead
+  id, title, path, or queue pointer — is a parenthetical reference for
+  looking something up or cross-referencing it. It carries no weight on
+  its own and is never the noun that carries the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -182,10 +211,6 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -200,6 +225,24 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by the system-class roles: deacon,
+     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
+     standards for that class only; universal standards live in
+     work-quality-base. -->
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.
 
 
 

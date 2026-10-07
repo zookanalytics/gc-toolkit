@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
+	"golang.org/x/sync/errgroup"
 )
 
 // defaultSupervisorPort is the supervisor's documented default loopback port
@@ -20,13 +21,23 @@ import (
 // unreadable and no override env is set.
 const defaultSupervisorPort = 8372
 
+// maxGatherFanout bounds how many per-epic and per-convoy child roll-ups the
+// gather fetches at once. Each roll-up is an independent GET, and fetching them
+// concurrently keeps the fan-out from serializing into an N+1 that costs tens
+// of seconds on a wide store. The bound keeps a store with hundreds of convoys
+// from opening an unbounded number of connections to the supervisor in a single
+// burst.
+const maxGatherFanout = 8
+
 // SupervisorSource reads bead state from the supervisor loopback HTTP
 // API. It satisfies [Source].
 //
 // It gathers the three TYPE-keyed anchor kinds and the two metadata-keyed ones
 // ([metadataAnchors]: `human` and `parked`). `GET /beads` takes no metadata
-// predicate, so that filter runs client-side over one paged scan of the city's
-// open beads.
+// predicate, so that filter runs client-side over a paged scan of the city's
+// open beads — plus a `type=gate` page unioned in, since a human demand is now
+// a gate and only the API's own defaults decide whether the bare page carries
+// one (see [SupervisorSource.openBeads]).
 //
 // A board served from this backend is NARROWER: no `updated_at` (so stale_days
 // is 0), no visits and so no sittings, no in-flight map, and no resolved
@@ -344,9 +355,30 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 	}
 	g.note(epics.Partial, epics.PartialErrors)
 	g.ok()
-	for _, e := range epics.Items {
+
+	// One GET /beads/graph/{id} per epic, fetched concurrently under the fan-out
+	// bound. Each fetch is independent and writes only its own slot, so the
+	// shared gatherState is not touched here — its anchors and warnings are
+	// merged back in the serial loop below, which also keeps anchor order
+	// stable regardless of which fetch finished first.
+	children := make([][]board.Child, len(epics.Items))
+	warns := make([][]string, len(epics.Items))
+	eg := new(errgroup.Group)
+	eg.SetLimit(maxGatherFanout)
+	for i, e := range epics.Items {
+		i, id := i, e.ID
+		eg.Go(func() error {
+			children[i], warns[i] = s.epicChildren(ctx, id)
+			return nil
+		})
+	}
+	_ = eg.Wait() // a child fetch reports its failure as a warning, never a hard error
+
+	for i, e := range epics.Items {
+		if len(warns[i]) > 0 {
+			g.note(true, warns[i])
+		}
 		rig, prefix := g.rigOf(e.ID)
-		children := s.epicChildren(ctx, g, e.ID)
 		g.anchors = append(g.anchors, board.Anchor{
 			ID:       e.ID,
 			Title:    e.Title,
@@ -355,25 +387,25 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 			Rig:      rig,
 			Prefix:   prefix,
 			Priority: e.Priority,
-			Children: children,
+			Children: children[i],
 		})
 	}
 }
 
 // epicChildren returns the epic's DIRECT children (matching gc-helm.sh's
 // `bd list --parent`), reading the all-status graph roll-up so closed children
-// are counted. Direct children are the parent-child edges out of the root.
-func (s *SupervisorSource) epicChildren(ctx context.Context, g *gatherState, epicID string) []board.Child {
+// are counted. Direct children are the parent-child edges out of the root. A
+// fetch failure is returned as a partial-error warning rather than mutating the
+// shared gatherState, so the caller can run this concurrently across epics.
+func (s *SupervisorSource) epicChildren(ctx context.Context, epicID string) (children []board.Child, warn []string) {
 	var graph graphResponse
 	if err := s.getJSON(ctx, "/beads/graph/"+url.PathEscape(epicID), &graph); err != nil {
-		g.note(true, []string{"graph " + epicID + ": " + err.Error()})
-		return nil
+		return nil, []string{"graph " + epicID + ": " + err.Error()}
 	}
 	byID := make(map[string]apiBead, len(graph.Beads))
 	for _, b := range graph.Beads {
 		byID[b.ID] = b
 	}
-	var children []board.Child
 	for _, d := range graph.Deps {
 		if d.From == epicID && d.Kind == "parent-child" {
 			if b, ok := byID[d.To]; ok {
@@ -381,7 +413,7 @@ func (s *SupervisorSource) epicChildren(ctx context.Context, g *gatherState, epi
 			}
 		}
 	}
-	return children
+	return children, nil
 }
 
 // childOf projects one payload bead onto a board child. Assignee and metadata
@@ -432,18 +464,43 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 	}
 	g.note(convoys.Partial, convoys.PartialErrors)
 	g.ok()
+
+	// Filter FIRST, then fan out: the per-convoy child fetch is the expensive
+	// call, and a skipped convoy must not make one. Skip parented (non-floating)
+	// convoys and the transient MACHINE convoys — "sling-*" and "input convoy
+	// for ..." — mirroring the gc-helm.sh filter. The live API omits `parent`,
+	// so the two title prefixes do the real exclusion work.
+	var admitted []apiBead
 	for _, c := range convoys.Items {
-		// Skip parented (non-floating) convoys and the transient MACHINE
-		// convoys — "sling-*" and "input convoy for ..." — mirroring the
-		// gc-helm.sh filter. The live API omits `parent`, so the two
-		// title prefixes do the real exclusion work.
 		if c.Parent != "" ||
 			strings.HasPrefix(c.Title, "sling-") ||
 			strings.HasPrefix(c.Title, "input convoy for") {
 			continue
 		}
+		admitted = append(admitted, c)
+	}
+
+	// One GET /convoy/{id} per admitted convoy, fetched concurrently under the
+	// fan-out bound — the convoy half of the N+1. Each fetch writes only its own
+	// slot; the shared gatherState is merged serially below, in admitted order.
+	children := make([][]board.Child, len(admitted))
+	warns := make([][]string, len(admitted))
+	eg := new(errgroup.Group)
+	eg.SetLimit(maxGatherFanout)
+	for i, c := range admitted {
+		i, id := i, c.ID
+		eg.Go(func() error {
+			children[i], warns[i] = s.convoyChildren(ctx, id)
+			return nil
+		})
+	}
+	_ = eg.Wait() // a child fetch reports its failure as a warning, never a hard error
+
+	for i, c := range admitted {
+		if len(warns[i]) > 0 {
+			g.note(true, warns[i])
+		}
 		rig, prefix := g.rigOf(c.ID)
-		children := s.convoyChildren(ctx, g, c.ID)
 		g.anchors = append(g.anchors, board.Anchor{
 			ID:       c.ID,
 			Title:    c.Title,
@@ -452,22 +509,24 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 			Rig:      rig,
 			Prefix:   prefix,
 			Priority: c.Priority,
-			Children: children,
+			Children: children[i],
 		})
 	}
 }
 
-func (s *SupervisorSource) convoyChildren(ctx context.Context, g *gatherState, convoyID string) []board.Child {
+// convoyChildren returns a floating convoy's members. A fetch failure is
+// returned as a partial-error warning rather than mutating the shared
+// gatherState, so the caller can run this concurrently across convoys.
+func (s *SupervisorSource) convoyChildren(ctx context.Context, convoyID string) (children []board.Child, warn []string) {
 	var detail convoyResponse
 	if err := s.getJSON(ctx, "/convoy/"+url.PathEscape(convoyID), &detail); err != nil {
-		g.note(true, []string{"convoy " + convoyID + ": " + err.Error()})
-		return nil
+		return nil, []string{"convoy " + convoyID + ": " + err.Error()}
 	}
-	children := make([]board.Child, 0, len(detail.Children))
+	children = make([]board.Child, 0, len(detail.Children))
 	for _, c := range detail.Children {
 		children = append(children, childOf(c))
 	}
-	return children
+	return children, nil
 }
 
 // beadPageSize is the supervisor's own maximum for `GET /beads?limit=`; asking
@@ -492,23 +551,54 @@ var infraTypes = map[string]bool{
 	"molecule": true,
 }
 
-// openBeads pages the whole city's open beads.
+// openBeads pages the whole city's open beads, GATES INCLUDED.
 //
-// EVERY WAY THIS SCAN COMES BACK SHORT REPORTS ITSELF: both truncations — a
+// The native human-demand state this backend must gather IS a gate —
+// issue_type=gate, gc.routed_to=human (assets/scripts/gc-helm.sh `demand`).
+// `bd list` hides issue_type=gate by default; the gascity API's list path
+// does NOT today (its bd-backed store passes --include-gates unconditionally,
+// internal/beads/bdstore.go listViaBDList), so the bare status=open page
+// already carries gates. Nothing in the API contract promises that, and a
+// default exclusion added upstream would silently drop every human gate the
+// in-process backend shows (whose metadata-keyed SearchIssues has no type
+// exclusion). The second, gate-keyed page is that guard: unioned by id, it
+// costs one short page and a dedupe while the bare page carries gates, and
+// keeps the board whole if it ever stops.
+//
+// EVERY WAY EITHER SCAN COMES BACK SHORT REPORTS ITSELF: both truncations — a
 // page that fails after earlier ones succeeded, and the page cap — return the
 // rows already read together with a `warn` the caller records as a partial
 // error. A board missing rows must not report itself complete.
 func (s *SupervisorSource) openBeads(ctx context.Context) (out []apiBead, warn []string, err error) {
+	out, warn, err = s.pageBeads(ctx, "/beads?status=open", "open-bead scan")
+	if err != nil {
+		return nil, warn, err
+	}
+	gates, gwarn, gerr := s.pageBeads(ctx, "/beads?status=open&type=gate", "gate scan")
+	warn = append(warn, gwarn...)
+	if gerr != nil {
+		// A gate page that fails degrades the board to the anchors already
+		// read, and says so — it never discards them.
+		return out, append(warn, "gate scan: "+gerr.Error()), nil
+	}
+	return dedupeBeadsByID(out, gates), warn, nil
+}
+
+// pageBeads pages one `/beads` query to exhaustion. base carries the query's
+// fixed predicates (status, and for the gate scan type); limit and cursor are
+// appended here. label prefixes the truncation warnings so the two scans name
+// themselves distinctly.
+func (s *SupervisorSource) pageBeads(ctx context.Context, base, label string) (out []apiBead, warn []string, err error) {
 	cursor := ""
 	for page := 1; page <= maxBeadPages; page++ {
-		path := fmt.Sprintf("/beads?status=open&limit=%d", beadPageSize)
+		path := fmt.Sprintf("%s&limit=%d", base, beadPageSize)
 		if cursor != "" {
 			path += "&cursor=" + url.QueryEscape(cursor)
 		}
 		var env listEnvelope
 		if e := s.getJSON(ctx, path, &env); e != nil {
 			if len(out) > 0 {
-				return out, append(warn, fmt.Sprintf("open-bead scan stopped after %d page(s): %v", page-1, e)), nil
+				return out, append(warn, fmt.Sprintf("%s stopped after %d page(s): %v", label, page-1, e)), nil
 			}
 			return nil, nil, e
 		}
@@ -523,11 +613,33 @@ func (s *SupervisorSource) openBeads(ctx context.Context) (out []apiBead, warn [
 		}
 		cursor = env.NextCursor
 	}
-	return out, append(warn, fmt.Sprintf("open-bead scan stopped at the %d-page cap; rows may be missing", maxBeadPages)), nil
+	return out, append(warn, fmt.Sprintf("%s stopped at the %d-page cap; rows may be missing", label, maxBeadPages)), nil
 }
 
-// gatherMetadataAnchors admits the two METADATA-keyed kinds from one paged scan
-// of the city's open beads.
+// dedupeBeadsByID unions bead pages, keeping the first row seen for each id.
+// The open and gate pages are disjoint by issue_type today; the dedup is the
+// guard that keeps the union one-row-per-id if a page predicate ever widens.
+func dedupeBeadsByID(pages ...[]apiBead) []apiBead {
+	total := 0
+	for _, p := range pages {
+		total += len(p)
+	}
+	out := make([]apiBead, 0, total)
+	seen := make(map[string]bool, total)
+	for _, p := range pages {
+		for _, b := range p {
+			if b.ID == "" || seen[b.ID] {
+				continue
+			}
+			seen[b.ID] = true
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// gatherMetadataAnchors admits the two METADATA-keyed kinds from [openBeads]'
+// scan of the city's open beads.
 //
 // The selector is [metadataAnchor.matches], shared with the beads backend so
 // the two cannot drift on which beads are anchors. A bead carrying BOTH markers
@@ -600,19 +712,23 @@ func anchorCandidate(b apiBead) bool {
 func (s *SupervisorSource) metadataAnchorFor(g *gatherState, b apiBead, md map[string]string, kind string, children []board.Child) board.Anchor {
 	rig, prefix := g.rigOf(b.ID)
 	return board.Anchor{
-		ID:             b.ID,
-		Title:          b.Title,
-		Kind:           kind,
-		Source:         kind,
-		Rig:            rig,
-		Prefix:         prefix,
-		Priority:       b.Priority,
-		Description:    b.Description,
-		Metadata:       md,
-		Children:       children,
-		Takeaway:       md["gc.takeaway"],
-		TakeawayAt:     md["gc.takeaway_at"],
-		TakeawayBy:     md["gc.takeaway_by"],
+		ID:          b.ID,
+		Title:       b.Title,
+		Kind:        kind,
+		Source:      kind,
+		Rig:         rig,
+		Prefix:      prefix,
+		Priority:    b.Priority,
+		Description: b.Description,
+		Metadata:    md,
+		Children:    children,
+		Takeaway:    md["gc.takeaway"],
+		TakeawayAt:  md["gc.takeaway_at"],
+		TakeawayBy:  md["gc.takeaway_by"],
+		// Notes is absent: this backend's apiBead does not decode it, so a
+		// recommendation row served from the supervisor fallback carries no card.
+		// The primary BeadsSource reads it; this is the same degraded-read shape
+		// as WaitingUnknown below.
 		WaitingUnknown: true,
 	}
 }

@@ -1,19 +1,37 @@
 #!/usr/bin/env bash
 # Hermetic test for reconcile-rig-checkouts.sh.
 #
-# Uses real temp git repos as stand-in rigs and a fake `gc` (a text-file bead
-# ledger) on PATH. No dependency on the live city, Dolt, the mayor, or the
-# network. Covers: (a) a clean-behind rig advances; (b) a diverged rig is NOT
-# mutated and produces exactly one mayor escalation; (c) a re-run does not
-# duplicate it; (d) the escalation auto-closes once the rig ff-s cleanly;
-# (e) the HQ root is excluded.
+# Uses real temp git repos as stand-in rigs, a fake `gc` (a text-file bead
+# ledger) and a fake escalate.sh (a call recorder) on PATH. No dependency on
+# the live city, Dolt, an agent, or the network. Covers: (a) a clean-behind rig
+# advances; (b) a diverged rig is NOT mutated and files exactly one reconcile
+# bead; (c) a re-run does not duplicate that bead; (d) the bead auto-closes once
+# the rig ff-s cleanly, and its board-visible tracking visit is retracted as moot
+# through escalate.sh --retract in the same pass (a still-diverged rig retracts
+# nothing); (e) the HQ root is excluded; (f) a divergence is raised
+# through escalate.sh, an advanced/HQ rig is not, and a recovered rig is not
+# re-escalated; (g) a configured pool that does not route falls back to the
+# human board; (h) an already-upstream divergence (SHA churn) auto-heals via
+# reset --hard while a genuine divergence still escalates, RECONCILE_NO_AUTOHEAL
+# disables the heal, and a dirty tracked file blocks it only when its content is
+# not yet upstream; (i) a unique local merge commit (invisible to git cherry)
+# fails the guard closed and escalates rather than being reset away; (j) an
+# unreadable git status fails the guard closed rather than healing on an
+# unproven-clean tree; (k) a path staged with local-only content whose worktree
+# copy matches the remote fails the guard closed, so reset --hard cannot discard
+# the staged content; (l) a rig root parked off the default branch (HEAD on a
+# feature/integration branch ahead of origin) is surfaced and left untouched,
+# not silently counted advanced by a no-op fast-forward.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/reconcile-rig-checkouts.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-reconcile-rig-checkouts-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -21,8 +39,17 @@ bad()  { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()   { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 commit() { echo "$2" > "$1/f.txt"; git -C "$1" add -A; git -C "$1" commit -qm "$2"; }
-# count OPEN escalation beads in the fake ledger for a given rig key.
+# count OPEN reconcile beads in the fake ledger for a given rig key.
 open_count() { awk -F'|' -v k="$1" '$2==k && $3=="open"' "$TMP/ledger" 2>/dev/null | wc -l | tr -d ' '; }
+# id of the OPEN reconcile bead for a rig key (empty if none).
+bead_for()   { awk -F'|' -v k="$1" '$2==k && $3=="open"{print $1; exit}' "$TMP/ledger" 2>/dev/null; }
+# escalate.sh calls recorded for a rig key, and the subject/pool of the first/last.
+esc_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/escalations" 2>/dev/null | wc -l | tr -d ' '; }
+esc_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/escalations" 2>/dev/null; }
+esc_last_pool() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{p=$3} END{print p}' "$TMP/escalations" 2>/dev/null; }
+# escalate.sh --retract calls recorded for a rig key, and the subject of the first.
+retract_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/retractions" 2>/dev/null | wc -l | tr -d ' '; }
+retract_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/retractions" 2>/dev/null; }
 
 # --- Build a remote with two commits, then derive three checkouts. ----------
 SRC="$TMP/src"; git init -q -b main "$SRC"; commit "$SRC" c1; commit "$SRC" c2
@@ -75,25 +102,356 @@ esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
+
+# Fake escalate.sh: record each call as `<key>|<subject>|<pool>` and, so the
+# pool->human fallback can be exercised, exit non-zero for a pool named in
+# FAKE_BAD_POOL — exactly as the real escalate.sh exits non-zero on a route no
+# live agent claims.
+cat > "$TMP/bin/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+subject=""; key=""; pool=""; retract=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --retract) retract=1; shift;;
+    --subject) subject="${2:-}"; shift 2;;
+    --key)     key="${2:-}";     shift 2;;
+    --message) shift 2;;
+    --pool)    pool="${2:-}";    shift 2;;
+    *) shift;;
+  esac
+done
+# The moot-retract counterpart records apart from filings so the file counts
+# stay exact; the real one closes the tracked visit through visit-close.sh
+# (proven in escalate.test.sh), and is a no-op success when none is open. It
+# exits non-zero under FAKE_RETRACT_FAIL, as the real one does on an unreadable
+# lookup or a close that did not land, so the caller's skip-close gate is testable.
+if [ "$retract" = 1 ]; then
+  printf '%s|%s\n' "$key" "$subject" >> "$FAKE_RETRACTIONS"
+  [ -n "${FAKE_RETRACT_FAIL:-}" ] && exit 1
+  exit 0
+fi
+printf '%s|%s|%s\n' "$key" "$subject" "$pool" >> "$FAKE_ESCALATIONS"
+[ -n "$pool" ] && [ "$pool" = "${FAKE_BAD_POOL:-}" ] && exit 1
+exit 0
+ESC
+chmod +x "$TMP/bin/escalate.sh"
+
 export PATH="$TMP/bin:$PATH" FAKE_RIGS_JSON="$TMP/rigs.json" FAKE_LEDGER="$TMP/ledger"
+export GC_RECONCILE_ESCALATE_TOOL="$TMP/bin/escalate.sh" FAKE_ESCALATIONS="$TMP/escalations"
+export FAKE_RETRACTIONS="$TMP/retractions"
+: > "$TMP/escalations"; : > "$TMP/retractions"
 
 # --- Run 1: alpha advances, beta escalates, hq is skipped. -------------------
 bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/alpha" rev-parse HEAD)" "$REMOTE_HEAD" "clean-behind rig advances to origin"
 eq "$(git -C "$TMP/beta"  rev-parse HEAD)" "$BETA_DIVERGED" "diverged rig is not mutated"
 grep -q c3-local < <(git -C "$TMP/beta" log --oneline) && ok "diverged rig keeps local commit" || bad "diverged rig keeps local commit"
-eq "$(open_count beta)"  "1" "diverged rig produces exactly one escalation"
-eq "$(open_count alpha)" "0" "advanced rig produces no escalation"
+eq "$(open_count beta)"  "1" "diverged rig files exactly one reconcile bead"
+eq "$(open_count alpha)" "0" "advanced rig files no reconcile bead"
 eq "$(open_count loomington)" "0" "HQ root is excluded (not reconciled)"
 
-# --- Run 2: idempotent — no duplicate escalation. ----------------------------
-bash "$SCRIPT" >/dev/null
-eq "$(open_count beta)" "1" "re-run does not duplicate the escalation"
+# The divergence is raised through escalate.sh, on the reconcile bead as subject;
+# an advanced or HQ rig raises nothing.
+eq "$(esc_count beta)"  "1" "diverged rig is escalated through escalate.sh"
+eq "$(esc_subject beta)" "$(bead_for beta)" "escalation subject is the reconcile bead"
+eq "$(esc_last_pool beta)" "" "default escalation names no pool (human helm board)"
+eq "$(esc_count alpha)" "0" "advanced rig is not escalated"
+eq "$(esc_count loomington)" "0" "HQ root is not escalated"
+# A still-diverged rig's visit must stay claimable: nothing is retracted while
+# the subject is unresolved.
+eq "$(retract_count beta)" "0" "a still-diverged rig retracts no visit"
 
-# --- Run 3: rig resolved -> escalation auto-closes. --------------------------
+# --- Run 2: idempotent — no duplicate reconcile bead. ------------------------
+# escalate.sh is called again (it dedups the visit on its own side, proven in
+# its own test); the reconcile bead must not be duplicated.
+bash "$SCRIPT" >/dev/null
+eq "$(open_count beta)" "1" "re-run does not duplicate the reconcile bead"
+
+# --- Run 3: rig resolved -> bead auto-closes, its moot tracking visit is
+# retracted, and no fresh escalation is raised. ------------------------------
+BETA_ESC_BEFORE="$(esc_count beta)"
+BETA_BEAD="$(bead_for beta)"
+: > "$TMP/retractions"
 git -C "$TMP/beta" reset --hard -q origin/main
 bash "$SCRIPT" >/dev/null
-eq "$(open_count beta)" "0" "escalation auto-closes after a clean fast-forward"
+eq "$(open_count beta)" "0" "reconcile bead auto-closes after a clean fast-forward"
+eq "$(esc_count beta)" "$BETA_ESC_BEFORE" "a recovered rig is not re-escalated"
+eq "$(retract_count beta)" "1" "the recovered rig's tracking visit is retracted as moot"
+eq "$(retract_subject beta)" "$BETA_BEAD" "the retract names the reconcile bead as its subject"
+
+# --- Run 4: a configured pool that does not route falls back to human. -------
+git -C "$TMP/beta" reset --hard -q "$BETA_DIVERGED"    # re-diverge beta
+: > "$TMP/escalations"
+RECONCILE_ESCALATION_POOL="rig/absent.pool" FAKE_BAD_POOL="rig/absent.pool" \
+  bash "$SCRIPT" >/dev/null
+eq "$(esc_count beta)" "2" "an unroutable pool triggers a second, fallback escalate call"
+eq "$(esc_last_pool beta)" "" "the fallback escalation carries no pool (human helm board)"
+
+# ===========================================================================
+# Auto-heal an already-upstream divergence (SHA churn from a rebase/squash/
+# force-push): reset --hard is lossless, so the checkout re-syncs without a
+# human. A genuine divergence still escalates, RECONCILE_NO_AUTOHEAL disables
+# the heal, and a dirty tracked file blocks the heal only when its content is
+# not yet upstream. Each rig below gets its own remote so its history rewrite is
+# isolated. beta above already proves a genuine unique-commit divergence is left
+# untouched; these cases exercise the new branch directly.
+# ===========================================================================
+
+# gamma sits on the pre-rewrite commit; origin carries the same tree under a new
+# SHA (an amend/force-push), so ff refuses but git cherry finds nothing unique.
+git init -q -b main "$TMP/gamma.src"; commit "$TMP/gamma.src" g1; commit "$TMP/gamma.src" g2
+git clone -q --bare "$TMP/gamma.src" "$TMP/gamma.git"
+git clone -q "$TMP/gamma.git" "$TMP/gamma"                       # gamma HEAD = g2 (pre-rewrite SHA)
+GAMMA_OLD="$(git -C "$TMP/gamma" rev-parse HEAD)"
+git -C "$TMP/gamma.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # g2': same tree/patch, new SHA
+git -C "$TMP/gamma.src" push -qf "$TMP/gamma.git" main
+GAMMA_REMOTE="$(git -C "$TMP/gamma.git" rev-parse main)"
+echo keep-me > "$TMP/gamma/untracked.txt"                        # untracked; reset --hard must keep it
+
+# delta: a genuine unique local commit whose content is not upstream -> escalate.
+git init -q -b main "$TMP/delta.src"; commit "$TMP/delta.src" d1; commit "$TMP/delta.src" d2
+git clone -q --bare "$TMP/delta.src" "$TMP/delta.git"
+git clone -q "$TMP/delta.git" "$TMP/delta"
+commit "$TMP/delta" d3-local                                     # a local commit...
+DELTA_DIVERGED="$(git -C "$TMP/delta" rev-parse HEAD)"
+commit "$TMP/delta.src" d3-remote                                # ...while origin advances elsewhere
+git -C "$TMP/delta.src" push -q "$TMP/delta.git" main
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"gamma","path":"$TMP/gamma"},
+  {"name":"delta","path":"$TMP/delta"}
+]}
+JSON
+
+# Escape hatch first: with auto-heal disabled, even an already-upstream rig is
+# escalated and left untouched. This run files gamma's reconcile bead.
+: > "$TMP/escalations"
+RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/gamma" rev-parse HEAD)" "$GAMMA_OLD" "RECONCILE_NO_AUTOHEAL leaves an already-upstream checkout unmutated"
+eq "$(esc_count gamma)" "1" "RECONCILE_NO_AUTOHEAL escalates instead of healing"
+eq "$(open_count gamma)" "1" "RECONCILE_NO_AUTOHEAL files a reconcile bead"
+
+# Now with auto-heal enabled (default): gamma resets --hard to origin, keeps its
+# untracked file, closes the bead the escape-hatch run filed, and is not
+# re-escalated; delta's genuine divergence still escalates and is not mutated.
+GAMMA_ESC_BEFORE="$(esc_count gamma)"
+GAMMA_BEAD="$(bead_for gamma)"
+: > "$TMP/retractions"
+OUT="$(bash "$SCRIPT")"
+eq "$(git -C "$TMP/gamma" rev-parse HEAD)" "$GAMMA_REMOTE" "already-upstream rig is reset --hard to origin"
+[ -f "$TMP/gamma/untracked.txt" ] && ok "auto-heal preserves untracked files" || bad "auto-heal preserves untracked files"
+eq "$(open_count gamma)" "0" "auto-heal closes the open reconcile bead"
+eq "$(esc_count gamma)" "$GAMMA_ESC_BEFORE" "auto-healed rig is not re-escalated"
+eq "$(retract_count gamma)" "1" "the auto-healed rig's tracking visit is retracted as moot"
+eq "$(retract_subject gamma)" "$GAMMA_BEAD" "the auto-heal retract names the reconcile bead as its subject"
+eq "$(retract_count delta)" "0" "a still-diverged rig alongside retracts nothing"
+grep -q '1 auto-healed' <<< "$OUT" && ok "summary line reports the auto-heal count" || bad "summary line reports the auto-heal count (got '$OUT')"
+eq "$(git -C "$TMP/delta" rev-parse HEAD)" "$DELTA_DIVERGED" "a genuine unique-commit divergence is not mutated"
+eq "$(open_count delta)" "1" "a genuine unique-commit divergence keeps its reconcile bead"
+
+# epsilon: an already-upstream SHA churn PLUS a dirty tracked change whose
+# content is NOT upstream -> the per-file guard blocks the heal and escalates.
+git init -q -b main "$TMP/eps.src"; commit "$TMP/eps.src" ep1; commit "$TMP/eps.src" ep2
+git clone -q --bare "$TMP/eps.src" "$TMP/eps.git"
+git clone -q "$TMP/eps.git" "$TMP/epsilon"
+EPS_HEAD="$(git -C "$TMP/epsilon" rev-parse HEAD)"
+git -C "$TMP/eps.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"
+git -C "$TMP/eps.src" push -qf "$TMP/eps.git" main               # SHA churn: ff refuses, cherry clean
+echo local-wip > "$TMP/epsilon/f.txt"                            # dirty; differs from remote (f.txt=ep2)
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"epsilon","path":"$TMP/epsilon"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/epsilon" rev-parse HEAD)" "$EPS_HEAD" "a dirty tracked change not upstream blocks the heal"
+eq "$(esc_count epsilon)" "1" "a dirty tracked change not upstream escalates"
+eq "$(cat "$TMP/epsilon/f.txt")" "local-wip" "the un-upstreamed dirty change is left untouched"
+
+# zeta: the .husky case — an already-upstream divergence PLUS a dirty tracked
+# file the checkout regenerated to the *upstream* content, so its per-file
+# `git diff --quiet <remote>` is empty and the heal proceeds.
+git init -q -b main "$TMP/zeta.src"
+commit "$TMP/zeta.src" z1
+echo H1 > "$TMP/zeta.src/hook.txt"; git -C "$TMP/zeta.src" add -A; git -C "$TMP/zeta.src" commit -qm z2
+git clone -q --bare "$TMP/zeta.src" "$TMP/zeta.git"
+git clone -q "$TMP/zeta.git" "$TMP/zeta"                         # zeta HEAD carries hook.txt=H1
+git -C "$TMP/zeta.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"   # churn z2's SHA
+echo H2 > "$TMP/zeta.src/hook.txt"; git -C "$TMP/zeta.src" add -A; git -C "$TMP/zeta.src" commit -qm z3
+git -C "$TMP/zeta.src" push -qf "$TMP/zeta.git" main
+ZETA_REMOTE="$(git -C "$TMP/zeta.git" rev-parse main)"
+echo H2 > "$TMP/zeta/hook.txt"                                   # dirty vs HEAD(H1); already == remote(H2)
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"zeta","path":"$TMP/zeta"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/zeta" rev-parse HEAD)" "$ZETA_REMOTE" "an already-upstream dirty tracked file (diffs empty) still heals"
+eq "$(esc_count zeta)" "0" "the already-upstream dirty file case is not escalated"
+
+# eta: an already-upstream SHA churn whose local HEAD is a MERGE commit carrying
+# tree content (evil.txt) that is NOT upstream. git cherry ignores merge commits,
+# so the committed-content proof is incomplete: the guard must refuse via the
+# merge check and escalate rather than reset the merge content away.
+git init -q -b main "$TMP/eta.src"
+commit "$TMP/eta.src" et1
+git -C "$TMP/eta.src" checkout -q -b side
+echo side-content > "$TMP/eta.src/side.txt"; git -C "$TMP/eta.src" add -A
+git -C "$TMP/eta.src" commit -qm et-side
+git -C "$TMP/eta.src" checkout -q main
+git -C "$TMP/eta.src" merge -q --no-ff side -m et-merge          # merge commit; tree gains side.txt
+git clone -q --bare "$TMP/eta.src" "$TMP/eta.git"
+git clone -q "$TMP/eta.git" "$TMP/eta"                           # local HEAD = et-merge
+echo evil > "$TMP/eta/evil.txt"; git -C "$TMP/eta" add -A
+git -C "$TMP/eta" commit -q --amend --no-edit                    # local merge now carries evil.txt
+ETA_LOCAL="$(git -C "$TMP/eta" rev-parse HEAD)"
+git -C "$TMP/eta.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # churn the merge SHA upstream, WITHOUT evil.txt
+git -C "$TMP/eta.src" push -qf "$TMP/eta.git" main
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"eta","path":"$TMP/eta"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/eta" rev-parse HEAD)" "$ETA_LOCAL" "a unique local merge commit blocks the heal (git cherry ignores merges)"
+eq "$(esc_count eta)" "1" "a unique local merge commit escalates"
+[ -f "$TMP/eta/evil.txt" ] && ok "the merge commit's unique tree content is preserved" || bad "the merge commit's unique tree content is preserved"
+
+# theta: an already-upstream SHA churn where git status cannot be read. An
+# unreadable status is not proof of a clean tree, so the dirty-tracked proof must
+# fail closed and escalate rather than reset --hard. A git shim on PATH fails
+# `git status` and passes every other subcommand through to real git.
+git init -q -b main "$TMP/theta.src"; commit "$TMP/theta.src" th1; commit "$TMP/theta.src" th2
+git clone -q --bare "$TMP/theta.src" "$TMP/theta.git"
+git clone -q "$TMP/theta.git" "$TMP/theta"
+THETA_HEAD="$(git -C "$TMP/theta" rev-parse HEAD)"
+git -C "$TMP/theta.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # SHA churn: ff refuses, cherry clean
+git -C "$TMP/theta.src" push -qf "$TMP/theta.git" main
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"theta","path":"$TMP/theta"}
+]}
+JSON
+: > "$TMP/escalations"
+REAL_GIT="$(PATH="${PATH#"$TMP/bin:"}" command -v git)"
+cat > "$TMP/bin/git" <<GITSHIM
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "status" ] && exit 128; done
+exec "$REAL_GIT" "\$@"
+GITSHIM
+chmod +x "$TMP/bin/git"
+bash "$SCRIPT" >/dev/null
+rm -f "$TMP/bin/git"
+eq "$(git -C "$TMP/theta" rev-parse HEAD)" "$THETA_HEAD" "an unreadable git status blocks the heal (fail closed)"
+eq "$(esc_count theta)" "1" "an unreadable git status escalates instead of healing"
+
+# iota: an already-upstream SHA churn PLUS a tracked path staged with local-only
+# content whose worktree copy was then restored to the upstream bytes. git status
+# reports it (MM f.txt), but the per-file worktree diff against the remote is
+# empty, so a worktree-only proof counts it clean and reset --hard would discard
+# the staged content. The proof must also compare the staged index against the
+# remote (git diff --cached) and refuse. Twin of the zeta case, which heals
+# because the dirty content is genuinely upstream; here only the worktree is.
+git init -q -b main "$TMP/iota.src"; commit "$TMP/iota.src" i1; commit "$TMP/iota.src" i2
+git clone -q --bare "$TMP/iota.src" "$TMP/iota.git"
+git clone -q "$TMP/iota.git" "$TMP/iota"                         # iota HEAD carries f.txt=i2
+IOTA_LOCAL="$(git -C "$TMP/iota" rev-parse HEAD)"
+git -C "$TMP/iota.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # churn i2's SHA, tree unchanged
+git -C "$TMP/iota.src" push -qf "$TMP/iota.git" main
+printf 'staged-local-only\n' > "$TMP/iota/f.txt"; git -C "$TMP/iota" add f.txt    # index: local-only content
+echo i2 > "$TMP/iota/f.txt"                                     # worktree: restored to the upstream bytes
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"iota","path":"$TMP/iota"}
+]}
+JSON
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/iota" rev-parse HEAD)" "$IOTA_LOCAL" "staged local-only content (hidden by an upstream-matching worktree) blocks the heal"
+eq "$(esc_count iota)" "1" "staged local-only content escalates instead of healing"
+eq "$(git -C "$TMP/iota" show :f.txt)" "staged-local-only" "the staged local-only content is left untouched"
+
+# kappa: the rig root parked off the default branch — an agent checked out an
+# integration branch in the rig root and left a seed commit on it, ahead of
+# origin/main. `merge --ff-only origin/main` reports "Already up to date", so a
+# HEAD-blind reconciler counts it advanced; the parked-off-default check must
+# surface it instead, mutating nothing.
+git init -q -b main "$TMP/kappa.src"; commit "$TMP/kappa.src" k1; commit "$TMP/kappa.src" k2
+git clone -q --bare "$TMP/kappa.src" "$TMP/kappa.git"
+git clone -q "$TMP/kappa.git" "$TMP/kappa"                       # on main == origin/main
+git -C "$TMP/kappa" checkout -q -b integration/seed origin/main  # park off the default branch
+echo seed > "$TMP/kappa/seed.txt"; git -C "$TMP/kappa" add -A; git -C "$TMP/kappa" commit -qm seed
+KAPPA_PARKED="$(git -C "$TMP/kappa" rev-parse HEAD)"
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"kappa","path":"$TMP/kappa"}
+]}
+JSON
+: > "$TMP/escalations"
+KAPPA_OUT="$(bash "$SCRIPT")"
+eq "$(git -C "$TMP/kappa" rev-parse HEAD)" "$KAPPA_PARKED" "a rig parked off the default branch is not mutated"
+eq "$(git -C "$TMP/kappa" symbolic-ref --short HEAD)" "integration/seed" "a parked rig is left on its branch, not force-moved"
+eq "$(esc_count kappa)" "1" "a rig parked off the default branch is escalated"
+eq "$(open_count kappa)" "1" "a rig parked off the default branch files a reconcile bead"
+grep -q '0 advanced' <<< "$KAPPA_OUT" && ok "a parked rig is not counted as advanced" || bad "a parked rig is not counted as advanced (got '$KAPPA_OUT')"
+
+# lambda: a recovered rig whose visit retract FAILS must keep its reconcile
+# subject OPEN. open_bead lists open beads only (no --all), so the subject is the
+# only handle the next patrol has to retry the retract; closing it after a failed
+# retract would strand the human-routed visit unretractable — the phantom demand
+# this change exists to clear. A later pass whose retract succeeds closes it.
+git init -q -b main "$TMP/lambda.src"; commit "$TMP/lambda.src" l1; commit "$TMP/lambda.src" l2
+git clone -q --bare "$TMP/lambda.src" "$TMP/lambda.git"
+git clone -q "$TMP/lambda.git" "$TMP/lambda"                     # HEAD = l2 (pre-rewrite SHA)
+git -C "$TMP/lambda.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"  # same tree, new SHA
+git -C "$TMP/lambda.src" push -qf "$TMP/lambda.git" main
+LAMBDA_REMOTE="$(git -C "$TMP/lambda.git" rev-parse main)"
+
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"lambda","path":"$TMP/lambda"}
+]}
+JSON
+
+# File lambda's reconcile bead first (auto-heal disabled: escalate, don't heal).
+: > "$TMP/escalations"; : > "$TMP/retractions"
+RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
+eq "$(open_count lambda)" "1" "lambda files a reconcile bead while diverged"
+LAMBDA_BEAD="$(bead_for lambda)"
+
+# Auto-heal enabled but the retract fails: lambda heals, the retract is attempted,
+# and because it did not land the subject is NOT closed.
+: > "$TMP/retractions"
+FAKE_RETRACT_FAIL=1 bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/lambda" rev-parse HEAD)" "$LAMBDA_REMOTE" "lambda still heals to origin even when the retract fails"
+eq "$(retract_count lambda)" "1" "a retract is attempted on the healed rig"
+eq "$(open_count lambda)" "1" "a FAILED retract leaves the reconcile subject OPEN as the retry handle"
+eq "$(bead_for lambda)" "$LAMBDA_BEAD" "the same subject stays open — no fresh bead is filed"
+
+# Next patrol, the retract succeeds: the still-open subject is re-found and closed.
+: > "$TMP/retractions"
+bash "$SCRIPT" >/dev/null
+eq "$(retract_count lambda)" "1" "the next patrol retries the retract on the still-open subject"
+eq "$(open_count lambda)" "0" "a successful retract finally closes the subject"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

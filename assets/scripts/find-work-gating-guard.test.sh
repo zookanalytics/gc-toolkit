@@ -36,7 +36,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-refinery-patrol.toml"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-find-work-gating-guard-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -93,15 +93,26 @@ for a in "$@"; do
   case "$a" in --limit=*) lim="${a#--limit=}" ;; esac
 done
 out=""; n=0
-while IFS='|' read -r id mr; do
+# FAKE_BD_CTRL injects a note carrying a raw LF, reproducing bd's unescaped-
+# newline bug: a raw C0 byte inside a JSON string, which is invalid JSON.
+notes=""
+[ "${FAKE_BD_CTRL:-0}" = "1" ] && notes=$(printf ',"notes":"para one\npara two"')
+# Rows are `id|merge_result|created_at|priority`; the last two are optional, so
+# the id|merge_result fixtures above still parse. created_at and priority are
+# top-level fields on a bd row (merge_result is under metadata), matching bd.
+while IFS='|' read -r id mr created prio; do
   [ -n "$id" ] || continue
   [ "$lim" -gt 0 ] && [ "$n" -ge "$lim" ] && break
   n=$((n + 1))
   if [ "$mr" = "-" ]; then
-    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s"}}' "$id" "$id")
+    meta=$(printf '"branch":"polecat/%s"' "$id")
   else
-    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s","merge_result":"%s"}}' "$id" "$id" "$mr")
+    meta=$(printf '"branch":"polecat/%s","merge_result":"%s"' "$id" "$mr")
   fi
+  extra=""
+  [ -n "$created" ] && extra="$extra,$(printf '"created_at":"%s"' "$created")"
+  [ -n "$prio" ] && extra="$extra,$(printf '"priority":%s' "$prio")"
+  obj=$(printf '{"id":"%s","metadata":{%s}%s%s}' "$id" "$meta" "$extra" "$notes")
   if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
 done < "$FAKE_ROWS"
 printf '[%s]\n' "$out"
@@ -133,12 +144,12 @@ case "$(select_err)" in
   *) bad "(2b) skipped anchor must be flagged on stderr" "got '$(select_err)'" ;;
 esac
 
-# (3) STARVATION REGRESSION. A parked anchor sorts ahead of real work. With the
-#     old --limit=1 the filter would see only the anchor and report no work,
-#     idling a refinery whose queue is non-empty — trading a false positive for
-#     a false negative. The widened window is what makes the filter safe.
+# (3) STARVATION REGRESSION. A parked anchor sorts ahead of real work. A
+#     1-row window would see only the anchor and report no work, idling a
+#     refinery whose queue is non-empty — trading a false positive for a false
+#     negative. Fetching the whole set client-side is what makes the filter safe.
 printf 'tk-anchor|pull_request\ntk-real|-\n' > "$FAKE_ROWS"
-eq "$(select_work)" "tk-real" "(3) real work behind a parked anchor is still found (limit > 1)"
+eq "$(select_work)" "tk-real" "(3) real work behind a parked anchor is still found (unbounded window)"
 
 # (4) The pre-open sub-state is equally a gating anchor.
 printf 'tk-pre|pre_open_gate\n' > "$FAKE_ROWS"
@@ -159,16 +170,62 @@ done
 printf 'tk-empty|\n' > "$FAKE_ROWS"
 eq "$(select_work)" "tk-empty" "(6) empty merge_result reads as absent, stays selectable"
 
-# (7) bd fails open (errors to stderr, empty stdout). Selection must yield NO
-#     work rather than a garbage id: idling is recoverable, re-gating is not.
+# (7) bd fails open (errors to stderr, empty stdout). The shape guard sees a
+#     non-array and fails CLOSED — the turn ends with no id selected, and never
+#     with a garbage one: idling is recoverable, re-gating is not.
 printf 'tk-plain|-\n' > "$FAKE_ROWS"
 eq "$(select_work 1)" "" "(7) unreadable listing selects nothing (fails safe)"
 
-echo "── 2. the query keeps a window wide enough for the filter ──"
+# (7b) A raw control byte in a note is bd's unescaped-newline bug: invalid JSON
+#      that aborts jq and, unscrubbed, reads a whole list as empty. The listing
+#      is scrubbed before jq, so the work behind it is still found.
+printf 'tk-plain|-\n' > "$FAKE_ROWS"
+FAKE_BD_CTRL=1 gc bd list --limit=25 --json > "$TMP/ctrl.json" 2>/dev/null
+jq -e . "$TMP/ctrl.json" >/dev/null 2>&1 \
+  && bad "(7b-pre) the control-laced fixture is invalid JSON before scrub" "it parsed clean; the scrub is unproven" \
+  || ok "(7b-pre) the control-laced fixture is invalid JSON before scrub"
+eq "$(FAKE_BD_CTRL=1 bash "$TMP/run-select.sh" 2>/dev/null)" "tk-plain" \
+   "(7b) a raw control byte in a note does not hide the work (scrubbed before jq)"
+
+echo "── 1b. the oldest-waiting handoff is served first ──"
+
+# (7c) Oldest-created wins. The rows are listed newest-first, as bd returns them
+#      before the sort, so picking the oldest proves the client-side sort runs —
+#      file order alone would hand back the newest.
+printf 'tk-new|-|2026-03-03T00:00:00Z\ntk-mid|-|2026-02-02T00:00:00Z\ntk-old|-|2026-01-01T00:00:00Z\n' > "$FAKE_ROWS"
+eq "$(select_work)" "tk-old" "(7c) oldest-created handoff is selected, not the newest"
+
+# (7d) A parked anchor is excluded even when it is the oldest row; the oldest
+#      UNPARKED handoff wins.
+printf 'tk-anchor|pull_request|2026-01-01T00:00:00Z\ntk-realnew|-|2026-03-03T00:00:00Z\ntk-realold|-|2026-02-02T00:00:00Z\n' > "$FAKE_ROWS"
+eq "$(select_work)" "tk-realold" "(7d) oldest UNPARKED handoff wins; an older parked anchor is skipped"
+
+# (7e) Priority preempts age across bands, but within a band the oldest wins: a
+#      newer P1 beats an older P2, and the older P1 beats the newer P1.
+printf 'tk-p2old|-|2026-01-01T00:00:00Z|2\ntk-p1new|-|2026-03-03T00:00:00Z|1\ntk-p1old|-|2026-02-02T00:00:00Z|1\n' > "$FAKE_ROWS"
+eq "$(select_work)" "tk-p1old" "(7e) highest priority first, oldest within the band"
+
+# (7f) Priority preemption must survive the whole queue, not just a window of it.
+#      bd sorts server-side on one field, so a bounded created-ordered window
+#      returns only the oldest rows and truncates a newer higher-priority handoff
+#      off before the client-side sort ever sees it. The rows are oldest-first,
+#      as bd returns created-ascending, with a batch of older P2s larger than any
+#      plausible bounded window and a newer P1 last; the P1 must still win. The
+#      stub honors --limit over file order, so any regression to a bounded
+#      created window truncates tk-p1win off and this fails.
+{ for ((i = 1; i <= 30; i++)); do printf -v d '%02d' "$i"; printf 'tk-p2-%s|-|2026-01-%sT00:00:00Z|2\n' "$d" "$d"; done
+  printf 'tk-p1win|-|2026-06-01T00:00:00Z|1\n'; } > "$FAKE_ROWS"
+eq "$(select_work)" "tk-p1win" "(7f) a newer high-priority handoff past a full created-ordered window still wins (unbounded)"
+
+echo "── 2. the query fetches the whole candidate set (unbounded window) ──"
 QUERY="$(grep -m1 'gc bd list' "$TMP/select.sh")"
+# A bounded window on one sort key can truncate off the bead the client-side
+# (priority, created) sort should pick, because bd sorts server-side on one
+# field only. --limit=0 fetches every candidate so the sort below sees them all.
 case "$QUERY" in
-  *--limit=1\ *|*--limit=1) bad "(8) listing limit must exceed 1" "client-side filter over a 1-row window starves" ;;
-  *--limit=*) ok "(8) listing limit exceeds 1 (filter cannot starve the queue)" ;;
+  *--limit=0*) ok "(8) listing window is unbounded (--limit=0): no candidate is truncated before the client-side sort" ;;
+  *--limit=1\ *|*--limit=1) bad "(8) unbounded window required (--limit=0)" "--limit=1: a client-side filter over a 1-row window starves" ;;
+  *--limit=*) bad "(8) unbounded window required (--limit=0)" "a bounded window can truncate off a higher-priority handoff the sort should pick; got: $QUERY" ;;
   *) bad "(8) listing carries an explicit --limit" "none found in: $QUERY" ;;
 esac
 case "$QUERY" in

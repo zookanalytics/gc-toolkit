@@ -2,40 +2,67 @@
 # escalate.sh — one open visit per situation. Files a board-visible visit on
 # the subject bead (the canonical gate-visit shape from formulas/mol-visit.toml)
 # stamped with an escalation_key; a later call naming the same situation finds
-# the open visit and files nothing. Replaces escalation-gate.sh and every
-# patrol `gc mail send` — escalations are visits a human can claim and close.
+# the open visit and files nothing. A visit is a conversation held for a human,
+# so this is for what only a human can answer.
 #   escalate.sh --subject <bead-id> --key <situation-key> --message <text>
-#               [--pool <rig-qualified converse pool>]
-# Callers: patrol formulas (refinery/witness/deacon), signoff.sh peers, and any
-# script that would otherwise mail. A changed situation gets a NEW key.
+#               [--pool <rig-qualified pool>]
+# The counterpart verb retracts a visit whose situation resolved on its own,
+# closing it as moot through visit-close.sh (the guarded moot/benign close) so a
+# self-healing subject does not leave a moot visit on the board:
+#   escalate.sh --retract --subject <bead-id> --key <situation-key> --message <reading>
+# Callers: formulas/mol-refinery-patrol.toml, formulas/mol-dog-shutdown-dance.toml,
+# the refinery's merge path (pr-open.sh, pr-facts.sh, merge.sh, gate-ensure.sh),
+# a blocked polecat, and a patrol emergency that needs a human now.
+# A changed situation gets a NEW key.
 # A visit filed by the deacon also lands one entry in its incident ledger
 # (gc-deacon-ledger.sh); see the marked block at the foot of this file.
+#
+# What this dedup does NOT span: a situation that RECURS. The window is one
+# OPEN visit, and a converse sitting closes each visit, so a condition that
+# fires again after the sitting files another. A recurring observation belongs
+# in a durable bead instead — assets/scripts/patrol-finding.sh, which the
+# deacon and witness patrols file their findings through; the first reaction
+# on that bead decides whether it is work, a wait, or a question, and only the
+# question becomes a visit.
 # The route is proved against the live agent set before anything is created,
 # and an already-open visit carrying an unroutable route is repointed rather
 # than counted as a satisfied escalation. A rig-qualified --pool also selects
-# the store the visit lands in, so route and store cannot disagree. An
+# the store the visit lands in, so route and store cannot disagree; without
+# one, a rig-less caller has no store to reconcile an already-open visit's
+# rig-qualified route against, and refuses rather than guess. An
 # ephemeral --subject (a patrol wisp) is redirected onto this store's standing
 # triage subject, because the sitting that works the visit writes its outcome
 # and takeaway to the subject.
 # A CLOSED visit answers too: a situation a sitting closed `moot` or `benign`
 # is not re-filed for GC_ESCALATE_VERDICT_WINDOW seconds (default 86400, 0
 # disables), and each suppressed repeat is tallied on that visit.
-# Exit: 0 filed, already open, repointed or inside the verdict window · 1 unroutable/could not file/verify · 2 usage
+# Exit: 0 filed, already open, repointed, inside the verdict window, or (--retract)
+# closed as moot / no open visit to close · 1 unroutable/could not file/verify/close · 2 usage
 set -uo pipefail
 
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 usage() {
   cat >&2 <<'U'
 usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
-                   [--pool <rig-qualified converse pool>]
+                   [--pool <rig-qualified pool>]
+       escalate.sh --retract --subject <bead-id> --key <situation-key>
+                   --message <one-line reading>
 
+  --retract  close the OPEN visit for this subject+key as moot, instead of
+             filing one, when the situation it raised resolved on its own.
+             --message is the reading folded onto the subject and stamped as the
+             visit's outcome reason. The caller owns the judgment that the
+             premise is gone; no matching open visit is a no-op success. Needs a
+             durable subject.
   --subject  the bead the escalation is about; the visit tracks it (required).
+             One bead id, [A-Za-z0-9._-] only.
              A durable bead also narrows the dedup to that bead; an ephemeral
              one (a patrol wisp) cannot, so there the key alone is the
              identity, and the visit is filed on the standing triage subject
@@ -49,11 +76,11 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              the key (`wedged-<target>`)
   --message  what the visit needs from a human; first line becomes the
              visit title's headline (required)
-  --pool     converse pool to route to; default ${GC_RIG:+$GC_RIG/}gc-toolkit.converse.
-             The route must name a live agent identity that reads this rig's
-             store, so a caller with GC_RIG unset must pass this explicitly —
-             the bare default matches no rig-scoped pool. A rig-qualified pool
-             also selects the store, so the two always agree.
+  --pool     route to a specific pool instead of the board; default `human`,
+             which parks the visit on the helm board for the operator to engage
+             (the converse routed-pool is retired). A pool route must name a
+             live agent identity that reads this rig's store; a rig-qualified
+             --pool also selects the store, so route and store cannot disagree.
 
 env:
   GC_ESCALATE_VERDICT_WINDOW  seconds a `moot` or `benign` verdict suppresses
@@ -67,13 +94,14 @@ U
 
 warn() { echo "escalate: $*" >&2; }
 
-SUBJECT=""; KEY=""; MESSAGE=""; POOL_ARG=""
+SUBJECT=""; KEY=""; MESSAGE=""; POOL_ARG=""; RETRACT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) SUBJECT="${2:-}"; shift 2 || { usage; exit 2; } ;;
     --key)     KEY="${2:-}";     shift 2 || { usage; exit 2; } ;;
     --message) MESSAGE="${2:-}"; shift 2 || { usage; exit 2; } ;;
     --pool)    POOL_ARG="${2:-}"; shift 2 || { usage; exit 2; } ;;
+    --retract) RETRACT=1; shift ;;
     -h|--help) usage; exit 2 ;;
     *) warn "unknown argument '$1'"; usage; exit 2 ;;
   esac
@@ -84,6 +112,17 @@ fi
 # A '=' or metacharacter in the key breaks the exact-match dedup read.
 case "$KEY" in
   *[!A-Za-z0-9._-]*) warn "--key must contain only [A-Za-z0-9._-] (got '$KEY')"; exit 2 ;;
+esac
+# The subject is one bead id. A durable subject is stamped as the visit's
+# gc.continuation_group, which the dedup and retract listings match exactly,
+# and is the far end of the tracks edge. A subject carrying a second word files
+# a visit that no later call matches and that tracks no bead. A space in it
+# usually comes from an unquoted expansion that did not word-split (zsh does
+# not), which joins the id to the word beside it.
+case "$SUBJECT" in
+  *[!A-Za-z0-9._-]*)
+    warn "--subject must be one bead id, [A-Za-z0-9._-] only (got '$SUBJECT'). An id joined to its neighbour usually comes from an unquoted \$VAR that did not word-split (zsh does not split it); read each field into its own variable, as 'while read -r SID SWHEN' does, and pass the id alone. Nothing was filed or closed."
+    exit 2 ;;
 esac
 
 # GC_RIG selects the store `gc bd` reads and writes, outranking BEADS_DIR and
@@ -96,74 +135,148 @@ if [ -z "${GC_RIG:-}" ] && [ -n "$POOL_ARG" ] && [ "$POOL_RIG" != "$POOL_ARG" ];
   warn "GC_RIG unset; adopting rig '$POOL_RIG' from --pool so the visit lands in the store that pool reads"
 fi
 
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
-
-# The live agent identity set, read once. Empty means UNREADABLE, never "no
-# agents" — an empty answer is the absence of proof, not a refusal.
-AGENT_IDS=""; AGENT_IDS_READ=0
-agent_ids() {
-  if [ "$AGENT_IDS_READ" = 0 ]; then
-    AGENT_IDS_READ=1
-    AGENT_IDS=$(if command -v timeout >/dev/null 2>&1; then timeout 15 gc agent list --json 2>/dev/null
-                else gc agent list --json 2>/dev/null; fi \
-      | scrub \
-      | jq -c '[.agents[]? | (.qualified_name // "") | select(. != "")]' 2>/dev/null)
-    [ "$AGENT_IDS" = "[]" ] && AGENT_IDS=""
+# The default route is `human` (the retired converse pool's replacement; set in
+# the gate-visit block below): the visit parks on the helm board, which is not a
+# pool name that selects a store. So unlike a rig-qualified --pool, the default
+# cannot prove which rig's ledger `gc bd create` writes to — and `gc bd` itself
+# only WARNS on a GC_RIG that names no bound rig, then answers from the ambient
+# store. Either way the visit — and its tracks edge to the subject — would land
+# in a store the subject's board never reads, invisible to the operator and
+# severed from the subject: the silent mute this script exists to end.
+#
+# So on the board route the store is proven from the subject itself, through
+# escalation-rig.sh (bead-store.sh): the one prefix->rig derivation the
+# destructive gates and the deacon's own escalations already use, which refuses
+# a prefix no rig carries, one two rigs carry, and an unreadable rig set, each
+# with its own reason on stderr. GC_RIG unset: bind the derived rig. GC_RIG set:
+# it must be the subject's rig, or the caller's pin is the wrong store (a stale
+# export, a typo) and nothing is filed. A subject whose store cannot be derived
+# (an ephemeral id with no rig prefix) is filed under the caller's GC_RIG as
+# before — there is nothing to disprove it with.
+if [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; then
+  ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
+  subj_rig=""
+  if [ -x "$ESC_RIG_SH" ]; then
+    subj_rig=$("$ESC_RIG_SH" "$SUBJECT" 2>"${TMPDIR:-/tmp}/escalate-rig.$$") || subj_rig=""
+    subj_rig_why=$(tr '\n' ' ' < "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+    rm -f "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null || true
+  else
+    subj_rig_why="cannot execute $ESC_RIG_SH"
   fi
-  printf '%s' "$AGENT_IDS"
-}
-
-# ok | unknown | cross-rig | no-identity. A pool offer matches by exact byte
-# equality (gascity hookClaimMatchesRoute), so a well-formed name no agent
-# carries is never claimed. GC_RIG picks both the store `gc bd create` writes
-# to and the rig segment a rig-scoped pool must carry, so a route naming
-# another rig addresses a pool that never reads the store its visit lands in.
-route_verdict() {
-  local route="$1" rig_seg ids
-  [ -z "$route" ] && { printf 'no-identity'; return 0; }
-  # `human` is the city's durable "the operator owns it; no agent will take
-  # it" marker (services/helm/README.md), so it is already held by the reader
-  # an escalation wants — not a pool name that failed to resolve.
-  [ "$route" = "human" ] && { printf 'ok'; return 0; }
-  rig_seg="${route%%/*}"; [ "$rig_seg" = "$route" ] && rig_seg=""
-  if [ -n "${GC_RIG:-}" ] && [ -n "$rig_seg" ] && [ "$rig_seg" != "$GC_RIG" ]; then
-    printf 'cross-rig'; return 0
+  if [ -z "${GC_RIG:-}" ]; then
+    if [ -n "$subj_rig" ]; then
+      export GC_RIG="$subj_rig"
+      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$subj_rig' from subject '$SUBJECT' so the visit lands in the store the subject lives in, not the caller's ambient store"
+    else
+      warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would land on the wrong board and its tracks edge would never reach the subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
+      exit 1
+    fi
+  elif [ -n "$subj_rig" ] && [ "$subj_rig" != "$GC_RIG" ]; then
+    warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$subj_rig' — nothing filed. On the board route the visit must land in the subject's own store or its board never shows it and its tracks edge never reaches the subject; 'gc bd' would not refuse an unbound GC_RIG, only warn and file elsewhere. Re-run with GC_RIG=$subj_rig (or unset, to derive it)."
+    exit 1
   fi
-  ids=$(agent_ids)
-  [ -z "$ids" ] && { printf 'unknown'; return 0; }
-  printf '%s' "$ids" | jq -e --arg r "$route" 'index($r) != null' >/dev/null 2>&1 \
-    && printf 'ok' || printf 'no-identity'
-}
+fi
 
-# Only proof refuses: an unreadable identity set warns and files, because an
-# unverified visit still beats the silent mute this script exists to end.
-assert_routable() {
-  local route="$1" rig_seg near
-  case "$(route_verdict "$route")" in
-    ok) return 0 ;;
-    unknown)
-      warn "could not read the live agent set (\`gc agent list --json\`); filing with route '$route' UNVERIFIED — confirm a pool claims it"
-      return 0 ;;
-    cross-rig)
-      rig_seg="${route%%/*}"
-      warn "route '$route' is scoped to rig '$rig_seg' but this visit lands in the '${GC_RIG:-}' store, which that pool never reads — nothing filed. Use a '${GC_RIG:-}/' pool, or run with GC_RIG=$rig_seg so the store and the route agree."
-      return 1 ;;
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+
+# >>> retract-moot
+# --retract closes the OPEN visit this script filed for a subject, as moot, when
+# the situation it raised resolved on its own. It is the counterpart to filing:
+# escalate.sh owns the visit's identity — escalation_key, narrowed to a durable
+# subject by gc.continuation_group — so it is the one place that can find that
+# visit again without a caller re-deriving the match and drifting from it. A
+# caller reaches this only once it has decided the premise is gone; that judgment
+# is the caller's, because whether a resolved subject implies a moot premise is
+# per-subject-type (reconcile-rig-checkouts.sh retracts here because its subject
+# tracks exactly one divergence and clears only on a clean sync, which does not
+# generalize to every visit).
+#
+# Only an OPEN visit is retracted. A visit a human already claimed (in_progress)
+# is theirs to close: the recheck-premise skill folds mootness in at their prep,
+# and an unattended caller must not close a conversation out from under them.
+# The close routes through visit-close.sh, the one guarded close — it folds the
+# reading onto the subject's notes, stamps gc.outcome=moot and gc.outcome_reason
+# (so the board reads a decision, not a dropped need), and closes the visit. No
+# matching open visit is success: retract is idempotent, so a second pass, or a
+# subject that never raised one, exits 0 having changed nothing. The store is the
+# ambient GC_RIG, pinned to the subject's own rig by the board-route block above
+# exactly as the filing path pins it.
+if [ "$RETRACT" = 1 ]; then
+  case "$SUBJECT" in
+    *-wisp-*) warn "--retract needs a durable subject; an ephemeral wisp's visits hang on the standing triage bucket keyed by --key alone, so there is no one subject-scoped visit to retract"; exit 2 ;;
   esac
-  near=$(agent_ids | jq -r --arg r "$route" \
-    '[.[] | select(endswith("/" + $r))] | join(", ")' 2>/dev/null)
-  warn "route '$route' matches no live agent identity — nothing filed (an unroutable visit reports success while no human is ever asked)."
-  [ -n "$near" ] && warn "  live rig-qualified forms of that name: $near"
-  warn "  repair: re-run with --pool <rig>/<pool>, or with GC_RIG set so the default qualifies itself."
-  return 1
-}
+  VISIT_CLOSE="${GC_ESCALATE_VISIT_CLOSE_TOOL:-$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/visit-close.sh}"
+  [ -x "$VISIT_CLOSE" ] || { warn "visit-close.sh not found or not executable ($VISIT_CLOSE); cannot retract the visit as moot"; exit 1; }
+  # Read the open visits for this subject+key. An unreadable read is not proof no
+  # visit exists: bd_json discards bd's stderr, so a failed list, a non-array
+  # error value, or unparseable output all arrive as text that is not a JSON
+  # array. Treating that as "nothing to do" (exit 0) would let a caller close the
+  # subject while its visit stays open, recreating the phantom demand retract
+  # exists to clear — so fail closed unless the read parses as an array. A
+  # readable array with no match keeps the idempotent no-op.
+  RETRACT_LISTING=$(bd_json list --status=open --metadata-field "escalation_key=$KEY" \
+      --metadata-field "gc.continuation_group=$SUBJECT" --limit=20)
+  if ! printf '%s' "$RETRACT_LISTING" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    warn "could not read open visits for $SUBJECT [$KEY]; NOT retracting — the visit's state is unknown and its subject must not be closed on an unreadable lookup"
+    exit 1
+  fi
+  # The same open-visit identity the filing dedup matches on, re-checked field by
+  # field because a listing that silently ignored a filter would match the wrong
+  # bead.
+  RETRACT_VISIT=$(printf '%s' "$RETRACT_LISTING" \
+    | jq -r --arg k "$KEY" --arg s "$SUBJECT" \
+        '.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id' \
+    | head -n 1)
+  if [ -z "$RETRACT_VISIT" ]; then
+    echo "escalate: no open visit for $SUBJECT [$KEY] to retract — nothing to do"
+    exit 0
+  fi
+  if "$VISIT_CLOSE" --visit "$RETRACT_VISIT" --subject "$SUBJECT" --outcome moot --reason "$MESSAGE"; then
+    echo "escalate: retracted visit $RETRACT_VISIT on $SUBJECT [$KEY] as moot"
+    exit 0
+  fi
+  warn "visit-close.sh did not close $RETRACT_VISIT; it stays open for a human"
+  exit 1
+fi
+# <<< retract-moot
 
-HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
+# The route gate is pool-route.sh, shared with every other copy of this
+# block: one implementation decides what "addresses somebody" means, so a
+# caller cannot drift from it by re-deriving the answer in its own copy.
+SELF_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+POOL_ROUTE="$SELF_DIR/pool-route.sh"
+[ -x "$POOL_ROUTE" ] || { warn "pool-route.sh not found beside this script ($POOL_ROUTE); no route can be proved, so nothing is filed"; exit 1; }
+# ok | unknown | cross-rig | no-identity | unbound-store, for a route this
+# script did not write.
+route_verdict() { "$POOL_ROUTE" --verdict "$1"; }
+
+# The headline is the first line of the message, capped so a long paragraph
+# does not run into the visit title. When it overruns, cut back to the last
+# word boundary near the cap (a bare byte cut severs a word, e.g. "…un" from
+# "until") and mark the cut with an ellipsis so the title says it was shortened.
+HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1)
+HEADLINE_MAX=100
+if [ "${#HEADLINE}" -gt "$HEADLINE_MAX" ]; then
+  keep=$(( HEADLINE_MAX - 1 ))          # leave room for the ellipsis
+  cut=${HEADLINE:0:$keep}
+  atword=${cut% *}                       # drop back to the last space
+  if [ "$atword" != "$cut" ] && [ "${#atword}" -ge $(( keep / 2 )) ]; then
+    cut=$atword                          # take the word boundary unless it loses most of the text
+  fi
+  HEADLINE="${cut}…"
+fi
 
 # >>> gate-visit
 # Canonical gate-visit shape (formulas/mol-visit.toml); gate-visit.test.sh
 # checks this copy's invariants. escalation_key rides its own flag beside it.
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-[ -n "$POOL_ARG" ] && POOL="$POOL_ARG"
+# The pool is resolved at each point that WRITES it, never up here: an
+# escalation whose visit is already open and routable has already asked its
+# human, and a default pool that call never needed must not turn it into a
+# failure. The default is the board marker `human` (the converse routed-pool is
+# retired); pool-route.sh passes `human` through unqualified.
+POOL_NAME="${POOL_ARG:-human}"
 
 # Idempotence: an open (or claimed) visit for this situation means the human is
 # already asked. What "this situation" is depends on whether the subject
@@ -214,8 +327,17 @@ if [ -n "$OPEN" ]; then
     unknown)
       echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — not filing another; its route '$OPEN_ROUTE' is UNVERIFIED"
       exit 0 ;;
+    unbound-store)
+      # The row was matched in whatever store the ambient environment picked,
+      # and its route names a rig. Which store that pool reads is exactly what
+      # GC_RIG would have said, so neither answer is available here: counting
+      # the visit is the mute this script exists to end, and repointing would
+      # rewrite a route that is very likely sound. The caller names its store.
+      warn "visit $OPEN is open for $DEDUP_SCOPE and routes to '$OPEN_ROUTE', but GC_RIG is unset, so nothing here can tell whether that pool reads the store this row came from — a visit in a store it never lists has asked nobody."
+      warn "  repair: re-run with --pool '$OPEN_ROUTE' (or GC_RIG=${OPEN_ROUTE%%/*}) so the store and the route agree."
+      exit 1 ;;
   esac
-  assert_routable "$POOL" || exit 1
+  POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
   warn "visit $OPEN is open for $DEDUP_SCOPE but routes to '$OPEN_ROUTE', which no live pool claims — repointing it at '$POOL'."
   gc bd update "$OPEN" --set-metadata "gc.routed_to=$POOL" >/dev/null 2>&1
   OPEN_GOT=$(bd_json show "$OPEN" | jq -r '.[0].metadata["gc.routed_to"] // ""' 2>/dev/null)
@@ -297,7 +419,7 @@ if [ "$VERDICT_WINDOW" -gt 0 ]; then
   fi
 fi
 
-assert_routable "$POOL" || exit 1
+POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 
 # The subject has to outlive the visit. A converse sitting records what it
 # settled by appending to the subject, and stamps the takeaway on the item —
@@ -352,7 +474,7 @@ if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
     STANDING=$(gc bd create -t task \
       --title "triage: escalations raised from an ephemeral subject (this rig)" \
       -d "Standing subject for escalations whose caller named an ephemeral subject — a patrol wisp, which is burned and re-poured every cycle. One open visit per situation key hangs here; each visit names the wisp that raised it in escalation_raised_by, and a sitting's outcome and takeaway land on this bead." \
-      --json | jq -r '.id // .[0].id')
+      --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     if [ -n "$STANDING" ] && [ "$STANDING" != "null" ]; then
       gc bd update "$STANDING" --set-metadata "task_kind=triage-subject" \
         --set-metadata "triage.scope=$TRIAGE_SCOPE" >/dev/null
@@ -382,27 +504,33 @@ BODY="$MESSAGE"
 
 Raised from $RAISED_BY, which is ephemeral. The visit hangs on this standing subject so the sitting's outcome and takeaway have a bead that outlives the cycle."
 
-VISIT=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$BODY" --json | jq -r '.id // .[0].id')
+# The identity metadata is stamped in the create itself. The dedup listing
+# above finds a prior visit by escalation_key — and, for a durable subject, by
+# gc.continuation_group — so a visit that exists without those stamps is
+# invisible to it, and the next call for the same situation files a duplicate.
+# A create followed by a separate stamp is two writes; an interruption between
+# them leaves an unstamped visit that nothing can dedup against. One write
+# cannot: the bead and its dedup keys land together or not at all.
+# escalation_raised_by (provenance for a redirected visit, whose subject is then
+# the bucket) rides the same object; empty when the subject was not redirected.
+VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$SUBJECT" --arg key "$KEY" --arg raised "$RAISED_BY" \
+  '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit", "escalation_key": $key}
+   + (if $raised == "" then {} else {"escalation_raised_by": $raised} end)')
+VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$BODY" --metadata "$VISIT_META" --json 2>/dev/null || true)
+VISIT=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-  || { echo "escalate: bd create returned no id — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }
-gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
-  --set-metadata "gc.continuation_group=$SUBJECT" \
-  --set-metadata "task_kind=visit" \
-  --set-metadata "escalation_key=$KEY"
-# Provenance for a redirected visit: the subject is the bucket, so without
-# this the sitting cannot tell which cycle raised it. Not load-bearing — a
-# stamp that misses costs traceability, never the disposition.
-[ -n "$RAISED_BY" ] && gc bd update "$VISIT" --set-metadata "escalation_raised_by=$RAISED_BY"
+  || { create_err=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+       echo "escalate: bd create returned no id${create_err:+: $create_err} — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }
 gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # tracks, NOT parent-child: a parent-child edge transmits the subject's
 # blocked state to the visit, unclaimable exactly where conversation is owed.
 # Read the group stamp back and repair it from the subject if it landed
-# empty: it can land present-but-empty while every sibling stamp in the
-# same update lands, and an empty group disables converse's group-scoped
-# re-claim fence — and here also this script's own dedup listing for a
-# durable subject. Repair and warn, never exit — this block files the one
-# visit for its scope, and on a persistent miss the tracks edge still
-# carries the subject for guards that read the union.
+# empty: it can land present-but-empty even when the create's other stamps
+# land, and an empty group disables converse's group-scoped re-claim fence —
+# and here also this script's own dedup listing for a durable subject. Repair
+# and warn, never exit — this block files the one visit for its scope, and on
+# a persistent miss the tracks edge still carries the subject for guards that
+# read the union.
 GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
 if [ "$GROUP_GOT" != "$SUBJECT" ]; then
   echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '$SUBJECT' — repairing" >&2

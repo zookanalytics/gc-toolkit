@@ -26,6 +26,11 @@
 #               cwd: this is fired from wherever the operator is sitting, and
 #               a silently varying destination is the worst failure mode an
 #               intake path can have. An unknown --rig files nothing.
+#   (DEADZONE)  a topic filed into a store with no reaction agent — no
+#               proactive pool and no registered converse — parks on the board
+#               with nobody to engage it. The intake refuses such a target
+#               before minting anything, keying on registration so a merely
+#               suspended rig (agents paused, see LIVENESS) still files.
 #   (SUBJECT)   an existing bead is its own subject — no second bead is
 #               minted — and a contradictory --rig/--type is refused rather
 #               than ignored.
@@ -60,7 +65,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/gc-visit-open.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-visit-open-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -87,9 +92,31 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
   "rig list")
+    # suspended/running are injected per rig ONLY when the driving var is set, so
+    # the default cases see neither field (null → unknown → the guard allows) and
+    # a liveness case sets exactly the flag it is exercising. Mirrors the real
+    # projection, which carries the two flags through {name,path,prefix,...}.
     jq -n --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
-      '{rigs:[{name:"gc-toolkit", path:$t, prefix:"tk"},
-              {name:"gascity",    path:$g, prefix:"gc"}]}' ;;
+          --arg gsusp "${GASCITY_SUSPENDED-}" --arg grun "${GASCITY_RUNNING-}" \
+          --arg tsusp "${GCTK_SUSPENDED-}"    --arg trun "${GCTK_RUNNING-}" \
+      '{rigs:[({name:"gc-toolkit", path:$t, prefix:"tk"}
+               + (if $tsusp != "" then {suspended: ($tsusp=="true")} else {} end)
+               + (if $trun  != "" then {running:   ($trun =="true")} else {} end)),
+              ({name:"gascity",    path:$g, prefix:"gc"}
+               + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
+               + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
+  "agent list")
+    # A reaction roster: proactive + converse for each rig named in
+    # $FAKE_REACTION_RIGS (default: both stub rigs served). A rig ABSENT from
+    # this list has no reaction agent — the dead zone require_reaction_agent
+    # refuses. FAKE_AGENT_LIST_EMPTY models an empty (unreadable) roster and
+    # FAKE_AGENT_LIST_INVALID a nonempty-but-unparseable one — both fail open.
+    [ -n "${FAKE_AGENT_LIST_EMPTY:-}" ] && exit 0
+    [ -n "${FAKE_AGENT_LIST_INVALID:-}" ] && { printf '%s\n' "$FAKE_AGENT_LIST_INVALID"; exit 0; }
+    jq -n --arg rigs "${FAKE_REACTION_RIGS-gc-toolkit gascity}" \
+      '{agents: [ ($rigs | split(" ")[] | select(length>0)) as $r
+                  | {qualified_name:($r+"/gc-toolkit.proactive"), suspended:false, pool:{max:2}},
+                    {qualified_name:($r+"/gc-toolkit.converse"),  suspended:false, pool:{max:2}} ]}' ;;
   "bd show")
     # Answers the origin read-back. $FAKE_ORIGIN is the value already on the
     # bead, so the "never overrule an existing origin" case is a real read of a
@@ -139,9 +166,22 @@ GC
 
 # --- gc-helm.sh stub ----------------------------------------------------------
 # Records the verb and argv; $FAKE_HELM_RC drives the failure cases.
+# $FAKE_HELM_REACT_RC, when set, drives the `react` verb ALONE — so a test can
+# model react returning its already-reacted no-op code (5) while `open` still
+# succeeds, the way the real tools behave for an already-reacted subject.
 cat > "$TMP/bin/gc-helm.sh" <<'HELM'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "$FAKE_CALLS"
+# resolve echoes the LIVE bead a reference maps to. FAKE_RESOLVE overrides the
+# result (a PR number or superseded id redirecting to its owner); unset, it
+# echoes the reference unchanged — the resolver's pass-through for a live id.
+if [ "$1" = resolve ]; then
+  echo "${FAKE_RESOLVE:-$2}"
+  exit "${FAKE_RESOLVE_RC:-0}"
+fi
+if [ "$1" = react ] && [ -n "${FAKE_HELM_REACT_RC:-}" ]; then
+  exit "$FAKE_HELM_REACT_RC"
+fi
 exit "${FAKE_HELM_RC:-0}"
 HELM
 
@@ -233,6 +273,21 @@ has "$ERR" "falling back" "(RECOVER) the fallback is announced, not silent"
 eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
 unset FAKE_HELM_RC
 
+# --- (REACTED) an already-reacted subject files the visit directly ------------
+# react returns its no-op code (5) when the subject already carries a first
+# reaction: the guard slung nothing, so no reaction will file the visit.
+# gc-visit-open must NOT trust the skip as a dispatch (the bug this fixes) — it
+# falls through and files the visit itself, naming the real cause so the visit
+# body is accurate rather than reporting a sling failure that did not happen.
+FAKE_HELM_REACT_RC=5 run yes "a topic on an already-reacted subject"
+eq "$RC" "0" "(REACTED) exits 0 — the visit is filed"
+has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the visit"
+has "$OUT" "visit filed" "(REACTED) the summary reports a filed visit"
+has "$ERR" "already carries a first reaction" "(REACTED) the reason names the no-op skip"
+hasnt "$ERR" "sling FAILED" "(REACTED) it is NOT reported as a sling failure"
+unset FAKE_HELM_REACT_RC
+
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
 run no "some cross-cutting topic"
 has "$CALLS" "--db $TMP/rigs/gc-toolkit/.beads" "(RIG) the default rig is gc-toolkit, not inferred from cwd"
@@ -254,6 +309,99 @@ set +e
 GC_VISIT_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>&1
 set -e
 has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAULT_RIG moves the default"
+
+# --- (LIVENESS) filing into a paused rig is recorded, not refused -------------
+# Suspend means paused processing, not a dead store: gc rig suspend leaves the
+# beads database accessible, so a report filed into a suspended (or not-yet-
+# running) rig is recorded now and triaged on resume. The intake mints the
+# subject and notes that it will wait — it never refuses, which would deny a rig
+# paused on purpose and filed into to process later.
+export GASCITY_SUSPENDED=true
+run no "a report for a suspended rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) a suspended target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the suspended rig"
+has "$ERR" "suspended" "(LIVENESS) and the note names the suspension"
+has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
+unset GASCITY_SUSPENDED
+
+export GASCITY_RUNNING=false
+run no "a report for a downed rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) a not-running target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the not-running rig"
+has "$ERR" "no agents running" "(LIVENESS) and the note names the downed runtime"
+unset GASCITY_RUNNING
+
+# Explicit-live files with no note — the control that proves the note fires on
+# the paused case, not every case.
+export GASCITY_SUSPENDED=false GASCITY_RUNNING=true
+run no "a report for a live rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) an explicitly live rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and the subject lands in that rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for a live rig"
+unset GASCITY_SUSPENDED GASCITY_RUNNING
+
+# A gc that reports neither flag leaves them null: unknown, no note. This is the
+# default-stub path every other case runs on, asserted here explicitly so the
+# note can never harden into a claim about a flag the data plane omits.
+run no "a report when liveness is unknown" --rig gascity
+eq "$RC" "0" "(LIVENESS) an unknown (null) liveness files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and files into the chosen rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
+
+# --- (DEADZONE) a target with no reaction agent is refused, not filed ---------
+# The reported bug: a topic filed into a store with no proactive pool AND no
+# registered converse parks on the board and no session ever engages it. The
+# intake now refuses such a target before minting anything. Registration is the
+# bar, not liveness — a suspended rig (agents registered, paused) still files,
+# per the (LIVENESS) block above.
+export FAKE_REACTION_RIGS="gc-toolkit"      # gascity now has no reaction agent
+run no "a topic for an agentless rig" --rig gascity
+eq "$RC" "3" "(DEADZONE) a rig with no reaction agent is refused (exit 3)"
+eq "$CALLS" "" "(DEADZONE) and nothing is created or filed"
+has "$ERR" "no reaction agent" "(DEADZONE) the message names the problem"
+has "$ERR" "Nothing filed" "(DEADZONE) and states that nothing was filed"
+has "$ERR" "gc-toolkit" "(DEADZONE) and points at a rig that has one"
+
+# The same store reached through an existing bead id (its own rig authoritative)
+# is refused the same way, before any visit is filed or origin stamped on it.
+run no gc-deadzn1
+eq "$RC" "3" "(DEADZONE) an existing bead in an agentless rig is refused"
+hasnt "$CALLS" "helm open" "(DEADZONE) and no visit is filed on it"
+hasnt "$CALLS" "bd update" "(DEADZONE) and its origin is not stamped"
+unset FAKE_REACTION_RIGS
+
+# Control: the SAME rig, now with a reaction agent registered, files exactly as
+# before — the refusal keys on the missing agent, not on the rig name.
+run no "a topic for a served rig" --rig gascity
+eq "$RC" "0" "(DEADZONE control) a rig WITH a reaction agent files as today"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE control) and the visit is filed"
+
+# An unreadable roster refuses nothing: a dead zone is a positive finding only,
+# so a roster gc cannot answer must not strand the operator at a refusal.
+export FAKE_AGENT_LIST_EMPTY=1
+run no "a topic when the roster is unreadable" --rig gascity
+eq "$RC" "0" "(DEADZONE) an unreadable roster files rather than refusing"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed"
+unset FAKE_AGENT_LIST_EMPTY
+
+# The same fail-open must cover a NONEMPTY roster gc cannot parse: malformed
+# JSON, a stray preface line before the JSON, a truncated payload, or valid JSON
+# of the wrong shape all leave the dead-zone finding unprovable, so the intake
+# files rather than refusing. Empty output was the only unreadable case covered
+# before; nonempty-invalid is the reachable degraded-data-plane one.
+for _bad in unparseable preface truncated wrongshape; do
+    case "$_bad" in
+        unparseable) _bad_roster='not json at all' ;;
+        preface)     _bad_roster="$(printf 'gc: reading rig store\n{"agents":[]}')" ;;
+        truncated)   _bad_roster='{"agents":[' ;;
+        wrongshape)  _bad_roster='{"unexpected":true}' ;;
+    esac
+    export FAKE_AGENT_LIST_INVALID="$_bad_roster"
+    run no "a topic when the roster is nonempty-invalid ($_bad)" --rig gascity
+    eq "$RC" "0" "(DEADZONE) a nonempty invalid roster ($_bad) files rather than refusing"
+    has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed ($_bad)"
+    unset FAKE_AGENT_LIST_INVALID
+done
 
 # --- (SUBJECT) an existing bead is its own subject ----------------------------
 run no tk-abc12
@@ -312,6 +460,41 @@ run no "tk-abc12" --topic
 has "$CALLS" "bd create" "(SHAPE) --topic forces a bead-shaped string to be a topic"
 run no "gc-toolkit is slow"
 has "$CALLS" "bd create" "(SHAPE) a multi-word string starting with a rig prefix is still a topic"
+
+# --- (RESOLVE) a PR ref or superseded id resolves to the live owner first -----
+# A bare PR number, a pull URL, and a superseded bead id are subject references,
+# not topics. gc-visit-open hands them to `gc-helm resolve` before the id-vs-topic
+# split, so a PR number never becomes a topic bead titled with the number and a
+# settled id redirects to its successor before it is stamped. The stub echoes
+# FAKE_RESOLVE as the resolved id.
+FAKE_RESOLVE=tk-owner run no 615
+eq "$RC" "0" "(RESOLVE) a bare PR number resolves and files"
+has "$CALLS" "helm resolve 615" "(RESOLVE) the PR number is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE) no topic bead is minted for a PR number"
+hasnt "$CALLS" "--title 615" "(RESOLVE) nothing is titled with the PR number"
+has "$CALLS" "helm open tk-owner" "(RESOLVE) the visit is filed on the resolved owner"
+
+FAKE_RESOLVE=tk-owner run no "https://github.com/o/r/pull/615"
+eq "$RC" "0" "(RESOLVE-URL) a pull URL resolves and files"
+has "$CALLS" "helm resolve https://github.com/o/r/pull/615" "(RESOLVE-URL) the URL is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE-URL) no topic bead is minted for a PR URL"
+has "$CALLS" "helm open tk-owner" "(RESOLVE-URL) the visit is filed on the resolved owner"
+
+FAKE_RESOLVE=tk-succ run no tk-pred
+eq "$RC" "0" "(RESOLVE-SUPERSEDE) a superseded id redirects before it is stamped"
+has "$CALLS" "helm resolve tk-pred" "(RESOLVE-SUPERSEDE) the id is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE-SUPERSEDE) no second bead is minted"
+has "$CALLS" "helm open tk-succ" "(RESOLVE-SUPERSEDE) the visit is filed on the successor"
+hasnt "$CALLS" "helm open tk-pred" "(RESOLVE-SUPERSEDE) never on the settled predecessor"
+
+# A PR reference the resolver cannot map to a live bead fails closed; it must NOT
+# fall through to minting a topic bead titled with the number.
+unset FAKE_RESOLVE
+FAKE_RESOLVE_RC=4 run no 999
+eq "$RC" "4" "(RESOLVE-MISSING) an unresolvable PR reference fails closed"
+has "$CALLS" "helm resolve 999" "(RESOLVE-MISSING) the resolver was consulted"
+hasnt "$CALLS" "bd create" "(RESOLVE-MISSING) and mints no topic bead"
+unset FAKE_RESOLVE FAKE_RESOLVE_RC
 
 # --- (TYPE) a question is a decision -----------------------------------------
 run no "should the refinery land siblings in one pass?"
@@ -520,6 +703,45 @@ eq "$(sort -u "$TMP/rigmsgs" | wc -l | tr -d ' ')" "5" \
 grep -q . < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/&&/gc rig list/&&/\|[[:space:]]*jq/' "$SCRIPT") \
   && bad "(RIGWHY-EVIDENCE) the pipe-into-jq form is back — gc's exit status is discarded" \
   || ok "(RIGWHY-EVIDENCE) gc is run on its own, so its exit status survives"
+
+# --- (RIGWHY-TRAPS) enumerate_rigs restores the caller's trap table ----------
+# A trap is process-global: one installed inside a helper and left there
+# rewrites how every later line of the caller answers a signal, and outlives
+# the file it was installed to remove. gc-helm.sh's enumerate_rigs scopes and
+# clears the same EXIT/INT/TERM/HUP traps; this asserts the sibling here does
+# too. The helper is lifted and run directly — every real call site is a
+# command substitution whose subshell would hide the residue. Assert the table
+# is unchanged across the call, not that it is empty: a caller can inherit a
+# disposition the helper never touches — a parent that ignores SIGPIPE shows up
+# as `trap -- '' SIGPIPE` — and the invariant is that the helper leaves the
+# table exactly as it found it.
+ENUM="$TMP/enum-helper.sh"
+sed -n '/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
+mkdir -p "$TMP/enumbin"
+cat > "$TMP/enumbin/gc" <<'ENUMGC'
+#!/usr/bin/env bash
+[ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
+exit 0
+ENUMGC
+chmod +x "$TMP/enumbin/gc"
+cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
+set -eu
+PROG=probe; RIGS=""
+die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
+. "$1"
+before="$(trap)"
+enumerate_rigs
+after="$(trap)"
+printf 'RIGS[%s]\n' "$RIGS"
+[ "$before" = "$after" ] && printf 'TRAPDELTA[]\n' \
+  || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
+ENUMPROBE
+ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+has "$EOUT" "RIGS[["  "(RIGWHY-TRAPS) the helper enumerated, so the temp-file path really ran"
+has "$EOUT" "TRAPDELTA[]" "(RIGWHY-TRAPS) …and left the caller's trap table as it found it"
+eq  "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
+    "(RIGWHY-TRAPS) …and removed its stderr capture"
 
 # --- (HELP/SYNTAX) ------------------------------------------------------------
 run yes --help

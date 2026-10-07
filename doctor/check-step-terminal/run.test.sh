@@ -3,7 +3,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-step-terminal-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -105,6 +105,11 @@ OLD="$(iso_ago 7200)"       # 2h ago — well past the 300s grace
 FRESH="$(iso_ago 10)"       # inside the grace window
 RECENT="$(iso_ago 3600)"    # 1h — inside the 48h stall bound
 STALE="$(iso_ago 259200)"   # 72h — past the 48h stall bound
+# A pool route (gc.routed_to) is what makes an open, unblocked step under a
+# closed molecule offerable: the pool query is unassigned + routed, so it can
+# hand a routed step out. A step without one is an inert husk, so every strand
+# fixture below carries a route and the routing-blindness cases (26-28) drop it.
+ROUTE=',"gc.routed_to":"alpha/gc-toolkit.polecat"'
 
 # --- 1. live molecule, recently touched: clean ---------------------------------
 steps "$(step s-1 r-1 ",\"updated_at\":\"$RECENT\"" "")"
@@ -114,7 +119,7 @@ eq "$RC" "0" "an open step under an open, recently-touched root is clean"
 has "$OUT" "OK:" "the pass message is the OK line"
 
 # --- 2. NEVER-CLOSED: open step under a closed root -----------------------------
-steps "$(step s-2 r-2)" "$(step s-3 r-2)"
+steps "$(step s-2 r-2 "$ROUTE")" "$(step s-3 r-2 "$ROUTE")"
 roots "{\"id\":\"r-2\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "open steps under a closed root are an ERROR"
@@ -123,7 +128,7 @@ has "$OUT" "s-2, s-3" "the steps are grouped into ONE finding per molecule"
 has "$OUT" "never closed" "the never-closed shape is called out"
 
 # --- 3. REOPENED: the step already carries gc.outcome ----------------------------
-steps "$(step s-4 r-3 ',"gc.outcome":"pass"')"
+steps "$(step s-4 r-3 ',"gc.outcome":"pass"'"$ROUTE")"
 roots "{\"id\":\"r-3\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a reopened completed step under a closed root is an ERROR"
@@ -138,16 +143,19 @@ eq "$RC" "0" "a root closed seconds ago is finalize-in-progress, not a strand"
 has "$OUT" "settle" "the settle window is noted, not silent"
 
 # --- 5. a root with an unparseable closed_at gets NO grace -------------------------
-steps "$(step s-6 r-5)"
+steps "$(step s-6 r-5 "$ROUTE")"
 roots "{\"id\":\"r-5\",\"status\":\"closed\",\"closed_at\":\"not-a-time\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an unreadable closed_at does not buy the settle exemption"
 
-# --- 6. STALL: open root, step untouched past the bound ----------------------------
-steps "$(step s-7 r-6 ",\"x\":\"y\"" ",\"updated_at\":\"$STALE\"")"
+# --- 6. STALL: open root, ROUTED step untouched past the bound ---------------------
+# The open-root path measures offerability too, so a stalled frontier has to
+# carry a pool route to read as a stall; an unrouted or finalize-only stale step
+# is inert (cases 29-30 below).
+steps "$(step s-7 r-6 "$ROUTE" ",\"updated_at\":\"$STALE\"")"
 roots "{\"id\":\"r-6\",\"status\":\"open\"}"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an open step under an OPEN root untouched past the bound is a WARNING"
+eq "$RC" "1" "an open, routed step under an OPEN root untouched past the bound is a WARNING"
 has "$OUT" "48h" "the stall bound is named"
 has "$OUT" "s-7" "the stalled step is named"
 OUT=$(GC_DOCTOR_STEP_STALL_HOURS=100 RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1); RC=$?
@@ -193,7 +201,8 @@ jq -cn --argjson n "$N" '[range(0;$n) | {id: ("r-" + (.|tostring)), status: "ope
     > "$TMP/stores/alpha.roots.json"
 jq -cn --argjson n "$N" --arg ua "$RECENT" '[range(0;$n)
     | {id: ("s-" + (.|tostring)), status: "open", updated_at: $ua,
-       metadata: {"gc.root_bead_id": ("r-" + (.|tostring))}}]' \
+       metadata: {"gc.root_bead_id": ("r-" + (.|tostring)),
+                  "gc.routed_to": "alpha/gc-toolkit.polecat"}}]' \
     > "$TMP/stores/alpha.steps.json"
 MAPBYTES=$(wc -c < "$TMP/stores/alpha.roots.json")
 ge "$MAPBYTES" "131073" "the fixture's root map alone exceeds MAX_ARG_STRLEN ($MAPBYTES bytes, $N small molecules)"
@@ -223,6 +232,19 @@ CALLS=$(wc -l < "$ARGV_LOG")
 lt "$WIDEST" "16384" "the widest --id argument across $CALLS lookups is $WIDEST bytes, far below the 131072 cap"
 ge "$CALLS" "2" "the roots were resolved in batches, not one sweep"
 : > "$ARGV_LOG"
+# The chunk narrows the widest argument independently of the store, so a small
+# fixture shows it: at chunk=10 the widest batch is 10 ids, far under the 100-id
+# batches the chunk=100 run above built at $N molecules. Re-scanning all $N here
+# at chunk=10 is $N/10 windows of bounded work to demonstrate a bound a few
+# molecules already carry — the store-size independence is test 10's job, above.
+clear_fixtures
+NARROW=30
+jq -cn --argjson n "$NARROW" '[range(0;$n) | {id:("r-"+(.|tostring)),status:"open",closed_at:""}]' \
+    > "$TMP/stores/alpha.roots.json"
+jq -cn --argjson n "$NARROW" --arg ua "$RECENT" '[range(0;$n)
+    | {id:("s-"+(.|tostring)),status:"open",updated_at:$ua,
+       metadata:{"gc.root_bead_id":("r-"+(.|tostring))}}]' \
+    > "$TMP/stores/alpha.steps.json"
 OUT=$(BD_ARGV_LOG="$ARGV_LOG" GC_DOCTOR_ROOT_CHUNK=10 RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1)
 WIDEST10=$(sort -rn "$ARGV_LOG" | head -1)
 lt "$WIDEST10" "$WIDEST" "a smaller batch size narrows the widest argument ($WIDEST10 < $WIDEST), so the bound is the batch"
@@ -234,7 +256,7 @@ clear_fixtures
 # what proves the probe names the absent id rather than condemning the whole short
 # batch: were the closed root swept in with it, every strand would downgrade from
 # an error to an orphan note and I8 would go quiet on the defect it exists to find.
-steps "$(step s-11 r-closed)" "$(step s-12 r-gone ',"gc.root_store_ref":"other-rig"')"
+steps "$(step s-11 r-closed "$ROUTE")" "$(step s-12 r-gone ',"gc.root_store_ref":"other-rig"')"
 roots "{\"id\":\"r-closed\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a closed root batched with an absent one is still an ERROR"
@@ -248,7 +270,7 @@ clear_fixtures
 # different windows is resolved more than once. Grouping must not follow the
 # windows: three stranded steps read across two of them are one defect, and a
 # window boundary is the cheapest way to split a molecule the reporting joins.
-steps "$(step s-w1 r-w)" "$(step s-w2 r-w)" "$(step s-w3 r-w)"
+steps "$(step s-w1 r-w "$ROUTE")" "$(step s-w2 r-w "$ROUTE")" "$(step s-w3 r-w "$ROUTE")"
 roots "{\"id\":\"r-w\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
 OUT=$(GC_DOCTOR_ROOT_CHUNK=2 RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "2" "steps split across two windows are still an ERROR"
@@ -333,7 +355,7 @@ clear_fixtures
 # The containment break this check exists to catch: an open step with every
 # blocker closed, which a sling can hand to a fresh worker on merged work. Only
 # the frontier is offerable, and both verdicts have to survive on one molecule.
-steps "$(step s-f2 r-o '' "$(blocks s-done)")" \
+steps "$(step s-f2 r-o "$ROUTE" "$(blocks s-done)")" \
       "$(step s-o1 r-o '' "$(blocks s-f2)")" \
       "$(step s-o2 r-o '' "$(blocks s-o1)")"
 roots "{\"id\":\"r-o\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
@@ -362,7 +384,7 @@ clear_fixtures
 # --- 21. a tracks edge to a live bead is not a blocker -----------------------------
 # Every step tracks its molecule root through an edge of its own. Ignoring edge
 # type would make each one look held by something live and silence the check.
-steps '{"id":"s-t1","status":"open","dependencies":[{"type":"tracks","depends_on_id":"live-1"}],"metadata":{"gc.root_bead_id":"r-t"}}'
+steps '{"id":"s-t1","status":"open","dependencies":[{"type":"tracks","depends_on_id":"live-1"}],"metadata":{"gc.root_bead_id":"r-t","gc.routed_to":"alpha/gc-toolkit.polecat"}}'
 roots "{\"id\":\"r-t\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
       "{\"id\":\"live-1\",\"status\":\"open\"}"
 OUT=$(run_check); RC=$?
@@ -373,7 +395,7 @@ clear_fixtures
 # `bd list --id` drops an id it cannot resolve, so a deleted blocker comes back
 # looking exactly like one that was never asked about. Reading that silence as
 # "still live" would let a vanished edge mute a real strand.
-steps "$(step s-g1 r-g '' "$(blocks gone-1)")"
+steps "$(step s-g1 r-g "$ROUTE" "$(blocks gone-1)")"
 roots "{\"id\":\"r-g\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a step whose blocker no longer exists is offerable, so an ERROR"
@@ -410,6 +432,126 @@ roots "{\"id\":\"r-p\",\"status\":\"open\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a parked step under an open root raises no stall warning"
 hasnt "$OUT" "frontier is stalled" "no stalled-frontier finding is raised for a parked step"
+clear_fixtures
+
+# --- 26. routing is the discriminator: the same step, routed vs unrouted --------
+# offerable() read only status + blockers, so an open, unblocked step under a
+# closed molecule was flagged a stranded ERROR whether or not a pool could reach
+# it. The pool query is unassigned + routed, so a routeless husk — an
+# input-convoy-poured step that sits in `bd ready` for days, unserved — is inert.
+# Toggling only the route flips the verdict.
+steps "$(step s-d1 r-d "$ROUTE")"
+roots "{\"id\":\"r-d\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the same step, routed, IS a stranded ERROR"
+has "$OUT" "s-d1" "the routed strand is named"
+steps "$(step s-d1 r-d)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the same step, unrouted, is inert — routing is the sole discriminator"
+has "$OUT" "residue to sweep, not a strand" "the unrouted husk is a note, not an error"
+hasnt "$OUT" "can still offer" "the check does not claim the pool can offer an unrouted step"
+clear_fixtures
+
+# --- 27. an unrouted step carrying gc.outcome is inert, not a REOPENED error ------
+# Routing-blindness hit both error shapes. A completed-then-reset step with no
+# route is as unreachable by the pool as one that never ran.
+steps "$(step s-u2 r-u2 ',"gc.outcome":"pass"')"
+roots "{\"id\":\"r-u2\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an unrouted reopened step under a closed root is inert, not an ERROR"
+hasnt "$OUT" "RESET" "an unrouted step is not reported as reopened-and-reset"
+clear_fixtures
+
+# --- 28. an armed step (gc.dispatch_when_ready) is a live dispatch path -----------
+# deferred-dispatch arms a routeless step to be slung when its blocker clears;
+# under a closed molecule with blockers closed that arm still fires, so an armed
+# step is a real strand even with an empty gc.routed_to.
+steps "$(step s-a1 r-a ',"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat"')"
+roots "{\"id\":\"r-a\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an armed (deferred-dispatch) step under a closed root is still an ERROR"
+has "$OUT" "s-a1" "the armed strand is named"
+clear_fixtures
+
+# --- 29. open-root stall measures offerability: routing is the discriminator ------
+# The open-root path was routing-blind — a stale open step warned whether or not
+# a pool could claim it. The pool query is unassigned + routed, so a routeless
+# husk step, open and stale but unreachable, is inert: a note, not a stalled
+# frontier. Toggling only the route flips the verdict.
+steps "$(step s-or1 r-or "$ROUTE" ",\"updated_at\":\"$STALE\"")"
+roots "{\"id\":\"r-or\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an open, routed, stale step under an open root IS a stall WARNING"
+steps "$(step s-or1 r-or "" ",\"updated_at\":\"$STALE\"")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the same step, unrouted, is inert — routing is the sole discriminator"
+has "$OUT" "residue, not a stalled frontier" "the unrouted open husk is a note"
+hasnt "$OUT" "frontier is stalled" "the check does not call an unrouted step a stalled frontier"
+clear_fixtures
+
+# --- 30. open-root stall: the control-dispatcher's finalize step is not a frontier -
+# Every molecule's workflow-finalize step is routed to core.control-dispatcher and
+# closed by it once the work steps close — never claimed from a pool. Under a husk
+# whose work steps never ran it sits open and stale, but it is not a worker
+# frontier: gc.kind marks it, so it reads inert even carrying a (non-pool) route.
+steps "$(step s-fin r-fin ',"gc.kind":"workflow-finalize","gc.routed_to":"alpha/core.control-dispatcher"' ",\"updated_at\":\"$STALE\"")"
+roots "{\"id\":\"r-fin\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a stale, routed workflow-finalize step under an open root is inert, not a stall"
+has "$OUT" "residue, not a stalled frontier" "the finalize husk is a note"
+hasnt "$OUT" "frontier is stalled" "the control-dispatcher's finalize step is not a stalled frontier"
+clear_fixtures
+
+# --- 31. the finalize exclusion holds under a CLOSED root too ----------------------
+# offerable() is shared: a workflow-finalize step left open under a closed
+# molecule is routed to the dispatcher, not a pool, so no pool re-offers it
+# against the dead molecule. It is inert residue, not a stranded ERROR.
+steps "$(step s-cf r-cf ',"gc.kind":"workflow-finalize","gc.routed_to":"alpha/core.control-dispatcher"')"
+roots "{\"id\":\"r-cf\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a workflow-finalize step open under a closed root is inert, not a stranded ERROR"
+has "$OUT" "residue to sweep, not a strand" "the closed-root finalize husk is a note"
+clear_fixtures
+
+# --- 32. a routed frontier still stalls even beside inert husk siblings ------------
+# A live molecule can hold a genuine stalled frontier (routed, unclaimed) next to
+# unrouted husk steps and its dispatcher-routed finalize. The frontier must still
+# warn; the unreachable siblings are the note, not a silencer.
+steps "$(step s-fr r-mix "$ROUTE" ",\"updated_at\":\"$STALE\"")" \
+      "$(step s-hk r-mix "" ",\"updated_at\":\"$STALE\"")" \
+      "$(step s-fz r-mix ',"gc.kind":"workflow-finalize","gc.routed_to":"alpha/core.control-dispatcher"' ",\"updated_at\":\"$STALE\"")"
+roots "{\"id\":\"r-mix\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a routed frontier beside inert husks is still a WARNING"
+has "$OUT" "s-fr" "the routed frontier is named in the stall warning"
+has "$OUT" "s-fz, s-hk" "the unrouted husk and the finalize step are the note"
+has "$OUT" "residue, not a stalled frontier" "the inert siblings are a note"
+clear_fixtures
+
+# --- 33. open-root stall: a step held by a LIVE blocker is not a stalled frontier --
+# The open-root path reads offerable() too, and offerable() calls a step held by
+# a live dependency unreachable. A stale, routed open step whose predecessor is
+# still in progress is an ordinary graph step waiting its turn, not a frontier
+# nobody advances — inert residue, a note. resolve_blockers must probe the open
+# root's blockers for this: an empty blocker map would read the step offerable
+# and escalate every step queued behind a live sibling as a stall.
+steps "$(step s-lb1 r-lb "$ROUTE" ",\"updated_at\":\"$STALE\"$(blocks live-b1)")"
+roots "{\"id\":\"r-lb\",\"status\":\"open\"}" \
+      "{\"id\":\"live-b1\",\"status\":\"in_progress\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a stale routed open-root step behind a live blocker is inert, not a stall"
+has "$OUT" "residue, not a stalled frontier" "the step held by a live predecessor is a note"
+hasnt "$OUT" "frontier is stalled" "a step waiting on a live predecessor is not a stalled frontier"
+has "$OUT" "s-lb1" "the held open-root step is named in the note"
+# Flip only the blocker's status: once the predecessor closes, the same stale
+# routed step is offerable again — a pool can claim it — so it is the stalled
+# frontier the warning is for. The live-vs-closed blocker is the sole discriminator.
+steps "$(step s-lb1 r-lb "$ROUTE" ",\"updated_at\":\"$STALE\"$(blocks live-b1)")"
+roots "{\"id\":\"r-lb\",\"status\":\"open\"}" \
+      "{\"id\":\"live-b1\",\"status\":\"closed\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the same step with its blocker CLOSED is a stall WARNING again"
+has "$OUT" "s-lb1" "the now-offerable frontier is named in the warning"
 clear_fixtures
 
 echo

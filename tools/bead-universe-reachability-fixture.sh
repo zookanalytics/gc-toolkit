@@ -35,7 +35,7 @@ TOOL="$HERE/gc-bd-universe.sh"
 CEILING="${GC_BD_UNIVERSE_TOKEN_CEILING:-2000}"
 SMOKE_BEAD="${SMOKE_BEAD:-tk-oqmc7}"
 
-FXDIR="$(mktemp -d)"
+FXDIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bead-universe-reachability-fixture.XXXXXX")"
 # shellcheck disable=SC2329  # invoked indirectly via the EXIT trap below
 cleanup() { rm -rf "$FXDIR"; }
 trap cleanup EXIT

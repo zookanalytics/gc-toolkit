@@ -10,7 +10,8 @@
 #
 # Two enforcement surfaces, and this suite checks both:
 #   - lifecycle.sh refuses the park without one at runtime (lifecycle.test.sh
-#     proves the refusal); here we only assert the guard is still wired.
+#     proves the refusal); here we only assert the guard is still wired in
+#     gctk lifecycle, the implementation lifecycle.sh execs.
 #   - a raw `gc bd update` bypasses lifecycle.sh entirely, so each such site is
 #     read out of the tree and required to carry the takeaway in the same
 #     statement.
@@ -64,7 +65,23 @@ block_start() { # <file> <line> — first line of the enclosing fenced block, el
         NR < line && /^[[:space:]]*```/ { if (open) { open = 0 } else { open = 1; at = NR } }
         END { if (open) print at }
       ' "$1")
-      [ -n "$fence" ] && [ "$fence" -gt "$from" ] && from="$fence"
+      # The fence bounds the search to the whole block, however tall: flooring
+      # it at LOOKBACK would cut off a stamp more than LOOKBACK lines above the
+      # transition. LOOKBACK is the fallback only outside any fence.
+      [ -n "$fence" ] && from="$fence"
+      ;;
+    *.sh)
+      # A shell script has no fence, so the enclosing block is the current
+      # function, or the whole script at top level. The converse hold stamps the
+      # takeaway, files its demand, then transitions — a span wider than any
+      # fixed window — so the same-bead stamp is sought across that block, the
+      # way the fence bounds it in a prompt.
+      local fn
+      fn=$(awk -v line="$2" '
+        NR < line && /^[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{[[:space:]]*$/ { at = NR }
+        END { if (at) print at }
+      ' "$1")
+      from=${fn:-1}
       ;;
   esac
   printf '%s' "$from"
@@ -105,6 +122,11 @@ while IFS=: read -r f n _; do
   [ -n "$f" ] || continue
   skip_file "$f" && continue
   stmt=$(statement "$f" "$n")
+  # A park marker inside an echoed or printed message is prose quoting the
+  # recovery command for an operator, not a writer running it. A real raw
+  # writer is a `gc bd update` (or a `set --` that builds its args) and never
+  # leads with echo/printf, so a statement that does is a message, not a park.
+  if [[ "$stmt" =~ ^[[:space:]]*(echo|printf)[[:space:]] ]]; then continue; fi
   raw_checked=$((raw_checked + 1))
   has "$stmt" "gc.takeaway=" "$f:$n writes the takeaway in the same update"
 done < <(grep -rn 'gc\.routed_to="\?human"\?' --include='*.sh' --include='*.toml' --include='*.md' . 2>/dev/null \
@@ -128,34 +150,41 @@ done < <(grep -rn "=\"$PARK\"" --include='*.sh' --include='*.toml' . 2>/dev/null
 [ "$raw_checked" -gt 0 ] && ok "raw park writers found and checked ($raw_checked)" \
   || bad "no raw park writer found — the discovery patterns have gone stale"
 
-# --- lifecycle.sh: the guard that covers every --route caller -------------------
-# Callers reach the park through --route, and there the rule is enforced at
-# runtime instead of by grep: a caller may satisfy it with --takeaway or with a
-# takeaway already on the bead, and only lifecycle.sh can tell the two apart.
+# --- the lifecycle guard that covers every --route caller ------------------------
+# Callers reach the park through lifecycle.sh's --route, and there the rule is
+# enforced at runtime instead of by grep: a caller may satisfy it with
+# --takeaway or with a takeaway already on the bead, and only the lifecycle
+# writer can tell the two apart. lifecycle.sh execs gctk lifecycle, so the
+# guard is read from the port's source.
 echo "# the lifecycle guard"
-LC="$HERE/lifecycle.sh"
-GUARD=$(awk '/LIFECYCLE_PARK_ROUTE" \] && \[ "\$TAKEAWAY_SET" = 0 \]/,/^  fi$/' "$LC")
-[ -n "$GUARD" ] && ok "lifecycle.sh carries the park-route takeaway guard" \
-  || bad "lifecycle.sh no longer refuses a park with no takeaway"
-has "$GUARD" "exit 1" "the guard refuses rather than warning"
+PORT="$ROOT/services/gctk/internal/cli/lifecycle.go"
+GUARD=$(awk '/o\.route == lifecycle\.ParkRoute && !o\.takeawaySet/,/^\t}$/' "$PORT")
+[ -n "$GUARD" ] && ok "gctk lifecycle carries the park-route takeaway guard" \
+  || bad "gctk lifecycle no longer refuses a park with no takeaway"
+has "$GUARD" "return 1" "the guard refuses rather than warning"
 has "$GUARD" "no question recorded" "the refusal quotes what the board would render"
 
 # The guard is only as good as the flag it accepts, and two arms carry that.
 # One refuses text that normalizes to nothing: the flag's presence alone
 # satisfies the guard above, so an empty one parks the bead mute — the state
 # the guard exists to prevent, reached through the flag that answers it.
-EMPTY=$(awk '/if \[ -z "\$TAKEAWAY" \]; then/,/fi$/' "$LC")
-[ -n "$EMPTY" ] && ok "lifecycle.sh refuses a --takeaway that normalizes to nothing" \
-  || bad "lifecycle.sh accepts an empty --takeaway"
-has "$EMPTY" "exit 1" "…refusing rather than writing an empty headline"
+# normalizeTakeaway words that refusal, and its caller returns on it.
+EMPTY=$(awk '/^func normalizeTakeaway/ {f = 1}
+             f && /if s == "" \{/ {g = 1}
+             g {print}
+             g && /^\t}$/ {exit}' "$PORT")
+REFUSE=$(awk '/normalizeTakeaway\(o\.takeaway\)/,/^\t}$/' "$PORT")
+[ -n "$EMPTY" ] && ok "gctk lifecycle refuses a --takeaway that normalizes to nothing" \
+  || bad "gctk lifecycle accepts an empty --takeaway"
+has "$REFUSE" "return 1" "…refusing rather than writing an empty headline"
 has "$EMPTY" "no question recorded" "…and quoting what the board would render"
 
 # The other spends the accepted text in the same atomic update as the route.
 # Named by the args it builds, not by its position: the validating arms carry
 # the same condition and only this one writes.
-WRITE=$(awk '/TAKEAWAY_SET" = 1 \]; then/{buf = ""; f = 1}
+WRITE=$(awk '/if o\.takeawaySet \{/ {buf = ""; f = 1}
              f {buf = buf $0 ORS}
-             f && /^  fi$/ {f = 0; if (buf ~ /ARGS\+=/) {printf "%s", buf; exit}}' "$LC")
+             f && /^\t}$/ {f = 0; if (buf ~ /updateArgs = append/) {printf "%s", buf; exit}}' "$PORT")
 has "$WRITE" "gc.takeaway=" "--takeaway writes the headline"
 has "$WRITE" "gc.takeaway_at=" "…its timestamp, which is when the wait started"
 has "$WRITE" "gc.takeaway_by=" "…and its provenance"

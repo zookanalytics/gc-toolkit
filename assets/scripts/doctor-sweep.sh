@@ -13,8 +13,11 @@
 #
 #   nothing live, sweep or retry due     start one detached     state=started
 #   nothing live, none due yet           nothing                state=idle
+#   due, one already started this hour   hold the cadence       state=throttled
+#   due, but the data plane is degraded  stand down for now     state=deferred
 #   in flight                            report progress        state=running
 #   finished                             collect it             state=complete
+#   finished more than an interval ago   discard its payload    state=stale
 #   finished badly, or bad payload       a FAILED scan          state=failed
 #   past its bound                       kill it, name the check state=exceeded
 #   cannot sweep at all                  say why, start nothing state=blocked
@@ -22,6 +25,13 @@
 # The bound is enforced here rather than by `timeout`, which is what lets it
 # exceed the harness ceiling. A sweep that never finishes still ends in a state
 # the patrol escalates, carrying its elapsed time and the check it died in.
+#
+# A payload describes the city at the second its sweep finished, and only a pass
+# collects it, so a patrol that stops for hours leaves a finished run waiting.
+# A run that finished more than one interval before the pass that reaches it is
+# reported stale, never complete or failed: its payload and its exit code are
+# not handed on, and because its window has elapsed, the next pass is due to
+# start a fresh sweep in its place.
 #
 # Starts are capped per interval. An ordinary sweep opens a window; a run that
 # ends failed or exceeded earns one retry on the next pass (up to
@@ -39,12 +49,19 @@ usage: doctor-sweep.sh [--status]
        (default)   advance the sweep: collect a finished run, or start one
                    once the interval has passed
        --status    report the current state; never starts, kills, or collects
-env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps (default 3600)
+env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps, and the age past
+                                     which a finished sweep is stale
+                                     (default 3600)
        GC_DOCTOR_SWEEP_MAX_ATTEMPTS  sweep starts per interval (default 2, min 1)
        GC_DOCTOR_SWEEP_BOUND         seconds a sweep may run (default 1800)
        GC_DOCTOR_SWEEP_STATE_DIR     where the run record lives
        GC_DOCTOR_SWEEP_NO_SYSTEMD    set to skip the transient user service and
                                      launch with setsid/nohup instead
+       GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT  seconds bounding the pre-spawn Dolt
+                                     health probe (default 20)
+       GC_DOCTOR_SWEEP_CADENCE_DIR   where the cross-session cadence lock and
+                                     last-start timestamp live (default under
+                                     $XDG_RUNTIME_DIR, else a per-uid /tmp path)
 USAGE
 }
 
@@ -85,6 +102,11 @@ resolve_num BOUND "${GC_DOCTOR_SWEEP_BOUND:-}" 1800 GC_DOCTOR_SWEEP_BOUND
 MAX_ATTEMPTS=""
 resolve_num MAX_ATTEMPTS "${GC_DOCTOR_SWEEP_MAX_ATTEMPTS:-}" 2 GC_DOCTOR_SWEEP_MAX_ATTEMPTS
 [ "$MAX_ATTEMPTS" -lt 1 ] && MAX_ATTEMPTS=1
+# The pre-spawn Dolt health probe is bounded: a data plane too slow to answer
+# its own health check is itself overloaded, so an exceeded probe reads as
+# degraded rather than something to wait on.
+DOLT_PROBE_TIMEOUT=""
+resolve_num DOLT_PROBE_TIMEOUT "${GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT:-}" 20 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
@@ -94,6 +116,20 @@ STATE_DIR="${GC_DOCTOR_SWEEP_STATE_DIR:-$DEFAULT_STATE_DIR}"
 RUN="$STATE_DIR/current"
 STAMP="$STATE_DIR/last-start"
 OUTCOME="$STATE_DIR/last-outcome"
+
+# The cadence floor's lock and last-start live OUTSIDE STATE_DIR, at a path every
+# one of the user's sessions shares and that survives a session recycle, so a
+# sweep one session starts is visible to the next even when STATE_DIR is the
+# per-session fallback above. XDG_RUNTIME_DIR is the user's systemd runtime dir;
+# with none, a fixed per-uid /tmp path stands in. The same place for every
+# session is what lets the floor serialize them, independent of STATE_DIR.
+CADENCE_DIR="${GC_DOCTOR_SWEEP_CADENCE_DIR:-}"
+if [ -z "$CADENCE_DIR" ]; then
+  if [ -n "${XDG_RUNTIME_DIR:-}" ]; then CADENCE_DIR="$XDG_RUNTIME_DIR/gc-doctor-sweep"
+  else CADENCE_DIR="/tmp/gc-doctor-sweep.$(id -u 2>/dev/null || echo 0)"; fi
+fi
+CADENCE_STAMP="$CADENCE_DIR/last-start"
+CADENCE_LOCK="$CADENCE_DIR/lock"
 
 NOW="$(date +%s)"
 
@@ -106,10 +142,11 @@ report() { # <state> [key=value]...
 }
 
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 read_file() { [ -f "$1" ] && tr -d '\n' < "$1" || printf ''; }
@@ -118,8 +155,10 @@ read_file() { [ -f "$1" ] && tr -d '\n' < "$1" || printf ''; }
 # retry after a failure. Advance mode only — --status must not write it. A
 # collection records `failed`, and only the complete path upgrades it to
 # `complete`, so every abnormal end (bad rc, invalid payload, a vanished
-# wrapper, an exceeded bound) is the failure that earns the retry.
-collect() { # <complete|failed>
+# wrapper, an exceeded bound) is the failure that earns the retry. A stale run
+# records `stale`, which arms no retry and needs none: its window has elapsed,
+# so the next start is the ordinary one.
+collect() { # <complete|failed|stale>
   [ "$MODE" = "status" ] && return 0
   : > "$RUN/collected"
   printf '%s' "$1" > "$OUTCOME"
@@ -166,6 +205,41 @@ kill_tree() { # <root-pid>
   kill -KILL "$root" 2>/dev/null
 }
 
+# Whether Dolt is degraded enough that a sweep must not pile onto it. Echoes a
+# one-line reason and returns 0 when degraded, 1 when healthy or unproven.
+# Judged off server.reachable and server.latency_ms — the same fields and
+# 5000ms ceiling the deacon patrol's dolt-health step uses — with a probe that
+# outruns its own bound counted as overloaded. A missing gc, a non-timeout
+# error, or an unparseable answer is unproven, never degraded, so a broken
+# probe cannot disable sweeping.
+dolt_degraded() {
+  local gcbin out rc reachable latency
+  gcbin="$(command -v gc 2>/dev/null)"
+  [ -n "$gcbin" ] || return 1
+  out="$(timeout "$DOLT_PROBE_TIMEOUT" "$gcbin" dolt health --json 2>/dev/null)"; rc=$?
+  if [ "$rc" -eq 124 ]; then
+    printf 'health probe exceeded %ss; data plane too slow to answer' "$DOLT_PROBE_TIMEOUT"
+    return 0
+  fi
+  [ "$rc" -eq 0 ] || return 1
+  # Not `// empty`: jq's `//` treats boolean false like null, so it would swallow
+  # the very `reachable:false` this is looking for. Read the field raw.
+  reachable="$(printf '%s' "$out" | jq -r '.server.reachable' 2>/dev/null)"
+  if [ "$reachable" = "false" ]; then
+    printf 'Dolt server unreachable'
+    return 0
+  fi
+  latency="$(printf '%s' "$out" | jq -r '.server.latency_ms // empty' 2>/dev/null)"
+  case "$latency" in
+    ''|*[!0-9]*) return 1 ;;
+    *) if [ "$latency" -gt 5000 ]; then
+         printf 'Dolt server latency %sms over 5000ms' "$latency"
+         return 0
+       fi ;;
+  esac
+  return 1
+}
+
 STATE_DIR_OK=1
 mkdir -p "$STATE_DIR" 2>/dev/null || STATE_DIR_OK=0
 # `-w` too: mkdir -p succeeds on an existing unwritable directory.
@@ -198,7 +272,22 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
   # payload is whole.
   if [ -n "$RC" ]; then
     FINISHED="$(read_file "$RUN/finished_at")"
+    # Read into arithmetic below, so an unreadable stamp is dropped like the
+    # others rather than aborting the collect.
+    case "$FINISHED" in ''|*[!0-9]*) FINISHED="" ;; esac
     [ -n "$FINISHED" ] && ELAPSED=$(( FINISHED - STARTED_AT ))
+    # Aged from when the run finished. An unreadable finished_at falls back to
+    # started_at, which is never later, so the fallback can only overstate the
+    # age: it may discard a current payload, never report a stale one.
+    AGE=$(( NOW - ${FINISHED:-$STARTED_AT} ))
+
+    if [ "$AGE" -gt "$INTERVAL" ]; then
+      collect stale
+      report stale "finished_at=${FINISHED:-unknown}" "age=$AGE" \
+        "interval=$INTERVAL"
+      exit 0
+    fi
+
     collect failed
 
     if [ "$RC" != "0" ] && [ "$RC" != "1" ]; then
@@ -248,7 +337,8 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
     ABANDONED="$(printf '%s' "$COUNTS" | cut -f3)"
     ABANDONED_NAMES="$(printf '%s' "$COUNTS" | cut -f4)"
     collect complete
-    report complete "rc=$RC" "elapsed=$ELAPSED" "payload=$PAYLOAD" \
+    report complete "rc=$RC" "elapsed=$ELAPSED" \
+      "finished_at=${FINISHED:-unknown}" "age=$AGE" "payload=$PAYLOAD" \
       "checks=$CHECKS" "findings=$FINDINGS" \
       "abandoned=$ABANDONED" "abandoned_checks=$ABANDONED_NAMES"
     exit 0
@@ -267,8 +357,18 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
 
   if ! kill -0 "$PID" 2>/dev/null; then
     collect failed
-    report failed "reason=sweep-vanished" "elapsed=$ELAPSED" "pid=$PID" \
-      "stderr=$RUN/stderr.log"
+    # The wrapper names the signal that ended it when it could catch one; an
+    # untrappable kill (SIGKILL, OOM) leaves no file, so say so rather than
+    # nothing. launch/unit point a reader at the run's own journal.
+    CAUSE="$(read_file "$RUN/cause")"
+    LAUNCH="$(read_file "$RUN/launch")"
+    UNIT="$(read_file "$RUN/unit")"
+    VANISHED=("reason=sweep-vanished" "cause=${CAUSE:-unknown}" \
+      "elapsed=$ELAPSED" "pid=$PID")
+    [ -n "$LAUNCH" ] && VANISHED+=("launch=$LAUNCH")
+    [ -n "$UNIT" ] && VANISHED+=("unit=$UNIT")
+    VANISHED+=("stderr=$RUN/stderr.log")
+    report failed "${VANISHED[@]}"
     exit 0
   fi
 
@@ -315,6 +415,7 @@ DO_START=0
 NEW_WINDOW=""     # window-start to stamp on a start; empty leaves it in place
 NEW_ATTEMPTS=""   # attempts to stamp on a start
 NEXT_IN=""        # seconds until the window reopens, for the idle report
+RETRY=0           # a retry the window authorized: exempt from the cadence floor
 if [ -z "$WINDOW_START" ] || [ -z "$ATTEMPTS" ]; then
   # Missing or corrupt pair: degrade to one start per interval on last-start.
   if [ -n "$SINCE" ] && [ "$SINCE" -lt "$INTERVAL" ]; then
@@ -328,7 +429,7 @@ elif [ "$(( NOW - WINDOW_START ))" -ge "$INTERVAL" ]; then
 elif [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ] && [ "$LAST_OUTCOME" = "failed" ]; then
   # One retry inside the open window after a failed run. Leaving window-start
   # in place is what makes the per-interval ceiling hold however runs fail.
-  DO_START=1; NEW_ATTEMPTS=$(( ATTEMPTS + 1 ))
+  DO_START=1; NEW_ATTEMPTS=$(( ATTEMPTS + 1 )); RETRY=1
 else
   # Window still open and either the cap is spent or the last run completed.
   NEXT_IN=$(( INTERVAL - ( NOW - WINDOW_START ) ))
@@ -343,6 +444,67 @@ if [ "$MODE" = "status" ]; then
   report idle "next_in=0" "interval=$INTERVAL" "since_last=${SINCE:-never}"
   exit 0
 fi
+
+# --------------------------------------------------------------- pre-spawn --
+# A start is due. Two last gates stand before spawning a ~10-minute sweep that
+# queries every store's Dolt. The Dolt-health gate keeps the sweep off a data
+# plane that is already unreachable or overloaded. The cadence floor keeps a
+# would-be burst — concurrent sessions, or a rapidly recycled one whose STATE_DIR
+# cannot see the last start — collapsed to one sweep per interval. Together they
+# stop this health check from driving the data plane it watches into a collapse.
+
+# Dolt degraded. Piling a ~10-minute sweep onto a data plane that is unreachable
+# or overloaded is one way this health check amplifies a slowdown; the probe is
+# far cheaper than the sweep it gates. This runs before the cadence stamp below,
+# so a start deferred here spends no cadence window; window-start and attempts
+# are left untouched too, so the same due start — the ordinary hourly one or the
+# retry a failed run armed — fires on the next pass once Dolt recovers, with no
+# attempt burned on a sweep that never ran.
+if DOLT_DETAIL="$(dolt_degraded)"; then
+  report deferred "reason=dolt-degraded" "detail=$DOLT_DETAIL"
+  exit 0
+fi
+
+# The cadence floor — the one cross-session gate. The in-flight and interval
+# guards above read only STATE_DIR, which falls back to a per-session path when
+# the city is unset and need not survive a rapidly recycled session; a blind
+# STATE_DIR lets concurrent or back-to-back starts each read as the first. The
+# floor reads and stamps a shared last-start timestamp under flock, so the check
+# and the claim are one atomic step no second starter can slip between. A fresh
+# start is refused while the last one sits inside the interval; the retry a
+# failed run armed is exempt from the refusal — it was authorized by a STATE_DIR
+# this session could read, where the burst cannot arise — but still stamps the
+# floor. The gate rests on a file lock, not on any process or query staying
+# responsive. If it cannot be taken — no flock, or a runtime dir it cannot write
+# — the sweep proceeds rather than go silent, and the report says so.
+CADENCE_NOTE=""
+if ! command -v flock >/dev/null 2>&1; then
+  CADENCE_NOTE="flock not found"
+elif ! mkdir -p "$CADENCE_DIR" 2>/dev/null || ! ( : >> "$CADENCE_LOCK" ) 2>/dev/null; then
+  CADENCE_NOTE="cannot write $CADENCE_DIR"
+else
+  CADENCE_THROTTLE=""
+  {
+    if flock -w 10 9 2>/dev/null; then
+      CADENCE_LAST="$(read_file "$CADENCE_STAMP")"
+      case "$CADENCE_LAST" in ''|*[!0-9]*) CADENCE_LAST="" ;; esac
+      if [ "$RETRY" -eq 0 ] && [ -n "$CADENCE_LAST" ] \
+         && [ "$(( NOW - CADENCE_LAST ))" -lt "$INTERVAL" ]; then
+        CADENCE_THROTTLE=$(( NOW - CADENCE_LAST ))
+      else
+        printf '%s' "$NOW" > "$CADENCE_STAMP.tmp" 2>/dev/null \
+          && mv "$CADENCE_STAMP.tmp" "$CADENCE_STAMP" 2>/dev/null
+      fi
+    else
+      CADENCE_NOTE="cadence lock contended past 10s"
+    fi
+  } 9>>"$CADENCE_LOCK"
+  if [ -n "$CADENCE_THROTTLE" ]; then
+    report throttled "reason=cadence-floor" "since_last=$CADENCE_THROTTLE" "floor=$INTERVAL"
+    exit 0
+  fi
+fi
+[ -n "$CADENCE_NOTE" ] && NOTE="${NOTE:+$NOTE; }cadence floor unavailable ($CADENCE_NOTE); started without the cross-session guard"
 
 # Nothing is in flight, so whatever is here is spent: a collected run, or a
 # dir left by a start that died before recording anything. Clearing it is what
@@ -383,16 +545,33 @@ printf '%s' "$NOW" > "$RUN/started_at"
 # file, sh sees the body unexpanded. The wrapper records its own pid before the
 # sweep and writes `rc` LAST, by rename, so a reader never sees a half-written
 # payload behind a finished marker.
+#
+# It also names its own cause of death. systemd counts SIGHUP/SIGINT/SIGTERM/
+# SIGPIPE as a clean stop and logs no failure line for them, so a sweep a reap
+# ends with one of those leaves no trace in the journal either; the trap records
+# which signal it was. The sweep runs in the background and the wrapper `wait`s,
+# so a trapped signal fires the handler at once instead of after doctor returns.
+# SIGKILL and OOM cannot be trapped and leave no cause file, which the reader
+# reports as `unknown`.
 SWEEP_BODY="$RUN/sweep.sh"
 cat > "$SWEEP_BODY" <<'BODY'
-printf %s "$$" > "$5"
-"$1" doctor --json > "$2" 2> "$3"
+gc=$1; payload=$2; errlog=$3; rcfile=$4; pidfile=$5; finfile=$6; causefile=$7
+printf %s "$$" > "$pidfile"
+_died() { printf 'signal:%s' "$1" > "$causefile.tmp" && mv "$causefile.tmp" "$causefile"; exit "$2"; }
+trap '_died HUP 129'  HUP
+trap '_died INT 130'  INT
+trap '_died QUIT 131' QUIT
+trap '_died PIPE 141' PIPE
+trap '_died TERM 143' TERM
+"$gc" doctor --json > "$payload" 2> "$errlog" &
+sweep_pid=$!
+wait "$sweep_pid"
 rc=$?
-date +%s > "$6"
-printf %s "$rc" > "$4.tmp" && mv "$4.tmp" "$4"
+date +%s > "$finfile"
+printf %s "$rc" > "$rcfile.tmp" && mv "$rcfile.tmp" "$rcfile"
 BODY
 SWEEP_ARGV=(sh "$SWEEP_BODY" "$GC_BIN" "$RUN/payload.json" "$RUN/stderr.log" \
-  "$RUN/rc" "$RUN/pid" "$RUN/finished_at")
+  "$RUN/rc" "$RUN/pid" "$RUN/finished_at" "$RUN/cause")
 
 launched=0
 if [ -z "${GC_DOCTOR_SWEEP_NO_SYSTEMD:-}" ] \
@@ -400,23 +579,40 @@ if [ -z "${GC_DOCTOR_SWEEP_NO_SYSTEMD:-}" ] \
    && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
   # Forward the caller's environment faithfully: env -0 keeps values that hold
   # spaces or newlines whole, and only POSIX-named vars pass so a shell-function
-  # export cannot make systemd reject the whole launch.
+  # export cannot make systemd reject the whole launch. GC_SESSION_ID is the one
+  # exception, dropped on purpose: the city-wide session-orphan reaper finds a
+  # detached process by the GC_SESSION_ID in its /proc/<pid>/environ and kills
+  # its whole process group, which this unit's cgroup does not shield it from.
+  # Carry the caller's id and the sweep looks like the deacon session it was
+  # launched from, so that session's next teardown reaps it mid-run. gc doctor
+  # needs the city context this forwards, never the session id.
   SETENV=()
   while IFS= read -r -d '' kv; do
-    case ${kv%%=*} in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac
+    case ${kv%%=*} in
+      ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*|GC_SESSION_ID) continue ;;
+    esac
     SETENV+=(--setenv="$kv")
   done < <(env -0 2>/dev/null)
+  # A named unit is what lets a later reader pull this run's own journal after
+  # the transient unit is collected; the start second keeps the name unique.
+  UNIT="gc-doctor-sweep-$NOW.service"
   if [ "${#SETENV[@]}" -gt 0 ] \
-     && systemd-run --user --collect --quiet \
+     && systemd-run --user --collect --quiet --unit="$UNIT" \
           --description="gc doctor sweep (survives session teardown)" \
           "${SETENV[@]}" "${SWEEP_ARGV[@]}" >/dev/null 2>&1; then
     launched=1
+    printf 'systemd' > "$RUN/launch"
+    printf '%s' "$UNIT" > "$RUN/unit"
   fi
 fi
 if [ "$launched" -eq 0 ]; then
   LAUNCH=(setsid)
   command -v setsid >/dev/null 2>&1 || LAUNCH=(nohup)
-  "${LAUNCH[@]}" "${SWEEP_ARGV[@]}" </dev/null >/dev/null 2>&1 &
+  printf '%s' "${LAUNCH[0]}" > "$RUN/launch"
+  # `env -u GC_SESSION_ID` for the same reason as the systemd branch: shed the
+  # caller's session identity so the reaper cannot claim the detached sweep by
+  # it. Here the child inherits the caller's env directly, so drop it at exec.
+  "${LAUNCH[@]}" env -u GC_SESSION_ID "${SWEEP_ARGV[@]}" </dev/null >/dev/null 2>&1 &
 fi
 
 printf '%s' "$NOW" > "$STAMP"

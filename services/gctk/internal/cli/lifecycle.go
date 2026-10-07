@@ -12,11 +12,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
-// `gctk lifecycle` is the port of assets/scripts/lifecycle.sh: THE writer of
-// anchor lifecycle transitions. The CLI is contract-preserving — same verbs,
-// same flags, same exit codes, same stdout grammar — because its callers
-// (pr-open, merge, pr-facts, mol-refinery-patrol) treat it as an opaque command
-// and must not notice which language answers.
+// `gctk lifecycle` is THE writer of anchor lifecycle transitions, and the only
+// implementation of assets/scripts/lifecycle.sh, which execs it. The CLI is the
+// script's contract — same verbs, same flags, same exit codes, same stdout
+// grammar — because its callers (pr-open, merge, pr-facts, mol-refinery-patrol)
+// invoke lifecycle.sh as an opaque command.
 //
 // Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
 // 2 post-write verification mismatch (or unreadable bead).
@@ -30,7 +30,7 @@ import (
 // they invoked.
 const prog = "lifecycle"
 
-const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
+const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>|human] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
        gctk lifecycle state <bead-id>
        gctk lifecycle reopen <bead-id>   # repair a bead closed on a non-closed merge_result
        gctk lifecycle --dump-machine     # the declared machine, for the lifecycle.toml drift test
@@ -225,7 +225,7 @@ type transitionOpts struct {
 // token is a malformed invocation and returns an error: the empty string it
 // would otherwise take drops --expect's compare-and-swap guard, so a truncated
 // command must fail rather than transition unguarded. An explicitly supplied
-// empty argument (--assignee '' clears the assignee) is a real token and is
+// empty argument (--assignee "" clears the assignee) is a real token and is
 // preserved.
 func parseTransition(args []string) (transitionOpts, error) {
 	var o transitionOpts
@@ -350,6 +350,16 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	// gc.routed_to is matched as an exact string by every pool claim, so a route
+	// that is neither <rig>/<agent> nor the ParkRoute sentinel reaches no pool:
+	// the bead stays ready and is offered to nobody. Every --route caller shares
+	// this writer, so the shape is enforced here once. An empty --route clears
+	// the route and is handled above, so it is exempt.
+	if o.routeSet && o.route != "" && o.route != lifecycle.ParkRoute && !strings.Contains(o.route, "/") {
+		fmt.Fprintf(stderr, "%s: --route '%s' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare name routes to nobody and the bead sits forever. Use <rig>/<agent> or '%s'.\n",
+			prog, o.route, lifecycle.ParkRoute)
+		return 1
+	}
 	for _, s := range append(append([]string{}, o.sets...), o.dated...) {
 		switch k, _ := kv(s); k {
 		case "merge_result":
@@ -421,7 +431,12 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	client := gcbd.New()
-	bead := client.Show(id)
+	// This read governs the write: --expect's compare-and-swap, edge legality,
+	// the dated-value resolution, and the idle-skip below all decide from it, and
+	// nothing re-checks the backing store at write time. So it takes the
+	// authoritative path, not the daemon's cache — a stale read would let --expect
+	// pass against an old state and then stamp one the real state forbids.
+	bead := client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to transition blind\n", prog, id)
 		return 2
@@ -482,6 +497,33 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	if !o.assigneeSet && lifecycle.IsDetachedState(o.to) {
 		if bead.AssigneeString() != "" && bead.StatusLower() == "open" {
 			o.assignee, o.assigneeSet = "", true
+		}
+	}
+
+	// The executor identity is the third field of the same let-go. gc.session_id
+	// and gc.session_name name the session that claimed the bead, so they belong
+	// to the assignee and go with it whenever the assignee is cleared — the
+	// repool that hands a rejected rework back to the pool, the handback that
+	// routes a bead to a human, and the detached-state clear above all reach here
+	// with an empty assignee. A survivor is residue the moment the bead next
+	// carries a route (doctor/executor-identity-residue reports it) and a stale
+	// orphan-recovery pin the runtime resolves a dead owner from. --unset-metadata
+	// bypasses bd's anti-steal guard, so no status gate is needed; if the assignee
+	// clear beside it is refused on an in_progress bead, the whole update rolls
+	// back and the pins stay with the live claim that still owns them. The
+	// post-write read-back covers these like the route and assignee arms.
+	if o.assigneeSet && o.assignee == "" {
+		for _, pin := range []string{"gc.session_id", "gc.session_name"} {
+			has := false
+			for _, u := range o.unsets {
+				if u == pin {
+					has = true
+					break
+				}
+			}
+			if !has {
+				o.unsets = append(o.unsets, pin)
+			}
 		}
 	}
 
@@ -552,6 +594,28 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// A transition into a closed state is a terminal land, and a landed bead
+	// carries no live objection: a rejection or a hold reason still on it now
+	// contradicts the record — a merged bead that still reads "do not merge".
+	// Clear every live-objection marker here, at the one writer every close
+	// passes through, so a caller or a field added later cannot reintroduce the
+	// divergence by listing some fields and forgetting others. Deduped against
+	// the caller's own --unset list so the clear is never written twice.
+	if lifecycle.IsClosedState(o.to) {
+		for _, obj := range []string{"rejection_reason", "blocked_reason"} {
+			seen := false
+			for _, u := range o.unsets {
+				if u == obj {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				o.unsets = append(o.unsets, obj)
+			}
+		}
+	}
+
 	var updateArgs []string
 	if o.to == "unanchored" {
 		updateArgs = append(updateArgs, "--unset-metadata", "merge_result")
@@ -598,8 +662,10 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Re-read and verify every written field; a write that reported success but
-	// did not land must never be reported as a transition.
-	bead = client.Show(id)
+	// did not land must never be reported as a transition. The read-back must
+	// observe the write just made and must carry the appended notes, so it uses
+	// the authoritative path, never the daemon's cached, notes-less read.
+	bead = client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s %s -> %s written but the read-back failed; UNVERIFIED\n", prog, id, cur, o.to)
 		return 2
@@ -709,7 +775,11 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	client := gcbd.New()
-	bead := client.Show(id)
+	// This read governs the write: reopen proceeds only when the bead is closed on
+	// a non-closed merge_result, and nothing re-checks that at write time. So it
+	// takes the authoritative path, not the daemon's cache — a stale read could
+	// show a non-closed state and reopen a bead already legitimately closed.
+	bead := client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to reopen blind\n", prog, id)
 		return 2
@@ -739,8 +809,9 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// Same read-back discipline as transition: verify status flipped and
-	// merge_result stayed put before reporting the repair.
-	bead = client.Show(id)
+	// merge_result stayed put before reporting the repair. Authoritative read,
+	// not the daemon's cache, so the just-written flip is observed.
+	bead = client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s reopen written but the read-back failed; UNVERIFIED\n", prog, id)
 		return 2

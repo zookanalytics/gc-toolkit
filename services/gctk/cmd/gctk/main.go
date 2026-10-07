@@ -3,9 +3,10 @@
 // SCOPE (specs/2026-08-review-gates/gctk-promotion.md). Shell stays the pack's
 // lingua franca: anything an agent pastes, anything that must read as
 // documentation, anything under ~150 lines. gctk takes the merge-cadence
-// cluster alone — highest stakes, pure data-plane, and already invoked by its
-// callers as an opaque CLI, so the language behind the command is invisible to
-// them.
+// cluster — highest stakes, pure data-plane, and already invoked by its callers
+// as an opaque CLI, so the language behind the command is invisible to them —
+// plus the PR-status tri-state, the derivation the status: label and the helm
+// board must share from one code path.
 //
 // Each subcommand keeps the byte-identical CLI of the script it replaces: same
 // flags, same exit codes, same stdout grammar. The scripts' own .test.sh
@@ -13,10 +14,15 @@
 // gctk shells out to gc/bd/gh exactly as the scripts did rather than linking
 // the beads library. Same observability, same stubs, same permissions surface.
 //
-// Ported so far: lifecycle. The rest of the cluster (gate-ensure, pr-open,
-// merge, pr-facts, convoy-graduate, signoff) still runs as shell, and
-// assets/scripts/lifecycle.sh remains as the fallback for a city whose gctk
-// build has not landed yet.
+// Ported so far: lifecycle, merge and pr-status. The rest of the merge-cadence
+// cluster (gate-ensure, pr-open, pr-facts, convoy-graduate, signoff) still runs
+// as shell. assets/scripts/merge.sh remains as the fallback for a city whose
+// gctk build has not landed yet. lifecycle has no shell fallback:
+// assets/scripts/lifecycle.sh only execs this binary, and refuses the call when
+// there is none to run. pr-status has none by design — its tri-state lives only
+// in gctk so the status: label and the helm board share one code path, so when
+// the binary is absent or stale pr-status-label.sh leaves the label unchanged
+// rather than deriving it in shell.
 package main
 
 import (
@@ -29,9 +35,11 @@ import (
 
 const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
+  gctk merge                      merge cadence arm 4 — the single writer of merged truth (assets/scripts/merge.sh)
+  gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
   gctk version                    the revision this binary was built from
 
-Run "gctk lifecycle" for that subcommand's verbs.
+Run "gctk lifecycle" or "gctk pr-status" for that subcommand's verbs.
 `
 
 func main() {
@@ -46,6 +54,10 @@ func run(args []string, stdout, stderr *os.File) int {
 	switch args[0] {
 	case "lifecycle":
 		return cli.Lifecycle(args[1:], stdout, stderr)
+	case "merge":
+		return cli.Merge(args[1:], stdout, stderr)
+	case "pr-status":
+		return cli.PRStatus(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version())
 		return 0
@@ -64,7 +76,7 @@ func run(args []string, stdout, stderr *os.File) int {
 var sourceRev string
 
 // version reports the revision this binary was built from. It is what
-// lifecycle.sh and doctor/check-cadence-live compare against the checkout: a
+// doctor/check-cadence-live compares against the checkout: a
 // cadence running a binary built from other sources is the failure mode the
 // build order's ~5m lag makes possible, and the operator has no other way to
 // see it. The build order's stamp wins because it names the module's own

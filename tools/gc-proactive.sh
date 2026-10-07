@@ -10,9 +10,11 @@
 #                        bounded by GC_PROACTIVE_SLING_CAP per sweep
 #   sling <bead> [--nudge] [-n]  sling a first reaction (mr path, hard-refuses
 #                        --merge direct — the security invariant)
-#   deliverable          "would a sling be picked up?" — no when the city's
+#   deliverable [bead]   "would a sling be picked up?" — no when the city's
 #                        agent roster says this pool cannot pick it up
-#                        (absent, suspended, or capped at zero), exit 0/1
+#                        (absent, suspended, or capped at zero), or when the
+#                        named bead lives in a store the pool's rig does not
+#                        own (cross-store route), exit 0/1
 # The pool's only throttle is its max_active_sessions
 # (agents/proactive/agent.toml); slung beads queue until a slot frees. That
 # bounds how many reactions run at once. GC_PROACTIVE_SLING_CAP is a different
@@ -33,6 +35,28 @@ SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 FORMULA="mol-first-reaction"
+# Set by cmd_sling to 1 when it skips an already-reacted bead as a no-op, else
+# empty. cmd_scan's --sling loop reads it in-process to keep a skip from
+# spending the cap; the `sling` CLI verb in main() translates it to
+# RC_ALREADY_REACTED so a cross-process caller (gc-helm react, gc-visit-open)
+# can tell the no-op from a dispatch and file its own visit rather than wait for
+# a reaction that never ran.
+SLING_SKIPPED=""
+# Exit code the `sling` CLI verb uses for that skip — distinct from a dispatch
+# (0) and an error (1), so a caller that needs a NEW reaction can branch on it.
+RC_ALREADY_REACTED=3
+# The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
+# new bead type earns reactions only when added here deliberately. Tunable per
+# rig via GC_PROACTIVE_TYPES without a code change. The default excludes
+# convoy/epic/step/molecule (machinery or work-in-flight), decision (already a
+# surfaced human choice) and spec (an output, not a raw input).
+PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
+# The one definition of the standing kinds, shared with the liveness sweep and
+# the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter
+# applies.
+# shellcheck source=../assets/scripts/standing-kinds.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/standing-kinds.sh" \
+    || { printf '%s: cannot source assets/scripts/standing-kinds.sh from the pack\n' "$PROG" >&2; exit 1; }
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
@@ -70,12 +94,64 @@ rig_beads_db() {
     return 0
 }
 
+# sling_first_reaction_guard — a first reaction happens once, so refuse to
+# re-start mol-first-reaction on a bead that already carries one. A workflow
+# start retires the subject's pool claim route (gascity's
+# retireInputConvoyClaimRoutes), on the premise the started workflow will drive
+# that bead as work. mol-first-reaction does not: it reacts to the subject and,
+# on an already-reacted one, first-reaction-dispose.sh refuses the second
+# dispose. So a re-sling destroys the route the first disposition set and puts
+# nothing in its place, leaving the bead disposed-looking but offered to no
+# pool. gc.first_reaction is stamped by the dispose before it acts,
+# gc.proactive_reaction by the release; either proves a completed reaction. The
+# subject is read from the fixture under test, live otherwise; an unreadable
+# bead is not proof of a reaction, so it proceeds. Returns non-zero when the
+# bead is already reacted, so the caller skips the sling.
+sling_first_reaction_guard() {
+    local bead="$1" meta fr pr ro detail
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/beads.json" ] || return 0
+        meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null || printf '{}')"
+    else
+        local db; db="$(rig_beads_db)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        meta="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null \
+            | jq -c 'if type=="array" then (.[0].metadata // {}) else {} end' 2>/dev/null || printf '{}')"
+    fi
+    # A live operator intake (gc-helm engage --new-subject) marks the subject
+    # gc.reaction_owned=1 and handles it end-to-end — it has already filed the
+    # one visit and spawned the sitting. Refuse to sling a first reaction that
+    # would only file a SECOND visit for a conversation already under way.
+    ro="$(printf '%s' "$meta" | jq -r '."gc.reaction_owned" // ""' 2>/dev/null || printf '')"
+    if [ "$ro" = "1" ]; then
+        log "$PROG: sling: $bead carries gc.reaction_owned=1 — a live operator intake is handling it end-to-end and has filed its one visit. Not slinging a first reaction that would file a second."
+        return 1
+    fi
+    fr="$(printf '%s' "$meta" | jq -r '."gc.first_reaction" // ""' 2>/dev/null || printf '')"
+    pr="$(printf '%s' "$meta" | jq -r '."gc.proactive_reaction" // ""' 2>/dev/null || printf '')"
+    [ -n "$fr" ] || [ "$pr" = "1" ] || return 0
+    detail="gc.first_reaction=${fr:-<unset>}, gc.proactive_reaction=${pr:-<unset>}"
+    log "$PROG: sling: $bead already carries a first reaction ($detail) — not re-slinging. A first reaction happens once; re-slinging retires its route and drives nothing, leaving the bead offered to no pool. Clear the reaction marker to re-react."
+    return 1
+}
+
 # board_rank — re-rank (stdin JSON array) by the board's priority weight
 # (prio_w = max(0, 4-p), null->1), oldest-first within a band. Mirrored
 # inline in agents/proactive/agent.toml's work_query; keep the two in sync.
 board_rank() {
     jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end);
         sort_by(-(prio_w(.priority)), (.created_at // ""))'
+}
+
+# exclude_topology_roots — drop graph.v2 topology ROOTS (gc.kind in
+# workflow/scope/spec) from a demand array on stdin. A root is routed only to
+# name its run; gc hook --claim never offers it, so a query that counts one
+# spawns a worker that claims nothing and drains. The gc binary's default pool
+# query applies this exact clause on both its worker and count forms; this
+# mirrors it for the proactive custom queries, which inline the same clause in
+# agents/proactive/agent.toml's work_query + scale_check — keep all three in sync.
+exclude_topology_roots() {
+    jq 'map(select((.metadata["gc.kind"] // "" | (. == "workflow" or . == "scope" or . == "spec")) | not))'
 }
 
 usage() {
@@ -90,15 +166,20 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
        $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
-                                      direct (the security invariant).
-       $PROG deliverable [<pool-target>]
+                                      direct (the security invariant). Exit 0
+                                      slung, $RC_ALREADY_REACTED already reacted
+                                      (no-op, nothing slung), 1 error.
+       $PROG deliverable [<pool-target>] [<bead>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
-                                      roster says it cannot: absent, suspended,
-                                      or capped at zero slots. Defaults to the
-                                      proactive pool; any rig-qualified target
-                                      answers. Exit 0 yes, 1 no; callers divert
-                                      on no.
+                                      roster says it cannot (absent, suspended,
+                                      or capped at zero slots), or when <bead>
+                                      is named and the target's rig does not own
+                                      the bead's store (a rig-scope pool never
+                                      claims another store's bead). Defaults to
+                                      the proactive pool; any rig-qualified
+                                      target answers. Exit 0 yes, 1 no; callers
+                                      divert on no.
 
 Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) throttles
 how many run at once; routed beads queue until a slot frees. One --sling sweep
@@ -109,26 +190,62 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# deliverable [<pool-target>] — "if I route work there right now, will anything
-# ever pick it up?" The default target is the proactive pool; the first
+# deliverable [<pool-target>] [<bead>] — "if I route work there right now, will
+# anything ever pick it up?" The default target is the proactive pool; the first
 # reaction's actionable exit asks the same question about the pool it is about
 # to hand a bead to."
 # The queue is not the question: a routed bead waits at zero cost until a slot
-# frees. What makes a sling vanish is a pool that cannot claim it at all, and
-# the city's own agent roster is where that shows: the pool is not registered
-# in this city, it is suspended, or it is capped at zero slots.
+# frees. Two things make a sling vanish. A pool that cannot claim it at all,
+# which the city's own agent roster shows: the pool is not registered in this
+# city, it is suspended, or it is capped at zero slots. And a pool that reads a
+# different store than the bead lives in: a rig-scope pool only ever claims
+# beads in its own rig's store, so a route whose rig does not own the bead's id
+# prefix is offered by nobody, the shape `gc sling` refuses as
+# CrossStoreRouteError. The store check is answerable only when the caller names
+# the bead, so it is skipped when <bead> is absent.
 #
-# NO is a positive finding only. A roster this cannot read answers YES, because
-# an unreadable roster is not evidence of an absent pool, and a false no
-# silently retires the framing every caller diverts from
+# NO is a positive finding only. A roster or rig list this cannot read answers
+# YES, because an unreadable one is not evidence of an absent or wrong-store
+# pool, and a false no silently retires the framing every caller diverts from
 # (assets/scripts/gc-visit-open.sh files a bare visit on a no).
 # ---------------------------------------------------------------------------
 cmd_deliverable() {
-    local target roster verdict
+    local target bead roster verdict riglist bead_prefix target_rig target_prefix bead_rig
     target="$(resolve_pool_target "${1:-}" 2>/dev/null)" || {
         printf 'no: cannot rig-qualify the proactive pool target (set GC_RIG or pass <rig>/<base>) — a bare name routes to nobody\n'
         return 1
     }
+    bead="${2:-}"
+
+    # Store-ownership arm. A rig-scope pool reads only its own rig's store, so a
+    # bead whose id prefix that rig does not own is open, unassigned and offered
+    # to nobody — the pool's find-work queries its store and never sees it. Refuse
+    # it here, before the route is written, the way `gc sling` refuses it at the
+    # sling (CrossStoreRouteError). Positive finding only: an unreadable rig list,
+    # or a rig or prefix this cannot resolve, falls through to the roster arm.
+    if [ -n "$bead" ]; then
+        if [ -n "$FIXTURE" ]; then
+            riglist=""
+            [ -f "$FIXTURE/rigs.json" ] && riglist="$(cat "$FIXTURE/rigs.json")"
+        else
+            riglist="$(gc rig list --json 2>/dev/null || true)"
+        fi
+        if [ -n "$riglist" ]; then
+            bead_prefix="${bead%%-*}"
+            target_rig="${target%%/*}"
+            target_prefix="$(printf '%s' "$riglist" \
+                | jq -r --arg n "$target_rig" '.rigs[]? | select((.name // "") == $n) | .prefix // ""' 2>/dev/null \
+                | head -n1 || true)"
+            if [ -n "$target_prefix" ] && [ "$target_prefix" != "$bead_prefix" ]; then
+                bead_rig="$(printf '%s' "$riglist" \
+                    | jq -r --arg p "$bead_prefix" '.rigs[]? | select((.prefix // "") == $p) | .name // ""' 2>/dev/null \
+                    | head -n1 || true)"
+                printf 'no: %s reads the %s store (prefix %s-) but %s lives in the %s store (prefix %s-) — a rig-scope pool only ever claims beads in its own store, so a reaction routed there is open, unassigned and offered to nobody (cross-store route; gc sling refuses this as CrossStoreRouteError)\n' \
+                    "$target" "$target_rig" "$target_prefix" "$bead" "${bead_rig:-<no rig owns prefix $bead_prefix->}" "$bead_prefix"
+                return 1
+            fi
+        fi
+    fi
 
     if [ -n "$FIXTURE" ]; then
         roster=""
@@ -189,64 +306,138 @@ cmd_demand() {
         # agent.toml work_query writes. Mirrors the polecat probe, pinned to
         # the proactive target.
         local target db
-        target="$(resolve_pool_target "${1:-}")"
+        # resolve_pool_target dies (with the "set GC_RIG or pass <rig>/<base>"
+        # guidance) on an unset GC_RIG; fail the demand query closed rather than
+        # query with an empty route that matches nothing.
+        target="$(resolve_pool_target "${1:-}")" || return 1
         db="$(rig_beads_db)"
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         r="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.routed_to=$target" --unassigned \
-                --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
+                --exclude-type=epic --json --limit 0 2>/dev/null || true)"
         [ -n "$r" ] || r='[]'
     fi
-    # Rank by board weight: spend the scarce proactive slots on the
-    # highest-priority work first (oldest-first within a band), not whatever
-    # bd-ready returned oldest-first across all priorities.
-    printf '%s' "$r" | board_rank
+    # Drop never-claimable topology roots (see exclude_topology_roots) so the
+    # demand mirror matches what gc hook --claim would offer, then rank by board
+    # weight and slice to the worker page. The full routed set is read
+    # (--limit 0) and roots dropped BEFORE the slice, so — like the agent.toml
+    # work_query this mirrors — a page filled by topology roots cannot bury a
+    # claimable step behind them and understate demand to zero. The scarce
+    # proactive slots then spend on the highest-priority work first (oldest
+    # within a band), not whatever bd-ready returned oldest across all bands.
+    printf '%s' "$r" | exclude_topology_roots | board_rank | jq --argjson n "$SCAN_LIMIT" '.[0:$n]'
 }
 
 # ---------------------------------------------------------------------------
-# scan — the PROCESS-SCAN trigger. Find beads "able to be updated": open,
-# ready, unassigned, not an epic, and not already reacted-to / hand-raised
-# (so we never re-react). Unions the explicit per-bead opt-in (gc.proactive=1)
-# with the broader movable-forward scan, deduped. Read-only unless --sling.
+# scan — the PROCESS-SCAN trigger. Find raw INPUT beads "able to be updated":
+# open, ready, unassigned, an allowlisted issue_type (GC_PROACTIVE_TYPES),
+# top-level, and not already reacted-to / routed / machinery (so we never
+# re-react and never react to work-in-flight). Unions the explicit per-bead
+# opt-in (gc.proactive=1) with the broader movable-forward scan, deduped and
+# precision-filtered (see scan_candidates). Read-only unless --sling.
 # ---------------------------------------------------------------------------
 
+# scan_precision_filter — from a candidate array on stdin, keep only raw
+# top-level INPUT beads a fresh first reaction may target. Each clause drops a
+# distinct non-input population:
+#   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops convoy/epic/
+#     step/molecule/spec/decision by omission.
+#   - topology roots (gc.kind in workflow/scope/spec) — a workflow root is
+#     issue_type task, so the allowlist misses it; drop it explicitly.
+#   - a standing kind (is_standing_kind, assets/scripts/standing-kinds.sh) — a
+#     standing record is open and unrouted by design and never closes, so a
+#     reaction has no disposition to make on it.
+#   - task_kind=review — a dispatched signoff lane, work-in-flight.
+#   - durable work/lifecycle markers ($markers) — a review lane carries
+#     check_name/anchor_bead; an implementation anchor carries branch/
+#     merge_result/work_dir/pr_url/pr_number. An anchor is an issue_type
+#     task/bug bead with no task_kind, so the allowlist and the task_kind
+#     clauses both miss it, and its markers are the only signal that the work
+#     is already in motion. Slinging a first reaction at either reassigns
+#     work-in-flight, which the proactive scope forbids.
+#   - gc.takeaway / gc.takeaway_by — a sitting has already RULED this bead.
+#   - top-level only — a parent-child CHILD carries the edge in its own
+#     .dependencies; a convoy's tracks edge lives on the convoy, so this
+#     catches parented beads, not every convoy member.
+# Plus a state predicate: not already reacted, not routed, has a description;
+# deduped by id. "Not already reacted" drops EITHER marker a completed reaction
+# leaves — gc.proactive_reaction (the release) and gc.first_reaction (the
+# dispose) — the same pair sling_first_reaction_guard refuses, so a reacted bead
+# is dropped here and never reaches the sling loop to spend a cap slot.
+#   - gc.reaction_owned — a live owner already owns reacting to this bead, so an
+#     autonomous first reaction would duplicate it. An operator engage (gc-helm
+#     engage --new-subject) is the setter today: it creates the subject marked,
+#     files the ONE visit, and spawns the sitting itself. The marker is set in
+#     the create write, so the scan never sees the subject unmarked; dropping it
+#     here keeps a sweep from filing a SECOND visit for a conversation that
+#     already has one. sling_first_reaction_guard refuses it too, and
+#     mol-first-reaction consumes it if a direct pour reaches one.
+scan_precision_filter() {
+    local types_json markers_json
+    types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
+    # Durable work/lifecycle markers that mark a bead as work-in-flight rather
+    # than raw input. Kept as one list so the review-lane keys and the
+    # implementation-anchor keys share a single source of truth.
+    markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
+    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ"'
+        map(select(
+            ((.metadata["gc.proactive_reaction"] // "") == "")
+            and ((.metadata["gc.first_reaction"] // "") == "")
+            and ((.metadata["gc.reaction_owned"] // "") == "")
+            and ((.metadata["gc.routed_to"] // "") == "")
+            and ((.description // "") != "")
+            and ((.issue_type // "") as $it | ($types | index($it)) != null)
+            and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
+            and (is_standing_kind | not)
+            and ((.metadata["task_kind"] // "") != "review")
+            and ((.metadata["gc.takeaway"] // "") == "")
+            and ((.metadata["gc.takeaway_by"] // "") == "")
+            and (.metadata as $m | ($markers | any(.[]; ($m[.] // "") != "")) | not)
+            and (([ .dependencies[]? | select((.dependency_type // .type) == "parent-child") ] | length) == 0)
+          ))
+        | unique_by(.id)
+    '
+}
+
 scan_candidates() {
+    local ranked
     if [ -n "$FIXTURE" ]; then
         local raw='[]'
         if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        printf '%s' "$raw" | board_rank
-        return 0
+        ranked="$(printf '%s' "$raw" | scan_precision_filter | board_rank)"
+    else
+        # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
+        # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
+        local optin movable db
+        db="$(rig_beads_db)"
+        # Read the FULL opt-in and movable sets (--limit 0), not a page.
+        # scan_precision_filter drops work-in-flight beads (review lanes,
+        # branch/PR anchors, topology roots), so bounding a query to the worker
+        # page BEFORE the filter lets a page of now-dropped rows bury a raw input
+        # past the bound — the union filters to empty while a real candidate sits
+        # at row N+1. Read all, filter, rank, then slice (below), the same
+        # filter-before-bound the demand mirror uses.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
+                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null || true)"
+        [ -n "$optin" ] || optin='[]'
+
+        # (B) movable-forward: any ready, unassigned, non-epic bead. The precision
+        # filter below drops the ones a fresh first reaction must not touch.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
+                    --sort oldest --limit 0 2>/dev/null || true)"
+        [ -n "$movable" ] || movable='[]'
+
+        # Union the two sources, apply the shared precision filter, then rank by
+        # board weight.
+        ranked="$(jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
+            | scan_precision_filter | board_rank)"
     fi
 
-    # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
-    # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
-    local optin movable db
-    db="$(rig_beads_db)"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
-                --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
-    [ -n "$optin" ] || optin='[]'
-
-    # (B) movable-forward: any ready, unassigned, non-epic bead. We then drop
-    # the ones already advanced (gc.proactive_reaction set) or already
-    # routed somewhere — those are not "able to be updated" by a fresh
-    # first reaction.
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
-                --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
-    [ -n "$movable" ] || movable='[]'
-
-    # Union, drop already-handled, dedup, then rank by board weight so a
-    # --sling sweep spends its limited headroom on the highest-priority
-    # candidates first.
-    jq -s '
-        (.[0] + .[1])
-        | map(select(
-            ((.metadata["gc.proactive_reaction"] // "") == "")
-            and ((.metadata["gc.routed_to"] // "") == "")
-            and ((.description // "") != "")
-          ))
-        | unique_by(.id)
-    ' <(printf '%s' "$optin") <(printf '%s' "$movable") | board_rank
+    # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and
+    # rank, so the bound falls on real candidates and a --sling sweep spends its
+    # limited headroom on the highest-priority ones first.
+    printf '%s' "$ranked" | jq --argjson n "$SCAN_LIMIT" 'if $n == 0 then . else .[0:$n] end'
 }
 
 cmd_scan() {
@@ -263,6 +454,17 @@ cmd_scan() {
     case "$SLING_CAP" in
         ''|*[!0-9]*) die "GC_PROACTIVE_SLING_CAP must be a non-negative integer (got '$SLING_CAP')" ;;
     esac
+
+    # A --sling sweep routes to the proactive pool, so resolve that target ONCE
+    # up front and fail the whole sweep closed when it cannot. resolve_pool_target
+    # dies on an unset GC_RIG; the per-bead cmd_sling re-resolves inside the loop's
+    # condition below, where set -e is disabled and that die cannot abort — so
+    # without this gate an unset GC_RIG surfaces the guidance once per candidate
+    # and then attempts `gc sling "" <bead>` each time. The subshell keeps die's
+    # exit local, so the guidance shows a single time; `|| return 1` stops the sweep.
+    if [ -n "$do_sling" ]; then
+        ( resolve_pool_target >/dev/null ) || return 1
+    fi
 
     local cands
     cands="$(scan_candidates)"
@@ -284,7 +486,7 @@ cmd_scan() {
     # many downstream sessions as the scan found candidates. What it skips is
     # named, not silently dropped — the next sweep sees the same beads, since
     # a candidate only leaves the scan once a reaction has advanced it.
-    local slung=0 skipped=0
+    local slung=0 skipped=0 reacted=0
     local ids
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
     local id
@@ -293,14 +495,26 @@ cmd_scan() {
             skipped=$(( skipped + 1 ))
             continue
         fi
+        # Only a genuine dispatch spends the cap. cmd_sling skips an
+        # already-reacted bead as a no-op and flags it in SLING_SKIPPED — a
+        # reaction that landed after the scan selected it, since
+        # scan_precision_filter drops the rest. Counting that skip is the
+        # cap-starvation bug: stale reacted records would spend the whole cap
+        # every sweep while no new reaction is slung.
         if cmd_sling "$id"; then
-            slung=$(( slung + 1 ))
+            if [ -n "$SLING_SKIPPED" ]; then
+                reacted=$(( reacted + 1 ))
+            else
+                slung=$(( slung + 1 ))
+            fi
         fi
     done
+    local note=""
+    if [ "$reacted" -gt 0 ]; then note=" ($reacted already reacted, not counted)"; fi
     if [ "$skipped" -gt 0 ]; then
-        log "scan --sling: slung $slung first reaction(s); $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
+        log "scan --sling: slung $slung first reaction(s)$note; $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
     else
-        log "scan --sling: slung $slung first reaction(s)"
+        log "scan --sling: slung $slung first reaction(s)$note"
     fi
 }
 
@@ -329,8 +543,30 @@ cmd_sling() {
         *) die "sling: unknown merge strategy '$MERGE' (mr|local)" ;;
     esac
 
+    # A first reaction happens once. Re-slinging one destroys the route the
+    # first disposition set (see sling_first_reaction_guard), so skip it as an
+    # idempotent no-op rather than clobber a live dispatch. cmd_sling returns 0
+    # either way and flags the skip out-of-band in SLING_SKIPPED: the in-process
+    # cmd_scan --sling loop reads that flag to tell a skip from a dispatch and
+    # not spend a cap slot on it, and the `sling` CLI verb in main() reads it to
+    # exit RC_ALREADY_REACTED, the signal a cross-process caller needs. The
+    # return stays 0 because a non-zero one cannot carry the distinction here:
+    # caught in the loop's condition it would disable set -e for this function,
+    # and returned to main it would read as the generic fail-closed error, not
+    # the specific no-op.
+    SLING_SKIPPED=""
+    if ! sling_first_reaction_guard "$bead"; then
+        SLING_SKIPPED=1
+        return 0
+    fi
+
     local target
-    target="$(resolve_pool_target)"
+    # resolve_pool_target emits the "set GC_RIG or pass <rig>/<base>" guidance and
+    # dies on an unset GC_RIG. Fail closed rather than sling an empty target that
+    # routes to nobody — this guards both a direct `sling` (where set -e would
+    # abort) and the cmd_scan loop's condition (where set -e is disabled, so the
+    # guard, not set -e, is what refuses the empty target).
+    target="$(resolve_pool_target)" || return 1
 
     # --on attaches the workflow to the existing bead and routes THAT bead;
     # --merge pins the path; --reassign hands a human-held bead over cleanly.
@@ -373,7 +609,13 @@ main() {
         -h|--help|help) usage; exit 0 ;;
         demand) cmd_demand "$@" ;;
         scan)   cmd_scan "$@" ;;
-        sling)  cmd_sling "$@" ;;
+        sling)
+            cmd_sling "$@"
+            # A skipped already-reacted bead is a no-op, not a dispatch: surface
+            # it to a cross-process caller as RC_ALREADY_REACTED so it files its
+            # own visit instead of waiting for a reaction that never ran.
+            if [ -n "$SLING_SKIPPED" ]; then exit "$RC_ALREADY_REACTED"; fi
+            ;;
         deliverable) cmd_deliverable "$@" ;;
         *) die "unknown verb '$verb' (demand|scan|sling|deliverable; --help)" ;;
     esac

@@ -26,7 +26,8 @@ skill — only an operator-merged PR changes agent behavior.
 Every step closes its own bead through `assets/scripts/step-close.sh --step
 <step-id>` (resolved into `$SC` at the top of each shell block) — never any
 other way, and never on an id read from the environment; the helper resolves
-by (assignee, gc.step_ref) and refuses when it cannot prove ownership.
+by (gc.root_bead_id, gc.step_ref) and refuses when it cannot prove which
+molecule it is executing.
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
 drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
@@ -71,7 +72,7 @@ required = false
 default = "12"
 
 [vars.work_quality_entry_cap]
-description = "Entry budget for the work-quality fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap."
+description = "Entry budget per work-quality fragment — the shared base or any one per-class fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap."
 required = false
 default = "12"
 
@@ -130,7 +131,26 @@ done
 # Rig set: a poured {{rig_list}} wins; else enumerate. `gc rig list --json`
 # returns an OBJECT ({"rigs":[...]}), and the HQ entry is addressable only by
 # PATH (`--rig <city>` fails) — so carry name + path per line.
-RIGSET=$(mktemp)
+# >>> distiller-pending-scratch
+RIGSET=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX")
+# The later blocks read $PENDING, so the trap keeps it only once this block
+# reaches the handoff at its end. Every earlier exit removes it with the rest.
+# The `.next` merge scratch is never handed on. An unset $RAW or $PENDING is
+# guarded because `rm -f "$RAW.pending"` would otherwise name `.pending` in
+# the cwd.
+RAW=""
+PENDING=""
+PENDING_HANDOFF=""
+distill_scratch_rm() {
+  rm -f "$RIGSET"
+  [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"
+  if [ -n "$PENDING" ]; then
+    rm -f "$PENDING.next"
+    [ -n "$PENDING_HANDOFF" ] || rm -f "$PENDING"
+  fi
+  return 0
+}
+trap distill_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 POURED="{{rig_list}}"
 if [ -n "$POURED" ]; then
   printf '%s' "$POURED" | tr ' ' '\\n' | grep -v '^$' > "$RIGSET"
@@ -144,14 +164,15 @@ if [ ! -s "$RIGSET" ]; then
   exit 0
 fi
 
-PENDING=$(mktemp); echo '[]' > "$PENDING"
+PENDING=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX"); echo '[]' > "$PENDING"
 # `while read < file`, never `for R in $RIGS` (zsh does not word-split).
 # Open a store by PATH when known (`gc bd -C <path>` — also reaches HQ),
 # by NAME only for poured names.
 TAB=$(printf '\\t')
 while IFS="$TAB" read -r R RPATH; do
   [ -n "$R" ] || continue
-  RAW=$(mktemp)
+  [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"
+  RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX")
   if [ -n "$RPATH" ]; then
     gc bd -C "$RPATH" list -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
   else
@@ -170,6 +191,9 @@ while IFS="$TAB" read -r R RPATH; do
       | . + {obs_rig: $rig, obs_rig_path: $rigpath}]' "$RAW" > "$RAW.pending"
   jq -s 'add' "$PENDING" "$RAW.pending" > "$PENDING.next" && mv "$PENDING.next" "$PENDING"
 done < "$RIGSET"
+# The pending set is complete: hand it past the trap to the later blocks.
+PENDING_HANDOFF=1
+# <<< distiller-pending-scratch
 ```
 
 ## 3. The cadence gate (D7)
@@ -230,6 +254,7 @@ $REPO, $PENDING, $DISTILL_RUN, and the rig set):
 (HQ included), each tagged obs_rig/obs_rig_path; on `gated`, `$PENDING` is
 empty; new vetoes recorded. Bead closed on every path; session NOT drained.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "judge-and-cluster"
@@ -364,7 +389,10 @@ file.
 
 Check live prompt-update beads AND the open PRs of closed ones (the
 pipeline closes the bead at PR-open, so a bead-only query misses in-flight
-PRs). Cap survivors at {{max_beads_per_run}}, strongest-reasoned first.
+PRs). A concurrent peer distiller pour files ordinary prompt-update beads too,
+so this same dedup is what keeps a non-atomic double-pour from double-filing: the
+later run's survivors empty here and it finalizes as a no-op. Cap survivors at
+{{max_beads_per_run}}, strongest-reasoned first.
 Then close this step (non-terminal; the session carries the survivors and
 the consumed-observation map forward):
 ```bash
@@ -377,6 +405,7 @@ adopted rule; a bounded proposal list with written reasoning; contested
 rules marked; a consumed map `(obs id, obs rig, obs rig path) -> pattern`
 for step 3. Bead closed on every path; session NOT drained.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "file-and-dispatch"
@@ -384,6 +413,16 @@ title = "File one prompt-update bead per proposal, stamp consumed observations, 
 needs = ["judge-and-cluster"]
 description = """
 The TERMINAL step — the one place this workflow drains, on every path.
+
+This step MUST finalize on every path it can reach: close its own bead, then
+`gc runtime drain-ack`. Never leave it `open` or `blocked`, and never hold the
+molecule here. The order that pours this formula is single-flight on an open
+root — the root closes only when this step closes, and the cooldown gate counts
+an open root with any non-closed descendant as a run still in flight. A step
+left blocked here therefore stalls the whole distiller cadence, which a human
+then has to clear by hand with `gc order sweep-tracking --include-wisps
+feedback-distiller`. A run with nothing to file finalizes the same as a full
+one; it never blocks.
 
 ## 0. Carry the run disposition
 
@@ -409,10 +448,30 @@ fi
 guess. A `gated` run reaches here normally with an empty consumed map and
 possibly retirement proposals — file those like any survivor.
 
+A run whose corpus a concurrent peer pour already holds is redundant, not
+blocked. The order's single-flight gate is not atomic, so two molecules can
+judge the same observations at once; judge-and-cluster §6 dedups every proposal
+a peer has already filed, so a redundant run arrives here with an empty survivor
+set and finalizes as a no-op — it files nothing, closes, and drains. When a peer
+races past that dedup the cost is one extra prompt-update bead, which the
+operator's review and the next run's veto sweep absorb. Ceding that way is cheap;
+a blocked step, which wedges the cadence above, never is.
+
 ## 1. File one bead per surviving proposal
 
 ```bash
-POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+# The route must name a LIVE agent identity: a pool offer matches by exact
+# byte equality, and GC_RIG picks both the store this bead lands in and the
+# rig segment a rig-scoped pool carries, so an address built out of GC_RIG
+# alone renders bare for a rig-less caller and is claimed by nobody while
+# the stamp reads back clean. pool-route.sh resolves it against the live
+# agent set: it prints a proven-live route, refuses one no agent carries
+# with empty stdout so the `|| exit 1` files nothing, and returns the route
+# marked UNVERIFIED when the agent set is unreadable.
+POOL_ROUTE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/pool-route.sh" ] && { POOL_ROUTE="$c/assets/scripts/pool-route.sh"; break; }
+done
+POOL=$("${POOL_ROUTE:?pool-route.sh not found in the pack}" {{binding_prefix}}polecat) || exit 1
 BODY="## Rule
 - Carrier: <convention | profile | work-quality | review-rubric | exemplar>
 - Action: <ADD | UPDATE | SUPERSEDE | RETIRE | HARDEN>
@@ -421,7 +480,7 @@ BODY="## Rule
 ## Target
 - convention    -> template-fragments/learned-conventions-<role>.template.md (cap {{fragment_bullet_cap}})
 - profile       -> template-fragments/operator-profile.template.md (cap {{profile_entry_cap}}); needs an obs.source=operator observation
-- work-quality  -> template-fragments/work-quality.template.md (cap {{work_quality_entry_cap}}); the standard the artifact is held to, no operator observation required
+- work-quality  -> template-fragments/work-quality-<class>.template.md (cap {{work_quality_entry_cap}} per fragment); the standard the artifact is held to, no operator observation required. A universal standard goes to work-quality-base (composed by every authoring role); a class-specific one goes to the fragment(s) of the class(es) it impacts. Classes: polecats (polecat, polecat-codex), human (converse and its per-model variants), system (deacon, mechanik, proactive, witness, refinery, keeper). A standard about changing a repo does not reach the human class.
 - review-rubric -> formulas/mol-review.toml, step review, What to check; its anchor goes in that file's TOML comment ledger above the step, never in the step description (rendered text a reviewer reads)
 - exemplar      -> template-fragments/learning-exemplars.template.md (cap {{exemplar_cap}})
 - learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor and no inventory row: the rubric is the loop's own method, not an adopted rule the retirement pass judges
@@ -477,7 +536,8 @@ subject). NOTE: this block reassigns POOL — run it after all filing above.
 ```bash
 SUBJECT="$PATTERN"
 # >>> gate-visit
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+# Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
+POOL="human"
 VISIT=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
   -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
@@ -529,6 +589,9 @@ if [ -n "$RECUR" ]; then
 else
   echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
 fi
+# Step 1 hands the pending set past its own trap because every step reads it;
+# this is its last use. Guarded because each block is its own shell.
+[ -n "${PENDING:-}" ] && rm -f "$PENDING"
 "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```
@@ -536,3 +599,4 @@ gc runtime drain-ack
 **Never** close a filed prompt-update bead, and never edit a fragment,
 prompt, or skill here — the worker edits, the refinery opens the PR, the
 operator's merge changes behavior."""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

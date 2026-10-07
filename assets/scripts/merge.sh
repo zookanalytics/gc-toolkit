@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge — arm 3 of the merge cadence: the single writer of merged truth.
+# merge — arm 4 of the merge cadence: the single writer of merged truth.
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
 # repo, not a fork), live anchor re-read (still open, still gating on
 # pull_request, still naming this PR by number, url and head branch), then
@@ -12,12 +12,19 @@
 # fail-closed defense; the structural check is doctor's); non-empty check_set
 # (empty is never the 'none' opt-out — an unnormalized anchor holds);
 # base == merged_target;
-# every check_set gate green; approval (armed by the check_set
-# member, signoff_dismissed, or a DISMISSED review of our own — satisfied only
-# by a latest APPROVED from another account at the live head; a standing
-# CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
-# child (metadata keys naming this PR AND dependency edges; unreadable holds);
-# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
+# every declared lane DERIVES green through lane-state.sh (no stored marker; a
+# lane with no local review bead is backed by an operator's GitHub approval on
+# the PR, the shared fallback); approval (a UNIVERSAL merge rule armed for every
+# PR, not a check_set member — satisfied only by a latest APPROVED from an
+# account other than the city's, given at any commit, because an approval stands
+# across later pushes until it is dismissed; dismissed reviews are dropped before
+# each reviewer's latest is taken, so a dismissed approval does not count and a
+# dismissed CHANGES_REQUESTED does not hide its author's older approval; a
+# standing CHANGES_REQUESTED from any other account vetoes); no unclosed
+# rework/review child or open must-fix finding (metadata keys naming this PR AND
+# dependency edges, the finding held by its own blocks edge; unreadable holds);
+# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only; an UNKNOWN,
+# which is GitHub still computing it, read again within one budget per pass);
 # generated/seed-audit current at the MERGE RESULT (its inputs re-hashed in the
 # tree `git merge-tree` writes, so a render clobbered by a base that moved holds
 # and escalates rather than landing). The FULL
@@ -36,18 +43,30 @@ set -u
 
 PROG="merge"
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 
-# The signoff round cap, mirrored from signoff.sh: past it no further rework is
-# filed, which is what turns a standing veto from a hold into a wedge.
-MAX_REVIEW_ROUNDS="${GC_MAX_REVIEW_ROUNDS:-3}"
-case "$MAX_REVIEW_ROUNDS" in ''|*[!0-9]*) MAX_REVIEW_ROUNDS=3 ;; esac
+# THE SHELL BELOW IS THE FALLBACK. `gctk merge` (services/gctk) is the ported
+# implementation and answers whenever the build order has published a binary;
+# this script runs when it has not — a fresh city, a build that failed, a rig
+# checkout ahead of the deployed binary. Both must stay correct while the
+# fallback stands, so merge.test.sh runs its whole body against both.
+# gctk-resolve.sh decides which one answers.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+gctk_resolve merge "$@"
+
+LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
+# The composable "may this anchor be finalized?" precondition set. An open visit
+# tracking the anchor holds its merge — subject-scoped via the anchor's incoming
+# tracks edge, never a cascading blocks edge (docs/finalize-gate.md).
+FINALIZE_GATE="$SCRIPTS_DIR/finalize-gate.sh"
+
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # The merged-record retry cap. Both record arms below retry every pass with no
 # memory of the last one, so a cause the retry cannot clear needs a writer that
@@ -55,6 +74,17 @@ ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # same repair count against one budget.
 RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 RENDERER="$SCRIPTS_DIR/render-seed-audit.sh"
+# The one shared helper every reader derives a lane's green state through, so
+# merge and publish never drift on which lane is green (a second implementation
+# of the predicate is how two actors come to disagree about one anchor).
+LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
+# The one resolver of the check index: the merge gate asks it for every declared
+# lane (`--through merge` spans all phases), which drops the non-lanes none/off
+# and the approval merge rule in one place instead of merge.sh re-deriving it.
+REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
+# A missing resolver would make every anchor read as having no lanes — merge's
+# fail-open. Require it, so a pack-integrity gap holds the merge rather than passing it.
+[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); merge held" >&2; exit 1; }
 # The repository this pass merges into, resolved through git so a run with no
 # checkout under it simply has no committed artifact to keep current.
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -84,11 +114,11 @@ gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
 # Used only to exclude our own reviews; unresolved holds the approval gate.
 SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
 if [ -z "$SELF_LOGIN" ]; then
-  # Bounded fail-open: with no login, an own DISMISSED review cannot arm the
-  # approval requirement from the GitHub side this pass. The signoff_dismissed
-  # marker (stamped before any dismissal) still arms it, and an armed approval
-  # gate still holds below.
-  echo "$PROG: WARN acting login unresolved; own-dismissed-review approval arming is unavailable this pass (signoff_dismissed still arms it)" >&2
+  # Approval is universal, so every PR needs an APPROVED review from an account
+  # other than the city's. With no acting login the city cannot tell an external
+  # approver from its own review, so the approval gate holds every anchor this
+  # pass (fail-closed, below).
+  echo "$PROG: WARN acting login unresolved; cannot distinguish an external approver from the city's own review, so the universal approval gate holds every PR this pass" >&2
 fi
 
 url_repo_q() {
@@ -100,6 +130,54 @@ canon_pr_url() {
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
+# reviewThreads is GraphQL-only (gh pr view has no such field), so it is read
+# apart from the pinned pr view, in the one arm that needs it. Paginated to
+# exhaustion: a count read from a truncated connection decides wrongly.
+THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}'
+# Count of unresolved review threads on <pr-number>, echoed as a non-negative
+# integer. Returns non-zero without output when the connection could not be
+# read — an unreadable connection is never zero, and a BLOCKED diagnosis has to
+# say which it is.
+unresolved_threads() { # <pr-number>
+  local raw n
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$THREADS_QUERY" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$1" 2>/dev/null) || return 1
+  [ -n "$raw" ] || return 1
+  n=$(printf '%s' "$raw" | scrub | jq -s '
+    ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
+    | if ($rt | length) == 0 then error("no reviewThreads in response")
+      else [ $rt[].nodes[]? | select((.isResolved // false) == false) ] | length end' 2>/dev/null) || return 1
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$n"
+}
+
+# Branch-protection facts for <branch>, read from its active rules: whether an
+# unresolved review thread blocks a merge (required_review_thread_resolution)
+# and how many approving reviews are required. Sets PROT_STATE=known|unknown;
+# when known, PROT_THREAD_REQ=true|false and PROT_APPROVALS to the required
+# count. An unreadable read is `unknown`, never a zero requirement — naming a
+# BLOCKED cause off `unknown` would be a guess.
+review_gates_for() { # <branch>
+  local b="$1" rules rrc
+  PROT_STATE=""; PROT_THREAD_REQ="false"; PROT_APPROVALS="0"
+  rules=$(gh_api_origin "repos/$ORIGIN_REPO/rules/branches/$b" 2>/dev/null); rrc=$?
+  if [ "$rrc" -ne 0 ] || ! printf '%s' "$rules" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    PROT_STATE="unknown"; return 0
+  fi
+  PROT_THREAD_REQ=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_review_thread_resolution // false ] | any')
+  PROT_APPROVALS=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_approving_review_count // 0 ] | max // 0')
+  case "$PROT_THREAD_REQ" in true|false) : ;; *) PROT_THREAD_REQ="false" ;; esac
+  case "$PROT_APPROVALS" in ''|*[!0-9]*) PROT_APPROVALS="0" ;; esac
+  PROT_STATE="known"
+}
+
 # Record the machine axis this pass reached, at the head it was read at. Every
 # hold below already decides it and spends the answer on a log line; this keeps
 # it, so a reader learns whether an anchor is moving without re-implementing
@@ -109,39 +187,40 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 # --route carries the anchor's own route back: recording a verdict is an
 # observation, not a routing decision, and an omitted --route would let a
 # detached state's default clear a route this pass never looked at.
+#
+# Every non-blocked verdict clears pr.machine_reason: the reason belongs only
+# beside a `blocked` verdict (record_blocked writes the pair), so a stale one
+# never lingers under a settled or progressing row, where the board would not
+# read it anyway.
 record_machine() { # <anchor-id> <value> <head-oid> <current-route>
   [ -n "${3:-}" ] || return 0
   "$LIFECYCLE" transition "$1" --to pull_request --expect pull_request \
-    --route "${4:-}" --set-dated "pr.machine=$2@$3" >/dev/null 2>&1 && return 0
+    --route "${4:-}" --set-dated "pr.machine=$2@$3" --unset pr.machine_reason >/dev/null 2>&1 && return 0
   echo "$PROG: WARN $1 machine axis '$2@$3' did not record; the board reads it as unknown until the next pass" >&2
+}
+
+# Record a `blocked` verdict AND the sentence naming its cause, in one write. A
+# blocked anchor cannot merge without a person and is not waiting on a review, so
+# the board owes it to the operator as needs-attention rather than folding it
+# into the settled tail. The reason is plain, not dated: the board reads it only
+# while the verdict is `blocked`, and record_machine clears it on any other one.
+record_blocked() { # <anchor-id> <head-oid> <current-route> <reason>
+  [ -n "${2:-}" ] || return 0
+  "$LIFECYCLE" transition "$1" --to pull_request --expect pull_request \
+    --route "${3:-}" --set-dated "pr.machine=blocked@$2" --set "pr.machine_reason=$4" >/dev/null 2>&1 && return 0
+  echo "$PROG: WARN $1 machine axis 'blocked@$2' did not record; the board reads it as unknown until the next pass" >&2
 }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-bd_list() { # guarded array read; non-zero = "could not tell"
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 anchor_row() { # live {status, meta}; empty = unreadable, never an all-default row
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -c '.[0] | select(. != null) | select(.metadata != null)
              | {status: (.status // ""), meta: .metadata}' 2>/dev/null
 }
-
-# The "first declared gate not green" predicate (none/off/approval dropped),
-# shared between hold_gate() and the terminal re-read below so the two jq
-# filters can never drift on which gate is red. Takes check_set as $cs and a
-# metadata object as $m.
-FIRST_RED_GATE_DEF='
-  def first_red_gate($cs; $m):
-    (($cs // "") | split(",") | map(gsub("[[:space:]]"; "")) | map(select(length > 0))
-       | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
-    | (first($gates[] | select((($m["check." + .]) // "") != "green"))) // "";
-'
 
 # The repository an anchor's pr_url names, case-folded, "?" when the url is
 # absent or unparseable (mirrors url_repo_q). Shared between the duplicate-
@@ -155,20 +234,44 @@ REPO_Q_DEF='
     | .[0] | if . == null then "?" else (.h + "/" + .o) end;
 '
 
-# First declared gate NOT green; non-zero = markers unreadable, which the
-# caller must hold on, never read as all-green. The lane is compared to no
-# head: green is a state of the lane, and a commit landing on the branch
-# neither clears it nor buys a review.
-hold_gate() { # <check_set> <row>
-  printf '%s' "${2:-}" | jq -re --arg cs "${1:-}" \
-    "$FIRST_RED_GATE_DEF"'
-    (.meta // {}) as $m
-    | first_red_gate($cs; $m)' 2>/dev/null
+# The first declared lane that does not DERIVE green, through lane-state.sh.
+# Prints that lane; empty stdout with a zero exit means every declared lane is
+# green. A non-zero exit is a lane the store would not read, which the caller
+# holds on and never reads as all-green. The derivation is the shared one every
+# reader uses: a lane greens from its own local approve-review bead, or, when it
+# has none, from an operator's GitHub approval on the anchor's PR (an approval
+# names no check, so it backs every lane). The lane is compared to no head: green
+# is a state of the lane, and a commit landing on the branch neither clears it
+# nor buys a review. The human approval the merge separately requires is the
+# universal approval rule enforced below, required of every PR.
+first_notgreen_lane() { # <anchor-id> <check_set>
+  local anchor="$1" cs="$2" lane lanes
+  # The resolver's exit status is load-bearing. A resolver that dies mid-run
+  # prints nothing, and an empty lane list reads as "every lane green" — the
+  # merge would then proceed on approval alone. Capture the status and fail
+  # closed (unreadable, the caller holds) rather than reading a crash as a pass.
+  lanes=$("$REVIEW_CHECKS" --resolve --check-set "$cs" --through merge 2>/dev/null) || return 2
+  while IFS= read -r lane; do
+    [ -n "$lane" ] || continue
+    "$LANE_STATE" green --anchor "$anchor" --lane "$lane"
+    case $? in
+      0) ;;                                   # green; next lane
+      1) printf '%s\n' "$lane"; return 0 ;;   # not green; hold, name it
+      *) return 2 ;;                          # unreadable; the caller holds
+    esac
+  done <<LANES
+$lanes
+LANES
+  return 0
 }
 
 # Which status checks actually gate <branch>: rulesets + classic protection via
 # the branch object (the protection endpoint needs admin and 404s ambiguously).
+# pr-facts.sh's red-check arm routes on the same gating set this holds on, so it
+# carries a byte-identical copy between the markers below; a test proves the two
+# never drift.
 REQ_STATE=""; REQ_CONTEXTS=""
+# >>> required-contexts-for
 required_contexts_for() { # <branch>
   local b="$1" rules branch rrc brc
   REQ_STATE=""; REQ_CONTEXTS=""
@@ -187,6 +290,7 @@ required_contexts_for() { # <branch>
   } | sed '/^$/d' | sort -u)
   REQ_STATE="known"
 }
+# <<< required-contexts-for
 
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than merging on a partial view" >&2
@@ -203,8 +307,7 @@ while IFS= read -r row; do
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
 
   # --- pinned PR read --------------------------------------------------------
-  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
-    --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url 2>/dev/null)
+  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json "$PR_FIELDS" 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "$PROG: PR#$num view failed; merge held (anchor $id, retry next pass)"
     held=$((held + 1)); continue
@@ -299,7 +402,7 @@ while IFS= read -r row; do
       *) short=$(printf '%.8s' "$merge_oid") ;;
     esac
     if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
-         --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --set "merged_sha=$merge_oid" \
          --unset merge_record_failures \
          --append-notes "Merged to $base at $short (record recovered by merge)"; then
       recovered=$((recovered + 1))
@@ -316,13 +419,12 @@ while IFS= read -r row; do
   # Only the merge consults these; the record above needs none of them.
   target=$(printf '%s' "$fresh" | jq -r '.meta.merged_target // ""')
   hold=$(printf '%s' "$fresh" | jq -r '.meta.merge_hold // ""')
-  dismissed=$(printf '%s' "$fresh" | jq -r '.meta.signoff_dismissed // ""')
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
   posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
   aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
 
   # --- validate, in order -------------------------------------------------------
-  # Empty/absent check_set is NEVER "no gates": the declared gateless opt-out is
+  # Empty/absent check_set is NEVER "no checks": the declared checkless opt-out is
   # the 'none' sentinel; empty means never normalized (gate-ensure stamps the
   # default). Fail closed rather than merge ungated.
   if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
@@ -385,16 +487,15 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num base '$base' != merged_target '$target' (retargeted); merge held (anchor $id, pr-facts escalates)"
     held=$((held + 1)); continue
   fi
-  if ! hg=$(hold_gate "$checkset" "$fresh"); then
-    echo "$PROG: PR#$num check-set markers unreadable on anchor $id; merge held"
+  if ! ng=$(first_notgreen_lane "$id" "$checkset"); then
+    echo "$PROG: PR#$num lane state unreadable on anchor $id; merge held"
     held=$((held + 1)); continue
   fi
-  if [ -n "$hg" ]; then
-    have=$(printf '%s' "$fresh" | jq -r --arg k "check.$hg" '.meta[$k] // "unreviewed"')
+  if [ -n "$ng" ]; then
     # A lane short of green is one a review is due to raise. The cap's park is
     # not reached here: it holds above, on merge_hold.
     record_machine "$id" "progressing" "$head_oid" "$aroute"
-    echo "$PROG: PR#$num check '$hg' is '$have', not green; merge held (anchor $id)"
+    echo "$PROG: PR#$num lane '$ng' does not derive green; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
 
@@ -403,8 +504,12 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num referencing-bead read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   }
-  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null | scrub)
-  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null | scrub)
+  # A probe that exited non-zero is unreadable whatever it printed — bd_list's
+  # contract for the list reads, since a failed read can print an empty array.
+  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null) || children=""
+  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null) || blockers=""
+  children=$(printf '%s' "$children" | scrub)
+  blockers=$(printf '%s' "$blockers" | scrub)
   if ! printf '%s' "$children" | jq -e 'type == "array"' >/dev/null 2>&1 \
      || ! printf '%s' "$blockers" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "$PROG: PR#$num dependency probe unreadable; merge held (anchor $id)"
@@ -431,7 +536,11 @@ while IFS= read -r row; do
         | (.metadata.pr_url | repo_q) as $rq
         | select(.via == "dep" or ($mr == "" and ((["","false","0","null"] | index($t)) != null)
                                    and ($rq == "?" or $rq == $ours)))
-        | "\(.id) (\($st))" ]
+        | ((.metadata.task_kind // "") | tostring) as $tk
+        | ((.metadata["finding.disposition"] // "") | tostring) as $fd
+        | (if $tk == "finding" then (if $fd != "" then "\($fd) finding" else "finding" end)
+           else "unclosed rework/review bead" end) as $kind
+        | "\($kind) \(.id) (\($st))" ]
     | .[0] // empty' 2>/dev/null); then
     echo "$PROG: PR#$num in-flight holder filter unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -448,8 +557,34 @@ while IFS= read -r row; do
           | ((.metadata["gc.routed_to"] // "") | tostring) as $r
           | select($r != "" and $r != "human")
           | .id ] | .[0] // empty' 2>/dev/null)
-    [ -n "$pool_holder" ] && record_machine "$id" "progressing" "$head_oid" "$aroute"
-    echo "$PROG: PR#$num has unclosed rework/review bead $inflight; merge held (anchor $id)"
+    if [ -n "$pool_holder" ]; then
+      record_machine "$id" "progressing" "$head_oid" "$aroute"
+    else
+      # No pool is behind it. A human-routed blocker is the demand the board
+      # already surfaces as `asking` from the edge itself, so leave the axis alone
+      # there. An UNROUTED open blocker is the gap: no automated actor will claim
+      # it and no `asking` edge names it, so the merge is stuck until a person
+      # clears it. Record `blocked` naming the holder, so the board stops reading
+      # it as awaiting-review.
+      stuck_holder=$(printf '%s' "$blockers" | jq -r --arg live "$LIVE_STATUSES" '
+        ($live | split(",")) as $ls
+        | [ .[] | select(type == "object")
+            | select((((.status // "open") | ascii_downcase) as $st | ($ls | index($st)) != null))
+            | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+            | .id ] | .[0] // empty' 2>/dev/null)
+      [ -n "$stuck_holder" ] && record_blocked "$id" "$head_oid" "$aroute" \
+        "held by $inflight — an unrouted blocker no automated actor will clear"
+    fi
+    echo "$PROG: PR#$num held by $inflight; merge held (anchor $id)"
+    held=$((held + 1)); continue
+  fi
+
+  # --- open visit on this anchor: a person owes a conversation before finalize ---
+  # Subject-scoped via the anchor's incoming tracks edge; a visit is non-blocking,
+  # so this holds THIS anchor's merge without touching its children or readiness.
+  # Fail-closed: an unreadable probe holds, like every probe above.
+  if ! fg_reason=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+    echo "$PROG: PR#$num ${fg_reason:-finalize gate refused (fail-closed)}; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
 
@@ -460,17 +595,17 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num reviews history read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
-  # Latest state-bearing review per non-self reviewer (DISMISSED shadows its
-  # author's older rows); approvals count only at the live head.
-  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" --arg head "$head_oid" '
+  # Each non-self reviewer's latest APPROVED or CHANGES_REQUESTED review, taken
+  # after every DISMISSED review is dropped: a dismissed approval does not count,
+  # and a dismissed CHANGES_REQUESTED does not hide its author's older approval.
+  # An approval stands across later pushes until someone dismisses it, so it
+  # counts at whatever commit it was given.
+  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" '
     ([ .[] | select((.user.login // "") != $self)
-       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
+       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED") ]
      | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
     | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
-        approver: ([ $latest[] | select(.state == "APPROVED")
-                     | select((.commit_id // "") == $head) | (.user.login // "") ] | .[0] // ""),
-        self_dismissed: ([ .[] | select($self != "") | select((.user.login // "") == $self)
-                           | select(.state == "DISMISSED") ] | length) }' 2>/dev/null)
+        approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") }' 2>/dev/null)
   if [ -z "$rstate" ]; then
     echo "$PROG: PR#$num reviews history unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -478,64 +613,67 @@ while IFS= read -r row; do
   veto=$(printf '%s' "$rstate" | jq -r '.veto // ""')
   if [ -n "$veto" ]; then
     # A human's standing NO holds every candidate, whatever the check_set says.
-    # Whether anything will ANSWER it is the round count: signoff.sh files a
-    # rework child per round and stops at the cap, so a veto standing past the
-    # cap is one nothing will act on. signoff.sh owns that count, and reading it
-    # any other way records the wedge over work it would still send back: its
-    # cap measures rounds since the operator's last feedback, so the total is
-    # wrong by exactly the floor that feedback sets. Both halves come off reads
-    # this pass already has — the blockers, and the anchor row re-read above.
-    # The floor's stamp is signoff's alone; nothing here writes it.
-    total=$(printf '%s' "$blockers" | jq -r '
-      [ .[] | select(type == "object")
-        | select(((.metadata.source_review_bead // "") | tostring) != "") ] | length' 2>/dev/null)
-    case "$total" in ''|*[!0-9]*) total=0 ;; esac
-    floor_raw=$(printf '%s' "$fresh" | jq -r '(.meta.signoff_round_floor // "") | tostring')
-    case "$floor_raw" in
-      *@*) floor="${floor_raw%%@*}"; floor_batch="${floor_raw#*@}" ;;
-      *)   floor=""; floor_batch="" ;;
-    esac
-    case "$floor" in ''|*[!0-9]*) floor=0; floor_batch="" ;; esac
-    # Feedback signoff has not answered yet retires every round filed before it:
-    # the next verdict writes the floor at the total and files rework. Holding
-    # the older floor here would wedge the anchor for the whole window between
-    # the feedback and that verdict, which is as long as a review takes.
-    reset_batch=$(printf '%s' "$fresh" | jq -r '(.meta.signoff_rounds_reset // "") | tostring')
-    if [ -n "$reset_batch" ] && [ "$reset_batch" != "$floor_batch" ]; then
-      floor="$total"
-    fi
-    rounds=$((total - floor))
-    [ "$rounds" -ge 0 ] || rounds=0
-    if [ "$rounds" -ge "$MAX_REVIEW_ROUNDS" ]; then
-      record_machine "$id" "wedged-veto" "$head_oid" "$aroute"
-    else
-      record_machine "$id" "progressing" "$head_oid" "$aroute"
-    fi
-    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED; merge held (anchor $id, rework rounds $rounds/$MAX_REVIEW_ROUNDS)"
+    # The in-flight arm above already held every anchor a finding, fix unit,
+    # review, or blocker is still moving, so reaching here means the cadence has
+    # run dry under a veto GitHub keeps standing across pushes and the city never
+    # dismisses. That settled tail is the operator's to clear by re-reviewing:
+    # record `settled`, whose owed rule reads the posture axis's standing
+    # changes_requested and puts the row on their queue. A veto with a fix unit
+    # still in flight never reaches here — the in-flight arm holds it at
+    # `progressing`.
+    record_machine "$id" "settled" "$head_oid" "$aroute"
+    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED and the cadence has run dry; merge held for re-review (anchor $id)"
     held=$((held + 1)); continue
   fi
-  needs_approval=""
-  case ",$(printf '%s' "$checkset" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')," in
-    *",approval,"*) needs_approval=1 ;;
-  esac
-  [ -n "$dismissed" ] && needs_approval=1
-  sd=$(printf '%s' "$rstate" | jq -r '.self_dismissed // 0')
-  [ "${sd:-0}" != "0" ] && needs_approval=1
-  if [ -n "$needs_approval" ]; then
-    if [ -z "$SELF_LOGIN" ]; then
-      echo "$PROG: PR#$num approval required but the acting login is unresolved; merge held (anchor $id)"
-      held=$((held + 1)); continue
-    fi
-    approver=$(printf '%s' "$rstate" | jq -r '.approver // ""')
-    if [ -z "$approver" ]; then
-      # Every declared gate is green at the live head and no pool-routed blocker
-      # is open: the cadence is done and the pull request is waiting on a person.
-      # That is `settled`, and the approval clause of the owed rule is what makes
-      # the row the operator's rather than nobody's.
-      record_machine "$id" "settled" "$head_oid" "$aroute"
-      echo "$PROG: PR#$num no external APPROVED review at the live head $head_oid (approval armed by: check_set/signoff_dismissed/own dismissed review); merge held (anchor $id)"
-      held=$((held + 1)); continue
-    fi
+  # Approval is a UNIVERSAL merge rule: every PR requires a standing external
+  # APPROVED review by an account other than the city's, enforced here in
+  # city merge logic (GitHub branch protection is an extra layer only, not the
+  # authority). No check_set token arms it and none opts out — the token that used
+  # to arm it per-anchor left integration-branch PRs robot-merging on green, the
+  # hole this closes. A designated agent approving certain PRs is a later
+  # extension; today the approver is any non-city login.
+  if [ -z "$SELF_LOGIN" ]; then
+    echo "$PROG: PR#$num approval required but the acting login is unresolved; merge held (anchor $id)"
+    held=$((held + 1)); continue
+  fi
+  approver=$(printf '%s' "$rstate" | jq -r '.approver // ""')
+  if [ -z "$approver" ]; then
+    # Every declared check is green and no pool-routed blocker is open: the
+    # cadence is done and the pull request is waiting on a person.
+    # That is `settled`, and the approval clause of the owed rule is what makes
+    # the row the operator's rather than nobody's.
+    record_machine "$id" "settled" "$head_oid" "$aroute"
+    echo "$PROG: PR#$num no external APPROVED review stands (approval is a universal merge rule); merge held (anchor $id)"
+    held=$((held + 1)); continue
+  fi
+
+  # --- UNKNOWN: GitHub has not computed this PR against its current base -------
+  # A merge this arm makes moves the base under every later candidate on that
+  # base, so their pinned reads answer UNKNOWN. The pinned read started the
+  # computation, so read it again before deciding, within the pass's re-read
+  # budget (gh_pr_view_settled, bd-lib.sh). Every read here comes after the
+  # latest merge this pass made, because merges happen only at the end of an
+  # iteration. A computed answer is judged below like any pinned
+  # one, so BEHIND and DIRTY keep their own handling. Every pinned field outside
+  # the mergeability facts was validated above, so a re-read that changes one is
+  # a different PR from the one those gates passed. A re-read that fails is held
+  # like a failed pinned read and records nothing.
+  unknown_note=""
+  if [ "$merge_state" = "UNKNOWN" ] && [ "$MERGE_STATE_REREADS" -gt 0 ]; then
+    gh_pr_view_settled "$num" "$ORIGIN_REPO_Q" "$PR_FIELDS" "$PR_JSON"; rr=$?
+    case "$rr" in
+      0) PR_JSON="$PR_REREAD_JSON"; merge_state="$PR_REREAD_STATE"
+         echo "$PROG: PR#$num answered UNKNOWN on the pinned read and $merge_state on re-read $PR_REREADS (anchor $id)" ;;
+      2) echo "$PROG: PR#$num changed between the pinned read and re-read $PR_REREADS of its UNKNOWN merge state ($PR_REREAD_CHANGED); merge held (anchor $id)"
+         held=$((held + 1)); continue ;;
+      3) echo "$PROG: PR#$num view failed on re-read $PR_REREADS of its UNKNOWN merge state; merge held (anchor $id, retry next pass)"
+         held=$((held + 1)); continue ;;
+      *) if [ "$PR_REREADS" -gt 0 ]; then
+           unknown_note=" after $PR_REREADS re-read(s); the pass's re-read budget is spent"
+         else
+           unknown_note="; not re-read, the pass's re-read budget is spent"
+         fi ;;
+    esac
   fi
 
   # --- mergeStateStatus: CLEAN, or UNSTABLE decided on required contexts only ----
@@ -574,10 +712,74 @@ while IFS= read -r row; do
         fi
       fi
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
+    BLOCKED)
+      # Branch protection holds a PR whose city-side checks (checked above) are
+      # all green. The blocking condition is read from the branch's own rules:
+      # an unresolved review thread is the gate only where thread resolution is
+      # required (required_review_thread_resolution), otherwise a missing
+      # approval is. reviewDecision cannot name it alone — it reads EMPTY while
+      # threads are unresolved and resolves only once they clear. The merge stays
+      # held whatever the cause; the log names it, and the machine axis records
+      # `blocked` for the causes a person must clear — an unresolved required
+      # thread, a rule that could not be named — so the board shows needs-attention,
+      # while the ordinary approval wait stays `settled` (the review tail).
+      review_decision=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
+      review_gates_for "$base"
+      if [ "$PROT_STATE" != "known" ]; then
+        record_blocked "$id" "$head_oid" "$aroute" "BLOCKED by branch protection; the rules for '$base' could not be read to name the cause"
+        echo "$PROG: PR#$num is BLOCKED by branch protection but the rules for '$base' could not be read to name the cause (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
+      else
+        bcause=""; bu=0
+        if [ "$PROT_THREAD_REQ" = "true" ]; then
+          if bu=$(unresolved_threads "$num"); then
+            [ "$bu" -gt 0 ] && bcause="threads"
+          else
+            bu=0; bcause="threads-unreadable"
+          fi
+        fi
+        if [ -z "$bcause" ]; then
+          if [ "$PROT_APPROVALS" -ge 1 ] && [ "$review_decision" != "APPROVED" ]; then bcause="approval"; else bcause="other"; fi
+        fi
+        case "$bcause" in
+          threads)
+            record_blocked "$id" "$head_oid" "$aroute" "$bu unresolved review thread(s) must be resolved before this PR can merge"
+            echo "$PROG: PR#$num is BLOCKED by branch protection: $bu unresolved review thread(s) hold required_review_thread_resolution (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          threads-unreadable)
+            record_blocked "$id" "$head_oid" "$aroute" "a required review thread's resolution state could not be read"
+            echo "$PROG: PR#$num is BLOCKED by branch protection: review-thread resolution is required but its reviewThreads could not be read to count them (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          approval)
+            # The ordinary review wait, not a block: the settled tail's owed rule
+            # already puts it on the operator's queue as awaiting-review.
+            record_machine "$id" "settled" "$head_oid" "$aroute"
+            echo "$PROG: PR#$num is BLOCKED by branch protection: waiting on an approving review ($PROT_APPROVALS required, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          other)
+            record_blocked "$id" "$head_oid" "$aroute" "branch protection holds it by a rule other than an unresolved required thread or a missing approval"
+            echo "$PROG: PR#$num is BLOCKED by branch protection by a rule other than an unresolved required thread or a missing approval (thread-resolution required=$PROT_THREAD_REQ, approvals required=$PROT_APPROVALS, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+        esac
+      fi
+      held=$((held + 1)); continue ;;
     *)
-      # The cadence has nothing left to do; GitHub is not ready. Still `settled`.
-      record_machine "$id" "settled" "$head_oid" "$aroute"
-      echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'); merge held (anchor $id)"
+      # The cadence has nothing left to do; GitHub is not ready. Two unready states
+      # a person — or the merge-in cadence — must clear reach here with no automated
+      # actor already behind them, since the in-flight arm above held every anchor a
+      # live rework or blocker is moving; both need the branch brought current and
+      # no review verdict does that, so record `blocked` and the board shows
+      # needs-attention rather than a merge in progress:
+      #   BEHIND — peers merged ahead and the base moved under this PR;
+      #   DIRTY  — the branch conflicts with the base.
+      # pr-facts.sh files a prepare_mode=merge rework to perform the bring-current;
+      # once that child is in flight the in-flight arm records `progressing` instead,
+      # so this `blocked` names the window where the branch is dirty with nothing
+      # moving it. Every other unready state (GitHub still computing mergeability,
+      # say) owes a person nothing and stays `settled`.
+      if [ "$merge_state" = "BEHIND" ]; then
+        record_blocked "$id" "$head_oid" "$aroute" "the base branch '$base' moved ahead; bring '$head_ref' current with '$base' before it can merge"
+      elif [ "$merge_state" = "DIRTY" ]; then
+        record_blocked "$id" "$head_oid" "$aroute" "the branch conflicts with '$base' and no merge-in rework is in flight; bring '$head_ref' current with '$base' before it can merge"
+      else
+        record_machine "$id" "settled" "$head_oid" "$aroute"
+      fi
+      echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'$unknown_note); merge held (anchor $id)"
       held=$((held + 1)); continue ;;
   esac
   if [ -z "$head_oid" ]; then
@@ -646,35 +848,49 @@ $sa_out" >/dev/null 2>&1 || true
     held=$((held + 1)); continue
   fi
   freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" \
-    "$FIRST_RED_GATE_DEF"'
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" '
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
     | ((($m.pr_number // "") | tostring)) as $pn
     | ((($m.merge_hold // "") | tostring)) as $h
-    | ((($m.signoff_dismissed // "") | tostring)) as $d
     | ((($m.merged_target // "") | tostring)) as $t
     | ((($m.pr_url // "") | tostring | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p))) as $pu
     | ((($m.branch // "") | tostring)) as $br
     | ((($m.check_set // "") | tostring)) as $fcs
-    | first_red_gate($fcs; $m) as $red
     | if $st != "open" then "status is now \($st)"
       elif $mr != "pull_request" then "merge_result is now \($mr)"
       elif $pn != $num then "anchor now claims PR#\($pn)"
       elif (["","false","0","null","False","FALSE"] | index($h)) == null then "merge_hold was set after validation"
       elif ((($m.pr_posture // "") | tostring) | startswith("commented@")) then "review comments went unanswered after validation"
-      elif $d != $dis then "signoff_dismissed changed after the approval gate ran"
       elif ($t != "" and $t != $base) then "retargeted after validation (merged_target=\($t))"
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"
       elif ($fcs | gsub("[[:space:],]"; "")) == "" then "check_set emptied after validation"
-      elif $red != "" then "check \($red) is no longer green"
       else "OK" end' 2>/dev/null); frc=$?
+  # The lane term the marker read used to carry, now derived: no declared lane
+  # may have left green between validation and the merge. A lane's backing bead
+  # can change without moving the head, so this re-derivation is the one guard
+  # --match-head-commit does not already provide. It runs only when every stored
+  # field above still reads OK, so a field mismatch keeps its own reason.
+  if [ "$frc" -eq 0 ] && [ "$freason" = "OK" ]; then
+    fcs=$(printf '%s' "$final" | jq -r '.meta.check_set // ""' 2>/dev/null)
+    if ! rg=$(first_notgreen_lane "$id" "$fcs"); then
+      freason="lane state unreadable before the merge"
+    elif [ -n "$rg" ]; then
+      freason="lane $rg is no longer green"
+    fi
+  fi
   # Explicit sentinel: "OK" is the only authorization. An empty result or a
   # non-zero jq means the comparison itself failed — hold, never merge blind.
   if [ "$frc" -ne 0 ] || [ -z "$freason" ]; then
     freason="terminal re-read comparison unreadable"
+  fi
+  # A visit is a subject-local bead filed without moving the PR head, so
+  # --match-head-commit does not catch one raised between validation and here.
+  # Re-assert the finalize gate in the terminal window, same fail-closed terms.
+  if [ "$freason" = "OK" ] && ! fg_final=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+    freason="${fg_final:-open visit or unreadable visit probe (fail-closed)}"
   fi
   if [ "$freason" != "OK" ]; then
     echo "$PROG: PR#$num anchor $id changed between validation and the merge — $freason; merge held"
@@ -700,7 +916,7 @@ $sa_out" >/dev/null 2>&1 || true
     *) short=$(printf '%.8s' "$merge_oid") ;;
   esac
   if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
-       --set "merged_sha=$merge_oid" --unset rejection_reason \
+       --set "merged_sha=$merge_oid" \
        --unset merge_record_failures \
        --append-notes "Merged to ${target:-$base} at ${short:-merge}"; then
     merged=$((merged + 1))

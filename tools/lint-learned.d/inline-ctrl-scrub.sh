@@ -47,9 +47,10 @@
 set -uo pipefail
 
 FENCE="control-char-scrub"
-# The one byte set: every C0 byte except LF. This file is exempt from its own
-# scan, so it may state the canonical line literally.
-CANON="scrub() { tr -d '\\000-\\011\\013-\\037'; }"
+# The one byte set: every C0 byte (U+0000–U+001F), the range JSON forbids raw
+# inside a string. This file is exempt from its own scan, so it may state the
+# canonical line literally.
+CANON="scrub() { tr -d '\\000-\\037'; }"
 # A `tr -d` whose set names C0 bytes, spelled as octal escapes or as the class.
 # A set held in a variable (`tr -d "$SET"`) names no bytes here and is invisible.
 CTRL_TR="tr[[:space:]]+-d[[:space:]]+[\"']?[^\"']*(\\\\0[0-9]|\[:cntrl:\])"

@@ -439,13 +439,14 @@ func fixtureBoard() board.Board {
 		// shape (no outcome, no close stamp) and the finished one.
 		Sittings: []board.Sitting{
 			{
-				ID:       "tk-vst01",
-				Rig:      "gc-toolkit",
-				Subject:  "tk-eemvf",
-				Title:    "visit: tk-eemvf — tile density",
-				Status:   "in_progress",
-				Session:  "gc-toolkit__converse-1",
-				OpenedAt: time.Date(2026, 8, 11, 14, 40, 0, 0, time.UTC),
+				ID:           "tk-vst01",
+				Rig:          "gc-toolkit",
+				Subject:      "tk-eemvf",
+				Title:        "visit: tk-eemvf — tile density",
+				SubjectTitle: "Attention Canvas — spatial in-canvas operator dashboard",
+				Status:       "in_progress",
+				Session:      "gc-toolkit__converse-1",
+				OpenedAt:     time.Date(2026, 8, 11, 14, 40, 0, 0, time.UTC),
 			},
 			{
 				ID:       "tk-vst02",
@@ -457,7 +458,7 @@ func fixtureBoard() board.Board {
 				Session:  "gascity__converse-2",
 				OpenedAt: time.Date(2026, 8, 11, 9, 12, 0, 0, time.UTC),
 				ClosedAt: time.Date(2026, 8, 11, 9, 48, 0, 0, time.UTC),
-				Takeaway: "the roll-up was right; the convoy's own progress claim was stale",
+				Takeaway: "every tracked child has landed; the convoy is complete",
 			},
 		},
 		Tiles: []board.Tile{
@@ -470,6 +471,9 @@ func fixtureBoard() board.Board {
 
 				Weight: 14,
 				Held:   true,
+				// Its sitting (tk-vst01) is in_progress, so a live conversation is
+				// engaged on it — the state that carries the field into the check.
+				VisitState: board.VisitEngaged,
 
 				NClosed:    3,
 				MTotal:     11,
@@ -486,11 +490,9 @@ func fixtureBoard() board.Board {
 
 				Owned: nil,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         false,
-				ProgressMismatch: false,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       false,
 				StaleDays:      4,
 				Priority:       &p1,
 				CrossRigRefs:   []string{"sl-9k2mq"},
@@ -505,9 +507,19 @@ func fixtureBoard() board.Board {
 				TakeawayBy: &takeawayBy,
 
 				UpdatedAt: time.Date(2026, 8, 7, 9, 30, 0, 0, time.UTC),
-				Frontier:  "7 open · 1 in flight · 1 stuck (dead owner) · 1 parked for the operator",
+				Frontier:  "needs-review · 7 open · 1 in flight · 1 stuck (dead owner) · 1 parked for the operator",
 				Needs:     takeaway,
 				RankScore: 3014004,
+				// The per-bead liveness, set on every LIVE row and led by the
+				// frontier. This epic reads its OWN anchor-level state — nothing is
+				// working the epic bead itself, so needs-review — not an aggregate
+				// over its children.
+				Phase: board.PhaseNeedsReview,
+				// A dead owner under it, so classifySection bands it stalled.
+				Section: board.SectionStalled,
+				// A top-level epic with no in-fixture parent or blocker: its own
+				// family root, which is the common shape (group_root == id).
+				GroupRoot: "tk-eemvf",
 			},
 			{
 				ID:       "gt-1a2b3",
@@ -537,11 +549,9 @@ func fixtureBoard() board.Board {
 				// the TypeScript `boolean | null` is exercised either way.
 				Owned: &no,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         true,
-				ProgressMismatch: true,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       true,
 				StaleDays:      0,
 				Priority:       &p3,
 				CrossRigRefs:   []string{},
@@ -554,9 +564,19 @@ func fixtureBoard() board.Board {
 				TakeawayAt: nil,
 				TakeawayBy: nil,
 
-				Frontier:  "all 2 closed · 0 open",
+				Frontier:  "needs-review · all 2 closed · 0 open",
 				Needs:     "all 2 closed — graduate",
 				RankScore: 3000,
+				// Settled at the head with nothing in flight — awaiting a human's
+				// graduate decision — so the shared core reads it needs-review.
+				Phase: board.PhaseNeedsReview,
+				// A LOW row with nothing asking bands cleanup. ClusterKey is pinned
+				// here — the fixture's one clustered row — to carry the field into
+				// the TypeScript check, the way the DONE tile carries closed_at; on
+				// a live board it is set only when at least three rows share it.
+				Section:    board.SectionCleanup,
+				ClusterKey: "all 2 closed — graduate",
+				GroupRoot:  "gt-1a2b3",
 			},
 			// A merge anchor: the PR round-trip's row. Wedged at the convergence
 			// cap's exception, which is the live shape six of the seven wedged
@@ -591,11 +611,9 @@ func fixtureBoard() board.Board {
 
 				Owned: nil,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         false,
-				ProgressMismatch: false,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       false,
 				StaleDays:      3,
 				Priority:       &p1,
 				CrossRigRefs:   []string{},
@@ -608,9 +626,14 @@ func fixtureBoard() board.Board {
 				TakeawayBy: nil,
 
 				UpdatedAt: time.Date(2026, 8, 11, 14, 55, 0, 0, time.UTC),
-				Frontier:  "polecat/tk-01n5cc · owed 3d",
+				Frontier:  "needs-attention · polecat/tk-01n5cc · owed 3d",
 				Needs:     "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not",
 				RankScore: 2003003,
+				// A wedged live merge anchor: a human must unstick it. On a merge
+				// anchor the per-bead Phase equals PRPhase — one bead, one tri-state
+				// — because both read the same shared core off the same facts.
+				PRPhase: board.PhaseNeedsAttention,
+				Phase:   board.PhaseNeedsAttention,
 
 				// No PR number: the branch is pushed and gated, and nothing has
 				// opened a pull request for it, so the branch is what names the
@@ -624,6 +647,15 @@ func fixtureBoard() board.Board {
 				// Three days before the board was generated, and held there by
 				// every reconcile pass in between.
 				PROwedSince: time.Date(2026, 8, 8, 11, 2, 0, 0, time.UTC),
+				// A merge anchor is a pull request's row, so it bands review even
+				// while it is wedged on the operator.
+				Section:   board.SectionReview,
+				GroupRoot: "tk-01n5cc",
+				// The accept-able case: a recommendation rides this anchor (the
+				// design's worked instance — dispose the wedged PR), so the
+				// fixture carries both fields non-zero into the TypeScript check.
+				Acceptable:    true,
+				AcceptFormula: "mol-dispose-pr",
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into
@@ -653,11 +685,9 @@ func fixtureBoard() board.Board {
 
 				Owned: nil,
 
-				Stranded:         false,
-				Empty:            false,
-				Complete:         true,
-				ProgressMismatch: false,
-
+				Stranded:       false,
+				Empty:          false,
+				Complete:       true,
 				StaleDays:      1,
 				Priority:       &p3,
 				CrossRigRefs:   []string{},
@@ -672,8 +702,10 @@ func fixtureBoard() board.Board {
 				UpdatedAt: time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC),
 				ClosedAt:  time.Date(2026, 8, 10, 9, 30, 0, 0, time.UTC),
 				Frontier:  "closed 1d ago",
-				Needs:     "closed — dismiss to clear",
+				Needs:     "closed — ages out",
 				RankScore: -1_000_000 + 998, // the DONE lane: closed 1 day ago
+				Section:   board.SectionDone,
+				GroupRoot: "tk-9tbbk",
 			},
 		},
 		Partial:       true,

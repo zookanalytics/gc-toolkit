@@ -61,11 +61,30 @@ deferred-dispatch.sh arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
 ```
 
 `arm` is fail-closed. It refuses a bead that is closed, one that is
-already dispatched (`in_progress`, or carrying `gc.routed_to` /
-`gc.execution_routed_to`), and one with no `--target`. Arming a bead that
-has *no* open blocker is legal and says so — the next pass dispatches it,
-which is what makes `arm` a safe universal substitute for a hand-held
+already dispatched (`in_progress`, or carrying `gc.routed_to`), one with
+no `--target`, and one held at any status other than `open`.
+`gc.execution_routed_to` alone does not count as dispatched: it is
+execution provenance, not a live queue, and an open bead carrying only it
+is the shape `doctor/check-blocked-work-armed` flags and names arming as
+the fix for, so refusing on it would dead-end that remedy. Arming a bead
+that has *no* open blocker is legal and says so — the next pass dispatches
+it, which is what makes `arm` a safe universal substitute for a hand-held
 sling.
+
+The status refusal is the one that is not about double-dispatch.
+`bd list --ready` excludes on status before it looks at dependencies at
+all, so a `blocked`, `deferred`, `hooked` or `pinned` bead is as unready
+as a gated one and stays that way however many blockers close. Nothing
+re-derives status from the dependency graph — whoever set the hold
+clears it. An arm recorded on such a bead can therefore never fire, so
+`arm` refuses it rather than writing a record that waits forever.
+
+Arming is the default move for a blocked follow-up you file or hold by
+hand: arm it rather than leave it unrouted for someone to route once its
+blocker lands, so a sitting can queue everything and drain. A blocked bead
+that is plainly work and carries neither a route nor `gc.dispatch_when_ready`
+is silent manual-follow-up debt — the exact miss
+`doctor/check-blocked-work-armed` reports.
 
 To see what is owed, in this rig's store:
 
@@ -81,32 +100,71 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 and the dispatcher's open-tracking gate gives each rig its own
 single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **dispatches** every armed bead that `bd` now reports ready — running
-  the recorded sling, then clearing the record;
-- **retires** the record on an armed bead that has closed, or that is
-  already routed (the crash-between-sling-and-disarm case), without
-  slinging;
+- **dispatches** every armed open bead whose own `blocks` edges have all
+  closed — the ones `bd` reports ready, and also the ones bd holds unready
+  only through a blocked or deferred ancestor (see below) — stamping its own
+  `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
+  running the recorded sling, promoting the marker to `slung@` on success,
+  then clearing the record;
+- **retires** the record on an armed bead that has closed, or whose sling
+  reconcile has proven — a `slung@` (or pre-two-state bare-timestamp)
+  `gc.dispatch_when_ready_slung` marker surviving into a later pass, from a
+  pass that died before disarming — so recovery reads one marker reconcile
+  owns rather than the lane-specific stamps a sling leaves (`gc.routed_to`
+  for a plain sling, `gc.execution_routed_to` for an `--on` pour) — without
+  slinging again;
+- **re-slings** an arm whose marker survived in the unproven `slinging@`
+  state — a pass that died before or during its sling, or a failed sling
+  whose rollback did not land — because that dispatch was never proven and
+  retiring it would silently lose the work;
 - **withholds** — leaving the record armed and saying so — when the bead
   is still blocked, when someone holds it by `assignee`, when the sling
-  fails, or when the recorded arguments are malformed.
+  fails, or when the recorded arguments are malformed;
+- **names as STRANDED**, every pass and on stderr, an armed bead sitting
+  at a non-`open` live status. The record is kept, because the hold may
+  yet clear, but it is counted apart from `waiting` and reported rather
+  than left in a silent count. `list` marks the same beads
+  `STRANDED — status=<s> is never --ready`. A held bead and a gated bead
+  are both "not ready", and conflating them is what hides a dead arm: the
+  gated one dispatches when its blocker closes, the held one never
+  dispatches at all.
 
-Dispatchability is not re-implemented here. `bd list --ready` applies
-beads' own predicate — open, no active blocker of a blocking type
-(`blocks` / `waits-for` / `conditional-blocks`), not `in_progress`,
-`blocked`, `deferred` or `hooked`, parent-child blocked-flag cascade
-included. Asking `bd` is what keeps this from drifting away from the
-predicate every other reader uses.
+The arm waits on the bead's OWN blockers, which is narrower than `bd list
+--ready`. `--ready` applies beads' own claimability predicate — open, no
+active blocker of a blocking type (`blocks` / `waits-for` /
+`conditional-blocks`), not `in_progress`, `blocked`, `deferred` or `hooked` —
+and it ALSO excludes a bead held only by a blocked or deferred ANCESTOR,
+because the is_blocked flag cascades DOWN parent-child edges. An armed epic
+child whose own blockers have all closed is ready to run, but sits under a
+container the operator holds on a human demand gate, so it never enters
+`bd --ready` while that gate is open and its arm would never fire. So the
+pass reads `bd --ready` as the fast path, then asks any open bead bd holds
+unready one direct question — are all of its own `blocks` edges closed? — and
+dispatches on a yes. The status gate still holds (a non-`open` bead is a
+deliberate hold and is never dispatched), and an assignee still HELDs the
+bead. The one question reconcile answers itself is the arm's own: whether the
+thing the arm waits on has landed. `bd blocked` and `bd ready` cannot answer
+it under this bead's id, because the cascade attributes the block to the
+ancestor.
 
-The pass slings **first** and clears the record **second**. Dying between
-the two leaves an armed bead that is already routed, which the next pass
-retires rather than pouring a second workflow onto.
+The pass stamps `gc.dispatch_when_ready_slung` as `slinging@<ts>`
+**first**, slings **second**, promotes the marker to `slung@<ts>` on
+success **third**, and clears the whole record **last**. A pass that dies
+before promoting the marker leaves the unproven `slinging@` state, which
+the next pass re-slings rather than retires — so a crash mid-dispatch costs
+a retry, never a silently lost dispatch. A marker surviving as `slung@` (or
+an unprefixed timestamp) is a proven dispatch whose pass died before
+disarming, and the next pass retires it rather than pouring a second time —
+one marker reconcile owns, not an inference from whichever stamp a delivery
+lane happened to leave. A sling that fails rolls the marker back, so the arm
+retries next pass.
 
 An unreadable listing exits non-zero and says so. It never prints a
 zero-count summary — for a dispatcher, "I could not see the queue" and
 "nothing was owed" reading alike is the same disappearing hold this
 machinery exists to remove.
 
-Two checks keep the halves together. The positive control closing
+Three checks keep the halves together. The positive control closing
 `assets/scripts/deferred-dispatch.test.sh` asserts the order file ships,
 is a rig-scoped cooldown, does not opt out of the single-flight gate, and
 still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
@@ -114,6 +172,12 @@ still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
 has fired within `max(3×interval, 15m)`. Ship the arm without the cadence
 and `arm` still succeeds, still writes a well-formed record, and nothing
 ever performs it — the same invisible hold, one layer down.
+`doctor/check-armed-dispatch-owed` closes the gap the other two leave: the
+cadence can be live and the pass still leave a dispatch unmade, so it flags an
+arm whose own `blocks` edges have all closed but that has stayed open and
+armed past the reconcile window, or one armed at a non-open status the pass can
+never dispatch — a dispatch silently not firing, surfaced before a human has to
+notice it days later.
 
 ## What this does not do
 

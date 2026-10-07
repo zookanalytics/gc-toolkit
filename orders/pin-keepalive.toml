@@ -1,0 +1,23 @@
+# pin-keepalive — keep standing conversational named sessions pinned so the
+# session reconciler's config-drift restart keeps deferring on them. The
+# reconciler defers unconditionally while a session carries metadata.pin_awake,
+# and pin_awake is settable only by `gc session pin`; this order asserts it from
+# OUTSIDE the session, so a pin dropped by a full re-materialization is
+# re-asserted with no startup race and no gascity fork. Today the predicate
+# selects mechanik; a converse sitting inherits it once its reshape makes it a
+# configured named conversational session.
+#
+# Condition-triggered like liveness-sweep: a condition trigger has no interval,
+# the cadence lives in the check's cooldown stamp. City-scoped, because the
+# target sessions are city-scoped named singletons and their beads live in the
+# city store — the same reason boot-health is city-scoped.
+#
+# Tuning is per-city via city.toml [[orders.overrides]], not by editing here.
+[order]
+description = "keep standing conversational named sessions (mechanik; a converse sitting once reshaped) pinned against config-drift restart. Precheck-gated; fully exec."
+trigger = "condition"
+check = "$PACK_DIR/assets/scripts/pin-keepalive-precheck.sh"
+check_timeout = "120s"
+exec = "$PACK_DIR/assets/scripts/pin-keepalive.sh"
+timeout = "120s"
+scope = "city"

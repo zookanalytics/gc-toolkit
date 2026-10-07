@@ -42,7 +42,7 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3" "missing '$2'" ;; esac; }
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-doctor-budget-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 now() { date +%s; }
 
 extract() { awk -v f="$FENCE" '
@@ -87,11 +87,18 @@ eq "$(bash -c 'set -u; . "$1"; printf "%s" "$BUDGET_TOTAL"' _ "$TMP/block.sh")" 
    "unset leaves the doctor's own 60s default, which is what runs today"
 
 echo "── 4. the slice is the time left, capped ──"
+# budget_slice reads budget_now to measure the time left. A deadline set from a
+# separate budget_now read is therefore two clock reads a statement apart, and
+# under load a one-second tick between them leaves the middle slice one short.
+# Freeze the clock and give each deadline an explicit offset, so the result turns
+# on the arithmetic under test, min(cap, left) floored at 0, not on whether two
+# reads fall in the same second.
 SLICES="$(GC_DOCTOR_CHECK_TIMEOUT=20 bash -c '
     set -u; . "$1"
-    printf "%s " "$(budget_slice)"                                  # capped at half
-    BUDGET_DEADLINE=$(( $(budget_now) + 3 )); printf "%s " "$(budget_slice)"   # under the cap
-    BUDGET_DEADLINE=$(( $(budget_now) - 9 )); printf "%s " "$(budget_slice)"   # past it
+    budget_now() { printf %s 1000; }
+    BUDGET_DEADLINE=$(( $(budget_now) + 15 )); printf "%s " "$(budget_slice)"   # left 15, capped at half
+    BUDGET_DEADLINE=$(( $(budget_now) + 3 ));  printf "%s " "$(budget_slice)"   # under the cap
+    BUDGET_DEADLINE=$(( $(budget_now) - 9 ));  printf "%s " "$(budget_slice)"   # past it
     budget_spent && printf spent' _ "$TMP/block.sh")"
 eq "$SLICES" "10 3 0 spent" "the slice is min(cap, time left), floors at 0, and then reports itself spent"
 RC="$(bash -c 'set -u; . "$1"; BUDGET_DEADLINE=$(( $(budget_now) - 9 ))

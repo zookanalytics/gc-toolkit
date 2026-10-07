@@ -33,6 +33,11 @@ h1 {
   opacity: 0.7;
 }
 
+.rig-filter {
+  font-size: 0.875rem;
+  margin: 0.5rem 0 0;
+}
+
 .error,
 .warn,
 .partial {
@@ -74,6 +79,313 @@ th {
   font-weight: 600;
   opacity: 0.7;
   white-space: nowrap;
+}
+
+/*
+ * The board is one table. Dependency structure is the grouping axis: a family's
+ * root with members leads as a group row and its members nest beneath it as a
+ * tree, each indented by its depth so a sub-epic sits above its own children; a
+ * single-item family is a plain row. The attention band rides a per-row column; a
+ * ● and a row tint mark the rows whose next move is the operator's, in place —
+ * the table is never reordered by attention.
+ */
+.anchors {
+  margin-top: 1.5rem;
+}
+
+.anchors h2 {
+  font-size: 0.9375rem;
+  margin: 0 0 0.25rem;
+}
+
+/* A new family opens with a stronger top rule; its members carry none, so a
+   group and the rows indented under it read as one block within the table. */
+.row-group td,
+.row-loose td {
+  border-top: 2px solid rgb(128 128 128 / 45%);
+}
+
+/* Rows indent by their depth in the family tree, on the title cell so the ● in
+   the band column still lines up down every row. The row sets --depth: a root
+   (depth 0) gets no indent, a direct member one step in, and a nested sub-epic's
+   child one step further. */
+.title-cell {
+  padding-left: calc(0.6rem + var(--depth, 0) * 1.75rem);
+}
+
+/* The attention highlight, in place: a row whose next move is the operator's, or
+   one an open visit is holding, is tinted where it already sits. wants-person is
+   the stronger signal, so its rule follows and wins when a row is both. */
+.row-held {
+  background: rgb(128 128 128 / 10%);
+}
+
+.row-wants-person {
+  background: rgb(138 97 0 / 12%);
+}
+
+/* A closed row is dimmed so it reads as finished at a glance without leaving the
+   table. */
+.row-done {
+  opacity: 0.6;
+}
+
+.anchors-note {
+  margin-top: 0.5rem;
+}
+
+.family-title {
+  font-weight: 600;
+}
+
+/*
+ * A parent reads as a navigable, summarizing header rather than an indented
+ * title: a disclosure control folds its subtree, and a summary beside the title
+ * states what the fold leaves legible — how many descendants want the operator,
+ * and (folded) the spread across the attention bands. A leaf reserves the
+ * disclosure's width so its title lines up under its siblings'. The block stays
+ * muted and calm by the whole surface's rule: nothing here shouts.
+ */
+.title-lead {
+  /* inline, not flex: a long title wraps and the summary flows after it rather
+     than a flex row pinning everything to one line. */
+}
+
+.disclosure,
+.disclosure--leaf {
+  display: inline-block;
+  vertical-align: baseline;
+  width: 1.1rem;
+}
+
+.disclosure {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  opacity: 0.6;
+  padding: 0;
+  text-align: left;
+}
+
+.disclosure:hover,
+.disclosure:focus-visible {
+  opacity: 1;
+}
+
+.disclosure__icon {
+  font-size: 0.75em;
+}
+
+.family-summary {
+  font-size: 0.75rem;
+}
+
+/* The one signal a fold must never swallow: how many descendants are the
+   operator's move. The board's own amber for the operator's move, stated as a
+   count — unmissable yet calm, never a klaxon. */
+.family-summary__owed {
+  color: #8a6100;
+  font-weight: 600;
+  margin-left: 0.5rem;
+  white-space: nowrap;
+}
+
+/* The band spread of a folded subtree, muted because it is reference, not a
+   demand; a middot joins the bands. Shown only when the parent is collapsed and
+   its rows are therefore off screen. */
+.family-summary__shape {
+  margin-left: 0.5rem;
+  opacity: 0.7;
+}
+
+.family-summary__band {
+  white-space: nowrap;
+}
+
+.family-summary__band + .family-summary__band::before {
+  content: ' · ';
+}
+
+/* The escape hatch: unfold everything, a quiet underlined control by the table
+   heading, present only while something is folded. */
+.expand-all {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  font-size: 0.75rem;
+  margin: 0 0 0.35rem;
+  opacity: 0.8;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.band {
+  font-size: 0.8125rem;
+  opacity: 0.8;
+  text-transform: uppercase;
+}
+
+.wants-person {
+  color: #8a6100;
+}
+
+/*
+ * The visit marker: a visible chip on a row an open visit holds, telling a PARKED
+ * visit (filed, waiting for the operator) from an ENGAGED one (a live sitting is
+ * in it now) by word and colour. Parked wears the amber the board already spends
+ * on the operator's own move — it is waiting for them; engaged wears teal, a live
+ * conversation someone else is holding. The chip reads as interactive, and
+ * hovering or focusing it reveals the details card below — not a native title,
+ * which had no affordance and needed an exact hover to find.
+ */
+.visit-marker {
+  display: inline-block;
+  position: relative;
+}
+
+.visit-marker--parked {
+  color: #8a6100;
+}
+
+.visit-marker--engaged {
+  color: #0e7490;
+}
+
+.visit-chip {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  padding: 0.02rem 0.4rem;
+  white-space: nowrap;
+}
+
+.visit-chip__icon {
+  margin-right: 0.2em;
+}
+
+.visit-card {
+  background: Canvas;
+  border: 1px solid rgb(128 128 128 / 45%);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+  color: CanvasText;
+  display: none;
+  font-size: 0.8125rem;
+  left: 0;
+  max-width: 28rem;
+  min-width: 15rem;
+  padding: 0.5rem 0.6rem;
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  white-space: normal;
+  z-index: 10;
+}
+
+/* Revealed on hover OR keyboard focus, so a pointer is not the only way in. */
+.visit-marker:hover .visit-card,
+.visit-marker:focus-within .visit-card {
+  display: block;
+}
+
+.visit-card__heading {
+  color: inherit;
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.visit-card__sitting {
+  color: CanvasText;
+  display: block;
+  padding: 0.15rem 0;
+}
+
+.visit-card__sitting + .visit-card__sitting {
+  border-top: 1px solid rgb(128 128 128 / 25%);
+}
+
+.visit-card__meta {
+  opacity: 0.75;
+}
+
+/*
+ * The key: a compact strip stating what the row markers and tints mean, since the
+ * board spends glyphs and colour the operator has to be able to read. Small and
+ * muted — a reference, not a demand — and it reuses the rows' own marker classes
+ * so a sample cannot drift from the thing it explains.
+ */
+.legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  gap: 0.2rem 0.9rem;
+  margin: 0 0 0.5rem;
+  opacity: 0.85;
+}
+
+.legend__title {
+  font-weight: 600;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.legend__item {
+  white-space: nowrap;
+}
+
+.legend__item--done {
+  opacity: 0.55;
+}
+
+.legend__swatch {
+  border-radius: 2px;
+  display: inline-block;
+  height: 0.7em;
+  vertical-align: baseline;
+  width: 1.1em;
+}
+
+.legend__swatch--wants {
+  background: rgb(138 97 0 / 30%);
+}
+
+.legend__swatch--held {
+  background: rgb(128 128 128 / 30%);
+}
+
+/*
+ * The PR phase chip: who must act on a merge anchor next, in the three status:
+ * values the GitHub PR list carries. One shared shape, colored by value so the
+ * answer reads at a glance — needs-attention loudest, working quietest.
+ */
+.pr-phase {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  margin-right: 0.4em;
+  white-space: nowrap;
+}
+
+.pr-phase--needs-attention {
+  color: #b3261e;
+}
+
+.pr-phase--needs-review {
+  color: #8a6100;
+}
+
+.pr-phase--working {
+  opacity: 0.7;
 }
 
 /*
@@ -296,6 +608,30 @@ tr.drilled {
   font-size: 0.8125rem;
   margin: 0;
   max-height: 20rem;
+  overflow: auto;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+}
+
+/* The first-reaction card folded under an AnchorRow's Accept. Mirrors the drill
+   description disclosure: a muted one-word summary, the card in a wrapped,
+   scrollable pre so a long recommendation never widens the column. */
+.recommendation {
+  font-size: 0.8125rem;
+  margin-top: 0.25rem;
+}
+
+.recommendation > summary {
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.recommendation pre {
+  background: rgb(128 128 128 / 12%);
+  border-radius: 3px;
+  margin: 0.25rem 0 0;
+  max-height: 20rem;
+  max-width: 48rem;
   overflow: auto;
   padding: 0.5rem;
   white-space: pre-wrap;

@@ -33,9 +33,10 @@
 #   2. THE WIRING that makes it fire. liveness-sweep.sh stamps the id lists
 #      and the visit.recheck PATH (covered by liveness-sweep.test.sh); here the
 #      converse loop's claim-time hook is asserted to read `visit.recheck` as a
-#      PATH and run it, never to eval a command string, and the stamp key /
-#      standing-kinds list are pinned against liveness-sweep.sh so the writer
-#      and the reader cannot drift apart.
+#      PATH and run it, never to eval a command string, and the stamp key is
+#      pinned against liveness-sweep.sh so the writer and the reader cannot
+#      drift apart. Every kind in the shared standing-kinds list re-checks as
+#      standing.
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no gh.
 set -u
 
@@ -44,7 +45,11 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-recheck.sh"
 SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
 PROMPT="$ROOT/agents/converse/prompt.template.md"
-TMP="$(mktemp -d)"
+# The claim-time re-check lives in the converse prep skill (steps 3–4); it calls
+# the hook script, which reads the visit.recheck stamp as a path and runs it.
+PREP="$ROOT/skills/converse-prep/SKILL.md"
+RECHECK_SUT="$ROOT/assets/scripts/converse-recheck-hook.sh"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-recheck-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -57,6 +62,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 [ -s "$SCRIPT" ]  || { echo "missing $SCRIPT" >&2; exit 1; }
 [ -s "$SWEEP" ]  || { echo "missing $SWEEP" >&2; exit 1; }
 [ -s "$PROMPT" ]  || { echo "missing $PROMPT" >&2; exit 1; }
+[ -s "$PREP" ]  || { echo "missing $PREP" >&2; exit 1; }
 
 echo "── the script is shipped executable and syntactically valid ──"
 [ -x "$SCRIPT" ] && ok "liveness-recheck.sh is executable" \
@@ -184,6 +190,29 @@ printf '%s' "$T" | grep -q "a sitting ended here" \
     && ok "its bucket says the takeaway is a record, not a wait" \
     || bad "its bucket says the takeaway is a record, not a wait" "no recorded bucket in the report"
 
+echo "── every kind in the shared standing-kinds list re-checks as standing ──"
+# The re-check and liveness-sweep.sh both read their standing kinds from
+# assets/scripts/standing-kinds.sh, so they cannot disagree about which records
+# are held by design. standing-kinds.test.sh asserts that both source it; here
+# each listed kind runs through the re-check itself. The kinds are read from the
+# shared definition, so a kind added there is covered with no edit to this file.
+# shellcheck source=standing-kinds.sh
+. "$ROOT/assets/scripts/standing-kinds.sh"
+KINDS="$(jq -nr "$STANDING_KINDS_JQ"'standing_kinds[]')"
+[ -n "$KINDS" ] && ok "the shared definition lists the standing kinds" \
+    || bad "the shared definition lists the standing kinds" "standing_kinds read back empty"
+SB='[]'; SR='[]'; SIDS=""
+for k in $KINDS; do
+    SB="$(printf '%s' "$SB" | jq -c --argjson b "$(bead "s-$k" open "$(jq -nc --arg k "$k" '{task_kind: $k}')")" '. + [$b]')"
+    SR="$(printf '%s' "$SR" | jq -c --arg id "s-$k" '. + [{id: $id}]')"
+    SIDS="${SIDS:+$SIDS,}s-$k"
+done
+printf '%s' "$SB" > "$STUB_BEADS"; printf '%s' "$SR" > "$STUB_READY"
+C="$("$SCRIPT" --ids "$SIDS" --json 2>/dev/null)"
+for k in $KINDS; do
+    eq "$(verdict_of "$C" "s-$k")" "standing" "a task_kind=$k record re-checks as standing"
+done
+
 echo "── an assignee alone marks a bead worked, and closed beats every other signal ──"
 jq -nc --argjson b "[
   $(bead b-assigned open   '{}')
@@ -193,6 +222,19 @@ jq -nc '[{id:"b-assigned"},{id:"b-cr"}]' > "$STUB_READY"
 C="$("$SCRIPT" --ids "b-assigned,b-cr" --json 2>/dev/null)"
 eq "$(verdict_of "$C" b-assigned)" "worked"   "an assignee alone is enough to read as worked"
 eq "$(verdict_of "$C" b-cr)"       "resolved" "closed outranks a leftover route — the disposition differs"
+
+echo "── a work bead marked only by gc.execution_routed_to reads as worked ──"
+# A slung work bead's claim moves its pool route to gc.execution_routed_to and
+# leaves assignee and gc.routed_to empty. It is unassigned and unblocked, so it
+# stays in the ready set — which is why the miss surfaced as "idle", not
+# "not-ready", and a sitting re-slung work already in flight.
+jq -nc --argjson b "[$(bead b-exec open '{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}')]" '$b' > "$STUB_BEADS"
+jq -nc '[{id:"b-exec"}]' > "$STUB_READY"
+C="$("$SCRIPT" --ids "b-exec" --json 2>/dev/null)"
+eq "$(verdict_of "$C" b-exec)" "worked" "an execution route alone reads as worked, not idle"
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-exec")] | .[0].detail | test("execution_routed_to=gc-toolkit/gc-toolkit.polecat")' >/dev/null 2>&1 \
+    && ok "the worked detail names the execution route" \
+    || bad "the worked detail names the execution route" "$(printf '%s' "$C" | jq -r '[.new[] | select(.id == "b-exec")] | .[0].detail')"
 
 # --- 2. report-don't-hide on every failure path ------------------------------
 echo "── the bead read failing prints NO census (a partial one looks complete) ──"
@@ -302,33 +344,33 @@ for key in sweep.new_ids sweep.carried_ids sweep.pass_at visit.recheck; do
 done
 
 # --- 5. the claim-time hook in the converse loop -----------------------------
-# The stamp only matters if something runs it. The sitting is where the body is
-# read, so the hook lives in the prep step — before any prep, not after.
+# The stamp only matters if something runs it. The sitting reads the body, so
+# the prep skill (steps 3–4) invokes the re-check before any prep; the hook
+# script it calls reads the stamp as a path and runs it, never eval-ing it.
 echo "── the converse loop runs the re-check at claim time ──"
-has "the prep step reads visit.recheck"      'visit.recheck'            "$PROMPT"
-has "an -x guard, so a missing copy is loud" '[ -x "$RECHECK" ]'        "$PROMPT"
-grep -qE 'eval +"?\$RECHECK' "$PROMPT" \
+has "the prep step reads visit.recheck"      'visit.recheck'            "$PREP"
+has "the prep step runs the re-check hook"   'converse-recheck-hook.sh' "$PREP"
+grep -qE 'eval +"?\$RECHECK' "$RECHECK_SUT" \
     && bad "the hook never evals a metadata string" "found an eval of \$RECHECK — the stamp is a path, so read-then-run is available" \
     || ok "the hook never evals a metadata string"
-has "the corrected census supersedes the body" "supersedes the body's lists" "$PROMPT"
+has "the corrected census supersedes the body" "supersedes the body's lists" "$PREP"
 
 # The seam between the two files is where this fix can rot without either side
 # looking wrong, so the hook is EXECUTED rather than grepped: the stamp key the
-# sweep writes and the key the prompt reads have to be the same string, and a
+# sweep writes and the key the sitting reads have to be the same string, and a
 # text assertion on each file separately would not notice them drifting apart.
-extract() { awk -v m="$1" '$0 ~ ("# >>> " m) {inb=1; next} $0 ~ ("# <<< " m) {inb=0} inb' "$2"; }
-extract visit-recheck-hook "$PROMPT" | sed 's/^   //' > "$TMP/hook.sh"
-[ -s "$TMP/hook.sh" ] && ok "visit-recheck-hook block present in the converse prompt" \
-    || bad "visit-recheck-hook block present in the converse prompt" "no marked block in $PROMPT"
-bash -n "$TMP/hook.sh" && ok "visit-recheck-hook: valid bash" \
-    || bad "visit-recheck-hook: valid bash" "bash -n failed"
+# The hook ships as converse-recheck-hook.sh; the converse prep skill calls it.
+[ -x "$RECHECK_SUT" ] && ok "converse-recheck-hook.sh is present and executable" \
+    || bad "converse-recheck-hook.sh is present and executable" "missing or not +x: $RECHECK_SUT"
+bash -n "$RECHECK_SUT" && ok "converse-recheck-hook: valid bash" \
+    || bad "converse-recheck-hook: valid bash" "bash -n failed"
 
 # The one string that has to agree across the two files, read out of each side
 # rather than asserted against a literal here: if this test spelled the key
 # itself, a rename in the formula plus a matching rename in the test would pass
 # while the converse hook silently read a key nobody writes any more.
 STAMP_KEY=$(sed -n 's/.*"\(visit\.[a-z_]*\)=.*/\1/p' "$SWEEP" | head -1)
-HOOK_KEY=$(sed -n 's/.*metadata\["\(visit\.[a-z_]*\)"\].*/\1/p' "$TMP/hook.sh" | head -1)
+HOOK_KEY=$(sed -n 's/.*metadata\["\(visit\.[a-z_]*\)"\].*/\1/p' "$RECHECK_SUT" | head -1)
 [ -n "$STAMP_KEY" ] && ok "the sweep writes a visit.* key" \
     || bad "the sweep writes a visit.* key" "found none in liveness-sweep.sh"
 eq "$HOOK_KEY" "$STAMP_KEY" "the key the sweep stamps is the key the sitting reads"
@@ -346,35 +388,20 @@ printf 'invoked with: %s\n' "$*"
 RC
 chmod +x "$TMP/fake-recheck"
 jq -nc --arg p "$TMP/fake-recheck" '[{metadata: {"visit.recheck": $p}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$TMP/hook.sh" 2>&1)"
+OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 eq "$OUT" "invoked with: tk-visit" "the hook runs the stamped path with the visit id as its only argument"
 
 echo "── the hook is loud, not silent, when the stamped path is not executable ──"
 jq -nc --arg p "$TMP/not-there" '[{metadata: {"visit.recheck": $p}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$TMP/hook.sh" 2>&1)"
+OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 printf '%s' "$OUT" | grep -q "UNVERIFIED" \
     && ok "an unrunnable stamp says the body is UNVERIFIED" \
     || bad "an unrunnable stamp says the body is UNVERIFIED" "got: $OUT"
 
 echo "── a visit with no stamp runs nothing and says nothing ──"
 jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$TMP/hook.sh" 2>&1)"
+OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 eq "$OUT" "" "an unstamped visit produces no hook output (the ordinary case, not an error)"
-
-echo "── the standing-record list agrees across the sweep and the re-check ──"
-# The other string that has to agree across two files, read out of each side for
-# the same reason as the stamp key above (bead tk-rw2ra). These two cannot share
-# code — one is a jq program inside a TOML formula description, the other this
-# standalone script — and a drifted pair fails INVISIBLY in both directions: the
-# sweep stops filing an idiom the re-check still calls idle, or the re-check
-# holds one the sweep is still filing, and either way the disagreement shows up
-# only as a bead a sitting cannot disposition.
-kinds_of() { sed -n 's/.*def standing_kinds: *\(\[[^]]*\]\);.*/\1/p' "$1" | head -1 | tr -d ' '; }
-F_KINDS="$(kinds_of "$SWEEP")"
-[ -n "$F_KINDS" ] && ok "the sweep names a standing_kinds list" \
-    || bad "the sweep names a standing_kinds list" "no def standing_kinds in $SWEEP"
-eq "$(kinds_of "$SCRIPT")" "$F_KINDS" \
-   "the standing records the sweep excludes are the ones the re-check holds"
 
 echo
 echo "liveness-recheck: $PASS passed, $FAIL failed"

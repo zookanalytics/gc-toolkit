@@ -32,11 +32,16 @@ Required vars:
 
 Optional vars:
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)
-  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip. (default=)
-  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip. (default=)
-  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip. (default=)
-  {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip. (default=)
-  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip. (default=)
+  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{escalation_target}}: Mail recipient for help and escalation mail. Defaults to the reserved `human`
+alias, which resolves in every city. Cities that staff a work-health role
+(e.g. the gastown pack's witness) can point this at it, for example
+`escalation_target = "<rig>/witness"`.
+ (default=human)
+  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
 
 Steps (7):
   ├── mol-upstream-gc-rebase-rework.load-context: Load context and verify assignment

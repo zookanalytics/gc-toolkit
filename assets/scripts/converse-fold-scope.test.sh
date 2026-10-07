@@ -35,6 +35,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
 PROMPT="$REPO/agents/converse/prompt.template.md"
 SWEEP="$REPO/assets/scripts/liveness-sweep.sh"
+FOLD_SUT="$REPO/assets/scripts/converse-fold.sh"
+CLAIMER="$REPO/assets/scripts/converse-claim.sh"
 
 PASS=0
 FAIL=0
@@ -55,7 +57,7 @@ is() {
     if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "got '$2', want '$3'"; fi
 }
 
-for f in "$PROMPT" "$SWEEP"; do
+for f in "$PROMPT" "$SWEEP" "$FOLD_SUT" "$CLAIMER"; do
     [ -r "$f" ] || {
         printf 'converse-fold-scope: cannot read %s\n' "$f" >&2
         exit 1
@@ -66,7 +68,7 @@ command -v jq >/dev/null 2>&1 || {
     exit 1
 }
 
-TMPD="$(mktemp -d)"
+TMPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-fold-scope-test.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"
 FIXDIR="$TMPD/fix"
@@ -77,6 +79,15 @@ mkdir -p "$BIN" "$FIXDIR"
 # silently reading the live store from a test.
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
+# The premise-gate probe drives the shipped converse-claim.sh, which opens with
+# `gc hook --claim`; HOOK_BEAD / HOOK_GROUP dial the existing_assignment result
+# it must return so the claimer reaches its hold arm. The fold probe never calls
+# hook, so this arm is inert for it.
+if [ "${1:-}" = "hook" ]; then
+    printf '{"bead_id":"%s","continuation_group":"%s","reason":"existing_assignment"}\n' \
+        "${HOOK_BEAD:-}" "${HOOK_GROUP:-}"
+    exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
@@ -122,26 +133,20 @@ unreadable() {
     printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/list.json"
 }
 
-# The block under test, lifted verbatim between its markers.
-extract_block() {
-    awk '/# >>> visit-fold-check/ {f = 1; next}
-         /# <<< visit-fold-check/ {f = 0}
-         f {print}' "$PROMPT"
-}
-# run_block <visit-id> <subject-id> — prints ITEM=… / HOLDER=… as resolved.
-# Runs with the stub first on PATH and cwd outside any checkout.
+# run_block <visit-id> <subject-id> — prints SUBJECT=… / ITEM=… / TOPIC=… /
+# HOLDER=… as converse-fold.sh resolves them. Runs the script with the stub
+# first on PATH and cwd outside any checkout.
 run_block() {
-    {
-        extract_block
-        printf 'printf "ITEM=%%s\\nHOLDER=%%s\\n" "$ITEM" "$HOLDER"\n'
-    } >"$TMPD/probe.sh"
     (
         cd "$TMPD" &&
             PATH="$BIN:$PATH" FIXDIR="$FIXDIR" VISIT="$1" SUBJECT="$2" \
-                bash "$TMPD/probe.sh" 2>/dev/null
+                bash "$FOLD_SUT" 2>/dev/null
     )
 }
-field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | tail -1; }
+# Read a field the way the prompt does — eval the quoted assignments in a
+# subshell (so they do not leak into the test), echo the var — so a single-quoted
+# value round-trips to its literal.
+field() { ( eval "$1"; eval "printf '%s' \"\${$2-}\"" ); }
 # holder <visit> <subject> — just the resolved holder.
 holder() { field "$(run_block "$1" "$2")" HOLDER; }
 # legacy_holds <subject> — what the OLD group-only rule saw: the count of
@@ -169,11 +174,10 @@ legacy_holder() {
         + [$v] | unique | .[0]' "$FIXDIR/list.json" 2>/dev/null
 }
 
-BLOCK="$(extract_block)"
-if [ -n "$BLOCK" ]; then
-    ok "the fold check is extractable (# >>> visit-fold-check markers present)"
+if [ -x "$FOLD_SUT" ]; then
+    ok "converse-fold.sh is present and executable"
 else
-    printf 'converse-fold-scope: no visit-fold-check block in %s — nothing to test\n' "$PROMPT" >&2
+    printf 'converse-fold-scope: no converse-fold.sh at %s — nothing to test\n' "$FOLD_SUT" >&2
     exit 1
 fi
 
@@ -302,6 +306,20 @@ folds=0
 [ "$h2" = "v-two" ] || folds=$((folds + 1))
 is "…so exactly one of the two folds (never both, never neither)" "$folds" "1"
 
+# The HOLDER scan reads `gc bd list`, whose tracks edge is keyed .type +
+# .depends_on_id — not the .dependency_type + .id show shape the visit() helper
+# emits. The shared predicate (visit-identity.sh) reads BOTH, so a live-list
+# edge must fold the same way; this pins that at the shared boundary so a
+# show-only simplification cannot pass.
+list_edge_visit() { # <id> <subject> <assignee>
+    jq -nc --arg id "$1" --arg s "$2" --arg a "$3" \
+      '{id:$id, assignee:$a, metadata:{"task_kind":"visit","gc.continuation_group":""},
+        dependencies:[{type:"tracks", issue_id:$id, depends_on_id:$s}]}'
+}
+fixture "$(list_edge_visit v-two sub sess-2)" "$(list_edge_visit v-one sub sess-1)"
+is "a live-list-shape (.type/.depends_on_id) tracks edge folds via the shared predicate" \
+    "$(holder v-two '')" "v-one"
+
 # The mirror: the scan must not over-match once it resolves candidates. Two
 # empty stamps whose EDGES name different subjects are different sittings.
 fixture "$(visit v-two '' '' sess-2 other)" "$(visit v-one '' '' sess-1 sub)"
@@ -336,8 +354,8 @@ is "…and siblings about different items still do not fold" "$(field "$out" HOL
 fixture "$(visit v-two '' '' sess-2)" "$(visit v-one '' '' sess-1)"
 is "with no stamp and no edge the block refuses to fold at all" \
     "$(holder v-two '')" "v-two"
-have "the prompt says an unresolvable subject holds" \
-    'You are the holder.' "$PROMPT"
+have "the prompt holds when it is the holder (an unresolvable subject resolves so)" \
+    'you are the holder' "$PROMPT"
 
 echo "── an unreadable listing never folds ──"
 # Fail-safe direction. A listing that did not read cannot prove another
@@ -358,20 +376,192 @@ have "the liveness sweep still folds on the stall_root key" \
 have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"
 # The takeaway target is the other half of the same defect: one field on a
-# shared bucket cannot hold N sittings, and the readers look at the item.
-n_item_stamp=$(grep -c 'takeaway "\$ITEM"' "$PROMPT")
-if [ "$n_item_stamp" -ge 2 ]; then
-    ok "both takeaway stamps target the item ($n_item_stamp)"
+# shared bucket cannot hold N sittings, and the readers look at a specific bead.
+# The stamp moved out of the prompt into the two scripts that write it. The hold
+# stamps the GATED bead — the visit for a PR anchor, so the hold marker sits
+# beside its demand edge (doctor/check-wait-is-an-edge), the item otherwise — and
+# the sign-off stamps the item. Both are a specific bead, never the shared
+# $SUBJECT bucket a sibling would clobber.
+HOLD_SUT="$REPO/assets/scripts/converse-hold.sh"
+SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
+if grep -q 'takeaway "\$GATED"' "$HOLD_SUT"; then
+    ok "the hold stamps the gated bead (visit or item), not the shared bucket"
 else
-    bad "both takeaway stamps target the item" \
-        "$n_item_stamp block(s) stamp \$ITEM — a stamp on the shared bucket is overwritten by the next sibling"
+    bad "the hold stamps the gated bead (visit or item), not the shared bucket" \
+        "converse-hold.sh no longer stamps takeaway \"\$GATED\" — a hold marker off its edge is unedged, and one on the bucket is clobbered by the next sibling"
 fi
-if grep -q 'takeaway "\$SUBJECT"' "$PROMPT"; then
+if grep -q 'takeaway "\$ITEM"' "$SIGNOFF_SUT"; then
+    ok "the sign-off stamps the item, not the shared bucket"
+else
+    bad "the sign-off stamps the item, not the shared bucket" \
+        "converse-signoff.sh no longer stamps takeaway \"\$ITEM\""
+fi
+if grep -q 'takeaway "\$SUBJECT"' "$HOLD_SUT" "$SIGNOFF_SUT"; then
     bad "no takeaway stamps the shared bucket" \
         "a takeaway on \$SUBJECT clobbers siblings and is invisible to the readers that look at the item"
 else
     ok "no takeaway stamps the shared bucket"
 fi
+
+echo "── step 1 lifts the claim and the fold into one script call each ──"
+# The two bash blocks the operator flagged (PR#475) are compressed to one `eval`
+# apiece; these fail if a future edit reverts to inline parsing or drops the
+# wiring. --sh is what makes the claim verdict eval-able (its default key=value
+# line is not), and the fold eval reads converse-fold.sh's own assignments.
+have "step 1 claims via 'converse-claim.sh --sh', evaled" \
+    'eval "$("$CONV/converse-claim.sh" --sh' "$PROMPT"
+have "step 1 folds via converse-fold.sh, evaled" \
+    'eval "$("$CONV/converse-fold.sh" "$VISIT"' "$PROMPT"
+if grep -qF "sed -n 's/.*bead=" "$PROMPT"; then
+    bad "step 1 no longer hand-parses the raw claim line" \
+        "the prompt still carries the sed parse the --sh eval replaced"
+else
+    ok "step 1 no longer hand-parses the raw claim line"
+fi
+
+echo "── eval-safety: a metacharacter subject reaches the caller as data ──"
+# The prompt runs `eval "$(converse-fold.sh ... | grep -E '^(SUBJECT|HOLDER)=')"`,
+# and SUBJECT is a continuation group recovered from claim/metadata, so it can
+# carry any byte. A group with shell metacharacters must arrive as one literal
+# string, never syntax the eval executes: `;` would end the assignment and start
+# a command, `$(...)` would substitute. Single-quoting the emitted value neuters
+# both. Space-free by construction (see converse-claim.test.sh).
+INJ='g;INJECTED=$(whoami)'
+fixture "$(visit v-inj "$INJ" item-x '')"
+out="$(run_block v-inj "$INJ")"
+is "fold passes a metacharacter subject through as one literal" "$(field "$out" SUBJECT)" "$INJ"
+INJECTED_SEEN="$(out="$out" bash -c '
+    eval "$(printf "%s\n" "$out" | grep -E "^(SUBJECT|HOLDER)=")"
+    printf %s "${INJECTED-}"')"
+is "fold eval neither splits the assignment nor substitutes" "$INJECTED_SEEN" ""
+case "$out" in
+    *"SUBJECT='"*) ok "fold emits SUBJECT single-quoted" ;;
+    *) bad "fold emits SUBJECT single-quoted" "not quoted in: $out" ;;
+esac
+
+# ── HOLD-ARM PREMISE GATE (visit-hold-premise-gate) ──────────────────────────
+# Deliberately housed in this suite, not a converse-hold-*.test.sh of its own:
+# the pack has no test discovery, so a fresh file is a suite nobody runs
+# (pack-tests-have-no-auto-discovery). This suite already extracts and executes
+# blocks from the same prompt, so the hold-arm gate rides the harness the fold
+# block built — same stub `gc`, same fixtures dir.
+#
+# The defect (tk-3vbus7): step 1's action=hold arm skipped the premise re-check
+# on the action=hold verdict ALONE. But `gc hook --claim` returns
+# existing_assignment (→ action=hold) for ANY bead already assigned to this
+# session identity, including a claim that died BEFORE step 2 ever ran. The gate
+# tells a real hold from a dead claim by a trace only a sitting past step 5
+# leaves: step 5 stamps the demand's id on the VISIT bead as gc.hold_demand
+# before it waits. The key is on the visit, so it is attributable — a sibling
+# sitting on the same item stamps the shared item's demand and takeaway, never
+# this visit's gc.hold_demand, so it cannot forge the trace.
+#
+# A missing key is not one answer but three, because absence is not proof a
+# sitting never began. A visit bead that will not read is UNKNOWN: it fails
+# closed to a hold, never a close. No key but an open demand still on the item
+# is a hold that predates the key, or a sibling's on the shared item: RECHECK
+# re-tests the premise and closes only a moot one, and re-stamping the key on a
+# live premise heals a legacy hold, while the item's demand never forges a
+# resume. Only a clean read with no key and no open item demand is a claim that
+# plainly never began, which routes to step 2's close.
+echo "── the hold-arm premise gate ships in converse-claim.sh ──"
+if [ -x "$CLAIMER" ]; then
+    ok "converse-claim.sh is present and executable"
+else
+    bad "converse-claim.sh is present and executable" "missing or not +x: $CLAIMER"
+fi
+
+# began <visit-id> <subject> — drive the shipped converse-claim.sh against the
+# current fixtures and print the BEGAN it reports. The gate is folded into the
+# claimer's action=hold arm, which prints `premise-gate: BEGAN=<...>` on STDERR
+# while the verdict line stays on stdout unchanged, so this reads stderr. The
+# stub gc's hook arm returns existing_assignment for HOOK_BEAD/HOOK_GROUP, which
+# is what routes the claimer to its hold arm. Same stub, cwd, and PATH as the
+# fold runner above.
+began() {
+    (
+        cd "$TMPD" &&
+            PATH="$BIN:$PATH" FIXDIR="$FIXDIR" HOOK_BEAD="$1" HOOK_GROUP="$2" \
+                sh "$CLAIMER" "$2" 2>&1 >/dev/null
+    ) | sed -n 's/^premise-gate: BEGAN=//p' | tail -1
+}
+# The gate reads one thing: gc.hold_demand on THIS visit's bead. hv_demand
+# builds a sibling demand on the shared item — the trace the OLD item-level gate
+# keyed on — kept here to prove this gate ignores it.
+hv_reset() { rm -f "$FIXDIR"/*.json; printf '[]\n' >"$FIXDIR/list.json"; }
+hv_visit() { # id [hold_demand] [stall_root]
+    jq -nc --arg id "$1" --arg hd "${2:-}" --arg sr "${3:-}" \
+        '[{id:$id, metadata:(({"task_kind":"visit"})
+            + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
+            + (if $sr == "" then {} else {"stall_root":$sr} end))}]' \
+        >"$FIXDIR/show-$1.json"
+}
+hv_demand() { # demand-id item-id — a sibling open demand naming the item
+    jq -nc --arg id "$1" --arg i "$2" '[{id:$id, assignee:"", metadata:{"gc.demand_for":$i}}]' \
+        >"$FIXDIR/list.json"
+}
+
+echo "── a claim that died before step 5 leaves no trace: re-check the premise ──"
+# The observed shape (tk-fzvjw7): an escalate visit under a standing scope whose
+# replacement claim found no gc.hold_demand on the visit.
+hv_reset
+hv_visit v-dead
+is "no trace resolves BEGAN=no (fall through to step 2)" "$(began v-dead sub)" "no"
+
+echo "── a visit that stamped gc.hold_demand reached step 5: its hold is real ──"
+hv_reset
+hv_visit v-held d-held
+is "gc.hold_demand resolves BEGAN=yes (re-open at step 4)" "$(began v-held sub)" "yes"
+
+echo "── no key but an open demand on the item: a legacy hold or a sibling's ──"
+# A hold filed before this trace existed carries no gc.hold_demand on its visit,
+# only the demand on the item, and every hold the shipped prompt filed is that
+# shape; a sibling's hold on a shared item is too. Absent the key the two are
+# one shape, and the gate must not close on the missing key: it re-checks the
+# premise (recheck), which closes only a moot premise and re-opens a live one,
+# re-stamping the key so the next restart reads it clean. Keyed on the visit it
+# still cannot forge a resume: recheck re-checks the premise, it does not
+# re-open a sitting on the item's demand alone.
+hv_reset
+hv_visit v-legacy "" item-x   # no gc.hold_demand; the item still carries its demand
+hv_demand d-x item-x          # the open demand on the item (a legacy hold's, or a sibling's)
+is "no key + an open item demand resolves BEGAN=recheck (fail closed, not a close)" "$(began v-legacy sub)" "recheck"
+
+echo "── the visit key stands even when its demand is no longer open ──"
+# A ruling can close the demand while the sitting still holds. The trace is the
+# visit's own record, not the demand's live status, so BEGAN does not depend on
+# the listing.
+hv_reset
+hv_visit v-closed d-gone   # gc.hold_demand set; no matching open demand in list
+is "gc.hold_demand with no open demand resolves BEGAN=yes" "$(began v-closed sub)" "yes"
+
+echo "── a visit whose own bead will not read is unknown, never a silent close ──"
+# gc bd show can fail on a store blip, or resolve to nothing. Either way the
+# visit's own state is unread, and absence of a trace on an unread bead is not
+# proof the sitting never began. The pre-fix gate defaulted BEGAN=no and sent it
+# to step 2's close; it must fail closed to a hold instead.
+hv_reset
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/show-v-blip.json"   # a read that did not happen
+is "an unreadable visit read resolves BEGAN=unknown (hold, do not close)" "$(began v-blip sub)" "unknown"
+hv_reset   # no show fixture for v-missing: bd show resolves to nothing
+is "a visit that resolves to nothing resolves BEGAN=unknown" "$(began v-missing sub)" "unknown"
+
+echo "── the prompt gates the skip on the trace, and fails closed on absence ──"
+have "the arm routes a traceless claim to step 2" 'fall through to step 2' "$PROMPT"
+have "an unreadable read holds rather than closes (BEGAN=unknown)" \
+    'BEGAN=unknown' "$PROMPT"
+have "an unreadable read mails the witness rather than draining" \
+    'hold the sitting and mail the' "$PROMPT"
+have "an open item demand without the key re-checks (BEGAN=recheck)" \
+    'BEGAN=recheck' "$PROMPT"
+have "recheck closes only a moot premise, not on the demand" \
+    'close here ONLY if the premise is moot' "$PROMPT"
+have "the arm keeps the fold check skipped on every branch" \
+    'The fold check stays skipped on every branch.' "$PROMPT"
+have "the gate reads gc.hold_demand off the visit (unique to this block)" \
+    'gc.hold_demand' "$PROMPT"
+have "step 5 stamps gc.hold_demand on the visit before it waits" \
+    'set-metadata "gc.hold_demand=$DEMAND"' "$REPO/assets/scripts/converse-hold.sh"
 
 echo
 echo "converse-fold-scope: $PASS passed, $FAIL failed"

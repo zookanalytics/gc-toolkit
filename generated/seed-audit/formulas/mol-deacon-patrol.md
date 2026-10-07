@@ -10,8 +10,10 @@ doctor sweep, pour the next iteration. Steps are not materialized; read
 each description as you reach it, and never exit the wisp from an
 intermediate step. The deacon is the controller's judgment layer — it never
 starts/stops agents, never recovers per-rig beads (witness), never writes
-code. Escalations go through assets/scripts/escalate.sh — one open visit
-per situation key.
+code. A finding becomes one deduped BEAD through
+assets/scripts/patrol-finding.sh, and a proactive first reaction disposes it:
+routed to a pool, held on an edge, or escalated to the operator as a visit.
+assets/scripts/escalate.sh is for what a patrol cannot express as a bead.
 
 Every non-routine ACTION also leaves one line in the incident ledger
 (assets/scripts/gc-deacon-ledger.sh), which is how a shift is reconstructed
@@ -26,7 +28,7 @@ keep it backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
-  {{doctor_interval}}: Length of the per-interval doctor-sweep window, in seconds. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep opens at most one window per interval. A window normally holds one start; a run that ends failed or exceeded earns one retry inside it (capped by GC_DOCTOR_SWEEP_MAX_ATTEMPTS, default 2), so on the failure path the sweep can run twice in one interval, while a completed run arms no retry. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still opens one window per hour. (default=3600)
+  {{doctor_interval}}: Length of the per-interval doctor-sweep window, in seconds. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep opens at most one window per interval. A window normally holds one start; a run that ends failed or exceeded earns one retry inside it (capped by GC_DOCTOR_SWEEP_MAX_ATTEMPTS, default 2), so on the failure path the sweep can run twice in one interval, while a completed run arms no retry. It also bounds a result's age: a sweep that finished more than one interval before the patrol collects it is reported stale and filed nowhere. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still opens one window per hour. (default=3600)
   {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep). Ceiling 600: the harness caps one call at 600s. (default=600)
 
 Steps (5):

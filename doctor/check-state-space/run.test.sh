@@ -3,7 +3,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-state-space-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -42,11 +42,34 @@ cat > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
-db=""; prev=""
-for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
+# >>> control-char-scrub
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+# Honor the three filters the check relies on: --db, --status (comma list) and
+# --has-metadata-key. A stub that ignored --status would let an in_progress
+# fixture reach the --status=open scan, so the detached-CLAIMED probe (which
+# reads only the non-open statuses) could never be told apart from the open scan,
+# and dropping the --status flag from either query would still pass this test.
+db=""; status=""; haskey=""; prev=""
+for a in "$@"; do
+  case "$prev" in
+    --db) db="$a" ;;
+    --status) status="$a" ;;
+    --has-metadata-key) haskey="$a" ;;
+  esac
+  prev="$a"
+done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
-f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
+f="$STORES/$name.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
+# scrub first: a fixture may carry raw control bytes (the check's own guard),
+# and real bd filters structured rows in the store, so its filter never sees
+# them. An unparseable fixture makes jq exit non-zero, which the check reads as
+# an unreadable store, exactly as a real bd failure would.
+scrub < "$f" | jq -c --arg status "$status" --arg haskey "$haskey" '
+  ($status | if . == "" then null else split(",") end) as $st
+  | map(select($st == null or ((.status // "open") as $bst | ($st | index($bst)) != null)))
+  | map(select($haskey == "" or ((.metadata // {}) | has($haskey))))'
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
@@ -108,7 +131,10 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unparseable store listing warns"
 
 # --- 8. control characters in a payload do not cost the store -------------
-printf '[{"id":"a-10","status":"open","metadata":{"merge_result":"bogus"},"notes":"tab\there\001etc"}]' \
+# A raw TAB, a raw C0 byte, and a raw LF (bd's unescaped-newline bug) — each is
+# invalid inside a JSON string and each must be scrubbed, or the whole store
+# degrades to "NOT checked" and hides every finding in it.
+printf '[{"id":"a-10","status":"open","metadata":{"merge_result":"bogus"},"notes":"tab\there\001and a\nraw newline"}]' \
     > "$TMP/stores/alpha.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a payload carrying raw control characters still yields the finding"
@@ -163,6 +189,71 @@ eq "$RC" "0" "a state lifecycle.toml does NOT declare detached is not held to th
 OUT=$(GC_PACK_DIR="$TMP/nopack" RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "2" "the same bead IS a finding under the builtin detached set"
 has "$OUT" "a-16" "the fallback arm names the bead"
+
+# --- 12. a detached anchor claimed into a non-open status ------------------
+# The open scan and every cadence reader enumerate --status=open, so this bead
+# is invisible to all of them; the non-open backstop probe is what reports it.
+store '[{"id":"a-19","status":"in_progress","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an in_progress detached anchor is an ERROR"
+has "$OUT" "a-19" "it names the claimed anchor the open scan cannot see"
+has "$OUT" "status=in_progress" "it names the status that hid it"
+has "$OUT" "dropped out of the pipeline" "it explains the cadence invisibility"
+
+# blocked is equally invisible: the invariant is status=open, not merely
+# not-in_progress. (pre_open_gate is the detached state the fixture's
+# lifecycle.toml declares.)
+store '[{"id":"a-21","status":"blocked","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a detached anchor held at status=blocked is flagged too"
+has "$OUT" "status=blocked" "the finding names the holding status"
+
+# An OPEN detached anchor at rest is the correct state; the non-open probe must
+# not re-report it. --has-metadata-key merge_result with no --status returns every
+# non-closed status, open included, so the probe's --status scoping is what keeps
+# the open resting state (already covered by the open scan) off the non-open
+# findings. Drop --status from the probe and this case flips to a false
+# status=open, not open finding.
+store '[{"id":"a-22","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an open detached anchor at rest is not re-flagged by the non-open probe"
+
+# --- 13. ordinary in-flight work is NOT a detached-state finding -----------
+# A polecat's own work bead is in_progress and carries branch but no
+# merge_result; the --has-metadata-key filter keeps the backstop off it, so an
+# empty assignee is never read as an orphan here.
+store '[{"id":"a-20","status":"in_progress","assignee":"","metadata":{"branch":"polecat/x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an in_progress bead with no merge_result is ordinary work, not a finding"
+
+# --- 14. disk pressure must not forge an all-clear ------------------------
+# bash backs a `<<<` here-string with a temp file; under disk pressure that file
+# cannot be staged, the redirection fails silently (the check is set -u, not
+# set -e), and the loop runs zero times — so the pre-fix check read a non-empty
+# store as empty and printed the OK line. The fix stages every enumeration
+# through a checked `mktemp -d`, so a failing `mktemp` aborts the run non-clean.
+# A failing `mktemp` command is a NO-OP on the pre-fix `<<<` (bash's here-string
+# temp is internal, never the mktemp command), which is exactly what makes this
+# case fail against the pre-fix script and so proves it discriminates.
+store '[{"id":"a-dp","status":"open","metadata":{"merge_result":"exploded"}}]'
+# Mirror: with a working mktemp the fixture yields its finding, so the
+# disk-pressure assertions below are not vacuously satisfied by an empty store.
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "mirror: the fixture reports its finding when mktemp works"
+has "$OUT" "a-dp" "mirror: the finding names the bead"
+# Now fail every mktemp — the hermetic stand-in for a full /tmp — and re-run.
+cat > "$TMP/bin/mktemp" <<'MK'
+#!/usr/bin/env bash
+echo "mktemp: stubbed disk-pressure failure" >&2
+exit 1
+MK
+chmod +x "$TMP/bin/mktemp"
+OUT=$(run_check); RC=$?
+rm -f "$TMP/bin/mktemp"
+eq "$RC" "1" "a temp-file failure warns (1) — it neither passes (0) nor errors (2)"
+has "$OUT" "not an all-clear" "it says the run could not scan, not that the state space holds"
+hasnt "$OUT" "OK:" "it does not forge the clean all-clear line"
+hasnt "$OUT" "a-dp" "the store is not reported clean — the run is non-clean, not a false pass"
 
 echo
 echo "check-state-space: $PASS passed, $FAIL failed"

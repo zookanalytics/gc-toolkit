@@ -79,8 +79,9 @@ Each entry: the upstream fact, its verification status, and the seam.
   direct stamps must be rig-qualified; and under a `default_sling_formula`
   a bare sling is a formula attach that stamps nothing — stamp-don't-sling
   or `--no-formula` ([gascity-routing-model.md](gascity-routing-model.md)).
-  *Seam:* a visit is ordinary routed work; pool demand spawns the
-  conversation session with no operator keystroke.
+  *Seam:* a visit parks on the helm board (`gc.routed_to=human`) and holds
+  no session; `gc-helm engage` spawns the conversation session when an
+  operator draws it off the board.
 
 - **The worker-role contract — upstream now owns the idiom.** The
   `gc-roles` pack ships a shared `gc-role-worker` contract fragment used
@@ -123,14 +124,17 @@ Each entry: the upstream fact, its verification status, and the seam.
   escalation recipient (source-verified 2026-08-06; **source-only** — the
   public docs do not cover the human-gate primitive, hold labels, or the
   renudge orders as of 2026-08-08). By contrast
-  `gc.routed_to=human` **parks** — no core machinery claims it, the nudge
-  order fails silently on it (same verification). The sanctioned hold
-  taxonomy is `hold:mayor` / `hold:external` only; a bare `human` hold
-  label has no sanctioned upstream meaning. *Seam:* a human question is a bead whose
-  canonical form is a visit — the visit is the
-  dialogue-carrying refinement of the human gate, never a competitor
-  to it; an open human gate is a legitimate named wait. The raw
-  `routed_to=human` lane is a trap, not a feature.
+  `gc.routed_to=human` is bare in upstream core — no core machinery claims
+  it, and the core nudge order fails silently on it (same verification). The
+  sanctioned upstream hold taxonomy is `hold:mayor` / `hold:external` only; a
+  bare `human` hold label has no sanctioned upstream meaning. *Seam:* the pack
+  supplies the attention channel core leaves out. A filed visit parks on the
+  helm board under `gc.routed_to=human` — the board's exact gather predicate —
+  and holds no session; the operator draws it off the board and `gc-helm
+  engage` spawns a `converse-<model>` sitting on demand. So `routed_to=human`
+  is the pack's deliberate board lane: a human question's canonical form is a
+  visit, the dialogue-carrying refinement of the human gate, never a
+  competitor to it, and an open human gate is a legitimate named wait.
 
 - **Questions gate work natively — blocking dependencies.**
   `bd dep <blocker> --blocks <blocked>` creates a blocking edge, and
@@ -257,28 +261,59 @@ create "returned no id" (tk-wp50s). The title is now collapsed to one line and
 cut back to a word boundary with an ellipsis if it is long; the body always
 carries what was typed, verbatim.
 
-**The default rig is fixed: `gc-toolkit`** (`--rig` overrides,
+**The bare CLI's default rig is fixed: `gc-toolkit`** (`--rig` overrides,
 `GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"` and its
 pool name is rig-qualified, so a topic that is not rig-specific still has to
-land somewhere. It is deliberately *not* inferred from cwd: the command is
-fired from wherever the operator happens to be sitting, and a destination that
-varies silently with the shell's directory is the worst failure mode an intake
-path can have.
+land somewhere. The CLI default is deliberately *not* inferred from cwd: the
+command is fired from wherever the operator happens to be sitting, and a
+destination that varies silently with the shell's directory is the worst
+failure mode an intake path can have.
+
+**The `prefix+a` keybinding picks the rig rather than defaulting it.** After the
+message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
+hq/city-workspace store — that store runs no reaction pool, so a topic filed
+there would park on the board with nobody to engage it, and it is dropped from
+the picker rather than offered. A suspended or not-running rig is still tagged,
+not withheld, since `gc rig suspend` keeps the beads store accessible and a
+report filed there is recorded and triaged on resume. The picker is defaulted to
+the rig of the pane the key was pressed in (its `GC_RIG`, else the
+`<rig>__<agent>` session-name prefix; absent on a pane that names no rig, where
+the operator just picks). Enter confirms that default or the operator picks
+another, and the choice rides through as `--rig`. This is board context, not
+cwd: the pane belongs to one rig explicitly, and the operator sees and confirms
+the target in the chooser rather than having it vary under them. A broken or
+empty `gc rig list` skips the chooser and leaves the intake on the CLI default.
+
+**A target with no reaction agent is refused, not filed.** `gc-visit-open.sh`
+reads the roster before it files: a rig with neither a proactive pool nor a
+registered converse cannot engage an operator topic, so the intake refuses such
+a target and files nothing rather than stranding the topic on the board. This
+backstops the chooser exclusion and also catches a `--rig` target, a
+non-interactive caller, or a bead id whose own rig is pool-less. Registration is
+the bar, not liveness: a suspended rig keeps its registered agents and still
+files (triaged on resume). An unreadable roster refuses nothing, so a degraded
+data plane never blocks an intake.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
-`mol-first-reaction` at the new subject, and *that formula files the visit*
-from its `advance-and-drain` step — so the operator arrives at a framed
-conversation with a first-reaction card already written, not a blank one. The
-script files nothing on that path; a second visit would split one conversation
+`mol-first-reaction` at the new subject. That formula triages the subject and
+takes one of its five dispositions; it files a visit from its `advance-and-drain`
+step on the two that put the subject to the operator, a ruling or a recommend. A
+ruling is Discuss-only: the reaction judges the capture a genuine fork, an
+irreversible or destructive action, or a policy call, and the operator arrives at
+a framed conversation with a first-reaction card already written. A recommend
+adds an action the operator can Accept: the reaction names the move and the
+execution mol, and the visit offers Accept beside Discuss. When the reaction
+judges the action clear and reversible, it routes the capture, holds it, or hands
+it to a validating closer, and files no visit. The script
+files nothing on the reaction path; a second visit would split one conversation
 into two sittings of the same subject.
 
-That step has three dispositions, and only one of them files a visit — but a
-subject this intake creates always gets it. `gc.origin=operator`, stamped here,
-is what `first-reaction-dispose.sh` reads to refuse the routing and holding
-exits: the operator typed a topic because they want the conversation, so
-answering it with a dispatch would leave them with a topic that looks filed and
-is silently forgotten. Beads that reach the reaction any other way are triaged
-on their merits.
+`gc.origin=operator`, stamped here, is a fact the reaction weighs, not a gate.
+An operator capture is triaged on its merits like a bead that reached the
+reaction any other way — the origin does not force the visit exit. What the
+preferred path buys is that a capture the reaction does send back to the
+operator arrives framed, carrying the card the reaction wrote, rather than as a
+bare topic.
 
 The fallback path (`--no-react`, or automatically) files the visit
 immediately, through `gc-helm.sh open --reason/--body`. **Visit filing lives
@@ -322,10 +357,43 @@ already recorded). The prose line in the body says the same thing to a human
 and is not a predicate: it has already drifted across two script generations
 plus one an agent typed by hand, and a `--desc-contains` sweep for it matches
 beads that merely *quote* it — three of thirteen live hits, including the bead
-that specified this change. The key is what the return trip below selects on.
+that specified this change. The key, not the prose line, is what the reaction
+reads when it weighs a subject's origin.
 Subjects filed before it existed are carried across by
 `assets/scripts/backfill-operator-origin.sh`, which owns the anchored
 line-match, once, where a wrong match is visible and re-runnable.
+
+## Start talking now: create-and-engage a fresh subject
+
+The intake above files a topic and lets the reaction triage it: the operator
+gets a board row, not a conversation. When the operator wants to talk *now*
+about something that has no bead yet, `gc-helm engage --new-subject` creates the
+subject and engages it in one gesture. It files the subject bead in a chosen
+rig, files its one visit, spawns the `converse-<model>` sitting, and binds it —
+the same spawn-on-engage path a parked visit takes, with the subject created up
+front. The positional text is the subject's title and, absent
+`--reason`/`--template`, its opener; `--rig` names the rig the subject is created
+in (an interactive prompt over the converse-capable rigs otherwise, since a
+brand-new subject has no id prefix to derive a rig from), and `--no-input`
+requires it. `prefix+A` is the keystroke — the sibling of `prefix+a`, which files
+a topic for triage — and it opens the real interactive prompt in a new tmux
+window, because the choice of rig, subject, and model does not fit tmux's
+one-line command-prompt.
+
+The created subject is operator-origin, so the force-to-visit invariant still
+holds — but engage files that one visit itself, so the async worker must not file
+a second. The subject is created marked `gc.reaction_owned=1`, in the same
+`gc bd create` write so the proactive scan never observes it unmarked. Three
+gates read the marker: `scan_precision_filter` drops a marked bead (the primary,
+race-free gate, so a sweep never slings a first reaction at it),
+`sling_first_reaction_guard` refuses it as a no-op, and `mol-first-reaction`'s
+`advance-and-drain` consumes it fail-closed and files no visit if a direct pour
+reaches one — stamping `gc.proactive_reaction=1` first, so the engage counts as
+the reaction and no later scan re-reacts. The invariant is preserved, not
+relaxed: the subject gets exactly one operator-filed visit. If a later gate
+refuses the live spawn — a bad model, a suspended rig — the subject's one visit
+is still filed and parked on the board, so the topic is never lost; the operator
+engages it once the blocker is cleared.
 
 ## How a parked conversation comes back (2026-08-22)
 
@@ -408,25 +476,107 @@ question no longer parks its subject on a sentence and waits for someone
 to come back and read it; it files what the person owes as its own bead
 and blocks the waiting work on that bead.
 
-What a person owes is a bead like any other. A ruling is
-`issue_type=decision`; a task only a named person can perform is a bead
-assigned to them. Either way it carries `gc.routed_to=human`, so it lands
-in the operator's partition of the board, and the authored
-140-character headline is its TITLE — the same primitive `gc.takeaway`
-already enforced, now attached to the thing that is actually owed. The
-work it gates carries a `blocks` edge to it and is therefore not
-`bd ready`. Closing the demand makes that work ready and the pool claims
-it, so discharging a decision advances the pipeline rather than the
-operator's to-do list.
+What a person owes is a native human gate — `issue_type=gate`,
+`await_type=human` — that blocks the waiting work. A ruling files
+unassigned; a task only a named person can perform is assigned to them, and
+the assignment is what tells the two apart. Either way it carries
+`gc.routed_to=human`, so it lands in the operator's partition of the board,
+and the authored 140-character headline is its TITLE — the same primitive
+`gc.takeaway` already enforced, now attached to the thing that is actually
+owed. Stamping the gate identity is what feeds core's
+notify-on-human-gate-creation and renudge-stale-human-gates orders and lists
+it under `gc bd gate list`; a bare `blocks` edge fires none of them. The work
+it gates carries a `blocks` edge to it and is therefore not `bd ready`.
+Resolving the gate makes that work ready and the pool claims it, so
+discharging a decision advances the pipeline rather than the operator's
+to-do list.
+
+A gate is hidden from `bd list` by default, so every reader of the demand
+convention — the hold check in `signoff.sh` and `pr-facts.sh`, the liveness
+sweeps, converse's own discharge lookup — passes `--include-gates`. The
+`gc.demand_for` key they match on is unchanged; only the visibility flag is
+new.
 
 The writer is `assets/scripts/gc-helm.sh demand`. It resolves the gated
 bead first, files the demand, wires the edge, and then reads the edge back
 off the gated bead — exiting non-zero when it did not land, because a
 demand with no edge leaves the work reading ready while a person still
 owes an answer, which is precisely the state the verb exists to remove.
-One open demand per gated bead: a resumed sitting that re-states the same
-question refreshes the existing demand rather than giving one wait two
-blockers.
+One open demand per gated bead and topic: a resumed sitting that re-states
+the same question under the same topic (`--topic`, the visit's
+escalation_key) refreshes its own demand rather than giving one wait two
+blockers. The topic scopes the lookup so two sittings on one shared
+standing-scope bucket each keep their own demand — without it the second
+would refresh the first's gate in place and overwrite the operator question
+it holds. An absent topic matches on the gated bead alone, the behaviour
+every caller that files no topic keeps.
+
+`converse-hold.sh` passes the visit's escalation_key as the topic on every
+demand a sitting files. The discharge in `converse-signoff.sh` resolves only
+demands the sitting itself filed, never the first unassigned demand on the
+item. The conversation demand is the one `gc.hold_demand` names, the id
+`converse-hold.sh` stamps on the visit. Any other demand, such as a
+`--hold-merge` demand on the anchor or a hold that predates the stamp, is found
+by the same topic-scoped lookup, keyed on the visit's escalation_key. So a
+sign-off under a standing scope resolves or re-states its own operator question
+and leaves a sibling topic's untouched.
+
+The gate is the STATE; the visit is its RESOLUTION. Because the operator does
+not read the "human" mailbox, the notify order is a durable record, not the
+reach — the visit is the attention channel. `orders/gate-visit-sweep.toml`
+files one converse visit on the gated bead of every open human gate, so the
+question arrives as a conversation with framing and an owner. One visit per
+gate: the sweep records the visit it filed (or the sitting already standing
+for the gated bead) on the gate as `gc.gate_visit=<visit-id>`, and never
+re-offers a stamped gate — a sitting that ends with the gate still open (a
+benign close, a cut-short hold, an operator dismiss) must not re-spawn a
+session every cooldown; the return trip for a cut-short hold rides the
+liveness sweep, as before. Stamping `gc.gate_visit=skip` on a gate before the
+sweep reaches it suppresses its visit, which is the operator's selection
+point when the default is too much; `gc bd update <gate> --unset-metadata
+gc.gate_visit` re-offers one. A gate assigned to a person gets
+no visit — the work is theirs to perform and close, and converse's discharge
+skips assigned demands on purpose — and neither does a gate whose gated bead
+is no longer open, which the sweep names on stderr until it is resolved by
+hand.
+
+### A conversation does not freeze its subject; a merge hold is an opt-in
+
+What the conversation demand gates is the choice that keeps a sitting from
+freezing the work it is about. A conversation about a PR anchor files its demand
+against the VISIT, not the anchor: the conversation cannot conclude until the
+operator answers, and the anchor keeps moving, so a conversation opened to help
+a stuck PR land does not itself hold it from landing. This is the default, and it
+needs no detection — the sitting never flags a hold it did not mean. The visit is
+itself the sitting that resolves that demand, so `converse-hold.sh` records it on
+the gate as `gc.gate_visit=<visit>` at filing time and `gate-visit-sweep.toml`
+files no second visit for it.
+
+When the sitting decides the merge must wait on the operator — the PR should not
+land until this is settled — it takes one explicit step: `--hold-merge` on
+`converse-hold.sh`, which files a second demand against the ANCHOR. That is the
+same `blocks` edge the merge sweep already honors — `merge.sh` holds on any open
+dep-edge blocker of the anchor, and `pr-facts.sh` and `pre-open-rebase.sh` read
+the anchor as held by matching `gc.demand_for=<anchor>` — so it pauses the PR
+with no change to any of them. The conversation demand on the visit never matches
+`gc.demand_for=<anchor>`, which is why the default no longer freezes the merge. A
+shepherd sitting simply omits the flag, and the PR stays on the merge track. The
+sign-off (`converse-signoff.sh`) discharges whichever demands the sitting filed:
+the visit demand always, the anchor demand only when the explicit hold was taken.
+
+A cut-short sign-off (`--ruled no`) is the one other time the merge waits. The
+conversation wait cannot ride the closing visit — a demand left on a closed visit
+is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
+— so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
+the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
+abandoned question is answered or the demand is resolved. The moved wait carries
+the sitting's topic, so it refreshes this sitting's own demand on the anchor and
+never a sibling sitting's.
+
+A pre-PR (unanchored) item is the one case the conversation demand still gates
+directly, because its `held` lifecycle state is a hold marker that
+`doctor/check-wait-is-an-edge` requires a live edge for. There is no merge to
+freeze there, so the hold stays on the item as before.
 
 ### The shape constraint, and why it is the hard part
 
@@ -489,17 +639,22 @@ that stamp. It asserts nothing about the sentence and blanks nothing —
   edge at. The stamp is a record, not a gate.
 - **A stand-down (`takeaway … --release --no-wait`).** The dispatch's premise
   is falsified and the work should NOT happen. That is a disposal: the anchor
-  is parked, and both of the molecule's pool-routed doors are quiesced so the
-  dead chain stops re-offering. Those are its step beads and its workflow
-  root. An edge would assert a wait that does not exist.
+  is parked, and the molecule beneath it — no live session will ever close its
+  chain — is REAPED, every step and its workflow root force-closed. A mere
+  de-route cannot end it: an open step, even unrouted, keeps workflow-finalize
+  blocked, so the molecule never reaps and its held steps keep drawing
+  re-dispatches. A stood-down molecule should die, not park. The one molecule
+  spared is the releasing session's own — a mol-first-reaction terminal step
+  disposing the anchor it runs on — which closes its chain the normal way and
+  only sheds its husk pins. An edge would assert a wait that does not exist.
 
   An anchor CLOSED before the stand-down reaches it — a fold that landed after
-  the pour, leaving the molecule routed behind it — takes the quiesce without
-  the park. Reopening it would make work whose disposition already landed
-  visible as open again, so the verb keeps the disposition, skips the reopen,
-  the unassign and the route stamp, and walks the molecule anyway. `--route`
-  is refused there and exits non-zero: a pool that claimed a disposed bead
-  would cut a branch for superseded work.
+  the pour, leaving the molecule routed behind it — takes the reap without the
+  park. Reopening it would make work whose disposition already landed visible
+  as open again, so the verb keeps the disposition, skips the reopen, the
+  unassign and the route stamp, and reaps the molecule anyway. `--route` is
+  refused there and exits non-zero: a pool that claimed a disposed bead would
+  cut a branch for superseded work.
 
 Everywhere else the takeaway carries its wait as an edge —
 `--waiting-on` for work a pool owes, a demand bead for what a person owes.
@@ -519,16 +674,34 @@ is never registered with the idle tracker (`buildIdleTracker`,
 `cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity at
 all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached. A held
 converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
-the operator's `gc-helm dismiss <subject>`.
+the operator's `gc-helm dismiss <subject>`. The sign-off is terminal — it stamps
+the outcome and closes the visit — so converse takes it only when nothing
+important is still pending; a turn that hands the operator important information
+(a live decision, a routing answer, anything they may want to respond to) posts
+the hand-back and leaves the visit open, ending that sitting on a later turn.
+Closing the visit ends the sitting's
+work; it does not close the session, so the pack's `converse-reap` order
+(`assets/scripts/converse-reap.sh`) closes the settled session once its visit
+reads closed or gone — the reap those two endings assume. It reaps only an
+UNATTACHED session, because the pack cannot see typed text in a composer and
+draining a pane that has some is the operator's one hard no (see below); an
+attached sitting whose visit already reads closed is left for a later pass, once
+it is no longer attended. A sitting whose visit is still OPEN — the operator
+walked away before any sign-off — is the harder, separate case, untouched here.
 
-Two endings the idle setting does not own, and both still reach converse:
+Two runtime endings the idle setting does not own, and both still reach converse:
 
-- **A sitting that has ENDED is still collected in about a minute** by the
+- **A pool session that has ENDED is still collected in about a minute** by the
   `no-wake-reason` drain, a different clock on a different path, unaffected by
-  any idle setting. See *How a pane dies when no sitting is live*, below.
+  any idle setting. See *How a pane dies when no sitting is live*, below. A
+  manual converse session (the post-cutover shape) is exempt from
+  that cycling, so `converse-reap` above is what collects its settled sitting.
 - **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
   health restart can still take a held sitting out from under a reader. The
-  trace-before-you-wait discipline holds for exactly this reason.
+  per-model converse templates run `wake_mode = "resume"`, so that restart
+  replays the thread and the sitting continues; the trace-before-you-wait
+  discipline holds because the demand is the durable gate the board reads
+  and the work blocks on, not because the thread is lost.
 
 The cost is real: a held visit nobody answers holds a `max_active_sessions`
 slot indefinitely, where an idle clock would recycle it. The bound is the
@@ -544,8 +717,9 @@ close outright. `dismiss` stamps `gc.outcome=dismissed`, then closes, escalating
 to `--force` only when the plain close is refused. The stamp is a precondition
 of the close, not a best-effort write beside it: the verb closes only the visits
 it can read as OPEN, so a visit closed without an outcome is one no re-run
-reaches. A refused stamp leaves that visit open and the subject's row on the
-board, and the run exits 4.
+reaches. A refused stamp leaves that visit open, and the run exits 4. It writes
+nothing to the subject: the subject's DONE row, once it closes, leaves the board
+only by ageing out of `GC_HELM_DONE_WINDOW`, with no per-row clear.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
@@ -589,22 +763,24 @@ that field:
   consecutive same-anchor defers, then `DecideAssignedWorkExhausted`
   forces the stop under its own `assigned_work_exhausted` reason. At
   `patrol_interval = "30s"` the defer buys ~90 seconds, not immortality.
-- **The kill erases the evidence.** The stop path calls
-  `ClearScrollback` (`cmd/gc/session_reconciler.go`), wiping the pane's
-  history, and the converse template's `wake_mode = "fresh"` makes the
-  respawn a clean provider session. Contrast `wake_mode = "resume"`,
-  which replays the provider transcript across gaps far longer than the
-  timeout (measured at ~15h, `specs/tk-oml75/spike-report.md` §1). So a
-  reaped converse thread is **unrecoverable, not merely hidden**, and no
-  remedy may assume the operator can reopen it.
+- **The kill clears the pane; a resume sitting replays past it.** The stop
+  path calls `ClearScrollback` (`cmd/gc/session_reconciler.go`), wiping the
+  pane's history. The per-model converse templates run `wake_mode =
+  "resume"`, which replays the provider transcript across gaps far longer
+  than the timeout (measured at ~15h, `specs/tk-oml75/spike-report.md` §1),
+  so a restarted sitting comes back with its thread. Only the legacy
+  `converse` pool is `wake_mode = "fresh"`, which respawns a clean provider
+  session; there the thread is gone and the durable trace is what a fresh
+  respawn reads instead.
 
-*Seam:* **nothing pack-owned runs at kill time**, so a warn-before-reap
-is not available to us; the pack's only lever is to have already written
-the trace. Hence the converse contract stamps the subject's takeaway when
-the hold *begins* (not only at close) — a reap then leaves a dated record
-of what the sitting was waiting for — and every deliberate close of a
-**held** sitting ends with a sign-off block naming the outcome and the
-subject to look at next.
+*Seam:* **nothing pack-owned runs at kill time**, so there is no
+warn-before-reap. The converse contract stamps the subject's takeaway when
+the hold *begins* (not only at close) because that stamp IS the demand —
+the gate the board reads and dependent work blocks on — so it has to land
+before the wait, not because a pane might be lost; a fresh respawn or a
+failed resume then still finds a dated record of what the sitting was
+waiting for. Every deliberate close of a **held** sitting ends with a
+sign-off block naming the outcome and the subject to look at next.
 
 *Longevity is not the remedy, and taking the clock off is not longevity.*
 Raising `idle_timeout` only widens the window in which a dead thread looks
@@ -694,31 +870,52 @@ thread. Without a third verdict the loop has nowhere left to go but the
 sitting it is holding.
 
 `assets/scripts/converse-claim.sh` has that third verdict, `action=hold`,
-keyed on the `existing_assignment` reason. A turn already `in_progress`
-under this session's identity is a sitting underway rather than an offer,
-so the loop leaves the sitting where it found it: nothing claimed,
-nothing released, nothing closed. Adoption still writes. The same hook
-result re-stamps the session identity on the visit, which is how a respawn
-becomes the recorded holder of a hold it inherited, and it pre-assigns open
-same-group siblings when the visit carries `gc.root_bead_id`. Those
-siblings are later turns of the same conversation, so the hold names them
-on its output line and keeps them rather than putting them back. Which of
-two shapes it is, a thread still carrying its own framing or a fresh
-session respawned onto a hold whose scrollback a restart took, is a
-question about this session's scrollback that no script can read, so the
-claimer states the fact and the prompt makes the choice.
+keyed on the `existing_assignment` reason. That reason is not itself proof
+of a held sitting. `gc hook --claim` returns it for any bead already
+`in_progress` under this session's identity, which covers both a sitting
+underway and a claim that died before its premise was ever re-checked. So
+the loop states the fact and leaves the sitting where it found it, with
+nothing claimed, released, or closed, and the prompt decides which case this
+is. Adoption still writes. The same hook result re-stamps the session
+identity on the visit, which is how a respawn becomes the recorded holder of
+a hold it inherited, and it pre-assigns open same-group siblings when the
+visit carries `gc.root_bead_id`. Those siblings are later turns of the same
+conversation, so the hold names them on its output line and keeps them rather
+than putting them back.
+
+The prompt's arm makes that choice from a trace on the visit's own bead:
+`gc.hold_demand`, the id of the demand a sitting files on its way into a hold,
+stamped on the visit before it waits. It lives on the visit, not the shared
+item, so a sibling holding the same item cannot forge it. Present, the hold is
+real and the arm re-opens it and skips the premise re-check. Absent, the arm
+does not close on the missing key. A visit whose bead will not read is held,
+not closed, because absence of a trace on an unreadable bead is not evidence
+of a dead premise. An item that still carries an open demand re-checks the
+premise and closes only a moot one, which re-opens and re-stamps a live legacy
+hold rather than abandoning it. A clean read with no key and no such demand is
+a claim that never began, and re-checks the premise at step 2 where it can
+close. Which of two shapes a readable visit is, a thread still carrying its
+own framing or a fresh session respawned onto a hold whose scrollback a restart
+took, is a question about this session's scrollback that no script can read, so
+the claimer states the fact and the prompt makes the choice.
 
 *The one shape that verdict gets wrong, and the fourth that covers it:* a
-sitting does not end in a single write. The prompt posts the sign-off, then
-stamps `gc.outcome` on the visit, reads it back, and closes last of all. A
+sitting does not end in a single write. When converse does sign off — the
+sitting settled with nothing important left to hand the operator — the prompt
+posts the sign-off, then stamps `gc.outcome` on the visit, reads it back, and
+closes last of all. A
 session that dies between the stamp and the close leaves a visit that is
 `in_progress`, assigned, and carrying a final outcome. It is complete in
 every way except the one that ends it, and the claim result says only
 `existing_assignment`, so the hold answers and the prompt goes back to
-waiting. The close never runs. `assets/scripts/liveness-sweep.sh` reads
-the still-live visit as `conversing`, which keeps its subject out of the
-unnamed-wait census for as long as the strand stands, so nothing else
-raises it either.
+waiting. The close never runs. Two nets catch what the missing close would
+otherwise strand. When the same session re-claims the visit, `action=finish`
+performs the close (below). When the session is gone and no re-claim reaches it,
+`assets/scripts/liveness-sweep.sh` is the backstop: it counts a visit as
+`conversing` only while its holder session is listed in a live state, so a
+visit stranded by a dead session — one gone from the session list, or lingering
+in it as archived or closed — returns its subject to the unnamed-wait census
+rather than masking it.
 
 `action=finish` is keyed on the stamp. Every path that writes `gc.outcome`
 closes the visit immediately after it, so a `task_kind=visit` still open
@@ -733,20 +930,28 @@ that finishes the close is a different thread in any case.
 
 Two constraints follow for anyone tuning this. With the idle clock off no
 clock ends a held sitting, so the wake path is the only pack-owned way one
-ends without a ruling and `action=hold` is the whole of that guard;
-re-arming `idle_timeout` adds a clock, not a substitute for it. And a
+ends without a ruling, and `action=hold` with the visit-trace check the
+prompt gates it on is the whole of that guard; re-arming `idle_timeout` adds
+a clock, not a substitute for it. And a
 wake nudge that names the claimer directly rather than sending the
 session through the prompt's claim block passes no continuation group,
 which silently disables the out-of-group guard above on every wake.
 
-`agents/converse/agent.toml` holds that field empty, which closes the
-wake path rather than tuning it. All three claim backstops resolve their
-re-delivery text from that field and skip a session whose text is empty
-before reserving an attempt, so no backstop nudge reaches a held sitting
-and the attempt-cap drain behind them is unreachable. The idle-claim
-rescue is silenced with them, which is the cost the file records. The
-second constraint above is what any text re-arming the field has to
-satisfy, and it is recorded there too.
+`agents/converse/agent.toml` holds that field empty, but emptiness is not
+what protects a held sitting. converse runs as a manual session, never
+pool_managed, and all three claim backstops gate `governs()` on
+`pool_managed` (`cmd/gc/idle_nudge.go`, `cmd/gc/execution_backstop.go`), so
+no backstop nudge and no drain reaches a converse sitting whatever this field
+holds. An empty field is not a uniform skip either, and for a pool_managed
+session the three backstops split on it. The execution backstop resolves its
+text to the empty field, so the shared empty-content path in
+`cmd/gc/nudge_backstop.go` runs that backstop's `exhausted`, the tracked drain
+that releases the claim. The pool-claim backstop substitutes a default claim
+nudge for an empty one and re-delivers instead. The continuation backstop's
+`exhausted` is a no-op. So only the execution backstop drains on an empty
+nudge. What the empty field does reach is the launch delivery, where the
+prompt is prepended to it and still arrives, so the second constraint above is
+what any text put here has to satisfy.
 
 *The core seam, now closed (landed 2026-08-12):* attachment is observable —
 `runtime.Provider.IsAttached` — and the idle ladder now consults it.
@@ -1012,8 +1217,9 @@ definition first, because everything below uses it:
 > subject's dialogue, stored as a bead linked to the subject by a
 > `tracks` edge and never as its child, whose body says what that
 > sitting would be for ("ratify this plan", "review posted — decision
-> needed"), whose metadata routes it to the converse pool and names
-> the subject's continuation group, whose `gc.outcome` records how it
+> needed"), whose metadata routes it to the operator
+> (`gc.routed_to=human`, the helm board) and names the subject's
+> continuation group, whose `gc.outcome` records how it
 > resolved, and which closes when it does (the subject never closes
 > this way). A visit that is *held* becomes the sitting it asked for,
 > and ends out loud, with a sign-off naming the outcome and the
@@ -1026,14 +1232,18 @@ definition first, because everything below uses it:
 > a subject is the dialogue's durable spine — board-legible,
 > cold-reconstructable, no provider transcript required.
 >
-> **A sitting is not a unit of work.** What it produces is beads: new
-> ones filed, ones slung to a pool, edges wired, an outcome appended
-> to the subject. It writes no files and makes no commits, because
-> moving a bead forward is what a molecule does — so a sitting that
-> finds work needing doing routes it to one, and where nothing can
-> reach the work, the gap is itself a bead to file. What reaches the
-> operator is the point where the operator is needed for a judgment,
-> which is narrower than judgment and narrower still than action.
+> **A sitting is not a unit of work, and it acts on its subject's
+> universe in coordination with the operator.** It files beads, slings
+> them to a pool, wires edges, appends an outcome to the subject; and on
+> an operator-agreed ruling it acts on the subject's PR — commenting,
+> replying to and resolving review threads, and retiring it, which closes
+> the PR and disposes the anchor as superseded. It writes no files and
+> makes no commits, because moving a bead forward is what a molecule does,
+> so a sitting that finds work needing doing routes it to one, and where
+> nothing can reach the work, the gap is itself a bead to file. The one
+> line it does not cross is a repo change. What reaches the operator is the
+> point where the operator is needed for a judgment, which is narrower than
+> judgment and narrower still than action.
 >
 > **A visit body is written at FILING time and read at CLAIM time**, and
 > those are routinely a day or more apart — a queued visit holds its

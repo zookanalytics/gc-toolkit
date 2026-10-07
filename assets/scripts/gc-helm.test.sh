@@ -3,19 +3,24 @@
 # services/helm; the open verb is covered by gc-helm-open.test.sh). Runs the
 # REAL script with a stubbed `gc` on PATH — no live city, Dolt, network, or
 # sessions. Covered:
-#   --release molecule quiescing: steps and the workflow root
-#   --release on a CLOSED anchor: the quiesce without the resurrecting park
-#   the split write, so a refused assignee clear cannot void the route pins
+#   --release molecule teardown: a husk (no live session on it) is REAPED —
+#     every step and the workflow root force-closed, incl. a held in_progress
+#     step — while the releasing session's OWN molecule keeps its chain
+#   --release on a CLOSED anchor: the reap without the resurrecting park
+#   the de-pin split write, so a refused assignee clear cannot void the route pins
 #   --waiting-on edges
 #   the ≤140-codepoint length gate, shared by takeaway and demand
 #   the demand verb's sibling shape and fail-closed edge
 #   the retired board verb refuses and names helm-svc board
 #   the dismiss verb: both halves of the operator's explicit clear
+#   the rig-enumeration helper leaving no trap installed on its caller
+#   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
+#     own no-op code (5), distinct from a dispatch (0) and a real failure (4)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/gc-helm.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-helm-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -28,26 +33,34 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 mkdir -p "$TMP/bin"
 
 # --- Fixture ------------------------------------------------------------------
-# A-PARKED anchors the molecule root-PARKED (via convoy-PARKED). Steps:
-#   s-load   affine  : assignee + routed + affinity  -> clear all three
-#   s-impl   pool    : routed only                   -> clear routed only
-#   s-final  finalize: control-dispatcher route      -> MUST stay routed
-#   s-quiet  quiet   : no pins                       -> not re-updated
-#   s-nonmol contract: another formula's graph.v2 step -> quiesced too (tk-q5r65)
+# A-PARKED anchors the molecule root-PARKED (via convoy-PARKED). No live session
+# holds a step of it (the run carries no identity), so the release REAPS the
+# husk — every step and the root are force-closed. Steps:
+#   s-load   affine  : assignee + routed + affinity  -> reaped (closed)
+#   s-impl   pool    : routed only                   -> reaped
+#   s-held   blocked : status=blocked, route cleared, assignee kept -> reaped
+#                      (the held-step shape molecule-hold.sh writes; only an
+#                      enumeration that includes blocked sees it)
+#   s-final  finalize: control-dispatcher route      -> reaped too; the teardown
+#                                                       replaces the escape route
+#   s-quiet  quiet   : no pins                       -> reaped (an open step is
+#                                                       still open, so it blocks)
+#   s-nonmol contract: another formula's graph.v2 step -> reaped too (tk-q5r65)
 #   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
 #   s-other  scope   : a different molecule's step   -> untouched
 #   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
-#   s-NOPIN  refused : the store rejects its pin write -> assignee clear skipped
-#   s-fold   folded  : step of a molecule whose anchor is CLOSED -> quiesced
+#   s-NOPIN  refused : the store rejects its close   -> de-pinned as a fallback
+#   s-fold   folded  : step of a molecule whose anchor is CLOSED -> reaped
 # and the gc.kind=workflow ROOTS, which carry a pool route of their own:
-#   root-PARKED      : this molecule's root          -> de-routed with its steps
+#   root-PARKED      : this molecule's root          -> reaped with its steps
 #   root-OTHER       : another molecule's root       -> untouched
 #   root-ORPHAN      : root with no convoy           -> skipped (fail closed)
-#   root-FOLD        : root of the folded anchor's molecule -> de-routed too
+#   root-FOLD        : root of the folded anchor's molecule -> reaped too
 cat > "$TMP/steps.json" <<'JSON'
 [
   {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"s-impl","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"s-held","status":"blocked","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-PARKED","blocked_reason":"declined: premise falsified"}},
   {"id":"s-final","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/core.control-dispatcher"}},
   {"id":"s-quiet","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.self-review","gc.root_bead_id":"root-PARKED"}},
   {"id":"s-nonmol","assignee":"someone","metadata":{"gc.step_ref":"mol-other-formula.step","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
@@ -97,6 +110,18 @@ case "$1 ${2:-}" in
     jq -n --arg sl "$FAKE_SL_PATH" \
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
                {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
+  "session list")
+    # The no-id dismiss resolves the session's own rig from its record, because
+    # a converse sitting defaults its store to the CITY ledger. converse-lx-1's
+    # record names rig signal-loom (the rig whose path HAS a .beads dir), so the
+    # pin it drives is visible in FAKE_LISTS; other identities match no record
+    # and the lookup falls back to the caller store.
+    jq -n '{sessions:[
+      {id:"gc-toolkit__converse-lx-1",
+       session_name:"gc-toolkit__converse-lx-1",
+       alias:"gc-toolkit/gc-toolkit.converse-lx-1",
+       rig:"signal-loom"}
+    ]}' ;;
   "bd list")
     # Record the store this list actually read, so a lookup that searched the
     # caller's rig instead of the subject's is visible rather than silent.
@@ -107,7 +132,20 @@ case "$1 ${2:-}" in
     # is the one that does not, and it is set to the payload to emit at rc 0.
     [ -n "${FAKE_LIST_RC:-}" ] && exit "$FAKE_LIST_RC"
     [ -n "${FAKE_LIST_OUT+x}" ] && { printf '%s' "$FAKE_LIST_OUT"; exit 0; }
-    cat "$FAKE_STEPS_JSON" ;;
+    # Honor --status the way real `bd list` does, but only for a row that
+    # DECLARES a status: a fixture row without one lists unconditionally, so the
+    # pre-existing rows are returned exactly as before. A row that sets status is
+    # filtered against the requested set, which is what lets a status=blocked
+    # held step hide from an open,in_progress enumeration and surface only once
+    # the caller asks for blocked too.
+    _st=""
+    for _a in "$@"; do case "$_a" in --status=*) _st="${_a#--status=}" ;; esac; done
+    if [ -n "$_st" ]; then
+      jq --arg s "$_st" '($s | split(",")) as $want
+        | [ .[] | .status as $st | select(($st == null) or ($want | any(. == $st))) ]' "$FAKE_STEPS_JSON"
+    else
+      cat "$FAKE_STEPS_JSON"
+    fi ;;
   "bd show")
     id="$3"
     # UNKNOWN- ids resolve to nothing, the way `bd show` answers for a bead
@@ -121,16 +159,48 @@ case "$1 ${2:-}" in
     # model the route LANDING and the route landing EMPTY (the silent drop a
     # multi-pair --set-metadata update can produce) with the same stub.
     routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
+    # What gc.execution_routed_to reads back as: the pour stamp a --release
+    # retires. FAKE_EXEC holds it, so a test models the clear LANDING (empty)
+    # and the clear being DROPPED (the stamp still standing) with one stub.
+    exec_routed="$(cat "${FAKE_EXEC:-/dev/null}" 2>/dev/null || true)"
     # What gc.takeaway_settled reads back as. Every landed write updates it
     # below, so the default fixture models a store that keeps what it was told;
     # FAKE_SETTLED_DROP models the pair that silently does not land.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
+    # What gc.proactive_reaction reads back as. The release stamps it =1 as the
+    # completion proof two guards key on; FAKE_PROACTIVE holds it so a test models
+    # the stamp LANDING and landing empty (the silent drop a multi-pair update can
+    # produce) with the same stub, the way FAKE_SETTLED does for the settled key.
+    proactive="$(cat "${FAKE_PROACTIVE:-/dev/null}" 2>/dev/null || true)"
+    # What gc.session_name / gc.session_id read back as: the executor identity a
+    # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them, so a
+    # test models the clear LANDING (empty) and being DROPPED (the pin still
+    # standing) with one stub, the way FAKE_EXEC does for the pour stamp.
+    sname="$(cat "${FAKE_SNAME:-/dev/null}" 2>/dev/null || true)"
+    sid="$(cat "${FAKE_SID:-/dev/null}" 2>/dev/null || true)"
     # What gc.outcome reads back as, per visit. dismiss stamps it on a visit and
     # reads it back before closing, so a stamp that lands empty is caught before
     # the irreversible close. FAKE_OUTCOME_DIR/<id> holds it; absent reads empty,
     # like a visit that was never stamped. FAKE_OUTCOME_DROP is the write below
     # that exits 0 and yet does not land.
     outcome="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id" 2>/dev/null || true)"
+    # gc.outcome_reason reads back the same way, from FAKE_OUTCOME_DIR/<id>.reason.
+    # dismiss reads it back beside gc.outcome, so a reason that lands empty while
+    # the outcome lands is caught before the irreversible close. FAKE_OUTCOME_REASON_DROP
+    # is the write below that exits 0 and yet does not land — the reason lost on
+    # its own, which is the drop the read-back must refuse the close on.
+    outcome_reason="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reason" 2>/dev/null || true)"
+    # A visit id (v-*) answers with its fixture row from FAKE_STEPS_JSON, so a
+    # verb handed a VISIT (the board lists parked visits as rows of their own)
+    # sees task_kind=visit and the subject it tracks, the way the store would.
+    # gc.outcome still reads back from FAKE_OUTCOME_DIR, as for any bead.
+    case "$id" in v-*)
+      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" --arg or "$outcome_reason" \
+            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc | .metadata["gc.outcome_reason"] = $or ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
+         && [ "$vrow" != "[]" ]; then
+        printf '%s\n' "$vrow"; exit 0
+      fi ;;
+    esac
     # A folded anchor names the bead that carried its work on. The release
     # path reads it to say which disposition it is preserving; an empty
     # string reads the same as an absent key, which is every other bead.
@@ -143,8 +213,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -155,6 +225,10 @@ case "$1 ${2:-}" in
       *STUCK*) exit 1 ;;
     esac ;;
   "convoy status")
+    # Record each convoy resolved, so a test can prove the quiesce confirms only
+    # the ONE molecule the reverse-tracks lookup matched — not one status call
+    # per open root in the store.
+    printf '%s\n' "$3" >> "${FAKE_CONVOY_CALLS:-/dev/null}"
     anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
@@ -179,6 +253,16 @@ case "$1 ${2:-}" in
             multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
             *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
           esac ;;
+        # gc.proactive_reaction=1 is the release's completion proof, read back the
+        # way gc.takeaway_settled is. FAKE_PROACTIVE_DROP=1 loses every one of them
+        # (no repair recovers it); =multi loses it only out of a multi-pair release
+        # write, the shape the lone repair write recovers.
+        gc.proactive_reaction=*)
+          case "${FAKE_PROACTIVE_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
+            *)     printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
+          esac ;;
         # gc.outcome lands per visit so the dismiss read-back sees the stamp.
         # FAKE_OUTCOME_DROP=1 loses every one of them though the call exits 0,
         # the exit-0 silent drop the read-back exists to catch; no repair write
@@ -187,6 +271,44 @@ case "$1 ${2:-}" in
           case "${FAKE_OUTCOME_DROP:-}" in
             1) ;;
             *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
+          esac ;;
+        # gc.outcome_reason lands beside gc.outcome so the read-back sees the
+        # headline the board shows for a no-takeaway close. FAKE_OUTCOME_REASON_DROP=1
+        # loses every one though the call exits 0 — the reason dropped while the
+        # outcome lands, no repair write recovering it — so the read-back must
+        # refuse the close on the reason alone.
+        gc.outcome_reason=*)
+          case "${FAKE_OUTCOME_REASON_DROP:-}" in
+            1) ;;
+            *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome_reason=}" > "$FAKE_OUTCOME_DIR/$3.reason" ;;
+          esac ;;
+        # gc.execution_routed_to is CLEARED via --unset-metadata, so its token
+        # arrives bare (no =value). A landed clear empties FAKE_EXEC, so the
+        # read-back reads absent. FAKE_EXEC_DROP=1 loses every clear (the store
+        # that will not take it, no repair recovers it); =multi loses it only
+        # out of the multi-pair release write, the shape the lone repair clears.
+        gc.execution_routed_to)
+          case "${FAKE_EXEC_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && : > "$FAKE_EXEC" ;;
+            *)     : > "$FAKE_EXEC" ;;
+          esac ;;
+        # gc.session_name / gc.session_id are CLEARED via --unset-metadata, bare
+        # like the pour stamp. A landed clear empties the pin file so the read-back
+        # reads absent. FAKE_SNAME_DROP/FAKE_SID_DROP=1 lose every clear (no repair
+        # recovers it); =multi loses it only out of the multi-pair release write,
+        # the shape the lone repair unset clears.
+        gc.session_name)
+          case "${FAKE_SNAME_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && : > "$FAKE_SNAME" ;;
+            *)     : > "$FAKE_SNAME" ;;
+          esac ;;
+        gc.session_id)
+          case "${FAKE_SID_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && : > "$FAKE_SID" ;;
+            *)     : > "$FAKE_SID" ;;
           esac ;;
       esac
     done ;;
@@ -198,6 +320,15 @@ case "$1 ${2:-}" in
     # the way the real `dep list` reports a bead it cannot resolve — a JSON
     # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
     if [ "${3:-}" = "list" ]; then
+      # reverse `tracks` (dep list <bead> --direction=up -t tracks): the convoys
+      # that TRACK this bead — how the quiesce resolves the released molecule
+      # from its anchor. Derived from FAKE_CONVOYS (convoy|anchor).
+      case "$*" in
+        *--direction=up*)
+          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$FAKE_CONVOYS" \
+            | jq -Rnc '[inputs | select(length > 0) | {id: .}]'
+          exit 0 ;;
+      esac
       case "${4:-}" in
         A-PROBEDEAD*) exit 1 ;;
         A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
@@ -218,10 +349,12 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists" \
+       FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
+       FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes"
+       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
+: > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
 # returns: one full bead row per edge, keyed .dependency_type.
@@ -276,10 +409,14 @@ w-same|gc-toolkit/gc-toolkit.refinery
 w-pend|gc-toolkit/gc-toolkit.polecat-3
 ASG
 unset GC_HELM_FIXTURE || true
-unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS || true
+# GC_RIG and BEADS_DIR too: the current-sitting lookup resolves the session's
+# rig, and an ambient value from the runner's own agent env would pin a store
+# the fixtures never set up.
+unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
-OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release 2>"$TMP/err" || true)"
+: > "$FAKE_CONVOY_CALLS"
+OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait 2>"$TMP/err" || true)"
 ERR="$(cat "$TMP/err")"
 UP="$TMP/updates"
 
@@ -296,131 +433,139 @@ grep -q 'gc.proactive_reaction=1' <<< "$A" \
   && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
+# The pour that dispatched this bead stamped gc.execution_routed_to; a release
+# ends that pour, so the stamp is retired in the same write. No arm or reconcile
+# guard reads this stamp (reconcile keys on its own gc.dispatch_when_ready_slung
+# marker), so it is only cosmetic provenance — a release drops it best-effort so a
+# parked or re-routed bead does not linger advertising a finished pour's pool.
+grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
+  && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
+# The unassign takes the departing executor's identity with it: a gc.session_name
+# left on an open bead that later carries a mismatched route is what
+# doctor/executor-identity-residue reports, and a gc.session_id left behind is a
+# stale orphan-recovery pin. Both are cleared in the release write, beside the
+# assignee.
+grep -q -- '--unset-metadata gc.session_name' <<< "$A" \
+  && ok "(RELEASE) anchor identity pointer gc.session_name cleared" || bad "(RELEASE) anchor gc.session_name cleared (got: $A)"
+grep -q -- '--unset-metadata gc.session_id' <<< "$A" \
+  && ok "(RELEASE) anchor identity pointer gc.session_id cleared" || bad "(RELEASE) anchor gc.session_id cleared (got: $A)"
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
-# (AFFINE) affine step -> all three pins cleared.
-SL="$(line_for s-load)"
-if grep -q -- '--unset-metadata gc.routed_to' <<< "$SL" \
-   && grep -q -- '--assignee' <<< "$SL" \
-   && grep -q -- '--unset-metadata gc.session_affinity' <<< "$SL"; then
-  ok "(AFFINE) affine step -> routed_to + assignee + session_affinity all cleared"
-else
-  bad "(AFFINE) affine step must clear all three pins (got: $SL)"
-fi
+# The molecule under A-PARKED is a husk — no live session holds one of its
+# steps — so it is REAPED: every step and the root are force-closed, so
+# workflow-finalize unblocks and the root reaps instead of parking open. A
+# reaped bead announces itself on stdout; a close the store refuses is named on
+# stderr and de-pinned instead.
+reaped() { grep -qE "reaped (step|root) $1( |\$)" <<< "$OUT"; }
 
-# (ORDER) …across TWO writes, route first. beads refuses `--assignee ""` on an
-# in_progress bead a live session holds, and refuses the whole update with it,
-# so a single write loses the route pins on exactly the bead being re-offered.
-# Route first and not last: the reverse leaves a routed+unassigned window,
-# which is the pool-offer shape a fresh polecat races into.
-eq "$(grep -cE '^bd update s-load( |$)' "$UP" || true)" "2" \
-  "(ORDER) s-load's pins are written in two updates, not one"
-ROUTE_N="$(grep -nE '^bd update s-load .*--unset-metadata gc.routed_to' "$UP" | head -n1 | cut -d: -f1)"
-WHO_N="$(grep -nE '^bd update s-load .*--assignee' "$UP" | head -n1 | cut -d: -f1)"
-if [ -n "$ROUTE_N" ] && [ -n "$WHO_N" ] && [ "$ROUTE_N" -lt "$WHO_N" ]; then
-  ok "(ORDER) …the route clear goes first, so no window leaves it routed+unassigned"
-else
-  bad "(ORDER) the route clear must precede the assignee clear (route@${ROUTE_N:-none} assignee@${WHO_N:-none})"
-fi
-WHO_LINE="$(grep -E '^bd update s-load .*--assignee' "$UP" | head -n1)"
-grep -q -- '--unset-metadata' <<< "$WHO_LINE" \
-  && bad "(ORDER) the assignee clear still rides with the route pins ($WHO_LINE)" \
-  || ok "(ORDER) …and rides alone, so a refusal of it cannot void them"
+# (REAP) every worker step of the husk molecule is force-closed.
+for s in s-load s-impl s-quiet; do
+  reaped "$s" && ok "(REAP) husk step $s reaped" || bad "(REAP) husk step $s not reaped (out: $OUT)"
+done
+grep -qE '^bd update s-load .*--status=closed' "$UP" \
+  && ok "(REAP) …via update --status=closed, which carries no assignee, so the claim guard never fires" \
+  || bad "(REAP) the close did not go through update --status=closed (got: $(line_for s-load))"
+grep -qE '^bd update s-load .*gc.outcome=stand-down' "$UP" \
+  && ok "(REAP) …and records gc.outcome=stand-down" || bad "(REAP) the teardown outcome is not stamped"
 
-# (POOL) unassigned+routed step -> routed_to only.
-SI="$(line_for s-impl)"
-grep -q -- '--unset-metadata gc.routed_to' <<< "$SI" \
-  && ok "(POOL) unassigned+routed step -> routed_to cleared" || bad "(POOL) routed_to cleared (got: $SI)"
-grep -q -- '--assignee' <<< "$SI" \
-  && bad "(POOL) must not clear an assignee that was already empty" || ok "(POOL) no spurious assignee clear"
-grep -q 'gc.session_affinity' <<< "$SI" \
-  && bad "(POOL) must not clear a session_affinity that was absent" || ok "(POOL) no spurious affinity clear"
+# (REAP HELD) the held affine step is the whole point: an open held step is what
+# kept workflow-finalize blocked, and update --status=closed closes it whoever
+# holds it — the ownership guard is on the `close` verb, not the closed state.
+reaped s-load && ok "(REAP HELD) a held (assigned) step is closed the same as any other" \
+  || bad "(REAP HELD) the held step was left open (out: $OUT)"
 
-# (FINAL) workflow-finalize keeps its control-dispatcher route.
-[ -z "$(line_for s-final)" ] \
-  && ok "(FINAL) workflow-finalize step left untouched (keeps its escape route)" \
-  || bad "(FINAL) must NOT de-route workflow-finalize"
+# (REAP BLOCKED) molecule-hold.sh writes a held step to status=blocked with its
+# route cleared and its assignee kept, so an enumeration of only open,in_progress
+# never sees it. Left unclosed it keeps the root's chain from closing and
+# workflow-finalize can never retire the molecule — so the reap enumeration
+# includes blocked, and the held step is force-closed like any other.
+reaped s-held && ok "(REAP BLOCKED) a status=blocked held step is enumerated and reaped" \
+  || bad "(REAP BLOCKED) the blocked held step was missed by the reap (out: $OUT)"
 
-# (IDEM) already-quiet step is not re-updated.
-[ -z "$(line_for s-quiet)" ] \
-  && ok "(IDEM) already-quiet step skipped" || bad "(IDEM) quiet step must not be updated"
+# (CONTRACT) a graph.v2 step of ANOTHER formula, under the husk root, is reaped
+# too — selection is by contract (gc.step_ref), not formula name (tk-q5r65).
+reaped s-nonmol && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the husk anchor is reaped" \
+  || bad "(CONTRACT) graph.v2 step of another formula must be reaped (out: $OUT)"
 
-# (CONTRACT) a graph.v2 step from ANOTHER formula, under the parked root, is
-# quiesced too — selection is by contract, not formula name (tk-q5r65).
-SN="$(line_for s-nonmol)"
-[ -n "$SN" ] \
-  && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the parked anchor IS quiesced" \
-  || bad "(CONTRACT) graph.v2 step of another formula must be quiesced (got: none)"
-grep -q -- '--unset-metadata gc.routed_to' <<< "$SN" \
-  && ok "(CONTRACT) its route is cleared" || bad "(CONTRACT) route cleared (got: $SN)"
-grep -q -- '--assignee' <<< "$SN" \
-  && ok "(CONTRACT) its assignee is cleared" || bad "(CONTRACT) assignee cleared (got: $SN)"
+# (REAP FINAL) the teardown closes workflow-finalize too: it is the molecule's
+# escape route only while the chain can close on its own, which a husk's never
+# will, so the reap is what dies here.
+reaped s-final && ok "(REAP FINAL) workflow-finalize is closed by the teardown, not left as an escape route" \
+  || bad "(REAP FINAL) finalize left open (out: $OUT)"
 
-# (NOTV2) no gc.step_ref -> never a candidate, even under the parked root.
+# (NOTV2) no gc.step_ref -> never a candidate, even under the husk root.
 [ -z "$(line_for s-noref)" ] \
-  && ok "(NOTV2) bead with no gc.step_ref never quiesced (not a graph.v2 step)" \
+  && ok "(NOTV2) bead with no gc.step_ref never touched (not a graph.v2 step)" \
   || bad "(NOTV2) a bead without gc.step_ref must never be touched"
 
 # (SCOPE) a different molecule (anchor != parked bead) is left untouched.
 [ -z "$(line_for s-other)" ] \
-  && ok "(SCOPE) molecule whose anchor != parked bead untouched" || bad "(SCOPE) wrong molecule quiesced"
+  && ok "(SCOPE) molecule whose anchor != parked bead untouched" || bad "(SCOPE) wrong molecule reaped"
 
 # (FAILCLOSE) a root whose anchor cannot be resolved is skipped.
 [ -z "$(line_for s-orphan)" ] \
-  && ok "(FAILCLOSE) unresolved-anchor root skipped (fail closed)" || bad "(FAILCLOSE) unresolved anchor quiesced"
+  && ok "(FAILCLOSE) unresolved-anchor root skipped (fail closed)" || bad "(FAILCLOSE) unresolved anchor reaped"
 
 # (ROOT) the gc.kind=workflow root is a second pool-routed door into the same
-# molecule. A release that quiets every worker step and leaves the root routed
-# keeps attracting polecat spawns onto the husk.
-RP="$(line_for root-PARKED)"
-grep -q -- '--unset-metadata gc.routed_to' <<< "$RP" \
-  && ok "(ROOT) the workflow root is de-routed alongside its steps" \
-  || bad "(ROOT) the workflow root kept its pool route (got: ${RP:-<none>})"
-grep -q 'quiesced husk root root-PARKED' <<< "$OUT" \
-  && ok "(ROOT) …and the run names it as a root, not a step" \
-  || bad "(ROOT) the root is unreported (out: $OUT)"
+# molecule, so it is reaped alongside its steps — a release that closes every
+# worker step and leaves the root open keeps drawing spawns onto the husk.
+reaped root-PARKED \
+  && ok "(ROOT) the workflow root is closed alongside its steps" \
+  || bad "(ROOT) the workflow root was not reaped (got: ${OUT})"
 
 # (ROOTSCOPE) the root walk inherits the step walk's scope and fail-closed guard.
 [ -z "$(line_for root-OTHER)" ] \
   && ok "(ROOTSCOPE) a root whose anchor != the parked bead is untouched" \
-  || bad "(ROOTSCOPE) another molecule's root was de-routed"
+  || bad "(ROOTSCOPE) another molecule's root was reaped"
 [ -z "$(line_for root-ORPHAN)" ] \
   && ok "(ROOTSCOPE) a root with no resolvable convoy is skipped (fail closed)" \
-  || bad "(ROOTSCOPE) an unresolvable root was de-routed"
+  || bad "(ROOTSCOPE) an unresolvable root was reaped"
 
-# (PINFAIL) the pin write is what makes the assignee clear safe. If it does not
-# land, unassigning would leave the bead routed AND unassigned — the pool-offer
-# shape the whole order exists to avoid — so the second write is skipped.
-eq "$(grep -cE '^bd update s-NOPIN( |$)' "$UP" || true)" "1" \
-  "(PINFAIL) a rejected pin write is not followed by an assignee clear"
-grep -q -- '--assignee' <<< "$(line_for s-NOPIN)" \
-  && bad "(PINFAIL) the bead was unassigned while still routed" \
-  || ok "(PINFAIL) …so the bead is never left routed+unassigned"
-grep -q 'could not quiesce step s-NOPIN' <<< "$ERR" \
-  && ok "(PINFAIL) …and the failure is reported for the patrol to retry" \
-  || bad "(PINFAIL) the failed quiesce is silent (stderr: $ERR)"
+# (REAPFAIL) a bead the store refuses to close is not left silently: the close
+# fails, and the fallback de-pins it so it stops re-attracting spawns while the
+# patrol retries. NOPIN refuses every write, so even the de-pin is refused, and
+# the run says so on stderr and never claims it reaped.
+grep -qE '^bd update s-NOPIN .*--status=closed' "$UP" \
+  && ok "(REAPFAIL) the refused bead's close was attempted" \
+  || bad "(REAPFAIL) the reap never tried to close s-NOPIN"
+grep -qE '^bd update s-NOPIN .*--unset-metadata gc.routed_to' "$UP" \
+  && ok "(REAPFAIL) …and the fallback de-pin was attempted so it stops re-offering" \
+  || bad "(REAPFAIL) a bead that would not close was not de-pinned as a fallback"
+reaped s-NOPIN && bad "(REAPFAIL) a refused close was reported as reaped" \
+  || ok "(REAPFAIL) …and a refused close never reads as reaped"
+grep -q 'could not reap step s-NOPIN' <<< "$ERR" \
+  && ok "(REAPFAIL) …and the failure is reported for the patrol to retry" \
+  || bad "(REAPFAIL) the failed reap is silent (stderr: $ERR)"
 
-# (NOCLOSE dynamic) no STEP update ever closes a bead or rewrites its status.
-STEP_UPDATES="$(grep -E '^bd update s-' "$UP" || true)"
-if grep -qE -- '--status|--close|bd close' <<< "$STEP_UPDATES"; then
-  bad "(NOCLOSE) a step update rewrote status or closed a bead (DANGER clause)"
-else
-  ok "(NOCLOSE) no step status rewrite / close (DANGER clause honored)"
-fi
+# (REPORT) the run announces the steps it reaped.
+grep -q 'reaped step s-load' <<< "$OUT" \
+  && ok "(REPORT) run reports the affine step it reaped" || bad "(REPORT) run reports s-load (out: $OUT)"
 
-# (REPORT) the run announces the steps it quiesced.
-grep -q 'quiesced husk step s-load' <<< "$OUT" \
-  && ok "(REPORT) run reports the affine step it quiesced" || bad "(REPORT) run reports s-load (out: $OUT)"
+# (BOUND) the resolution is keyed on the parked anchor, not the store: one
+# reverse-tracks lookup, then a convoy-status confirm for the ONE matched root,
+# NOT a status call per open root. Enumerating every root would confirm
+# convoy-PARKED, convoy-OTHER and convoy-FOLD; asserting only the matched
+# molecule's convoy is touched is what keeps the fan-out from coming back.
+eq "$(grep -c . "$FAKE_CONVOY_CALLS")" "1" \
+  "(BOUND) --release confirms only the matched molecule's convoy, not one per open root"
+eq "$(cat "$FAKE_CONVOY_CALLS")" "convoy-PARKED" \
+  "(BOUND) …and the one it confirms is the parked anchor's own convoy"
 
-# (NOCLOSE static) the quiesce block itself contains no close/status-write; the
-# only legitimate `--status` is the bd list READ filter.
-BLOCK="$(awk '/# >>> quiesce-release-molecule-steps/{f=1;next} /# <<< quiesce-release-molecule-steps/{f=0} f' "$SCRIPT")"
-[ -n "$BLOCK" ] && ok "(MARKERS) quiesce block extracted between markers" || bad "(MARKERS) block extraction EMPTY — markers missing"
-DANGER="$(printf '%s\n' "$BLOCK" | grep -v 'bd list --status' | grep -E 'bd close|--status|--close' || true)"
-[ -z "$DANGER" ] \
-  && ok "(NOCLOSE static) quiesce block writes no status and closes nothing (only the bd list read-filter uses --status)" \
-  || bad "(NOCLOSE static) quiesce block contains a close/status-write: $DANGER"
+# (REAP static) the reap block is what force-closes; the markers bound it, and
+# --status=closed is the close verb it uses.
+BLOCK="$(awk '/# >>> reap-release-molecule/{f=1;next} /# <<< reap-release-molecule/{f=0} f' "$SCRIPT")"
+[ -n "$BLOCK" ] && ok "(MARKERS) reap block extracted between markers" || bad "(MARKERS) block extraction EMPTY — markers missing"
+grep -q -- '--status=closed' <<< "$BLOCK" \
+  && ok "(REAP static) the reap block force-closes (--status=closed present)" \
+  || bad "(REAP static) the reap block never closes anything"
+# The de-pin path is still the one that must never close: the releasing
+# session's own molecule keeps its chain, so its block writes no status.
+QBLOCK="$(awk '/# >>> quiesce-release-molecule-steps/{f=1;next} /# <<< quiesce-release-molecule-steps/{f=0} f' "$SCRIPT")"
+QDANGER="$(printf '%s\n' "$QBLOCK" | grep -v 'bd list --status' | grep -E 'bd close|--status|--close' || true)"
+[ -z "$QDANGER" ] \
+  && ok "(NOCLOSE static) the de-pin walk still closes nothing (only the bd list read-filter uses --status; the reap is a separate call)" \
+  || bad "(NOCLOSE static) the de-pin block contains a close/status-write: $QDANGER"
 
 if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 
@@ -608,6 +753,60 @@ grep -q 'contradicts' "$TMP/berr" \
   && ok "(BOTH) …and the refusal says why" \
   || bad "(BOTH) the refusal does not name the contradiction (stderr: $(cat "$TMP/berr"))"
 
+# (NEITHERPARK) a --release that PARKS for a person (no --route) a bead with NO
+# open blocker (A-PARKED) would leave a prose-only hold, so it must state its
+# disposition — refused before anything is written, no edge wired. A bead already
+# held by an open blocker is exempt (DELEGBARE, below); a --release --route
+# DISPATCHES and is exempt (ROUTEOK/ROUTEFIX pass neither flag and land); a bare
+# headline (no --release) parks nothing (NEITHERBARE).
+: > "$TMP/updates"; : > "$TMP/deps"
+NPRC=0
+sh "$SCRIPT" takeaway A-PARKED "parked on prose alone" --by proactive --release >/dev/null 2>"$TMP/nperr" || NPRC=$?
+eq "$NPRC" "2" "(NEITHERPARK) a --release park with neither --waiting-on nor --no-wait is refused"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(NEITHERPARK) …before anything is written"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(NEITHERPARK) …and no edge is wired"
+grep -q 'states its disposition' "$TMP/nperr" \
+  && ok "(NEITHERPARK) …and the refusal says why" \
+  || bad "(NEITHERPARK) the refusal does not explain itself (stderr: $(cat "$TMP/nperr"))"
+# (NEITHERBARE) a bare headline (no --release) parks nothing, so it is unaffected
+# — it still stamps the headline and clears the settled key with neither flag.
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "a headline beside a demand" --by converse >/dev/null 2>"$TMP/nberr" || true
+grep -q -- '--set-metadata gc.takeaway=a headline beside a demand' "$TMP/updates" \
+  && ok "(NEITHERBARE) a bare takeaway with neither flag still lands" \
+  || bad "(NEITHERBARE) a bare takeaway was refused or dropped: $(cat "$TMP/updates") / $(cat "$TMP/nberr")"
+
+# (NEITHERPROBE) the park guard fails CLOSED on an unreadable probe. Unlike the
+# --route guard below (DELEGPROBE/DELEGJUNK), a bare --release park that cannot
+# read its blockers cannot prove an edge holds the bead, and a headline stamped
+# anyway is the unedged hold this guard exists to stop. A store that will not
+# answer (A-PROBEDEAD) is refused before any write, and the refusal names the
+# unread probe and sends the caller to a disposition.
+: > "$TMP/updates"; : > "$TMP/deps"
+NPP=0
+sh "$SCRIPT" takeaway A-PROBEDEAD "parked, store silent" --by proactive --release >/dev/null 2>"$TMP/nperr" || NPP=$?
+eq "$NPP" "2" "(NEITHERPROBE) a park whose blocker probe will not answer is refused"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(NEITHERPROBE) …before anything is written"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(NEITHERPROBE) …and no edge is wired"
+grep -q 'could not be read' "$TMP/nperr" \
+  && ok "(NEITHERPROBE) …and the refusal says the probe did not run" \
+  || bad "(NEITHERPROBE) the refusal does not name the unreadable probe (stderr: $(cat "$TMP/nperr"))"
+grep -q -- '--waiting-on' "$TMP/nperr" \
+  && ok "(NEITHERPROBE) …and points the caller at a disposition" \
+  || bad "(NEITHERPROBE) the refusal offers no move (stderr: $(cat "$TMP/nperr"))"
+
+# (NEITHERJUNK) the non-array error object `dep list` returns for a bead it
+# cannot resolve is unreadable the same way — read as "no edges" it would pass
+# the guard, so the SHAPE must refuse, not the exit code a pipeline never sees.
+: > "$TMP/updates"; : > "$TMP/deps"
+NPJ=0
+sh "$SCRIPT" takeaway A-PROBEJUNK "parked, junk payload" --by proactive --release >/dev/null 2>"$TMP/njerr" || NPJ=$?
+eq "$NPJ" "2" "(NEITHERJUNK) a park whose probe returns a non-array payload is refused too"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(NEITHERJUNK) …before anything is written"
+grep -q 'could not be read' "$TMP/njerr" \
+  && ok "(NEITHERJUNK) …and it is reported unreadable, not empty" \
+  || bad "(NEITHERJUNK) an error object was read as an empty edge list (stderr: $(cat "$TMP/njerr"))"
+
 : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-PARKED "actionable — slung to the pool" \
    --release --route "gc-toolkit/gc-toolkit.polecat" --no-wait >/dev/null 2>&1 || true
@@ -711,13 +910,17 @@ case "$RLINE" in
   *) bad "(ROUTE) the release halves split off the route write: ${RLINE:-<none>}" ;;
 esac
 case "$RLINE" in
+  *"--unset-metadata gc.execution_routed_to"*) ok "(ROUTE) …and the prior pour stamp is retired, not carried into the new route" ;;
+  *) bad "(ROUTE) the release-to-pool write kept gc.execution_routed_to: ${RLINE:-<none>}" ;;
+esac
+case "$RLINE" in
   *"--set-metadata gc.takeaway=actionable — routed to the polecat pool"*) ok "(ROUTE) …and the headline still rides it" ;;
   *) bad "(ROUTE) the headline was lost: ${RLINE:-<none>}" ;;
 esac
 
 # (ROUTECLR) the plain release is untouched: it still hands the bead back.
 : > "$TMP/updates"; : > "$TMP/routed"
-sh "$SCRIPT" takeaway A-PARKED "back to the human" --by proactive --release >/dev/null 2>&1 || true
+sh "$SCRIPT" takeaway A-PARKED "back to the human" --by proactive --release --no-wait >/dev/null 2>&1 || true
 grep -q -- '--set-metadata gc.routed_to= ' "$TMP/updates" \
   && ok "(ROUTECLR) no --route still clears the route" \
   || bad "(ROUTECLR) the plain release changed shape: $(cat "$TMP/updates")"
@@ -788,6 +991,254 @@ grep -q "released to $POOL" "$TMP/rout" \
   && ok "(ROUTEDEAD) …and says where the bead went" \
   || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
 
+# ── takeaway --release: the pour stamp read-back ──────────────────────────────
+# gc.execution_routed_to is the field the release clears best-effort: a first
+# reaction was slung to a pool, the pour stamped it, and a release ends that
+# pour. No arm or reconcile guard reads this stamp (reconcile keys on its own
+# gc.dispatch_when_ready_slung marker), so it gates no re-dispatch — it is only
+# cosmetic provenance. The clear rides the multi-pair release write; a pair
+# silently dropped there leaves the stamp standing, so the release retries a lone
+# unset and, if that also misses, WARNS and stands rather than failing. Covered:
+#   (EXECOK)   a clear that reads back empty is verified once, no repair, no word
+#   (EXECFIX)  a clear dropped from the multi-pair write is retried and reported
+#   (EXECWARN) a clear that will not land warns and the release still stands
+STAMP="gc-toolkit/gc-toolkit.proactive"
+
+# (EXECOK) the clear lands: the release's own unset is the only one written, and
+# a read-back that finds it gone says nothing.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+XORC=0
+sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
+  >/dev/null 2>"$TMP/xerr" || XORC=$?
+eq "$XORC" "0" "(EXECOK) a pour stamp that reads back cleared exits 0"
+eq "$(grep -c -- '--unset-metadata gc.execution_routed_to' "$TMP/updates" || true)" "1" \
+   "(EXECOK) …and the clear is written once, with no repair"
+grep -q 'gc.execution_routed_to on' "$TMP/xerr" \
+  && bad "(EXECOK) a landed clear should say nothing (stderr: $(cat "$TMP/xerr"))" \
+  || ok "(EXECOK) …and says nothing about a read-back"
+
+# (EXECFIX) the stamp of the pour that dispatched this bead, and a clear that
+# does not land: the multi-pair release drops it, the lone repair unset carries
+# it. The stamp stood after the first write, so the read-back re-issues the clear.
+: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+XFRC=0
+FAKE_EXEC_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/xerr" || XFRC=$?
+eq "$(grep -c -- '--unset-metadata gc.execution_routed_to' "$TMP/updates" || true)" "2" \
+   "(EXECFIX) a clear that did not land is re-issued"
+grep -q "gc.execution_routed_to on A-PARKED read back as '$STAMP'" "$TMP/xerr" \
+  && ok "(EXECFIX) …and the miss is reported with the stamp that stood" \
+  || bad "(EXECFIX) the dropped clear was silent (stderr: $(cat "$TMP/xerr"))"
+grep -q 'execution-stamp repair landed' "$TMP/xerr" \
+  && ok "(EXECFIX) …and the repair that fixed it says so" \
+  || bad "(EXECFIX) the repair did not report landing (stderr: $(cat "$TMP/xerr"))"
+eq "$XFRC" "0" "(EXECFIX) …and a repaired stamp is not a verb failure"
+eq "$(cat "$TMP/exec")" "" "(EXECFIX) …the bead ends with the pour stamp cleared"
+
+# (EXECWARN) the store that will not take the clear at all. The stamp is cosmetic
+# provenance — no arm or reconcile guard reads it — so a surviving stamp WARNS and
+# the release still stands (exit 0). Failing here would exit 4 into
+# first-reaction-dispose's die before its --then-route arm, skipping the arm over
+# a harmless stamp.
+: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+XDRC=0
+FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >"$TMP/xout" 2>"$TMP/xerr" || XDRC=$?
+eq "$XDRC" "0" "(EXECWARN) a pour stamp that will not clear does NOT fail the release"
+grep -q "still carries gc.execution_routed_to='$STAMP'" "$TMP/xerr" \
+  && ok "(EXECWARN) …and the warning names the stamp left standing" \
+  || bad "(EXECWARN) the persistent miss does not name the stale stamp (stderr: $(cat "$TMP/xerr"))"
+grep -q -- '--unset-metadata gc.execution_routed_to' "$TMP/xerr" \
+  && ok "(EXECWARN) …and carries the by-hand repair" \
+  || bad "(EXECWARN) no repair spelled out (stderr: $(cat "$TMP/xerr"))"
+grep -q 'takeaway set on' "$TMP/xout" \
+  && ok "(EXECWARN) …and the release still stands, reported as set" \
+  || bad "(EXECWARN) the release was not reported despite the harmless stamp (stdout: $(cat "$TMP/xout"))"
+grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/updates" \
+  && ok "(EXECWARN) …the headline write is kept" \
+  || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
+: > "$TMP/exec"
+
+# ── takeaway --release: the completion-proof read-back ────────────────────────
+# gc.proactive_reaction=1 is the stamp two guards downstream key on to refuse a
+# SECOND release — first-reaction-dispose's retry guard and cmd_sling's
+# already-reacted skip — so a park whose stamp lands empty reads to both as a
+# partial that never completed, and the next dispose re-releases a bead a worker
+# may already hold. It rides the multi-pair release write, so the same silent
+# drop can hit it; it is read back and repaired like the route beside it, and —
+# unlike the cosmetic pour stamp — a repair that also misses is a verb failure.
+# Covered:
+#   (PROACTOK)   a stamp that reads back "1" is written once, no repair, exit 0
+#   (PROACTFIX)  a stamp dropped from the multi-pair write is re-stamped, exit 0
+#   (PROACTDEAD) a stamp that will not land is a verb failure, writes kept
+
+# (PROACTOK) the stamp lands: the release's own set is the only one written.
+: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+PORC=0
+sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
+  >/dev/null 2>"$TMP/perr" || PORC=$?
+eq "$PORC" "0" "(PROACTOK) a completion stamp that reads back exits 0"
+eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "1" \
+   "(PROACTOK) …and is written once, with no repair"
+grep -q 'gc.proactive_reaction on' "$TMP/perr" \
+  && bad "(PROACTOK) a landed stamp should say nothing (stderr: $(cat "$TMP/perr"))" \
+  || ok "(PROACTOK) …and says nothing about a read-back"
+
+# (PROACTFIX) the stamp dropped from the multi-pair release write, recovered by
+# the lone repair set.
+: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+PFRC=0
+FAKE_PROACTIVE_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/perr" || PFRC=$?
+eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "2" \
+   "(PROACTFIX) a stamp that did not land is re-stamped"
+grep -q "gc.proactive_reaction on A-PARKED read back as ''" "$TMP/perr" \
+  && ok "(PROACTFIX) …and the miss is reported with the value that stood" \
+  || bad "(PROACTFIX) the dropped stamp was silent (stderr: $(cat "$TMP/perr"))"
+grep -q 'the proactive-reaction repair landed' "$TMP/perr" \
+  && ok "(PROACTFIX) …and the repair that fixed it says so" \
+  || bad "(PROACTFIX) the repair did not report landing (stderr: $(cat "$TMP/perr"))"
+eq "$PFRC" "0" "(PROACTFIX) …and a repaired stamp is not a verb failure"
+eq "$(cat "$TMP/proactive")" "1" "(PROACTFIX) …the bead ends carrying the completion proof"
+
+# (PROACTDEAD) the store that will not take the stamp at all. The bead is
+# released, so a zero exit would report a park whose completion proof — the thing
+# that stops the next dispose re-releasing it — never landed.
+: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+PDRC=0
+FAKE_PROACTIVE_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >"$TMP/pout" 2>"$TMP/perr" || PDRC=$?
+eq "$PDRC" "4" "(PROACTDEAD) a completion stamp that will not land is a verb runtime failure"
+grep -q "did not stamp as '1'" "$TMP/perr" \
+  && ok "(PROACTDEAD) …and the message names what was missing" \
+  || bad "(PROACTDEAD) the persistent miss is unexplained (stderr: $(cat "$TMP/perr"))"
+grep -q -- '--set-metadata gc.proactive_reaction=1' "$TMP/perr" \
+  && ok "(PROACTDEAD) …and carries the by-hand repair" \
+  || bad "(PROACTDEAD) no repair spelled out (stderr: $(cat "$TMP/perr"))"
+grep -q 'takeaway set on' "$TMP/pout" \
+  && bad "(PROACTDEAD) the verb reported success on a bead missing its completion proof" \
+  || ok "(PROACTDEAD) …and does not report the takeaway as set"
+PD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$PD" in
+  *"--status=open"*"--assignee="*) ok "(PROACTDEAD) …the release it already wrote is kept, not rolled back" ;;
+  *) bad "(PROACTDEAD) the release write was lost: ${PD:-<none>}" ;;
+esac
+: > "$TMP/proactive"
+
+# ── takeaway --release: the executor-identity read-back ───────────────────────
+# The unassign takes the departing executor's identity with it, so the release
+# clears gc.session_name and gc.session_id via --unset-metadata. Both have
+# readers: a surviving gc.session_name is the residue doctor/executor-identity-
+# residue reports on the next route, and a surviving gc.session_id lets orphan
+# recovery resolve a dead owner for a bead nobody holds. So — unlike the cosmetic
+# pour stamp — each is read back, a lone unset retried, and a persistent miss is a
+# verb failure, the way the route and completion proof are. orphan-dispose.sh
+# verifies the same pair after its own release. Covered:
+#   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
+#   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried
+#   (SNAMEDEAD/SIDDEAD)  a clear that will not land is a verb failure, writes kept
+SNAME="gc-toolkit__polecat-lx-gone"
+SID="lx-gone"
+
+# (SNAMEOK/SIDOK) both pins clear: the release's own unset is the only write for
+# each, and a read-back that finds them gone says nothing.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+printf '%s' "$SNAME" > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
+IORC=0
+sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
+  >/dev/null 2>"$TMP/ierr" || IORC=$?
+eq "$IORC" "0" "(SNAMEOK) pins that read back cleared exit 0"
+eq "$(grep -c -- '--unset-metadata gc.session_name' "$TMP/updates" || true)" "1" \
+   "(SNAMEOK) …and gc.session_name is cleared once, with no repair"
+eq "$(grep -c -- '--unset-metadata gc.session_id' "$TMP/updates" || true)" "1" \
+   "(SIDOK) …and gc.session_id is cleared once, with no repair"
+grep -qE 'gc.session_name on|gc.session_id on' "$TMP/ierr" \
+  && bad "(SNAMEOK) a landed clear should say nothing (stderr: $(cat "$TMP/ierr"))" \
+  || ok "(SNAMEOK) …and says nothing about a read-back"
+
+# (SNAMEFIX) the identity clear dropped from the multi-pair release write, carried
+# by the lone repair unset. The pin stood after the first write, so the read-back
+# re-issues the clear and the release still exits 0.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+printf '%s' "$SNAME" > "$TMP/sname"; : > "$TMP/sid"
+SFRC=0
+FAKE_SNAME_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/ierr" || SFRC=$?
+eq "$(grep -c -- '--unset-metadata gc.session_name' "$TMP/updates" || true)" "2" \
+   "(SNAMEFIX) a clear that did not land is re-issued"
+grep -q "gc.session_name on A-PARKED read back as '$SNAME'" "$TMP/ierr" \
+  && ok "(SNAMEFIX) …and the miss is reported with the pin that stood" \
+  || bad "(SNAMEFIX) the dropped clear was silent (stderr: $(cat "$TMP/ierr"))"
+grep -q 'session-name repair landed' "$TMP/ierr" \
+  && ok "(SNAMEFIX) …and the repair that fixed it says so" \
+  || bad "(SNAMEFIX) the repair did not report landing (stderr: $(cat "$TMP/ierr"))"
+eq "$SFRC" "0" "(SNAMEFIX) …and a repaired pin is not a verb failure"
+eq "$(cat "$TMP/sname")" "" "(SNAMEFIX) …the bead ends with the identity cleared"
+
+# (SNAMEDEAD) the store that will not take the clear at all. The bead is released,
+# so a zero exit would report a park still carrying the executor identity this
+# release exists to remove — the next route reproduces the residue. So the
+# persistent miss is a verb failure, with its writes kept and named.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+printf '%s' "$SNAME" > "$TMP/sname"; : > "$TMP/sid"
+SDRC=0
+FAKE_SNAME_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >"$TMP/iout" 2>"$TMP/ierr" || SDRC=$?
+eq "$SDRC" "4" "(SNAMEDEAD) an identity pin that will not clear is a verb runtime failure"
+grep -q "still carries gc.session_name='$SNAME'" "$TMP/ierr" \
+  && ok "(SNAMEDEAD) …and the message names the pin left standing" \
+  || bad "(SNAMEDEAD) the persistent miss does not name the stale pin (stderr: $(cat "$TMP/ierr"))"
+grep -q -- '--unset-metadata gc.session_name' "$TMP/ierr" \
+  && ok "(SNAMEDEAD) …and carries the by-hand repair" \
+  || bad "(SNAMEDEAD) no repair spelled out (stderr: $(cat "$TMP/ierr"))"
+grep -q 'takeaway set on' "$TMP/iout" \
+  && bad "(SNAMEDEAD) the verb reported success on a bead still carrying the identity" \
+  || ok "(SNAMEDEAD) …and does not report the takeaway as set"
+IDLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$IDLINE" in
+  *"--status=open"*"--assignee="*) ok "(SNAMEDEAD) …the release it already wrote is kept, not rolled back" ;;
+  *) bad "(SNAMEDEAD) the release write was lost: ${IDLINE:-<none>}" ;;
+esac
+: > "$TMP/sname"
+
+# (SIDFIX) the same silent drop on gc.session_id: the multi-pair write drops it,
+# the lone repair unset carries it, and the release still exits 0.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+: > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
+DFRC=0
+FAKE_SID_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/ierr" || DFRC=$?
+eq "$(grep -c -- '--unset-metadata gc.session_id' "$TMP/updates" || true)" "2" \
+   "(SIDFIX) a clear that did not land is re-issued"
+grep -q "gc.session_id on A-PARKED read back as '$SID'" "$TMP/ierr" \
+  && ok "(SIDFIX) …and the miss is reported with the pin that stood" \
+  || bad "(SIDFIX) the dropped clear was silent (stderr: $(cat "$TMP/ierr"))"
+grep -q 'session-id repair landed' "$TMP/ierr" \
+  && ok "(SIDFIX) …and the repair that fixed it says so" \
+  || bad "(SIDFIX) the repair did not report landing (stderr: $(cat "$TMP/ierr"))"
+eq "$DFRC" "0" "(SIDFIX) …and a repaired pin is not a verb failure"
+eq "$(cat "$TMP/sid")" "" "(SIDFIX) …the bead ends with the pin cleared"
+
+# (SIDDEAD) the store that will not take the gc.session_id clear at all. A stale
+# pin lets orphan recovery resolve a dead owner for a released bead, so the miss
+# is a verb failure, with its writes kept and named.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+: > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
+DDRC=0
+FAKE_SID_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >"$TMP/iout" 2>"$TMP/ierr" || DDRC=$?
+eq "$DDRC" "4" "(SIDDEAD) an orphan-recovery pin that will not clear is a verb runtime failure"
+grep -q "still carries gc.session_id='$SID'" "$TMP/ierr" \
+  && ok "(SIDDEAD) …and the message names the pin left standing" \
+  || bad "(SIDDEAD) the persistent miss does not name the stale pin (stderr: $(cat "$TMP/ierr"))"
+grep -q -- '--unset-metadata gc.session_id' "$TMP/ierr" \
+  && ok "(SIDDEAD) …and carries the by-hand repair" \
+  || bad "(SIDDEAD) no repair spelled out (stderr: $(cat "$TMP/ierr"))"
+grep -q 'takeaway set on' "$TMP/iout" \
+  && bad "(SIDDEAD) the verb reported success on a bead still carrying the pin" \
+  || ok "(SIDDEAD) …and does not report the takeaway as set"
+: > "$TMP/sid"
+
 # ── takeaway --release on a CLOSED anchor: the quiesce without the park ──────
 # A fold that lands after the pour leaves a molecule routed under an anchor
 # that is already disposed. --release is the only writer that walks that
@@ -818,7 +1269,7 @@ grep -q 'gc.takeaway=folded into CARRIER-1' <<< "$FA" \
   && ok "(FOLDED) …while the headline the sitting owes still lands" \
   || bad "(FOLDED) the headline was lost with the park write ($FA)"
 grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(FOLDED) the molecule under it is quiesced — the half a fold still needs" \
+  && ok "(FOLDED) the molecule under it is reaped — a folded husk no session completes is force-closed" \
   || bad "(FOLDED) the folded anchor's molecule was never walked"
 grep -qE '^bd update root-FOLD( |$)' "$TMP/updates" \
   && ok "(FOLDED) …its workflow root too, so no door is left open" \
@@ -845,8 +1296,8 @@ grep -q "gc.routed_to=$POOL" <<< "$(line_for CLOSED-A-FOLD)" \
   && bad "(FOLDROUTE) a disposed bead was handed to a pool" \
   || ok "(FOLDROUTE) …and the pool route is never stamped"
 grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(FOLDROUTE) …while the quiesce the operator came for still runs" \
-  || bad "(FOLDROUTE) the refusal took the quiesce with it"
+  && ok "(FOLDROUTE) …while the reap the operator came for still runs" \
+  || bad "(FOLDROUTE) the refusal took the reap with it"
 grep -q 'takeaway set on' "$TMP/rout" \
   && bad "(FOLDROUTE) the verb reported success on an unrouted bead" \
   || ok "(FOLDROUTE) …and success is not reported"
@@ -1036,12 +1487,12 @@ grep -q 'helm-svc board' <<< "$BERRTXT" \
   && ok "(NOBOARD) …and the refusal points at helm-svc board" \
   || bad "(NOBOARD) refusal must name the successor (got: $BERRTXT)"
 
-# ── dismiss: the operator's one explicit "take this out of my view" ─────────
-# Two surfaces hold a subject in view and neither lets go on its own: converse
-# runs with no idle_timeout so a held visit keeps its pane, and a closed anchor
-# keeps a DONE row on the board. dismiss is the single act that releases both,
-# so each half is asserted separately — a verb that did one and silently
-# skipped the other would look like it worked.
+# ── dismiss: the operator's explicit "end this sitting" ─────────────────────
+# converse runs with no idle_timeout, so a held visit keeps its pane until
+# something closes the visit; dismiss is that close. It writes nothing to the
+# subject: the DONE band the closed anchor lands in carries no per-row state,
+# so a row leaves only by ageing out of the window. The outcome stamp precedes
+# the close, so the ended sitting is still one the board can report.
 
 cat > "$TMP/visits.json" <<'JSON'
 [
@@ -1061,8 +1512,16 @@ cat > "$TMP/visits.json" <<'JSON'
 JSON
 export FAKE_STEPS_JSON="$TMP/visits.json"
 
-: > "$TMP/updates"; : > "$TMP/closes"
-DOUT="$(sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
+# A recorder standing in for pr-visit-comment.sh, to prove dismiss updates the
+# subject's PR reminder when it closes a sitting's visit.
+cat > "$TMP/rec-pvc" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$REC_PVC_LOG"
+REC
+chmod +x "$TMP/rec-pvc"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/pvc.log"
+DOUT="$(GC_VISIT_COMMENT_TOOL="$TMP/rec-pvc" REC_PVC_LOG="$TMP/pvc.log" sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
 DERR="$(cat "$TMP/derr")"
 
 # (DISMISS-SITTING) the held visit is closed, and over its holder's claim: bd
@@ -1097,22 +1556,25 @@ else
     bad "(DISMISS-OUTCOME) the visit closes with no outcome, invisible to every reader of finished sittings (got: ${VU:-<no update on v-HELD>})"
 fi
 
-# (DISMISS-ROW) …and the board row is cleared in the same act.
-DU="$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)"
-if grep -q 'gc.dismissed_at=' <<< "$DU"; then
-    ok "(DISMISS-ROW) the subject is stamped dismissed, so its DONE row leaves the board"
+# (DISMISS-NOSUBJECT) dismiss ends the sitting and writes NOTHING to the
+# subject: the DONE band the closed anchor lands in carries no per-row state,
+# so its row leaves only by ageing out of the window. The only write is the
+# outcome stamp on the visit above.
+if [ -z "$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)" ]; then
+    ok "(DISMISS-NOSUBJECT) the subject is never written — the band carries no per-row state"
 else
-    bad "(DISMISS-ROW) gc.dismissed_at not stamped (got: $DU)"
+    bad "(DISMISS-NOSUBJECT) dismiss wrote the subject (got: $(grep -E '^bd update A-PARKED' "$TMP/updates"))"
 fi
-if grep -q -- '--append-notes' <<< "$DU"; then
-    ok "(DISMISS-NOTES) the reason is appended, never replacing the dispatch note"
+
+# (DISMISS-PRCOMMENT) the closed sitting's visit gets its PR reminder updated to
+# closed. The subject A-PARKED is passed, the closed visit v-HELD is named, and
+# the outcome is dismissed. update-only in the tool itself means a subject with
+# no PR is a silent no-op; here the recorder proves the wiring fires with the
+# right arguments.
+if grep -qF -- 'close --visit v-HELD --subject A-PARKED --outcome dismissed' "$TMP/pvc.log"; then
+    ok "(DISMISS-PRCOMMENT) the dismissed visit's PR reminder is updated to closed"
 else
-    bad "(DISMISS-NOTES) reason not appended (got: $DU)"
-fi
-if grep -q -- '--notes ' <<< "$DU"; then
-    bad "(DISMISS-NOTES) a replacing --notes write erases the dispatch note"
-else
-    ok "(DISMISS-NOTES) no replacing --notes write"
+    bad "(DISMISS-PRCOMMENT) the PR reminder was not updated on dismiss (got: $(cat "$TMP/pvc.log"))"
 fi
 
 # (DISMISS-SCOPE) another subject's visit is not collateral.
@@ -1138,8 +1600,35 @@ else
     bad "(DISMISS-EDGE) an empty group stamp hid the visit (closes: $(cat "$TMP/closes"))"
 fi
 
-# (DISMISS-IDEM) a subject with no open visit is already dismissed and says so;
-# the row half still runs, so a second dismiss is not a no-op that half-worked.
+# (DISMISS-JSON) --json prints the machine object and NAMES which identity each
+# closed visit matched — the same shared predicate open reports. stdout is pure
+# JSON; the human progress lines move to stderr. A-PARKED matches its visit by
+# the gc.continuation_group stamp; A-EDGE matches by the tracks edge.
+: > "$TMP/updates"; : > "$TMP/closes"
+JOUT="$(sh "$SCRIPT" dismiss A-PARKED --json 2>"$TMP/jerr")"; JERR="$(cat "$TMP/jerr")"
+if printf '%s' "$JOUT" | jq -e '.subject == "A-PARKED" and .closed == 1 and .ok == true and .matched[0].identity == "continuation_group"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) --json names the matched identity (continuation_group) and the close count"
+else
+    bad "(DISMISS-JSON) --json object wrong (got: ${JOUT:-<nothing>})"
+fi
+grep -q 'by continuation_group identity' <<< "$JERR" \
+  && ok "(DISMISS-JSON) stderr also names which identity matched" \
+  || bad "(DISMISS-JSON) stderr must name the identity (err: $JERR)"
+if printf '%s' "$JOUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) stdout is a single JSON object, not human text"
+else
+    bad "(DISMISS-JSON) stdout was not clean JSON (got: $JOUT)"
+fi
+: > "$TMP/updates"; : > "$TMP/closes"
+EJOUT="$(sh "$SCRIPT" dismiss A-EDGE --json 2>/dev/null)"
+if printf '%s' "$EJOUT" | jq -e '.matched[0].identity == "tracks"' >/dev/null 2>&1; then
+    ok "(DISMISS-JSON) an edge-only visit is named as a 'tracks' match"
+else
+    bad "(DISMISS-JSON) edge match identity wrong (got: ${EJOUT:-<nothing>})"
+fi
+
+# (DISMISS-IDEM) a subject with no open visit has no sitting to end and says so,
+# writing nothing.
 : > "$TMP/updates"; : > "$TMP/closes"
 IOUT="$(sh "$SCRIPT" dismiss A-QUIET 2>&1 || true)"
 eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-IDEM) nothing to close, nothing closed"
@@ -1148,17 +1637,35 @@ if grep -q 'no open visit' <<< "$IOUT"; then
 else
     bad "(DISMISS-IDEM) silent about the absent sitting (got: $IOUT)"
 fi
-if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-QUIET' "$TMP/updates" || true)"; then
-    ok "(DISMISS-IDEM) …and the row is still cleared"
+eq "$(grep -c '^bd update A-QUIET' "$TMP/updates" || true)" "0" \
+   "(DISMISS-IDEM) …and writes nothing to the subject"
+
+# (DISMISS-VISITID) the board lists a parked visit as a row of its own and
+# engage takes that id straight off the row, so dismiss must take it too: a
+# visit id resolves the subject it tracks (stamp, else tracks edge) and closes
+# that subject's visit — not stamping the visit as a subject with "no open
+# visit" while its sitting keeps the pane.
+: > "$TMP/updates"; : > "$TMP/closes"
+VOUT="$(sh "$SCRIPT" dismiss v-HELD --reason "done" 2>&1 || true)"
+if grep -q 'closed visit v-HELD' <<< "$VOUT"; then
+    ok "(DISMISS-VISITID) dismissing by visit id closes that visit"
 else
-    bad "(DISMISS-IDEM) the board half was skipped when there was no visit"
+    bad "(DISMISS-VISITID) the visit was not closed (got: $VOUT)"
+fi
+grep -q 'no open visit' <<< "$VOUT" \
+  && bad "(DISMISS-VISITID) the visit id was read as a subject with no visit" \
+  || ok "(DISMISS-VISITID) …never reading the visit id as a visit-less subject"
+: > "$TMP/updates"; : > "$TMP/closes"
+EOUT="$(sh "$SCRIPT" dismiss v-EDGE 2>&1 || true)"
+if grep -q 'closed visit v-EDGE' <<< "$EOUT"; then
+    ok "(DISMISS-VISITID-EDGE) a visit with only a tracks edge resolves its subject through the edge"
+else
+    bad "(DISMISS-VISITID-EDGE) edge-only visit id did not close v-EDGE (got: $EOUT / $(cat "$TMP/closes"))"
 fi
 
-# (DISMISS-STUCK) a visit that will not close must not take the row with it.
-# The quiet direction is a pane that stays up; the loud one is a row that
-# disappears while the sitting behind it is still live. The row is the
-# operator's only evidence that the sitting exists, so the row half runs only
-# when the visit half accounted for every sitting.
+# (DISMISS-STUCK) a visit that will not close is reported, not swallowed: the
+# pane stays up, and the run fails so a caller cannot read it as a dismiss. The
+# verb still writes nothing to the subject, whatever the sitting does.
 : > "$TMP/updates"; : > "$TMP/closes"
 SRC=0
 SOUT="$(sh "$SCRIPT" dismiss A-STUCK 2>&1)" || SRC=$?
@@ -1173,7 +1680,7 @@ else
     bad "(DISMISS-STUCK) no recovery command offered"
 fi
 eq "$(grep -c '^bd update A-STUCK' "$TMP/updates" || true)" "0" \
-   "(DISMISS-STUCK) …and the row is NOT retired over a sitting that is still up"
+   "(DISMISS-STUCK) …and the subject is never written, whatever the sitting does"
 eq "$SRC" "4" "(DISMISS-STUCK) …and the run fails, so a caller cannot read it as a dismiss"
 if grep -q 'was NOT dismissed' <<< "$SOUT"; then
     ok "(DISMISS-STUCK) …and it says the subject was not dismissed"
@@ -1193,9 +1700,9 @@ NOUT="$(sh "$SCRIPT" dismiss A-STAMPLESS 2>&1)" || NRC=$?
 eq "$(grep -c '^bd close v-NOSTAMP' "$TMP/closes" || true)" "0" \
    "(DISMISS-UNSTAMPED) a visit whose outcome stamp was refused is not closed"
 eq "$(grep -c '^bd update A-STAMPLESS' "$TMP/updates" || true)" "0" \
-   "(DISMISS-UNSTAMPED) …and the row is NOT retired over the sitting it leaves up"
+   "(DISMISS-UNSTAMPED) …and the subject is never written"
 eq "$NRC" "4" "(DISMISS-UNSTAMPED) …and the run fails, so a caller cannot read it as a dismiss"
-if grep -q 'could not stamp gc.outcome on visit v-NOSTAMP; it was NOT closed' <<< "$NOUT"; then
+if grep -q 'could not stamp the outcome on visit v-NOSTAMP; it was NOT closed' <<< "$NOUT"; then
     ok "(DISMISS-UNSTAMPED) …and it names the visit and says the close was withheld"
 else
     bad "(DISMISS-UNSTAMPED) the refused stamp reads as a warning beside a close that happened anyway (got: $NOUT)"
@@ -1221,9 +1728,9 @@ eq "$(grep -c '^bd close v-DROP' "$TMP/closes" || true)" "0" \
 eq "$(grep -c '^bd update v-DROP --set-metadata gc.outcome=dismissed' "$TMP/updates" || true)" "2" \
    "(DISMISS-DROPPED) …read back and written once more before it is given up on"
 eq "$(grep -c '^bd update A-DROP' "$TMP/updates" || true)" "0" \
-   "(DISMISS-DROPPED) …and the row is NOT retired over the sitting it leaves up"
+   "(DISMISS-DROPPED) …and the subject is never written"
 eq "$DRPRC" "4" "(DISMISS-DROPPED) …and the run fails, so a caller cannot read it as a dismiss"
-if grep -q "gc.outcome on visit v-DROP read back as '<empty>', not 'dismissed'" <<< "$DRPOUT"; then
+if grep -q "visit v-DROP did not read back (gc.outcome='<empty>'" <<< "$DRPOUT"; then
     ok "(DISMISS-DROPPED) …and it names the read-back that came up empty"
 else
     bad "(DISMISS-DROPPED) the silent drop reads as a close that happened anyway (got: $DRPOUT)"
@@ -1232,6 +1739,38 @@ if grep -q 'was NOT dismissed' <<< "$DRPOUT"; then
     ok "(DISMISS-DROPPED) …and it says the subject was not dismissed"
 else
     bad "(DISMISS-DROPPED) the refusal is not stated as one (got: $DRPOUT)"
+fi
+
+# (DISMISS-REASON-DROPPED) the read-back covers the reason as well as the
+# outcome. gc.outcome_reason is the headline the board shows a no-takeaway close
+# by (board.Sitting.Headline in services/helm/internal/board/model.go), and an
+# empty one drops the row to the subject's bare title. So a store that lands
+# gc.outcome=dismissed but silently drops gc.outcome_reason — the exit-0 write
+# that does not persist — must still withhold the close, the same both-stamp
+# guard visit-close.sh applies. Read back on the outcome alone, the close would
+# proceed and the sitting would end illegibly. v-DROP is unassigned, so its close
+# would otherwise succeed; the dropped reason is the only thing withholding it,
+# which isolates the reason read-back from a close that would have failed anyway.
+# The outcome files are shared across dismiss cases, so clear them first: this
+# case needs the outcome to LAND while only the reason drops.
+: > "$TMP/updates"; : > "$TMP/closes"
+rm -f "$TMP/outcomes/v-DROP" "$TMP/outcomes/v-DROP.reason"
+RDRC=0
+RDOUT="$(FAKE_OUTCOME_REASON_DROP=1 sh "$SCRIPT" dismiss A-DROP 2>&1)" || RDRC=$?
+eq "$(grep -c '^bd close v-DROP' "$TMP/closes" || true)" "0" \
+   "(DISMISS-REASON-DROPPED) a reason that exits 0 but does not land leaves the visit unclosed"
+eq "$(grep -c '^bd update v-DROP --set-metadata gc.outcome=dismissed' "$TMP/updates" || true)" "2" \
+   "(DISMISS-REASON-DROPPED) …read back and written once more before it is given up on"
+eq "$RDRC" "4" "(DISMISS-REASON-DROPPED) …and the run fails, so a caller cannot read it as a dismiss"
+if grep -q "visit v-DROP did not read back (gc.outcome='dismissed', gc.outcome_reason='<empty>')" <<< "$RDOUT"; then
+    ok "(DISMISS-REASON-DROPPED) …and it names the reason as the stamp that came up empty while the outcome landed"
+else
+    bad "(DISMISS-REASON-DROPPED) the dropped reason reads as a close that happened anyway (got: $RDOUT)"
+fi
+if grep -q 'was NOT dismissed' <<< "$RDOUT"; then
+    ok "(DISMISS-REASON-DROPPED) …and it says the subject was not dismissed"
+else
+    bad "(DISMISS-REASON-DROPPED) the refusal is not stated as one (got: $RDOUT)"
 fi
 
 # (DISMISS-BLIND) a visit lookup that did not ANSWER is not a subject with no
@@ -1271,48 +1810,31 @@ for blind_payload in '' '{"error":"no issues found"}' 'null'; do
 done
 
 # …and the gate must not swallow the honest answer: an EMPTY ARRAY is a subject
-# with no visit, which dismisses. Without it the shape gate above trades a lost
-# row for a verb that can never clear one.
+# with no visit, which dismisses cleanly (exit 0) rather than failing as a blind
+# read.
 : > "$TMP/updates"; : > "$TMP/closes"
 ERC=0
 EOUT="$(FAKE_LIST_OUT='[]' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || ERC=$?
 eq "$ERC" "0" "(DISMISS-BLIND) an empty visit array is an answer, not a blind read"
-if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)"; then
-    ok "(DISMISS-BLIND) …and the row half still runs on it"
+if grep -q 'no open visit' <<< "$EOUT"; then
+    ok "(DISMISS-BLIND) …and it reports no sitting to end rather than failing"
 else
     bad "(DISMISS-BLIND) the shape gate refused a legitimate empty result (got: $EOUT)"
 fi
 
-# (DISMISS-VERIFY) an id nothing answers for writes NOTHING. A marker stamped on
-# an unverified id is a row nobody can ever bring back.
+# (DISMISS-VERIFY) an id that does not resolve writes NOTHING. A marker stamped
+# on an unverified id is a row nobody can ever bring back. dismiss classifies the
+# refusal the way `open` does (shared verify_subject): UNKNOWN-9's prefix matches
+# no rig, a not-found provable without the data plane, so the refusal names that.
 : > "$TMP/updates"; : > "$TMP/closes"
 VRC=0
 VERR="$(sh "$SCRIPT" dismiss UNKNOWN-9 2>&1 >/dev/null)" || VRC=$?
 eq "$VRC" "4" "(DISMISS-VERIFY) an unresolvable subject is a runtime failure"
 eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-VERIFY) …and nothing was written"
-if grep -q 'could not verify' <<< "$VERR"; then
+if grep -qE 'bead not found|could not verify' <<< "$VERR"; then
     ok "(DISMISS-VERIFY) …and the refusal says why"
 else
     bad "(DISMISS-VERIFY) unclear refusal (got: $VERR)"
-fi
-
-# (DISMISS-LIVE) dismissing a bead that is still OPEN ends its sitting but must
-# not claim to have taken its row off the board: the row is live work, and a
-# verb that said otherwise would teach the operator that dismiss hides things
-# that still need them.
-: > "$TMP/updates"; : > "$TMP/closes"
-LOUT="$(sh "$SCRIPT" dismiss A-PARKED 2>&1 || true)"
-if grep -q 'still open, so it keeps its live row' <<< "$LOUT"; then
-    ok "(DISMISS-LIVE) an open subject is told it keeps its live row"
-else
-    bad "(DISMISS-LIVE) an open subject was told its row left the board (got: $LOUT)"
-fi
-: > "$TMP/updates"; : > "$TMP/closes"
-COUT="$(sh "$SCRIPT" dismiss CLOSED-7 2>&1 || true)"
-if grep -q "leaves the board's DONE band" <<< "$COUT"; then
-    ok "(DISMISS-LIVE) …and a closed subject is told its DONE row leaves"
-else
-    bad "(DISMISS-LIVE) a closed subject got the live-row wording (got: $COUT)"
 fi
 
 # (DISMISS-RIG) a subject in ANOTHER rig: the visit lookup must read that rig's
@@ -1327,9 +1849,111 @@ else
         "read: $(cat "$TMP/lists")"
 fi
 
-# (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs.
-ARC=0; sh "$SCRIPT" dismiss >/dev/null 2>&1 || ARC=$?
-eq "$ARC" "2" "(DISMISS-ARGS) a missing bead-id is a usage error"
+# (DISMISS-INFER) with no bead named, dismiss resolves "the sitting I am in":
+# the one open visit assigned to this session, and its continuation_group
+# subject. This is what lets a bare `gc-helm dismiss` map to a keystroke. The
+# visits fixture models v-HELD (converse-lx-1) -> A-PARKED, so a session under
+# that identity dismisses A-PARKED without ever naming it.
+: > "$TMP/updates"; : > "$TMP/closes"
+IRC=0; IOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1)" || IRC=$?
+eq "$IRC" "0" "(DISMISS-INFER) a bare dismiss on a held sitting succeeds"
+if grep -q 'inferred the current sitting' <<< "$IOUT"; then
+    ok "(DISMISS-INFER) a bare dismiss resolves the subject from session state"
+else
+    bad "(DISMISS-INFER) no inference happened (got: $IOUT)"
+fi
+if grep -q 'closed visit v-HELD' <<< "$IOUT"; then
+    ok "(DISMISS-INFER) …and dismisses the inferred subject's visit"
+else
+    bad "(DISMISS-INFER) the inferred subject's visit was not closed (got: $IOUT)"
+fi
+if grep -q 'gc.outcome=dismissed' <<< "$(grep -E '^bd update v-HELD' "$TMP/updates" || true)"; then
+    ok "(DISMISS-INFER) …and stamps the inferred sitting's own visit, not some other bead"
+else
+    bad "(DISMISS-INFER) the inferred visit was not stamped (updates: $(grep -E '^bd update' "$TMP/updates" || true))"
+fi
+grep -q 'from the pane' <<< "$(grep -E '^bd close v-HELD' "$TMP/closes" || true)" \
+  && ok "(DISMISS-INFER) …and the --reason reaches the inferred visit's close" \
+  || bad "(DISMISS-INFER) the reason was dropped on the inferred path (closes: $(cat "$TMP/closes"))"
+
+# A listing that did not answer is a runtime fault (exit 4, the header's
+# contract), not a usage error, and never a reason to report "no sitting".
+LFRC=0; LFOUT="$(FAKE_LIST_RC=1 GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss 2>&1)" || LFRC=$?
+eq "$LFRC" "4" "(DISMISS-INFER) a failed listing is a runtime failure, not a usage error"
+grep -q "'gc bd list' failed" <<< "$LFOUT" \
+  && ok "(DISMISS-INFER) …and it names the read that failed" \
+  || bad "(DISMISS-INFER) wrong failed-listing diagnostic (got: $LFOUT)"
+# An array this verb cannot parse (a non-object element beside a real held
+# visit) is the same fault, and must not be misreported as an empty sitting.
+MFRC=0; MFOUT="$(FAKE_LIST_OUT='[{"id":"v-HELD","assignee":"gc-toolkit__converse-lx-1","metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},"junk"]' GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss 2>&1)" || MFRC=$?
+if grep -q 'no open visit is assigned' <<< "$MFOUT"; then
+    bad "(DISMISS-INFER) a malformed element was misreported as no sitting (got: $MFOUT)"
+else
+    ok "(DISMISS-INFER) a malformed listing is not reported as an empty sitting"
+fi
+grep -q 'inferred the current sitting' <<< "$MFOUT" \
+  && ok "(DISMISS-INFER) …and the held visit beside a junk sibling still infers" \
+  || { [ "$MFRC" -eq 4 ] && ok "(DISMISS-INFER) …or it fails closed as unparseable (rc 4)" \
+       || bad "(DISMISS-INFER) malformed listing neither inferred nor failed closed (rc $MFRC, got: $MFOUT)"; }
+
+# No session identity at all: nothing to infer. It fails closed with the exact
+# usage exit a missing bead-id had before inference existed — a refusal, never
+# a guess.
+NIRC=0; NIOUT="$(sh "$SCRIPT" dismiss 2>&1)" || NIRC=$?
+eq "$NIRC" "2" "(DISMISS-INFER) no identity and no bead is a usage error"
+grep -q 'no session identity' <<< "$NIOUT" \
+  && ok "(DISMISS-INFER) …and says the environment named no session" \
+  || bad "(DISMISS-INFER) wrong no-identity refusal (got: $NIOUT)"
+grep -q 'dismiss <bead-id>' <<< "$NIOUT" \
+  && ok "(DISMISS-INFER) …and its recovery hint is the runnable dismiss form, not a placeholder" \
+  || bad "(DISMISS-INFER) no-identity hint is not a copyable dismiss <bead-id> (got: $NIOUT)"
+
+# A session that holds NO visit has no current sitting; refuse and name the
+# explicit-id form rather than dismiss whatever the store happens to return.
+NVRC=0; NVOUT="$(GC_SESSION_ID=gc-toolkit__converse-nobody sh "$SCRIPT" dismiss 2>&1)" || NVRC=$?
+eq "$NVRC" "2" "(DISMISS-INFER) a session holding no visit refuses to guess"
+grep -q 'no open visit is assigned to this session' <<< "$NVOUT" \
+  && ok "(DISMISS-INFER) …and points at the explicit-id form" \
+  || bad "(DISMISS-INFER) wrong empty-sitting refusal (got: $NVOUT)"
+grep -q 'dismiss <bead-id>' <<< "$NVOUT" \
+  && ok "(DISMISS-INFER) …and that explicit-id form is the runnable dismiss <bead-id>" \
+  || bad "(DISMISS-INFER) empty-sitting hint is not a copyable dismiss <bead-id> (got: $NVOUT)"
+
+# (DISMISS-INFER-RIG) a converse sitting defaults its store to the CITY ledger,
+# but its visit is filed in its SUBJECT's rig. So the no-id lookup must resolve
+# the session's own rig (converse-lx-1's record names signal-loom) and read
+# THERE; unpinned it reads the caller store, finds nothing, and reports no open
+# sitting while its pane is still up. The read store is recorded in FAKE_LISTS,
+# so a lookup that ran against the caller store is visible rather than silent.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/lists"
+RGOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1 || true)"
+if grep -qF "$TMP/signal-loom/.beads" "$TMP/lists"; then
+    ok "(DISMISS-INFER-RIG) the current-sitting lookup is pinned at the session's rig, not the caller store"
+else
+    bad "(DISMISS-INFER-RIG) the inference read the caller store, not the session's rig" \
+        "read: $(cat "$TMP/lists")"
+fi
+grep -q 'closed visit v-HELD' <<< "$RGOUT" \
+  && ok "(DISMISS-INFER-RIG) …and finds the visit the caller store would have missed" \
+  || bad "(DISMISS-INFER-RIG) the session-rig visit was not found (got: $RGOUT)"
+
+# More than one held visit is ambiguous: dismissing either would be a guess, so
+# it refuses and names both subjects. Nothing is closed or stamped.
+: > "$TMP/updates"; : > "$TMP/closes"
+TWO='[{"id":"v-A","assignee":"gc-conv-multi","metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},{"id":"v-B","assignee":"gc-conv-multi","metadata":{"task_kind":"visit","gc.continuation_group":"A-OTHER"}}]'
+AMRC=0; AMOUT="$(FAKE_LIST_OUT="$TWO" GC_SESSION_ID=gc-conv-multi sh "$SCRIPT" dismiss 2>&1)" || AMRC=$?
+eq "$AMRC" "2" "(DISMISS-INFER) more than one held visit refuses to guess"
+grep -q 'more than one open visit' <<< "$AMOUT" \
+  && ok "(DISMISS-INFER) …and names the ambiguity" \
+  || bad "(DISMISS-INFER) wrong ambiguity refusal (got: $AMOUT)"
+grep -q 'dismiss <bead-id>' <<< "$AMOUT" \
+  && ok "(DISMISS-INFER) …and its disambiguation hint is the runnable dismiss <bead-id>" \
+  || bad "(DISMISS-INFER) ambiguity hint is not a copyable dismiss <bead-id> (got: $AMOUT)"
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-INFER) …and closes nothing while ambiguous"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-INFER) …and stamps nothing while ambiguous"
+
+# (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs. (A
+# missing bead-id with no sitting to infer is the no-identity case above.)
 ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 
@@ -1338,14 +1962,26 @@ export FAKE_STEPS_JSON="$TMP/steps.json"
 # ── The releasing session's own step survives the release ────────────────────
 # mol-first-reaction's terminal step disposes by calling `takeaway --release` on
 # the bead its own molecule is anchored to, and then has to close its own step
-# bead. step-close.sh resolves that bead by (assignee, gc.step_ref), so a
-# quiesce that clears the live step's assignee lands the disposition and strands
-# the molecule: the step stays open and is re-offered forever. This section runs
+# bead. step-close.sh resolves that bead within its molecule and corroborates
+# it by the assignee; this live step carries no gc.session_id stamp, so the
+# assignee is the only handle that proves the bead is this session's, and a
+# quiesce that cleared it would land the disposition but strand the molecule:
+# the step stays open and is re-offered forever. This section runs
 # the real release and then the real step-close.sh against ONE mutating store —
 # a logging-only stub cannot show the second command failing on what the first
 # wrote.
 LIVE="$TMP/live"; mkdir -p "$LIVE/bin"
 export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIVE/log"
+# A store write the stub cannot land must not pass silently. The stub mutates the
+# store with a whole-file `jq > tmp && mv` rewrite — the largest write here and
+# the first to hit ENOSPC when a concurrent run-tests.sh batch transiently
+# exhausts the shared tmpfs. Unchecked, that failed rewrite leaves the store at
+# its pre-takeaway value while the stub still exits 0, so every field() read
+# below sees stale state and the quiesce assertions FALSELY fault gc-helm.sh.
+# The stub records this flag instead, and live_store_intact turns it into a
+# distinct infra abort. Sited in $TMP, not $LIVE, so it still lands when $LIVE
+# is the directory that cannot be written.
+export LIVE_WRITE_FAILED="$TMP/live-store-write-failed"
 SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
 
@@ -1356,9 +1992,12 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 # a DIFFERENT live session, so beads refuses to clear its assignee.
 #
 # A-FOLD is a second, independent anchor: CLOSED and superseded, with its own
-# molecule (root-FOLD, F-work) still carrying the pool route the pour left. It
-# is the fold-after-pour race, and the store is what proves the release does
-# not put it back on the board.
+# molecule (root-FOLD, F-work, F-held) still carrying the pool route the pour
+# left. No live session holds a step of it, so it is a HUSK the release reaps:
+# every step and the root are force-closed. F-held is in_progress under another
+# live session, the exact step de-pinning could never release — the store is
+# what proves the reap closes it anyway (--status=closed carries no assignee,
+# so the reassign guard never fires).
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
@@ -1368,6 +2007,7 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
+ {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
  {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
 ]
 JSON
@@ -1378,7 +2018,10 @@ cat > "$LIVE/bin/gc" <<'GCL'
 #!/usr/bin/env bash
 # A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
 # answers the state the earlier write left behind.
-sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE"; }
+# Fail CLOSED: an unchecked `jq > … && mv` drops the write silently when the
+# rewrite cannot land (ENOSPC under disk pressure) and still returns success, so
+# the SUT reads back pre-write state. Record the flag the suite checks instead.
+sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE" && return 0; : >> "$LIVE_WRITE_FAILED"; return 1; }
 case "$1 ${2:-}" in
   "rig list") printf '{"rigs":[{"name":"gc-toolkit","path":"/nonexistent-rig","prefix":"tk"}]}\n' ;;
   "bd list")
@@ -1428,7 +2071,18 @@ case "$1 ${2:-}" in
         *)                shift ;;
       esac
     done ;;
-  "bd dep") printf 'dep %s\n' "$*" >> "$LIVE_LOG" ;;
+  "bd dep")
+    printf 'dep %s\n' "$*" >> "$LIVE_LOG"
+    # reverse `tracks`: the convoys tracking this bead, from LIVE_CONVOYS — the
+    # quiesce resolves the released molecule from its anchor this way.
+    if [ "${3:-}" = "list" ]; then
+      case "$*" in
+        *--direction=up*)
+          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$LIVE_CONVOYS" \
+            | jq -Rnc '[inputs | select(length > 0) | {id: .}]' ;;
+        *) printf '[]\n' ;;
+      esac
+    fi ;;
 esac
 exit 0
 GCL
@@ -1436,9 +2090,21 @@ chmod +x "$LIVE/bin/gc"
 
 field() { jq -r --arg i "$1" --arg k "$2" '.[] | select(.id==$i) | (if $k=="status" then .status elif $k=="assignee" then (.assignee // "") else (.metadata[$k] // "") end)' "$LIVE_STORE"; }
 
+# Call after each mutating run, at TOP LEVEL (never inside a $(field …), where an
+# exit would only leave the subshell). A write the stub could not land leaves the
+# store stale; reading it as a gc-helm.sh verdict would be the false failure this
+# guards against, so stop with a distinct infra message the gate can tell from a
+# real fault.
+live_store_intact() {
+  [ -e "$LIVE_WRITE_FAILED" ] || return 0
+  echo "ABORT(disk-pressure): a LIVE fixture-store write did not land (ENOSPC on the filesystem backing $TMP); the assertions below neither fault nor exonerate gc-helm.sh. Re-run with free tmp space." >&2
+  exit 1
+}
+
 SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
 RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
+live_store_intact   # the quiesce writes landed, or this is disk pressure not a verdict
 
 eq "$(field L-live assignee)" "$SESSION" \
    "(LIVESTEP) the step the release runs FROM keeps its assignee"
@@ -1485,6 +2151,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 SCRC=0
 SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
 eq "$(field L-live status)" "closed" \
    "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
@@ -1499,6 +2166,7 @@ FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-FOLD "superseded by A-CARRIER; the pour raced the fold" \
      --by proactive --release 2>"$LIVE/folderr")" || FOLDRC=$?
 FOLDERR="$(cat "$LIVE/folderr")"
+live_store_intact   # the fold reap's writes landed, or this is disk pressure not a verdict
 eq "$FOLDRC" "0" "(FOLDSTORE) the release on a folded anchor succeeds"
 eq "$(field A-FOLD status)" "closed" \
    "(FOLDSTORE) the anchor is still CLOSED — its disposition was not resurrected"
@@ -1512,17 +2180,51 @@ eq "$(field A-FOLD gc.superseded_by)" "A-CARRIER" \
    "(FOLDSTORE) …and the fold record itself untouched"
 eq "$(field A-FOLD gc.takeaway)" "superseded by A-CARRIER; the pour raced the fold" \
    "(FOLDSTORE) the sitting's headline still lands on it"
-eq "$(field F-work gc.routed_to)" "" \
-   "(FOLDSTORE) the molecule the fold outran is de-routed — the half that was unreachable"
-eq "$(field F-work assignee)" "" "(FOLDSTORE) …and unpinned from the session that is gone"
-eq "$(field root-FOLD gc.routed_to)" "" \
-   "(FOLDSTORE) …and its workflow root with it"
+eq "$(field F-work status)" "closed" \
+   "(FOLDSTORE) the molecule the fold outran is REAPED — a husk no live session completes is force-closed"
+eq "$(field F-work gc.outcome)" "stand-down" \
+   "(FOLDSTORE) …and records why it closed"
+eq "$(field root-FOLD status)" "closed" \
+   "(FOLDSTORE) …its workflow root closed with it, so no door is left to re-offer the husk"
+# The bug this fix exists for: a step in_progress under ANOTHER live session.
+# The reassign guard refuses `--assignee ""` there, which is why de-pinning
+# could never release it and workflow-finalize stayed blocked. The reap closes
+# it through `update --status=closed`, which carries no assignee, so the guard
+# never fires and the held step is gone.
+eq "$(field F-held status)" "closed" \
+   "(FOLDSTORE) a step held in_progress by another live session is force-closed — the reap uses --status=closed, which the reassign guard does not gate"
+eq "$(field F-held assignee)" "gc-toolkit__polecat-lx-other" \
+   "(FOLDSTORE) …with the assignee left as-is: a closed bead is never re-offered, so the guard is never provoked"
 grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
   && ok "(FOLDSTORE) …and the run names the disposition it kept" \
   || bad "(FOLDSTORE) the skipped park is unexplained (stderr: $FOLDERR)"
 grep -q 'anchor left closed' <<< "$FOLDOUT" \
   && ok "(FOLDSTORE) …and reports a quiesce, not a release" \
   || bad "(FOLDSTORE) the run claimed a release (stdout: $FOLDOUT)"
+
+# ── the disk-pressure guard itself ───────────────────────────────────────────
+# The quiesce assertions above read the store back through field(); a stub write
+# the host could not land (ENOSPC under a concurrent run-tests.sh batch) would
+# leave that store stale and read as a false gc-helm.sh failure — the flake this
+# guard removes. Prove both halves so a regression that re-swallows the write is
+# caught: the stub FLAGS a write it could not land, and the flag ABORTS the block
+# distinctly instead of rendering a verdict on stale state. A store directory
+# with no write bit is the hermetic stand-in for a full disk: jq's temp-file
+# create fails exactly as ENOSPC would, while $LIVE stays readable/traversable so
+# the stub still runs and the flag (in $TMP) still lands.
+rm -f "$LIVE_WRITE_FAILED"
+chmod 555 "$LIVE"
+GUARD_WROTE="$("$LIVE/bin/gc" bd update A-LIVE --status=open 2>&1 || true)"
+chmod 755 "$LIVE"
+[ -e "$LIVE_WRITE_FAILED" ] \
+  && ok "(DISKGUARD) a stub store write that cannot land is flagged, not dropped silently" \
+  || bad "(DISKGUARD) a failed store write was swallowed (out: $GUARD_WROTE)"
+GRC=0; GOUT="$(live_store_intact 2>&1)" || GRC=$?
+rm -f "$LIVE_WRITE_FAILED"
+eq "$GRC" "1" "(DISKGUARD) the flag aborts the LIVE block, not a verdict on stale state"
+grep -q 'disk-pressure' <<< "$GOUT" \
+  && ok "(DISKGUARD) …and the abort names disk pressure, not a gc-helm.sh fault" \
+  || bad "(DISKGUARD) the abort is unexplained (out: $GOUT)"
 PATH="$SAVED_PATH"
 
 # ── demand: what a person owes, as a bead the work is blocked by ──────────────
@@ -1548,15 +2250,63 @@ case "$1 ${2:-}" in
     # <bead>|<value> in D_SETTLED: the disposition a bead already carries, which
     # a refresh has to clear off it.
     sd="$(awk -F'|' -v b="$id" '$1==b{print $2; exit}' "$D_SETTLED" 2>/dev/null || true)"
-    blk="$(awk -v b="$id" '$1=="bd" && $2=="dep" && $3=="add" && $4==b {print $5}' "$D_LOG" | jq -R . | jq -sc .)"
+    blk="$( { awk -v b="$id" '$1=="bd" && $2=="dep" && $3=="add" && $4==b {print $5}' "$D_LOG"; awk -v b="$id" '$1==b {print $2}' "$D_GATE_EDGES" 2>/dev/null; } | jq -R . | jq -sc 'map(select(. != "")) | unique')"
     jq -n --arg id "$id" --arg p "$p" --arg sd "$sd" --argjson blk "$blk" \
       '[{id: $id,
-         metadata: {"gc.takeaway_settled": $sd},
+         metadata: ({"gc.takeaway_settled": $sd}
+                    + (if ($id | test("LANDED")) then {"gc.demand_for": "tk-kid"} else {} end)),
          dependencies: ((if $p != "" then [{id: $p, dependency_type: "parent-child"}] else [] end)
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
-  "bd list")  cat "$D_LIST" ;;
+  "bd list")
+    # Even a valid-looking response must not count if the command failed.
+    if [ -f "$D_LIST_FAIL" ]; then cat "$D_LIST"; exit 1; fi
+    cat "$D_LIST" ;;
   "bd create") printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;;
+  "bd gate")
+    # `gc bd gate create --type=human --blocks <gated> --title <t> --json`
+    # returns the new gate's id AND, like the real command, wires the block edge
+    # on the gated bead at birth — recorded in D_GATE_EDGES, which `bd show`
+    # unions in. A gate id carrying NOEDGE models a create whose edge did not
+    # land (wrong ledger, a cycle). `gc bd gate resolve <id>` closes the gate and
+    # drops its edge; that is how `demand` repairs a gate it could not stamp, and
+    # a gate id carrying NORESOLVE models a resolve that itself fails.
+    gid="$(cat "$D_NEXTID")"; prev=""
+    case "${3:-}" in
+      create)
+        [ "${D_CREATE_MODE:-}" != "no-write" ] || exit 1
+        blocked=""; marker=""
+        for a in "$@"; do
+          [ "$prev" = "--blocks" ] && blocked="$a"
+          case "$a" in --await-id=*) marker="${a#--await-id=}" ;; esac
+          prev="$a"
+        done
+        case "$gid" in *NOEDGE*) : ;; *) [ -n "$blocked" ] && printf '%s %s\n' "$blocked" "$gid" >> "$D_GATE_EDGES" ;; esac
+        if [ -n "${D_CREATE_MODE:-}" ]; then
+          jq -n --arg id "$gid" --arg marker "$marker" \
+            '[{id:$id, issue_type:"gate", await_type:"human", await_id:$marker, metadata:{}}]' > "$D_LIST"
+          [ "$D_CREATE_MODE" != "lookup-fail" ] || touch "$D_LIST_FAIL"
+          printf '{"error":"failed to commit"}\n'
+          exit 1
+        fi
+        printf '{"id":"%s"}\n' "$gid" ;;
+      resolve)
+        rid="${4:-}"
+        case "$rid" in *NORESOLVE*) exit 1 ;; esac
+        [ -n "$rid" ] && sed -i "/ $rid\$/d" "$D_GATE_EDGES" 2>/dev/null || true ;;
+    esac ;;
   "bd update")
+    # A gate id carrying NOSTAMP models the stamp write failing after the gate
+    # was already born blocking the work — the orphan `demand` must repair. One
+    # carrying LANDED as well models a write that landed and still exited
+    # non-zero (bd commits after it writes): `bd show` answers the stamp.
+    case "$3" in *NOSTAMP*) exit 1 ;; esac
+    for a in "$@"; do
+      case "$a" in gc.demand_for=*)
+        jq --arg id "$3" --arg g "${a#gc.demand_for=}" \
+          'map(if .id == $id then .metadata["gc.demand_for"] = $g else . end)' \
+          "$D_LIST" > "$D_LIST.tmp" && mv "$D_LIST.tmp" "$D_LIST" ;;
+      esac
+    done
     # The multi-pair refresh never lands here, which is the dropped clear this
     # store models. The lone-pair repair does — unless the bead id says STUCK,
     # the store that will not take that write either.
@@ -1580,8 +2330,10 @@ GC2
 chmod +x "$TMP/bin2/gc"
 
 export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
-       D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing" D_SETTLED="$TMP/dsettled"
+       D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing" D_SETTLED="$TMP/dsettled" \
+       D_GATE_EDGES="$TMP/dgateedges" D_LIST_FAIL="$TMP/dlistfail"
 : > "$TMP/dsettled"
+: > "$TMP/dgateedges"
 printf 'tk-kid|tk-mum\n' > "$D_PARENTS"   # tk-kid has a parent; tk-solo has none
 printf 'tk-gone\n'        > "$D_MISSING"
 printf '[]\n'             > "$D_LIST"
@@ -1590,7 +2342,7 @@ printf 'tk-dem1\n'        > "$D_NEXTID"
 # demand_run <gated> [args...] — fresh log, returns the verb's exit status in DRC
 DRC=0
 demand_run() {
-    : > "$D_LOG"; : > "$TMP/derr"
+    : > "$D_LOG"; : > "$TMP/derr"; : > "$D_GATE_EDGES"
     DRC=0
     DOUT="$(PATH="$TMP/bin2:$PATH" sh "$SCRIPT" demand "$@" 2>"$TMP/derr")" || DRC=$?
     DERR="$(cat "$TMP/derr")"
@@ -1599,23 +2351,29 @@ demand_run() {
 d_create() { grep -E '^bd create ' "$D_LOG" || true; }
 d_update() { grep -E '^bd update ' "$D_LOG" || true; }
 d_deps()   { grep -E '^bd dep add ' "$D_LOG" || true; }
+d_gate()   { grep -E '^bd gate create ' "$D_LOG" || true; }
+d_gate_resolve() { grep -E '^bd gate resolve ' "$D_LOG" || true; }
 
-# (SIBLING) the demand inherits the GATED bead's parent — never becomes its
-# child, which beads would refuse to let it block.
+# (GATE) the demand is a native human gate that blocks the gated bead, born
+# from `gc bd gate create` — the only verb that sets issue_type=gate.
 demand_run tk-kid "operator: pick the storage backend" --by converse
-eq "$DRC" "0" "(SIBLING) a demand on a parented bead succeeds"
-grep -q -- '--parent tk-mum' <<< "$(d_create)" \
-  && ok "(SIBLING) the demand is filed under the gated bead's own parent" \
-  || bad "(SIBLING) no --parent tk-mum in: $(d_create)"
-grep -q -- '--parent tk-kid' <<< "$(d_create)" \
-  && bad "(SIBLING) the demand was filed as a CHILD of the bead it gates" \
+eq "$DRC" "0" "(GATE) a demand on a parented bead succeeds"
+grep -q -- '--type=human' <<< "$(d_gate)" \
+  && ok "(GATE) the demand is a human gate" || bad "(GATE) not --type=human: $(d_gate)"
+grep -q -- '--blocks tk-kid' <<< "$(d_gate)" \
+  && ok "(GATE) …blocking the gated bead" || bad "(GATE) not --blocks tk-kid: $(d_gate)"
+grep -q -- '--title operator: pick the storage backend' <<< "$(d_gate)" \
+  && ok "(GATE) the authored headline is the gate title" \
+  || bad "(GATE) headline is not the title: $(d_gate)"
+eq "$(d_create)" "" "(GATE) no plain bd create — the demand is a gate, not a bare bead"
+# (SIBLING) the gate is grouped under the GATED bead's own parent — never its
+# child, which beads would refuse to let it block.
+grep -q -- '--parent tk-mum' <<< "$(d_update)" \
+  && ok "(SIBLING) the gate is re-homed under the gated bead's own parent" \
+  || bad "(SIBLING) no --parent tk-mum in: $(d_update)"
+grep -q -- '--parent tk-kid' <<< "$(d_update)$(d_gate)" \
+  && bad "(SIBLING) the gate was filed as a CHILD of the bead it gates" \
   || ok "(SIBLING) …and not as a child of the bead it gates"
-grep -q -- '-t decision' <<< "$(d_create)" \
-  && ok "(SIBLING) a ruling is issue_type=decision (a typed board anchor)" \
-  || bad "(SIBLING) not -t decision: $(d_create)"
-grep -q -- '--title operator: pick the storage backend' <<< "$(d_create)" \
-  && ok "(SIBLING) the authored headline is the demand's TITLE" \
-  || bad "(SIBLING) headline is not the title: $(d_create)"
 
 # (EDGE) the wait is an edge on the GATED bead: "tk-kid is blocked by tk-dem1".
 eq "$(d_deps)" "bd dep add tk-kid tk-dem1 -t blocks" \
@@ -1636,31 +2394,29 @@ grep -q 'gc.takeaway_by=converse' <<< "$U" \
 eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-dem1" \
    "(OUT) the demand id is the second field of the 'demand …' line"
 
-# (SIBLINGNONE) a parentless gated bead gets a parentless demand: still a
-# sibling, and still able to carry the edge.
+# (SIBLINGNONE) a parentless gated bead gets a parentless gate: no re-home,
+# and still able to carry the edge.
 demand_run tk-solo "operator: ratify the cutover" --by converse
 eq "$DRC" "0" "(SIBLINGNONE) a demand on a parentless bead succeeds"
-grep -q -- '--parent' <<< "$(d_create)" \
-  && bad "(SIBLINGNONE) invented a parent: $(d_create)" \
+grep -q -- '--parent' <<< "$(d_gate)$(d_update)" \
+  && bad "(SIBLINGNONE) invented a parent: $(d_gate) / $(d_update)" \
   || ok "(SIBLINGNONE) no parent is invented for a parentless subject"
 
-# (KIND) work only a person can do is a task assigned to that person.
-demand_run tk-solo "sign the vendor contract" --kind task --assignee zook
-eq "$DRC" "0" "(KIND) --kind task is accepted"
-grep -q -- '-t task' <<< "$(d_create)" \
-  && ok "(KIND) …filed as a task" || bad "(KIND) not -t task: $(d_create)"
+# (ASSIGN) work only a person can do is assigned to that person; the
+# assignment — not a separate key — is what marks it a task, and the issue
+# type stays gate. No gc.demand_kind is written: the key never had a reader.
+demand_run tk-solo "sign the vendor contract" --assignee zook
+eq "$DRC" "0" "(ASSIGN) an assigned demand is accepted"
 grep -q -- '--assignee zook' <<< "$(d_update)" \
-  && ok "(KIND) …assigned to the person who owes it" || bad "(KIND) no assignee: $(d_update)"
-
-# (KINDBAD) any other kind is a usage error, and files nothing.
-demand_run tk-solo "whatever" --kind epic
-eq "$DRC" "2" "(KINDBAD) an unsupported --kind is a usage error"
-eq "$(d_create)" "" "(KINDBAD) …and nothing is filed"
+  && ok "(ASSIGN) …assigned to the person who owes it" || bad "(ASSIGN) no assignee: $(d_update)"
+grep -q -- 'gc.demand_kind' <<< "$(d_update)" \
+  && bad "(ASSIGN) a dead gc.demand_kind key was written: $(d_update)" \
+  || ok "(ASSIGN) …and no unread gc.demand_kind key is written"
 
 # (CAP) the ≤140 gate is SHARED with takeaway: the title is the same headline.
 demand_run tk-solo "$T141"
 eq "$DRC" "2" "(CAP) a 141-char demand headline is a usage error"
-eq "$(d_create)" "" "(CAP) …and nothing is filed"
+eq "$(d_gate)" "" "(CAP) …and nothing is filed"
 grep -q 'cap is 140' <<< "$DERR" \
   && ok "(CAP) …and the refusal names the cap" || bad "(CAP) refusal is silent: $DERR"
 demand_run tk-solo "$T140"
@@ -1670,7 +2426,7 @@ eq "$DRC" "0" "(CAP) exactly 140 chars is accepted — one boundary, both verbs"
 # still reads on the board as a question someone owes an answer to.
 demand_run tk-gone "operator: decide"
 eq "$DRC" "4" "(RESOLVE) an unresolvable gated bead is a runtime failure"
-eq "$(d_create)" "" "(RESOLVE) …and no demand is filed"
+eq "$(d_gate)" "" "(RESOLVE) …and no demand is filed"
 grep -q 'does not resolve' <<< "$DERR" \
   && ok "(RESOLVE) …and the refusal says why" || bad "(RESOLVE) refusal is silent: $DERR"
 
@@ -1679,7 +2435,7 @@ grep -q 'does not resolve' <<< "$DERR" \
 printf '[{"id":"tk-old1","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
 demand_run tk-kid "operator: pick the storage backend (still)" --by converse
 eq "$DRC" "0" "(IDEM) a re-stated demand succeeds"
-eq "$(d_create)" "" "(IDEM) …without filing a second bead"
+eq "$(d_gate)" "" "(IDEM) …without filing a second bead"
 grep -q '^bd update tk-old1 ' <<< "$(d_update)" \
   && ok "(IDEM) …refreshing the open one instead" || bad "(IDEM) the open demand was not refreshed: $(d_update)"
 grep -q -- '--title operator: pick the storage backend (still)' <<< "$(d_update)" \
@@ -1767,6 +2523,312 @@ grep -q '^demand tk-dem1 blocks tk-kid' <<< "$DOUT" \
   && bad "(ALSOCLOSED) success was printed while a requested edge was missing: $DOUT" \
   || ok "(ALSOCLOSED) …and no success line is printed"
 
+# (GATEREPAIR) `bd gate create` requires --blocks, so the gate is born already
+# blocking the work; a stamp that fails after it leaves a gate that blocks
+# $gated but carries no gc.demand_for — invisible to the re-run's existing-demand
+# lookup, which would then file a SECOND gate. The verb resolves that orphan
+# before returning, so the board is left with nothing blocking the work.
+printf 'tk-NOSTAMP1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend"
+eq "$DRC" "4" "(GATEREPAIR) a stamp that did not land is a runtime failure"
+grep -q '^bd gate resolve tk-NOSTAMP1' <<< "$(cat "$D_LOG")" \
+  && ok "(GATEREPAIR) …and the unstamped gate is resolved, not left blocking" \
+  || bad "(GATEREPAIR) the orphan gate was not resolved: $(d_gate_resolve)"
+grep -q 'resolved the orphan' <<< "$DERR" \
+  && ok "(GATEREPAIR) …and the message says the block was cleared" \
+  || bad "(GATEREPAIR) the repair was silent: $DERR"
+eq "$(awk '$1=="tk-kid"{print $2}' "$D_GATE_EDGES")" "" \
+   "(GATEREPAIR) …so tk-kid is left blocked by no orphan gate"
+grep -q '^demand ' <<< "$DOUT" \
+  && bad "(GATEREPAIR) a success line was printed despite the failed stamp: $DOUT" \
+  || ok "(GATEREPAIR) …and no success line is printed"
+
+# (GATEREPAIRSTUCK) when the orphan cannot even be resolved, the verb says the
+# gate still blocks the work and hands over the manual clear, rather than
+# reporting a demand it did not finish filing.
+printf 'tk-NOSTAMPNORESOLVE1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend"
+eq "$DRC" "4" "(GATEREPAIRSTUCK) a stamp and a resolve that both fail is a runtime failure"
+grep -q 'could not resolve it' <<< "$DERR" \
+  && ok "(GATEREPAIRSTUCK) …and the message says the gate still blocks the work" \
+  || bad "(GATEREPAIRSTUCK) the stuck orphan was silent: $DERR"
+grep -q 'gc bd gate resolve tk-NOSTAMPNORESOLVE1' <<< "$DERR" \
+  && ok "(GATEREPAIRSTUCK) …and hands over the exact manual clear" \
+  || bad "(GATEREPAIRSTUCK) no repair command offered: $DERR"
+
+# (GATELANDED) a non-zero stamp is not proof the stamp did not land: bd writes
+# before it commits. When gc.demand_for reads back, the gate is live and
+# stamped — resolving it would release the work while a person owes an answer.
+printf 'tk-NOSTAMPLANDED1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend"
+eq "$DRC" "0" "(GATELANDED) a stamp that reads back after a non-zero update succeeds"
+eq "$(d_gate_resolve)" "" "(GATELANDED) …and the live, stamped gate is NOT resolved"
+grep -q 'reads back as tk-kid' <<< "$DERR" \
+  && ok "(GATELANDED) …and the verb says why it continued" \
+  || bad "(GATELANDED) silent continue: $DERR"
+grep -q '^demand tk-NOSTAMPLANDED1 blocks tk-kid' <<< "$DOUT" \
+  && ok "(GATELANDED) …and the success line names the gate" \
+  || bad "(GATELANDED) no success line: $DOUT"
+printf 'tk-dem1\n' > "$D_NEXTID"
+
+# Creation can write the row and edge, then fail before returning its id.
+export D_CREATE_MODE=post-write
+printf 'tk-recovered\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recover the interrupted demand"
+eq "$DRC" "0" "(CREATELOST) a post-write create failure recovers successfully"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(CREATELOST) the recovered row receives discoverable demand metadata"
+eq "$(awk '$1=="tk-kid"{print $2}' "$D_GATE_EDGES")" "tk-recovered" \
+   "(CREATELOST) the original blocker remains in place"
+eq "$(d_gate_resolve)" "" "(CREATELOST) the recovered live gate is not resolved"
+eq "$(awk '/^demand /{print $2}' <<< "$DOUT")" "tk-recovered" \
+   "(CREATELOST) success returns the recovered id"
+demand_run tk-kid "operator: restate the demand"
+eq "$DRC" "0" "(CREATERETRY) the stamped demand can be refreshed"
+eq "$(d_gate)" "" "(CREATERETRY) retry creates no second gate"
+
+# Recovery still goes through the existing orphan cleanup if stamping fails.
+printf '[]\n' > "$D_LIST"
+printf 'tk-NOSTAMP-recovered\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recovered but unstamped"
+eq "$DRC" "4" "(RECOVERYCLEANUP) failed stamp after recovery reports failure"
+eq "$(d_gate_resolve)" "bd gate resolve tk-NOSTAMP-recovered" \
+   "(RECOVERYCLEANUP) recovered orphan is resolved by the existing cleanup"
+eq "$(cat "$D_GATE_EDGES")" "" "(RECOVERYCLEANUP) orphan no longer blocks work"
+printf 'tk-recovered\n' > "$D_NEXTID"
+
+# If immediate recovery is unreadable, the stable marker survives for a retry.
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=lookup-fail
+demand_run tk-kid "operator: recover later"
+eq "$DRC" "4" "(RECOVERYREAD) failed recovery reports failure"
+grep -q 'creation on tk-kid is uncertain' <<< "$DERR" \
+  && ok "(RECOVERYREAD) reports uncertainty rather than claiming nothing was filed" \
+  || bad "(RECOVERYREAD) wrong diagnostic: $DERR"
+eq "$(jq -r '.[0].await_id' "$D_LIST")" "gc-demand:tk-kid" \
+   "(RECOVERYREAD) the unstamped row retains the recovery marker"
+demand_run tk-kid "operator: still unreadable"
+eq "$DRC" "4" "(LOOKUPREAD) an unreadable initial lookup fails closed"
+eq "$(d_gate)" "" "(LOOKUPREAD) no create while the ledger is unreadable"
+rm "$D_LIST_FAIL"
+demand_run tk-kid "operator: recover later"
+eq "$DRC" "0" "(RECOVERYRETRY) a later retry adopts the unstamped gate"
+eq "$(d_gate)" "" "(RECOVERYRETRY) adoption creates no second gate"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(RECOVERYRETRY) adoption completes the stamp"
+
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=no-write
+demand_run tk-kid "operator: no write landed"
+eq "$DRC" "4" "(CREATEEMPTY) creation with no surviving row fails"
+eq "$(d_update)$(d_gate_resolve)" "" "(CREATEEMPTY) no invented gate is stamped or resolved"
+eq "$(grep -c '^bd gate create ' "$D_LOG")" "1" "(CREATEEMPTY) no blind create retry"
+unset D_CREATE_MODE
+
+printf '{"error":"unreadable"}\n' > "$D_LIST"
+demand_run tk-kid "operator: invalid lookup"
+eq "$DRC" "4" "(LOOKUPINVALID) malformed list shape fails closed"
+eq "$(d_gate)" "" "(LOOKUPINVALID) no create after an invalid lookup"
+
+printf '[{"id":"tk-a","issue_type":"gate","await_type":"human","await_id":"gc-demand:tk-kid"},{"id":"tk-b","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: ambiguous demand"
+eq "$DRC" "4" "(LOOKUPMULTIPLE) multiple matching demands require reconciliation"
+eq "$(d_gate)$(d_update)$(d_gate_resolve)" "" "(LOOKUPMULTIPLE) neither gate is changed or duplicated"
+grep -q 'tk-a, tk-b' <<< "$DERR" \
+  && ok "(LOOKUPMULTIPLE) diagnostic identifies both gates" \
+  || bad "(LOOKUPMULTIPLE) missing conflicting ids: $DERR"
+printf '[]\n' > "$D_LIST"
+
+# (IDEMSCRUB) the dedup lookup must survive a control-character-laden `bd list`.
+# A raw C0 byte makes jq reject the whole payload, so an unscrubbed lookup comes
+# back empty and the re-state files a SECOND gate beside the one already open —
+# the duplicate the single-open-demand invariant exists to prevent. demand_lookup
+# scrubs C0 bytes before jq, so a noisy read still finds the open demand and
+# refreshes it. A raw TAB inside a JSON string is the canonical case: invalid to
+# jq, dropped by the scrub, and unrelated to the field the match reads.
+printf '[{"id":"tk-old2","status":"open","metadata":{"gc.demand_for":"tk-kid"},"notes":"noisy\tread"}]\n' > "$D_LIST"
+demand_run tk-kid "operator: pick the backend (after a noisy read)" --by converse
+eq "$DRC" "0" "(IDEMSCRUB) a re-state whose lookup carried a control char still succeeds"
+eq "$(d_gate)" "" "(IDEMSCRUB) …filing no second gate — the open demand was found through the noise"
+grep -q '^bd update tk-old2 ' <<< "$(d_update)" \
+  && ok "(IDEMSCRUB) …refreshing the one already open" \
+  || bad "(IDEMSCRUB) the noisy-read demand was not refreshed: $(d_update)"
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-old2" \
+   "(IDEMSCRUB) …and it names the demand that already existed"
+printf '[]\n' > "$D_LIST"
+
+# (CAPREFRESH) an over-cap RE-STATE, with a demand already open, is rejected by
+# the length gate before the lookup runs — so it neither refreshes the open
+# demand nor files a second one, and the single open demand is left untouched.
+# The gate rejecting is what keeps a too-long re-state from becoming a duplicate.
+printf '[{"id":"tk-old3","status":"open","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+demand_run tk-kid "$T141"
+eq "$DRC" "2" "(CAPREFRESH) an over-cap re-state is a usage error"
+eq "$(d_gate)$(d_update)" "" "(CAPREFRESH) …touching nothing: no second gate, no refresh of the open one"
+grep -q 'cap is 140' <<< "$DERR" \
+  && ok "(CAPREFRESH) …and the refusal names the cap" \
+  || bad "(CAPREFRESH) refusal is silent: $DERR"
+printf '[]\n' > "$D_LIST"
+
+# ── demand --topic: one open demand per (gated bead, topic) ───────────────────
+# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
+# files a demand on it. Keyed on the gated bead alone, the second refreshes the
+# first's gate in place and overwrites the operator question it holds. --topic
+# scopes the demand to the sitting (its escalation_key), so each keeps its own.
+
+# (TOPICFILE) a fresh topic-scoped demand records its topic and a topic-scoped
+# recovery marker, so an unstamped orphan is later recoverable under that topic
+# alone rather than colliding with a sibling's on the same bucket.
+printf '[]\n' > "$D_LIST"
+printf 'tk-demTA\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick backend (finding A)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICFILE) a topic-scoped demand succeeds"
+grep -qE -- '--await-id=gc-demand:tk-kid:finding-a( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICFILE) …the gate's recovery marker carries the topic" \
+  || bad "(TOPICFILE) await-id is not topic-scoped: $(d_gate)"
+grep -q -- 'gc.demand_topic=finding-a' <<< "$(d_update)" \
+  && ok "(TOPICFILE) …and the demand records its topic" \
+  || bad "(TOPICFILE) gc.demand_topic missing: $(d_update)"
+grep -q -- 'gc.demand_for=tk-kid' <<< "$(d_update)" \
+  && ok "(TOPICFILE) …alongside the gated bead it blocks" \
+  || bad "(TOPICFILE) gc.demand_for missing: $(d_update)"
+
+# (TOPICISOLATE) two demands on ONE gated bead, one per topic. A re-state under
+# topic A refreshes only A's demand — never the sibling's, and files no new gate
+# — so a sitting on one bucket cannot overwrite another's operator question.
+printf '[{"id":"tk-demA","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-a"}},{"id":"tk-demB","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-b"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: pick backend (finding A, restated)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICISOLATE) a topic-scoped re-state succeeds beside a sibling demand on the same bead"
+eq "$(d_gate)" "" "(TOPICISOLATE) …without filing a second gate"
+grep -q '^bd update tk-demA ' <<< "$(d_update)" \
+  && ok "(TOPICISOLATE) …refreshing its own topic's demand" \
+  || bad "(TOPICISOLATE) topic A's demand was not refreshed: $(d_update)"
+grep -q '^bd update tk-demB ' <<< "$(d_update)" \
+  && bad "(TOPICISOLATE) the sibling topic's demand was overwritten: $(d_update)" \
+  || ok "(TOPICISOLATE) …and the sibling topic's demand is left untouched"
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-demA" \
+   "(TOPICISOLATE) …and it names topic A's demand"
+printf '[]\n' > "$D_LIST"
+
+# (TOPICNONE) a demand with no --topic keeps the pre-topic shape: a bare
+# gc-demand:<gated> marker and no gc.demand_topic key, so every other caller of
+# the verb is unchanged.
+printf 'tk-demNT\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend" --by converse
+eq "$DRC" "0" "(TOPICNONE) a demand with no topic succeeds"
+grep -qE -- '--await-id=gc-demand:tk-kid( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICNONE) …with a bare, topic-free recovery marker" \
+  || bad "(TOPICNONE) await-id is not the bare marker: $(d_gate)"
+grep -q -- 'gc.demand_topic' <<< "$(d_update)" \
+  && bad "(TOPICNONE) a gc.demand_topic key was written without a topic: $(d_update)" \
+  || ok "(TOPICNONE) …and no gc.demand_topic key is written"
+printf 'tk-dem1\n' > "$D_NEXTID"
+printf '[]\n' > "$D_LIST"
+
+# (TOPICRECOVERY) the topic variant of RECOVERYREAD/RECOVERYRETRY. A topic-scoped
+# create writes an unstamped orphan — its await_id carries the topic, but
+# gc.demand_topic is not stamped yet — then fails before returning its id. A later
+# retry under the SAME topic must adopt that orphan by its await_id and file no
+# second gate. The await_id already encodes the topic, so the adoption lookup keys
+# on it rather than on a gc.demand_topic the orphan does not carry; a lookup that
+# demanded gc.demand_topic here would miss the orphan and duplicate the gate.
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=lookup-fail
+printf 'tk-TOPICorphan\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recover later (finding A)" --by converse --topic finding-a
+eq "$DRC" "4" "(TOPICRECOVERY) a topic-scoped recovery read failure fails closed"
+eq "$(jq -r '.[0].await_id' "$D_LIST")" "gc-demand:tk-kid:finding-a" \
+   "(TOPICRECOVERY) the unstamped orphan retains the topic-scoped marker"
+rm "$D_LIST_FAIL"
+demand_run tk-kid "operator: recover later (finding A)" --by converse --topic finding-a
+eq "$DRC" "0" "(TOPICRECOVERYRETRY) a later retry adopts the unstamped topic orphan"
+eq "$(d_gate)" "" "(TOPICRECOVERYRETRY) adoption creates no second gate"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(TOPICRECOVERYRETRY) adoption completes the stamp on the gated bead"
+grep -q -- 'gc.demand_topic=finding-a' <<< "$(d_update)" \
+  && ok "(TOPICRECOVERYRETRY) …recording the topic on the adopted gate" \
+  || bad "(TOPICRECOVERYRETRY) gc.demand_topic not stamped on adoption: $(d_update)"
+unset D_CREATE_MODE
+printf 'tk-dem1\n' > "$D_NEXTID"
+printf '[]\n' > "$D_LIST"
+
+# ── the rig-enumeration helper restores the caller's trap table ──────────────
+# A trap is process-global: one installed inside a helper and left there
+# rewrites how every later line of the caller answers a signal, and outlives
+# the file it was installed to remove. The helper is lifted and run directly
+# — every real call site is a command substitution, whose subshell would hide
+# the residue. Assert the table is unchanged across the call, not that it is
+# empty: a caller can inherit a disposition the helper never touches — a parent
+# that ignores SIGPIPE shows up as `trap -- '' SIGPIPE`, which bash reports and
+# the helper can neither set nor clear — and the invariant is that the helper
+# leaves the table exactly as it found it.
+ENUM="$TMP/enum-helper.sh"
+sed -n '/^rigs_count() {/,/^}/p;/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
+mkdir -p "$TMP/enumbin"
+cat > "$TMP/enumbin/gc" <<'ENUMGC'
+#!/usr/bin/env bash
+[ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
+exit 0
+ENUMGC
+chmod +x "$TMP/enumbin/gc"
+cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
+set -eu
+PROG=probe; FIXTURE=""; RIGS=""; TIMEOUT_BIN=""
+with_timeout() { shift; "$@"; }
+. "$1"
+before="$(trap)"
+enumerate_rigs
+after="$(trap)"
+printf 'RIGS[%s]\n' "$RIGS"
+[ "$before" = "$after" ] && printf 'TRAPDELTA[]\n' \
+  || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
+ENUMPROBE
+ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+grep -q 'RIGS\[\[' <<< "$EOUT" \
+  && ok "(ENUM) the helper enumerated, so the temp-file path really ran" \
+  || bad "(ENUM) the helper did not enumerate (out: $EOUT)"
+grep -q 'TRAPDELTA\[\]' <<< "$EOUT" \
+  && ok "(ENUM) …and left the caller's trap table as it found it" \
+  || bad "(ENUM) the helper changed the caller's traps (out: $EOUT)"
+eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l)" "0" \
+   "(ENUM) …and removed its stderr capture"
+
 echo ""
-echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape): $PASS passed, $FAIL failed"
+echo "── react: an already-reacted skip is a distinct exit, not a silent dispatch ──"
+# react is a thin wrapper over tools/gc-proactive.sh `sling`. That tool exits
+# RC_ALREADY_REACTED (3) when its guard skips a bead that already carries a
+# first reaction — a no-op that dispatched nothing. react must re-raise that as
+# its OWN no-op code (5), distinct from a dispatch (0) and a real failure (4),
+# so an intake caller (gc-visit-open) files its own visit instead of waiting for
+# a reaction that never ran. Drive the REAL react over a fake sling whose exit
+# code is the one thing under test (rig resolution uses the gc `rig list` stub).
+cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
+#!/usr/bin/env bash
+exit "${FAKE_SLING_RC:-0}"
+PRO
+chmod +x "$TMP/bin/gc-proactive.sh"
+export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
+
+rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
+eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
+grep -q "already carries a first reaction" "$TMP/rerr" \
+  && ok "(REACT) …and names the no-op cause" \
+  || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
+grep -q "failed" "$TMP/rerr" \
+  && bad "(REACT) a no-op must not be reported as a failure" \
+  || ok "(REACT) …and is not reported as a failure"
+
+rrc=0; FAKE_SLING_RC=0 sh "$SCRIPT" react tk-react1 >/dev/null 2>&1 || rrc=$?
+eq "$rrc" "0" "(REACT) a dispatched sling (exit 0) exits 0"
+
+rrc=0; FAKE_SLING_RC=4 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr2" || rrc=$?
+eq "$rrc" "4" "(REACT) a real sling failure (exit 4) stays a failure (exit 4)"
+grep -q "failed" "$TMP/rerr2" \
+  && ok "(REACT) …and is reported as a failure" \
+  || bad "(REACT) react failure message missing: $(cat "$TMP/rerr2")"
+unset GC_PROACTIVE_TOOL FAKE_SLING_RC
+
+echo ""
+echo "gc-helm takeaway + demand + dismiss + react (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference, react no-op exit): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

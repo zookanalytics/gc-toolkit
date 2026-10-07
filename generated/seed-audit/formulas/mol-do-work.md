@@ -16,7 +16,15 @@ review).
 | Variable | Source | Description |
 |----------|--------|-------------|
 | convoy_id | runtime | Input convoy tracking the single work bead |
+| escalation_target | caller / rig `formula_vars` | Mail recipient for blocked work (default: `human`) |
 
+
+Variables:
+  {{escalation_target}}: Mail recipient for escalations when work cannot be completed. Defaults to the
+reserved `human` alias, which resolves in every city. Cities that staff a
+work-health role (e.g. the gastown pack's witness) can point this at it, for
+example `escalation_target = "<rig>/witness"`.
+ (default=human)
 
 Steps (3):
   ├── mol-do-work.do-work: Read assignment, implement, verify, commit, and close

@@ -14,18 +14,20 @@ reaction, and drains.
 2. **Write a CARD**, not prose: `Understanding · Found (freshness-stamped)
    · Proposal · Decision needed · Disposition` — the shape the board lands the
    human on, ending in the one line the terminal step acts on.
-3. **Dispose, don't close.** The reaction ends in ONE of three exits — route
-   the bead to a pool, hold it on an edge, or file a visit — chosen from the
-   card. The work bead stays OPEN either way; closing it would claim the work
-   is done.
+3. **Dispose, don't close.** The reaction ends in ONE of five exits — route
+   the bead to a pool, recommend an action on a visit the operator can Accept,
+   hold it on an edge, route it to a validating closer, or file a plain visit —
+   chosen from the card. The reaction never closes the bead itself; where a bead
+   should close, the closer pool confirms and closes it.
 4. **mr-only for code.** A reaction is notes-only by default; code it
    produces takes the gated `mr` path, never `direct`, never a push to main.
 
 Mechanics the steps are written around: the target bead arrives as the
 input convoy (each step re-derives WORK_BEAD_ID in its own shell — never
 spell the retired `issue` var), and each step closes its own bead through
-assets/scripts/step-close.sh, which resolves by (assignee, gc.step_ref) —
-never a GC_*BEAD_ID env var, which does not track the current step.
+assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,
+gc.step_ref) — never a GC_*BEAD_ID env var, which does not track the current
+step.
 
 
 Steps (4):

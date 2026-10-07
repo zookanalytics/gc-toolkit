@@ -36,7 +36,7 @@ beforeEach(() => {
       bead: BEAD_ID,
       outcome: 'filed',
       visit: 'tk-v1s1t',
-      message: `visit tk-v1s1t filed on ${BEAD_ID} (pool gc-toolkit/gc-toolkit.converse) — a converse session will spawn (cold) or vacuum it (warm).`,
+      message: `visit tk-v1s1t filed on ${BEAD_ID} — parked on the helm board (gc.routed_to=human); no session spawned.`,
     });
   vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 function clickOpen() {
-  fireEvent.click(screen.getByRole('button', { name: /start a conversation/i }));
+  fireEvent.click(screen.getByRole('button', { name: /file a visit/i }));
 }
 
 describe('OpenConversation', () => {
@@ -66,6 +66,9 @@ describe('OpenConversation', () => {
     expect(call.url).toBe('helm/open');
     expect(call.init?.method).toBe('POST');
     expect(JSON.parse(String(call.init?.body))).toEqual({ bead: BEAD_ID });
+    // The supervisor refuses a private-service mutation without X-GC-Request
+    // (403 "csrf: X-GC-Request header required"), so the open write must carry it.
+    expect((call.init?.headers as Record<string, string>)?.['X-GC-Request']).toBe('true');
   });
 
   it('reports a filed visit without claiming to have attached the operator', async () => {
@@ -73,7 +76,7 @@ describe('OpenConversation', () => {
     clickOpen();
 
     const status = await screen.findByRole('status');
-    expect(text(status)).toContain('A conversation is being opened.');
+    expect(text(status)).toContain('A visit is parked on the board.');
     // The tool's own sentence survives to the browser.
     expect(text(status)).toContain('visit tk-v1s1t filed on');
     // …and the one thing the tool does not say.
@@ -86,17 +89,17 @@ describe('OpenConversation', () => {
         bead: BEAD_ID,
         outcome: 'existing',
         visit: 'tk-old99',
-        message: `visit tk-old99 is already open for ${BEAD_ID} — a converse session holds it (or will spawn/vacuum it).`,
+        message: `visit tk-old99 is already open for ${BEAD_ID} — parked on the helm board until an operator engages it.`,
       });
     render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
 
     const status = await screen.findByRole('status');
-    expect(text(status)).toContain('A conversation is already open on this bead.');
+    expect(text(status)).toContain('A visit is already open on this bead.');
     expect(text(status)).toContain('tk-old99');
-    // Told "being opened" here, an operator would believe a second conversation
-    // now exists. It does not — the tool deliberately filed nothing.
-    expect(text(status)).not.toContain('A conversation is being opened.');
+    // Shown the filed line here, an operator would believe a NEW visit was just
+    // parked. It was not — the tool deliberately filed nothing.
+    expect(text(status)).not.toContain('A visit is parked on the board.');
   });
 
   // THE OPERATOR'S ACTUAL COMPLAINT: different operator moves must not render
@@ -186,7 +189,7 @@ describe('OpenConversation', () => {
     rerender(<OpenConversation beadId="tk-other9" />);
     expect(screen.queryByRole('status')).toBeNull();
     // …and the action is offered afresh for the new bead.
-    expect(screen.getByRole('button', { name: /start a conversation/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /file a visit/i })).toBeTruthy();
   });
 
   it('drops a failure when the panel is pointed at a different bead', async () => {
@@ -208,7 +211,7 @@ describe('OpenConversation', () => {
 
     const { rerender } = render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
-    await screen.findByRole('button', { name: /opening…/i });
+    await screen.findByRole('button', { name: /filing…/i });
 
     rerender(<OpenConversation beadId="tk-other9" />);
     release(
@@ -216,7 +219,7 @@ describe('OpenConversation', () => {
     );
     // Give the settled promise a turn to run.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /start a conversation/i })).toBeTruthy(),
+      expect(screen.getByRole('button', { name: /file a visit/i })).toBeTruthy(),
     );
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -231,7 +234,7 @@ describe('OpenConversation', () => {
     render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
 
-    const button = await screen.findByRole('button', { name: /opening…/i });
+    const button = await screen.findByRole('button', { name: /filing…/i });
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
     // A second click while in flight must not queue a second visit.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/duplicate-sweep.sh — arm 7 of the merge
+# Hermetic test for assets/scripts/duplicate-sweep.sh — arm 11 of the merge
 # cadence. Covers: both proofs of "recorded no work" (an explicit
 # work_outcome=no-op and the structural no-work-key case) and the fact that a
 # no-op duplicate carrying the TWIN's branch still disposes; both successor
@@ -14,7 +14,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-duplicate-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -43,14 +43,14 @@ while [ $# -gt 0 ]; do
   esac
   shift || true
 done
-S="${STUB_STORE:?}"; tmp="$(mktemp)"
+S="${STUB_STORE:?}"; tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-duplicate-sweep-test.XXXXXX")"
 if [ -z "${REHOME_NO_STAMP:-}" ]; then
   jq -c --arg id "$origin" --arg s "$succ" 'map(if .id == $id then
       .metadata["gc.superseded_by"] = $s
       | .metadata["gc.superseded_by_store"] = "rig:gc-toolkit" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
 fi
 if [ -z "${REHOME_NO_CLOSE:-}" ] && [ -z "${REHOME_NO_STAMP:-}" ]; then
-  tmp="$(mktemp)"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-duplicate-sweep-test.XXXXXX")"
   jq -c --arg id "$origin" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
 fi
 exit 0

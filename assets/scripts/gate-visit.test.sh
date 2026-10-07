@@ -10,10 +10,16 @@
 # formulas-only; gc-helm.sh's `open` verb carries the copy the operator front
 # doors actually reach — and asserts the load-bearing invariants each stamp
 # carries (each has a silent-failure trap the pack has paid for):
-#   - the pool is the rig-qualified exact-match form (bare names sit
-#     silently forever on the exact-string read side)
-#   - the three metadata stamps ride one --set-metadata flag each
-#     (comma-joined pairs become one garbage value)
+#   - each copy routes to the board (POOL="human", the literal the board's
+#     gather matches on gc.routed_to == "human") or to a pool proved by
+#     pool-route.sh against the live agent set; either way the conditional rig
+#     prefix that renders bare for a rig-less caller is gone (a pool offer is
+#     read by exact string equality, so a bare address sits silently forever)
+#   - the three metadata stamps are each present and load-bearing, riding
+#     either their own --set-metadata flag (comma-joined pairs become one
+#     garbage value, so each rides its own) or a key in the create's jq-built
+#     --metadata JSON (which stamps the identity atomically with the create, so
+#     an interrupted stamp cannot leave a visit its dedup can never match)
 #   - the visit is wired to its subject with a tracks edge (parent-child
 #     would transmit the subject's blocked state to the visit)
 #   - the visit title carries the "visit: " brand
@@ -34,6 +40,17 @@ ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 have() { if grep -qF -- "$2" "$3"; then ok "$1"; else bad "$1" "missing: $2"; fi; }
 
+# A load-bearing stamp rides EITHER its own --set-metadata flag (the own-flag
+# form guards the comma-joined-pairs trap) OR a key in the create's jq-built
+# --metadata JSON, which cannot hit that trap and stamps the identity atomically
+# with the create. Accept both. $2 is the --set-metadata ERE, $3 the JSON key ERE.
+stamped() { # <block> <set-metadata-ERE> <json-key-ERE>
+    printf '%s' "$1" | grep -qE -- "$2" && return 0
+    printf '%s' "$1" | grep -qF -- '--metadata "' \
+        && printf '%s' "$1" | grep -qE -- "\"$3\"[[:space:]]*:" && return 0
+    return 1
+}
+
 extract() { # extract marked blocks from one file to stdout, blocks separated by \x1e
     awk '/# >>> gate-visit/{inb=1; next} /# <<< gate-visit/{inb=0; printf "\x1e"; next} inb' "$1"
 }
@@ -47,7 +64,7 @@ echo "── every consumer copy carries the invariants ──"
 # SCRIPT_CONSUMERS split that by surface so each census can assert its own
 # floor (a formula copy going missing must not be masked by a script copy
 # appearing, or the reverse).
-CONSUMERS=0; FORMULA_CONSUMERS=0; SCRIPT_CONSUMERS=0; PROMPT_CONSUMERS=0
+CONSUMERS=0; FORMULA_CONSUMERS=0; SCRIPT_CONSUMERS=0
 # check_file <path> — assert the invariants on every marked copy in one file.
 # Fed by a heredoc, NOT a pipe: a pipe would run the loop in a subshell and
 # the counters would come back zero.
@@ -59,30 +76,65 @@ check_file() {
     while IFS= read -r -d $'\x1e' block; do
         [ -n "$(printf '%s' "$block" | tr -d '[:space:]')" ] || continue
         n=$((n + 1)); CONSUMERS=$((CONSUMERS + 1))
-        case "$f" in *.toml)              FORMULA_CONSUMERS=$((FORMULA_CONSUMERS + 1)) ;;
-                     *prompt.template.md) PROMPT_CONSUMERS=$((PROMPT_CONSUMERS + 1)) ;;
-                     *)                   SCRIPT_CONSUMERS=$((SCRIPT_CONSUMERS + 1)) ;; esac
+        case "$f" in *.toml) FORMULA_CONSUMERS=$((FORMULA_CONSUMERS + 1)) ;;
+                     *)       SCRIPT_CONSUMERS=$((SCRIPT_CONSUMERS + 1)) ;; esac
         name="$(basename "$f") block $n"
-        tmp="$(mktemp)"
+        tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
         # neutralize template placeholders so bash can parse the copy
         printf '%s\n' "$block" | sed 's/{{[a-z_]*}}/X/g' > "$tmp"
         if bash -n "$tmp" 2>/dev/null; then ok "$name: valid bash"; else bad "$name: valid bash" "bash -n failed"; fi
         # Leading whitespace tolerated: a copy living inside a shell function
         # (gc-helm.sh's cmd_open) is legitimately indented, and an assertion
         # anchored at column 0 would report a correct POOL line as "absent".
-        pool_line="$(grep -E '^[[:space:]]*POOL=' "$tmp" || true)"
-        case "$pool_line" in
-            *'${GC_RIG:+$GC_RIG/}'*converse\") ok "$name: rig-qualified converse pool" ;;
-            *) bad "$name: rig-qualified converse pool" "POOL line: ${pool_line:-absent}" ;;
+        # A gate-visit copy routes EITHER to the board (POOL="human", the retired
+        # converse pool's replacement; the board's gather matches
+        # gc.routed_to == "human" exactly) OR to a pool proved by pool-route.sh
+        # (a fix/rework or polecat pool that survives). EVERY POOL assignment is
+        # checked, not the first: a copy that resolves the route and then
+        # overwrites POOL is back where it started. (escalate.sh reassigns POOL
+        # from --pool, but through pool-route.sh, so it too is a guarded call.)
+        pool_lines="$(grep -E '^[[:space:]]*POOL=' "$tmp" || true)"
+        unproved="$(printf '%s\n' "$pool_lines" \
+            | grep -vE 'POOL="human"|POOL=\$\(.*POOL_ROUTE.*\)[[:space:]]*\|\|[[:space:]]*exit' || true)"
+        if [ -n "$pool_lines" ] && [ -z "$unproved" ]; then
+            ok "$name: every POOL assignment is the board literal or a guarded pool-route.sh call"
+        else
+            bad "$name: every POOL assignment is the board literal or a guarded pool-route.sh call" \
+                "POOL line(s): ${pool_lines:-absent}"
+        fi
+        # The construct the resolver replaces must be GONE, not merely unused:
+        # GC_RIG picks both the store the visit lands in and the rig segment a
+        # rig-scoped pool carries, so a copy that rebuilds the address itself
+        # renders it bare for a rig-less caller and files a visit nobody holds.
+        case "$block" in
+            *'${GC_RIG:+$GC_RIG/}'*)
+                bad "$name: no conditional rig prefix" "the copy still builds an address out of GC_RIG" ;;
+            *)  ok "$name: no conditional rig prefix" ;;
         esac
+        # ...and a copy that RESOLVES a pool through the resolver must name the
+        # SHARED one. A copy is free to bind it outside its own markers
+        # (escalate.sh does), so the file carries the proof, not the block. A
+        # board-only copy (POOL="human") resolves no pool and needs none.
+        if printf '%s\n' "$pool_lines" | grep -qE 'POOL=\$\(.*POOL_ROUTE'; then
+            if grep -qF 'pool-route.sh' "$f"; then
+                ok "$name: POOL_ROUTE names the shared resolver"
+            else
+                bad "$name: POOL_ROUTE names the shared resolver" "no pool-route.sh anywhere in $f"
+            fi
+        else
+            ok "$name: board route resolves no pool"
+        fi
         printf '%s' "$block" | grep -qE 'gc bd create -t task --title "visit: ' \
             && ok "$name: visit title brand" || bad "$name: visit title brand" 'no `--title "visit: …"` create'
-        printf '%s' "$block" | grep -qF -- '--set-metadata "gc.routed_to=$POOL"' \
-            && ok "$name: routed_to stamp, own flag" || bad "$name: routed_to stamp, own flag" "stamp absent or malformed"
-        printf '%s' "$block" | grep -qE -- '--set-metadata "gc\.continuation_group=' \
-            && ok "$name: continuation_group stamp, own flag" || bad "$name: continuation_group stamp, own flag" "stamp absent or malformed"
-        printf '%s' "$block" | grep -qF -- '--set-metadata "task_kind=visit"' \
-            && ok "$name: task_kind stamp, own flag" || bad "$name: task_kind stamp, own flag" "stamp absent or malformed"
+        stamped "$block" '--set-metadata "gc\.routed_to=\$POOL"' 'gc\.routed_to' \
+            && ok "$name: routed_to stamped (own flag or create --metadata)" \
+            || bad "$name: routed_to stamped" "no gc.routed_to via --set-metadata or the create's --metadata"
+        stamped "$block" '--set-metadata "gc\.continuation_group=' 'gc\.continuation_group' \
+            && ok "$name: continuation_group stamped (own flag or create --metadata)" \
+            || bad "$name: continuation_group stamped" "no gc.continuation_group via --set-metadata or the create's --metadata"
+        stamped "$block" '--set-metadata "task_kind=visit"' 'task_kind' \
+            && ok "$name: task_kind stamped (own flag or create --metadata)" \
+            || bad "$name: task_kind stamped" "no task_kind via --set-metadata or the create's --metadata"
         printf '%s' "$block" | grep -qF -- '[ -n "$VISIT" ] && [ "$VISIT" != "null" ]' \
             && ok "$name: create id guarded before use" || bad "$name: create id guarded before use" 'no `[ -n "$VISIT" ] && [ "$VISIT" != "null" ]` guard after the create'
         printf '%s' "$block" | grep -q -- '--type=tracks' \
@@ -104,8 +156,11 @@ check_file() {
         fi
         # ...and the read-back must REPAIR, not refuse: this block files the
         # one visit for its scope, so exiting on a lost stamp trades a quiet
-        # degradation for an outage of the same surface.
-        printf '%s' "$block" | grep -qF -- '--set-metadata "gc.continuation_group=' \
+        # degradation for an outage of the same surface. The re-stamp grep is
+        # scoped to the read-back arm (GROUP_GOT onward): the block's initial
+        # stamp carries the same '--set-metadata "gc.continuation_group="', so a
+        # block-wide grep stays green with the read-back's re-stamp deleted.
+        printf '%s' "$block" | sed -n '/GROUP_GOT=/,$p' | grep -qF -- '--set-metadata "gc.continuation_group=' \
             && printf '%s' "$block" | grep -qE 'warning: gc\.continuation_group .* — repairing"' \
             && ok "$name: the read-back repairs and warns" \
             || bad "$name: the read-back repairs and warns" 'the read-back must re-stamp the group and warn, never exit'
@@ -130,27 +185,28 @@ for f in "$SDIR"/*.sh; do
     case "$f" in *.test.sh) continue ;; esac    # tests quote the block; they do not ship it
     check_file "$f"
 done
-# ...and the PROMPT surface: agents/proactive ships a marked copy to an agent
-# the same way a formula copy ships to a molecule, and an unswept copy is
-# where a fix lands everywhere and still misses one.
-for f in "$REPO"/agents/*/prompt.template.md; do
-    [ -r "$f" ] || continue
-    check_file "$f"
-done
+# Worker prompts carry no gate-visit copy: they are doctrine and defer the
+# dispose mechanics to their formula (proactive → mol-first-reaction's
+# advance-and-drain), so the formula and script sweeps above cover every
+# shipped copy.
 
 echo "── the read-back actually repairs (executed, not grepped) ──"
 # The assertions above prove the TEXT is present; none proves the logic works,
 # and the block exists to turn a silent failure into a loud one. So the
 # canonical copy is extracted and RUN against a stub, once per outcome.
-EXTMP="$(mktemp -d)"
+EXTMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
 trap 'rm -rf "$EXTMP"' EXIT
 mkdir -p "$EXTMP/bin"
 cat > "$EXTMP/bin/gc" <<'GVSTUB'
 #!/usr/bin/env bash
 # Serves the reads the block makes. LOST=1 makes the first stamp vanish —
 # the observed failure: the update returns 0 and the value reads back empty.
+# $AGENTS is the live identity set the route is proved against; an arm that
+# answered nothing would read as UNREADABLE, which fails open and would take
+# the whole route check out of this suite.
 case "$1 ${2:-}" in
-  "bd create") echo '{"id":"v-1"}' ;;
+  "agent list") printf '%s\n' "${AGENTS:-}" ;;
+  "bd create") printf 'CREATE %s\n' "$*" >> "$LOG"; echo '{"id":"v-1"}' ;;
   "bd update") printf 'UPDATE %s\n' "$*" >> "$LOG"
                case "$*" in *gc.continuation_group=*)
                  if [ -f "$STATE/stamped" ]; then touch "$STATE/repaired"; else touch "$STATE/stamped"; fi ;;
@@ -171,9 +227,13 @@ chmod +x "$EXTMP/bin/gc"
 awk '/# >>> gate-visit/{f = 1; next} /# <<< gate-visit/{f = 0} f' "$FDIR/mol-visit.toml" \
     | sed 's/{{subject}}/sub-A/g; s/{{visit}}/why/g; s/{{binding_prefix}}/gc-toolkit./g' \
     > "$EXTMP/block.sh"
+# The canonical copy parks on the board (POOL="human", the retired converse
+# pool's replacement) and resolves no pool, so this run exercises the create and
+# the continuation_group repair, not a route. The route-refusal proof lives with
+# the surviving pool-route.sh call sites (escalate.test.sh executes it).
 run_block_gv() { # <LOST> -> stdout+stderr of the block; $EXTMP/log side-effects
     rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
-    env PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST="$1" GC_RIG=rig \
+    PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST="$1" GC_RIG=rig \
         bash "$EXTMP/block.sh" 2>&1
 }
 group_writes() { grep -c 'gc.continuation_group=' "$EXTMP/log" 2>/dev/null || echo 0; }
@@ -220,11 +280,6 @@ if [ "$SCRIPT_CONSUMERS" -ge 1 ]; then
     ok "the script surface carries marked copies ($SCRIPT_CONSUMERS found)"
 else
     bad "the script surface carries marked copies" "expected >=1 (gc-helm.sh open files the operator's visit); found $SCRIPT_CONSUMERS — did a copy get unmarked or hand-rolled?"
-fi
-if [ "$PROMPT_CONSUMERS" -ge 1 ]; then
-    ok "the prompt surface carries marked copies ($PROMPT_CONSUMERS found)"
-else
-    bad "the prompt surface carries marked copies" "expected >=1 (agents/proactive files a first-reaction visit); found $PROMPT_CONSUMERS — an unswept copy is where a fix lands everywhere and still misses one"
 fi
 
 echo

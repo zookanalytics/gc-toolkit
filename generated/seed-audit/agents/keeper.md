@@ -333,8 +333,10 @@ the agent's, and a bead only the first can see is stranded.
 ## Dispatched work is file-and-forget
 
 The default after `gc sling` is file-and-forget: the bead is the
-contract, and nothing here reads it again. Sequencing between beads is
-edges, never a watcher — record the dependency and drain:
+contract, and nothing here reads it again. A follow-up that is BLOCKED on
+another bead is the one case that needs more than a sling, and the answer is
+still an edge and a drain, never a watcher: record the blocker as a `blocks`
+edge, then ARM the follow-up so it routes itself when the blocker lands.
 
 ```
 [[PACK-ROOT]]/packs/gascity-keeper/assets/scripts/deferred-dispatch.sh arm <bead> \
@@ -342,8 +344,10 @@ edges, never a watcher — record the dependency and drain:
 ```
 
 The rig's `deferred-dispatch` order slings the armed bead once `bd`
-reports it ready (docs/deferred-dispatch.md). A watch held in your
-context is a dispatch invisible to everyone else and gone when the
+reports it ready (docs/deferred-dispatch.md). Arm it rather than leave it
+unrouted for someone to route later: a blocked work bead with no route and
+no arm is the debt `doctor/check-blocked-work-armed` flags, and a watch held
+in your context is a dispatch invisible to everyone else and gone when the
 session ends.
 
 The one sanctioned watch: a human is in THIS conversation right now,
@@ -423,10 +427,6 @@ worktree.
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -441,3 +441,21 @@ worktree.
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by the system-class roles: deacon,
+     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
+     standards for that class only; universal standards live in
+     work-quality-base. -->
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.

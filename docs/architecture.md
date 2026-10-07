@@ -18,11 +18,12 @@ foundation: the system boundary, how work moves end to end, how humans engage,
 how lessons compound, and the test that keeps new work grounded.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
-and gate mechanics are owned by [state-machine.md](state-machine.md); the merge
+and check mechanics are owned by [state-machine.md](state-machine.md); the merge
 cadence's runtime semantics by
 [refinery-merge-cadence.md](refinery-merge-cadence.md); the primitive list and
 the invariant→check binding by [component-model.md](component-model.md); the
-filing conventions by [file-structure.md](file-structure.md).
+filing conventions by [file-structure.md](file-structure.md); how work is
+structured into epics and when an epic closes by [epics.md](epics.md).
 
 ## The boundary
 
@@ -57,7 +58,7 @@ flowchart LR
   FORM -->|push| BR
   FORM -->|via lifecycle.sh| LIFE
   LIFE -->|one atomic bd update| LEDGER
-  SIGN -->|gate markers| LEDGER
+  SIGN -->|check markers| LEDGER
   ORD -->|every 60s| CAD
   CAD -->|reads + writes via lifecycle.sh| LEDGER
   CAD -->|opens / merges| PR
@@ -69,7 +70,7 @@ flowchart LR
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Three write
 paths matter: `lifecycle.sh` is the only writer of lifecycle transitions,
-`signoff.sh` is the only writer of gate verdicts, and the merge cadence is the
+`signoff.sh` is the only writer of check verdicts, and the merge cadence is the
 only thing that opens or merges a PR. Everything else reads.
 
 ## How work moves
@@ -92,11 +93,11 @@ performer; the full transition table with writers is
    leaves either the pre-handoff state (witness orphan recovery re-routes it)
    or the complete post-handoff state, never a half. The anchor is still
    unanchored here; its first lifecycle transition is the refinery's.
-6. **Gate.** The merge cadence's gate-ensure arm makes every declared gate
+6. **Gate.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` writes the verdict marker or files one rework
    child.
-7. **PR.** With every declared gate green at the live head, `pr-open.sh` opens
+7. **PR.** With every declared check green at the live head, `pr-open.sh` opens
    (or adopts) the pull request.
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one
@@ -132,16 +133,16 @@ The human surface is subject / visit / takeaway on native primitives
   depends on who can answer it. Mail is the agent-to-agent pathway: a worker
   mails the witness, which unblocks what it can and promotes what needs a
   person. A visit is the human engagement: `escalate.sh` files or refreshes
-  **exactly one open visit per situation key**, routed to the converse pool.
-  There is no mayor; a situation that needs a human is a visit, same as any
-  other. Patrol formulas escalate rather than mail, because a patrol sits at
+  **exactly one open visit per situation key**, parked on the helm board
+  (`gc.routed_to=human`), where the operator engages it. There is no mayor; a
+  situation that needs a human is a visit, same as any other. Patrol formulas escalate rather than mail, because a patrol sits at
   the top of the agent tier and has no peer to mail.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger; `gc-helm.sh` keeps only the write verbs —
-  takeaway, open, react. Everything works without the board: it spends no
+  open, engage, react, takeaway, demand, dismiss. Everything works without the board: it spends no
   state, so it can never be wrong for longer than one render.
 
 The discipline throughout is *agents earn every interaction*: prep done before

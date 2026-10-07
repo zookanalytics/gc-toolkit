@@ -1,7 +1,7 @@
 Formula: mol-review
 Description: Signoff review lifecycle — claim -> pin -> judge -> ONE signoff.sh verdict ->
 drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
-metadata.task_kind=review, check_name (the gate the verdict satisfies),
+metadata.task_kind=review, check_name (the check the verdict satisfies),
 anchor_bead (the gating anchor), and the review target — review_branch /
 review_base pre-open, or pr_url / pr_number once a PR exists — plus the
 dispatch-pinned reviewed_oid. The steps carry the whole method; the agent
@@ -26,15 +26,18 @@ Hard rules, in force for every step:
   and how, and one party's code read is not that. When the dispatch says not
   to re-raise something and you find it, report it and say in the verdict
   that you are contradicting the dispatch and why.
-- One agent, single pass. Read the diff yourself, run the tests yourself,
-  write the verdict yourself. No subagents, no persona reviewers, no
-  parallel review pass.
+- Single honest pass. Read the diff yourself, run the tests yourself, write
+  your findings yourself. No subagents doing the review, no persona
+  reviewers. The review may run as a two-provider quorum instead: two lanes
+  each do one honest pass, and one synthesizer combines their findings into
+  the single verdict (the mol-review-quorum-signoff formula). One verdict per
+  claim holds either way, because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: the review bead arrives as the input
 convoy (each step re-derives REVIEW_BEAD in its own shell), and each step
 closes its own bead through assets/scripts/step-close.sh, which resolves by
-(assignee, gc.step_ref) — never a GC_*BEAD_ID env var, which does not track
-the current step.
+(gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var, which does not
+track the current step.
 
 
 Steps (4):

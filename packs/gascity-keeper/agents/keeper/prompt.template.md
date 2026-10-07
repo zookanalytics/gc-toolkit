@@ -340,4 +340,6 @@ worktree.
 [ ] HANDOFF if incomplete: gc handoff -- "HANDOFF: <brief>" "<context>"
 ```
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-system" . }}

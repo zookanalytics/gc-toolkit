@@ -136,6 +136,33 @@ if ! gc handoff "context cycle: context reached $TOKENS tokens" >&2; then
   echo "cycle-recycle: gc handoff failed (non-fatal); reset still attempted" >&2
 fi
 
+# Reap this session's scratch now. The recycle abandons the tree whole — the
+# inheriting session gets a new id and a new tree — so the retiring session
+# reclaims its own at once, with the certainty the hourly horizon reaper can
+# only estimate: that pass holds any session carrying a live process, and this
+# one is still live, so it would decline the very tree the recycle is leaving.
+# The reaper stays the backstop for sessions that end without recycling, so a
+# miss here costs a delayed reclaim, never the recycle. The session id names
+# both the transcript file and the scratch directory; take it from the
+# transcript this hook already read, fall back to the exported id, and reap
+# nothing if neither is a bare id. scratch-reap.sh resolves as its PreToolUse
+# sibling does, and carries every deletion rail.
+SID="$(basename "$TRANSCRIPT" .jsonl 2>/dev/null)"
+case "$SID" in '' | *[!A-Za-z0-9-]*) SID="${CLAUDE_CODE_SESSION_ID:-}" ;; esac
+case "$SID" in '' | *[!A-Za-z0-9-]*) SID="" ;; esac
+if [ -n "$SID" ]; then
+  REAP=""
+  for C in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$C/assets/scripts/scratch-reap.sh" ] && { REAP="$C/assets/scripts/scratch-reap.sh"; break; }
+  done
+  if [ -n "$REAP" ]; then
+    "$REAP" --session "$SID" >&2 \
+      || echo "cycle-recycle: scratch self-reap failed (non-fatal); the hourly reaper is the backstop" >&2
+  else
+    echo "cycle-recycle: scratch-reap.sh not found; leaving this session's scratch to the hourly reaper" >&2
+  fi
+fi
+
 # `gc session reset` is the actual restart trigger for on-demand named sessions
 # (a no-op for controller-restartable ones, which gc handoff already stopped),
 # and it clears any tripped named-session respawn circuit breaker. Best-effort:

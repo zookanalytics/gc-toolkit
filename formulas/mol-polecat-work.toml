@@ -5,7 +5,7 @@ the refinery handoff. Run by every polecat in the city; the agent prompt
 carries the doctrine, this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
-push branch, ONE atomic handoff update to the refinery -> close own step
+push branch, hand the bead to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
 bead and names the disposition for whoever owns the close.
@@ -13,8 +13,9 @@ NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
 assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
-own bead, and step-close.sh resolves it from the (assignee, gc.step_ref)
-pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead after a claim.
+own bead, and step-close.sh resolves it from the (gc.root_bead_id,
+gc.step_ref) pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead
+after a claim, and a pool assignee names every molecule the slot ever ran.
 workflow-finalize is the control-dispatcher's — never close it.
 
 Two distinct branch questions: {{base_branch}} is what the worktree is
@@ -27,11 +28,11 @@ after any edit here.
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a
 separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
-submit-and-exit resolves it once, in step 4c, and the summary follows it.
+submit-and-exit resolves it once, in step 4b, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
-attempt bounced with the branch intact — resume it per metadata.prepare_mode
-(merge = shared branch, never rebase/force-push), don't redo the work.
+attempt bounced with the branch intact — resume it by bringing the branch
+current with MERGE (never rebase or force-push), don't redo the work.
 """
 formula = "mol-polecat-work"
 extends = ["mol-polecat-base"]
@@ -49,9 +50,290 @@ description = "Shell-safe command that reads `git diff --name-only origin/{{base
 default = ""
 
 [[steps]]
+id = "load-context"
+title = "Load context and verify assignment"
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+description = """
+Initialize your session and understand your assignment.
+
+**1. Prime your environment:**
+```bash
+gc prime                    # Load role context
+gc bd prime                    # Load beads context
+```
+
+**2. Derive your work bead and check your hook:**
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+if [ -z "$WORK_BEAD_ID" ]; then
+  echo "mol-polecat-work requires an input convoy with exactly one tracked member" >&2
+  exit 1
+fi
+gc bd list --assignee=$GC_AGENT --status=in_progress
+```
+
+The work bead is your assigned issue. Read it carefully:
+```bash
+WORK_BEAD_JSON=$(gc bd show "$WORK_BEAD_ID" --json)
+printf '%s' "$WORK_BEAD_JSON" | jq '.[0]'           # Full issue details
+printf '%s' "$WORK_BEAD_JSON" | jq '.[0].metadata'  # Check for existing metadata
+```
+
+**3. Verify nobody else is already working it (FAIL CLOSED):**
+
+Two dispatch surfaces can reach one work bead — this workflow, and a direct
+pool route left on the bead itself. When both fire, two workers set up the same
+branch and one silently destroys the other's commits. Before touching the
+workspace, prove that the bead is neither in flight nor already completed
+elsewhere:
+
+```bash
+# >>> load-context-duplicate-dispatch-hold
+WORK_STATUS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].status // empty')
+WORK_OWNER=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].assignee // empty')
+if [ -z "$WORK_STATUS" ]; then
+  # An unreadable bead is not proof of safety. Treat it as blocked.
+  WORK_STATUS=unknown
+  WORK_OWNER="${WORK_OWNER:-unreadable}"
+fi
+OWNER_LIVE=0
+DONE_ELSEWHERE=""
+case "$WORK_OWNER" in
+  ""|"$GC_SESSION_NAME"|"$GC_SESSION_ID"|"$GC_AGENT"|"$GC_ALIAS") ;;   # unowned, or owned by you
+  *)
+    case "$WORK_STATUS" in
+      in_progress|unknown)
+        # In flight: a live worker may still hold it, so the hold is gated on
+        # that owner being alive. An assignee is any of the three forms a claim
+        # writes — the session name (what `gc bd update --claim` sets), the
+        # session id, or the agent address — and a session record exposes them
+        # as .session_name, .id and .alias respectively, with no .name field.
+        # Match all of them.
+        OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
+        # No answer means you could not disprove a live owner — assume one.
+        [ -z "$OWNER_LIVE" ] && OWNER_LIVE=1 ;;
+      *)
+        # Open or closed under a foreign assignee is a completed hand-off, not a
+        # live conflict: the refinery handoff leaves the bead open, assigned to
+        # the refinery, route cleared, and a merge leaves it closed. A fresh or
+        # rework dispatch reaches load-context with an empty assignee (routed by
+        # gc.routed_to, cleared on re-dispatch), so a foreign one here means
+        # another dispatch already carried the work past this point. Building it
+        # now rebuilds a branch that already has a PR, so the liveness gate does
+        # not apply — hold regardless.
+        DONE_ELSEWHERE="already handed off or merged ($WORK_STATUS, held by $WORK_OWNER); another dispatch carried it to completion" ;;
+    esac ;;
+esac
+# A merge_result stamp means a PR or merge already exists for THIS bead — fresh
+# work is its own anchor — and it outlives a cleared assignee, so a bead the
+# handoff left unowned would otherwise sail its open PR through the arms above.
+if [ "$OWNER_LIVE" = "0" ] && [ -z "$DONE_ELSEWHERE" ]; then
+  WORK_MERGE_RESULT=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
+  [ -n "$WORK_MERGE_RESULT" ] && DONE_ELSEWHERE="already carrying merge_result=$WORK_MERGE_RESULT; a PR or merge exists for this bead"
+fi
+if [ "$OWNER_LIVE" != "0" ] || [ -n "$DONE_ELSEWHERE" ]; then
+  SCRIPTS=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  if [ -n "$DONE_ELSEWHERE" ]; then
+    # FINISHED, not a live conflict: a PR or merge already exists for this bead
+    # (a completed hand-off, or a merge_result stamp), so the work has landed or
+    # is landing with the refinery and no human has a decision to make. This
+    # reaches a polecat two ways — a redundant dispatch the refinery already
+    # carried past, or a lease-expiry re-offer of THIS molecule's own
+    # load-context after its own work finished — and both are husks. Quiesce the
+    # molecule and drain; do NOT escalate. A human visit here answers nothing and
+    # is what stranded finished work: molecule-hold.sh is one-way and
+    # dead-molecule-dispose.sh refuses a live root, so a false hold behind a
+    # visit had no way back. molecule-hold.sh never touches the work bead, so the
+    # refinery keeps it and its PR proceeds.
+    DUP_REASON="$DONE_ELSEWHERE"
+    gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused (work finished; quiesced without escalation): $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
+    if "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch (work finished): $WORK_BEAD_ID $DUP_REASON"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
+  else
+    # A LIVE conflict: in flight under a foreign owner still present in the
+    # session list. Two live dispatches building at once are a routing anomaly a
+    # human must adjudicate, so record the release path first and hold only if it
+    # landed. A blocked, de-routed molecule with no visit is a silent stall no
+    # one is asked to clear, so the drain is conditional on the escalation AND
+    # the hold.
+    DUP_REASON="already $WORK_STATUS under live $WORK_OWNER"
+    gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused: $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is $DUP_REASON, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Two dispatches are live: decide which owns the bead, then re-offer that one."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID $DUP_REASON"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
+  fi
+  exit 1
+fi
+# <<< load-context-duplicate-dispatch-hold
+```
+
+**Hold this step; never close it.** Closing advances the workflow into
+workspace-setup, the branch-recreating step that destroys the live worker's
+uncommitted work. `molecule-hold.sh` sets the step `blocked` and clears the
+route on the step, on the molecule root, and on the root's other steps, which
+is the not-closed state that is also not claimable.
+
+Leaving the step `open` instead is what respawns the pool. `open` is half the
+pool's offer predicate, so a fresh polecat claims the same step within minutes,
+re-derives the same refusal, and leaves it open again. Clearing the route
+without changing the status does not help either: gascity's stranded-worker
+repair sweeps `open` and `in_progress` beads assigned to a drained session and
+re-stamps a run_target fallback on any it finds unrouted. `blocked` is outside
+that sweep.
+
+The two arms dispose of two different situations and drain differently.
+
+A FINISHED bead — a completed hand-off or a `merge_result` — is not a live
+conflict. A PR or merge already exists for it, so the work has landed or is
+landing with the refinery and no human has a decision to make. The arm quiesces
+the molecule and drains with no escalation; the drain is conditional on the hold
+alone. A human visit here answers nothing, and it is what stranded finished
+work with no way back — `molecule-hold.sh` is one-way and
+`dead-molecule-dispose.sh` refuses a live root. `molecule-hold.sh` never touches
+the work bead, so the refinery keeps the bead and its PR proceeds.
+
+A LIVE conflict — in flight under a foreign owner still present in `gc session
+list --state all` — is two dispatches building at once, a routing anomaly a
+human must adjudicate. That arm records the release path first: `escalate.sh`
+files a board-visible visit a human can claim, and the drain is conditional on
+that visit AND the hold. A hold on its own is never enough there — a blocked,
+de-routed molecule with no visit is a silent stall no one is asked to clear. If
+`escalate.sh` cannot file or route the visit it exits non-zero and the arm
+neither holds nor drains, leaving the step claimable so the next worker retries.
+
+`molecule-hold.sh` in turn exits non-zero when it cannot prove which bead this
+shell is executing, when duplicate step beads make that ambiguous, when the
+blocking write is refused, and when a route it had to clear — on the molecule
+root or on a sibling step — survived. Draining on any of those leaves this step
+or the molecule around it claimable, the loop the hold exists to stop, so both
+arms drain only after a hold that landed.
+
+`CLAIMED_STEP_BEAD_ID` is the `bead_id` from the `gc hook --claim --json` that
+handed you the step you are running. Set it at the top of each step. It is a
+hint that resolves the ambiguous case; unset, the hold still finds the step
+from the `(assignee, gc.step_ref)` pair, and refuses rather than guessing.
+
+The same rule covers every other reason you might decline this bead. A polecat
+that judges the work already delivered, or the premise falsified, holds the
+molecule the same way and drains; it never leaves a claimable step behind.
+
+Owner liveness gates the in-flight case only: an idle pool worker between
+claims looks identical to an abandoned one, so an `in_progress` bead is a
+conflict only while its owner is present in `gc session list --state all` — a
+crashed owner leaves the work yours to take, and only a session absent from
+that list is safely gone. A bead already handed off (open or closed under a
+foreign assignee) or carrying a `merge_result` is finished rather than in
+flight, and holds regardless of any session's liveness.
+
+**4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
+
+`gc sling <target> <bead> --on <formula>` pours the formula immediately and
+reads no `blocks` deps, and under a graph.v2 dispatch the routed record is the
+freshly minted workflow root, not the work bead — so a `blocks` edge on the
+work bead gates nothing and a blocked bead reaches you as an offered claim
+(docs/gascity-routing-model.md). Raw pool routing does not have this problem:
+there the work bead itself is the routed unit and `bd ready` withholds it while
+a blocker is open. This gate is the pack-level safety net for the formula-sling
+path — if the work bead carries an open `blocks` blocker, refuse to build it,
+arm a re-dispatch so the work re-offers when the blocker closes, and hold this
+molecule.
+
+```bash
+# >>> load-context-blocked-work-hold
+OPEN_BLOCKERS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '[.[0].dependencies[]? | select((.dependency_type == "blocks") and (.status != "closed")) | .id] | join(" ")' 2>/dev/null)
+if [ -n "$OPEN_BLOCKERS" ]; then
+  POOL=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+  gc bd update "$WORK_BEAD_ID" --append-notes "bd-ready guard: refused to build $WORK_BEAD_ID at load-context; open blocks-blocker(s): $OPEN_BLOCKERS. Molecule held; re-dispatch armed to '$POOL' to fire once the blocker(s) close."
+  SCRIPTS=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  gc bd update "$WORK_BEAD_ID" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" --set-metadata gc.deferred_assignee=""
+  RELEASE_OK=0
+  if [ -n "$POOL" ] && [ -x "$SCRIPTS/deferred-dispatch.sh" ] && "$SCRIPTS/deferred-dispatch.sh" arm "$WORK_BEAD_ID" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "bd-ready guard: blocked by $OPEN_BLOCKERS"; then
+    RELEASE_OK=1
+  elif "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-blocked-work --message "Formula-slung $WORK_BEAD_ID reached a polecat while blocked by open blocks-dep(s): $OPEN_BLOCKERS. Held at load-context; no workspace was touched and nothing was closed. Auto re-dispatch could not be armed (target='$POOL'); re-offer this work once the blocker(s) close."; then
+    RELEASE_OK=1
+  fi
+  if [ "$RELEASE_OK" != "1" ]; then
+    echo "neither deferred-dispatch arm nor escalate recorded a release path; NOT holding or draining, so the step stays claimable and the next worker retries the release rather than parking a molecule no reader knows how to release." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID has open blocks-blocker(s) $OPEN_BLOCKERS; re-dispatch armed to re-offer when they close"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
+# <<< load-context-blocked-work-hold
+```
+
+The work bead carries `gc.execution_routed_to` from the pour. `arm` keys on
+`gc.routed_to`, not on that stamp, so clearing `gc.routed_to` is what makes the
+bead armable. `reconcile` keys idempotency on its own
+`gc.dispatch_when_ready_slung` marker, not on the execution stamp, so the
+re-dispatch's `--on mol-polecat-work` arm slings when the blocker closes whether
+or not the stamp is set; it is cleared alongside as hygiene, so the bead does not
+advertise a finished pour's pool. `status` stays `open` and `assignee` empty from
+the pour, so neither is written and no claim-guard rollback is possible. The open blocker keeps the bead out of `bd ready`
+throughout, so clearing the route opens no pool window. The re-dispatch is armed
+to the same pool the pour was executing on, replaying `--on mol-polecat-work`,
+so the work re-offers itself once the blocker closes; escalation is the
+fallback only when the arm cannot be recorded. The drain is conditional on a
+recorded release path AND a landed hold, for the same reason the
+duplicate-dispatch arm above is: a blocked, de-routed molecule with no way back
+is a silent stall, and a hold that did not fully land leaves the molecule
+claimable.
+
+**5. Check for rejection (IMPORTANT):**
+
+If `metadata.rejection_reason` exists, this bead was previously attempted
+and rejected by the refinery. Read the reason carefully:
+- Rebase conflict → you'll resume the existing branch and rebase
+- Test failure → you'll resume the branch and fix the issue
+
+If `metadata.branch` exists, a branch already exists from the prior attempt.
+You will use it in workspace-setup instead of creating a new one.
+
+**6. Check inbox for additional context:**
+```bash
+gc mail inbox
+# Read any HANDOFF or assignment messages, then archive after absorbing context
+# gc mail read <id> → process → gc mail archive <id>
+```
+
+**7. Understand the requirements:**
+- What exactly needs to be done?
+- What files are likely involved?
+- What does "done" look like?
+- If rejected: what specifically needs fixing?
+
+If blocked or unclear, escalate. Your mail budget is zero, and an escalation
+files one open visit per situation key that a human can claim and close:
+```bash
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+"${SCRIPTS:?escalate.sh not found in the pack}/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-unclear-requirements --message "Unclear requirements on $WORK_BEAD_ID. Question: <what you need clarified>. Tried: <where you already looked>."
+```
+
+**Exit criteria:** You understand the work and can begin."""
+
+[[steps]]
 id = "workspace-setup"
 title = "Set up worktree and feature branch"
 needs = ["load-context"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 description = """
 Ensure an isolated git worktree and a clean feature branch. Every check is
 idempotent — safe to re-run after crash/restart.
@@ -68,7 +350,15 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 if [ -z "$WORK_BEAD_ID" ]; then
   echo "mol-polecat-work requires an input convoy with exactly one tracked member" >&2
-  gc runtime drain-ack
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key polecat-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-polecat-work cannot derive its work bead; the pour is malformed and must be redone. Held at workspace-setup; nothing was touched or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
   exit 1
 fi
 ```
@@ -82,7 +372,16 @@ if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
   cd "$WORKTREE"
 else
   WORKTREE_PATH=$(pwd)/worktrees/"$WORK_BEAD_ID"
-  git worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
+# >>> workspace-setup-worktree-add
+  # `-C "$RIG_ROOT"` binds the worktree to the rig checkout, so a session whose
+  # cwd sits in another repo still registers it in the rig, not that repo.
+  # An empty RIG_ROOT would let `git -C ""` operate on cwd — the coupling this
+  # avoids — so fail closed when neither GC_RIG_ROOT nor the roster names it.
+  RIG_ROOT="${GC_RIG_ROOT:-}"
+  [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+  [ -n "$RIG_ROOT" ] || { echo "workspace-setup: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+  git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
+# <<< workspace-setup-worktree-add
   cd "$WORKTREE_PATH"
   gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$WORKTREE_PATH"
 fi
@@ -94,11 +393,23 @@ fast-forward only, and stop on divergence — never create a different branch:
 ```bash
 BRANCH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.branch // empty')
 if [ -n "$BRANCH" ]; then
-  git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || echo "Could not fetch metadata.branch=$BRANCH; checking local refs."
+  git fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" || echo "Could not fetch metadata.branch=$BRANCH; checking local refs."
   if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
     if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
       git checkout "$BRANCH" || exit 1
-      git merge --ff-only "origin/$BRANCH" || { echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."; gc runtime drain-ack; exit 1; }
+      if ! git merge --ff-only "origin/$BRANCH"; then
+        echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."
+        SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+        : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+        if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Held at workspace-setup; nothing was touched or closed."; then
+          echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+        elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "local $BRANCH diverged from origin/$BRANCH; reconcile the two by hand, then re-offer this molecule"; then
+          gc runtime drain-ack
+        else
+          echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+        fi
+        exit 1
+      fi
     else
       git checkout --track -b "$BRANCH" "origin/$BRANCH" || exit 1
     fi
@@ -106,38 +417,46 @@ if [ -n "$BRANCH" ]; then
     git checkout "$BRANCH" || exit 1
   else
     echo "metadata.branch=$BRANCH is set but no local or origin branch exists. STOP — do not create a different branch."
-    gc runtime drain-ack
+# >>> workspace-setup-missing-branch-hold
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Held at workspace-setup; nothing was touched or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "metadata.branch=$BRANCH names a branch that exists neither locally nor on origin; restore it or clear metadata.branch, then re-offer this molecule"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
     exit 1
+# <<< workspace-setup-missing-branch-hold
   fi
 fi
 ```
 
 If resuming a REJECTED branch, bring it current the way the refinery
-classified it — `metadata.prepare_mode` is stamped by the refinery's prepare
-block: `rebase` for a disposable per-bead branch, `merge` for every other
-shape. A rebase rewrites commits, which is destructive on a branch other
-work already depends on (an integration branch carries already-merged PRs),
-so honor the mode:
+classified it — `metadata.prepare_mode` is stamped `merge` by the refinery's
+prepare block for every branch shape, and the resume brings the branch current
+the way it was prepared: MERGE origin in, never rebase. A rebase rewrites
+history and forces a --force-with-lease push, which resets the PR's "changes
+since last review" and drifts its line-anchored review comments, so no shape is
+rewritten:
 ```bash
 # >>> rejected-branch-resume-mode
 BEAD_JSON=$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null)
 REJECTION=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.rejection_reason // empty')
 if [ -n "$REJECTION" ]; then
-    PREPARE_MODE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.prepare_mode // empty')
-    if [ "$PREPARE_MODE" = "merge" ]; then
-        echo "prepare_mode=merge: SHARED branch — bring it current by MERGE; never rebase, amend, squash, or force-push it"
-        git merge --no-edit origin/{{base_branch}}
-        # Conflicts (likely the rejection reason): resolve, git add, git commit.
-    else
-        git rebase origin/{{base_branch}}
-        # Conflicts: resolve, then git rebase --continue.
-    fi
+    # Bring the branch current by MERGE — never rebase, amend, squash, or
+    # force-push it. prepare_mode is stamped merge; an absent stamp resolves to
+    # merge here too, so a dropped stamp never triggers a rewrite.
+    echo "resuming rejected branch by MERGE (git merge --no-edit origin/{{base_branch}}); never rebase or force-push"
+    git merge --no-edit origin/{{base_branch}}
+    # Conflicts (likely the rejection reason): resolve, git add, git commit.
     gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
 fi
 # <<< rejected-branch-resume-mode
 ```
-Leave `prepare_mode` on the bead — it is the refinery's classification,
-re-stamped on every prepare.
+Leave `prepare_mode` on the bead — the refinery re-stamps it (merge) on every
+prepare.
 
 **If no branch**: create `polecat/<bead-id>` from the FRESHLY-FETCHED remote
 tip (a stale local base causes spurious duplicate conflicts at the refinery)
@@ -150,6 +469,17 @@ git checkout -B "$BRANCH" "origin/{{base_branch}}"
 gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH"
 ```
 
+**Record the resolved worktree.** `self-review` and `submit-and-exit` read
+`work_dir` from this bead to locate the checkout. Three paths reach here: a
+fresh create, a reuse of a recorded worktree, and a rework child that adopts
+the anchor's already-checked-out worktree. Stamp the directory you are in now,
+so every path records it. Re-stamping the same path is a no-op.
+```bash
+# >>> workspace-setup-record-worktree
+gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$(pwd)"
+# <<< workspace-setup-record-worktree
+```
+
 **4. Clean state + setup:** `git status` should be clean; run
 `{{setup_command}}` (empty = skip).
 
@@ -157,12 +487,294 @@ gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH"
 {{base_branch}}, deps installed."""
 
 [[steps]]
+id = "preflight-tests"
+title = "Verify pre-flights pass on base branch"
+needs = ["workspace-setup"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+description = """
+Check if the codebase is healthy BEFORE starting your work.
+
+**Config: typecheck_command = {{typecheck_command}}**
+**Config: lint_command = {{lint_command}}**
+**Config: test_command = {{test_command}}**
+
+**Skip this step if resuming a rejected branch** — pre-flights were
+already verified on the prior attempt. Close this step and proceed.
+
+**1. Run pre-flights (skip empty commands silently):**
+```bash
+{{typecheck_command}}
+{{lint_command}}
+{{test_command}}
+```
+
+**If ALL commands above are empty**, check the repo's CLAUDE.md or AGENTS.md
+(whichever your provider uses) for quality-gate guidance. Look for sections
+named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
+verification commands listed there — in code blocks or bullet lists.
+
+Run ONLY read-only verification commands (typecheck, lint, build, test).
+Do NOT run install, cleanup, publish, release, `git push`, or any
+destructive command you find there, even inside a quality-gate section.
+
+**2. If pre-flights pass:** proceed.
+
+**3. If pre-flights fail on {{base_branch}}:**
+
+The failure is on the base branch, so it is not yours and every polecat
+starting a baseline right now sees the same thing. Report it ONCE: search
+the ledger first, and add your confirmation to the existing bead instead of
+filing another copy. Do NOT fix pre-existing failures — that's not your
+assignment.
+
+FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing
+failures. FORBIDDEN: Filing before searching.
+
+**3a. Derive a stable symptom key.** Two agents describe one defect in two
+different ways, so free-text prose cannot match; a symptom key can.
+
+Use the failing **test function** name, with any Go subtest suffix stripped
+at the first `/`. Two polecats often trip different subtests of the same
+function — `TestDisableAndPurge.../clean_config_with_residual_files` versus
+`.../peer_successor_cross-device_tree` — and searching the full subtest path
+means neither finds the other's bead. Key on the function; note the subtest
+in the description.
+
+```bash
+RAW_FAILURE="<failing test as reported, e.g. TestFoo/some_subtest>"
+SYMPTOM_KEY="${RAW_FAILURE%%/*}"
+```
+
+When the failure has no test name at all, use the failing package or target
+path (`internal/api/genclient`). Handle each distinct failure under its own
+key.
+
+**3b. Search before filing — and fail CLOSED on lookup error.** A lookup
+that errors is not an all-clear. Include claimed beads: the existing report
+is usually already `in_progress` with someone fixing it.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+EXISTING=""
+MATCHES=$(gc bd list --title-contains "$SYMPTOM_KEY" --status open,in_progress,blocked --json)
+LOOKUP_RC=$?
+if [ "$LOOKUP_RC" -ne 0 ]; then
+    echo "Ledger lookup failed (rc=$LOOKUP_RC). NOT filing — a failed lookup is not proof the bead is missing."
+    gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} pre-flight failed, dedupe lookup broken" \
+      -m "Symptom: $SYMPTOM_KEY. Lookup exited $LOOKUP_RC so nothing was filed. Proceeding with $WORK_BEAD_ID."
+else
+    EXISTING=$(printf '%s' "$MATCHES" | jq -r '.[0].id // empty')
+fi
+```
+
+**3b2. If the exact key matched nothing, widen to the family.** Sibling
+tests in one package usually fail for one reason: three different
+`TestDisableAndPurge*` functions were filed separately when a single
+environment leak broke all of them, and that package accumulated eight beads
+in under two days. Search the shared prefix, or the package name:
+
+```bash
+if [ "$LOOKUP_RC" -eq 0 ] && [ -z "$EXISTING" ]; then
+    SYMPTOM_FAMILY="<shared test prefix or failing package, e.g. TestDisableAndPurge>"
+    FAMILY_MATCHES=$(gc bd list --title-contains "$SYMPTOM_FAMILY" --status open,in_progress,blocked --json)
+    FAMILY_RC=$?
+    if [ "$FAMILY_RC" -ne 0 ]; then
+        echo "Family lookup failed (rc=$FAMILY_RC). NOT filing — a failed lookup is not proof the bead is missing."
+    else
+        printf '%s' "$FAMILY_MATCHES" | jq -r '.[] | "\\(.id)\\t\\(.title)"'
+    fi
+fi
+```
+
+Read what comes back rather than matching on the string alone. A hit whose
+symptom is genuinely the same defect — same package, same failure mode —
+means comment on it as in 3c. Set it by hand — this one is a judgement
+call, so nothing assigns it for you:
+
+```bash
+EXISTING="<the bead id you judged to be the same defect>"
+```
+
+A hit that merely shares a prefix but fails for a different reason is not
+your bead; keep going to 3d.
+
+**3c. If `$EXISTING` is set — comment, do not file:**
+
+```bash
+gc bd comment "$EXISTING" "Also observed on {{base_branch}} while starting $WORK_BEAD_ID."
+```
+
+One bead, N confirmations. Then get on with your own work.
+
+**3d. If the lookup succeeded and matched nothing, check whether the fix
+already landed** and your baseline is simply stale. Re-filing a defect that
+is already fixed puts a ready bead in the pool, and the next sling sends a
+polecat to redo merged work:
+
+```bash
+CUTOFF=$(date -u -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-7d +%Y-%m-%d)
+CLOSED_MATCHES=$(gc bd list --title-contains "$SYMPTOM_KEY" --status closed --closed-after "$CUTOFF" --json)
+CLOSED_RC=$?
+```
+
+On a match — or on a non-zero `$CLOSED_RC`, since a failed lookup is not
+proof the fix has not landed — re-fetch `origin/{{base_branch}}`, reset your
+worktree to the current tip, and re-run the pre-flight before filing
+anything.
+
+**3e. Only now file it** — with the symptom key verbatim in the title, so
+the next polecat's 3b lookup finds your bead. Put the full failure,
+including the subtest you stripped in 3a and the package, in the body:
+
+```bash
+gc bd create --title "Pre-existing failure: $SYMPTOM_KEY — <short description>" \
+  --type bug --priority 1 \
+  --design "Observed on {{base_branch}}. Full failure: $RAW_FAILURE"
+gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} has failing pre-flights" \
+  -m "Filed: <bead-id> for $SYMPTOM_KEY. Proceeding with $WORK_BEAD_ID."
+```
+
+**Exit criteria:** Pre-flights pass, or the failure is recorded exactly once
+— a new bead you filed, or your comment on the bead that already had it —
+or, when the ledger lookup itself was broken, `{{escalation_target}}` has been notified
+instead."""
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+needs = ["preflight-tests"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+description = """
+Do the actual implementation work.
+
+**Working principles:**
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't gold-plate or scope-creep
+
+**If resuming a rejected branch:** Read `metadata.rejection_reason`
+from load-context. Focus on fixing the specific issue that caused
+rejection — don't redo everything.
+
+**If the rework turns out already satisfied:** a resumed rework can need no
+change, because the feedback was addressed on the branch already or the
+dispatch was spurious. Hand it back anyway through the normal path: run
+self-review, then submit-and-exit. The branch is unchanged, so its `git push
+origin HEAD` is a safe no-op ("Everything up-to-date"), and the handoff
+is what routes the bead to the refinery and clears your
+`gc.session_id`/`gc.session_name`. The refinery closes it as a rework hand-back
+landed-on-branch. Never improvise the hand-back with a bare `gc bd update
+--assignee=<refinery>`: it leaves your session identity stamped on the bead,
+which `doctor/executor-identity-residue` reports and the witness owner filter
+(which ranks `gc.session_id` ahead of the assignee) reads as a false orphan.
+
+Derive your work bead in this shell context:
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+```
+
+**Commit frequently with detailed messages.** Every commit gets a
+subject AND a body. The body is what makes the repo navigable a year
+from now — the reviewer (and future-you) needs to understand *why* the
+change exists, not just *what* the diff did. The diff already shows
+the what.
+
+```bash
+git add <files>
+git commit -m "<type>: <imperative subject> ($WORK_BEAD_ID)" -m "$(cat <<'BODY'
+<1-3 paragraph explanation:>
+- The motivation: which bug, regression, design decision, or upstream
+  request drove this commit
+- What the change actually does at a higher level than the diff
+- Anything non-obvious about the approach: trade-offs taken, paths not
+  chosen, hidden constraints honored
+- Validation: which tests/benchmarks/manual checks confirmed correctness
+
+Note any follow-ups, deferred edge cases, or downstream impacts here.
+BODY
+)"
+```
+
+Commit types: feat, fix, refactor, perf, test, docs, chore
+
+**Examples of strong subjects + bodies:**
+- `fix(session): preserve lifecycle metadata during crash adoption (ga-xxxx)`
+  body: explains the stale session projection, the resume path that
+  lost metadata, the projection update, and the focused adoption test
+- `perf(events): batch typed payload registration lookups (ga-xxxx)`
+  body: cites the event fan-out profile, names the registry call site
+  that drove the regression, and notes why the cache stays read-only
+
+**Weak commits to avoid** (refinery/reviewer can't tell what's going on):
+- `fix: stuff (ga-xxxx)`
+- `perf: speed up the slow loop`
+- `refactor` with no body
+
+**Discovered work (outside scope):**
+```bash
+gc bd create --title "Found: <description>" --type bug --priority 2
+```
+Do NOT fix unrelated issues in this branch.
+
+**If stuck (>15 minutes):**
+```bash
+gc mail send {{escalation_target}} -s "HELP: Stuck on implementation" -m "Issue: $WORK_BEAD_ID
+Problem: <what's blocking you>
+Tried: <what you've attempted>"
+```
+
+**If context filling up:**
+```bash
+gc runtime request-restart
+```
+This blocks until the controller kills your session. The next session
+resumes from context (re-reads formula steps, checks git/bead state).
+
+**Close the inline step chain and drain.** self-review is a bounded check loop,
+not an inline step: its iterations are claimed fresh from the pool so each runs
+in its own session. So this inline session ends here, and it must close the
+steps it completed before it drains — an open, routed step left behind by a
+drained session is re-offered to a fresh polecat, and `load-context` re-offered
+walks that polecat back through workspace-setup onto a branch this run already
+built. Close forward (each step blocks the next, and `bd` refuses to close a
+blocked issue), then drain; the self-review loop and submit-and-exit close
+themselves.
+```bash
+SC=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
+for STEP in load-context workspace-setup preflight-tests implement; do
+  "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+done
+gc runtime drain-ack
+```
+
+**Exit criteria:** Implementation complete, all changes committed, the inline
+step chain closed forward, and this session drained. The self-review loop takes
+it from here."""
+
+[[steps]]
 id = "self-review"
-title = "Self-review and run tests (affected-aware)"
+title = "Self-review and verify green (affected-aware, bounded check loop)"
 needs = ["implement"]
 description = """
-Review your changes and verify they work before handing off. Overrides the
-base self-review to support affected-test detection.
+Prove the change is green before it can hand off. This step is a bounded check
+loop: each iteration runs the declared checks in its own session and, on green,
+stamps the verified HEAD on the work bead; the exit condition
+(assets/scripts/self-review-check.sh) converges the loop only when the stamp
+names the live HEAD. A red iteration spawns the next, up to `max_attempts`, so a
+failure the refinery would have bounced a hop later — deleting the workflow and
+repouring a fresh molecule — is fixed here instead. The refinery still re-runs
+the real gate as the backstop.
+
+Each iteration runs in a FRESH pooled session with none of the previous one's
+context — the loop clears session affinity on every pool retry, by design.
+Recover what you need from durable state; assume nothing carried over.
 
 **Config: setup_command = {{setup_command}}**
 **Config: typecheck_command = {{typecheck_command}}**
@@ -171,15 +783,32 @@ base self-review to support affected-test detection.
 **Config: test_command = {{test_command}}**
 **Config: affected_tests_command = {{affected_tests_command}}**
 
-**1. Review the diff:**
+**1. Recover the work bead and worktree.** `CLAIMED_ITER_BEAD` is the `bead_id`
+your `gc hook --claim --json` returned for this iteration; it is the only id
+that names this attempt unambiguously, and you close it in step 6.
+```bash
+CLAIMED_ITER_BEAD="<the bead_id your gc hook --claim returned>"
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "cannot derive work bead from convoy {{convoy_id}}" >&2; exit 1; }
+WORK_JSON=$(gc bd show "$WORK_BEAD_ID" --json)
+WORKTREE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.work_dir // empty')
+BRANCH=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.branch // empty')
+cd "$WORKTREE" || { echo "recorded work_dir is missing: $WORKTREE" >&2; exit 1; }
+[ -n "$BRANCH" ] && git checkout "$BRANCH" 2>/dev/null || true
+```
+
+**2. Review the diff:**
 ```bash
 git diff origin/{{base_branch}}...HEAD
 git log --oneline origin/{{base_branch}}..HEAD
 ```
 Check for bugs, security issues, missing error handling, debug cruft,
-unintended file changes. Fix what you find.
+unintended file changes. Fix what you find. On a retry, the previous attempt's
+failure reproduces in the checks below — run them and read the failure rather
+than re-deriving from scratch.
 
-**2. Quality checks (skip empty commands):**
+**3. Quality checks (skip empty commands):**
 ```bash
 {{setup_command}}
 {{typecheck_command}}
@@ -187,7 +816,7 @@ unintended file changes. Fix what you find.
 {{build_command}}
 ```
 
-**3. Tests — affected subset when the rig provides one, full suite otherwise:**
+**4. Tests — affected subset when the rig provides one, full suite otherwise:**
 ```bash
 if [ -n "{{affected_tests_command}}" ]; then
     {{affected_tests_command}}
@@ -196,16 +825,61 @@ else
 fi
 ```
 
-**ALL CHECKS MUST PASS.** Your change caused the failure -> fix it.
-Pre-existing -> file a bead. A PR that fails locally fails in CI too — fix
-before submitting.
+**A failure your diff introduced blocks the stamp — fix it and commit.** A
+failure that reproduces on `origin/{{base_branch}}` is pre-existing:
+preflight-tests already filed it, so it neither blocks your stamp nor earns a
+second bead. `git status` must be clean before you stamp.
 
-**4. Commit everything.** If uncommitted changes remain, commit them with a
-body explaining what slipped through implement (self-review touch-up, test
-addition, formatter run). NEVER discard implementation changes with
-`git checkout -- .`
+**5. Stamp the verified HEAD — only when every check above is green.** The exit
+condition converges on `self_review_passed_sha == live HEAD`, so the stamp
+certifies exactly the tree whose checks you saw pass. `gc.var.issue` on the root
+gives the exit condition a resilient handle on this bead when the store is
+degraded.
+```bash
+HEAD_SHA=$(git rev-parse HEAD)
+ROOT=$(gc bd show "$CLAIMED_ITER_BEAD" --json | jq -r '.[0].metadata."gc.root_bead_id" // empty')
+gc bd update "$WORK_BEAD_ID" --set-metadata self_review_passed_sha="$HEAD_SHA"
+[ -n "$ROOT" ] && gc bd update "$ROOT" --set-metadata gc.var.issue="$WORK_BEAD_ID"
+```
+If it is not green after your best effort this iteration, stamp nothing: an
+absent or stale stamp is exactly what the exit condition reads as "not yet", and
+the loop iterates. Never stamp a HEAD whose checks you did not watch pass — the
+refinery re-runs them, and a forged green only wastes the round.
 
-**Exit criteria:** all checks pass, all changes committed, tree clean."""
+**6. Close this iteration bead — closing is what runs the exit condition.**
+Close by the explicit id you claimed; `$GC_BEAD_ID` is unset for a pool-claimed
+polecat, and a guarded close silently no-ops and stalls the loop.
+```bash
+gc bd close "$CLAIMED_ITER_BEAD" --reason "self-review iteration complete"
+gc runtime drain-ack
+```
+Never close the work bead, and never close the `self-review` control bead: the
+orchestrator closes the control on convergence, and on the final failing attempt
+the exit condition hands the work bead back itself
+(`aborted_at=self-review-exhausted`), because nothing runs after the budget is
+spent.
+
+**Exit criteria (for the loop, not for you):** the declared checks are green at
+HEAD, `self_review_passed_sha` names that HEAD, and this iteration bead is
+closed. Any iteration that leaves the tree closer to that has done its job."""
+
+[steps.check]
+# Total attempts including the first. A red iteration spawns the next; this
+# bounds the churn a self-review fix usually takes, not any goal count.
+# Exhaustion closes the control bead gc.outcome=fail and the exit condition
+# hands the work bead back on that last failing attempt — it reads this budget
+# off the control bead's gc.max_attempts, so changing the number here needs no
+# other edit.
+max_attempts = 3
+
+[steps.check.check]
+mode = "exec"
+path = "../assets/scripts/self-review-check.sh"
+# The script verifies a sha-bound stamp; it does not run the gate (its header
+# explains why — the exec is inline in the control dispatcher, sandboxed, and
+# time-bounded, so a real test suite would time out and stall the city). 2m is
+# slack for a few bead reads and the exhaustion handback, not a test budget.
+timeout = "2m"
 
 [[steps]]
 id = "submit-and-exit"
@@ -285,8 +959,8 @@ if [ -n "$STORE_ONLY_RECORD" ]; then
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
-  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
-  for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+  : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
+  for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
     "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
   # <<< submit-store-only-chain-close
@@ -314,14 +988,22 @@ the difference between a bead someone can dispose of and one that just sits:
 invariant is `CURRENT_BRANCH == metadata.branch` — `polecat/<bead-id>` is
 only how FRESH work satisfies it (a rework child legitimately stands on the
 reviewed branch that workspace-setup called authoritative; forcing the
-template there forks the branch under review):
+template there forks the branch under review).
+
+The halt mails the witness. This gate fires in a session that is about to
+end, so a message printed to a dying session's stdout is the same as no
+message at all, and a bead held back here looks exactly like one still being
+worked. The mail carries three facts: the origin ref, local HEAD, and the
+bead's assignee. Equal refs mean the work is pushed, and a refinery assignee
+means the handoff is written too, so what stays open is the step chain:
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 # >>> submit-branch-gate
 CURRENT_BRANCH=$(git branch --show-current)
-METADATA_BRANCH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.branch // empty')
+BEAD_ROW=$(gc bd show "$WORK_BEAD_ID" --json)
+METADATA_BRANCH=$(printf '%s' "$BEAD_ROW" | jq -r '.[0].metadata.branch // empty')
 if [ -n "$METADATA_BRANCH" ]; then
     EXPECTED_BRANCH="$METADATA_BRANCH"
     GATE_SOURCE="metadata.branch"
@@ -335,12 +1017,26 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     echo "  expected branch: $EXPECTED_BRANCH"
     echo "  gate source:     $GATE_SOURCE"
     echo "Refinery handoff merges metadata.branch; proceeding would strand the work."
+    PUSHED_REF=$(git ls-remote origin "refs/heads/$EXPECTED_BRANCH" 2>/dev/null | awk '{print $1}')
+    HALT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+    HALT_ASSIGNEE=$(printf '%s' "$BEAD_ROW" | jq -r '.[0].assignee // empty')
     if [ -n "$METADATA_BRANCH" ]; then
-        echo "This bead already names its branch — check out '$EXPECTED_BRANCH', move your commits onto it, re-run submit-and-exit."
+        echo "This bead already names its branch — check out '$EXPECTED_BRANCH' at the pushed head, then re-run submit-and-exit."
+        echo "  origin/$EXPECTED_BRANCH: ${PUSHED_REF:-absent}"
+        echo "  local HEAD:              $HALT_HEAD"
+        echo "  bead assignee:           ${HALT_ASSIGNEE:-<unset>}"
     else
         echo "Re-run workspace-setup: create '$EXPECTED_BRANCH' from origin/{{base_branch}}, cherry-pick your commits, re-run submit-and-exit."
     fi
-    gc runtime drain-ack
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Held at submit-and-exit; nothing was pushed or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); move the commits onto $EXPECTED_BRANCH, then re-offer this molecule"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
     exit 1
 fi
 if [ -z "$METADATA_BRANCH" ]; then
@@ -348,6 +1044,18 @@ if [ -z "$METADATA_BRANCH" ]; then
 fi
 # <<< submit-branch-gate
 ```
+
+**1a. Re-read the work bead before you hand off.** `load-context` read the
+bead once, at the start of the molecule. A coordinator may have appended a
+correction since: a retracted premise, an added requirement, a reviewer's
+note. The handoff is the last point it is still cheap to honor, so read the
+notes now:
+```bash
+gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].notes // ""'
+```
+Reconcile the diff you are about to hand off against what you read, and fix
+what a note contradicts. A note asking for a decision you cannot make is an
+escalation, not something to ship past.
 
 **1b. Resolve the landing target (fails closed).** `{{base_branch}}` is what
 the worktree was poured FROM, not necessarily where the work LANDS. A
@@ -372,7 +1080,15 @@ else
     echo "  current branch:  $CURRENT_BRANCH"
     echo "Nothing names a landing branch, and base_branch is empty or the branch being pushed — recording it would be a self-merge."
     echo "Set it, then re-run submit-and-exit:  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
-    gc runtime drain-ack
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Held at submit-and-exit; nothing was pushed or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "no landing branch: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}; set target on $WORK_BEAD_ID, then re-offer this molecule"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
     exit 1
 fi
 echo "landing target: $LANDING_TARGET"
@@ -386,7 +1102,7 @@ with untracked work left behind.
 **3. auto_push=false halt arm, then push.** The halt arm is a TERMINAL exit,
 so it carries its own copy of the chain-close block — `exit 0` never reaches
 step 5, and each fenced block is its own shell (the test pins the copy
-byte-identical to step 5's, +2 indent):
+byte-identical to step 7's, +2 indent):
 
 ```bash
 # >>> submit-auto-push-halt
@@ -394,15 +1110,35 @@ AUTO_PUSH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata | if has("a
 if [ "$AUTO_PUSH" = "false" ]; then
   echo "auto_push=false: halting at branch-ready (no push, no refinery handoff)"
   BRANCH=$(git branch --show-current)
-  [ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
-  gc bd update "$WORK_BEAD_ID" --status=open --assignee="" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  if [ -z "${LANDING_TARGET:-}" ]; then
+    echo "LANDING_TARGET unset — run step 1b before this arm."
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Held at submit-and-exit; nothing was pushed or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset; step 1b did not run"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
+    exit 1
+  fi
+  # Three writes, not one: a gc bd update that clears the assignee while this
+  # session still holds the bead in_progress is refused by bd's claim guard,
+  # which rolls back the batched metadata and notes with it. Metadata and notes
+  # bypass the guard and clear the route first, --status=open is accepted from
+  # the holder, and the assignee write lands once the bead is open — the same
+  # order the store-only arm releases a bead in.
+  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  gc bd update "$WORK_BEAD_ID" --status=open
+  gc bd update "$WORK_BEAD_ID" --assignee=""
   # >>> submit-halt-chain-close
   SC=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
-  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
-  for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+  : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
+  for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
     "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
   # <<< submit-halt-chain-close
@@ -410,7 +1146,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
   exit 0
 fi
 # <<< submit-auto-push-halt
-git push origin HEAD || { echo "PUSH FAILED — bead stays with polecat. If prepare_mode=merge, a non-fast-forward rejection is NOT a force-push case (shared branch); redo the resume as a merge."; gc runtime drain-ack; exit 1; }
+git push origin HEAD || { echo "PUSH FAILED — bead stays with polecat. A non-fast-forward rejection means the branch moved under you; re-fetch, MERGE origin in, and retry — never force-push (branches are brought current by merge, never rebase)."; gc runtime drain-ack; exit 1; }
 # Verify the ref is actually on origin before trusting the push.
 REMOTE_REF=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 LOCAL_HEAD=$(git rev-parse HEAD)
@@ -421,19 +1157,14 @@ if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
 fi
 ```
 
-**4. Clean up the local branch** (it is pushed; the refinery owns it now):
-```bash
-git checkout --detach && git branch -D "$CURRENT_BRANCH"
-```
-
-**4b. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
+**4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the
 dispatch text, written before the diff existed and addressed to you, not to a
 reviewer. You are the only actor that has read the diff, so say what changed
 and why, for a reviewer who was not in the originating conversation:
 
 ```bash
-PR_SUMMARY_FILE=$(mktemp)
+PR_SUMMARY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-polecat-work.XXXXXX")
 cat > "$PR_SUMMARY_FILE" <<'PRSUMMARY'
 <the behavior before, the behavior now, and the shape of the change — a short
 paragraph or a few bullets of markdown>
@@ -449,13 +1180,13 @@ What the summary describes is the BRANCH, not this pass. On a rework or
 rebase child the PR body publishes the whole branch, so an account of only
 the fix you just made describes something no reviewer is looking at.
 
-**4c. Resolve the bead the summary belongs on.** `pr-open.sh` publishes
+**4b. Resolve the bead the summary belongs on.** `pr-open.sh` publishes
 `pr_summary` off the anchor row it enumerates: the open bead that carries a
-`merge_result` for this branch. On fresh work that is the bead you claimed
-and one write serves both. On a rework or rebase child the anchor is a
-DIFFERENT bead, and a summary stamped on the child is never read — the PR
-body falls back to the dispatch text, which was written before the diff
-existed. An anchor in a gating state rests unheld (`lifecycle/lifecycle.toml`
+`merge_result` for this branch. On fresh work that is the bead you claimed, so
+the handoff's own metadata write carries the summary. On a rework or rebase
+child the anchor is a DIFFERENT bead, and a summary stamped on the child is
+never read — the PR body falls back to the dispatch text, which was written
+before the diff existed. An anchor in a gating state rests unheld (`lifecycle/lifecycle.toml`
 `detached_states`), so stamping it races no one:
 
 ```bash
@@ -481,22 +1212,64 @@ The query asks the branch, not the state name: every state that carries a
 unreadable probe resolves to empty and the step behaves as it did before this
 block existed — degraded to the dispatch-text fallback, never stranded.
 
-**5. ONE atomic handoff.** A single `gc bd update` carries the whole
-transition — target, PR summary, notes, refinery assignee, cleared route — so
-no partial handoff can strand the bead between writes. `--append-notes`, never
-`--notes` (which REPLACES and erases the dispatch note). The empty
-`gc.routed_to` is deliberate: the direct assignment IS the handoff, and
-named-session work must not read as pool demand.
+**5. The refinery handoff (three writes).** The transition carries target, PR
+summary, notes, refinery assignee, cleared route, and cleared session pins.
+It takes three `gc bd update` calls, not one. A single update that reassigns
+the bead off this session while it still holds it `in_progress` is refused by
+bd's claim guard (`AssigneeNotStolen`, which fires only on an `in_progress`
+bead), and the refusal rolls back the target, the notes, and everything else
+batched into that call. So the writes are ordered:
+
+1. metadata and notes, which bypass the guard, clearing the route while the
+   status is still `in_progress`;
+2. `--status=open`, accepted from the holder because it carries no assignee
+   change;
+3. the plain `--assignee`, accepted once the bead is `open` and no longer
+   `in_progress`.
+
+The intermediate state after the second write is open, still assigned here,
+and unrouted, which a pool's offer predicate cannot see, so no window offers
+the bead to anyone. Clearing the route in the first write, before the status
+flips, is what keeps it out. This is the order the store-only arm above
+releases a bead in.
+
+`--append-notes`, never `--notes` (which REPLACES and erases the dispatch
+note). The empty `gc.routed_to` is deliberate: the direct assignment IS the
+handoff, and named-session work must not read as pool demand.
+
+A refused `gc bd update` exits non-zero and rolls its own call back, so the
+three writes are chained. If any one fails the bead is not handed off, and the
+step holds and escalates rather than closing its chain and draining past a
+strand the refinery never sees.
+
+The handoff clears the polecat's `gc.session_id`/`gc.session_name`: once it
+lands the refinery holds the bead and this session does not. The witness
+resolves a bead's owner from `gc.session_id` ahead of the assignee, so a pin
+left in place names a session that has since drained, and a bead the live
+refinery holds reads as an absent orphan. Only these two pins are cleared —
+they are the ones the owner filter reads.
 
 The summary is the one field addressed to a bead other than the claimed one.
-When 4c named an anchor, it is stamped there in its own write, before the
+When 4b named an anchor, it is stamped there in its own write, before the
 handoff: it is metadata on a bead this session does not hold, and a failure to
 land it costs a good PR body, not the handoff. Everything the refinery reads
-still arrives in the single atomic write below.
+still arrives in the three writes below.
 
 ```bash
 # >>> submit-target-consume
-[ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
+if [ -z "${LANDING_TARGET:-}" ]; then
+  echo "LANDING_TARGET unset — run step 1b before this arm."
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Held at submit-and-exit; nothing was pushed or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the handoff with LANDING_TARGET unset; step 1b did not run"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
 ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
 if [ -z "$ROSTER" ]; then
@@ -511,16 +1284,34 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
 fi
 PR_SUMMARY=""
 if [ -s "${PR_SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$PR_SUMMARY_FILE"); fi
-HANDOFF=(--status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="")
+HANDOFF_META=(--set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
 if [ -n "$PR_SUMMARY" ]; then
     if [ -n "${GATING_ANCHOR:-}" ]; then
         gc bd update "$GATING_ANCHOR" --set-metadata pr_summary="$PR_SUMMARY" || echo "pr_summary did not reach anchor $GATING_ANCHOR; its PR body falls back to the dispatch text"
     else
-        HANDOFF+=(--set-metadata pr_summary="$PR_SUMMARY")
+        HANDOFF_META+=(--set-metadata pr_summary="$PR_SUMMARY")
     fi
 fi
-gc bd update "$WORK_BEAD_ID" "${HANDOFF[@]}" --append-notes "Implemented: <brief summary>"
+HANDOFF_OK=0
+if gc bd update "$WORK_BEAD_ID" "${HANDOFF_META[@]}" --append-notes "Implemented: <brief summary>" && gc bd update "$WORK_BEAD_ID" --status=open && gc bd update "$WORK_BEAD_ID" --assignee="$REFINERY_TARGET"; then HANDOFF_OK=1; fi
+if [ "$HANDOFF_OK" != "1" ]; then
+    echo "HANDOFF REFUSED: a gc bd update in the handoff exited non-zero and rolled itself back, so $WORK_BEAD_ID is not open, assigned to $REFINERY_TARGET, and unrouted. The branch is pushed; the step chain is NOT closed."
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery. Held at submit-and-exit; nothing was closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "refinery handoff refused: a gc bd update exited non-zero and rolled back; the branch is pushed but the bead is not handed off"; then
+      gc runtime drain-ack
+    else
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    fi
+    exit 1
+fi
 # <<< submit-target-consume
+# The summary file crosses steps, so step 4b cannot trap it and the block
+# above must not consume it — it is extracted and replayed against one
+# fixture. Handed off, it has no further reader.
+rm -f "${PR_SUMMARY_FILE:-}"
 ```
 
 `${GC_RIG:+$GC_RIG/}` renders the rig prefix only inside a rig session. An
@@ -551,19 +1342,41 @@ SC=""
 for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-: "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
-for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
+for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
   "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
 done
 # <<< submit-chain-close
 ```
 
-**8. Drain and exit:**
+**8. Release the local branch.** The work is pushed, the refinery owns it and
+this session's step chain is closed, so the ref is freed here. Holding it
+checked out blocks every later worktree that resumes this branch, such as a
+rework or rebase child.
+
+The release runs after every durable write this step owes, because it destroys
+the branch shape step 1 asserts. Placed ahead of one, it strands that write: a
+session dying in the window leaves the submit step open, and the re-offer reads
+an empty `CURRENT_BRANCH` against a set `metadata.branch` and halts before
+reaching the write still owed. Placed behind both the handoff and the chain
+close, a death anywhere in this step costs a held ref and nothing else. No
+reader downstream wants the local branch:
+
+```bash
+# >>> submit-branch-release
+RELEASE_BRANCH=$(git branch --show-current)
+if [ -n "$RELEASE_BRANCH" ]; then
+    git checkout --detach && git branch -D "$RELEASE_BRANCH" || echo "branch release failed: $RELEASE_BRANCH stays checked out here. The handoff is already written, so this costs a held ref, nothing more."
+fi
+# <<< submit-branch-release
+```
+
+**9. Drain and exit:**
 ```bash
 gc runtime drain-ack
 exit
 ```
 
-**Exit criteria:** branch pushed and verified, one atomic handoff written,
-refinery signaled, step chain closed forward, drain acknowledged. Done means
-gone."""
+**Exit criteria:** branch pushed and verified, the refinery handoff written in
+three guard-safe writes, refinery signaled, step chain closed forward, local
+branch released, drain acknowledged. Done means gone."""

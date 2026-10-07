@@ -27,6 +27,14 @@ type fakeStore struct {
 	failMeta map[string]error                                // metadata key -> forced SearchIssues error
 	failDeps map[string]error                                // issue id -> forced dependency error
 	closed   bool
+
+	// Read tallies, for the batched-edge-read acceptance test: the edge reads
+	// must not scale with the number of anchors.
+	searchN, depnN, depyN int
+
+	// calls records every SearchIssues filter, so a test can assert the shape of
+	// the query the gather asked — which pass reads lite, which reads full.
+	calls []beads.IssueFilter
 }
 
 // SearchIssues answers both gather shapes: the type-keyed anchor queries, and
@@ -35,12 +43,15 @@ type fakeStore struct {
 // returned its fixtures regardless would let the gather ask a wrong question
 // and still pass.
 func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.IssueFilter) ([]*beads.Issue, error) {
+	f.searchN++
+	f.calls = append(f.calls, filter)
 	// An id-keyed read is the one shape with no status scope, and that is the
 	// point of it: the sitting gather resolves a subject bead whether or not it
 	// has since closed. It is matched first so the scope rule below stays a
 	// rule about the SEARCHES.
 	if len(filter.IDs) > 0 {
-		return f.searchByIDs(filter)
+		out, err := f.searchByIDs(filter)
+		return liteProject(out, filter), err
 	}
 
 	// Every other gather query must scope its statuses; a fake that ignored the
@@ -77,13 +88,41 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 		if err, bad := f.failType[kind]; bad {
 			return nil, err
 		}
-		return f.matching(f.issues[kind], filter), nil
+		return liteProject(f.matching(f.issues[kind], filter), filter), nil
 	}
 	out, err := f.searchByMetadata(filter)
 	if err != nil {
 		return nil, err
 	}
-	return f.matching(out, filter), nil
+	return liteProject(f.matching(out, filter), filter), nil
+}
+
+// liteProject mirrors the library's lite SELECT: with filter.Lite set it returns
+// COPIES whose six HeavyDropList columns (description, design, acceptance_criteria,
+// notes, waiters, payload) are zeroed and IsLitePartial is true, so a test sees
+// exactly what a lite read hands back. Copies, not mutations: the fixtures are
+// shared across a gather's many reads, and a full read after a lite one must
+// still find the heavy fields.
+func liteProject(in []*beads.Issue, filter beads.IssueFilter) []*beads.Issue {
+	if !filter.Lite {
+		return in
+	}
+	out := make([]*beads.Issue, len(in))
+	for i, iss := range in {
+		if iss == nil {
+			continue
+		}
+		c := *iss
+		c.Description = ""
+		c.Design = ""
+		c.AcceptanceCriteria = ""
+		c.Notes = ""
+		c.Waiters = nil
+		c.Payload = ""
+		c.IsLitePartial = true
+		out[i] = &c
+	}
+	return out
 }
 
 // searchByIDs models `id IN (...)`, which is what the shared SQL builder emits
@@ -96,11 +135,30 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 	for _, id := range filter.IDs {
 		want[id] = true
 	}
+	found := map[string]bool{}
 	var out []*beads.Issue
 	for _, kind := range slices.Sorted(maps.Keys(f.issues)) { // deterministic order
 		for _, iss := range f.issues[kind] {
-			if want[iss.ID] {
+			if want[iss.ID] && !found[iss.ID] {
 				out = append(out, iss)
+				found[iss.ID] = true
+			}
+		}
+	}
+	// The far-end children and blockers live embedded in the dependency
+	// fixtures, not in f.issues, so the batched gather's hydration — one
+	// SearchIssues over every edge's far end — must resolve them here too, the
+	// way a real store returns them from its issues table. A bead in f.issues
+	// wins a collision; a fixture does not disagree with itself.
+	for _, embedded := range []map[string][]*beads.IssueWithDependencyMetadata{f.depsUp, f.depsDown} {
+		for _, deps := range embedded {
+			for _, d := range deps {
+				if d == nil || !want[d.Issue.ID] || found[d.Issue.ID] {
+					continue
+				}
+				iss := d.Issue
+				out = append(out, &iss)
+				found[d.Issue.ID] = true
 			}
 		}
 	}
@@ -187,18 +245,61 @@ func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, 
 	return f.matching(out, filter), nil
 }
 
-func (f *fakeStore) GetDependenciesWithMetadata(_ context.Context, id string) ([]*beads.IssueWithDependencyMetadata, error) {
-	if err, bad := f.failDeps[id]; bad {
+// GetDependencyRecordsForIssues is the OUTBOUND batched read: for each queried
+// id, the raw `tracks`/`blocks` edges it owns, drawn from the same depsDown
+// fixtures the per-anchor read used. A raw edge carries only the two ids and the
+// type — the far-end issue is hydrated separately, which searchByIDs answers
+// from the embedded fixtures.
+func (f *fakeStore) GetDependencyRecordsForIssues(_ context.Context, issueIDs []string) (map[string][]*beads.Dependency, error) {
+	f.depyN++
+	if err := f.batchFailure(issueIDs); err != nil {
 		return nil, err
 	}
-	return f.depsDown[id], nil
+	out := map[string][]*beads.Dependency{}
+	for _, id := range issueIDs {
+		for _, d := range f.depsDown[id] {
+			out[id] = append(out[id], &beads.Dependency{
+				IssueID:     id,
+				DependsOnID: d.Issue.ID,
+				Type:        d.DependencyType,
+			})
+		}
+	}
+	return out, nil
 }
 
-func (f *fakeStore) GetDependentsWithMetadata(_ context.Context, id string) ([]*beads.IssueWithDependencyMetadata, error) {
-	if err, bad := f.failDeps[id]; bad {
+// GetDependentRecordsForIssues is the INBOUND batched read: for each queried
+// target, the raw edges pointing AT it (its dependents), from the depsUp
+// fixtures. The dependent is the edge's SOURCE, so it lands in IssueID.
+func (f *fakeStore) GetDependentRecordsForIssues(_ context.Context, targetIDs []string) (map[string][]*beads.Dependency, error) {
+	f.depnN++
+	if err := f.batchFailure(targetIDs); err != nil {
 		return nil, err
 	}
-	return f.depsUp[id], nil
+	out := map[string][]*beads.Dependency{}
+	for _, target := range targetIDs {
+		for _, d := range f.depsUp[target] {
+			out[target] = append(out[target], &beads.Dependency{
+				IssueID:     d.Issue.ID,
+				DependsOnID: target,
+				Type:        d.DependencyType,
+			})
+		}
+	}
+	return out, nil
+}
+
+// batchFailure models an ATOMIC batched read that fails when any queried id is
+// marked in failDeps. The real read is one query over the whole set, so a
+// single unreadable id fails the batch rather than that id alone — the gather's
+// error handling degrades per batch, not per anchor.
+func (f *fakeStore) batchFailure(ids []string) error {
+	for _, id := range ids {
+		if err, bad := f.failDeps[id]; bad {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeStore) Close() error { f.closed = true; return nil }
@@ -247,6 +348,14 @@ func withDepType(c *beads.IssueWithDependencyMetadata, t string) *beads.IssueWit
 	return c
 }
 
+// withLabels stamps labels on an issue fixture. A convoy's ownership is read
+// from its own "owned" label — the same label gascity keys the `gc convoy
+// list` owned flag on.
+func withLabels(iss *beads.Issue, labels ...string) *beads.Issue {
+	iss.Labels = labels
+	return iss
+}
+
 // cityWithRigs lays out <tmp>/rigs/<name>/.beads/config.yaml for each rig so the
 // on-disk discovery path is exercised for real.
 func cityWithRigs(t *testing.T, rigs map[string]string) string {
@@ -286,7 +395,7 @@ func populatedStore() *fakeStore {
 			"decision": {issue("tk-dec", "Pick a path", "decision", 1, testNow.Add(-2*24*time.Hour),
 				`{"gc.routed_to":"human","retries":3,"blocked":true}`)},
 			"convoy": {
-				issue("tk-cv", "real convoy", "convoy", 2, testNow.Add(-time.Hour), ""),
+				withLabels(issue("tk-cv", "real convoy", "convoy", 2, testNow.Add(-time.Hour), ""), "owned"),
 				issue("tk-sling", "sling-tk-x", "convoy", 2, testNow, ""),
 				issue("tk-inputcv", "input convoy for tk-sy3vj", "convoy", 2, testNow, ""),
 			},
@@ -332,7 +441,9 @@ func populatedStore() *fakeStore {
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
 			"tk-cv": {
 				withDepType(child("tk-m1", "in_progress", testNow, ""), "tracks"),
-				// A convoy's own blocks-edges are not membership.
+				// A convoy's own blocks-edge is a WAIT, not membership: it stays
+				// out of Children and is gathered into WaitingOn so the family
+				// grouping can climb a blocked convoy to what it blocks.
 				withDepType(child("tk-m2", "open", testNow, ""), "blocks"),
 			},
 			// The `--waiting-on` edges. Every kind that spends them gets one
@@ -348,8 +459,8 @@ func populatedStore() *fakeStore {
 			},
 			"tk-human":  {withDepType(child("tk-w3", "open", testNow, ""), "blocks")},
 			"tk-parked": {withDepType(child("tk-w4", "closed", testNow, ""), "blocks")},
-			// An epic is banded by a child roll-up that already says whether
-			// its work is moving, so its edges are deliberately NOT read.
+			// An epic gathers its blocks edges, so a blocked epic can join the
+			// dependency family it hangs off.
 			"tk-epic": {withDepType(child("tk-w5", "closed", testNow, ""), "blocks")},
 		},
 	}
@@ -361,21 +472,18 @@ func populatedStore() *fakeStore {
 // happens to be running.
 type fakeGC struct {
 	sessions map[string]string
-	convoys  []convoyRow
-	members  map[string]string // convoy id -> single tracked member
-	err      error             // when set, every call fails with it
-	memberN  int               // ConvoyMember call count
-	// sessionsN and convoysN complete the tally. Together with memberN they are
-	// every external command a gather runs, which is what lets a test assert
-	// the cost of the board rather than only its contents.
+	err      error // when set, every call fails with it
+	// sessionsN is every external command a gather runs — session liveness is
+	// the only `gc` subprocess left, convoy ownership and membership being
+	// in-process store reads — which is what lets a test assert the cost of the
+	// board rather than only its contents.
 	sessionsN int
-	convoysN  int
 }
 
 // externalCalls is every subprocess this gather made. The gather's whole
 // external surface is this interface: the rest is the bead store, opened
 // in-process.
-func (f *fakeGC) externalCalls() int { return f.sessionsN + f.convoysN + f.memberN }
+func (f *fakeGC) externalCalls() int { return f.sessionsN }
 
 func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 	f.sessionsN++
@@ -383,22 +491,6 @@ func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 		return nil, f.err
 	}
 	return f.sessions, nil
-}
-
-func (f *fakeGC) Convoys(context.Context) ([]convoyRow, error) {
-	f.convoysN++
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.convoys, nil
-}
-
-func (f *fakeGC) ConvoyMember(_ context.Context, id string) (string, error) {
-	f.memberN++
-	if f.err != nil {
-		return "", f.err
-	}
-	return f.members[id], nil
 }
 
 func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore, opts ...BeadsOption) *BeadsSource {
@@ -638,8 +730,11 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 // stand down anyway. Nothing errors, no field goes missing, and the only
 // visible symptom is a row that quietly stopped asking too early.
 //
-// `epic` and `convoy` deliberately do not pay it: they are banded by a child
-// roll-up that already reports whether their work is moving.
+// `epic` and `convoy` pay it for a different consumer: the dependency-family
+// grouping climbs a tile to the anchor it blocks, so a blocked epic or convoy
+// must gather its `blocks` edges to join the family it hangs off. A convoy's
+// come from the same outbound read that already
+// fetched its `tracks` members — a blocker there is a wait, not membership.
 func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()})
@@ -669,8 +764,10 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 			"so does a human-routed bead — and this one is still outstanding"},
 		{"tk-parked", "parked", []string{"tk-w4"}, []string{"tk-w4"},
 			"the parked read tk-2plde added is unchanged"},
-		{"tk-epic", "epic", nil, nil,
-			"an epic is banded by its roll-up; it does not pay the extra read"},
+		{"tk-epic", "epic", []string{"tk-w5"}, []string{"tk-w5"},
+			"an epic now gathers its blocks edges for the dependency-family grouping"},
+		{"tk-cv", "convoy", []string{"tk-m2"}, nil,
+			"a convoy's blocks edge is a wait it now gathers, separate from its tracks members"},
 	} {
 		idx, ok := find(c.id, c.kind)
 		if !ok {
@@ -694,23 +791,187 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 	}
 }
 
+// TestReviewReworkChildrenAreAdmittedAsTiles pins the in-flight review/rework
+// selector: a not-closed bead carrying metadata.anchor_bead
+// with task_kind review or rework earns a tile so the operator sees the review
+// or rework in flight as a member of its merge anchor's family. Open OR
+// in_progress — a review is slung open, a rework is claimed — but never closed
+// (its anchor carries the DONE row), and never without an anchor to join.
+func TestReviewReworkChildrenAreAdmittedAsTiles(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	rev := issue("tk-rev", "Review branch polecat/tk-anc -> main", "task", 2, testNow,
+		`{"task_kind":"review","anchor_bead":"tk-anc","check_name":"codex"}`)
+	rwk := issue("tk-rwk", "Rework branch polecat/tk-anc", "task", 2, testNow,
+		`{"task_kind":"rework","anchor_bead":"tk-anc"}`)
+	rwk.Status = beads.StatusInProgress // a claimed rework runs in_progress
+	orphan := issue("tk-orphan", "A review bead naming no anchor", "task", 2, testNow,
+		`{"task_kind":"review"}`)
+	done := issue("tk-revdone", "A review round that closed", "task", 2, testNow,
+		`{"task_kind":"review","anchor_bead":"tk-anc"}`)
+	done.Status = beads.StatusClosed
+	closedAt := testNow.Add(-time.Hour)
+	done.ClosedAt = &closedAt
+
+	st := &fakeStore{issues: map[string][]*beads.Issue{"task": {rev, rwk, orphan, done}}}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	kindOf := func(id string) (string, bool) {
+		for _, a := range res.Anchors {
+			if a.ID == id {
+				return a.Kind, true
+			}
+		}
+		return "", false
+	}
+	if k, ok := kindOf("tk-rev"); !ok || k != "review" {
+		t.Errorf("open review child: kind=%q ok=%v, want a review tile", k, ok)
+	}
+	if k, ok := kindOf("tk-rwk"); !ok || k != "rework" {
+		t.Errorf("in_progress rework child: kind=%q ok=%v, want a rework tile", k, ok)
+	}
+	if _, ok := kindOf("tk-orphan"); ok {
+		t.Error("a review bead with no anchor_bead cannot join a family and must be dropped")
+	}
+	if _, ok := kindOf("tk-revdone"); ok {
+		t.Error("a closed review round is not gathered on the live pass — its anchor carries the DONE row")
+	}
+}
+
+// withDesc stamps a description on an issue fixture — the one heavy TEXT column
+// this source reads (crossRigRefs scans an open anchor's prose).
+func withDesc(iss *beads.Issue, desc string) *beads.Issue {
+	iss.Description = desc
+	return iss
+}
+
+// TestClosedPassReadsLiteLivePassReadsFull pins the projection split. The live
+// anchor pass reads full, so a bead's description reaches the board and
+// crossRigRefs can weigh an open anchor by the other-rig ids in its prose. The
+// closed/DONE pass reads lite and drops the heavy TEXT columns, because a SevDone
+// row orders by recency and reads none of them. The fake honours Lite by blanking
+// the HeavyDropList columns, so a dropped description on the closed anchor and a
+// present one on the live anchor are the two reads.
+func TestClosedPassReadsLiteLivePassReadsFull(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	store := &fakeStore{issues: map[string][]*beads.Issue{
+		"epic": {
+			withDesc(issue("tk-live", "live epic", "epic", 2, testNow.Add(-time.Hour), ""), "blocks sl-aa111 downstream"),
+			withDesc(closedIssue("tk-done", "done epic", "epic", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), ""), "closed once sl-bb222 landed"),
+		},
+	}}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	i, ok := findAnchor(res, "tk-live")
+	if !ok {
+		t.Fatal("live epic anchor missing")
+	}
+	if res.Anchors[i].Description == "" {
+		t.Error("live anchor must carry its description: the live pass reads full so crossRigRefs can weigh the open anchor")
+	}
+
+	j, ok := findAnchor(res, "tk-done")
+	if !ok {
+		t.Fatal("closed epic anchor missing")
+	}
+	if got := res.Anchors[j].Description; got != "" {
+		t.Errorf("closed anchor description must be dropped by the lite closed pass, got %q", got)
+	}
+}
+
+// TestGatherQueryShapesHonourLite asserts the projection the gather ASKS for, per
+// pass, over the recorded filters. The typed and metadata-keyed anchor queries
+// read lite on the closed pass and full on the live pass; the edge hydration (an
+// id-keyed read) always reads lite. The sitting and workflow-root queries read
+// full and are excluded here by their distinct shape — they scope with Statuses
+// (so Status is nil) or MetadataFields, never a bare Status plus IssueType or
+// HasMetadataKey — and with no sittings the only id-keyed read is the hydration.
+func TestGatherQueryShapesHonourLite(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	store := &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"epic": {issue("tk-live", "live epic", "epic", 2, testNow, "")},
+			// A closed merge anchor exercises the metadata-keyed closed pass.
+			"task": {closedIssue("tk-done-merge", "landed", "task", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), `{"merge_result":"merged"}`)},
+		},
+		depsUp: map[string][]*beads.IssueWithDependencyMetadata{
+			// A child edge makes the gather hydrate a far end.
+			"tk-live": {withDepType(child("tk-child", "open", testNow, ""), "parent-child")},
+		},
+	}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store})
+
+	if _, err := src.Gather(context.Background()); err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	var sawClosedTyped, sawLiveTyped, sawClosedMeta, sawHydrate bool
+	for _, c := range store.calls {
+		switch {
+		case len(c.IDs) > 0: // edge hydration — the only id-keyed read with no sittings
+			sawHydrate = true
+			if !c.Lite {
+				t.Errorf("edge hydration must read lite: %+v", c)
+			}
+		case c.Status == nil: // join shape (sittings, workflow roots) — not an anchor pass
+			continue
+		case c.IssueType != nil && *c.Status == beads.StatusClosed:
+			sawClosedTyped = true
+			if !c.Lite {
+				t.Errorf("closed typed anchor query must read lite: type=%s", *c.IssueType)
+			}
+		case c.IssueType != nil && *c.Status == beads.StatusOpen:
+			sawLiveTyped = true
+			if c.Lite {
+				t.Errorf("live typed anchor query must read full (crossRigRefs needs description): type=%s", *c.IssueType)
+			}
+		case c.HasMetadataKey != "" && *c.Status == beads.StatusClosed:
+			sawClosedMeta = true
+			if !c.Lite {
+				t.Errorf("closed metadata anchor query must read lite: key=%s", c.HasMetadataKey)
+			}
+		case c.HasMetadataKey != "" && *c.Status == beads.StatusOpen:
+			if c.Lite {
+				t.Errorf("live metadata anchor query must read full: key=%s", c.HasMetadataKey)
+			}
+		}
+	}
+	if !sawClosedTyped || !sawLiveTyped {
+		t.Errorf("expected both a closed and a live typed anchor query (closed=%v live=%v)", sawClosedTyped, sawLiveTyped)
+	}
+	if !sawClosedMeta {
+		t.Error("expected a closed metadata-keyed anchor query (HasMetadataKey)")
+	}
+	if !sawHydrate {
+		t.Error("expected an edge-hydration id-keyed query")
+	}
+}
+
 // TestWaitingEdgeFailureIsUnknownNotEmpty is the fail-closed half of the read
-// above: WHICH kinds pay it is pinned there, what a FAILED payment reports is
-// pinned here.
+// above: WHICH kinds pay the `blocks` read is pinned there, what a FAILED read
+// reports is pinned here.
 //
-// The per-anchor dependency query can fail on its own — a Dolt timeout, a
-// schema skew — while the anchor query that found the row succeeded. The row is
-// still gathered, because dropping it would hide work, so the only trace of the
-// failure is what this reports about its edges. Report an empty set and the
-// anchor is indistinguishable from one that genuinely has no waits, which is
-// precisely the state board.ruled reads as "every recorded wait has landed":
-// the answered row stands down because its graph could not be read (tk-fhd705).
+// The outbound edge read is ONE batched query for the whole rig+status, so it
+// fails as a whole — a Dolt timeout or schema skew takes every blocks-spending
+// anchor with it. The rows are still gathered, because dropping them would hide
+// work, so the only trace of the failure is what they report about their edges.
+// Report an empty set and a row is indistinguishable from one that genuinely has
+// no waits, which is precisely the state board.ruled reads as "every recorded
+// wait has landed" and stands the row down. So a failed read reports
+// UNKNOWN, not empty. The inbound (parent-child) read is a SEPARATE batch and is
+// unaffected: a failed wait read does not also cost an anchor its child roll-up.
 func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	st := populatedStore()
-	// Only the decision's read fails. The other two kinds that spend the edges
-	// are the control: one anchor's failure must not mark the rest unknown, or
-	// a single slow query quietly re-elevates half the board.
+	// The outbound batch carries every blocks-spending anchor, so marking one id
+	// unreadable fails it for all of them — the atomic shape of the real read.
 	st.failDeps = map[string]error{"tk-dec": errors.New("dolt timeout")}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
 
@@ -718,33 +979,82 @@ func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	i, ok := findAnchor(res, "tk-dec")
-	if !ok {
-		t.Fatal("an anchor whose edge read fails must still appear")
-	}
-	dec := res.Anchors[i]
-	if len(dec.WaitingOn) != 0 || len(dec.WaitingOnClosed) != 0 {
-		t.Errorf("a failed read invents no edges: %v / %v", dec.WaitingOn, dec.WaitingOnClosed)
-	}
-	if !dec.WaitingUnknown {
-		t.Error("a failed edge read must report UNKNOWN, not an empty wait set — " +
-			"board.ruled cannot tell the two apart without it, and stands the row down")
-	}
 	if !res.Partial {
 		t.Error("a failed edge read must set partial")
 	}
-
-	for _, id := range []string{"tk-human", "tk-parked"} {
+	// Every kind that spends the `blocks` read shares the one batch, so all of
+	// them report UNKNOWN — never an empty set board.ruled would read as "all
+	// waits landed" and stand the row down.
+	for _, id := range []string{"tk-dec", "tk-human", "tk-parked"} {
 		j, ok := findAnchor(res, id)
 		if !ok {
-			t.Fatalf("%s: anchor missing", id)
+			t.Fatalf("%s: an anchor whose edge read fails must still appear", id)
 		}
-		if res.Anchors[j].WaitingUnknown {
-			t.Errorf("%s: one anchor's failed read must not mark another unknown", id)
+		a := res.Anchors[j]
+		if !a.WaitingUnknown {
+			t.Errorf("%s: a failed edge read must report UNKNOWN, not an empty wait set — "+
+				"board.ruled cannot tell the two apart without it, and stands the row down", id)
 		}
-		if len(res.Anchors[j].WaitingOn) == 0 {
-			t.Errorf("%s: the control anchors must still carry their real edges", id)
+		if len(a.WaitingOn) != 0 || len(a.WaitingOnClosed) != 0 {
+			t.Errorf("%s: a failed read invents no edges: %v / %v", id, a.WaitingOn, a.WaitingOnClosed)
 		}
+	}
+	// The inbound (parent-child) read is a separate batch: a failed WAIT read
+	// must not cost an anchor its child roll-up. tk-parked decomposed into two
+	// parent-child children, and they survive.
+	if j, ok := findAnchor(res, "tk-parked"); ok {
+		if len(res.Anchors[j].Children) != 2 {
+			t.Errorf("tk-parked: the independent children read must survive a failed wait read: %+v",
+				res.Anchors[j].Children)
+		}
+	}
+}
+
+// TestEdgeReadsAreBatchedNotPerAnchor is the acceptance criterion for the
+// batched edge reads: the number of edge reads is fixed by the number of
+// (rig × status-pass) gathers, not by how many anchors those gathers return, so
+// two stores that differ ONLY in anchor count must make the SAME number of edge
+// reads.
+func TestEdgeReadsAreBatchedNotPerAnchor(t *testing.T) {
+	build := func(n int) *fakeStore {
+		st := &fakeStore{
+			issues:   map[string][]*beads.Issue{},
+			depsUp:   map[string][]*beads.IssueWithDependencyMetadata{},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{},
+		}
+		for i := 0; i < n; i++ {
+			ep := fmt.Sprintf("tk-ep%d", i)
+			dc := fmt.Sprintf("tk-dc%d", i)
+			st.issues["epic"] = append(st.issues["epic"], issue(ep, "an epic", "epic", 2, testNow, ""))
+			st.issues["decision"] = append(st.issues["decision"], issue(dc, "a decision", "decision", 2, testNow, ""))
+			st.depsUp[ep] = []*beads.IssueWithDependencyMetadata{withDepType(child(ep+"-c", "open", testNow, ""), "parent-child")}
+			st.depsDown[dc] = []*beads.IssueWithDependencyMetadata{withDepType(child(dc+"-w", "open", testNow, ""), "blocks")}
+		}
+		return st
+	}
+	gather := func(st *fakeStore) {
+		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+		if _, err := src.Gather(context.Background()); err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+	}
+
+	small, large := build(3), build(60)
+	gather(small)
+	gather(large)
+
+	if small.depnN != large.depnN || small.depyN != large.depyN {
+		t.Errorf("edge reads scale with anchor count — the N+1 is back: "+
+			"dependents %d vs %d, dependencies %d vs %d (3 vs 60 anchors per kind)",
+			small.depnN, large.depnN, small.depyN, large.depyN)
+	}
+	// The fixed count is one batch per direction per gather pass. The open pass
+	// gathers every anchor; the closed pass finds none here, so it reads no edges
+	// at all — hence exactly one of each.
+	if large.depnN != 1 || large.depyN != 1 {
+		t.Errorf("expected one batched read per direction, got dependents=%d dependencies=%d",
+			large.depnN, large.depyN)
 	}
 }
 
@@ -920,6 +1230,82 @@ func TestBeadsCheckAndRigDiscovery(t *testing.T) {
 	}
 }
 
+// TestDiscoverCityPath covers the resolution DiscoverCityPath performs before a
+// BeadsSource opens anything: the explicit env overrides, then the gc fallback
+// that lets the CLI read a city from a plain shell setting none of them.
+func TestDiscoverCityPath(t *testing.T) {
+	// Env wins over gc, in declared precedence order. A gc stub that would answer
+	// a different path is installed throughout, so a case that leaked past the env
+	// check would return "/from/gc" — a wrong, detectable value — rather than
+	// silently reaching the developer's live gc.
+	t.Setenv("GC_HELM_GC_BIN", writeGCStub(t, `{"city_path":"/from/gc"}`, 0))
+	for _, tc := range []struct {
+		name string
+		set  map[string]string
+		want string
+	}{
+		{"GC_HELM_CITY_PATH first", map[string]string{"GC_HELM_CITY_PATH": "/from/helm", "GC_CITY_PATH": "/from/city_path", "GC_CITY": "/from/city"}, "/from/helm"},
+		{"GC_CITY_PATH next", map[string]string{"GC_HELM_CITY_PATH": "", "GC_CITY_PATH": "/from/city_path", "GC_CITY": "/from/city"}, "/from/city_path"},
+		{"GC_CITY last", map[string]string{"GC_HELM_CITY_PATH": "", "GC_CITY_PATH": "", "GC_CITY": "/from/city"}, "/from/city"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.set {
+				t.Setenv(k, v)
+			}
+			if got := DiscoverCityPath(); got != tc.want {
+				t.Errorf("DiscoverCityPath: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// None set: DiscoverCityPath asks gc. The stub stands in for
+	// `gc config show --json`, and it prefixes the JSON with a warning line so the
+	// real subprocess AND decodeLooseJSON's chatter-skipping are both exercised.
+	t.Run("gc fallback when no env is set", func(t *testing.T) {
+		t.Setenv("GC_HELM_CITY_PATH", "")
+		t.Setenv("GC_CITY_PATH", "")
+		t.Setenv("GC_CITY", "")
+		t.Setenv("GC_HELM_GC_BIN", writeGCStub(t, "warning: city.toml is deprecated\n{\"city_path\":\"/discovered/by/gc\"}\n", 0))
+		if got := DiscoverCityPath(); got != "/discovered/by/gc" {
+			t.Errorf("DiscoverCityPath gc fallback: got %q, want %q", got, "/discovered/by/gc")
+		}
+	})
+
+	// A gc that cannot answer — run outside any city, or absent — is the
+	// fail-closed case: DiscoverCityPath yields "", the "no city" the callers
+	// already handle, never a partial or a panic. The stub exits non-zero, which
+	// run() surfaces as an error regardless of what it printed.
+	t.Run("empty when gc fails", func(t *testing.T) {
+		t.Setenv("GC_HELM_CITY_PATH", "")
+		t.Setenv("GC_CITY_PATH", "")
+		t.Setenv("GC_CITY", "")
+		t.Setenv("GC_HELM_GC_BIN", writeGCStub(t, "gc: no city found\n", 1))
+		if got := DiscoverCityPath(); got != "" {
+			t.Errorf("DiscoverCityPath with a failing gc: got %q, want empty", got)
+		}
+	})
+}
+
+// writeGCStub writes an executable stand-in for the `gc` binary that prints
+// stdout verbatim and exits with code. GC_HELM_GC_BIN points newGCExec at it, so
+// DiscoverCityPath's fallback runs the stub instead of the real gc — the whole
+// subprocess path, hermetically. The body is carried in a sibling file the stub
+// cats, so any content (warnings, newlines) round-trips without shell quoting.
+func writeGCStub(t *testing.T, stdout string, code int) string {
+	t.Helper()
+	dir := t.TempDir()
+	payload := filepath.Join(dir, "payload")
+	if err := os.WriteFile(payload, []byte(stdout), 0o644); err != nil {
+		t.Fatalf("write gc stub payload: %v", err)
+	}
+	path := filepath.Join(dir, "gc")
+	script := fmt.Sprintf("#!/bin/sh\ncat %q\nexit %d\n", payload, code)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write gc stub: %v", err)
+	}
+	return path
+}
+
 // TestBeadsSourceCloses verifies shutdown releases the cached handles.
 func TestBeadsSourceCloses(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
@@ -1051,6 +1437,12 @@ func joinStore() *fakeStore {
 		issue("tk-root3", "mol-polecat-work", "task", 2, testNow,
 			`{"gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-lx-dead"}`),
 	)
+	// Each input convoy tracks its one work bead. resolveInflight reads the
+	// member from this `tracks` edge in-process, so the fixture carries the
+	// edge a real convoy would rather than stubbing a `gc convoy status`.
+	st.depsDown["tk-icv1"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-work1", "in_progress", testNow, ""), "tracks")}
+	st.depsDown["tk-icv2"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-work2", "in_progress", testNow, ""), "tracks")}
+	st.depsDown["tk-icv3"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-work3", "in_progress", testNow, ""), "tracks")}
 	return st
 }
 
@@ -1060,11 +1452,6 @@ func liveGC() *fakeGC {
 			"gc-toolkit__polecat-lx-live":  "active",
 			"gc-toolkit__polecat-lx-steps": "active",
 			"gc-toolkit__polecat-lx-dead":  "archived",
-		},
-		members: map[string]string{
-			"tk-icv1": "tk-work1",
-			"tk-icv2": "tk-work2",
-			"tk-icv3": "tk-work3",
 		},
 	}
 }
@@ -1094,14 +1481,57 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 	if got, ok := res.Facts.Inflight["tk-work3"]; ok {
 		t.Errorf("a husk (archived session) must not read as in flight: got %v", got)
 	}
-	// Liveness is filtered BEFORE the convoy reads, so the husk costs no
-	// subprocess at all — that bound is what keeps the gather proportional to
-	// live polecats rather than to the husk pile.
-	if gc.memberN != 2 {
-		t.Errorf("convoy status called %d times, want 2 (live roots only)", gc.memberN)
+	// Member resolution and convoy ownership are in-process store reads now, so
+	// the only subprocess a gather spends is the one session list, however many
+	// roots are in flight.
+	if calls := gc.externalCalls(); calls != 1 {
+		t.Errorf("gather spent %d subprocesses, want 1 (session list; membership and ownership are in-process)", calls)
 	}
 	if res.Facts.OwnerState["gc-toolkit__polecat-lx-live"] != "active" {
 		t.Errorf("session states carried: %v", res.Facts.OwnerState)
+	}
+}
+
+// TestGatherAnchorOwnWorkflowCountsOnItsTile pins the in-flight join across the
+// gather/board boundary for an anchor that is itself the slung work bead. Its
+// input convoy tracks the anchor's own bead, so the gather keys Facts.Inflight
+// by the anchor's id, and the tile built from that gather must count the live
+// molecule. The board tests hand-build their Facts, so only a board fed by a
+// real gather proves the producer and the reader agree on the key.
+func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
+	st := populatedStore()
+	st.issues["task"] = append(st.issues["task"],
+		issue("tk-slung", "Land the slung fix", "task", 2, testNow,
+			`{"merge_result":"pre_open_gate","branch":"polecat/tk-slung"}`),
+		issue("tk-root9", "mol-polecat-work", "task", 2, testNow,
+			`{"gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+	)
+	// An idle child, so a tile that missed the anchor's own molecule would band
+	// stranded rather than merely read zero.
+	st.depsUp["tk-slung"] = []*beads.IssueWithDependencyMetadata{
+		withDepType(child("tk-kid", "open", testNow, ""), "parent-child"),
+	}
+	st.depsDown["tk-icv9"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-slung", "open", testNow, ""), "tracks")}
+
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st}, withGCClient(liveGC()))
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if got := res.Facts.Inflight["tk-slung"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+		t.Fatalf("the join is keyed by the convoy's member, here the anchor's own bead: got %v", res.Facts.Inflight)
+	}
+
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == "tk-slung" })
+	if i < 0 {
+		t.Fatalf("the merge anchor has no tile among %d", len(b.Tiles))
+	}
+	tl := b.Tiles[i]
+	if tl.InProgressLive != 1 || tl.InFlight != 1 || tl.Stranded {
+		t.Errorf("the anchor's own live molecule counts on its tile: in_progress_live=%d in_flight=%d stranded=%v (want 1, 1, false)",
+			tl.InProgressLive, tl.InFlight, tl.Stranded)
 	}
 }
 
@@ -1133,17 +1563,17 @@ func TestGatherCarriesPrefixesAndDescription(t *testing.T) {
 	}
 }
 
-// TestConvoyOwnershipJoin: `gc convoy list` decides whether a convoy is a normal
-// row or the unowned-orphan exception, and an ABSENT answer must not be read as
-// "unowned" — that would flag every convoy in the city the first time the call
-// failed.
+// TestConvoyOwnershipJoin: a convoy's own "owned" label decides whether it is a
+// normal row or the unowned-orphan exception. It is the same label gascity keys
+// the `gc convoy list` owned flag on, read here from the convoy bead the gather
+// already holds — so ownership is always determinable and there is no absent
+// answer to guard against.
 func TestConvoyOwnershipJoin(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 
-	t.Run("unowned convoy flips kind", func(t *testing.T) {
-		gc := liveGC()
-		gc.convoys = []convoyRow{{ID: "tk-cv", Owned: false, Progress: &convoyProgress{Closed: 1, Total: 2}}}
-		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
+	t.Run("owned label stays a convoy", func(t *testing.T) {
+		// populatedStore's tk-cv carries the "owned" label.
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(liveGC()))
 		res, err := src.Gather(context.Background())
 		if err != nil {
 			t.Fatalf("Gather: %v", err)
@@ -1153,41 +1583,33 @@ func TestConvoyOwnershipJoin(t *testing.T) {
 			t.Fatal("tk-cv missing")
 		}
 		a := res.Anchors[i]
+		if a.Kind != "convoy" {
+			t.Errorf("an owned convoy is a normal row: kind=%q", a.Kind)
+		}
+		if a.Owned == nil || !*a.Owned {
+			t.Errorf("owned=true carried: %v", a.Owned)
+		}
+	})
+
+	t.Run("no owned label flips kind to the orphan exception", func(t *testing.T) {
+		st := populatedStore()
+		st.issues["convoy"] = append(st.issues["convoy"],
+			issue("tk-orphan", "unlabelled convoy", "convoy", 2, testNow, ""))
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st}, withGCClient(liveGC()))
+		res, err := src.Gather(context.Background())
+		if err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		i, ok := findAnchor(res, "tk-orphan")
+		if !ok {
+			t.Fatal("tk-orphan missing")
+		}
+		a := res.Anchors[i]
 		if a.Kind != "unowned" || a.Source != "unowned" {
 			t.Errorf("an unowned convoy is the orphan exception: kind=%q source=%q", a.Kind, a.Source)
 		}
 		if a.Owned == nil || *a.Owned {
 			t.Errorf("owned=false carried: %v", a.Owned)
-		}
-		if a.Progress == nil || a.Progress.Total != 2 || a.Progress.Closed != 1 {
-			t.Errorf("progress carried: %+v", a.Progress)
-		}
-	})
-
-	t.Run("owned convoy stays a convoy", func(t *testing.T) {
-		gc := liveGC()
-		gc.convoys = []convoyRow{{ID: "tk-cv", Owned: true}}
-		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
-		res, _ := src.Gather(context.Background())
-		i, _ := findAnchor(res, "tk-cv")
-		if res.Anchors[i].Kind != "convoy" {
-			t.Errorf("kind = %q, want convoy", res.Anchors[i].Kind)
-		}
-		if res.Anchors[i].Owned == nil || !*res.Anchors[i].Owned {
-			t.Errorf("owned=true carried: %v", res.Anchors[i].Owned)
-		}
-	})
-
-	t.Run("absent ownership is not an orphan", func(t *testing.T) {
-		gc := liveGC() // no convoy rows at all
-		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
-		res, _ := src.Gather(context.Background())
-		i, _ := findAnchor(res, "tk-cv")
-		if res.Anchors[i].Kind != "convoy" {
-			t.Errorf("an unlisted convoy keeps kind convoy, got %q", res.Anchors[i].Kind)
-		}
-		if res.Anchors[i].Owned != nil {
-			t.Errorf("owned stays null when unknown, got %v", res.Anchors[i].Owned)
 		}
 	})
 }
@@ -1542,6 +1964,27 @@ func TestSittingTakeawayIsAttributedBySpan(t *testing.T) {
 	}
 }
 
+// TestSittingCarriesSubjectTitle: the row's topic is the subject bead's title,
+// carried onto every sitting that names it — the two with no attributable
+// takeaway included, which is the whole point. Unlike the takeaway, the title
+// has no span test: it is what the subject is about whenever the sitting ran.
+func TestSittingCarriesSubjectTitle(t *testing.T) {
+	got := sittingsByID(gatherSittings(t))
+	const topic = "the subject three sittings talked about"
+	for _, id := range []string{"tk-sit-open", "tk-sit-recent", "tk-sit-earlier"} {
+		if s := got[id]; s.SubjectTitle != topic {
+			t.Errorf("%s: SubjectTitle = %q, want the subject's title %q", id, s.SubjectTitle, topic)
+		}
+	}
+	// The two that carry the topic but NO takeaway are the rows the change
+	// exists for: without the title their headline would be a bare id.
+	for _, id := range []string{"tk-sit-open", "tk-sit-earlier"} {
+		if s := got[id]; s.Takeaway != "" {
+			t.Errorf("guard: %s should carry no takeaway, got %q", id, s.Takeaway)
+		}
+	}
+}
+
 // TestSittingWindowIsConfigurable: the knob widens the closed half, and zero
 // turns it off without touching the running half.
 func TestSittingWindowIsConfigurable(t *testing.T) {
@@ -1599,8 +2042,89 @@ func TestSittingPassesDegradeIndependently(t *testing.T) {
 	if s := got["tk-sit-recent"]; s.Takeaway != "" || s.Outcome != "diagnosed" {
 		t.Errorf("the sitting keeps what it owns and loses only the joined headline: %+v", s)
 	}
+	if s := got["tk-sit-recent"]; s.SubjectTitle != "" {
+		t.Errorf("an unreadable subject leaves the topic empty, not guessed: %q", s.SubjectTitle)
+	}
 	if !res.Partial {
 		t.Error("a failed subject read is reported as partial")
+	}
+}
+
+// TestGatherResolvesEdgeOnlyVisitSubject: a visit records its subject twice — the
+// gc.continuation_group stamp and a tracks edge — and gate-visit can leave the stamp
+// empty. The board reads the subject off the edge in that case, so an edge-only visit
+// holds its anchor and carries its subject's headline exactly as a stamped one does.
+func TestGatherResolvesEdgeOnlyVisitSubject(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"task": {
+				issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+				// task_kind=visit with NO gc.continuation_group: the subject is
+				// reachable only through the tracks edge below.
+				visitBead("tk-sit-edge", "visit: tk-rec — named through the tracks edge",
+					`{"task_kind":"visit","gc.claimed_at":"2026-08-01T11:00:00Z","gc.session_name":"gc-toolkit__converse-1"}`,
+					testNow),
+			},
+		},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-sit-edge": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
+		},
+	}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	got := sittingsByID(res)
+	s, ok := got["tk-sit-edge"]
+	if !ok {
+		t.Fatalf("the edge-only visit was dropped from the sitting record: %v", slices.Sorted(maps.Keys(got)))
+	}
+	if s.Subject != "tk-rec" {
+		t.Errorf("Subject = %q, want the tracks-edge target %q with the stamp empty", s.Subject, "tk-rec")
+	}
+	if !res.Facts.Visits["tk-rec"] {
+		t.Error("a running edge-only visit holds its subject, so the board must mark it visited")
+	}
+	// The subject's title rides the row, which only happens if the edge subject is
+	// resolved BEFORE attributeTakeaways reads it.
+	if want := "a recommendation subject"; s.SubjectTitle != want {
+		t.Errorf("SubjectTitle = %q, want the subject's title %q carried onto the row", s.SubjectTitle, want)
+	}
+}
+
+// TestEdgeSubjectResolutionReadsOnlyForStamplessVisits: the tracks-edge read fires
+// only for a visit whose stamp is empty. Two stores that differ only in whether the
+// visit carries a gc.continuation_group stamp make dependency reads that differ by
+// exactly one — the stamped board spends nothing resolving its subject.
+func TestEdgeSubjectResolutionReadsOnlyForStamplessVisits(t *testing.T) {
+	gather := func(st *fakeStore) *fakeStore {
+		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+		if _, err := src.Gather(context.Background()); err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		return st
+	}
+	stamped := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {
+		issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+		visitBead("tk-sit-stamped", "visit: tk-rec — stamped",
+			`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
+	}}})
+	edgeOnly := gather(&fakeStore{
+		issues: map[string][]*beads.Issue{"task": {
+			issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+			visitBead("tk-sit-edge", "visit: tk-rec — edge only",
+				`{"task_kind":"visit"}`, testNow),
+		}},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-sit-edge": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
+		},
+	})
+	if edgeOnly.depyN != stamped.depyN+1 {
+		t.Errorf("the tracks-edge read must fire only for a stamp-less visit: stamped=%d edge-only=%d (want edge-only = stamped+1)",
+			stamped.depyN, edgeOnly.depyN)
 	}
 }
 
@@ -1611,7 +2135,8 @@ func TestSittingPassesDegradeIndependently(t *testing.T) {
 // that does, and the two things that bound it.
 
 // doneStore is one rig's worth of recently closed anchors: one inside the
-// window, one outside it, and one inside it that the operator has dismissed.
+// window, one outside it, and one inside it that carries a legacy dismiss
+// marker from before the DONE band went stateless.
 func doneStore() *fakeStore {
 	return &fakeStore{
 		issues: map[string][]*beads.Issue{
@@ -1621,7 +2146,10 @@ func doneStore() *fakeStore {
 					testNow.Add(-24*time.Hour), testNow.Add(-24*time.Hour), ""),
 				closedIssue("tk-ancient", "closed last month", "epic", 2,
 					testNow.Add(-30*24*time.Hour), testNow.Add(-30*24*time.Hour), ""),
-				closedIssue("tk-gone", "closed yesterday, dismissed since", "epic", 2,
+				// A row closed inside the window that still carries the retired
+				// gc.dismissed_at marker. The band reads no per-row state, so the
+				// marker is inert and the row bands DONE like any other.
+				closedIssue("tk-marked", "closed yesterday, carries a legacy dismiss marker", "epic", 2,
 					testNow.Add(-24*time.Hour), testNow.Add(-24*time.Hour),
 					`{"gc.dismissed_at":"2026-08-01T09:00:00Z","gc.dismissed_by":"operator"}`),
 			},
@@ -1629,10 +2157,6 @@ func doneStore() *fakeStore {
 				closedIssue("tk-subject", "a conversation subject that closed", "bug", 2,
 					testNow.Add(-2*time.Hour), testNow.Add(-2*time.Hour),
 					`{"gc.takeaway":"settled — nothing further"}`),
-				// Dismissed while it was closed, then REOPENED. It is live work
-				// again and the stale marker must not follow it.
-				issue("tk-reopened", "dismissed, then reopened", "bug", 1, testNow.Add(-time.Hour),
-					`{"gc.takeaway":"back open","gc.dismissed_at":"2026-07-30T09:00:00Z"}`),
 			},
 		},
 	}
@@ -1674,7 +2198,7 @@ func TestGatherKeepsRecentlyClosedAnchors(t *testing.T) {
 	}
 }
 
-func TestGatherBoundsAndDismissesTheDoneBand(t *testing.T) {
+func TestGatherBoundsTheDoneBand(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
 
@@ -1685,28 +2209,11 @@ func TestGatherBoundsAndDismissesTheDoneBand(t *testing.T) {
 	if _, ok := findAnchor(res, "tk-ancient"); ok {
 		t.Error("the window bounds the pass: an anchor closed a month ago is history, not layout")
 	}
-	if _, ok := findAnchor(res, "tk-gone"); ok {
-		t.Error("gc.dismissed_at is the operator's explicit clear; a dismissed row must not come back")
-	}
-}
-
-// The marker retires a DONE row and nothing else. A dismissed anchor that is
-// later reopened is live work, and hiding it would be the same disappearance
-// the band exists to stop, with a stale marker as the cause.
-func TestDismissMarkerDoesNotHideALiveAnchor(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
-	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
-
-	res, err := src.Gather(context.Background())
-	if err != nil {
-		t.Fatalf("Gather: %v", err)
-	}
-	i, ok := findAnchor(res, "tk-reopened")
-	if !ok {
-		t.Fatal("a reopened anchor carrying a stale gc.dismissed_at is live work and belongs on the board")
-	}
-	if !res.Anchors[i].ClosedAt.IsZero() {
-		t.Error("...and reads as live, not DONE")
+	// The window is the only bound. A row closed inside it stays on the pass
+	// even carrying a legacy gc.dismissed_at: the band reads no per-row state,
+	// so the marker is inert and the row ages out on the clock like any other.
+	if _, ok := findAnchor(res, "tk-marked"); !ok {
+		t.Error("a row closed inside the window bands DONE regardless of a legacy dismiss marker; the band is stateless")
 	}
 }
 

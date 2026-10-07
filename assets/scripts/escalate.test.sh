@@ -5,7 +5,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/escalate.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -25,6 +25,13 @@ printf '[%s] %s\n' "${GC_RIG:-<unset>}" "$*" >> "${STUB_GC_LOG:?}"
 if [ "${1:-}" = "agent" ] && [ "${2:-}" = "list" ]; then
   [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
   printf '%s\n' "${STUB_AGENTS:-}"
+  exit 0
+fi
+# The city's rig set, by id prefix. escalate.sh reads this to pin the store to
+# the subject's own rig when the route defaults to the board and GC_RIG is unset.
+if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
+  [ -n "${STUB_RIG_LIST_FAIL:-}" ] && { echo "gc: rig list unavailable" >&2; exit 1; }
+  printf '%s\n' "${STUB_RIGS:-}"
   exit 0
 fi
 [ "${1:-}" = "bd" ] || exit 0
@@ -62,14 +69,19 @@ case "${1:-}" in
   create)
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "bd: refused" >&2; exit 1; }
     shift
-    title=""; body=""
+    title=""; body=""; meta="{}"
     while [ $# -gt 0 ]; do
       case "$1" in
         --title) shift; title="$1" ;;
         -d) shift; body="$1" ;;
+        --metadata) shift; meta="${1:-}"; [ -n "$meta" ] || meta="{}" ;;
       esac
       shift || true
     done
+    # A create that returns an id but drops the metadata — the readback guard's
+    # reason to exist. Distinct from STUB_UPD_FAIL, which no longer touches the
+    # identity stamps now that they ride the create.
+    [ -n "${STUB_CREATE_NOMETA:-}" ] && meta="{}"
     # One create can fail while another lands: the run that mints a standing
     # subject issues two, and the fail-open arm is only reachable when the
     # first fails by itself.
@@ -78,9 +90,13 @@ case "${1:-}" in
       *) case "$title" in *"$STUB_CREATE_FAIL_MATCH"*) echo "bd: refused" >&2; exit 1 ;; esac ;;
     esac
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
-    tmp=$(mktemp)
-    jq -c --arg id "vis-$n" --arg t "$title" --arg d "$body" \
-      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":{},"notes":""}]' \
+    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX")
+    # The real `gc bd create` stamps --metadata (a JSON object) into the bead
+    # atomically with the create; model that so the create carries the identity
+    # the same way, and a run whose follow-up writes are lost still leaves a
+    # dedup-complete visit.
+    jq -c --arg id "vis-$n" --arg t "$title" --arg d "$body" --argjson m "$meta" \
+      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":$m,"notes":""}]' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
     printf '{"id":"vis-%s"}\n' "$n" ;;
   update)
@@ -90,7 +106,7 @@ case "${1:-}" in
       "") : ;;
       *) case "$*" in *"$STUB_UPD_FAIL_MATCH"*) exit 1 ;; esac ;;
     esac
-    tmp=$(mktemp); cp "$STORE" "$tmp"
+    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX"); cp "$STORE" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
@@ -106,15 +122,46 @@ case "${1:-}" in
 esac
 STUB
 chmod +x "$BIN/gc"
+
+# Fake visit-close.sh for the --retract path: record each call as
+# `<visit>|<subject>|<outcome>|<reason>` and, so the not-closed arm can be
+# exercised, exit non-zero when STUB_VISIT_CLOSE_FAIL is set — as the real
+# visit-close.sh exits non-zero when the close does not land. escalate.sh reaches
+# it through the GC_ESCALATE_VISIT_CLOSE_TOOL override, so the real one beside the
+# SUT is never touched.
+cat > "$BIN/visit-close.sh" <<'VC'
+#!/usr/bin/env bash
+visit=""; subject=""; outcome=""; reason=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --visit)   visit="${2:-}";   shift 2 ;;
+    --subject) subject="${2:-}"; shift 2 ;;
+    --outcome) outcome="${2:-}"; shift 2 ;;
+    --reason)  reason="${2:-}";  shift 2 ;;
+    --force)   shift ;;
+    *)         shift ;;
+  esac
+done
+printf '%s|%s|%s|%s\n' "$visit" "$subject" "$outcome" "$reason" >> "${STUB_VISIT_CLOSE_LOG:?}"
+[ -n "${STUB_VISIT_CLOSE_FAIL:-}" ] && exit 4
+exit 0
+VC
+chmod +x "$BIN/visit-close.sh"
+
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
+export GC_ESCALATE_VISIT_CLOSE_TOOL="$BIN/visit-close.sh" STUB_VISIT_CLOSE_LOG="$TMP/visit-close.log"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
-      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS 2>/dev/null || true
+      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL \
+      STUB_CREATE_NOMETA 2>/dev/null || true
 # The live agent set the route is matched against. converse exists ONLY
 # rig-scoped, which is what makes the bare name unroutable.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
   {"qualified_name":"myrig/gc-toolkit.converse"},{"qualified_name":"other/rig.converse"},
   {"qualified_name":"gc-toolkit.dog"}]}'
+# The city's rigs, keyed by id prefix. The subject in these cases is tk-a, so a
+# rig-less board-route caller derives its store from prefix 'tk' -> gc-toolkit.
+export STUB_RIGS='{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/nonexistent-rig"}]}'
 # Most cases below are a rig-bound caller; the rig-less ones drop GC_RIG themselves.
 export GC_RIG=gc-toolkit
 
@@ -126,10 +173,13 @@ STANDING='{"id":"sub-0","status":"open","assignee":"","title":"triage: escalatio
 reset() {
   printf '%s' "${1:-[]}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
+  : > "$STUB_VISIT_CLOSE_LOG"; unset STUB_VISIT_CLOSE_FAIL 2>/dev/null || true
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 field()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 visits() { cat "$STUB_SEQ"; }   # creates issued since reset (the seed bead is vis-0)
+vclog()  { cat "$STUB_VISIT_CLOSE_LOG"; }        # visit-close.sh calls the retract made
+vccount(){ wc -l < "$STUB_VISIT_CLOSE_LOG" | tr -d ' '; }   # how many calls
 
 echo "# files a visit in the canonical gate-visit shape"
 reset
@@ -137,7 +187,7 @@ out=$("$SUT" --subject tk-stuck --key merge-conflict --message "PR#7 is CONFLICT
 eq "$rc" 0 "filing exits 0"
 eq "$(visits)" "1" "exactly one visit filed"
 has "$(field vis-1 title)" "visit: tk-stuck — PR#7 is CONFLICTING" "title carries the visit brand, subject and headline"
-eq "$(meta vis-1 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "routed to the rig-qualified converse pool"
+eq "$(meta vis-1 gc.routed_to)" "human" "parked on the board (the default route, since the converse pool is retired)"
 eq "$(meta vis-1 gc.continuation_group)" "tk-stuck" "continuation group is the subject"
 eq "$(meta vis-1 task_kind)" "visit" "task_kind=visit stamped"
 eq "$(meta vis-1 escalation_key)" "merge-conflict" "escalation_key stamped"
@@ -145,29 +195,76 @@ has "$(cat "$STUB_DEPS")" "vis-1|tk-stuck|tracks" "visit tracks the subject (nev
 hasnt "$(cat "$STUB_DEPS")" "parent-child" "no parent-child edge"
 has "$out" "filed visit vis-1" "reports what it filed"
 
-echo "# rig qualification and --pool override"
+echo "# the default route is human, and --pool overrides it"
+# The converse routed-pool is retired: the default is the board (human), which
+# needs no live-agent match. --pool still routes to a pool.
 reset
-GC_RIG=myrig "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(meta vis-1 gc.routed_to)" "myrig/gc-toolkit.converse" "GC_RIG qualifies the default pool"
+GC_RIG=gc-toolkit "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(meta vis-1 gc.routed_to)" "human" "the default route is the board"
 reset
 GC_RIG=other "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse >/dev/null 2>&1
 eq "$(meta vis-1 gc.routed_to)" "other/rig.converse" "--pool overrides the default"
 
-echo "# an unroutable route refuses BEFORE anything is created"
-# Nothing filed is the point: a visit that exists and routes nowhere is worse
-# than a loud refusal, because the caller reads exit 0 as "a human was asked".
+echo "# a board-route caller whose GC_RIG is not the subject's rig REFUSES"
+# The old converse default was verified against the live agent set, which also
+# proved GC_RIG named a real rig. `human` needs no agent match, and `gc bd`
+# only WARNS on a GC_RIG that names no bound rig before filing into the ambient
+# store — so a stale or misspelled export would file the visit on a board the
+# subject never reaches, exit 0. The subject's own rig (tk -> gc-toolkit) is
+# the store the visit must land in; a pin that disagrees is refused.
+reset
+out=$(GC_RIG=myrig "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "GC_RIG naming a rig other than the subject's exits 1"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "lives in rig 'gc-toolkit'" "and names the rig the subject lives in"
+echo "# a rig-less board-route caller pins the store to the subject's own rig"
+# The board route ('human') names no store, so a rig-less caller cannot let the
+# create fall to the ambient store — the visit would land on the wrong board and
+# its tracks edge would miss the subject. escalate derives the store from the
+# subject's id prefix (tk -> gc-toolkit) and files there.
 reset
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "a rig-less caller's bare default exits 1"
-eq "$(visits)" "0" "and files NOTHING — the refusal precedes the create"
-has "$out" "matches no live agent identity" "says the route names no agent"
-has "$out" "gc-toolkit/gc-toolkit.converse" "names the live rig-qualified forms"
-has "$out" "repair:" "and prints the repair"
+eq "$rc" 0 "a rig-less board-route caller files once it derives the subject's rig"
+eq "$(visits)" "1" "the visit exists"
+eq "$(meta vis-1 gc.routed_to)" "human" "routed to the board"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "the create runs under the derived rig, not the ambient store"
+has "$out" "deriving rig 'gc-toolkit'" "and says which store it pinned"
+
+echo "# a rig-less board-route caller whose subject resolves to no rig REFUSES"
+# Fail before filing: a visit written to the ambient store lands on the wrong
+# board and severs the tracks edge — the silent mute escalate exists to end.
+reset
+out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unresolvable subject prefix on the board route exits 1"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "could not be proven" "and says the store could not be proven"
+has "$out" "no rig carries the prefix 'zz'" "with escalation-rig's reason (an unknown prefix, not an unreadable rig set)"
+
+echo "# a rig-less board-route caller REFUSES when the rig set is unreadable"
+reset
+out=$(env -u GC_RIG STUB_RIG_LIST_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unreadable rig set on the board route exits 1 (fail closed)"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "could not read" "and says the rig set was unreadable, not that the prefix is unknown"
+
+echo "# a board-route caller whose subject has no rig prefix keeps its own GC_RIG"
+# An ephemeral or prefix-less subject cannot disprove the caller's pin, so the
+# pinned store files as before.
+reset
+out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a prefix-less subject under a pinned GC_RIG still files"
+eq "$(visits)" "1" "the visit exists"
+
+echo "# an unroutable --pool is refused before anything is created"
+# A --pool that names no live agent is refused BEFORE anything is created: a
+# visit that exists and routes nowhere reads to the caller as "a human was asked".
 
 reset
-out=$("$SUT" --subject tk-a --key k1 --message m --pool no/such.pool 2>&1); rc=$?
-eq "$rc" 1 "an unknown --pool exits 1"
+out=$("$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/nonexistent.pool 2>&1); rc=$?
+eq "$rc" 1 "an unknown --pool (this rig, no such agent) exits 1"
 eq "$(visits)" "0" "and files nothing"
+has "$out" "matches no live agent identity" "says the route names no agent"
+has "$out" "repair:" "and prints the repair"
 
 echo "# a live pool that does not read this rig's store is refused too"
 # GC_RIG picks the store `gc bd create` writes to as well as the route, so a
@@ -204,22 +301,25 @@ out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit
 eq "$rc" 0 "a bare pool a city agent holds still files"
 has "$(cat "$STUB_GC_LOG")" "[<unset>] bd create" "and keeps the ambient store — there is no rig to adopt"
 
-echo "# an unreadable agent set is not proof — it files, loudly unverified"
+echo "# an unreadable agent set is not proof — a --pool route files, loudly unverified"
+# The board default needs no live-agent match, so the verify path is exercised
+# by an explicit --pool: an unreadable agent set cannot disprove it, so it files
+# and says so rather than muting a human.
 reset
-out=$(STUB_AGENTS_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 0 "an unreadable agent set still files"
+out=$(STUB_AGENTS_FAIL=1 "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 0 "an unreadable agent set still files a --pool route"
 eq "$(visits)" "1" "the visit exists"
 has "$out" "UNVERIFIED" "and says the route was never verified"
 
-echo "# a control byte in the agent set does not silently mute the check"
+echo "# a control byte in the agent set does not silently mute the --pool check"
 # A raw C0 byte anywhere in the payload aborts jq on the WHOLE document, which
-# reads here as an empty identity set — the fail-open arm above, so the route
-# would file UNVERIFIED and the check that just refused it would be gone. The
-# scrub is what keeps the refusal reachable; without it this case files.
+# reads as an empty identity set — the fail-open arm above, so an unroutable
+# --pool would file UNVERIFIED and the check that should refuse it would be
+# gone. The scrub is what keeps the refusal reachable; without it this files.
 reset
 out=$(STUB_AGENTS="$(printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse","work_query":"a\002b"}]}')" \
-  env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "the bare default is still refused past a control byte"
+  "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/nonexistent.pool 2>&1); rc=$?
+eq "$rc" 1 "an unroutable --pool is still refused past a control byte"
 eq "$(visits)" "0" "and nothing is filed"
 has "$out" "matches no live agent identity" "the route was actually checked, not skipped"
 
@@ -234,6 +334,25 @@ reset '[{"id":"vis-0","status":"in_progress","assignee":"conv/1","metadata":{"gc
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "0" "a CLAIMED (in_progress) visit also suppresses"
 
+echo "# the create stamps the dedup keys, so a lost follow-up write cannot orphan a visit"
+# The failure this closes: a visit created without its escalation_key — the
+# stamp landing in a separate write that never ran — is invisible to the dedup
+# listing, so the next identical escalation mints a second visit. Stamping the
+# identity in the create means a run whose every post-create write fails still
+# leaves a dedup-complete visit. STUB_UPD_FAIL fails every update to prove no
+# follow-up write is relied on.
+reset
+STUB_UPD_FAIL=1
+out1=$("$SUT" --subject tk-orphan --key stuck --message "first" 2>&1); rc1=$?
+eq "$rc1" 0 "the first escalation succeeds with no follow-up update at all"
+eq "$(visits)" "1" "one visit filed"
+eq "$(meta vis-1 escalation_key)" "stuck" "the create stamped escalation_key without any update"
+eq "$(meta vis-1 gc.continuation_group)" "tk-orphan" "…and the continuation_group the durable dedup also needs"
+out2=$("$SUT" --subject tk-orphan --key stuck --message "second" 2>&1)
+eq "$(visits)" "1" "the repeat dedups to the one open visit — no orphan, no duplicate"
+has "$out2" "already open" "the repeat reports the visit is already open"
+unset STUB_UPD_FAIL
+
 echo "# an already-open visit that routes nowhere is repointed, not counted"
 # The create-side gate cannot reach a visit that already exists. One filed
 # before it carries the unroutable name still, and every later pass matches
@@ -242,17 +361,17 @@ reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"
 out=$("$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "a repointed situation exits 0"
 eq "$(visits)" "0" "no second visit filed"
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "the stale route is repaired in place"
+eq "$(meta vis-0 gc.routed_to)" "human" "the stale route is repaired in place — repointed to the board"
 has "$out" "repointing it at" "and the repoint is announced"
 
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "a visit with NO route is repointed too"
+eq "$(meta vis-0 gc.routed_to)" "human" "a visit with NO route is repointed too — to the board"
 eq "$(visits)" "0" "and still files nothing"
 
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"other/rig.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "a cross-rig route is repointed at this store's pool"
+eq "$(meta vis-0 gc.routed_to)" "human" "a cross-rig route is repointed to the board"
 
 echo "# a visit parked on the operator is left where it is"
 # gc.routed_to=human is the city's "no agent will take it" marker, not a pool
@@ -276,6 +395,46 @@ out=$(STUB_AGENTS_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "an unprovable route leaves the visit alone"
 eq "$(meta vis-0 gc.routed_to)" "gc-toolkit.converse" "the route is not rewritten on no evidence"
 has "$out" "UNVERIFIED" "and says so"
+
+echo "# a rig-less caller with a bare --pool cannot confirm a rig-qualified route"
+# The board route derives its store from the subject (above), and a rig-qualified
+# --pool adopts its rig, but a BARE --pool does neither, so GC_RIG stays unset.
+# The dedup listing then runs against whatever store the ambient environment
+# picks, and nothing here says the matched visit lives in the store its
+# rig-scoped pool reads. Counting it exits 0 on a visit that may have asked
+# nobody — the same mute, entered from the dedup side — while the create path
+# refuses this very caller. Repointing is wrong too: the route is likely sound.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again --pool gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 1 "an unconfirmable already-open route exits 1"
+eq "$(visits)" "0" "and files nothing"
+eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "and leaves the route it cannot condemn"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "no write at all"
+has "$out" "GC_RIG is unset" "says why the open visit cannot be counted"
+has "$out" "--pool 'gc-toolkit/gc-toolkit.converse'" "and the repair names the row's own route"
+
+# The repair the refusal names: --pool binds the store, and the dedup that
+# could not be trusted rig-less is then a proved match in the pool's own store.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again \
+  --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 0 "naming that pool exits 0"
+eq "$(visits)" "0" "still files nothing"
+has "$out" "already open" "the situation is confirmed, not guessed"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd list" "the dedup read ran in the pool's own store"
+
+# A city identity carries no rig segment, so there is no store claim to
+# reconcile and the rig-less caller's dedup stands on identity alone.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit.dog","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again 2>&1); rc=$?
+eq "$rc" 0 "a bare city identity still suppresses for a rig-less caller"
+eq "$(visits)" "0" "and files nothing"
+
+# ...and so does the operator marker: `human` is a held route, not a rig.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"human","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again 2>&1); rc=$?
+eq "$rc" 0 "a human-parked visit still suppresses for a rig-less caller"
+eq "$(meta vis-0 gc.routed_to)" "human" "and keeps its route"
 
 echo "# a closed visit does not suppress; a different subject/key does not suppress"
 reset '[{"id":"vis-0","status":"closed","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
@@ -359,7 +518,7 @@ reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key"
 out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message m 2>&1); rc=$?
 eq "$rc" 0 "an unroutable visit matched by key alone exits 0"
 eq "$(visits)" "0" "and no duplicate is filed"
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "the key-only match is repointed too"
+eq "$(meta vis-0 gc.routed_to)" "human" "the key-only match is repointed too — to the board"
 has "$out" "repointed" "and says so"
 
 echo "# an ephemeral subject is filed on a durable standing subject"
@@ -477,8 +636,8 @@ out=$(STUB_CREATE_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 1 "a failed create exits 1"
 has "$out" "no id" "and says the create returned nothing"
 reset
-out=$(STUB_UPD_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "stamps that do not read back exit 1"
+out=$(STUB_CREATE_NOMETA=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "a create that drops the identity stamps is caught at read-back and exits 1"
 has "$out" "repair:" "and print the repair command"
 
 echo "# the deacon's filed visits reach its incident ledger"
@@ -487,6 +646,13 @@ echo "# the deacon's filed visits reach its incident ledger"
 # real ledger script; what is under test is which calls escalate.sh makes.
 LSUT="$TMP/sut"; mkdir -p "$LSUT"
 cp "$SUT" "$LSUT/escalate.sh"; chmod +x "$LSUT/escalate.sh"
+# escalate.sh proves its route through the sibling pool-route.sh, so the private
+# copy needs it beside escalate.sh too, or every filing here exits 1 before the
+# ledger is reached.
+cp "$HERE/pool-route.sh" "$LSUT/pool-route.sh"; chmod +x "$LSUT/pool-route.sh"
+# and its bead-store reads come from the sibling bd-lib.sh, sourced the same way,
+# so the private copy needs it beside escalate.sh too.
+cp "$HERE/bd-lib.sh" "$LSUT/bd-lib.sh"
 cat > "$LSUT/gc-deacon-ledger.sh" <<'LSTUB'
 #!/usr/bin/env bash
 set -u
@@ -541,6 +707,44 @@ out=$("$SUT" --subject tk-a --key "bad key!" --message m 2>&1); rc=$?
 eq "$rc" 2 "a key outside [A-Za-z0-9._-] is rejected"
 out=$("$SUT" --subject tk-a --key k1 --message m --nonsense 2>&1); rc=$?
 eq "$rc" 2 "an unknown argument is rejected"
+
+echo "# a --subject that is not one bead id is refused before the store is touched"
+# An unquoted expansion that does not word-split (zsh) hands escalate.sh an id
+# and the word beside it as one argument. Filed, the visit's group would be the
+# joined string, which no later dedup or retract call matches, and its tracks
+# edge would name no bead. The refusal comes before any gc call, so nothing is
+# listed, created or closed.
+gccalls() { grep -c . "$STUB_GC_LOG"; }
+reset
+out=$("$SUT" --subject "tk-a 2026-10-04T07:07:52Z" --key witness-refinery-queue --message m 2>&1); rc=$?
+eq "$rc" 2 "an id joined to a timestamp by a space is a usage error"
+eq "$(visits)" "0" "and files no visit"
+eq "$(gccalls)" "0" "and makes no gc call at all"
+has "$out" "--subject must be one bead id" "and names the subject as the fault"
+has "$out" "read -r SID SWHEN" "and names the read-each-field fix"
+reset
+out=$("$SUT" --subject $'tk-a\ntk-b' --key k1 --message m 2>&1); rc=$?
+eq "$rc" 2 "a newline-joined id list is refused too"
+eq "$(visits)" "0" "and files no visit"
+reset
+out=$("$SUT" --subject $'tk-a\t2026-10-04T07:07:52Z' --key k1 --message m 2>&1); rc=$?
+eq "$rc" 2 "a tab-joined pair is refused too"
+eq "$(visits)" "0" "and files no visit"
+reset
+"$SUT" --subject tk-a --key witness-refinery-queue --message m >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "the same call with the id alone files"
+eq "$(meta vis-1 gc.continuation_group)" "tk-a" "with the id as the visit's group"
+reset
+"$SUT" --subject tk-9tbbk.2 --key k1 --message m >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "a child bead id (dotted) is one bead id and files"
+eq "$(meta vis-1 gc.continuation_group)" "tk-9tbbk.2" "with the child id as the visit's group"
+# The retract path takes the same guard. The seeded visit carries the joined
+# string as its group, so an unguarded retract would match it and close it.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub 2026-10-04T07:07:52Z — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"witness-refinery-queue","gc.continuation_group":"tk-sub 2026-10-04T07:07:52Z","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject "tk-sub 2026-10-04T07:07:52Z" --key witness-refinery-queue --message m 2>&1); rc=$?
+eq "$rc" 2 "--retract refuses a joined subject as a usage error"
+eq "$(vccount)" "0" "and closes nothing, not even a visit whose group is the same joined string"
+eq "$(gccalls)" "0" "and makes no gc call at all"
 
 echo "# a moot or benign verdict suppresses a re-file inside the window"
 # The open-visit dedup above sees only OPEN visits, so without this window a
@@ -648,6 +852,74 @@ out=$(STUB_UPD_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "a failed tally write still exits 0"
 eq "$(visits)" "0" "and still files nothing"
 has "$out" "could not record the recurrence" "and says the tally was lost"
+
+echo "# --retract closes the open visit for a subject as moot"
+# The counterpart to filing: a self-healing subject (reconcile) whose divergence
+# resolved retracts its lingering board visit, routing the moot close through
+# visit-close.sh with the reading passed through as the outcome reason.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — diverged","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message "rigs/alpha is back in sync" 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when it closes a visit"
+eq "$(visits)" "0" "retract files no new visit"
+eq "$(vccount)" "1" "retract calls visit-close.sh exactly once"
+eq "$(vclog)" "vis-7|tk-sub|moot|rigs/alpha is back in sync" "closes the tracked visit as moot, subject and reading passed through"
+has "$out" "retracted visit vis-7 on tk-sub" "reports what it retracted"
+
+echo "# --retract is a no-op success when no open visit matches"
+# Idempotent: a second pass, or a subject that never raised one, changes nothing.
+reset '[]'
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract with no matching visit exits 0"
+eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+has "$out" "no open visit" "and says there was nothing to retract"
+
+echo "# --retract fails closed when the open-visit lookup is unreadable"
+# The mirror of the filing dedup's fail-OPEN (an unreadable listing files a
+# duplicate — a duplicate beats a mute): retract must NOT read an unreadable
+# lookup as "no visit" and let its caller close the subject, because that strands
+# the still-open visit it could not see. A matching visit exists but the lookup
+# is down, so retract exits non-zero and closes nothing.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — diverged","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$(STUB_LIST_FAIL=1 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 1 "retract exits 1 when the open-visit lookup is unreadable"
+eq "$(vccount)" "0" "and closes no visit on an unreadable lookup"
+has "$out" "could not read open visits" "and says the lookup was unreadable, not that there was nothing to retract"
+
+echo "# --retract matches on BOTH the key and the subject"
+# A visit for another subject, or another situation under this subject, is left
+# alone — the same conjunction the filing dedup uses.
+reset '[{"id":"vis-8","status":"open","assignee":"","title":"visit: tk-other — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
+"$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m >/dev/null 2>&1
+eq "$(vccount)" "0" "a visit whose continuation_group is another subject is not retracted"
+reset '[{"id":"vis-8","status":"open","assignee":"","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"other-situation","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+"$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m >/dev/null 2>&1
+eq "$(vccount)" "0" "a visit for another situation key is not retracted"
+
+echo "# --retract leaves an in_progress (claimed) visit for its holder"
+# A human already engaged it; the recheck-premise skill folds mootness in at
+# their prep, so an unattended caller must not close it under them. Only OPEN
+# visits are retracted.
+reset '[{"id":"vis-9","status":"in_progress","assignee":"someone","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when the only match is claimed"
+eq "$(vccount)" "0" "and does not close the claimed visit"
+has "$out" "no open visit" "treating a claimed visit as none to retract"
+
+echo "# --retract refuses an ephemeral subject"
+# A wisp's visits hang on the standing triage bucket keyed by --key alone, so
+# there is no one subject-scoped visit to retract.
+reset '[]'
+out=$("$SUT" --retract --subject tk-wisp-abc --key k --message m 2>&1); rc=$?
+eq "$rc" 2 "retract on an ephemeral subject is a usage error"
+eq "$(vccount)" "0" "and calls visit-close.sh not at all"
+
+echo "# --retract reports a close that did not land"
+# visit-close.sh guards its own close; a non-zero exit means the visit stays open
+# for a human, and retract surfaces that as a failure rather than a false success.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"}}]'
+out=$(STUB_VISIT_CLOSE_FAIL=1 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 1 "retract exits 1 when visit-close.sh does not close the visit"
+has "$out" "did not close" "and says the visit stays open"
 
 echo
 echo "escalate.test.sh: $PASS passed, $FAIL failed"

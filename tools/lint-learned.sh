@@ -63,10 +63,11 @@ else
     # failing `git ls-files` yields zero iterations and an empty list, which
     # is byte-identical to a clean tree, so the gate reads green exactly when
     # it can see nothing.
-    listing="$(mktemp)" || exit 2
+    listing="$(mktemp "${TMPDIR:-/tmp}/gctk-lint-learned.XXXXXX")" || exit 2
+    trap 'rm -f "$listing" 2>/dev/null' EXIT
+    trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
     if ! git ls-files >"$listing"; then
         echo "lint-learned: cannot enumerate tracked files under $repo_root" >&2
-        rm -f "$listing"
         exit 2
     fi
     while IFS= read -r f; do

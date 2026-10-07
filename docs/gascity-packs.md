@@ -148,10 +148,14 @@ observed writing to the wrong bead — or to none:
 | `$GC_TRIGGER_BEAD_ID` | not refreshed by `gc hook --claim` (tk-niu2f), so it still names the session's spawn bead | OPEN — the close succeeds against *another live session's* in-progress step |
 
 Close through `assets/scripts/step-close.sh --step <formula>.<step-id>` instead.
-It resolves the target from the store by (`assignee`, `metadata."gc.step_ref"`)
-— a pair that names exactly one bead and cannot go stale across a claim — and
-refuses to write at all when it cannot prove which bead is yours. The pack's
-`doctor/check-step-close-owns-bead` holds the line.
+It resolves the target from the store by (`metadata."gc.root_bead_id"`,
+`metadata."gc.step_ref"`) — the molecule and the step. A pool agent wears one
+assignee across every run it makes, so only that pair names exactly one bead;
+the assignee corroborates the match and never identifies it alone. It refuses
+to write at all when it cannot prove which bead is yours. The pack's
+hardened detector `tools/lint-learned.d/step-close-env-id.sh` holds the
+line, flagging any step that closes a bead on an id read from the
+environment.
 
 **`gc runtime drain-ack` is a session verb, not a step verb.** It tells the
 reconciler this session is finished; it closes no bead. So a step body that
@@ -166,6 +170,42 @@ claims it, and the workflow respawn-loops at its entry step indefinitely. It
 presents as a routing or pool bug; it is a missing `--status=closed`.
 
 **Terminal steps close, then drain-ack** — in that order.
+
+**A step that must NOT close has a third state: `blocked`.** Some refusal arms
+cannot close, because closing advances the graph and the next step is
+destructive — `mol-polecat-work`'s duplicate-dispatch hold is the case, where
+`workspace-setup` would recreate the branch over a live worker's commits. The
+tempting reading is that not-closed means `open`, and that is the respawn loop
+above by another door: `open` is claimable, so the pool re-offers the same step
+every cycle and each fresh worker re-derives the same refusal.
+
+Clearing `gc.routed_to` alone does not fix it.
+`unclaimWorkAssignedToRetiredSessionInfo` (`cmd/gc/session_beads.go`) sweeps
+`{open, in_progress}` assigned to a drained session and calls
+`ReleaseWorkBead`, which stamps a `run_target` fallback route "only when
+otherwise unrouted" — so an open step with its route cleared is exactly what
+gets re-routed. The same two statuses gate drain-ack's assigned-work close gate
+(`sessionHasOpenAssignedWorkInStoreByIdentifiersForCloseGate`,
+`cmd/gc/session_reconciler.go`) and the pool offer. `blocked` sits outside all
+three while still not being closed, so it holds the workflow without advancing
+it.
+
+`assets/scripts/molecule-hold.sh` is the writer. It blocks the step, clears the
+route on the step, on the molecule root — a routed root re-offers the molecule
+even with every step quiet — and on the root's other steps, skipping
+`workflow-finalize` so the graph can still retire. It closes nothing. The
+blocking write deliberately carries no assignee: bd's claim guard refuses
+`--assignee ""` on an `in_progress` bead and the refusal is atomic over the
+whole update, so batching the two loses the status change as well.
+Sibling claims are cleared afterwards, route first, because the reverse order
+leaves a bead briefly `open + unassigned + routed`, which is the offer predicate
+itself.
+
+It reports success only when all of that landed. The caller drains on exit 0,
+and a molecule still routed anywhere is re-offered however quiet its steps are,
+so a route that survived on the root or on a sibling exits non-zero instead. A
+sibling whose route clear failed keeps its claim, because unassigning it there
+writes the offer predicate rather than escaping it.
 
 **The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
 drain-ack without closing anything, so the habit transfers and silently breaks.

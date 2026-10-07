@@ -68,6 +68,18 @@ export interface Tile {
   weight: number;
   /** An open visit bead names this anchor — a conversation is holding it. */
   held: boolean;
+  /**
+   * Refines `held` into the visit's engagement: `'engaged'` when a live sitting
+   * is in the conversation right now, `'parked'` when the visit stands open and
+   * un-engaged — filed and waiting for a person to pick it up. `''` on a row no
+   * open visit holds (`held` is false).
+   *
+   * Derived on the Go side from the same rule `acceptable` reads — a parked
+   * visit is the one Accept is offered on, an engaged one suppresses it — so the
+   * web reads this field rather than re-deriving it (the rule reads the visit's
+   * assignee, which the wire does not carry). Always present.
+   */
+  visit_state: string;
   n_closed: number;
   m_total: number;
   open: number;
@@ -96,8 +108,6 @@ export interface Tile {
   stranded: boolean;
   empty: boolean;
   complete: boolean;
-  /** The convoy's own closed/total claim disagrees with the rolled-up membership. */
-  progress_mismatch: boolean;
   /**
    * Whole days since the anchor was last updated. 0 both when the anchor was
    * touched today and when the source could not read `updated_at` at all —
@@ -168,7 +178,13 @@ export interface Tile {
   pr_branch: string;
   /**
    * What the merge cadence can do next: `'progressing'`, `'settled'`,
-   * `'wedged-exception'`, `'wedged-veto'`, or `'unknown'`.
+   * `'wedged-exception'`, `'blocked'`, or `'unknown'`.
+   *
+   * `'blocked'` is a hold no automated actor will clear and no review verdict is
+   * owed on — an unresolved required review thread, a base gone BEHIND, or an
+   * unrouted blocker. It is owed by the operator (needs-attention), distinct from
+   * `'settled'`, which waits on a review or the merge pass. Its specific cause is
+   * spelled out in `needs`.
    *
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
    * same choice `waiting_unknown` makes on the gather side. A missing key means
@@ -185,15 +201,13 @@ export interface Tile {
    */
   pr_conversation: string;
   /**
-   * Whether GitHub is withholding the merge for a human review: `'required'`,
-   * `'met'`, `'not_required'`, or `'unknown'`. Read from the recorded review
-   * decision, which is GitHub's own requirement rather than the city's gate
-   * set — a repository can require a review `check_set` never declared.
-   *
-   * `'required'` covers a standing `changes_requested` too, so a pull request
-   * GitHub is blocking never renders as one it will let through. That row is
-   * not `owed` by the operator, though: answering a rejecting review is the
-   * city's move.
+   * Whether this pull request still owes an external approval before it can
+   * merge: `'required'`, `'met'`, or `'unknown'`. Approval is a universal merge
+   * rule — the city holds every open pull request until a non-city `APPROVED`
+   * review stands, and one given at any commit stands until dismissed — so only
+   * an approved row is `'met'` and every other posture owes one. It is the city's
+   * rule, not GitHub's protection set, so a pull request on an `integration/*`
+   * base or in a repo with no required-review rule reads `'required'` too.
    */
   pr_approval: string;
   /**
@@ -206,6 +220,98 @@ export interface Tile {
    * Not `updated_at`, which a wedged anchor's every reconcile pass touches.
    */
   pr_owed_since?: string;
+
+  /**
+   * The KIND of attention this row wants — `'review'` (a pull request),
+   * `'gate'` (a person must answer), `'stalled'` (open work nothing is moving),
+   * `'active'` (healthy in-flight), `'cleanup'` (a finished or empty row to
+   * dispose of), or `'done'` (the anchor itself closed). Orthogonal to
+   * `severity`'s how-badly. A surface groups by this and reads the bands in the
+   * order model.go's `SectionOrder` fixes; it is on the wire so the CLI and this
+   * app cannot each invent their own split. The Go type is a plain string, so an
+   * unknown value is representable even though this union is not exhaustive here.
+   */
+  section: string;
+  /**
+   * Set when this row is one of at least three in the same `section` sharing a
+   * `needs` sentence — a recurring template, like the first-reaction gates or
+   * the cap-3 signoff rows. It is that shared `needs` string, and a surface
+   * folds every row carrying it into one entry that names the count and lists
+   * the members. Absent (Go `omitempty`) on a row that does not cluster, which
+   * is every row with an LLM-authored, and so unique, takeaway.
+   */
+  cluster_key?: string;
+  /**
+   * The id of the dependency FAMILY this row belongs to — the top-most anchor
+   * its parent-child and `blocks` edges climb to, and equal to the row's own
+   * `id` when it climbs to nothing. Dependency structure is the board's primary
+   * grouping axis and the attention band orders and highlights within a family;
+   * a surface buckets by this the way it buckets `section`.
+   * Always present.
+   */
+  group_root: string;
+  /**
+   * The id of this row's IMMEDIATE parent in the dependency family — the one
+   * anchor its edges climb to a single level up, and empty when the row climbs to
+   * nothing (it is a family root). `group_root` names the top of the tree; this
+   * names the next step toward it, so a surface nests the family as a containment
+   * tree — a sub-epic under its parent, its own children under it — instead of one
+   * flat member list under the top root.
+   * Always present.
+   */
+  group_parent: string;
+  /**
+   * Set when this row can be ACCEPTED: the subject carries a recommended
+   * execution formula (`gc.recommended_formula`) and its visit is un-engaged, so
+   * a person can dispatch that formula at the subject and dismiss the visit in
+   * one procedural order — the extra move a recommendation row offers over a
+   * discuss-only gate. A live sitting suppresses it and leaving without a ruling
+   * restores it. Always present (Go bool); false on every non-recommendation row.
+   */
+  acceptable: boolean;
+  /**
+   * The `gc.recommended_formula` Accept would dispatch, so a surface can name
+   * what accepting does without re-reading the subject bead. Empty exactly when
+   * `acceptable` is false. Always present.
+   */
+  accept_formula: string;
+  /**
+   * The GitHub tree-view link for `pr_branch`, or `''` when the row has no
+   * branch or the rig's repository could not be resolved. The board makes no
+   * GitHub call: the repository is learned from a `pr_url` already on the board,
+   * since every anchor in one rig targets that rig's repository. A rig the board
+   * holds no pull request URL for keeps the bare branch text.
+   */
+  pr_branch_url: string;
+  /**
+   * Who must act on this merge anchor next — `'working'`, `'needs-review'`, or
+   * `'needs-attention'` — the same status: taxonomy the GitHub PR list carries,
+   * so the board and the label read one vocabulary. `''` on a non-merge row.
+   */
+  pr_phase: string;
+  /**
+   * This bead's liveness in the same tri-state vocabulary — `'working'`,
+   * `'needs-review'`, or `'needs-attention'` — on EVERY live row, and the word
+   * the `frontier` string leads with. It begins as the per-bead value derived
+   * from the same inputs as `pr_phase`, but a row with child tiles then takes its
+   * children's rolled-up state instead: an epic's frontier is its children's.
+   *
+   * So `phase` and `pr_phase` are two independent axes. `pr_phase` is the PR
+   * round-trip value and is never rolled up; `phase` equals it on a merge anchor
+   * with no child tiles (the common case, since a merge anchor's review/rework
+   * children hang off a blocked edge the roll-up does not climb) and diverges
+   * from it on a merge anchor that also has parent-child child tiles. `''` only
+   * on a closed (`DONE`) row, where the live vocabulary has no answer — the same
+   * not-applicable empty `pr_phase` uses off a non-merge row.
+   */
+  phase: string;
+  /**
+   * The first-reaction card from the subject bead's notes — Proposal and
+   * Decision-needed included — so the Accept decision shows WHY, not only the
+   * one-line `takeaway` folded into `needs`. `null`, not absent, when there is
+   * none; non-null exactly on an `acceptable` row.
+   */
+  recommendation: string | null;
 }
 
 /**
@@ -233,6 +339,15 @@ export interface Sitting {
    * sitting reading `dismissed` until it is closed or signed off over.
    */
   outcome: string;
+  /**
+   * The one-line human-readable sentence naming WHY the visit closed
+   * (`gc.outcome_reason`): "moot: premise died, subject already closed",
+   * "folded into <holder>", or what a held sitting signed off on. `outcome` is
+   * the word to group by; this is the sentence to read, so a dedup close reads
+   * as a decision rather than a dropped need. `''` when the writer stamped only
+   * the word.
+   */
+  outcome_reason: string;
   /** The converse session that ran it — what an operator attaches to. */
   session: string;
   /** RFC 3339. Omitted when the source could not read the stamp. */
@@ -246,6 +361,14 @@ export interface Sitting {
    * subject visited three times has two sittings that did not write it.
    */
   takeaway: string;
+  /**
+   * The subject bead's title — the row's topic, what the conversation is about.
+   * Read in the same batch as the takeaway, so a row says what it concerns even
+   * with nothing concluded on it. `''` when the subject could not be read, which
+   * the render falls back on the subject id (topic) or the visit title
+   * (headline) for.
+   */
+  subject_title: string;
 }
 
 /**

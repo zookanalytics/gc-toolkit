@@ -17,10 +17,14 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- State a decision or an action so the operator can accept or reject it
-  without looking anything up. A bare bead id, a title, or a pointer to a
-  queue is not a decision.
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+- State an operator-facing decision, brief, or sign-off so it is
+  answerable in about a minute: lead with the plain-language stake and
+  what each option costs, keep it to one screen, and let the operator
+  accept or reject without looking anything up. An identifier — a bead
+  id, title, path, or queue pointer — is a parenthetical reference for
+  looking something up or cross-referencing it. It carries no weight on
+  its own and is never the noun that carries the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -53,10 +57,6 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -71,6 +71,31 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by polecat and polecat-codex (via the
+     polecat-doctrine fragment). Holds the authoring standards for the polecat
+     class only; universal standards live in work-quality-base. -->
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.
+
+<!-- rule:tk-0slk80 src:visit:tk-rxeohl (operator ruling) adopted:2026-09-23 -->
+- A design or implementation bead's deliverable is the behavior it decides
+  or verifies, in the smallest form that runs. A spec-only or
+  documentation-only change is a legitimate deliverable only when a tracked
+  bead owns the work that will build it and the change names the cost of
+  waiting. An untracked spec dump, or a fix that defers to nothing, is the
+  anti-pattern. The discipline is the tracked deferral, not a ban on specs.
 
 
 ## Execute immediately
@@ -192,7 +217,7 @@ stands on a branch some OTHER open bead anchors, and every reader that matters
 for the merge — enumerates anchors by `merge_result` and reads that bead. A
 write aimed at the claimed bead lands, errors nowhere, and is never read.
 
-Submit step 4c resolves it: the open bead on this branch that carries a
+Submit step 4b resolves it: the open bead on this branch that carries a
 `merge_result`. Write to the anchor what the anchor's readers read, and to
 your claimed bead everything else.
 
@@ -213,9 +238,13 @@ your claimed bead everything else.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
-  `step-close.sh`, which resolves the bead from the `(assignee, gc.step_ref)`
-  pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the wrong bead
-  after a hook-claim and fail silently.
+  `step-close.sh`, which resolves the bead from the `(gc.root_bead_id,
+  gc.step_ref)` pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the
+  wrong bead after a hook-claim and fail silently, and your assignee names
+  every molecule this pool slot has ever run, not this one. When it refuses
+  because only that assignee names your molecule, re-run it with
+  `--root <root_bead_id>` from your claim; nothing else can tell your chain
+  from an earlier one.
 - **Close the chain in FORWARD order** (first step first, terminal step
   last): each step blocks the next and `bd` refuses to close a blocked
   issue, so the chain only unwinds from the unblocked end. Run the
@@ -233,18 +262,44 @@ bead is handed to the people who need it, and nothing downstream can miss a
 note it never saw. This applies to every write in the done sequence,
 including the `auto_push=false` halt arm.
 
+
+## No consent UI
+
+**You are a pool worker. NEVER invoke `AskUserQuestion`, `/handoff`, or any
+other blocking consent UI — about anything.** The prohibition is on the
+MECHANISM, not on a list of topics: if a question would park your turn until
+an operator presses a key, you do not ask it, whatever it is about. There is no
+approval wait, and a consent prompt manufactures one — a pool worker stopped at
+a prompt cannot be un-nudged, because typing at a pending prompt types into the
+UI and not into you, so it keeps its pool slot and reports `active` while doing
+no work until a person walks past its pane. Your turn ends at the formula's
+terminal step, never at a prompt.
+
+**What to do instead — none of these block, and each leaves a durable record a
+pending prompt does not:**
+- **A requirement is unclear, or another agent could answer:** mail the witness
+  (`HELP:`), per Escalation.
+- **A decision only the operator can make, or work you must decline and cannot
+  close:** file the visit with `escalate.sh`, then hold the molecule and drain,
+  per Escalation. The visit is the release path a human can claim.
+- **`/handoff` is operator-initiated** — never proposed via consent UI.
+
+
 ## Escalation
 
 When blocked, act — do not wait, and do not guess. Where the signal goes
-depends on who can answer it.
+depends on who can answer it. Anything that ends in a hold and a drain needs a
+tracked, routed record filed first. That record is the visit `escalate.sh`
+opens, or a bead a query returns. The hold de-routes the whole molecule, so a
+hold with no such record behind it is a silent strand no reader is ever
+handed. Mail is not that record.
 
-The witness is your first responder. Mail it for anything another agent can
-resolve or should know about: requirements unclear after checking the docs,
+The witness is your first responder for a question another agent can answer
+without you holding the bead: requirements unclear after checking the docs,
 stuck more than fifteen minutes on one problem, tests failing inexplicably
 after two or three attempts, or a fact about shared state you do not own,
-such as a base branch with failing pre-flights, a broken dedupe lookup, or a
-duplicate dispatch on your bead. Use `HELP:` when you need an answer and
-`NOTICE:` when you are reporting a fact.
+such as a base branch with failing pre-flights or a broken dedupe lookup. Use
+`HELP:` when you need an answer and `NOTICE:` when you are reporting a fact.
 
 ```bash
 gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <work-bead>
@@ -255,30 +310,83 @@ The witness triages its inbox every patrol cycle. It unblocks what it can and
 promotes what needs a person into a visit, so mailing it is not a slower route
 to a human. It is the route that spends a human only when one is required.
 
-Escalate directly only when no agent can answer. Missing credentials, external
-access, and decisions that are the operator's to make have no agent-side
-resolution, so send those to a human without the extra hop:
+Escalate directly when no agent can answer: missing credentials, external
+access, or a decision that is the operator's to make. Escalate this way before
+any hold and drain, whatever the reason for the hold. `escalate.sh` files (or
+refreshes) exactly one open visit per situation key, and its exit 0 is the
+release path a human hears about and can claim:
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/molecule-hold.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 "$SCRIPTS/escalate.sh" --subject <work-bead> --key polecat-blocked \
   --message "Blocked: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```
 
-It files (or refreshes) exactly one open visit per situation key, which is
-how a human hears about it.
+For a plain blocker that visit is the whole escalation: continue if possible,
+otherwise leave the bead resumable (branch + notes recorded) and drain.
 
-After either route: continue if possible, otherwise leave the bead resumable
-(branch + notes recorded) and drain. If the ruling that comes back is
-stand-down — the premise was falsified, or a live sitting owns the decision —
-the disposal step is the sitting's
+**Draining without closing your step means holding the molecule first, and the
+hold needs a filed visit before it.** This covers every reason you decline work
+you must not close: a duplicate dispatch, a premise you found falsified, work
+another branch already delivered. A step left `open` is claimable, so the pool
+hands it to a fresh polecat within minutes, that polecat re-derives your refusal
+and leaves it open again, and the cycle burns one pool slot per iteration until
+a human notices. So the hold sets the step `blocked`, which is not-closed and
+not-claimable, and clears the route on the step, on the molecule root, and on
+the root's other steps. Clearing the route without the `blocked` status does not
+stop the loop: the stranded-worker repair sweeps open steps assigned to a
+drained session and re-stamps a route on any it finds unrouted.
+
+But a de-routed molecule with nothing tracking it is worse than the loop. It is
+a silent strand no query returns and no human is asked to clear. So the record
+comes first: `escalate.sh` files the visit that is the release path, and only on
+its success do you hold, and only on the hold's success do you drain:
+
+```bash
+"$SCRIPTS/escalate.sh" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what releases the hold>" \
+  || { echo "escalate.sh recorded no release path; NOT holding or draining, so the step stays claimable and the next worker retries the escalation" >&2; exit 1; }
+"$SCRIPTS/molecule-hold.sh" --step "<formula>.<step-id>" --bead "<the bead_id your gc hook --claim returned>" --reason "<why you declined, and what releases the hold>" \
+  || { echo "molecule-hold did not land; NOT draining — something in the molecule is still claimable" >&2; exit 1; }
+gc runtime drain-ack
+```
+
+`molecule-hold.sh` closes nothing, so whatever a live worker is holding stays
+where it is. Drain only if both landed. `escalate.sh` exits non-zero when it can
+neither file nor find the visit; `molecule-hold.sh` exits non-zero when it
+cannot prove which bead is yours, when duplicate step beads make that ambiguous,
+when the blocking write is refused, or when a route it had to clear survived,
+whether on the molecule root or on a sibling step. A drain after either failed
+leaves something in the molecule claimable.
+
+If the ruling that comes back is stand-down — the premise was falsified, or a
+live sitting owns the decision — the disposal step is the sitting's
 `gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`: it parks the
 anchor and quiesces the molecule's routed steps in one writer, so the chain
 stops re-offering, and `--no-wait` records that the ruling ended the wait
-rather than moving it. Your part stays the same: record, escalate, drain.
+rather than moving it. Your part stays the same: record, escalate, hold, drain.
+
+## Sends to repos we do not own
+
+A `gh` write to a repository outside this rig's origin — an issue, a PR, a
+comment, a review — spends someone else's time, so the operator makes it.
+Hitting an upstream bug while working your bead is ordinary; sending the
+report yourself is not. Park the command instead, with the same `$SCRIPTS`
+resolved above:
+
+```bash
+"$SCRIPTS/upstream-finding.sh" \
+  --message "<what you found, where you hit it, why it earns the send>" \
+  -- gh issue create --repo <owner>/<name> --title "<title>" --body "<body>"
+```
+
+That files one bead carrying the exact command, ready to paste, and asks a
+human through the visit route. Name the target with `--repo` and inline the
+body — the operator pastes it later, from their own shell
+(docs/outbound-sends.md). Then carry on with your bead: the send is not
+yours to wait on.
 
 ## Communication
 

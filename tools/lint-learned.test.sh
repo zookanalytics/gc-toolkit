@@ -32,7 +32,7 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3" "missing '$2' in: $1" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3" "found '$2' in: $1" ;; *) ok "$3" ;; esac; }
 
-TMP="$(mktemp -d)" || { echo "cannot mktemp"; exit 1; }
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lint-learned-test.XXXXXX")" || { echo "cannot mktemp"; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
 # Ambient git config must not reach the fixture repo.

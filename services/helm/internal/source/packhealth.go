@@ -40,6 +40,7 @@ type packBuildFile struct {
 	ProbeStatus    string `json:"probe_status"`
 	ProbeDetail    string `json:"probe_detail"`
 	CheckedAt      string `json:"checked_at"`
+	BehindMain     int    `json:"behind_main"`
 }
 
 // GatherPackHealth reads every component's build status under cityPath. It is
@@ -103,6 +104,7 @@ func GatherPackHealth(cityPath string, now time.Time) []board.PackBuild {
 			ProbeStatus:    f.ProbeStatus,
 			ProbeDetail:    f.ProbeDetail,
 			CheckedAt:      checkedAt,
+			BehindMain:     f.BehindMain,
 		})
 	}
 	if len(rows) == 0 {

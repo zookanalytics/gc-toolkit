@@ -3,8 +3,14 @@ Witness patrol loop — rig work-health RECOVERY only. Poured as a root-only
 wisp on startup (the agent prompt's startup reconcile adopts before it
 pours):
 
-  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
+  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}'
   gc bd update $WISP --assignee=$GC_AGENT
+
+The pour passes the binding prefix and nothing else, so the cycle wait is the
+formula's default as it stood when this wisp was poured. It is rendered here
+for the step that reads it:
+
+  event_timeout={{event_timeout}}
 
 Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
 pour the next iteration. Steps are not materialized; read each description
@@ -17,8 +23,11 @@ polecat pool when mail reports a defect in the pack, and watches the refinery
 queue. It does NOT manage processes (controller), write code
 (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
 executes warrants), or run the batch unnamed-wait triage (the
-liveness-sweep exec order owns that surface). Escalations go through
-assets/scripts/escalate.sh — one open visit per situation key.
+liveness-sweep exec order owns that surface). A finding becomes one deduped
+BEAD through assets/scripts/patrol-finding.sh, and a proactive first reaction
+disposes it: routed to a pool, held on an edge, or escalated to the operator
+as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
+a bead — an emergency that needs a human now.
 
 Every address this formula stamps comes from assets/scripts/resolve-route.sh.
 The agents it files to do not share a scope: the dog is city-scoped and its
@@ -27,10 +36,12 @@ rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
 the other, and either stamp reads back clean, so a hand-written address is
 right only by luck.
 
-Marked blocks (bug-dispatch, host-bead-skip, liveness-map-guard,
-liveness-lookup, warrant-file, husk-guard, crash-loop-window,
-patrol-wisp-pour, refinery-queue-nudge) are extracted and executed by their
-tests; keep markers, keep them backslash-free."""
+Marked blocks (bug-dispatch, candidate-pipeline, host-bead-skip,
+downstream-court-skip, topology-root-skip, liveness-map-guard,
+liveness-lookup, warrant-file, husk-guard, owning-store-guard,
+recovery-stamp-gate, crash-loop-window, patrol-wisp-pour,
+refinery-stuck-escalate) are extracted and executed by their tests; keep
+markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -39,7 +50,7 @@ description = "Agent identity prefix, including trailing dot when bound."
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it."
+description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
 default = "600"
 
 [[steps]]
@@ -50,9 +61,12 @@ description = """
 gc mail inbox
 ```
 Triage HELP/blocked mail from polecats: unblock what you can (point at
-docs, suggest an approach); a blocker that needs a human becomes a visit
-via escalate.sh (`--subject <the polecat's bead> --key polecat-help`).
-Emergencies (crash, data loss, corruption, security) escalate immediately.
+docs, suggest an approach); a blocker you cannot becomes a finding bead
+(`patrol-finding.sh --scope witness-findings --key polecat-help --about <the
+polecat's bead> ...`), and the reaction decides whether it is work, a wait, or
+a question for the operator. `--about` is what keeps two blocked polecats two
+findings. Emergencies (crash, data loss, corruption, security) go straight to
+escalate.sh — they need a human now, not a disposition.
 A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
 filed — note the outcome (the closed warrant carries the evidence) and
 archive. Lifecycle chatter is acknowledged and archived.
@@ -101,17 +115,24 @@ the pool. Canonical chain: worktree -> (push) -> branch -> (merge) ->
 target; recovery ensures work reaches the branch, then the bead is
 schedulable again.
 
-**1. Candidates.** List this rig's beads and keep only OWNED ones:
+**1. Candidates.** List this rig's beads and keep only OWNED ones. The listing
+and the three filters that narrow it run as ONE pipeline, so bd's JSON flows
+from `gc bd list` through each filter on stdin and never sits in a shell
+variable. Run the block as written. The agent's shell is zsh, whose builtin
+`echo` expands the backslash escapes inside JSON strings, so a listing captured
+in a variable and re-fed through `echo "$X" | jq` reaches jq corrupted and the
+cycle loses every candidate.
 ```bash
-gc bd list --status=in_progress --json --limit=0
-gc bd list --status=open --json --limit=0
-```
-```bash
+# >>> candidate-pipeline
+# A raw control byte in any one bead string aborts jq on the whole listing and
+# blinds the cycle to every candidate, so the strip runs ahead of the first jq,
+# the same strip check-refinery applies to its listing.
+CANDIDATES=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-candidates.XXXXXX")
+gc bd list --status=in_progress,open --json --limit=0 | tr -d '[:cntrl:]' | {
 # >>> host-bead-skip
 # Keep only beads that name an OWNER, and stamp that owner as `.owner` for the
 # liveness loop. Reads the bead-list array on stdin, writes the surviving array
-# on stdout — apply it to the combined in_progress + open listing before the
-# per-bead liveness loop.
+# on stdout.
 #
 # A bead names its owner in up to three places and only one of them is an
 # assignee. A workflow STEP bead has no assignee at all: gc bd list --json omits
@@ -135,14 +156,120 @@ jq -c '[ .[]
   | select($owner != null)
   | $bead + {owner: $owner} ]'
 # <<< host-bead-skip
+} | {
+# >>> downstream-court-skip
+# Drop beads whose work already reached a downstream court, so orphan recovery
+# never returns finished work to the pool or marks it. The crash-loop signal is a
+# RATE off recovered_at/recovered_count, so a re-recovered in-flight bead
+# escalates a moot visit each cycle; dropping it here is what stops both the
+# re-dispatch and the escalation. Two states name not-the-pool's work: an
+# in-flight PR (merge_result pre_open_gate/pull_request) or a human gate
+# (gc.routed_to=human). pr.machine is not read: a progressing stamp is written
+# only with an anchor merge_result, which unanchoring clears while leaving the
+# stamp, so on a repooled bead it is stale — the in-flight-PR test already covers
+# a bead still in the machine. A bead carrying neither state is still the pool's
+# to recover. Reads the candidate array on stdin (the host-bead-skip result),
+# writes the survivors on stdout, and touches no field a survivor arrived with.
+jq -c '[ .[]
+  | (.metadata // {}) as $m
+  | ($m.merge_result // "") as $mr
+  | ($m["gc.routed_to"] // "") as $routed
+  | select($mr != "pre_open_gate" and $mr != "pull_request"
+           and $routed != "human") ]'
+# <<< downstream-court-skip
+} | {
+# >>> topology-root-skip
+# Drop graph.v2 topology ROOTS before the liveness loop. A root names its owner
+# only in gc.session_name — the pool SLOT, which a successor session keeps alive
+# — so resolving its liveness reads the successor's life as the dead run's and
+# warrants a live session; and a root has no worktree, so the salvage path only
+# churns a witness-salvage-refused notice. A root is not recoverable work: its
+# steps carry the work and the gc.session_id, and its close is the
+# control-dispatcher's workflow-finalize. The kind set is
+# beadmeta.WorkflowTopologyKinds (workflow, scope, spec) — the same set the hook
+# (hookCandidateClaimable) and pool demand (demandRowServable) refuse, mirrored
+# by liveness-sweep.sh's topology_kind. Reads the candidate array on stdin (the
+# downstream-court-skip result), writes the survivors on stdout, and touches no
+# field a survivor arrived with.
+jq -c '[ .[]
+  | (.metadata // {}) as $m
+  | ($m["gc.kind"] // "") as $kind
+  | select($kind != "workflow" and $kind != "scope" and $kind != "spec") ]'
+# <<< topology-root-skip
+} > "$CANDIDATES"
+# A file that is not a JSON array is a failed listing, not a rig with no
+# candidates.
+if jq -e 'type == "array"' "$CANDIDATES" >/dev/null 2>&1; then
+  jq -r '.[] | .id + " " + .owner' "$CANDIDATES"
+else
+  echo "witness: the candidate listing did not parse; no orphan recovery this cycle" >&2
+fi
+rm -f "$CANDIDATES"
+# <<< candidate-pipeline
 ```
+The block prints one row per candidate, `<bead> <owner>`. The bead id is the
+`<bead>` the parts below act on, and the owner is the loop's `OWNER`. No rows
+means no candidates. A `did not parse` line means the listing itself failed,
+which is not a rig with nothing to recover: no candidate set exists this cycle,
+and orphan recovery stays blind until the listing reads again. Skip the rest of
+this step and file it
+(`patrol-finding.sh --scope witness-findings --key witness-candidates-unreadable
+--title "witness orphan-candidate listing did not parse" --message "<the
+listing's stderr> ..."`), then continue to check-refinery. A cycle that fails
+the same way lands on that finding as another occurrence.
+
 A bead naming no owner in any of the three places is already in the pool's
-court, and it is the only thing this filter drops. There is no owned-bead class
-orphan recovery must skip on kind alone: a visit whose session died SHOULD
-return to the pool (cold continuity is respawn-and-reconstitute). Two
-exclusions are structural, not kind-based:
+court, and it is the only thing host-bead-skip drops. Every OTHER owned bead
+reaches the liveness loop regardless of kind — a visit whose session died
+SHOULD return to the pool (cold continuity is respawn-and-reconstitute) — save
+one class topology-root-skip drops by kind: the graph.v2 topology root, which
+is not recoverable work.
+
+A bead whose work has ALREADY REACHED a downstream court is dropped next, by
+state not by kind. Orphan recovery returns LOST work to the pool, but a bead in
+the refinery's landing pipeline or on a person's board is not lost: the refinery
+enumerates it by `merge_result` and owns landing it. Returning it to the pool
+re-dispatches finished work AND stamps a recovery on it, and the crash-loop
+signal downstream reads that stamp as a RATE off recovered_at/recovered_count —
+so a bead that keeps arriving here escalates a moot visit every cycle. Such a
+bead still names an owner: the refinery that will land it, or the person it is
+parked on. Host-bead-skip drops only the beads that name no owner, so this one
+passes it, and in the liveness loop a drained owner would false-orphan it.
+Downstream-court-skip reads the state the bead already carries and drops it, so
+it never enters the liveness loop and is never marked.
+Two states name work that is not the pool's to recover:
+- an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`;
+- a human gate — `gc.routed_to=human`, the city's "no agent will take it" marker
+  (a signoff cap, a merge gate, an operator approval).
+
+`pr.machine` is deliberately not read here. A `progressing` stamp is written only
+alongside an anchor `merge_result` (`merge.sh` and `gate-ensure.sh` gate the write
+on it), but `transition --to unanchored` clears `merge_result` and leaves
+`pr.machine` behind — so on a bead unanchored back to the pool `progressing` is a
+stale stamp, and a bead still in the machine carries the `merge_result` the first
+bullet already drops.
+
+One owned class is dropped by kind rather than state: the graph.v2 topology
+root. A root carries `gc.kind` in the topology set — `workflow`, `scope`,
+`spec` — and only a `gc.session_name` slot label, never a `gc.session_id`. It
+is the anchor its STEP beads hang from, not a claimable unit of work; the steps
+carry the work and the `gc.session_id` that names the session actually holding
+them. The root's own close is the control-dispatcher's `workflow-finalize`, and
+`orphan-dispose.sh` already refuses a root as `root_not_schedulable`, so the
+loop has no recovery to offer it. Left in, a root does harm either way it
+resolves: live via the inherited slot label it is warranted against the
+successor that now holds the slot, absent it churns a `witness-salvage-refused`
+notice on a bead that never had a worktree. Topology-root-skip drops it before
+the loop, by the same kind set `hookCandidateClaimable` and the pool-demand
+`demandRowServable` refuse (`liveness-sweep.sh`'s `topology_kind` mirrors it).
+
+Two more exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,
-  configured named sessions) — the controller owns their lifecycle.
+  configured named sessions) — the controller owns their lifecycle. `.owner`
+  ranks gc.session_id ahead of the assignee, and the polecat→refinery handoff
+  clears the departing session's `gc.session_id`/`gc.session_name`, so a bead a
+  live refinery holds carries no drained polecat pin and resolves its owner to
+  the live refinery assignee.
 - **Dispatcher-routed control beads** (`gc.routed_to=control-dispatcher`,
   `gc.kind=workflow-finalize`/`ralph`) — infrastructure, not orphans; the
   serve loop picks them up.
@@ -160,8 +287,10 @@ temp files, never --argjson (ARG_MAX):
 # empty when the map is usable and carries the escalation reason otherwise. This
 # runs once per cycle with no bead in scope, so no bead's owner can reach the
 # decision.
-SESSIONS_RAW=$(mktemp)
-SESSION_BEADS=$(mktemp)
+SESSIONS_RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
+SESSION_BEADS=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
+trap 'rm -f "$SESSIONS_RAW" "$SESSION_BEADS" 2>/dev/null' EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
 gc bd list --type=session --label=gc:session --include-infra --all --json --limit=0 > "$SESSION_BEADS" 2>/dev/null || true
 # The session list is the load-bearing source. A non-object, or an object with
@@ -203,21 +332,19 @@ else
   esac
 fi
 rm -f "$SESSIONS_RAW" "$SESSION_BEADS"
+trap - EXIT INT TERM HUP
 # <<< liveness-map-guard
 ```
 
 **Fail safe — never orphan on an empty map, and never on anything else.**
 `MAP_TRIP` is the entire test. A non-empty `MAP_TRIP` means the map failed to
 load, which would false-orphan live agents. Skip orphan recovery this cycle
-and escalate
-(`escalate.sh --subject <the standing subject> --key witness-empty-liveness-map ...`),
-then continue to check-refinery. The subject is never this wisp: next-iteration
-burns it, and the converse sitting writes its takeaway to the subject the visit
-tracks. escalate.sh redirects a wisp subject onto a generic standing subject
-rather than lose that write, so naming one here is what keeps witness findings
-in a scope of their own. Use this rig's standing subject — the open bead
-carrying `task_kind=triage-subject` and `triage.scope=witness-findings`,
-created once if no open one exists.
+and file it
+(`patrol-finding.sh --scope witness-findings --key witness-empty-liveness-map
+--title "witness liveness map failed to load" --message "$MAP_TRIP ..."`),
+then continue to check-refinery. The finding bead is its own durable subject,
+so it outlives this wisp, which next-iteration burns; a cycle that trips the
+same way lands on that bead as another occurrence.
 
 An owner that resolves `absent` against a POPULATED map is never grounds for
 the fail safe. Closed sessions are excluded from `gc session list` on every
@@ -272,23 +399,23 @@ park: defer, file nothing this cycle. Otherwise file ONE warrant for the
 dog pool, dedup'd on the target like an escalation key — never kill
 directly. The dog is city-scoped, so its identity carries no rig segment and
 the rig-qualified form the refinery queue-nudge uses matches nothing here.
-Set TARGET to the wedged session and REASON to what is stale and for how
-long:
+Set REASON to what is stale and for how long. `file-warrant.sh` resolves the
+loop's OWNER to a live session id — the target dance-probe.sh and `gc session
+kill` require — and refuses to file a warrant no dog can execute:
 ```bash
 # >>> warrant-file
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/file-warrant.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 DOG=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}dog") || true
 if [ -z "$DOG" ]; then
   echo "no live dog identity resolves from '{{binding_prefix}}dog'; a warrant nothing claims leaves the session wedged and still reports success, so escalate instead of filing." >&2
 else
-  OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=$TARGET" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
-  if [ -n "$OPEN_WARRANT" ]; then
-    echo "warrant $OPEN_WARRANT already open for $TARGET; not filing another"
-  else
-    gc bd create --type=task --title="Stuck: $TARGET" --label=warrant --metadata "$(jq -nc --arg t "$TARGET" --arg r "$REASON" --arg d "$DOG" '{"warrant.target":$t,"warrant.reason":$r,"warrant.requester":"witness","gc.routed_to":$d}')"
-  fi
+  "$SCRIPTS/file-warrant.sh" --owner "$OWNER" --reason "$REASON" --requester witness --dog "$DOG"
+  case $? in
+    0|3) : ;;  # a warrant was filed, or one was already open for this session
+    *) echo "file-warrant.sh refused to file for owner '$OWNER' (it resolved to no live session id); escalate this wedged session instead of leaving it silently un-warranted." >&2 ;;
+  esac
 fi
 # <<< warrant-file
 ```
@@ -296,11 +423,84 @@ The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
 pardon-or-execute, DOG_DONE notice back); if it executes, the dead
 session's beads return through THIS step next cycle.
 
-**3. Salvage.** Read `metadata.work_dir` and `metadata.branch` from the
-bead. Before ANY salvage git write, assert the work_dir is its OWN worktree
-root — a husk directory (worktree removed, dir survives) lets `cd` succeed
-while every git command resolves to the ENCLOSING repo, so `git add -A &&
-git push` would publish the town repo's working tree:
+**3. Salvage.** Read the bead's recovery pointers and resolve the repo that
+OWNS the branch. The witness runs from its agent home, whose git toplevel is
+the town repo, so an unpinned git or gh call resolves `origin` there and a
+branch that lives in a rig repo reads as absent — a false "gone" that invites
+discarding pushed work. `branch-context.sh` resolves the owning rig from the
+bead (store ref, then work_dir, then the patrol's own rig) and pins every
+existence, geometry, and push check to it, reporting `unknown` for anything it
+cannot assert rather than absence:
+```bash
+BEAD_JSON=$(gc bd show <bead> --json)
+WORKTREE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.work_dir // empty')
+BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+STORE_REF=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata["gc.root_store_ref"] // empty')
+BC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/branch-context.sh" ] && { BC="$c/assets/scripts/branch-context.sh"; break; }
+done
+eval "$("$BC" resolve --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH")"
+# sets RIG_ROOT, OWNER_REPO, OWNING_ORIGIN_URL, REPO_CTX, BRANCH_ON_ORIGIN
+```
+`REPO_CTX=ok` asserts the owning repo was found and its origin read. On anything
+else, escalate
+(`escalate.sh --subject <bead> --key witness-branch-recovery-unknown ...`) and
+treat the branch's state as unknown rather than gone.
+
+Salvage and the verify below run only for a work bead; a visit, a review, or a
+graph.v2 step or root has no worktree to salvage and no branch of its own to
+verify. Classify first, the way part 5's `orphan-dispose.sh` does, and for
+anything but a `source` work bead skip straight to part 5:
+```bash
+# >>> salvage-scope-gate
+# Salvage and part 4's merge-verify are WORK-BEAD operations: both read
+# metadata.work_dir and metadata.branch, which a polecat stamps on the work
+# (source) bead alone. A visit, a review, a graph.v2 step and a graph.v2 root
+# carry neither — a review's review_branch names the anchor under review, not
+# work of its own — so salvaging one refuses on the husk guard and files a
+# no-signal witness-salvage-refused, and verifying one reads `unknown` off an
+# empty branch and escalates witness-branch-recovery-unknown. Classify the bead
+# as part 5's orphan-dispose.sh does — task_kind=visit, then task_kind=review,
+# then a root (gc.kind=workflow or gc.formula_contract=graph.v2), then a step
+# (gc.step_ref), else a source — and salvage only a source; anything else skips
+# to part 5, which releases or skips it by that same class.
+# salvage-scope-gate.test.sh runs this gate and orphan-dispose.sh over one set of
+# fixtures and asserts they agree, so the two classifiers cannot drift. An
+# unreadable classification defaults to the work-bead path: recovery is
+# load-bearing and salvage self-guards on the husk check, so it never skips a
+# real orphan.
+IS_WORK_BEAD=$(printf '%s' "$BEAD_JSON" | jq -r '
+  (.[0].metadata // {}) as $m
+  | if   ($m.task_kind // "") == "visit" then "0"
+    elif ($m.task_kind // "") == "review" then "0"
+    elif (($m["gc.kind"] // "") == "workflow") or (($m["gc.formula_contract"] // "") == "graph.v2") then "0"
+    elif ($m["gc.step_ref"] // "") != "" then "0"
+    else "1" end' 2>/dev/null)
+case "$IS_WORK_BEAD" in 1|0) ;; *) IS_WORK_BEAD=1 ;; esac
+# <<< salvage-scope-gate
+```
+
+A source work bead that carries neither a worktree nor a branch never reached
+workspace-setup: its owner died before one was created. There is nothing to
+salvage and no branch to verify, so the salvage fall-through below would file a
+no-signal `witness-salvage-refused` and part 4 would read `unknown` off the
+empty branch and escalate `witness-branch-recovery-unknown` — a human branch
+recovery for a branch that never existed. Mark that case here so salvage and
+part 4 both skip it, and part 5 returns the bead to the pool the way it returns
+any source bead:
+```bash
+# >>> nothing-to-salvage-gate
+NOTHING_TO_SALVAGE=0
+if [ "$IS_WORK_BEAD" = "1" ] && [ -z "$WORKTREE" ] && [ -z "$BRANCH" ]; then
+  NOTHING_TO_SALVAGE=1
+fi
+# <<< nothing-to-salvage-gate
+```
+
+Before ANY salvage git write, assert work_dir is its OWN worktree root — a husk
+directory (worktree removed, dir survives) lets `cd` succeed while every git
+command resolves to the ENCLOSING repo, so `git add -A && git push` would
+publish that repo's working tree:
 ```bash
 # >>> husk-guard
 WORKTREE_SAFE=0
@@ -315,59 +515,166 @@ if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
 fi
 # <<< husk-guard
 ```
-If the branch is already on origin (`git ls-remote --heads origin $BRANCH`,
-run from the RIG ROOT — a husk resolves `origin` from the wrong repo), the
-worktree is disposable: go to step 4. Otherwise salvage — every git write
-gated on the guard:
+`BRANCH_ON_ORIGIN=present` means the work is already published and the worktree
+disposable — go to step 4. Otherwise salvage. The salvage push publishes to the
+worktree's origin, so gate it on `push-target-ok`, which refuses when the
+worktree's origin is not the owning origin (a husk points it at the wrong repo).
+A push of work that may already be on origin is idempotent and never loses
+commits, while `unknown` must never be read as gone:
 ```bash
-if [ "$WORKTREE_SAFE" = "1" ]; then
+if [ "$IS_WORK_BEAD" != "1" ]; then
+  echo "not a work bead (a visit, a review, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
+elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then
+  echo "source work bead with no work_dir and no branch — never had a worktree; nothing to salvage, straight to disposal." >&2
+elif [ "$BRANCH_ON_ORIGIN" = "present" ]; then
+  echo "branch already on origin — worktree disposable; skipping salvage." >&2
+elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" --owning-origin "$OWNING_ORIGIN_URL" --bead <bead>; then
   cd "$WORKTREE"
   git status --porcelain
-  # Commit whatever is uncommitted/untracked, then publish the branch. All
-  # work is useful work — never discard.
+  # All work is useful work — commit whatever is uncommitted, then publish.
   git add -A
   git commit -m "witness: salvage work from orphaned agent (<bead>)" || true
   BRANCH=$(git branch --show-current)
   git push origin HEAD
   gc bd update <bead> --set-metadata branch="$BRANCH"
 else
-  echo "husk or missing work_dir — REFUSING salvage writes (see HUSK GUARD); nothing salvageable." >&2
+  echo "husk, wrong-origin, or missing work_dir — REFUSING salvage writes (see guards); nothing salvageable." >&2
 fi
 ```
-When nothing is salvageable (no worktree and no branch on origin, or the
-guard refused), escalate the refusal best-effort
-(`escalate.sh --subject <bead> --key witness-salvage-refused ...`) and fall
-through — recovery is load-bearing, the notice advisory.
+When a work bead's worktree is a husk or gone and its branch is not on the owning
+origin (or a guard refused), the work may be lost: file the refusal best-effort
+(`patrol-finding.sh --scope witness-findings --key witness-salvage-refused
+--about <bead> ...`) and fall through — recovery is load-bearing, the notice
+advisory. A source bead with neither a work_dir nor a branch is not that case:
+it never had a worktree, so the nothing-to-salvage arm skips it with no refusal
+to file. A visit, a review, or a graph.v2 step or root never reaches this branch
+either; the scope gate has no worktree to lose for it and sent it to part 5.
 
-**4. Verify before reset.** If the branch is already reachable from the
-target (`git merge-base --is-ancestor origin/$BRANCH origin/main`), the
-work landed: escalate the observation, close the bead, clean the worktree.
-Otherwise reset:
+**4. Verify before reset (work beads only).** A bead the scope gate marked
+not-a-work-bead has no branch to verify, so skip straight to part 5. For a work
+bead, ask the owning repo whether the branch already landed on the target.
+`branch-context.sh merged` reads it after the salvage push and defers to the
+compare API on a shallow checkout, whose grafted boundary makes a landed branch
+read as unmerged; a branch it cannot freshly fetch (deleted upstream, network)
+is `unknown`, never a stale-ref discard:
+```bash
+if [ "$IS_WORK_BEAD" = "1" ]; then
+  if [ "$NOTHING_TO_SALVAGE" = "1" ]; then
+    BRANCH_MERGED=skip   # never had a branch; nothing to verify, go to part 5
+  else
+    TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "main"')
+    BRANCH_MERGED=$("$BC" merged --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH" --target "$TARGET")
+  fi
+else
+  BRANCH_MERGED=skip   # no branch by construction; nothing to verify, go to part 5
+fi
+```
+`yes` — the work landed: escalate the observation, close the bead, clean the
+worktree. `no` — the work is unmerged: return it to the pool (step 5). `skip` —
+not a work bead, or a source bead that never had a worktree or branch (the
+nothing-to-salvage arm): nothing to verify, go straight to part 5. `unknown` — no
+context could answer authoritatively, so do NOT reset and do NOT report the work
+discardable; escalate (`--key witness-branch-recovery-unknown`) and leave the
+bead for a human.
 
-**5. Cleanup + return to pool.** Remove the worktree (from the rig root:
-`git worktree remove <path> --force; git worktree prune`). Then hand the bead
-to `orphan-dispose.sh`, which picks the disposal from what the bead IS:
+**5. Cleanup + return to pool.** The worktree is removed on the authority of
+the bead that owns it, so that bead has to be provably present in the store
+its own id prefix names. A bare `gc bd show` cannot supply that proof: it
+resolves a live id from whichever store holds it, but a miss is answered by
+the store you are standing in, not the one the prefix names, so an absent
+answer cannot tell a bead gone from its own store from a lookup sent to the
+wrong store. Reading that miss as an unowned directory is what licenses a
+wrong delete. `bead-store.sh --present` derives the store from the prefix and
+asks it by `--db`, and it refuses an unknown prefix as readily as a missing
+bead:
+
+```bash
+# >>> owning-store-guard
+BS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/bead-store.sh" ] && { BS="$c/assets/scripts/bead-store.sh"; break; }
+done
+OWNED=0
+if [ -z "$BS" ]; then
+  echo "witness: bead-store.sh not found — the store owning <bead> is unproven; REFUSING to remove $WORKTREE" >&2
+elif "$BS" --present "<bead>"; then
+  OWNED=1
+else
+  echo "witness: <bead> does not resolve in the store its prefix names — REFUSING to remove $WORKTREE; a worktree whose owner cannot be placed is not an unowned one" >&2
+fi
+# <<< owning-store-guard
+```
+
+Remove the worktree only under the guard, only when the bead recorded one, and
+from the rig root, and never let a failed removal abort the step. `git worktree
+remove` exits 128 for any path that names no registered worktree: a visit, a
+graph.v2 step and a graph.v2 root carry no `metadata.work_dir`, so `WORKTREE` is
+empty for them, while a husk work_dir (worktree removed, directory left behind)
+or an already-pruned path is nonempty but unregistered. Under `set -e` an
+uncaught 128 aborts the step before `orphan-dispose.sh` can release or skip the
+bead. The `[ -n "$WORKTREE" ]` test covers the empty shapes and a caught removal
+covers the rest, so cleanup stays best-effort and disposal always runs. The rig
+root is required because a husk resolves the worktree list from the wrong repo:
+
+```bash
+# >>> worktree-cleanup
+if [ "$OWNED" = "1" ] && [ -n "$WORKTREE" ]; then
+  if ! git -C "${GC_RIG_ROOT:-.}" worktree remove "$WORKTREE" --force; then
+    echo "witness: 'git worktree remove $WORKTREE' failed — a husk or already-removed path names no registered worktree; continuing to prune and disposal." >&2
+  fi
+  git -C "${GC_RIG_ROOT:-.}" worktree prune
+fi
+# <<< worktree-cleanup
+```
+
+A refusal leaves the worktree standing and escalates
+(`escalate.sh --subject <bead> --key witness-unplaceable-owner ...`). Disposal
+still runs either way: a bead whose store cannot be named is exactly the bead a
+person needs to see, and leaving it owned hides it.
+
+Then hand the bead to `orphan-dispose.sh`, which picks the disposal from what
+the bead IS:
 
 ```bash
 OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/orphan-dispose.sh" ] && { OD="$c/assets/scripts/orphan-dispose.sh"; break; }
 done
+DISPOSE_RESULT=""; DISPOSE_RC=0
 if [ -z "$OD" ]; then
   echo "orphan-dispose.sh not found — NOT disposing of <bead>; it stays owned and returns next cycle" >&2
 else
-  "$OD" <bead> --owner "$OWNER" --apply
+  # Capture the disposal's own verdict: it decides whether this bead was RETURNED
+  # to the pool (result=disposed) or left untouched (result=skipped — a root, or a
+  # source already in a downstream court). `|| DISPOSE_RC=$?` keeps a non-zero exit
+  # (3 partial, 1 failed) from killing the step under set -e; the JSON is printed
+  # before either exit, so DISPOSE_RESULT still reads.
+  DISPOSE_JSON=$("$OD" <bead> --owner "$OWNER" --apply --json) || DISPOSE_RC=$?
+  printf '%s\n' "$DISPOSE_JSON"
+  DISPOSE_RESULT=$(printf '%s' "$DISPOSE_JSON" | jq -r '.result // ""')
 fi
 ```
 
-Four kinds reach it and only two are returned to the pool. A **visit** gives up
-its assignee and nothing else, because its route, continuation group and
-task_kind are its identity. A **workflow step** gives up the dead session's pin
-and keeps the rest, so the molecule resumes at that same step under whoever
-claims it next. A **workflow root** is skipped: nothing claims a root, it closes
-when its workflow-finalize step closes, and setting it open, unassigned and
-routed is what makes a pool offer the root itself as work. Everything else is a
-**source bead** and goes to `gc workflow delete-source --apply` followed by
-`gc workflow reopen-source`.
+Each kind is disposed by what it is. Some kinds return a bead to a pool to be
+claimed again, and some of those return it only when the work has not already
+reached a downstream court. A **visit** gives up its assignee and nothing else,
+because its route, continuation group and task_kind are its identity. A
+**review** is the source bead of its own mol-review molecule and carries no
+worktree of its own, so it disposes by the source contract below — recognised by
+task_kind before the source arm the way a visit is, and reopened to its review
+pool. A **workflow step under a live root** gives up the
+dead session's pin and keeps the rest, so the molecule resumes at that same step
+under whoever claims it next. A **workflow root** is skipped: nothing claims a
+root, it closes when its workflow-finalize step closes, and setting it open,
+unassigned and routed is what makes a pool offer the root itself as work.
+Everything else is a **source bead** and goes to
+`gc workflow delete-source --apply` followed by `gc workflow reopen-source`.
+
+The remaining step dispositions turn on the step's root, which the disposal reads
+before it releases anything. A step whose **root has CLOSED** has no molecule left to
+resume — releasing it would hand a finished chain to a pool as fresh work — so
+it goes to `dead-molecule-dispose.sh`, which de-routes every member of the chain
+before it closes any of them. A step whose **root will not read** is left
+untouched: an unreadable root is not a live one, and the step stays owned and
+comes back next cycle rather than being released on a failed probe.
 
 Those two commands are the source arm alone. `delete-source` matches workflow
 roots on `gc.source_bead_id`, a root poured from an input convoy carries no such
@@ -376,11 +683,31 @@ it is handed. Running the pair on a step or a root therefore performs no close
 and reopens live molecule machinery into a pool.
 
 Exit 3 is a PARTIAL write: some fields landed and some did not, the bead is now
-half-released, and it needs an escalation
-(`escalate.sh --subject <bead> --key witness-partial-release ...`), not a retry.
+half-released, and it needs a finding
+(`patrol-finding.sh --scope witness-findings --key witness-partial-release
+--about <bead> ...`), not a retry.
 
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
+
+A disposal that SKIPPED changed nothing — a workflow root, or a source whose work
+already reached a downstream court — so it is not a recovery and must not be
+recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
+signal a RATE for work that was never re-dispatched, the moot escalation this
+whole filter exists to stop. Gate the record on the disposal's own verdict:
+```bash
+# >>> recovery-stamp-gate
+# STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
+# (result=disposed: a released visit or step, or a delegated source or review). Every other
+# verdict — skipped (a root, or a source already in a downstream court), partial,
+# failed, or an unread empty — returned nothing to the pool, so no recovery is
+# stamped and no crash-loop rate is read.
+case "${DISPOSE_RESULT:-}" in
+  disposed) STAMP_RECOVERY=1 ;;
+  *)        STAMP_RECOVERY=0 ;;
+esac
+# <<< recovery-stamp-gate
+```
 
 **6. Record the recovery. A crash loop is a RATE, not a mark.** A bare
 `recovered=true` is a flag nothing clears, so reading a repeat recovery off
@@ -433,11 +760,15 @@ esac
 # <<< crash-loop-window
 ```
 ```bash
-gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
+# Only a disposed bead is a recovery (recovery-stamp-gate above); a skip stamps
+# nothing, so the crash-loop RATE is never fed a recovery that did not happen.
+if [ "$STAMP_RECOVERY" = "1" ]; then
+  gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
+fi
 ```
-Escalate `--key witness-crash-loop` only when `CRASH_LOOP=1`, and say which
-two recoveries were close together — a visit that reports only "recovered
-before" asks a human to re-derive the interval. `recovered_count` outside the
+File a finding `--key witness-crash-loop --about <bead>` only when `STAMP_RECOVERY=1` and `CRASH_LOOP=1`, and say which
+two recoveries were close together — a finding that reports only "recovered
+before" makes whoever handles it re-derive the interval. `recovered_count` outside the
 window is a bead that keeps coming back rather than one that is looping; it is
 recorded here so that signal can be built from evidence, and it is not this
 key.
@@ -449,48 +780,114 @@ id = "check-refinery"
 title = "Check refinery queue health"
 needs = ["recover-orphaned-beads"]
 description = """
+Escalate a refinery handoff that has gone genuinely stuck, and the blind
+monitor when the queue cannot be read at all — but never transient churn.
+The refinery has two drivers. Its session (mol-refinery-patrol `find-work`)
+claims open, branch-bearing work assigned to it with no `merge_result`, prepares
+the branch, and stamps the first `merge_result`; the order-driven
+refinery-reconcile cadence then owns the anchor, and its transitions clear the
+assignee (`--assignee ""`), so a gating anchor is detached from both queues
+(docs/refinery-merge-cadence.md).
+
+The beads still assigned to the refinery are its inbound queue: fresh handoffs
+and rebase/rework tasks. Both turn over on their own, a handoff within a poll
+interval and a rebase task once the fix pool claims it, so their count is
+transient churn rather than a health signal, and a nudge asserting a count goes
+stale the moment the queue drains. What a human must see is one bead that has
+sat untouched far past that turnover, which the session is failing to advance.
+Escalate only that.
 ```bash
-# >>> refinery-queue-nudge
+# >>> refinery-stuck-escalate
 REFINERY="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+# A bead assigned to the refinery clears on its own: a handoff within a poll
+# interval, a rebase/rework task within the fix pool's work time (observed under
+# ~2h). Past this bound it is not churn; the session is not advancing it.
+# Conservative on purpose: a false escalation here is the defect this step fixes.
+STUCK_SECS=14400
+NOW=$(date -u +%s)
 # Under a strict shell a plain VAR=$(...) capture exits the step at a failed
-# listing, before the arms below can tell an unreadable queue from an empty
-# one.
-if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --json --limit=0); then QUEUE_RC=0; else QUEUE_RC=$?; fi
-printf '%s' "$QUEUE" | jq -r '.[] | [.id, .updated_at, .title] | @tsv' || true
-DEPTH=$(printf '%s' "$QUEUE" | jq 'if type == "array" then length else empty end' 2>/dev/null) || DEPTH=""
-# The nudge asserts a backlog, so only a counted one may send it: an
-# unconditional send leaves a real backlog worded exactly like the
-# empty-queue ones. Anything that is not a bead array counts nothing to
-# assert — an error body is an object, whose length is its field count.
-case "${DEPTH:-}" in
-  ''|*[!0-9]*) DEPTH="" ;;
+# listing, before the arms below can tell an unreadable queue from a healthy one.
+# bd's --json can emit a raw control byte inside a bead string (an unescaped
+# newline from a multi-paragraph note), which is invalid JSON and aborts jq;
+# tr -d '[:cntrl:]' drops the control bytes JSON forbids raw before the parse,
+# the same strip recover-orphaned-beads applies to its bd --json read above.
+# The common blinding case is a control byte in an otherwise-valid queue, which
+# the strip rescues.
+if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --exclude-type=epic --has-metadata-key=branch --json --limit=0 | tr -d '[:cntrl:]'); then QUEUE_RC=0; else QUEUE_RC=$?; fi
+# Keep only the session's own inbound work (merge_result empty; a gating anchor
+# carries one and belongs to the cadence, and is unassigned anyway) that has sat
+# past the bound. A listing that is not an array yields nothing (STUCK_N empty),
+# which the unreadable arm below catches and escalates.
+STUCK=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) | {id, updated_at} ] else empty end' 2>/dev/null) || STUCK=""
+STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty end' 2>/dev/null) || STUCK_N=""
+case "${STUCK_N:-}" in
+  ''|*[!0-9]*) STUCK_N="" ;;
 esac
-if [ "$QUEUE_RC" -ne 0 ] || [ -z "$DEPTH" ]; then
-  echo "check-refinery: queue listing unreadable (rc=$QUEUE_RC); not nudging" >&2
-elif [ "$DEPTH" -eq 0 ]; then
-  echo "check-refinery: queue empty; not nudging" >&2
+if [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
+  # Genuinely unreadable: bd failed, or the listing is not a JSON array even
+  # after the control-byte strip. A silent stderr log here was the defect this
+  # block fixes — a blinded monitor lets a genuinely stuck handoff go unseen —
+  # so escalate the blind monitor itself. escalate.sh dedups one open visit per
+  # key, so a persistently blind read files one visit, not a storm. The subject
+  # is this patrol run (a wisp id, or the session as a fallback); escalate.sh
+  # redirects an ephemeral subject onto the standing triage bucket.
+  echo "check-refinery: refinery queue unreadable (rc=$QUEUE_RC; not a JSON array after the control-byte strip); escalating the blind monitor" >&2
+  SCRIPTS=""
+  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  : "${SCRIPTS:?escalate.sh not found in the pack}"
+  "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unreadable --message "check-refinery cannot read the refinery queue (rc=$QUEUE_RC; the bd --json listing is not a JSON array even after stripping control bytes). The stuck-handoff monitor is blind, so a genuinely stuck refinery handoff would go unseen until this is fixed. Inspect the refinery queue listing and the store's health." || echo "check-refinery: queue unreadable AND escalation failed (rc=$QUEUE_RC)" >&2
+elif [ "$STUCK_N" -eq 0 ]; then
+  echo "check-refinery: no stuck handoffs; the queue is churning normally" >&2
 else
-  OLDEST=$(printf '%s' "$QUEUE" | jq -r 'sort_by(.updated_at // "") | .[0].updated_at // "unknown"')
-  gc session nudge "$REFINERY" "Merge queue: $DEPTH open bead(s) assigned to you, oldest untouched since $OLDEST."
+  SCRIPTS=""
+  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  : "${SCRIPTS:?escalate.sh not found in the pack}"
+  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.updated_at // "unknown")' | while read -r SID SWHEN; do
+    "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." || echo "check-refinery: escalate failed for $SID" >&2
+  done
 fi
-# <<< refinery-queue-nudge
+# A handoff that has left the refinery queue is no longer sitting unprepared, so
+# its stuck-handoff escalation is premise-moot: retract the open visit through
+# escalate.sh --retract (which closes it moot via visit-close.sh, stamping
+# gc.outcome) rather than leaving it open for a bare close that records no
+# outcome. Gated on a queue that read AND parsed as an array ($STUCK_N set): an
+# unreadable or unparseable queue is not proof a handoff resolved, and an
+# empty-set fallback there would withdraw every live escalation. Only a visit
+# whose group is exactly the handoff bead id is retracted; a legacy group
+# carrying extra tokens (a malformed-subject filing) is left for repair.
+if [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
+  QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
+  [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
+  RESOLVED=$(gc bd list --status=open,in_progress --has-metadata-key=escalation_key --json --limit=0 2>/dev/null | tr -d '[:cntrl:]' | jq -r --argjson q "$QUEUE_IDS_JSON" 'if type == "array" then (.[] | select((.metadata.escalation_key // "") == "witness-refinery-queue") | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "") as $g | select($g | test("^[A-Za-z0-9._-]+$")) | select(($q | index($g)) == null) | $g) else empty end' 2>/dev/null)
+  if [ -n "$RESOLVED" ]; then
+    SCRIPTS=""
+    for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+    done
+    : "${SCRIPTS:?escalate.sh not found in the pack}"
+    printf '%s' "$RESOLVED" | while IFS= read -r RSUBJ || [ -n "$RSUBJ" ]; do
+      [ -n "$RSUBJ" ] || continue
+      "$SCRIPTS/escalate.sh" --retract --subject "$RSUBJ" --key witness-refinery-queue --message "Refinery handoff $RSUBJ has left the refinery queue (merged, closed, or reassigned); it is no longer sitting unprepared, so the stuck-handoff escalation is moot." || echo "check-refinery: retract failed for $RSUBJ" >&2
+    done
+  fi
+fi
+# <<< refinery-stuck-escalate
 ```
-Look for: **stale beads** (assigned long ago, untouched — the refinery may
-be stuck), **queue depth** (a pile means stuck or overwhelmed), **empty
-queue** (usually fine — but a near-miss assignee on a handoff is missing
-from this listing, not absent from the city; read the cadence's pass log
-before calling it healthy).
-Escalate only what a human must act on — a stuck queue, never an
-approval-gated one (a PR awaiting the operator is a resting state worth
-zero escalations):
-```bash
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/escalate.sh" --subject <bead> --key witness-refinery-queue --message "Observation: <what is stuck and since when>. Recommendation: <what should happen>."
-```
-One escalation per stuck bead, never a queue-wide roundup. Close this step
-and continue to next-iteration."""
+One escalate.sh call per stuck bead: escalate.sh narrows its dedup to a durable
+subject, so each stuck bead gets its own visit and a churning queue files none.
+A stuck bead reaches a human through a re-derived visit rather than a nudge whose
+count goes stale. A queue that will not parse even after the control-byte strip
+escalates once under its own key, so a blinded monitor is surfaced rather than
+silently trusted. The counterpart retract closes the loop: when a readable queue
+no longer carries a handoff an open visit still escalates, the "sat unprepared"
+premise is gone, so the visit is retracted moot through escalate.sh --retract
+(guarded by visit-close.sh, which stamps gc.outcome) instead of lingering open
+for a bare close that records none. Close this step and continue to
+next-iteration."""
 
 [[steps]]
 id = "next-iteration"
@@ -499,29 +896,54 @@ needs = ["check-refinery"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
-**1. Pour next iteration BEFORE burning — and GUARD the assign.** The pour
-and the assign are separate writes; a wisp poured but not assigned reaches
-no hook and drops the loop, invisibly (the prompt's title-scoped startup
-reconcile is the backstop, not the fix). Forward every declared var — a
---root-only pour materializes no defaults. Keep the pour on ONE line (TOML
-eats a trailing backslash):
+**1. Pour the next iteration and burn this one, both BEFORE the wait — and
+GUARD the assign.** The pour and the assign are separate writes; a wisp poured
+but not assigned reaches no hook and drops the loop, invisibly (the prompt's
+title-scoped startup reconcile is the backstop, not the fix). Burning this
+wisp is folded in right after the assign so it precedes the wait: a session
+reset during that wait has already poured and assigned its successor and
+burned itself, so the next boot adopts the successor instead of orphaning this
+wisp. Pass exactly the vars the startup pour passes, which is binding_prefix
+alone, and nothing else. An omitted var renders the formula's current default
+on the new wisp, while a passed one keeps the first wisp's value for as long
+as the chain runs, so a default changed on main would never reach it. Keep
+each gc command on ONE line (TOML eats a trailing backslash).
+
+`GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
+current wisp has to work: a wisp is an EPHEMERAL molecule, which means
+`--type=molecule --include-infra` plus the title filter. Any narrower query
+reads empty, and an unresolved current wisp is one that never burns.
 
 ```bash
 # >>> patrol-wisp-pour
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
+CURRENT_WISP=${GC_BEAD_ID:-}
+if [ -z "$CURRENT_WISP" ]; then
+  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-witness-patrol")][0].id // empty')
+fi
+NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
   exit 1
 fi
+gc bd update "$NEXT" --set-metadata gc.rig="$GC_RIG" || true  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
 if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
   echo "Could not assign poured wisp $NEXT; rolling it back and NOT burning this one."
   gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile will collect it."
   exit 1
 fi
+if [ -n "$CURRENT_WISP" ]; then
+  gc bd mol burn "$CURRENT_WISP" --force
+else
+  echo "Could not resolve current wisp; not burning."
+  exit 1
+fi
 # <<< patrol-wisp-pour
 ```
-If either guard fires, stay on the current wisp and retry next cycle; skip
-steps 2 and 3.
+If the pour or assign guard fires, this wisp is unburned and its successor was
+rolled back or never poured: stay on the current wisp and retry next cycle,
+skipping the wait below. If the pour succeeded but no current wisp resolves,
+the successor is already live, so this exit hands off to it and leaves any
+stray to the title-scoped reconcile.
 
 **2. Wait before the next cycle** — a bounded clock-poll in ONE tool call
 (the harness blocks a standalone sleep, and caps one call at 600s):
@@ -530,13 +952,9 @@ end=$(( $(date +%s) + {{event_timeout}} ))
 until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
 ```
 
-**3. Burn this wisp — only if step 1 succeeded:**
-```bash
-gc bd mol burn <this-wisp-id> --force
-```
-
 Re-read the plain `gc formula show mol-witness-patrol` for step order (not
 the full --json; pull one step's description only as you reach it).
 
-**Exit criteria:** next wisp poured and assigned, this one burned — or the
-guard fired and this wisp survives for the retry."""
+**Exit criteria:** the next wisp poured and assigned, this one burned, and the
+inter-cycle wait elapsed — or a guard fired and this wisp survives for the
+retry."""

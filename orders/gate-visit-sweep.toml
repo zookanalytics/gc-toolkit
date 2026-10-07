@@ -1,0 +1,31 @@
+# gate-visit-sweep — file a converse visit on the bead each open human gate
+# blocks, so a human gate (the escalation STATE) reaches a person through a
+# visit (its RESOLUTION). The visit-on-gate rule and its operator control live
+# in one place rather than in every gate producer: ONE visit per human gate
+# carrying gc.demand_for. The filed visit is recorded on the gate as
+# gc.gate_visit=<visit-id>, which is the idempotence key — a gate is never
+# re-offered after its sitting ends, so a benign close, a cut-short hold or an
+# operator dismiss cannot re-spawn a session every cooldown. Suppress a gate by
+# stamping gc.gate_visit=skip before the sweep reaches it; re-offer one with
+# `gc bd update <gate> --unset-metadata gc.gate_visit`. Gates assigned to a
+# person, and gates whose gated bead is no longer open, get no visit
+# (assets/scripts/gate-visit-sweep.sh).
+#
+# The visit is the ONLY attention channel — the operator does not read the
+# "human" mailbox, so the upstream notify-on-human-gate-creation order is a
+# durable record, not the reach (docs/gascity-human-engagement.md).
+#
+# Exec, not a formula: two `bd list`s plus one `gc-helm open` per gate still
+# owed a visit needs no LLM. Cooldown, not event: the stamp makes a re-run a
+# no-op, and a gate missed on one pass is caught on the next.
+# Rig-scoped: one pass per importing rig against its own store; the runtime's
+# open-tracking gate is the single-flight guard, so keep `timeout` under the
+# tracking sweep's stale-after (10m). Tune interval from city.toml
+# [[orders.overrides]].
+[order]
+description = "File one converse visit per open human gate on its gated bead, recorded as gc.gate_visit (opt out with gc.gate_visit=skip; unset it to re-offer)"
+trigger = "cooldown"
+interval = "2m"
+timeout = "120s"
+exec = "$PACK_DIR/assets/scripts/gate-visit-sweep.sh"
+scope = "rig"

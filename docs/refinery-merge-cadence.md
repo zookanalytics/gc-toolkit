@@ -41,85 +41,46 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 ## The arms
 
-1. **gate-ensure.sh** — gate satisfiability. Every gating anchor declares a
+1. **gate-ensure.sh** — check satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
-   sentinel is respected), and every declared gate is *raisable*: the lane
+   sentinel is respected), and every declared check is *raisable*: the lane
    reads `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
    back). A lane that reads `green` ends the arm's interest however far the
-   branch has advanced since — nothing here compares a marker to a head. The
-   convergence cap's park also ends it with no dispatch: `signoff.sh` set
-   `merge_hold=signoff_cap` (the literal string, distinct from an operator's
-   own `merge_hold=true`) with `signoff_cap=<gate>` beside it,
-   `gc.routed_to=human`, a `blocked_reason` naming the cap, and
-   the shorter `gc.takeaway` headline the helm board renders, in one act. No
-   visit is filed for it, so the anchor is parked rather than queued. What
-   undoes that is new operator feedback, which arm 5 records: the cap counts
-   non-convergence, and a review the branch has never answered is not that
-   ([state-machine.md](state-machine.md#the-round-cap-counts-from-the-last-operator-feedback)).
-   An anchor capped before its PR was opened can receive neither, and says so
-   in its `blocked_reason`; `signoff.sh reset <anchor> --reason <why>` is its
-   release.
+   branch has advanced since — nothing here compares a marker to a head. An
+   operator's own `merge_hold` also ends the arm with no dispatch: gate-ensure
+   raises no review under a hold.
    A review whose only reach is the pour stamp is qualified before it counts
    as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict
    can still be coming, and the arm escalates through `escalate.sh` under the
    `review-wedge` key rather than holding the anchor in silence. It escalates
    on the second consecutive sighting, because `mol-review`'s failure arm
-   closes its chain before it restores the bead's route. One dispatch is
-   refused outright: a head that a closed request-changes verdict already
-   judged, whose rework child is still open, can only be answered the same
-   way, so the gate stays armed and the merge held until that rework moves the
-   head. Behind that sits a ceiling on DISPATCHES —
-   `GC_MAX_REVIEW_DISPATCHES`, default 5, and not `signoff.sh`'s round cap —
-   for the reviews neither refusal can see: one that ends writing no marker
-   and leaving no open rework child returns the anchor to the state that
-   triggered the dispatch, so the next pass repeats it at the same head. At
-   the ceiling the gate holds, the anchor carries `dispatch_backstop.<gate>`
-   and a note saying why, and one visit is filed under the `dispatch-runaway`
-   key. **rc=3 is the designed interlock**: it holds `merge.sh` for this
-   pass — an anchor whose gates are not yet satisfiable must not be mergeable
+   closes its chain before it restores the bead's route. No dispatch goes out
+   while anything is acting on the anchor — an open `must-fix` finding on any
+   lane, a fix unit in flight, a validation pass in flight, or a full review
+   already in flight on the lane — which is the QUIESCENCE predicate one
+   authority computes so it cannot disagree with itself about whether a review
+   was already out. The same authority also releases that hold: it closes a
+   `must-fix` finding once every fix unit answering it has closed, so a fix that
+   has landed on the branch stops holding the re-gate rather than wedging the
+   anchor at `pre_open_gate`. A review that read a mid-change diff would raise
+   only the no-op rework the declination texts are full of. There is no dispatch
+   ceiling: quiescence forbids the redundant round a ceiling would have bounded,
+   and the runaway shapes left — a reviewer that dies after claim, a fix unit
+   filed with its edge reversed, a landed fix whose finding that release missed
+   — stop the PR moving and are caught by `liveness-sweep.sh`'s stale-gate pass,
+   not a count on the check.
+   **rc=3 is the designed interlock**: it holds `merge.sh` for this
+   pass — an anchor whose checks are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
 
-   **1a. pre-open-rebase.sh** — the conflict observer for anchors that have no
-   PR yet. Every other arm reads whether a branch still merges off the PR
-   (`mergeable`, `mergeStateStatus`), and `pr-facts.sh` skips any anchor whose
-   `pr_number` is absent before it reads anything else. That is not a narrow
-   enumeration one could widen: the facts those arms dispatch on are PR facts,
-   so a pre-open anchor has none of them and a widened net routes nothing. This
-   arm asks git instead. One fetch per pass mirrors every branch on origin into
-   `refs/gc-toolkit/pre-open-rebase/heads/*` — one round trip costs the same as
-   38, and this arm holds the pass lock while it runs — pruned, so a branch
-   deleted on origin does not linger as a ref the probe would believe. Per
-   anchor it then requires both sides to resolve there and probes
-   `git merge-tree --write-tree`; a conflict files the same rebase child arm 5
-   files for a PR anchor, classified by the same branch allowlist and stamped
-   `prepare_mode`. It runs before `pr-open.sh` because that arm ends its
-   domain: once an anchor carries a PR, `mergeable` answers the question and
-   arm 5 owns the dispatch. Both arms probe children on `metadata.branch` and
-   write the same `head <oid>` phrasing, so whichever sees a branch first
-   files and the other stands down. The vetoes are arm 5's: `merge_hold`,
-   `rebase_hold` on the anchor or on any bead naming the branch, and a live
-   demand. A failure here is not a merge hold — an anchor it could not observe
-   is left exactly as the pass found it.
-
-2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor whose
-   every marker-bearing `check_set` gate reads `green` (the same
-   predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
-   set is held, never read as ungated): adopt an existing PR for the branch or
-   `gh pr create` non-draft, re-read the created PR by number, refuse a moved
-   head, replay the verdict as a comment (never an approval), then one
-   `lifecycle.sh` transition carrying `pr_url`/`pr_number`/`merged_target`.
-   The body's `## Summary` is the polecat's `pr_summary`, written at handoff
-   by the only actor that has read the diff; the anchor's description is
-   dispatch text, demoted to a collapsed section and standing in as the
-   summary only when the handoff carried none.
-3. **pr-facts.sh --posture-only** — the posture record, and nothing else.
+2. **pr-facts.sh --posture-only** — the posture record.
    `merge.sh` answers "is a human waiting on this?" off the bead and never asks
    GitHub, so the value it reads has to be written in the same pass. This arm
    writes `pr_posture` and `pr_merge_state` at the live head for every open
    non-draft anchor, then stops: no dispatch, no watermark, and MERGED/CLOSED
-   reconciliation stays with arm 5. A held merge still gets one, because
+   reconciliation stays with arm 7. A held merge still gets one, because
    recording a fact is not a dispatch, and the pass that finally merges must not
    be reading a posture from a previous tick. **A non-zero rc is the second
    interlock.** An anchor this arm could not make current — an unreadable review
@@ -127,17 +88,71 @@ the cadence — the arms run whether or not any refinery session is awake.
    validate against a fact from an earlier tick, so the driver holds arm 4 for
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
-   other anchor's too.
-4. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
+   other anchor's too. Where this arm changes an anchor's posture value, it also
+   re-derives that PR's `status:` label, so an approval moves the label in the
+   pass that records it
+   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
+
+3. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
+   early, before merge. Arm 7 runs after merge and near the pass tail, so a pass
+   the timeout kills between the posture record and arm 7 leaves the operator's
+   review stamped-as-seen by the posture yet unrouted, sometimes for hours, while
+   the anchor reads as handled. This arm closes that window: it re-reads each open
+   anchor's feedback and dispatches the same rework child or visit and opens the
+   same validation pass arm 7 would, then stops — no write-back sweep, no
+   external-fact reconciliation, none of the arms that belong after merge, so it
+   is cheap and finishes on the early tick. A batch it routes is live work on the
+   anchor, which the `status:` label reads, so it re-derives that PR's label as it
+   routes. Arm 7 still runs the routing
+   idempotently (a landed batch's watermark and `pr_comment_disposition` make the
+   re-run a no-op) and still owns the write-back and the terminal-state records.
+   Its rc is reported but holds nothing: routing is not the posture interlock, and
+   the full pass is the backstop. The observability half is
+   `doctor/check-feedback-routing-owed`, which flags an anchor whose posture still
+   says a human is waiting with no disposition past a window.
+4. **merge.sh** — `pull_request → merged`. It runs the moment its two same-pass
+   interlocks are done — gate-ensure's rc=3 hold and the posture record above —
+   and ahead of pre-open-rebase and pr-open, whose per-anchor GitHub round-trips
+   over the `pre_open_gate` backlog would otherwise consume the pass budget before
+   merge was reached, so a grown held backlog left every approved CLEAN PR
+   unlanded. It reads none of those two arms' output — it lands `pull_request`
+   anchors, they produce `pre_open_gate` ones — so nothing it needs sits behind
+   them. Pinned `gh pr view`, identity gates
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
-   validate holds/posture/gates/children/approval/base/CLEAN, check that the
-   merge result keeps `generated/seed-audit` current, re-read the full
+   validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
+   that the merge result keeps `generated/seed-audit` current, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record via one
    `lifecycle.sh` call. The posture it validates is the value **pr-facts
-   recorded on the anchor**, never a fresh read of GitHub.
+   recorded on the anchor**, never a fresh read of GitHub. The open-visit clause
+   is the finalize gate: an open visit tracking the anchor holds its merge
+   (`docs/finalize-gate.md`), re-asserted in the terminal re-read because a visit
+   filed mid-pass does not move the head.
+
+   GitHub computes a PR's mergeability lazily. The first read after the PR's
+   base moves answers `UNKNOWN` and starts the computation, which finishes in a
+   few seconds, and a PR nobody reads stays `UNKNOWN`. Every merge this arm makes
+   moves the base under each later candidate on that base, so their pinned reads
+   answer `UNKNOWN`. The arm reads such a PR again before deciding it. A PR's
+   first re-read goes out immediately, and each later one waits
+   `MERGE_STATE_REREAD_SECS` (default 5). A re-read that answers a computed state
+   decides its PR. One that answers `UNKNOWN` again spends one of the pass's
+   `MERGE_STATE_REREADS` (default 3), and once they are spent every later
+   `UNKNOWN` holds on its pinned read. With the defaults, a computation stalled
+   across the repository costs a pass three reads and ten seconds of waiting,
+   however many candidates it holds. The computed state is judged exactly as a
+   pinned one is, so `BEHIND` and `DIRTY` keep their handling. A re-read may
+   differ from the pinned read only in `mergeStateStatus`, `mergeable` and
+   `reviewDecision`. Any other difference means the PR changed under the gates
+   that passed it, so the merge holds and the log names each field that changed.
+   A re-read that fails holds the merge for the pass, as a failed pinned read
+   does, and records nothing. A state still `UNKNOWN` when the re-reads are spent
+   holds for the pass and records `settled`. The re-read belongs to the CLEAN
+   check, the last in the validation order above, so only a candidate every
+   earlier check cleared pays for it. Every read comes after the latest merge of
+   the pass, because the arm merges only at the end of an anchor's turn.
 
    Landing and recording are two writes, and a pass killed between them leaves
    an anchor saying `pull_request` over a PR already on the target branch.
@@ -184,9 +199,87 @@ the cadence — the arms run whether or not any refinery session is awake.
    they do; per-input records move only where the input moved. The record is
    two lines, path then hash, because git needs one unchanged line between two
    changes to merge them and neighbouring entries in a flat list leave none.
-5. **pr-facts.sh** — external facts only, no merge authority: PR merged
+5. **pre-open-rebase.sh** — the conflict observer for anchors that have no PR
+   yet. It runs after merge, which reads none of its output, and before
+   `pr-open.sh`, whose flip to a PR ends its domain. Every other arm reads
+   whether a branch still merges off the PR (`mergeable`, `mergeStateStatus`),
+   and `pr-facts.sh` skips any anchor whose `pr_number` is absent before it reads
+   anything else. That is not a narrow enumeration one could widen: the facts
+   those arms dispatch on are PR facts, so a pre-open anchor has none of them and
+   a widened net routes nothing. This arm asks git instead. One fetch per pass
+   mirrors every branch on origin into `refs/gc-toolkit/pre-open-rebase/heads/*`
+   — one round trip costs the same as 38, and this arm holds the pass lock while
+   it runs — pruned, so a branch deleted on origin does not linger as a ref the
+   probe would believe. Per anchor it then requires both sides to resolve there
+   and probes `git merge-tree --write-tree`; a conflict files the same merge-in
+   rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
+   branch shape is brought current by merge, never rebase). It runs before
+   `pr-open.sh` because that arm ends its domain: once an anchor carries a PR,
+   `mergeable` answers the question and arm 7 owns the dispatch. Both arms probe
+   children on `metadata.branch` and write the same `head <oid>` phrasing, so
+   whichever sees a branch first files and the other stands down. The vetoes are
+   arm 7's: `merge_hold`, `rebase_hold` on the anchor or on any bead naming the
+   branch, and a live demand. A failure here is not a merge hold — an anchor it
+   could not observe is left exactly as the pass found it.
+6. **pr-open.sh** — `pre_open_gate → pull_request`. It runs after merge because
+   it produces the `pull_request` anchors a LATER pass lands: the city approves
+   nothing at open (the verdict is replayed only as a comment), so a freshly
+   opened PR is never mergeable on the same tick, and deferring it past merge
+   costs a PR its open-pass landing only in the ungated lane-only case and never
+   starves merge. For each anchor whose
+   every `pre-open` check in `check_set` reads `green` (the one resolver names
+   that set — `none`/`off` and the universal `approval` rule dropped; an empty
+   set is held, never read as ungated): adopt an existing PR for the branch or
+   `gh pr create` — as a draft when `check_set` names an `open-as-draft` check,
+   so a preview can deploy before the change is surfaced, else ready — re-read
+   the created PR by number, refuse a moved head, replay the verdict as a comment
+   (never an approval), then one `lifecycle.sh` transition carrying
+   `pr_url`/`pr_number`/`merged_target`. A later pass flips a draft to ready once
+   its `open-as-draft` checks are green. Each anchor's head comes from one fetch
+   of origin's branches per pass, with the API answering when that fetch could
+   not and confirming the head before any create, so an anchor parked on a red
+   lane costs no API read for its head. Its gates are resolved once at that
+   head, and the one answer feeds the gate, the draft decision and the body; a
+   resolver that is missing or fails holds the anchor. An adopted draft is the
+   refinery's to flip only when the city opened it as a draft and nobody has
+   re-drafted it since. Any other draft is adopted without that claim and stays
+   with whoever parked it.
+   The body's `## Summary` is the polecat's `pr_summary`, written at handoff
+   by the only actor that has read the diff; the anchor's description is
+   dispatch text, demoted to a collapsed section and standing in as the
+   summary only when the handoff carried none. The region writes that heading
+   itself, so a `pr_summary` opening with one of its own is de-duplicated. The
+   composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
+   re-splices it from the anchor's current `pr_summary` — a rework's restamp
+   reaches the published merge surface — while text an operator or `pr-stack.sh`
+   added outside the markers stays. A body a create wrote before these markers
+   is the same stale-body case: the region is established over its legacy
+   `## Summary`…`## Refinery handoff` prefix, keeping what follows, so the
+   restamp still lands. A body carrying no such managed region — hand-written,
+   or a malformed marker shape — has nothing stale to republish and is adopted
+   as it stands; a MERGED PR is a landed record, flipped untouched. A refresh
+   this arm cannot verify — an unreadable or unparseable body, a missing head,
+   or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
+   rather than flip a managed body that may be stale. This adopt-time re-splice
+   covers only the `pre_open_gate` window; once the anchor is `pull_request`,
+   republishing a rework's restamp is arm 12's job (`pr-stack.sh`), the anchor
+   never returning to the state this arm scans (no `pull_request → pre_open_gate`
+   lifecycle edge).
+7. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
-   (→ `retargeted` + visit), CONFLICTING (one rework child per head),
+   (→ `retargeted` + visit), CONFLICTING (one rework child per head), `BLOCKED`
+   (→ a visit under `merge-blocked-threads`, only where
+   `required_review_thread_resolution` is on and a thread is unresolved, read
+   from the branch's own rules. A missing required approving review files no
+   visit: it is the operator's own review queue, the state the board's review
+   section already surfaces from the recorded `pr_posture`. Because such a
+   review is state and never an escalation, the cadence also retires any open
+   `merge-blocked-approval` visit `moot`, at the top of its run ahead of the
+   no-anchors early-exit and in every rig, failing closed on an unreadable
+   subject. A cause the rules cannot name — an unmodeled rule, or unreadable
+   rules or thread count — escalates nothing and the next reconcile retries.
+   `reviewDecision` cannot name the cause alone, reading EMPTY while threads
+   are unresolved, so the rules are read directly),
    hold-resolved retraction. It re-reviews no moved head: a lane state is a
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
@@ -194,13 +287,20 @@ the cadence — the arms run whether or not any refinery session is awake.
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
    rework child or a visit. The posture write is idempotent, so re-running it
-   here after arm 3 costs nothing when nothing changed. Routing lives only in
-   this arm: arm 3 records, this one decides what answers it. Each batch it
-   routes also resets `signoff.sh`'s round cap, once per batch, retiring the
-   cap's own park with it — but only while `merge_hold` still reads the
-   literal `signoff_cap` with a non-empty `signoff_cap=<gate>` beside it; an
-   operator's own `merge_hold=true` is never that pairing and is never lifted
-   by this reset, even past an orphan `signoff_cap`.
+   here after arm 2 costs nothing when nothing changed. The routing runs in two
+   places by design: arm 3 picks the feedback up early, before merge, and this
+   arm re-runs the same routing idempotently — a landed batch's watermark and
+   `pr_comment_disposition` make the second run a no-op — while owning the
+   write-back sweep and the terminal-state records that only make sense after
+   merge. Arm 2 records the posture; arm 3 and this arm decide what answers it.
+   Each batch it
+   routes also opens one validation pass on the anchor — a
+   `task_kind=validation` bead, unrouted, blocking the anchor — from which
+   `gate-ensure.sh`'s quiescence holds a fresh whole-diff review while the
+   validator rules the batch.
+   The batch is watermarked only once that pass records the shape the validator
+   reads — `anchor_bead`, `check_name=human`, `reviewed_oid` — and its `blocks`
+   edge holds.
    A write-back sweep then answers the operator in the PR itself. On an anchor
    carrying `pr_comment_disposition`, every comment at or below the recorded
    watermark gets an EYES reaction, and once the bead that disposition names
@@ -222,10 +322,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    reply, because no commit answered it. Idempotence is read back off GitHub,
    so a repeat pass writes nothing and a failed write is retried by the next
    one.
-6. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
+8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
-7. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
    marker to a commit and there is no commit, and `request-changes` would
@@ -236,8 +336,26 @@ the cadence — the arms run whether or not any refinery session is awake.
    left alone. Branch existence comes from one `git ls-remote --heads origin`
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
-   residue is filed by two dispatchers, arm 1 and arm 5.
-8. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
+   residue is filed by two dispatchers, arm 1 and arm 7.
+10. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
+   An anchor withdrawn won't-do or closed not-planned carries a disposition —
+   `gc.superseded_by` (the pointer `bead-rehome.sh` stamps) or
+   `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
+   machine review scaffolding does not close with it: the validation pass, the
+   finding beads, and the rework/fix-unit beads stay open, each holding a
+   `blocks` edge on the anchor or on a rework that blocks it, and each holding
+   gate-ensure's quiescence, so the disposed anchor stands stuck behind work that
+   will never land. Nothing else retires them on a disposal: `close-answered`
+   keys on a fix LANDING, and `review-sweep` on an anchor already closed. This
+   arm closes each `task_kind=validation|finding|rework` bead whose `anchor_bead`
+   names a disposed, non-merged anchor — `gc.outcome=moot`, the reason appended,
+   read back — findings before the reworks they block so a rework's close is not
+   refused the same pass. It leaves `task_kind=review` to review-sweep and
+   `task_kind=visit` to the human side, and never closes the anchor itself: that
+   is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh` while a human
+   visit is owed — which clearing the machine scaffolding here lets land once no
+   visit is. A merged anchor is a landing, never a disposal, and is skipped.
+11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
    waits for a human ruling, one bead at a time. This arm closes the ones that
@@ -248,25 +366,41 @@ the cadence — the arms run whether or not any refinery session is awake.
    have recorded no work — either `work_outcome=no-op`, or no work-product key
    at all (`branch`, `work_dir`, `pr_number`, `pr_url`, `merge_result`,
    `gc.work_commit`). "No work" cannot be read off an absent `branch`: on a
-   rebase or rework dispatch that field names the TWIN's branch, so most
-   verified no-op duplicates carry one. A bead somebody else owns — assigned,
+   rework dispatch that field names the TWIN's branch, so most verified no-op
+   duplicates carry one. A bead somebody else owns — assigned,
    `in_progress`, a review bead, a step bead, or already pointed at a different
    successor — is out of the population by construction. It runs after
-   review-sweep so a twin that arm 4 merged or arm 5 recorded on this pass is
+   review-sweep so a twin that arm 4 merged or arm 7 recorded on this pass is
    disposable on the same tick.
-9. **pr-stack.sh** — the beads-on-this-branch section of an open PR's body. No
-   merge authority, and the only arm that writes no bead. A body is composed
-   once, by arm 2, out of one anchor; commits keep arriving on the branch after
-   that and none of them touch it, so a reviewer approves a scope the body does
-   not describe. For each open anchor recording a `pr_number`, this arm reads
-   the branch's bead ledger — `branch` (committed onto the branch: the anchor,
-   plus every rework and rebase hand-back), `fold_target` (folded onto it by a
-   polecat), and `merged_target` with `merge_result=merged` (landed its own PR
-   into it) — and splices the list into a delimited section at the end of the
-   body. The title is left alone: it names the anchor, and the body is where a
-   reviewer reads scope. A branch carrying one bead publishes nothing, because
-   arm 2 already named it. Idempotence is the rendered section compared against
-   the one between the markers, never the whole body, and the body is read
+12. **pr-stack.sh** — keeps an open PR's body current with its anchor in both
+   managed regions. No merge authority, and the only arm that writes no bead. A
+   body is composed once, by arm 6, out of one anchor; then two things drift it,
+   and this arm lands both fixes in one body edit.
+
+   The `gc:branch-beads` section: commits keep arriving on the branch after open
+   — a fold, a rework or rebase hand-back, a stacked bead's own PR — and none of
+   them touch the body, so a reviewer approves a scope it does not describe. For
+   each open anchor recording a `pr_number`, this arm reads the branch's bead
+   ledger — `branch` (committed onto the branch: the anchor, plus every rework
+   hand-back), `fold_target` (folded onto it by a polecat), and `merged_target`
+   with `merge_result=merged` (landed its own PR into it) — and splices the list
+   into a delimited section. A branch carrying one bead publishes nothing here,
+   because arm 6 already named it.
+
+   The `gc:pr-summary` region: a rework restamps the anchor's `pr_summary`, but
+   arm 6 composes that region only at `pre_open_gate` and an open anchor never
+   returns there, so the published `## Summary` — the merge surface, and the
+   squash commit message — would otherwise keep describing superseded work. When
+   the region is a well-formed marker pair whose summary is behind the anchor's
+   current `pr_summary`, this arm recomposes and re-splices it; a region already
+   current, a legacy markerless body (arm 6's adoption path establishes that), or
+   a malformed shape is left alone. The recompose uses `refresh` mode: the
+   reworked head has not re-signed-off, so the handoff bullet names the head and
+   defers to the PR's checks rather than repeating arm 6's pre-open sign-off line.
+
+   The title is left alone: it names the anchor, and the body is where a reviewer
+   reads scope. Idempotence for each region is its rendered content compared
+   against what the body carries, never the whole body, and the body is read
    `\r`-stripped: GitHub stores a body it re-wrapped with CRLF, and a marker
    line carrying a trailing CR would match nothing and append a second section
    every pass. Any read that fails leaves that PR as it stands — a truncated
@@ -341,7 +475,7 @@ second merge writer that neither the gate nor the lock can see.
 The controller keeps an exec order's output only on non-zero exit, folding a
 bounded tail into the `order.failed` event. So: an unexpected arm failure makes
 the driver exit 1 (the failing arm names reach `order.failed`); gate-ensure's
-rc=3 hold is reported but does not fail the order. Arm 3 is the one that does
+rc=3 hold is reported but does not fail the order. Arm 2 is the one that does
 both, holding the merge arm and failing the order, because a posture that could
 not be recorded is a fault to see rather than a routine gate. Every pass logs to
 `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`, trimmed to
@@ -368,6 +502,34 @@ gc order history refinery-reconcile --since 30m --limit 0
 
 Prefer `gc doctor` (`check-cadence-live`) over hand-rolled queries: it asserts
 per rig that the order is registered and firing within its interval.
+
+### When a pass drops its merge tail
+
+The log shows how a pass ended, but a killed pass leaves no record of the
+approved-clean anchors its merge arm never reached — on the board they look
+identical to a healthy "awaiting review". So each pass also stamps a
+merge-decision marker, `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/merge-decision`,
+one line `<phase> <tick> <head>`, as it runs:
+
+| Phase | Written | Meaning |
+|---|---|---|
+| `started` | before the arms | the pass began; dying here means it never reached the merge arm |
+| `reached` | just before the merge arm | the merge arm is about to decide its candidates |
+| `held` | when a same-pass interlock holds merge | merge was deliberately not run — a recorded decision, not a drop |
+| `decided` | after the merge arm returns | the merge decision completed |
+
+The controller kills a pass with SIGKILL, so one that overruns its budget runs
+no at-exit code — but the phase it wrote before the kill survives. At each pass's
+start, holding the pass lock so the pass that wrote the marker is already dead,
+`merge-tail-report.sh` reads it: a marker left at `started` or `reached` while
+open anchors still carry `merge_result=pull_request` is a dropped merge tail. It
+files one `patrol-finding` naming those anchors, with the head and timestamp of
+the pass that dropped them, keyed per rig (`reconcile-merge-tail-dropped-<rig>`)
+so a recurrence updates one bead rather than filing another. It names only
+anchors still open, so a tail the next pass lands leaves nothing to report, and
+it keys on the pass failing to finish its merge decision, never on how long an
+anchor has waited — slow-but-legitimate CI never trips it, and a real drop is
+never invisible.
 
 ## Adjacent order: rig-checkout sync
 

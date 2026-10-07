@@ -7,9 +7,20 @@
 # held to the same test — assignment polls are the same exact-match contract.
 # Arm 3: no scope="rig" order is registered with no rig bound (an unbound copy
 # strands an unclaimable workflow root in the city store every fire). Arm 4:
-# an open, unassigned, routed bead appears in `bd ready` or in `bd blocked` —
-# an address arms 1-2 accept still names nobody who can be OFFERED the bead,
-# and a bead in neither list waits where no queue reports it.
+# an open, unassigned, routed bead is reachable from the store it lives in — an
+# address arms 1-2 accept still names nobody who can be OFFERED the bead. Two
+# ways it is not: the route reads a different store than the bead lives in (a
+# rig-scope pool queries only its own rig's store, so a cross-store route is
+# offered by nobody however valid the address, even while the bead sits in its
+# own store's `bd ready` — the shape gc sling refuses as CrossStoreRouteError),
+# or the bead is in neither `bd ready` nor `bd blocked`, waiting where no queue
+# reports it. A live graph.v2 molecule step (gc.step_id with a LIVE
+# gc.root_bead_id — open or in_progress) is exempt: its molecule schedules it
+# through session affinity, so it is in neither list by design, not stranded —
+# an orphan step of a CLOSED molecule stays a finding, and a root whose liveness
+# cannot be read warns, never passes.
+# Each candidate is re-read at report time, so one that closed between the
+# listing and the report is dropped, not flagged from a stale snapshot.
 # Values are compared AS STORED; normalization is a diagnostic, never a pass.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
@@ -60,39 +71,78 @@ budget_init
 # <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# >>> probe-stderr-capture
+# The gc probes below send stderr to $PROBE_ERR, not /dev/null, so a failure the
+# check reports names the reason it failed instead of only its rc. An I3
+# transient reported as "rc=1" alone is undiagnosable and recurs. Each probe's
+# `2>"$PROBE_ERR"` truncates the file, so it never holds a prior probe's stderr.
+# probe_err returns the first non-blank line, control characters stripped to keep
+# it one line and length-capped. mktemp failing degrades to /dev/null (always
+# empty), so probe_err yields nothing and every detail reads as before.
+PROBE_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-check-routed-work-claimable.XXXXXX" 2>/dev/null) || PROBE_ERR=/dev/null
+[ "$PROBE_ERR" = /dev/null ] || trap 'rm -f "$PROBE_ERR"' EXIT
+probe_err() {
+    [ -s "$PROBE_ERR" ] || return 0
+    tr -d '\000-\010\013-\037' < "$PROBE_ERR" 2>/dev/null | grep -m1 '[^[:space:]]' | cut -c1-200
+}
+# <<< probe-stderr-capture
 
-agents_raw=$(run_bounded gc agent list --json 2>/dev/null); agents_rc=$?
+agents_raw=$(run_bounded gc agent list --json 2>"$PROBE_ERR"); agents_rc=$?; agents_err=$(probe_err)
 identities=$(printf '%s' "$agents_raw" \
     | jq -c '[.agents[]? | (.qualified_name // "") | select(. != "")] | unique' 2>/dev/null)
 if [ "$agents_rc" -ne 0 ] || [ -z "$identities" ] || [ "$identities" = "[]" ]; then
     echo "cannot determine whether routed/assigned work is claimable (I3)"
     detail "\`gc agent list --json\` failed (rc=$agents_rc) or listed no qualified identities; with no identity set every route looks dead."
+    [ -n "$agents_err" ] && detail "\`gc agent list\` stderr: $agents_err"
     exit 1
 fi
 city_path=$(printf '%s' "$agents_raw" | jq -r '.city_path // ""' 2>/dev/null)
 
-rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+rigs_raw=$(run_bounded gc rig list --json 2>"$PROBE_ERR"); rigs_rc=$?; rigs_err=$(probe_err)
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path] | join("\u001f")' 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether routed/assigned work is claimable (I3)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
+    [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
     exit 1
 fi
+# Rig name -> store path, so arm 4 can reach a molecule root's store from its
+# gc.root_store_ref ("rig:<name>") when the root lives outside the store being
+# scanned. Built once from the same rig list the scan iterates.
+declare -A STORE_PATH=()
+while IFS=$'\037' read -r _sn _sp; do [ -n "$_sp" ] && STORE_PATH["$_sn"]="$_sp"; done <<< "$scopes"
+
+# Identity -> the store PATH it actually reads, so arm 4 can tell a valid address
+# that reads THIS store from one that reads another. A rig-scope agent reads its
+# rig's store (the "<rig>/" prefix of its qualified name); a city-scope agent
+# reads the city store. Any other scope is left unmapped, so the cross-store arm
+# below makes a positive finding only where the target store is known.
+declare -A ROUTE_STORE=()
+while IFS=$'\037' read -r _qn _scope; do
+    [ -n "$_qn" ] || continue
+    case "$_scope" in
+        rig)  case "$_qn" in */*) _rn="${_qn%%/*}"; [ -n "${STORE_PATH[$_rn]:-}" ] && ROUTE_STORE["$_qn"]="${STORE_PATH[$_rn]}" ;; esac ;;
+        city) [ -n "$city_path" ] && ROUTE_STORE["$_qn"]="$city_path" ;;
+    esac
+done <<< "$(printf '%s' "$agents_raw" | jq -r '.agents[]?
+    | [((.qualified_name // "") | gsub("[[:cntrl:]]"; " ")), ((.scope // "") | tostring)]
+    | join("\u001f")' 2>/dev/null)"
 
 while IFS=$'\037' read -r rig_name rig_path; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
     qualifier="$rig_name"
     [ -n "$city_path" ] && [ "$rig_path" = "$city_path" ] && qualifier=""
-    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>"$PROBE_ERR"); rc=$?; list_err=$(probe_err)
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
-        warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
+        warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked${list_err:+; \`gc bd list\` stderr: $list_err}")
         continue
     fi
     rows=$(printf '%s' "$raw" | scrub | jq -r \
@@ -135,10 +185,11 @@ while IFS=$'\037' read -r rig_name rig_path; do
     # Arm 4 — reachability. A valid address is not an offer: a pool offers what
     # `bd ready` returns, so a routed bead in neither `bd ready` nor `bd blocked`
     # is offered by nobody and shows its wait to nobody.
-    ready_raw=$(run_bounded gc bd ready --db "$rig_path/.beads" --json --limit 0 2>/dev/null); ready_rc=$?
-    blocked_raw=$(run_bounded gc bd blocked --db "$rig_path/.beads" --json 2>/dev/null); blocked_rc=$?
+    ready_raw=$(run_bounded gc bd ready --db "$rig_path/.beads" --json --limit 0 2>"$PROBE_ERR"); ready_rc=$?; ready_err=$(probe_err)
+    blocked_raw=$(run_bounded gc bd blocked --db "$rig_path/.beads" --json 2>"$PROBE_ERR"); blocked_rc=$?; blocked_err=$(probe_err)
     if [ "$ready_rc" -ne 0 ] || [ -z "$ready_raw" ] || [ "$blocked_rc" -ne 0 ] || [ -z "$blocked_raw" ]; then
-        warnings+=("$label: could not read \`bd ready\` (rc=$ready_rc) or \`bd blocked\` (rc=$blocked_rc) in $rig_path/.beads — routed work there was NOT checked for reachability")
+        reach_err="$ready_err${ready_err:+${blocked_err:+; }}$blocked_err"
+        warnings+=("$label: could not read \`bd ready\` (rc=$ready_rc) or \`bd blocked\` (rc=$blocked_rc) in $rig_path/.beads — routed work there was NOT checked for reachability${reach_err:+; stderr: $reach_err}")
         continue
     fi
     offered=$(printf '%s\n%s\n' "$ready_raw" "$blocked_raw" | scrub \
@@ -169,12 +220,87 @@ while IFS=$'\037' read -r rig_name rig_path; do
     while IFS=$'\037' read -r id btype route parent blockers; do
         [ -n "$id" ] || continue
         [ -n "${addr_errors[$id]:-}" ] && continue
-        [ -n "${offerable[$id]:-}" ] && continue
+        # Cross-store reachability. A route can name a live identity (arm 1 passed
+        # it) yet read a store that does not hold this bead: a rig-scope pool
+        # queries only its own rig's store, so it never offers a bead that lives
+        # elsewhere — even one sitting in its own store's `bd ready`. That in-store
+        # `bd ready` membership is exactly what `offerable` records, so this test
+        # precedes it: a cross-store route is not rescued by being offerable where
+        # no routed-to pool reads. Positive finding only — a route whose store is
+        # unknown (ROUTE_STORE unset) falls through to the offerable test below.
+        xstore=""; target_store="${ROUTE_STORE[$route]:-}"
+        [ -n "$target_store" ] && [ "$target_store" != "$rig_path" ] && xstore=1
+        [ -z "$xstore" ] && [ -n "${offerable[$id]:-}" ] && continue
         case "$READY_EXCLUDES" in
             *" $btype "*)
                 notes+=("$label bead $id: gc.routed_to=\"$route\" is set on a $btype, a type \`bd ready\` never returns — in neither list by that type's design rather than by a stranded route; reported, not judged")
                 continue ;;
         esac
+        # >>> arm4-live-molecule-and-recheck
+        # A strand verdict rests on the candidate being open NOW and not being a
+        # live graph.v2 molecule step. The open-bead list above is a snapshot: a
+        # bead that closed since is flagged from a ghost. And a molecule step
+        # (gc.step_id + gc.root_bead_id) is routed, unassigned, and in neither
+        # `bd ready` nor `bd blocked` BY DESIGN — its molecule schedules it
+        # through session affinity, not the pool queues. Re-read the candidate
+        # once: drop it if it is no longer open, exempt it if its molecule is
+        # still live (root open or in_progress), and keep it as the genuine
+        # strand it is — an orphan step of a CLOSED molecule stays an error. An
+        # unreadable CANDIDATE re-read falls through to the snapshot verdict
+        # (fail-closed to visibility, never a silent drop); an unreadable or
+        # otherwise undetermined ROOT liveness warns, so the step neither passes
+        # nor is flagged as a strand the check cannot prove.
+        cur_raw=$(run_bounded gc bd show "$id" --db "$rig_path/.beads" --json 2>"$PROBE_ERR"); cur_rc=$?
+        cur_row=$(printf '%s' "$cur_raw" | scrub | jq -c 'if type == "array" then .[0] else . end' 2>/dev/null)
+        if [ "$cur_rc" -eq 0 ] && [ -n "$cur_row" ] && [ "$cur_row" != "null" ]; then
+            cur_status=$(printf '%s' "$cur_row" | jq -r '.status // ""' 2>/dev/null)
+            if [ -n "$cur_status" ] && [ "$cur_status" != "open" ]; then
+                notes+=("$label bead $id: gc.routed_to=\"$route\" was open when the store was listed but is $cur_status now — it closed between the listing and this report, so it is not stranded; reported, not judged")
+                continue
+            fi
+            step_id=$(printf '%s' "$cur_row" | jq -r '(.metadata // {})["gc.step_id"] // ""' 2>/dev/null)
+            root_id=$(printf '%s' "$cur_row" | jq -r '(.metadata // {})["gc.root_bead_id"] // ""' 2>/dev/null)
+            if [ -n "$step_id" ] && [ -n "$root_id" ]; then
+                root_ref=$(printf '%s' "$cur_row" | jq -r '(.metadata // {})["gc.root_store_ref"] // ""' 2>/dev/null)
+                root_db="$rig_path/.beads"
+                case "$root_ref" in
+                    rig:*) rn="${root_ref#rig:}"; [ -n "${STORE_PATH[$rn]:-}" ] && root_db="${STORE_PATH[$rn]}/.beads" ;;
+                esac
+                root_raw=$(run_bounded gc bd show "$root_id" --db "$root_db" --json 2>"$PROBE_ERR"); root_rc=$?; root_err=$(probe_err)
+                root_status=$(printf '%s' "$root_raw" | scrub | jq -r 'if type == "array" then .[0] else . end | .status // ""' 2>/dev/null)
+                if [ "$root_rc" -ne 0 ]; then
+                    # The root probe failed, so the molecule's liveness is unknown.
+                    # An unreadable probe warns and never passes: exempting would let
+                    # a real orphan through, and erroring would manufacture the very
+                    # strand false positive this carve-out exists to prevent.
+                    warnings+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, whose liveness could not be read (\`gc bd show $root_id\` rc=$root_rc) — this step's reachability was NOT determined${root_err:+; stderr: $root_err}")
+                    continue
+                fi
+                case "$root_status" in
+                    open|in_progress)
+                        # A live molecule root (poured or running) schedules its steps
+                        # through session affinity, so an in-flight step is absent
+                        # from `bd ready` and `bd blocked` by design, not stranded.
+                        notes+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, which is $root_status — the molecule schedules its steps through session affinity, so an in-flight step is absent from \`bd ready\` and \`bd blocked\` by design, not stranded; reported, not judged")
+                        continue ;;
+                    closed)
+                        errors+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, which is closed — the molecule is done but this step is still open and routed, an orphaned step no session will resume; close it or re-pour the molecule")
+                        continue ;;
+                    *)
+                        # rc=0 but the root resolved to no status (a missing or
+                        # cross-store-unresolvable root) or to a status that is
+                        # neither live nor closed: liveness is undetermined. Warn —
+                        # never silently pass, and never flag a strand we cannot prove.
+                        warnings+=("$label bead $id: gc.routed_to=\"$route\" is the graph.v2 step $step_id of molecule $root_id, whose molecule liveness is undetermined (root status=\"$root_status\") — this step's reachability was NOT determined")
+                        continue ;;
+                esac
+            fi
+        fi
+        # <<< arm4-live-molecule-and-recheck
+        if [ -n "$xstore" ]; then
+            errors+=("$label bead $id: gc.routed_to=\"$route\" is a live identity, but its pool reads a different store than the one $id lives in ($label) — a rig-scope pool claims only beads in its own store, so this route is offered by nobody however valid the address, even while $id sits in $label's own \`bd ready\`. This is the cross-store route gc sling refuses as CrossStoreRouteError; route it at a pool whose store holds $id, or file the demand in the store that pool reads")
+            continue
+        fi
         stranded="$label bead $id: gc.routed_to=\"$route\" is set, but the bead is in neither \`bd ready\` nor \`bd blocked\` — no pool offers it and no queue shows it waiting"
         if [ -n "$parent" ]; then
             errors+=("$stranded; it has parent $parent, and a parent-child child inherits its ancestor's blocked flag and drops out of ready — a routed bead must be parentless, or slung so a parentless workflow root carries the demand")
@@ -188,9 +314,9 @@ done <<< "$scopes"
 
 # Arm 3 — a live registration with no rig bound whose order declares scope="rig".
 declares_rig_scope() { grep -qE '^[[:space:]]*scope[[:space:]]*=[[:space:]]*"rig"' "$1" 2>/dev/null; }
-orders_raw=$(run_bounded gc order list --json 2>/dev/null); orders_rc=$?
+orders_raw=$(run_bounded gc order list --json 2>"$PROBE_ERR"); orders_rc=$?; orders_err=$(probe_err)
 if [ "$orders_rc" -ne 0 ] || ! printf '%s' "$orders_raw" | jq -e '(.orders | type) == "array"' >/dev/null 2>&1; then
-    warnings+=("could not read the order registry (\`gc order list --json\`, rc=$orders_rc) — the rig-scoped-order arm did not run, so an unbound rig-scoped order would not be visible here")
+    warnings+=("could not read the order registry (\`gc order list --json\`, rc=$orders_rc) — the rig-scoped-order arm did not run, so an unbound rig-scoped order would not be visible here${orders_err:+; \`gc order list\` stderr: $orders_err}")
 else
     while IFS=$'\t' read -r oname osrc; do
         [ -n "$oname" ] || continue
@@ -223,6 +349,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every route and assignee on open work names a live agent identity, and every rig-scoped order is bound"
+echo "OK: every route and assignee on open work names a live agent identity whose store holds the bead, and every rig-scoped order is bound"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

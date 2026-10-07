@@ -3,7 +3,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -11,7 +11,7 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
-mkdir -p "$TMP/bin" "$TMP/pack/orders" "$TMP/hist"
+mkdir -p "$TMP/bin" "$TMP/pack/orders" "$TMP/hist" "$TMP/empty-city"
 cat > "$TMP/pack/orders/tick.toml" <<'EOF'
 [order]
 trigger = "cooldown"
@@ -46,19 +46,40 @@ esac
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH" HIST_DIR="$TMP/hist" HIST_ARGS="$TMP/hist-args.log"
-# GCTK_BIN is pinned to a path that does not exist so arm 3 stays out of every
-# order case: unset, it would resolve through the AMBIENT city and read the live
-# binary, which is neither hermetic nor what those cases are about. The gctk
-# cases below override it deliberately. An order case that hand-rolls its own
-# `bash "$CHECK"` loses that pin, so vary ORDERS_JSON or RIGS_JSON and call this.
-run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/no-such-gctk}" bash "$CHECK" 2>&1; }
-
 # A pack dir that is its own git repo, so arm 3 has a tree revision to compare
-# against. Local and never pushed; the identity is scaffolding.
+# against. Local and never pushed; the identity is scaffolding. The identity is
+# the services/gctk subtree, not the commit: the build order records and stamps
+# that, so a commit touching nothing under it is not a mismatch.
+mkdir -p "$TMP/pack/services/gctk/cmd/gctk"
+echo 'package main' > "$TMP/pack/services/gctk/cmd/gctk/main.go"
+git -C "$TMP/pack" init -q >/dev/null 2>&1
+git -C "$TMP/pack" add -A >/dev/null 2>&1
+git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m fixture >/dev/null 2>&1
+PACK_REV=$(git -C "$TMP/pack/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
+PACK_COMMIT=$(git -C "$TMP/pack" rev-parse HEAD 2>/dev/null)
+[ -n "$PACK_REV" ] && ok "the fixture pack has a revision for arm 3 to compare" \
+                   || bad "no fixture revision; the gctk arm would pass vacuously"
+
 gctk_stub() { # <version-output> -> installs a fake gctk at $TMP/bin/gctk-stub
     printf '#!/bin/sh\n[ "$1" = version ] && echo "%s"\n' "$1" > "$TMP/bin/gctk-stub"
     chmod +x "$TMP/bin/gctk-stub"
 }
+# The binary every order case runs against: deployed, and built from this
+# fixture checkout, so arm 3 notes a match and adds nothing to those cases.
+printf '#!/bin/sh\n[ "$1" = version ] && echo "%s"\n' "$PACK_REV" > "$TMP/bin/gctk-current"
+chmod +x "$TMP/bin/gctk-current"
+
+# GCTK_BIN is pinned to that binary so arm 3 stays out of every order case:
+# unset, it would resolve through the AMBIENT city and read the live binary,
+# which is neither hermetic nor what those cases are about, and a missing binary
+# is a finding of its own. The gctk cases below override it deliberately. An
+# order case that hand-rolls its own `bash "$CHECK"` loses that pin, so vary
+# ORDERS_JSON or RIGS_JSON and call this.
+# GC_CITY_PATH is pinned the same way, to a fixture city (empty by default) so
+# the registration arm never reads the AMBIENT city.toml; the disable cases set
+# CITY_DIR to a fixture that carries [[orders.overrides]] / skip entries.
+run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/bin/gctk-current}" GC_CITY_PATH="${CITY_DIR:-$TMP/empty-city}" bash "$CHECK" 2>&1; }
 
 # Fully healthy registry: tick on both rigs, gated on both, citywide unbound.
 cat > "$TMP/orders.json" <<'EOF'
@@ -132,27 +153,17 @@ eq "$RC" "1" "an unreadable order registry warns, never passes"
 OUT=$(HIST_RC=1 run_check); RC=$?
 eq "$RC" "1" "an unreadable history warns (the liveness arm did not run)"
 
-# --- 8. arm 3: the deployed gctk is the one this checkout describes -------------
+# --- 8. arm 3: a gctk is deployed, and it is the one this checkout describes ----
 # Orders can fire perfectly while the cadence runs logic several commits old,
 # because the data plane is a binary a build order publishes. Nothing in arms 1
-# and 2 can see that.
-# The identity is the services/gctk subtree, not the commit: the build order
-# records and stamps that, so a commit touching nothing under it is not a
-# mismatch.
-mkdir -p "$TMP/pack/services/gctk/cmd/gctk"
-echo 'package main' > "$TMP/pack/services/gctk/cmd/gctk/main.go"
-git -C "$TMP/pack" init -q >/dev/null 2>&1
-git -C "$TMP/pack" add -A >/dev/null 2>&1
-git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m fixture >/dev/null 2>&1
-PACK_REV=$(git -C "$TMP/pack/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
-PACK_COMMIT=$(git -C "$TMP/pack" rev-parse HEAD 2>/dev/null)
-[ -n "$PACK_REV" ] && ok "the fixture pack has a revision for arm 3 to compare" \
-                   || bad "no fixture revision; the gctk arm would pass vacuously"
-
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "no deployed binary is the supported migration state, not a finding"
-has "$OUT" "shell fallbacks" "and it says which implementation is answering"
+# and 2 can see that, nor a binary that was never published at all.
+#
+# lifecycle.sh execs the binary and has no other implementation, so a missing
+# one is an error: every lifecycle transition is refused until one lands.
+OUT=$(GCTK_BIN="$TMP/no-such-gctk" run_check); RC=$?
+eq "$RC" "2" "no deployed binary is an ERROR — lifecycle.sh has nothing else to exec"
+has "$OUT" "no binary at $TMP/no-such-gctk" "the finding names where the binary should be"
+has "$OUT" "gctk-build" "…and the order that publishes it"
 
 gctk_stub "$PACK_REV"
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
@@ -206,16 +217,101 @@ OUT=$(check_by_city GC_CITY_PATH="$CITY"); RC=$?
 eq "$RC" "0" "GC_CITY_PATH alone resolves the deployed binary"
 has "$OUT" "matches this checkout" "and the arm compared it, rather than reporting no deploy"
 
+# A named city with nothing at the path lifecycle.sh would exec: a fresh city
+# before the gctk-build order's first build, or one whose builds never succeed.
+mkdir -p "$TMP/bare-city"
+OUT=$(check_by_city GC_CITY_PATH="$TMP/bare-city"); RC=$?
+eq "$RC" "2" "a named city with no binary deployed is an ERROR"
+has "$OUT" "no binary at $TMP/bare-city/.gc/services/gctk/bin/gctk" "and the finding names the path lifecycle.sh would exec"
+
 # The control. Same city on disk, named by nothing: without it the case above
-# would also pass on a resolver that found the binary by some other route.
+# would also pass on a resolver that found the binary by some other route. With
+# no city to look in, the arm reports that it did not look, not that the binary
+# is missing.
 OUT=$(check_by_city); RC=$?
-eq "$RC" "0" "no city named at all is still the supported migration state"
-has "$OUT" "shell fallbacks" "and the arm says the fallback is what answers there"
+eq "$RC" "1" "no city named at all WARNS: the arm could not look"
+has "$OUT" "was NOT checked" "and it says the binary was not checked, rather than calling it missing"
 
 # --- 9. no orders/ at all is vacuously OK ---------------------------------------------
 mkdir -p "$TMP/empty-pack"
 OUT=$(GC_PACK_DIR="$TMP/empty-pack" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a pack shipping no orders has no cadence to assert"
+
+# --- 10. a deliberate city.toml disable is a NOTE, not a missing registration ------
+# `gc order list` omits a disabled order, so arm 1 sees it as unregistered. The
+# check reads city.toml and tells an intended disable apart from a real gap, so a
+# true stall (arm 2) is never buried beside a deliberate one.
+mkdir -p "$TMP/city-tick-beta"
+cat > "$TMP/city-tick-beta/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "tick"
+rig = "beta"
+enabled = false
+EOF
+# tick registered on alpha only (orders-missing.json); beta's gap is the disable.
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-tick-beta" run_check); RC=$?
+eq "$RC" "0" "a rig-scoped order disabled on a rig is a NOTE, not an error"
+has "$OUT" "deliberately disabled on rig beta" "the disable is named as intended, not as a gap"
+hasnt "$OUT" "rig beta imports this pack but has NO registration" "and it did not stay a missing-registration error"
+
+# A disabled rig (note) beside a registered-but-stopped rig (error): the real
+# stall must survive, un-buried.
+printf '{"entries":[]}' > "$TMP/hist/tick.json"   # alpha registered but did not fire
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-tick-beta" run_check); RC=$?
+eq "$RC" "2" "a real stall is still an ERROR while a disabled rig is only a note"
+has "$OUT" "has NOT fired" "the stall is reported"
+has "$OUT" "deliberately disabled on rig beta" "the deliberate disable rides along as a note"
+hasnt "$OUT" "rig beta imports this pack but has NO registration" "the disable did not add a false error"
+printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
+
+# A gap the config does NOT disable stays an error — the true positive preserved.
+mkdir -p "$TMP/city-unrelated"
+cat > "$TMP/city-unrelated/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "some-other-order"
+rig = "beta"
+enabled = false
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-unrelated" run_check); RC=$?
+eq "$RC" "2" "a gap the city config does not explain is still an ERROR"
+has "$OUT" "tick: rig beta imports this pack but has NO registration" "the genuine gap is still named"
+
+# An unscoped (rigless) enabled=false covers a rig-scoped order on every rig.
+mkdir -p "$TMP/city-tick-all"
+cat > "$TMP/city-tick-all/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "tick"
+enabled = false
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-missing.json" CITY_DIR="$TMP/city-tick-all" run_check); RC=$?
+eq "$RC" "0" "an unscoped disable covers a rig-scoped order's missing rig"
+has "$OUT" "tick: deliberately disabled on rig beta" "the missing rig reads as deliberate"
+
+# A city-scoped order: an unscoped disable answers its city-wide question.
+mkdir -p "$TMP/city-wide-off"
+cat > "$TMP/city-wide-off/city.toml" <<'EOF'
+[orders]
+[[orders.overrides]]
+name = "citywide"
+enabled = false
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-nocity.json" CITY_DIR="$TMP/city-wide-off" run_check); RC=$?
+eq "$RC" "0" "a city-scoped order disabled by an unscoped override is a NOTE"
+has "$OUT" "citywide: deliberately disabled" "the disabled city order is noted"
+hasnt "$OUT" "NO live registration" "and not reported as never registered"
+
+# The [orders] skip list is the other deliberate-disable mechanism.
+mkdir -p "$TMP/city-skip"
+cat > "$TMP/city-skip/city.toml" <<'EOF'
+[orders]
+skip = ["citywide"]
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-nocity.json" CITY_DIR="$TMP/city-skip" run_check); RC=$?
+eq "$RC" "0" "an order in the [orders] skip list is a NOTE, not an error"
+has "$OUT" "citywide: deliberately disabled" "the skipped order is noted"
 
 echo
 echo "check-cadence-live: $PASS passed, $FAIL failed"

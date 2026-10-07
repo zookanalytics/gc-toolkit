@@ -10,10 +10,11 @@
 # exactly — and against a ROOT it offers the root itself to a pool as work.
 #
 # What is exercised here:
-#   * CLASSIFICATION on the four shapes that reach the disposal, including the
-#     order dependencies: a visit is the source bead of its own molecule and
-#     must be read as a visit, and a root carries gc.kind/gc.formula_contract
-#     where a step carries gc.step_ref;
+#   * CLASSIFICATION of the shapes that reach the disposal, including the
+#     order dependencies: a visit and a review are each the source bead of their
+#     own molecule and must be recognised by task_kind before the source arm,
+#     and a root carries gc.kind/gc.formula_contract where a step carries
+#     gc.step_ref;
 #   * the ROOT arm writing NOTHING, and in particular never reaching the
 #     open+unassigned+routed shape a pool can claim;
 #   * the STEP arm releasing the dead session's pin while the chain survives:
@@ -32,7 +33,10 @@
 #     alone and a step whose owner is not its assignee still releases;
 #   * a HALF-LANDED write (the store drops one key while reporting success),
 #     which must exit 3 and name the field, not report a clean release;
-#   * the source arm still delegating to the two commands it was built for;
+#   * the source arm delegating to the two commands it was built for, then
+#     clearing the session pins reopen-source leaves (gc.session_id and
+#     gc.session_name) so orphan recovery stops re-detecting the pooled bead,
+#     with verify reporting partial when a pin reports cleared and rolls back;
 #   * preview being the default: no --apply writes nothing at all;
 #   * usage errors and an unreadable bead, which must write nothing.
 #
@@ -41,7 +45,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/orphan-dispose.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-orphan-dispose-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -63,7 +67,9 @@ chmod +x "$TMP/bin/bd"
 # claimed by a pool session directly looks like; the other live step shape,
 # assigned to the pool ADDRESS while gc.session_id names the dead session, has
 # its own fixture under "the owner is not the assignee guard". The root carries
-# no assignee and names only gc.session_name.
+# no assignee and names only gc.session_name. The source work bead carries both
+# gc.session_id and gc.session_name from its pool claim — the shape whose pins
+# the source arm must scrub, or orphan recovery re-derives the dead owner.
 fixture() {
   store '[
     {"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"Implement the solution",
@@ -81,7 +87,7 @@ fixture() {
                  "gc.continuation_group":"cg-visit","gc.session_id":"lx-dead"}},
     {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
-                 "workflow_id":"tk-root","gc.session_id":"lx-dead"}}
+                 "workflow_id":"tk-root","gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}
   ]'
   : > "$STUB_GC_LOG"
 }
@@ -101,6 +107,15 @@ store '[{"id":"tk-v2","status":"in_progress","assignee":"lx-dead","title":"visit
                      "gc.routed_to":"r","gc.session_id":"lx-dead"}}]'
 OUT=$("$SCRIPT" tk-v2 2>&1); has "$OUT" "class=visit" "task_kind=visit outranks a step_ref"
 
+# A review bead is the source bead of its own mol-review molecule, so like a visit
+# it is classified by task_kind before the source arm — and before the step/root
+# checks, so a review that also carried a step_ref still reads review.
+store '[{"id":"tk-rv","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+         "metadata":{"task_kind":"review","gc.step_ref":"mol-review.review","check_name":"codex",
+                     "anchor_bead":"tk-anc","review_branch":"polecat/tk-anc",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"lx-dead"}}]'
+OUT=$("$SCRIPT" tk-rv 2>&1); has "$OUT" "class=review" "task_kind=review outranks a step_ref"
+
 echo "--- preview is the default ---"
 fixture
 OUT=$("$SCRIPT" tk-step 2>&1); rc=$?
@@ -108,7 +123,8 @@ eq "$rc" "0" "preview exits 0"
 has "$OUT" "result=preview" "preview says so"
 eq "$(bstatus tk-step)" "in_progress" "preview left the status alone"
 eq "$(meta tk-step gc.session_id)" "lx-dead" "preview left the session pin alone"
-eq "$(wc -l < "$STUB_GC_LOG")" "1" "preview issued exactly one read and no write"
+eq "$(wc -l < "$STUB_GC_LOG")" "2" "preview reads the step and its root, nothing more"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "preview issued no write at all"
 
 echo "--- root arm: never returns a root to a pool ---"
 fixture
@@ -131,6 +147,7 @@ has "$OUT" "result=disposed" "step release reports disposed"
 eq "$(bstatus tk-step)" "open" "step is open"
 eq "$(bassignee tk-step)" "" "step is unassigned"
 eq "$(meta tk-step gc.session_id)" "<absent>" "dead session id cleared"
+eq "$(meta tk-step gc.session_name)" "<absent>" "dead session name cleared"
 eq "$(meta tk-step gc.session_affinity)" "<absent>" "session affinity cleared"
 eq "$(meta tk-step gc.continuation_group)" "<absent>" "continuation group cleared"
 eq "$(meta tk-step gc.routed_to)" "gc-toolkit/gc-toolkit.polecat" "route PRESERVED"
@@ -154,7 +171,12 @@ ORDER=$(grep -- "update tk-step" "$STUB_GC_LOG" \
   | sed -e 's/.*--unset-metadata.*/meta/' -e 's/.*--status.*/status/' -e 's/.*--assignee.*/assignee/' \
   | tr '\n' ',')
 eq "$ORDER" "meta,status,assignee," "metadata first, status next, assignee last"
-has "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "assignee clear is guarded on the assignee snapshot"
+has "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "assignee clear is guarded on the assignee snapshot"
+# The guard value is attached (=form), never space-separated. A spaced session-id
+# value is read as a bead id by the gc wrapper's store-scope scanner and retargets
+# the command to the city store, where the rig bead is not found; the release then
+# silently falls through to the forced bare-bd retry instead of the sanctioned CAS.
+hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "guard uses the attached =form, not the mis-scoping spaced form"
 
 echo "--- the owner is not the assignee guard ---"
 # The shape orphan recovery most often hands over: the dead owner is the step's
@@ -163,24 +185,144 @@ echo "--- the owner is not the assignee guard ---"
 # clear on --owner would mismatch and refuse every release of this shape.
 store '[{"id":"tk-slot","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}}]'
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}},
+        {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
+         "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
 : > "$STUB_GC_LOG"
 OUT=$("$SCRIPT" tk-slot --owner lx-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "a step whose owner differs from its assignee still releases"
 eq "$(bassignee tk-slot)" "" "the slot assignee is cleared"
 eq "$(meta tk-slot gc.session_id)" "<absent>" "the dead session id is cleared"
-has "$(cat "$STUB_GC_LOG")" "--if-assignee gc-toolkit/gc-toolkit.polecat" \
+has "$(cat "$STUB_GC_LOG")" "--if-assignee=gc-toolkit/gc-toolkit.polecat" \
   "the guard is the ASSIGNEE, not the --owner"
-hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "the owner is never used as the guard"
+hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "the owner is never used as the guard"
 
 echo "--- step arm: a step with no route says so ---"
 store '[{"id":"tk-unrouted","status":"in_progress","assignee":"lx-dead","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                     "gc.session_id":"lx-dead"}}]'
+                     "gc.session_id":"lx-dead"}},
+        {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
+         "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
 : > "$STUB_GC_LOG"
 OUT=$("$SCRIPT" tk-unrouted --owner lx-dead --apply 2>&1)
 has "$OUT" "detail=routed=absent" "an unrouted step is released and flagged"
 eq "$(bstatus tk-unrouted)" "open" "unrouted step still released"
+
+echo "--- step arm: a root that CLOSED means there is no molecule to resume ---"
+# Releasing here would set the step open+unassigned+routed — a pool's offer
+# predicate exactly — for a molecule that is over. The chain, not this bead, is
+# the disposal unit, so the arm delegates. A stub stands in for the disposer:
+# what this suite owns is the DELEGATION, not the teardown.
+cat > "$TMP/bin/dead-dispose-stub" <<'STUB'
+#!/usr/bin/env bash
+printf 'dead-molecule-dispose %s\n' "$*" >> "${STUB_GC_LOG:?}"
+[ -n "${STUB_DEAD_OUT:-}" ] && printf '%s\n' "$STUB_DEAD_OUT"
+exit "${STUB_DEAD_RC:-0}"
+STUB
+chmod +x "$TMP/bin/dead-dispose-stub"
+export GC_DEAD_MOLECULE_TOOL="$TMP/bin/dead-dispose-stub"
+
+dead_fixture() {
+  store '[{"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"step",
+           "metadata":{"gc.step_ref":"mol-review.load-dispatch","gc.root_bead_id":"tk-root",
+                       "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"lx-dead"}},
+          {"id":"tk-root","status":"closed","assignee":"","title":"mol-review",
+           "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.outcome":"moot"}}]'
+  : > "$STUB_GC_LOG"
+}
+
+dead_fixture
+export STUB_DEAD_OUT='{"result":"disposed","detail":"passes=1"}'
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+export STUB_DEAD_OUT=""
+eq "$rc" "0" "a step under a closed root exits 0"
+has "$OUT" "class=workflow-step-dead" "it is classified dead, not releasable"
+has "$OUT" "root_status=closed" "the report carries the root status it judged on"
+has "$OUT" "action=dispose-dead-chain" "the arm disposes rather than releases"
+has "$OUT" "result=disposed" "a disposed chain is reported disposed"
+has "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose tk-step --apply" "the chain disposer is invoked with --apply"
+hasnt "$(cat "$STUB_GC_LOG")" "--status=open" "the dead step is never reopened"
+hasnt "$(cat "$STUB_GC_LOG")" "--assignee" "the dead step is never returned to a pool"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "the dead arm never calls reopen-source"
+
+echo "--- step arm: a 0-exit refusal is a skip, not a landed disposal ---"
+# dead-molecule-dispose.sh exits 0 for a refusal that wrote nothing as well as
+# for a real teardown: result=refused when the chain still holds a work bead,
+# result=live_root when the root read back live. Trusting the 0 exit reports a
+# recovery that never happened and drops the reason; the wrapper discriminates
+# on result, skips, and carries the disposer's detail.
+dead_fixture
+export STUB_DEAD_OUT='{"result":"refused","detail":"work_bead_in_chain=tk-anchor"}'
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+export STUB_DEAD_OUT=""
+eq "$rc" "0" "a refused chain still exits 0"
+has "$OUT" "result=skipped" "a refusal is not reported as a disposal"
+hasnt "$OUT" "result=disposed" "the wrapper does not claim a landing it did not make"
+hasnt "$OUT" "landed=dead-chain" "nothing is marked landed when the chain is intact"
+has "$OUT" "not-disposed=refused" "the disposer's result is named"
+has "$OUT" "work_bead_in_chain=tk-anchor" "the reason it was refused survives"
+
+dead_fixture
+export STUB_DEAD_OUT='{"result":"live_root","detail":"root_status=open"}'
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+export STUB_DEAD_OUT=""
+eq "$rc" "0" "a root that read back live exits 0"
+has "$OUT" "result=skipped" "a live root is a skip, not a disposal"
+hasnt "$OUT" "landed=dead-chain" "a live root lands nothing"
+has "$OUT" "not-disposed=live_root" "the live-root result is named"
+has "$OUT" "root_status=open" "the disposer's detail survives"
+
+dead_fixture
+export STUB_DEAD_OUT=""
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "an unparseable 0-exit still exits 0"
+has "$OUT" "result=skipped" "an unconfirmed disposal is a skip, never a landing"
+has "$OUT" "not-disposed=no-result" "an absent result is named, not read as disposed"
+
+dead_fixture
+OUT=$("$SCRIPT" tk-step 2>&1)
+has "$OUT" "result=preview" "preview of a dead step says preview"
+hasnt "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose" "preview does not invoke the disposer"
+
+dead_fixture
+export STUB_DEAD_RC=1
+OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
+export STUB_DEAD_RC=0
+eq "$rc" "1" "a failed chain disposal exits non-zero"
+has "$OUT" "failed=dead-chain" "the failure is named, not swallowed"
+
+echo "--- step arm: an inner PARTIAL teardown (exit 3) survives as partial ---"
+# dead-molecule-dispose.sh reserves exit 3 for a chain left half torn down. The
+# witness patrol escalates that as a partial write (witness-partial-release),
+# not a retry, so the wrapper must propagate it as its own exit-3 partial and
+# carry the member detail — collapsing it to failed=dead-chain (exit 1) would
+# drop the exact signal the caller acts on.
+dead_fixture
+export STUB_DEAD_RC=3
+export STUB_DEAD_OUT='{"result":"partial","members":"tk-step,tk-sib","detail":"unclosed=tk-sib"}'
+OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
+export STUB_DEAD_RC=0
+export STUB_DEAD_OUT=""
+eq "$rc" "3" "an inner partial teardown exits 3, not 1"
+has "$OUT" "result=partial" "the wrapper reports partial, not failed"
+has "$OUT" "unclosed=tk-sib" "the disposer's member detail is carried into the report"
+
+echo "--- step arm: an unreadable root withholds the release ---"
+# An unreadable root is not a live one. Releasing on a failed probe is how a
+# finished molecule gets handed back to a pool; the step stays owned and
+# returns next cycle instead.
+store '[{"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"step",
+         "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-gone",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
+eq "$rc" "0" "an unresolved root exits 0"
+has "$OUT" "class=workflow-step-unresolved" "it is classified unresolved"
+has "$OUT" "detail=root_unreadable" "the skip states why"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "nothing is written"
+hasnt "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose" "and nothing is torn down on a failed probe"
+eq "$(bstatus tk-step)" "in_progress" "the step stays owned for the next cycle"
+unset GC_DEAD_MOLECULE_TOOL
 
 echo "--- half-landed write is not a clean release ---"
 fixture
@@ -209,6 +351,175 @@ has "$(cat "$STUB_GC_LOG")" "workflow delete-source tk-work --apply" "delete-sou
 has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-work" "reopen-source invoked"
 eq "$(bstatus tk-work)" "open" "source bead returned to the pool"
 eq "$(meta tk-work gc.routed_to)" "gc-toolkit/gc-toolkit.polecat" "source route preserved by reopen-source"
+has "$OUT" "result=disposed" "source disposal reports disposed"
+has "$OUT" "pins" "source arm reports the pin clear in landed"
+eq "$(meta tk-work gc.session_id)" "<absent>" "source arm clears the dead session id (reopen leaves it)"
+eq "$(meta tk-work gc.session_name)" "<absent>" "source arm clears the dead session name (reopen leaves it)"
+
+echo "--- review arm: a review orphan is reopened to its pool by the source contract ---"
+# A review bead is the source of its own mol-review molecule: no worktree, so the
+# witness scope gate skips its salvage/verify, but its disposal IS the source
+# contract — delete-source (a no-op on the input-convoy root) + reopen-source,
+# then the dead session's pins cleared and the route restored from the durable
+# execution stamp so another reviewer is offered it. It reports class=review only
+# so the scope gate and this classifier agree that it takes no salvage path.
+store '[{"id":"tk-rev","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+         "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
+                     "review_branch":"polecat/tk-anc","review_base":"main","gc.routed_to":"",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-5-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-rev --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "review disposal exits 0"
+has "$OUT" "class=review" "a review orphan is classed review, not source"
+has "$OUT" "action=delegate-source-workflow" "the review arm delegates to the source contract"
+has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-rev" "reopen-source invoked for the review"
+eq "$(bstatus tk-rev)" "open" "the review bead is returned to the pool"
+eq "$(meta tk-rev gc.routed_to)" "gc-toolkit/gc-toolkit.polecat-codex" "review route restored from the execution stamp"
+eq "$(meta tk-rev gc.session_id)" "<absent>" "the dead session id is cleared"
+eq "$(meta tk-rev gc.session_name)" "<absent>" "the dead session name is cleared"
+has "$OUT" "result=disposed" "review disposal reports disposed"
+
+echo "--- source arm: a claimed-then-orphaned source bead has its route restored ---"
+# The bug this arm exists to close: a source bead (a rework, say) is dispatched
+# to a pool, its own claim empties gc.routed_to and stamps the assignee, then the
+# claiming session dies. reopen-source reopens it but preserves the emptied route,
+# so it lands open, unassigned and unrouted — bd-ready yet never offered to a pool
+# again. The durable gc.execution_routed_to stamp survived the claim, so the route
+# is restored from it and the bead becomes offerable once more.
+store '[{"id":"tk-strand","status":"in_progress","assignee":"lx-dead","title":"Rework branch polecat/tk-anchor: address pre-open signoff findings",
+         "metadata":{"branch":"polecat/tk-anchor","gc.routed_to":"",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
+                     "gc.session_id":"lx-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-4-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-strand --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "a restored source disposal exits 0"
+has "$OUT" "class=source" "the stranded rework is a source bead"
+has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-strand" "reopen-source invoked"
+eq "$(bstatus tk-strand)" "open" "the bead is returned to the pool"
+eq "$(meta tk-strand gc.routed_to)" "gc-toolkit/gc-toolkit.polecat" "gc.routed_to restored from the execution stamp"
+has "$OUT" "result=disposed" "a restored disposal reports disposed"
+has "$OUT" "route" "the route restore is reported in landed"
+eq "$(meta tk-strand gc.session_id)" "<absent>" "the dead session id is still cleared"
+
+echo "--- source arm: a route already present is never clobbered ---"
+# reopen-source (or a source-id workflow) may leave a route in place. A bead that
+# still carries gc.routed_to keeps it, rather than having it overwritten from the
+# execution stamp, so a restore never fights a live route.
+store '[{"id":"tk-liveroute","status":"in_progress","assignee":"lx-dead","title":"a work bead",
+         "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-liveroute --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "a preserved-route disposal exits 0"
+eq "$(meta tk-liveroute gc.routed_to)" "gc-toolkit/gc-toolkit.polecat-codex" "an existing route is left untouched"
+hasnt "$OUT" "route-unrecoverable" "a live route is not flagged unrecoverable"
+
+echo "--- source arm: a reopened bead with no recoverable route is surfaced, not stranded ---"
+# When the claim emptied gc.routed_to and no gc.execution_routed_to was ever
+# stamped, the reopened bead cannot be offered and there is nothing to restore it
+# from. Leaving it silent recreates the strand, so the release is reported partial
+# (exit 3) for the patrol to surface, rather than passed off as a clean disposal.
+store '[{"id":"tk-noroute","status":"in_progress","assignee":"lx-dead","title":"Rework branch polecat/tk-old: address findings",
+         "metadata":{"branch":"polecat/tk-old","gc.routed_to":"",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-noroute --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "3" "an unrecoverable-route release exits 3"
+has "$OUT" "result=partial" "it reports partial, not disposed"
+has "$OUT" "route-unrecoverable" "the missing route is named"
+eq "$(bstatus tk-noroute)" "open" "the bead was still reopened and unassigned"
+eq "$(meta tk-noroute gc.routed_to)" "" "gc.routed_to stays empty when nothing can restore it"
+
+echo "--- source arm: an in-flight-PR source bead is NOT returned to the pool ---"
+# A work bead handed off with its branch pushed and its PR in flight (merge_result
+# pull_request/pre_open_gate) still names its dead session, so orphan recovery
+# classes it source and would delete-source + reopen-source it back to the pool,
+# re-dispatching finished work the refinery owns landing and stamping a recovery
+# the crash-loop signal reads as a RATE. The source arm skips it: no delete-source,
+# no reopen, bead left as-is.
+for MR in pull_request pre_open_gate; do
+  store "[{\"id\":\"tk-inflight\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"in-flight work bead\",
+           \"metadata\":{\"branch\":\"polecat/tk-inflight\",\"merge_result\":\"$MR\",
+                       \"gc.routed_to\":\"gc-toolkit/gc-toolkit.polecat\",\"gc.session_name\":\"polecat-9-pool\"}}]"
+  : > "$STUB_GC_LOG"
+  OUT=$("$SCRIPT" tk-inflight --owner polecat-9-pool --apply 2>&1); rc=$?
+  eq "$rc" "0" "in-flight source disposal ($MR) exits 0"
+  has "$OUT" "class=source"        "in-flight bead is still classed source ($MR)"
+  has "$OUT" "action=skip"         "in-flight source is skipped, not delegated ($MR)"
+  has "$OUT" "result=skipped"      "in-flight source reports skipped ($MR)"
+  has "$OUT" "detail=inflight_pr"  "in-flight skip states why ($MR)"
+  hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "in-flight source never calls delete-source ($MR)"
+  hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "in-flight source never reopens ($MR)"
+  eq "$(bstatus tk-inflight)" "open" "in-flight bead left as-is ($MR)"
+done
+
+echo "--- source arm: a stale progressing pr.machine (no anchor) is recovered ---"
+# pr.machine=progressing is written only alongside an anchor merge_result, and
+# transition --to unanchored clears merge_result while leaving pr.machine behind,
+# so a `progressing` stamp with NO merge_result is a stale leftover on a bead
+# unanchored back to the pool — genuinely lost work. It must NOT block the reopen:
+# the source arm delegates and recovers it, whatever the stamp says.
+store '[{"id":"tk-prog","status":"in_progress","assignee":"lx-dead","title":"stale-progressing work bead",
+         "metadata":{"branch":"polecat/tk-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-prog --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "stale-progressing source disposal exits 0"
+has "$OUT" "action=delegate-source-workflow" "a stale progressing stamp (no anchor) delegates, not skips"
+has "$(cat "$STUB_GC_LOG")" "delete-source" "stale-progressing source calls delete-source"
+has "$OUT" "result=disposed" "stale-progressing source is recovered"
+
+echo "--- source arm: a human-gate source bead is NOT returned to the pool ---"
+# A work bead a person owns clearing — routed to the human gate (gc.routed_to=human:
+# a signoff cap, a merge gate, an operator approval) — is not lost work, even with no
+# merge_result and no progressing machine. It still names its dead session, so orphan
+# recovery classes it source and would delete-source + reopen-source it back to the
+# pool. mol-witness-patrol's downstream-court-skip filter drops it upstream, but a bead
+# that moves onto a human gate after that filter, or reaches this script by recovery or
+# manual replay, must still be skipped here. The tk-work and tk-settled cases above
+# (routed to a pool address, no in-flight state) still delegate, so the guard is scoped
+# to the human gate, not to any route.
+store '[{"id":"tk-human","status":"open","assignee":"","title":"human-gate work bead",
+         "metadata":{"branch":"polecat/tk-human","gc.routed_to":"human","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-human --owner polecat-9-pool --apply 2>&1); rc=$?
+eq "$rc" "0" "human-gate source disposal exits 0"
+has "$OUT" "class=source"      "human-gate bead is still classed source"
+has "$OUT" "action=skip"       "human-gate source is skipped, not delegated"
+has "$OUT" "result=skipped"    "human-gate source reports skipped"
+has "$OUT" "detail=human_gate" "human-gate skip states why"
+hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "human-gate source never calls delete-source"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "human-gate source never reopens"
+eq "$(bstatus tk-human)" "open" "human-gate bead left as-is"
+
+echo "--- source arm: a progressing pr.machine WITH an anchor still skips (on merge_result) ---"
+# The in-flight skip is the merge_result arm's alone now. A bead genuinely in the
+# machine carries an anchor merge_result, so it still skips — proving the fix
+# narrowed the skip to merge_result/human without letting in-flight work through.
+store '[{"id":"tk-anchor-prog","status":"open","assignee":"","title":"anchored progressing work bead",
+         "metadata":{"branch":"polecat/tk-anchor-prog","merge_result":"pull_request","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-anchor-prog --owner polecat-9-pool --apply 2>&1); rc=$?
+eq "$rc" "0" "anchored-progressing source disposal exits 0"
+has "$OUT" "result=skipped" "an in-flight bead (merge_result=pull_request) still skips"
+has "$OUT" "detail=inflight_pr" "the skip is on the merge_result arm"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "anchored-progressing source never reopens"
+
+echo "--- source arm: a pin that will not clear is not a clean release ---"
+# clear_pins bypasses the claim guard, but a store that reports success and drops
+# the key is the rollback verify exists to catch. With the dead session id
+# surviving, orphan recovery would re-detect this bead — so it must read partial,
+# not disposed, and name the pin.
+fixture
+export STUB_DROP_KEYS="tk-work:gc.session_id"
+OUT=$("$SCRIPT" tk-work --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "3" "a source disposal whose pin survives exits 3"
+has "$OUT" "result=partial" "it reports partial, not disposed"
+has "$OUT" "gc.session_id(still=lx-dead)" "the surviving pin is named"
+export STUB_DROP_KEYS=""
 
 echo "--- source arm: reopen does not run when the close failed ---"
 fixture

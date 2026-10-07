@@ -3,6 +3,12 @@
 # queue health. Stall/parked detection is the liveness-sweep exec order's.
 scope = "rig"
 wake_mode = "fresh"
-work_dir = ".gc/agents/{{.Rig}}/witness"
+# A rig worktree so this rig-scoped patrol's cwd resolves to the rig it serves,
+# like the polecat/proactive/refinery pools. The patrol already targets the rig
+# via git -C "$GC_RIG_ROOT"; the worktree makes bare gh/git and the
+# rev-parse-based script lookup resolve to the rig too, not the city repo the
+# .gc tree sits in. One tree per rig (no {{.AgentBase}}): witness is a singleton.
+work_dir = ".gc/worktrees/{{.Rig}}/witness"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 nudge = "Run gc prime, then the startup wisp reconcile; patrol the rig."
 idle_timeout = "2h"

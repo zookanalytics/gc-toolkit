@@ -1,10 +1,8 @@
 // Package lifecycle holds the anchor lifecycle state machine.
 //
 // lifecycle/lifecycle.toml remains the human- and doctor-readable declaration.
-// This file is the executable copy for the port, and `gctk lifecycle
-// --dump-machine` prints it for the drift test to compare the TOML against.
-// assets/scripts/lifecycle.sh carries a second mirror for as long as the shell
-// fallback ships; lifecycle.test.sh holds both against the TOML.
+// This file is its one executable copy, and `gctk lifecycle --dump-machine`
+// prints it for the drift test in lifecycle.test.sh to compare the TOML against.
 package lifecycle
 
 // Edge is one declared transition.
@@ -47,9 +45,9 @@ var (
 	ClosedStates = []string{"merged"}
 
 	// ParkRoute is the one route value no pool claims, so it parks the bead for
-	// a person. A detached state may rest on it — signoff.sh routes a
-	// round-capped anchor there — and a transition that finds it leaves it
-	// alone rather than retracting a bead a person still owns.
+	// a person — the sentinel a visit or an operator hold leaves. A detached
+	// state may rest on it, and a transition that finds it leaves it alone
+	// rather than retracting a bead a person still owns.
 	ParkRoute = "human"
 
 	Transitions = []Edge{
@@ -80,10 +78,9 @@ var (
 
 // TakeawayMax caps a takeaway in CODEPOINTS. The board spends gc.takeaway as a
 // row's NEEDS cell — one line, read at a glance — so the two writers of that
-// cell cap it identically: assets/scripts/gc-helm.sh carries TAKEAWAY_MAX and
-// assets/scripts/lifecycle.sh carries LIFECYCLE_TAKEAWAY_MAX, and
+// cell cap it identically: assets/scripts/gc-helm.sh carries TAKEAWAY_MAX, and
 // `gctk lifecycle --dump-machine` prints this one for lifecycle.test.sh to hold
-// against them.
+// against it.
 const TakeawayMax = 140
 
 func contains(haystack []string, needle string) bool {

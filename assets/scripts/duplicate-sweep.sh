@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# duplicate-sweep — arm 7 of the merge cadence; caller: refinery-reconcile.sh.
+# duplicate-sweep — arm 11 of the merge cadence; caller: refinery-reconcile.sh.
 # Gives `duplicate_of` a reader. A polecat that diagnoses a duplicate dispatch
 # stamps the marker and parks the bead, because polecats never close work
 # beads; without a reader the bead sits open until a human rules on it, one at
@@ -24,8 +24,10 @@
 # "No work" cannot be tested as "metadata.branch is absent": on a rebase or
 # rework dispatch that field names the TWIN's branch, so most verified no-op
 # duplicates carry one. The no-op stamp is what says nothing was pushed.
-# A successor in another store is skipped, not guessed at: `gc bd` reads this
-# rig only, so its status is unestablished here.
+# A successor whose stamped store is not this rig is skipped, not guessed at.
+# The skip is keyed on that stamp rather than on the read failing: `gc bd show`
+# resolves a foreign id by searching every store, so a hit answers from
+# whichever store holds it while a miss answers from the ambient one.
 # A bead carrying a hold_reason is disposable — the hold parks a BRANCH, and
 # nothing here moves one — but the close reason says a hold was standing, so a
 # deliberate park is never retired silently.
@@ -41,10 +43,11 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 REHOME="${DUPLICATE_SWEEP_REHOME:-$SCRIPTS_DIR/bead-rehome.sh}"
 
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # in_progress is deliberately absent: a bead someone is holding is being
@@ -52,14 +55,9 @@ scrub() { tr -d '\000-\011\013-\037'; }
 LIVE_STATUSES="open,blocked,deferred,hooked,pinned"
 
 # Guarded reads: non-zero means "could not tell", never "nothing there".
-bd_list() {
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # </dev/null on every call inside the candidate loop: that loop is fed by a
 # heredoc, and a child inheriting its stdin would consume the rows behind it.
 bd_show() {

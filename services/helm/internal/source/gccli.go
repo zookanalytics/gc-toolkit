@@ -12,19 +12,26 @@ import (
 )
 
 // The `gc` CLI is the third sanctioned Gas City interface this package reads,
-// alongside the in-process beads library and the supervisor HTTP API. It exists
-// here because two of the board's facts live nowhere else:
+// alongside the in-process beads library and the supervisor HTTP API. Two facts
+// come from it:
 //
 //   - SESSION LIVENESS. Whether the session that claimed a child is still alive
 //     is what separates work in flight from an orphan, and no bead carries it.
 //     The supervisor API has no sessions endpoint and the beads library cannot
-//     see sessions at all; `gc session list` is the only reader.
-//   - CONVOY OWNERSHIP. `owned` and `progress` are convoy-level facts the
-//     library's issue rows do not carry.
+//     see sessions at all; `gc session list` is the only reader. This is the
+//     same read gc-helm.sh makes (`gcq session list`), so the two boards agree
+//     by construction rather than by two independent derivations.
 //
-// This is the same source gc-helm.sh reads (`gcq session list`, `gc convoy
-// list`, `gc convoy status`), so the two boards agree by construction rather
-// than by two independent derivations. It honours the package's data-access
+//   - CITY DISCOVERY. When no city env var is set, the city root comes from
+//     `gc config show` — the city gc itself resolves — rather than a discovery
+//     reimplemented here: gc-toolkit runs on Gas City, so gc is the authority on
+//     which city to read and helm-svc mirrors its answer. See DiscoverCityPath
+//     and CityPath.
+//
+// Convoy ownership and membership are read in-process from the rig store: a
+// convoy is `owned` when its bead carries the "owned" label — the test gascity
+// itself applies for the `gc convoy list` owned flag — and its members are the
+// `tracks` edges out of it. This source honours the package's data-access
 // contract for the same reason the other two backends do: it is a Gas City
 // interface, not raw Dolt. There is no sql.Open here.
 //
@@ -34,9 +41,9 @@ import (
 // gather.
 
 // defaultGCTimeout bounds one `gc` invocation. `gc rig list` alone has been
-// measured at ~10s on this host (tk-lzdty), and the session and convoy reads
-// hit the same supervisor, so the bound is generous rather than snappy: the
-// cost of guessing too low is a board that silently loses its liveness join.
+// measured at ~10s on this host (tk-lzdty), and the session read hits the same
+// supervisor, so the bound is generous rather than snappy: the cost of guessing
+// too low is a board that silently loses its liveness join.
 const defaultGCTimeout = 30 * time.Second
 
 // gcClient is the slice of the `gc` CLI this source uses. It is an interface so
@@ -45,31 +52,6 @@ type gcClient interface {
 	// Sessions maps every session's NAME and its ALIAS to that session's state.
 	// Both forms are keys because a child's assignee may be written either way.
 	Sessions(ctx context.Context) (map[string]string, error)
-	// Convoys lists every convoy in the city with its ownership and progress.
-	Convoys(ctx context.Context) ([]convoyRow, error)
-	// ConvoyMember resolves a convoy to its SINGLE tracked member, returning ""
-	// when the convoy tracks any other number. The one-member rule is a
-	// fail-closed gate, not an optimisation: a convoy of another shape is one
-	// this join does not understand, and the safe reading of "not understood"
-	// is "no claim about movement".
-	ConvoyMember(ctx context.Context, convoyID string) (string, error)
-}
-
-// convoyRow is one entry of `gc convoy list --json`.
-type convoyRow struct {
-	ID       string          `json:"id"`
-	Title    string          `json:"title"`
-	Status   string          `json:"status"`
-	Owned    bool            `json:"owned"`
-	Progress *convoyProgress `json:"progress"`
-}
-
-// convoyProgress mirrors the `progress` object on a convoy row. It is declared
-// here rather than reused from the board package so this file stays a pure
-// transport decode; the gather converts it.
-type convoyProgress struct {
-	Closed int `json:"closed"`
-	Total  int `json:"total"`
 }
 
 // gcExec is the production gcClient: it shells out to the `gc` binary.
@@ -187,29 +169,19 @@ func (g *gcExec) Sessions(ctx context.Context) (map[string]string, error) {
 	return out, nil
 }
 
-// Convoys implements gcClient.
-func (g *gcExec) Convoys(ctx context.Context) ([]convoyRow, error) {
+// CityPath returns the city root gc resolves for this invocation, so discovery
+// reads the same city gc acts on instead of reimplementing city discovery.
+// `gc config show` reports gc's resolved configuration, city_path among it, so
+// this asks gc "which city would you act on here?" and takes that answer. The
+// discovery client carries no cityPath, so run pins neither --city nor
+// GC_CITY_PATH and leaves cmd.Dir at this process's cwd; gc resolves from where
+// helm-svc was started — the plain-shell case the env vars do not cover.
+func (g *gcExec) CityPath(ctx context.Context) (string, error) {
 	var payload struct {
-		Convoys []convoyRow `json:"convoys"`
+		CityPath string `json:"city_path"`
 	}
-	if err := g.run(ctx, &payload, "convoy", "list", "--json"); err != nil {
-		return nil, err
-	}
-	return payload.Convoys, nil
-}
-
-// ConvoyMember implements gcClient.
-func (g *gcExec) ConvoyMember(ctx context.Context, convoyID string) (string, error) {
-	var payload struct {
-		Children []struct {
-			ID string `json:"id"`
-		} `json:"children"`
-	}
-	if err := g.run(ctx, &payload, "convoy", "status", convoyID, "--json"); err != nil {
+	if err := g.run(ctx, &payload, "config", "show", "--json"); err != nil {
 		return "", err
 	}
-	if len(payload.Children) != 1 {
-		return "", nil
-	}
-	return payload.Children[0].ID, nil
+	return strings.TrimSpace(payload.CityPath), nil
 }

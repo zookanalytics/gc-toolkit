@@ -3,7 +3,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-seed-audit-current-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -12,15 +12,7 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esa
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
 P="$TMP/pack"
-mkdir -p "$P/assets/scripts" "$P/generated/seed-audit/agents" "$P/generated/seed-audit/formulas" "$TMP/bin"
-# Stub gc: run.sh reads `gc version` off PATH and compares it to the version
-# the artifact records, so an unstubbed fixture is green only where gc is absent.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
-[ "${1:-}" = "version" ] && { printf '%s\n' "${GCVER:-gc v1}"; exit 0; }
-exit 0
-GC
-chmod +x "$TMP/bin/gc"
+mkdir -p "$P/assets/scripts" "$P/generated/seed-audit/agents" "$P/generated/seed-audit/formulas"
 # The upkeep arm sits behind a rev-parse guard: without a real repo it is
 # skipped, and "hook wired" then reports a read that never happened.
 git init -q -b main "$P"
@@ -43,7 +35,7 @@ done
 exit 0
 R
 chmod +x "$P/assets/scripts/render-seed-audit.sh"
-index() { { echo "# seed audit"; echo "- \`gc\` version: \`gc v1\`"; } > "$P/generated/seed-audit/INDEX.md"; }
+index() { echo "# seed audit" > "$P/generated/seed-audit/INDEX.md"; }
 manifest() { # <path=hash>... — what the artifact commits
     LIVE="$(printf '%s\n' "$@")" bash "$P/assets/scripts/render-seed-audit.sh" --print-sources \
         > "$P/generated/seed-audit/SOURCES.txt"
@@ -52,7 +44,7 @@ printf 'p\n' > "$P/generated/seed-audit/agents/worker.md"
 printf 'f\n' > "$P/generated/seed-audit/formulas/mol-x.md"
 # core.hooksPath resolves local-then-global, so an operator with a global one
 # set would answer case 9's unset read; /dev/null pins the fixture to local.
-run_check() { LIVE="${LIVE:-}" GCVER="${GCVER:-gc v1}" GC_PACK_DIR="$P" PATH="$TMP/bin:$PATH" \
+run_check() { LIVE="${LIVE:-}" GC_PACK_DIR="$P" \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null bash "$CHECK" 2>&1; }
 
 CURRENT='agents/a.md=h1
@@ -112,14 +104,7 @@ template-fragments/x.md=h2' run_check); RC=$?
 eq "$RC" "2" "staleness is still detected through bash despite the mode bit"
 chmod +x "$P/assets/scripts/render-seed-audit.sh"
 
-# --- 7. a gc newer than the artifact records warns, never errors ------------------
-OUT=$(LIVE="$CURRENT" GCVER='gc v9' run_check); RC=$?
-eq "$RC" "1" "a host gc newer than the rendered artifact warns"
-has "$OUT" "gc version drift" "the drift is named"
-has "$OUT" 'rendered with "gc v1", host runs "gc v9"' "both versions are shown"
-has "$OUT" "upkeep is not fully wired" "content is current, only upkeep is flagged"
-
-# --- 8. a hook wired somewhere else warns -----------------------------------------
+# --- 7. a hook wired somewhere else warns -----------------------------------------
 git -C "$P" config core.hooksPath .githooks
 OUT=$(LIVE="$CURRENT" run_check); RC=$?
 eq "$RC" "1" "a hooksPath pointing somewhere else warns"
@@ -127,14 +112,14 @@ has "$OUT" 'core.hooksPath is ".githooks", not assets/hooks' "the configured pat
 has "$OUT" "upkeep is not fully wired" "the summary separates upkeep from content"
 git -C "$P" config core.hooksPath assets/hooks
 
-# --- 9. no hook wired at all warns ------------------------------------------------
+# --- 8. no hook wired at all warns ------------------------------------------------
 git -C "$P" config --unset core.hooksPath
 OUT=$(LIVE="$CURRENT" run_check); RC=$?
 eq "$RC" "1" "an unset hooksPath warns"
 has "$OUT" "core.hooksPath is unset, not assets/hooks" "the unset case reads as one value"
 git -C "$P" config core.hooksPath assets/hooks
 
-# --- 10. no renderer shipped = nothing to keep current -------------------------------------
+# --- 9. no renderer shipped = nothing to keep current -------------------------------------
 rm "$P/assets/scripts/render-seed-audit.sh"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a pack shipping no renderer has nothing to keep current"

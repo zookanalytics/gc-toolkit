@@ -26,7 +26,8 @@ skill — only an operator-merged PR changes agent behavior.
 Every step closes its own bead through `assets/scripts/step-close.sh --step
 <step-id>` (resolved into `$SC` at the top of each shell block) — never any
 other way, and never on an id read from the environment; the helper resolves
-by (assignee, gc.step_ref) and refuses when it cannot prove ownership.
+by (gc.root_bead_id, gc.step_ref) and refuses when it cannot prove which
+molecule it is executing.
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
 drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
@@ -44,7 +45,7 @@ Variables:
   {{max_beads_per_run}}: Maximum prompt-update/engineering beads filed per run; dropped survivors re-surface next cycle (state is durable, so this is naturally resumable). (default=3)
   {{profile_entry_cap}}: Entry budget for the operator profile (carrier: profile). Same displacement rule as fragment_bullet_cap. (default=12)
   {{rig_list}}: Space-separated rig names whose stores hold observations (D5). Empty = runtime enumeration; if that fails, the run aborts fail-safe — never judge on a partial observation set. (default=)
-  {{work_quality_entry_cap}}: Entry budget for the work-quality fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap. (default=12)
+  {{work_quality_entry_cap}}: Entry budget per work-quality fragment — the shared base or any one per-class fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap. (default=12)
 
 Steps (4):
   ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate

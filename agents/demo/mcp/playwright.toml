@@ -1,0 +1,16 @@
+# playwright — the browser-driving MCP for demo capture, the same
+# @playwright/mcp server Playwright's own `init-agents --loop` wires and the
+# SprintShow engine documents (examples/agent-mcp/mcp.json). It lives under this
+# agent's mcp/ dir on purpose: a browser driver belongs in a demo-gated session,
+# not in every polecat. The demo:capture skill drives it to screenshot each step
+# into the captures dir, then hands the frames to `sprintshow assemble`.
+name = "playwright"
+description = "Playwright MCP — drives a browser for demo capture; screenshots land in .captures/agent-run for `sprintshow assemble`."
+command = "npx"
+args = [
+  "@playwright/mcp@latest",
+  "--headless",
+  "--isolated",
+  "--viewport-size", "1280,900",
+  "--output-dir", ".captures/agent-run",
+]

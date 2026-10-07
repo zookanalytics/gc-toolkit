@@ -1,13 +1,14 @@
 #!/bin/sh
-# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, open, react.
+# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, open, engage,
+# react.
 # Job: write the operator-facing state the helm board renders. The board
 # itself is `helm-svc board` (services/helm); this script renders nothing.
-# Contract:
-#   gc-helm open  <bead-id> [--reason "..."] [--body "..."]   file one visit (one open visit per subject)
-#   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
-#   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
-#   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
-#   gc-helm dismiss  <bead-id> [--reason "..."]               end the sitting and clear the row
+# Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
+# write verbs open, engage, react, takeaway, demand, dismiss, and the read-only
+# resolve. open, engage and react take a <subject> (a bead id, a PR number or
+# URL, or a superseded id) and resolve it to the live bead that owns the work
+# by metadata and the graph, never a title; an unresolvable or ambiguous
+# reference is refused and nothing is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
@@ -16,15 +17,19 @@
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move, tk-lzdty),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
-# a --route or a takeaway disposition that will not stamp).
+# a --route or a takeaway disposition that will not stamp),
+# 5 react no-op: the subject already carries a first reaction, so nothing was
+# slung (a first reaction happens once) — distinct from 4 so an intake caller
+# files its own visit instead of reading a skip as a dispatched reaction.
 
 set -eu
 
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 PROG="gc-helm"
@@ -34,18 +39,56 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
+  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
-  gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
-  gc-helm dismiss  <bead-id> [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row
+  gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
+  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue) and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
+  gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
 The board is `helm-svc board` (services/helm). This script carries only the
-write verbs. open files a visit in the picked bead's continuation group (pool
-demand spawns/vacuums a converse session); its --reason is the short title
-tail and --body the brief the converse session reads at claim time. react
-slings a proactive first reaction via tools/gc-proactive.sh (its --reason is
-log-only operator intent). takeaway stamps gc.takeaway (+_at/+_by) in one
+write verbs. open, engage and react take the subject as a bead id, a PR number
+or URL, or a superseded bead id, and resolve it to the LIVE bead that owns the
+work by metadata and the graph — a PR number/URL to the anchor whose
+pr_number/pr_url records it, a closed+superseded id along gc.superseded_by to
+its successor — never an id scraped from a title. An unresolvable or ambiguous
+reference is refused, naming what it could not resolve; nothing is filed.
+open files a visit in the picked bead's continuation group and
+parks it on the board (gc.routed_to=human); its --reason is the short title
+tail and --body the brief the sitting reads at claim time. engage draws a
+parked visit off the board: it spawns a manual converse-<model> sitting
+(origin=manual, backstop-exempt), assigns the visit to the session's runtime
+name so the session's own claim adopts it with no pool routing, and attaches;
+--model picks the converse variant (opus, the work tier, is the default),
+--no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
+subject it prompts for one (id or title search), lists the subject's open
+visits and offers engage-existing or a new visit, prompts a new visit's starter
+(a numbered seed, Enter for none, or free text sent verbatim), and prompts the
+model as a numbered choice over the configured variants. Any command-line value
+pre-fills and skips its prompt (--subject/positional, --reason/--template,
+--model); --no-input reverts to the flag-driven one-shot behavior. Starter seeds
+live in assets/scripts/gc-helm-engage-starters.sh. A --reason or --template with
+a SUBJECT files a new visit carrying that opener and engages it even when one is
+parked, passing --allow-duplicate through to open and --body the opener as the
+claim-time brief. With no starter, an existing parked visit is engaged and a
+fresh one is filed only when the subject has none. A --reason with an explicit
+visit id is refused, because a new visit needs a subject and the reason would
+otherwise be dropped. The summary and prompts print on stdout; a single [debug]
+line of visit/sitting/routing ids is always printed on stderr.
+--new-subject raises a topic that has no bead yet: it creates a fresh
+operator-origin subject bead (the positional text, or an interactive prompt, is
+its title and — absent --reason/--template — its opener), then files the one
+visit and engages it, all in one gesture. The rig to create it in comes from
+--rig or an interactive prompt over the converse-capable rigs (needed because
+there is no id prefix yet to derive a rig from); --no-input requires --rig. The
+subject is marked gc.reaction_owned=1 so the async first-reaction/proactive
+worker stands down rather than file a second visit; the operator-origin
+force-to-visit invariant is preserved — engage files that one visit itself.
+dismiss ends the sitting. react slings a proactive first reaction via
+tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
+stamps gc.takeaway (+_at/+_by) in one
 update; --release also reopens/unassigns/clears the route and quiesces the
 released molecule's step beads and workflow root. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
@@ -66,20 +109,25 @@ blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
 <gated>`, so a caller reads the id back with
 `awk '/^demand /{print $2; exit}'`.
 
-dismiss is the operator's one explicit act for "take this out of my view",
-and both halves of it exist because the alternative is something leaving on
-its own. It closes the subject's open visit, which is what holds a converse
-sitting up now that nothing idle-reaps one; and it stamps gc.dismissed_at, so
-the board drops the subject's row from the terminal DONE band a closed anchor
-otherwise keeps for GC_HELM_DONE_WINDOW (default 7d). The close half stamps
-gc.outcome=dismissed first, so the ended sitting is still one the board can
-report, and a visit that will not take that stamp is left open rather than
-closed unreadable; the close itself falls back to --force when the visit is
-held under a session identity this actor cannot close under. A sitting the
-verb could not account for aborts the row stamp: the row stays and the run
-exits 4.
-Idempotent: a subject with no visit and no row is already dismissed and says
-so.
+dismiss is the operator's explicit "end this sitting". It closes the subject's
+open visit, which is what holds a converse sitting's pane up; converse-reap
+then ends the now-settled session. It stamps gc.outcome=dismissed first, so the
+ended sitting is still one the board can report, and a visit that will not take
+that stamp is left open rather than closed unreadable; the close itself falls
+back to --force when the visit is held under a session identity this actor
+cannot close under. A visit the verb could not account for aborts the run,
+which exits 4. It writes nothing to the subject: the DONE band a closed anchor
+lands in carries no per-row state, so a row leaves only by ageing past
+GC_HELM_DONE_WINDOW (default 7d).
+Idempotent: a subject with no open visit has no sitting to end and says so.
+
+dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
+current sitting from session state: the one open visit assigned to this session
+(GC_SESSION_NAME / GC_SESSION_ID / GC_ALIAS), whose subject is its
+gc.continuation_group or tracks edge. That is what lets a bare `gc-helm dismiss`
+end the sitting the operator is reading. Inference fails CLOSED — no identity,
+no held visit, more than one, or an unreadable listing each refuse rather than
+guess a subject, and name the explicit-id form as the fix.
 EOF
 }
 
@@ -132,10 +180,47 @@ normalize_headline() {
     # <<< takeaway-length-gate
 }
 
+# visit_headline <raw> — the board headline for a visit title, whitespace
+# collapsed and capped at TAKEAWAY_MAX codepoints. normalize_headline REJECTS
+# over its cap because a demand/takeaway headline IS the deliverable and only
+# the author knows which clause to keep; a visit carries its full reason in the
+# body, so here the over-cap tail is TRUNCATED with an ellipsis instead. That
+# keeps "visit: <id> — <tail>" under bd's title cap without dropping the reason.
+visit_headline() {
+    printf '%s' "$1" | jq -Rsr --argjson n "$TAKEAWAY_MAX" \
+        '((gsub("\\s+"; " ")) | sub("^ "; "") | sub(" $"; "")) as $h
+         | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end' \
+        2>/dev/null || printf '%s' "$1" | cut -c1-"$TAKEAWAY_MAX"
+}
+
 # Sibling tools: assets/scripts/ and tools/ are siblings under the pack root.
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+# The one definition of what subject a visit covers — the tracks-edge identity
+# (gc.continuation_group stamp as fallback) that open, dismiss and engage below
+# all match on, shared with converse-fold.sh and the sweeps. Exposes
+# $VISIT_IDENTITY_JQ.
+# shellcheck source=visit-identity.sh
+. "${GC_VISIT_IDENTITY_LIB:-$SCRIPT_DIR/visit-identity.sh}" \
+    || { echo "$PROG: cannot source visit-identity.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one definition of whether a rig carries converse — read from the
+# import-resolved roster, shared with gc-visit-open.sh so engage and visit intake
+# cannot diverge. Exposes rig_carries_converse.
+# shellcheck source=converse-capability.sh
+. "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
+    || { echo "$PROG: cannot source converse-capability.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# engage's starter seeds live in a sibling data table; its converse-<model>
+# variants are enumerated from the agent dirs, so the model menu cannot drift
+# from what `gc session new converse-<model>` resolves. Both are overridable so
+# a hermetic test can point them at a fixture.
+STARTERS_TOOL="${GC_HELM_STARTERS_TOOL:-$SCRIPT_DIR/gc-helm-engage-starters.sh}"
+ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
+# Leaves a reminder on the subject's PR that a visit engaged (and, on dismiss,
+# that it closed). Best-effort and self-silencing when the subject has no PR;
+# overridable so a hermetic test can point it at a fixture.
+VISIT_COMMENT_TOOL="${GC_VISIT_COMMENT_TOOL:-$SCRIPT_DIR/pr-visit-comment.sh}"
+TAB=$(printf '\t')
 
 # Bust the retired bash board's gather cache so a straggler reader never
 # serves a pre-write board for a whole TTL.
@@ -144,8 +229,36 @@ _city_key=$(printf '%s' "${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-default}}}" 
 CACHE_FILE="$CACHE_DIR/board2-$_city_key.ndjson"
 bust_cache() { rm -f "$CACHE_FILE" 2>/dev/null || true; }
 
+# The spellings a bead's assignee can carry for THIS session, one per line —
+# the same three step-close.sh tries as the assignee, and the same set the
+# claim hook matches when a respawn adopts a hold. Empty when none is set.
+session_identities() {
+    printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true
+}
+
+# sitting_is_gone <session-name> — 0 (true) iff the named sitting is PROVABLY
+# absent from `gc session list`: no session there carries the name, under any of
+# the spellings a bind writes (the runtime session_name, its short name, the id,
+# or a qualified alias that ends with it). Fails CLOSED — a listing that did not
+# read, or did not answer with a sessions array, returns non-zero (NOT gone), so
+# a transient read never reclaims a live sitting's visit. `--state all` so a
+# session present but closed still counts as a match, never as gone.
+sitting_is_gone() {
+    _sn="$1"; [ -n "$_sn" ] || return 1
+    _sl=$(gc session list --state all --json 2>/dev/null | scrub) || return 1
+    printf '%s' "$_sl" | jq -e --arg n "$_sn" \
+        'if (type == "object" and ((.sessions // null) | type) == "array")
+         then ([ .sessions[]
+                 | select(((.session_name // "") == $n)
+                          or ((.name // "") == $n)
+                          or ((.id // "") == $n)
+                          or (($n | length > 0) and ((.session_name // "") | endswith($n)))) ]
+               | length) == 0
+         else error("sessions array unreadable") end' >/dev/null 2>&1
+}
+
 # ── Rig enumeration ──────────────────────────────────────────────────
-# Sets RIGS (JSON array of {name,path,prefix}); exits 3 with a per-cause
+# Sets RIGS (JSON array of {name,path,prefix,suspended,running}); exits 3 with a per-cause
 # sentence otherwise. Each failure names its own operator move because for a
 # non-CLI caller (the web board's open button) the code plus the sentence is
 # the whole signal (tk-lzdty).
@@ -167,12 +280,20 @@ enumerate_rigs() {
     _er_secs="${GC_HELM_RIG_TIMEOUT:-30}"
     # Capture status AND stderr — they are the only things separating a
     # timeout kill, a wedged data plane, malformed output, and a rigless city.
-    _er_errf=$(mktemp 2>/dev/null || printf '')
+    # The stderr capture outlives nothing: it is read and removed a few lines
+    # down, and the traps that cover the signal landing while `gc rig list`
+    # runs come off with it. A trap is process-global, so a helper that leaves
+    # one installed rewrites how every later line of every caller handles a
+    # signal — this one lives exactly as long as the file it removes.
+    _er_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-rig-enum.XXXXXX" 2>/dev/null || printf '')
     _er_rc=0
     if [ -n "$_er_errf" ]; then
+        trap 'rm -f "$_er_errf" 2>/dev/null' EXIT
+        trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
         rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>"$_er_errf") || _er_rc=$?
         _er_why=$(tr '\n' ' ' < "$_er_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
         rm -f "$_er_errf" 2>/dev/null || true
+        trap - EXIT INT TERM HUP
     else
         rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>/dev/null) || _er_rc=$?
         _er_why=""
@@ -202,7 +323,10 @@ enumerate_rigs() {
            exit 3 ;;
     esac
 
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null || printf '[]')
+    # Carry suspended/running through: engage's liveness guard reads them from
+    # this same enumeration. A `gc rig list` that omits either leaves it null,
+    # which the guard treats as unknown and never refuses on.
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix, suspended, running}]' 2>/dev/null || printf '[]')
     if [ "$(rigs_count)" -eq 0 ]; then
         # gc answered correctly: this city really has no rigs. Not a malfunction.
         echo "$PROG: no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." >&2
@@ -222,33 +346,327 @@ rig_name_for_bead() {
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
 }
 
+# rig_suspended_for_bead <bead-id> / rig_running_for_bead <bead-id> — the
+# liveness flags `gc rig list` reports for the rig owning the bead: "true" or
+# "false", or EMPTY when the field is absent (an older gc that does not report
+# it). engage's guard refuses only on an explicit suspended=true or
+# running=false, so an empty read is unknown and never refuses — the flag is a
+# safety net over today's behaviour, not a new precondition on every engage.
+rig_suspended_for_bead() {
+    enumerate_rigs
+    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
+        '.[] | select(.prefix==$p) | if (.suspended == null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1
+}
+rig_running_for_bead() {
+    enumerate_rigs
+    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
+        '.[] | select(.prefix==$p) | if (.running == null) then "" else (.running|tostring) end' 2>/dev/null | head -n1
+}
+
+# rig_db_for_session — the .beads dir of THIS session's rig, or empty when it
+# cannot be resolved. Where the resolvers above key off a bead id, this one
+# keys off the session itself: a converse sitting's visit is filed in its
+# SUBJECT's rig, but the session runs with GC_RIG and BEADS_DIR unset and so
+# defaults to the CITY store, where that rig-filed visit is absent. Take the
+# rig name from the environment when it names one, else from this session's own
+# runtime record (.rig, matched on any identity form), and map it to a repo
+# path. Best-effort: an unresolved rig yields empty and the caller keeps its
+# default store rather than failing.
+rig_db_for_session() {
+    _srig="${GC_RIG:-}"
+    if [ -z "$_srig" ]; then
+        _sids=$(session_identities)
+        [ -n "$_sids" ] || return 0
+        _srig=$(gc session list --state all --json 2>/dev/null | scrub \
+            | jq -r --arg ids "$_sids" '
+                ($ids | split("\n") | map(select(. != ""))) as $me
+                | [ .sessions[]? | objects | . as $s
+                    | ([ $s.id, $s.session_name, $s.alias, $s.name, $s.agent_name ]
+                       | map(select(. != null and . != ""))) as $sig
+                    | select([ $sig[] | select(. as $x | $me | index($x)) ] | length > 0)
+                    | ($s.rig // "") ]
+                | map(select(. != "")) | first // ""' 2>/dev/null || true)
+    fi
+    [ -n "$_srig" ] || return 0
+    _spath=$(gc rig list --json 2>/dev/null | scrub \
+        | jq -r --arg n "$_srig" '.rigs[]? | objects | select(.name == $n) | .path' 2>/dev/null | head -n1)
+    [ -n "$_spath" ] && [ -d "$_spath/.beads" ] && printf '%s' "$_spath/.beads"
+}
+
+# ── Reap helper: force-close a husk molecule ─────────────────────────
+# A released molecule that no live session is completing — its work cancelled by
+# a stand-down, or already folded — never closes its own step chain, so
+# workflow-finalize stays blocked_by the chain and the root never reaps, while
+# its held steps keep drawing re-dispatches. A stood-down molecule should die,
+# not park, so force-close the whole subtree: every step and the root. bd
+# refuses to close a bead an open blocker gates, so the chain unwinds from its
+# unblocked end — close what closes, repeat until a pass closes nothing.
+# `update --status=closed` needs no --force: the ownership check belongs to the
+# `close` verb, not to reaching the closed state, and the forward order is what
+# satisfies the blocker rule. A bead the store will not close is de-pinned
+# instead, so it stops re-attracting spawns while the patrol retries.
+#
+# $1 = newline-separated molecule rows (JSON, {id,kind,step,...}); $2 = rig
+# .beads path or ""; $3 = the released anchor id, for the log line.
+# >>> reap-release-molecule
+reap_release_molecule() {
+    _reap_rows="$1"; _reap_db="$2"; _reap_anchor="$3"
+    _reap_todo=$(printf '%s\n' "$_reap_rows" | jq -r '.id // empty' 2>/dev/null | grep . || true)
+    [ -n "$_reap_todo" ] || return 0
+    _reap_n=$(printf '%s\n' "$_reap_todo" | grep -c . 2>/dev/null || echo 0)
+    case "$_reap_n" in ''|*[!0-9]*) _reap_n=0 ;; esac
+    _reap_pass=0
+
+    while [ -n "$_reap_todo" ] && [ "$_reap_pass" -le "$_reap_n" ]; do
+        _reap_pass=$((_reap_pass + 1))
+        _reap_next=""
+        _reap_moved=0
+        while IFS= read -r _sid; do
+            [ -n "$_sid" ] || continue
+            _lbl=$(printf '%s\n' "$_reap_rows" | jq -r --arg i "$_sid" \
+                'select(.id == $i) | "\(.kind) \(.id) (\(.step // ""))"' 2>/dev/null | head -1)
+            # shellcheck disable=SC2086  # ${_reap_db:+--db "$_reap_db"} expands to 0 or 2 fields
+            if gc bd update "$_sid" ${_reap_db:+--db "$_reap_db"} --status=closed --set-metadata "gc.outcome=stand-down" >/dev/null 2>&1; then
+                _reap_moved=1
+                echo "$PROG: takeaway: reaped ${_lbl:-$_sid} of $_reap_anchor"
+            else
+                _reap_next="${_reap_next}${_sid}
+"
+            fi
+        done <<REAP
+$_reap_todo
+REAP
+        _reap_todo=$(printf '%s' "$_reap_next" | grep . || true)
+        [ "$_reap_moved" -eq 1 ] || break
+    done
+
+    # Anything the store refused to close — a pin-write refusal, or a blocker
+    # outside this molecule that never clears — is de-pinned so it stops
+    # re-attracting spawns, and named so the patrol knows to retry.
+    while IFS= read -r _sid; do
+        [ -n "$_sid" ] || continue
+        _lbl=$(printf '%s\n' "$_reap_rows" | jq -r --arg i "$_sid" \
+            'select(.id == $i) | "\(.kind) \(.id) (\(.step // ""))"' 2>/dev/null | head -1)
+        # shellcheck disable=SC2086  # ${_reap_db:+--db "$_reap_db"} expands to 0 or 2 fields
+        gc bd update "$_sid" ${_reap_db:+--db "$_reap_db"} --unset-metadata gc.routed_to --unset-metadata gc.session_affinity >/dev/null 2>&1 || true
+        echo "$PROG: takeaway: could not reap ${_lbl:-$_sid} of $_reap_anchor — de-pinned; retries via witness patrol" >&2
+    done <<REAP
+$_reap_todo
+REAP
+}
+# <<< reap-release-molecule
+
+# ── Subject resolver: an operator reference to the live bead it owns ──
+# The operator supplies a subject by reading it off whatever is in front of
+# them — a PR, a board row, a bead whose title cites its lineage. A PR/bead
+# title legitimately names OTHER beads (`gc.supersedes`), so an id scraped from
+# one opens the wrong bead: the settled predecessor of a fold, or nothing. The
+# fix is a deterministic resolver keyed on structured metadata and the graph,
+# never on title text, so a PR number or a superseded id cannot open a dead
+# bead.
+#
+# resolve_live_subject <reference> sets RESOLVED_SUBJECT. A live bead id, and
+# any reference this resolver does not recognize (a topic string), pass through
+# unchanged for the caller's own existence gate to judge. It fails CLOSED
+# (exit 4) on a PR that resolves to no live bead or to several, when a store
+# the PR search must read is unreadable, and on a superseded-by cycle, naming
+# what it could not resolve — the alternative is filing on the wrong bead,
+# which is the defect this exists to end.
+#
+#   PR number (615) or URL (…/pull/615)  ->  the anchor whose pr_number / pr_url
+#                                            metadata matches (never a title)
+#   closed + gc.superseded_by            ->  followed to the live successor
+#   live bead id                         ->  unchanged
+RESOLVED_SUBJECT=""
+resolve_live_subject() {
+    _rls_ref="$1"
+    RESOLVED_SUBJECT="$_rls_ref"
+
+    # Rig health first: the PR search reads every rig's store, so validate the
+    # rig list (exit 3) before any read reaches the wire, and cache it here for
+    # the search and for the caller's later rig_path_for_bead.
+    enumerate_rigs
+
+    # Classify without touching the store. A PR URL pins the repo; a bare
+    # number does not. A bead id carries a rig-prefix and a dash; a topic
+    # string is neither and passes through untouched.
+    _rls_prnum=""; _rls_prurl=""
+    case "$_rls_ref" in
+        http://*/pull/[0-9]*|https://*/pull/[0-9]*)
+            _rls_prurl="$_rls_ref"
+            _rls_prnum=$(printf '%s' "$_rls_ref" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p') ;;
+        *[!0-9]*) : ;;                       # a non-digit: not a bare PR number
+        [0-9]*)   _rls_prnum="$_rls_ref" ;;  # all digits: a bare PR number
+    esac
+
+    if [ -n "$_rls_prnum" ]; then
+        _resolve_pr_reference "$_rls_prnum" "$_rls_prurl"
+        return 0
+    fi
+
+    case "$_rls_ref" in
+        *-*) _resolve_superseded_reference "$_rls_ref" ;;
+    esac
+    return 0
+}
+
+# _resolve_pr_reference <number> <url-or-empty> — set RESOLVED_SUBJECT to the
+# LIVE bead that RECORDS this PR, or exit 4 fail-closed. pr_number / pr_url are
+# bare metadata keys (signoff.sh, pr-facts.sh). Filtered CLIENT-SIDE: bd list's
+# --metadata-field mangles a numeric value into non-JSON here. A URL additionally
+# pins the repo, so a bare number several repos share is disambiguated by it.
+# The status set is the pack's live-PR set (pr-facts.sh:247, merge.sh:126):
+# an anchor is live in deferred/hooked/pinned too, so a narrower query would
+# fail to resolve a PR whose bead sits in one of those states. The number's
+# uniqueness holds only across EVERY live store, so any rig the search cannot
+# fully read refuses the whole resolution (exit 4) naming that ledger, rather
+# than resolve from the stores that answered while a dropped one may also record
+# the number: a rig with no .beads ledger to pin with --db, a list that exits
+# non-zero, and an answer that is not a JSON array.
+_resolve_pr_reference() {
+    _pr_num="$1"; _pr_url="$2"
+    # The URL pins the repo. A browser copy can be a PR subpage (…/pull/615/files)
+    # or carry a query string, but pr-open.sh stores and merge.sh compares the
+    # canonical …/pull/<number> form, so canonicalize the paste before matching.
+    _pr_url=$(printf '%s' "$_pr_url" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
+    _pr_hits=""
+    _pr_paths=$(printf '%s' "$RIGS" | jq -r '.[].path // ""' 2>/dev/null) || _pr_paths=""
+    _pr_saved_ifs=$IFS
+    IFS='
+'
+    for _pr_p in $_pr_paths; do
+        _pr_rig=$(printf '%s' "$RIGS" | jq -r --arg p "$_pr_p" '.[] | select(.path == $p) | .name' 2>/dev/null | head -n1)
+        # A listed rig whose ledger cannot be pinned with --db would make the
+        # per-rig read fall back to the session default store: one store read
+        # twice, this rig never read. That is the same incomplete cross-store
+        # proof a non-zero or non-array read leaves below, so refuse it the same
+        # way. Resolving a bare number while a live rig went unread could file on
+        # the wrong repo's anchor.
+        if [ -z "$_pr_p" ] || [ ! -d "$_pr_p/.beads" ]; then
+            echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} (${_pr_p:-<no path>}) has no readable .beads store to pin with --db, so the search would fall back to the session default store and never read this rig. A bare PR number is unique only across every live store, so resolving it with a rig unread could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
+            exit 4
+        fi
+        _pr_db="$_pr_p/.beads"
+        # Capture bd's OWN exit status — a pipe to scrub would report scrub's. A
+        # store that will not read (non-zero exit) or answers with something that
+        # is not a JSON array (an error object, a wedged empty answer) leaves the
+        # cross-store uniqueness proof incomplete, so refuse rather than resolve
+        # from the stores that answered.
+        _pr_rc=0
+        _pr_raw=$(gc bd list --db "$_pr_db" --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null) || _pr_rc=$?
+        _pr_rows=$(printf '%s' "$_pr_raw" | scrub)
+        if [ "$_pr_rc" -ne 0 ] || ! printf '%s' "$_pr_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            _pr_led="$_pr_db"
+            if [ "$_pr_rc" -ne 0 ]; then _pr_why="gc bd list exited $_pr_rc"; else _pr_why="its answer was not a JSON array"; fi
+            echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} ($_pr_led) did not read ($_pr_why). A bare PR number is unique only across every live store, so resolving it from the stores that answered could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
+            exit 4
+        fi
+        _pr_found=$(printf '%s' "$_pr_rows" | jq -r --arg n "$_pr_num" --arg u "$_pr_url" '
+            [ .[]? | objects
+              | select(((.metadata.pr_number // "") | tostring) == $n)
+              | select($u == "" or (((.metadata.pr_url // "") | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p)) == $u))
+              | .id ] | .[]' 2>/dev/null) || _pr_found=""
+        for _pr_id in $_pr_found; do
+            [ -n "$_pr_id" ] && _pr_hits="$_pr_hits$_pr_id
+"
+        done
+    done
+    IFS=$_pr_saved_ifs
+
+    _pr_uniq=$(printf '%s' "$_pr_hits" | awk 'NF && !seen[$0]++')
+    _pr_count=$(printf '%s\n' "$_pr_uniq" | awk 'NF{c++} END{print c + 0}')
+
+    if [ "$_pr_count" -eq 0 ]; then
+        echo "$PROG: no open bead records PR #$_pr_num${_pr_url:+ ($_pr_url)}. If it merged its anchor is closed and there is nothing live to open a visit on; otherwise pass the live bead id. Nothing filed." >&2
+        exit 4
+    fi
+    if [ "$_pr_count" -gt 1 ]; then
+        echo "$PROG: PR #$_pr_num is ambiguous — recorded by $(printf '%s' "$_pr_uniq" | tr '\n' ' '). Pass the PR URL to pin the repo, or the live bead id directly. Nothing filed." >&2
+        exit 4
+    fi
+    RESOLVED_SUBJECT=$(printf '%s' "$_pr_uniq" | awk 'NF{print; exit}')
+    echo "$PROG: PR #$_pr_num -> $RESOLVED_SUBJECT (matched by pr_number/pr_url metadata, never a title)." >&2
+}
+
+# _resolve_superseded_reference <bead-id> — follow a settled disposition
+# (status closed + gc.superseded_by) to its live successor and set
+# RESOLVED_SUBJECT. bead-rehome.sh stamps gc.superseded_by (+ the legacy bare
+# key) alongside gc.superseded_by_store; the successor is read cross-ledger by
+# its rig-unique id, so that store hint is not needed to find it. A live bead,
+# or one that does not resolve, passes through unchanged for the caller's
+# existence gate; a cycle is refused (exit 4) rather than guessed.
+_resolve_superseded_reference() {
+    _ss_orig="$1"; _ss_cur="$1"; _ss_seen=" $1 "; _ss_hops=0
+    while [ "$_ss_hops" -le 24 ]; do
+        _ss_row=$(gc bd show "$_ss_cur" --json 2>/dev/null | scrub) || _ss_row=""
+        _ss_this=$(printf '%s' "$_ss_row" | jq -c --arg b "$_ss_cur" \
+            'if type == "array" then (first(.[] | objects | select((.id // "") == $b)) // null) else null end' 2>/dev/null) || _ss_this="null"
+        if [ -z "$_ss_this" ] || [ "$_ss_this" = "null" ]; then
+            # The reference ITSELF does not resolve: pass it through unchanged so
+            # the caller's existence gate reports a clean not-found.
+            [ "$_ss_cur" = "$_ss_orig" ] && { RESOLVED_SUBJECT="$_ss_orig"; return 0; }
+            # A SUCCESSOR we followed does not resolve (a broken or cross-store
+            # pointer). Refuse — never fall back to opening the settled predecessor.
+            echo "$PROG: $_ss_orig is superseded by $_ss_cur, which does not resolve (a broken or cross-store pointer). Refusing to open the settled predecessor; pass the live bead id directly. Nothing filed." >&2
+            exit 4
+        fi
+        _ss_status=$(printf '%s' "$_ss_this" | jq -r '.status // ""' 2>/dev/null) || _ss_status=""
+        _ss_succ=$(printf '%s' "$_ss_this" | jq -r '(.metadata["gc.superseded_by"] // .metadata.superseded_by // "")' 2>/dev/null) || _ss_succ=""
+        if [ "$_ss_status" = "closed" ] && [ -n "$_ss_succ" ]; then
+            case "$_ss_seen" in
+                *" $_ss_succ "*)
+                    echo "$PROG: $_ss_orig leads to a superseded-by cycle at $_ss_succ; refusing to guess which is live. Pass the live bead id directly. Nothing filed." >&2
+                    exit 4 ;;
+            esac
+            _ss_seen="$_ss_seen$_ss_succ "
+            _ss_cur="$_ss_succ"
+            _ss_hops=$((_ss_hops + 1))
+            continue
+        fi
+        break
+    done
+    if [ "$_ss_cur" != "$_ss_orig" ]; then
+        echo "$PROG: $_ss_orig is closed and superseded -> resolving to the successor $_ss_cur (never the settled predecessor)." >&2
+    fi
+    RESOLVED_SUBJECT="$_ss_cur"
+}
+
 # ── Release helper: quiesce a released molecule ──────────────────────
 # A molecule whose anchor is out of play — parked by a stand-down, or closed by
 # a fold that landed after the pour — keeps re-attracting the pins
 # (gc.routed_to / assignee / session_affinity) that re-spawn a polecat onto the
 # husk. That is why the walk is reachable on a closed anchor too. Both doors
 # carry them: the graph.v2 STEP beads, and the gc.kind=workflow ROOT, which is
-# only a tracker but is pool-routed in its own right. Walk both in reverse (a
-# step through gc.root_bead_id, a root through itself, then on through the
-# root's gc.input_convoy_id to the convoy's single tracked member) and clear
-# the pins wherever that resolves to THIS anchor.
+# only a tracker but is pool-routed in its own right. The anchor's input convoy
+# TRACKS it, so a reverse `tracks` lookup on the anchor names the convoy(s)
+# whose molecule resolves HERE; a root belongs to this molecule when its
+# gc.input_convoy_id is one of them and that convoy's single tracked member is
+# the anchor. Keying on the anchor keeps the resolution bounded — the work does
+# not grow with the number of molecules open in the store.
 #
-# Guards: fail closed on an unresolved or foreign anchor; NEVER close a bead or
-# rewrite its status; never de-route workflow-finalize or a control-dispatcher
-# route, which is the molecule's only escape path; never de-pin the bead the
-# RELEASING session holds, which is live and not a husk; steps are selected by
+# What each resolved molecule gets turns on whether the RELEASING session holds
+# one of its steps. If it does, the molecule is the session's OWN and live — a
+# mol-first-reaction terminal step disposing the anchor it runs on, or a sitting
+# — and it closes its own chain the normal way: the held step is left alone, the
+# husk pins around it are cleared, and workflow-finalize keeps its escape route.
+# If no step is the releasing session's, nothing will ever close the chain, so
+# the molecule is a husk and reap_release_molecule force-closes the whole
+# subtree.
+#
+# Guards: fail closed on an unresolved or foreign anchor; select steps by
 # contract (gc.step_ref) and never by formula name; an absent root is the
 # witness patrol's, not ours.
 #
-# The pins go in TWO updates, route first. beads refuses `--assignee ""` on an
-# in_progress bead another session holds, and refuses the whole update along
-# with it, so folding all three keys into one write loses the route pins on
-# exactly the bead being re-offered. Clearing gc.routed_to alone already lifts
-# a bead out of every pool claim predicate; the assignee is the one key that
-# may legitimately have to wait for its holder. The order is load-bearing —
-# reversed, the gap between the writes would leave the bead routed and
-# unassigned, which is the pool-offer shape a fresh polecat races into. For the
-# same reason the second write is skipped outright when the first one fails.
+# The de-pin path clears the pins in TWO updates, route first. beads refuses
+# `--assignee ""` on an in_progress bead another session holds, and refuses the
+# whole update along with it, so folding all three keys into one write loses the
+# route pins on exactly the bead being re-offered. Clearing gc.routed_to alone
+# already lifts a bead out of every pool claim predicate; the assignee is the
+# one key that may legitimately have to wait for its holder. The order is
+# load-bearing — reversed, the gap between the writes would leave the bead
+# routed and unassigned, which is the pool-offer shape a fresh polecat races
+# into. For the same reason the second write is skipped outright when the first
+# one fails.
 #
 # Best-effort subshell. $1 = released anchor id, $2 = rig .beads path or "".
 # >>> quiesce-release-molecule-steps
@@ -256,12 +674,16 @@ quiesce_release_molecule_steps() (
     set +e
     _anchor="$1"; _db="$2"
 
-    # The spellings a bead's assignee can carry for THIS session — the same
-    # three step-close.sh resolves by.
-    _me=$(printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true)
+    _me=$(session_identities)
 
+    # `blocked` belongs in the set because molecule-hold.sh writes a held step
+    # to status=blocked (route and affinity cleared, assignee kept). That step
+    # still blocks the chain, so an enumeration that could not see it would close
+    # every other step, then fail to close the root behind the surviving blocker,
+    # and leave workflow-finalize unable to retire the molecule — the husk this
+    # release exists to kill. The reap force-closes it forward like any other.
     # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
-    _steps=$(gc bd list --status=open,in_progress ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
+    _steps=$(gc bd list --status=open,in_progress,blocked ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
     [ -n "$_steps" ] && [ "$_steps" != "[]" ] || exit 0
 
     # A root names no gc.root_bead_id and no gc.step_ref; it IS the root, and
@@ -279,28 +701,72 @@ quiesce_release_molecule_steps() (
                                   else ($b.metadata["gc.step_ref"] // "") end),
             root:     (if $isroot then $b.id
                                   else ($b.metadata["gc.root_bead_id"] // "") end),
+            convoy:   (if $isroot then ($b.metadata["gc.input_convoy_id"] // "") else "" end),
             routed:   ($b.metadata["gc.routed_to"] // ""),
             assignee: ($b.assignee // ""),
             affinity: ($b.metadata["gc.session_affinity"] // "") }' 2>/dev/null || true)
     [ -n "$_rows" ] || exit 0
 
-    _roots=$(printf '%s\n' "$_rows" | jq -r -s 'map(.root) | map(select(. != "")) | unique | .[]' 2>/dev/null || true)
-    [ -n "$_roots" ] || exit 0
+    # Resolve the released molecule DIRECTLY from the parked anchor. The input
+    # convoy TRACKS the anchor, so a reverse `tracks` lookup names the convoy(s)
+    # whose molecule resolves here — one read keyed on the anchor. Enumerating
+    # every open root and resolving each one's convoy back to the anchor instead
+    # is O(open molecules) `gc bd show` + `gc convoy status` round trips per
+    # release, work that scales with the store rather than with the one molecule
+    # being released. An unreadable or empty lookup leaves the husk to the
+    # witness patrol — the same skip an absent root already takes.
+    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+    _convoys=$(gc bd dep list "$_anchor" --direction=up -t tracks ${_db:+--db "$_db"} --json 2>/dev/null \
+        | jq -r 'if type == "array" then (.[] | .id // empty) else empty end' 2>/dev/null | grep . || true)
+    [ -n "$_convoys" ] || exit 0
 
-    printf '%s\n' "$_roots" | while IFS= read -r _root; do
+    # Match roots whose input convoy is in that set, in memory against the scan
+    # above — no per-root store read. A root reachable only through its steps
+    # (its own bead already closed) carries no convoy row here and is the witness
+    # patrol's, the same boundary the enumeration drew.
+    _match_roots=$(printf '%s\n' "$_rows" | jq -r -s --arg c "$_convoys" '
+        ($c | split("\n") | map(select(length > 0))) as $cs
+        | [ .[]
+            | select(.kind == "root")
+            | . as $r | ($r.convoy // "") as $cv
+            | select($cv != "" and ($cs | any(. == $cv)))
+            | $r.root ]
+        | unique | .[]' 2>/dev/null || true)
+    [ -n "$_match_roots" ] || exit 0
+
+    printf '%s\n' "$_match_roots" | while IFS= read -r _root; do
         [ -n "$_root" ] || continue
-
-        # Resolve this root's anchor; an empty read (failed OR absent root) skips.
-        _convoy=$(gc bd show "$_root" ${_db:+--db "$_db"} --json 2>/dev/null \
-            | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null || true)
+        _convoy=$(printf '%s\n' "$_rows" | jq -r --arg r "$_root" \
+            'select(.kind == "root" and .root == $r) | .convoy' 2>/dev/null | head -n1)
         [ -n "$_convoy" ] || continue
+
+        # FAIL CLOSED: the reverse lookup proved the convoy tracks the anchor;
+        # confirm it is a clean 1:1 input convoy whose single tracked member IS
+        # the parked bead before acting — the guard the enumeration enforced.
         _ranchor=$(gc convoy status "$_convoy" --json 2>/dev/null \
             | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null || true)
-
-        # FAIL CLOSED: act only on the molecule whose anchor IS the parked bead.
         [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
 
-        printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null | while IFS= read -r _row; do
+        _mol_rows=$(printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null || true)
+        [ -n "$_mol_rows" ] || continue
+
+        # A molecule the RELEASING session is itself completing keeps its chain
+        # and just sheds its husk pins; one no live session holds a step of is a
+        # husk whose work is cancelled or folded, and it is reaped so
+        # workflow-finalize can unblock and the root reaps.
+        _own=""
+        if [ -n "$_me" ]; then
+            _own=$(printf '%s\n' "$_mol_rows" | jq -r -s --arg me "$_me" '
+                ($me | split("\n") | map(select(length > 0))) as $ids
+                | [ .[] | (.assignee // "") | select(. != "") | . as $a | select($ids | any(. == $a)) ]
+                | if length > 0 then "own" else "" end' 2>/dev/null || true)
+        fi
+        if [ -z "$_own" ]; then
+            reap_release_molecule "$_mol_rows" "$_db" "$_anchor"
+            continue
+        fi
+
+        printf '%s\n' "$_mol_rows" | while IFS= read -r _row; do
             [ -n "$_row" ] || continue
             _sid=$(printf '%s'      "$_row" | jq -r '.id // empty' 2>/dev/null || true)
             _kind=$(printf '%s'     "$_row" | jq -r '.kind // empty' 2>/dev/null || true)
@@ -316,12 +782,11 @@ quiesce_release_molecule_steps() (
 
             # Never de-pin the bead this release is being performed FROM. The
             # quiesce exists to stop an ABANDONED molecule re-attracting spawns;
-            # a bead the releasing session holds is the live one, and
-            # step-close.sh resolves it by (assignee, gc.step_ref), so clearing
-            # that assignee strands the molecule this release is completing.
-            # With no identity in the environment step-close.sh refuses to close
-            # anything at all, so there is no case where the skip is needed and
-            # unavailable.
+            # a bead the releasing session holds is the live one, not a husk,
+            # and the session still owes its own step chain's close, so this
+            # quiesce leaves it alone. With no identity in the environment
+            # step-close.sh refuses to close anything at all, so there is no
+            # case where the skip is needed and unavailable.
             if [ -n "$_who" ] && [ -n "$_me" ] && printf '%s\n' "$_me" | grep -qxF -- "$_who"; then
                 echo "$PROG: takeaway: kept live $_kind $_sid ($_step) — this session holds it and still has to close it"
                 continue
@@ -404,6 +869,14 @@ quiesce_release_molecule_steps() (
 # sitting would answer for the next one — a settled sign-off would silence the
 # park that followed it. lifecycle/lifecycle.toml [holds] settled_keys is where
 # doctor/check-wait-is-an-edge reads the pairing.
+#
+# A --release that PARKS an open anchor for a person (no --route) must carry one
+# of --waiting-on or --no-wait — the wait as an edge, or the settled mark that
+# says there is none — UNLESS the bead already carries an open blocker whose edge
+# holds it. Neither flag on a bead with no blocker is the silent prose-only park
+# refused below, the unedged hold the I1 backlog exists to drain. A --release
+# --route DISPATCHES to a pool instead (moving, not held), a closed anchor takes
+# only the quiesce, and a bare headline (no --release) parks nothing — all exempt.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; npos=0
     waiting_ids=""; no_wait=""; subj_branch=""; real_waits=""; skipped_riders=""
@@ -499,6 +972,42 @@ cmd_takeaway() {
         fi
     fi
     # <<< takeaway-release-closed-anchor
+
+    # A park for a person states its disposition, UNLESS the bead is already held
+    # by an open blocker — then the wait is an existing edge and a bare --release
+    # parks it beside that edge, not a prose-only hold. --release reopens a
+    # standing anchor and either DISPATCHES it (a --route to a pool, moving) or
+    # PARKS it for a person (no route: open, unassigned, at rest). A held park
+    # names its wait: --waiting-on writes it as a `blocks` edge, --no-wait says
+    # nothing waits and stamps gc.takeaway_settled. Neither, on a bead carrying NO
+    # open blocker, is the silent prose-only park — a headline holding it with no
+    # edge and no settled mark, the shape doctor/check-wait-is-an-edge reports and
+    # the I1 backlog drains, refilled by parks faster than closes drain it. Any
+    # open blocker counts, its own demand included: a demand is an edge that holds.
+    # An unreadable probe refuses the park: with the blockers unread no existing
+    # edge can be proven, and stamping an unedged hold on a bead the guard could
+    # not inspect is the shape it exists to stop, so the caller states its
+    # disposition (--waiting-on or --no-wait) or re-runs once the store answers.
+    # A dispatch is moving and leaves no unedged hold, so the route guard below
+    # fails open on the same probe where this one fails closed; a closed anchor
+    # took no park (release_park cleared above); a bare headline (no --release)
+    # parks nothing; a converse sitting stamps one beside a demand that holds it.
+    if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        park_held=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
+            | jq -er 'if type == "array" then
+                   [ .[] | select((.dependency_type // "") == "blocks")
+                         | select((.status // "") != "closed") | .id ] | join(" ")
+                 else error("not an edge array") end' 2>/dev/null) || park_held="__unreadable__"
+        if [ "$park_held" = "__unreadable__" ]; then
+            echo "$PROG: takeaway: --release parks $bead for a person, and a park states its disposition — but $bead's blockers could not be read, so an open blocker holding it beside an edge cannot be proven. Pass --waiting-on <bead> for the wait it holds on (written as a blocks edge), or --no-wait when nothing waits on it, or re-run once the store answers: a park the guard cannot clear must not stamp an unedged hold on a bead it could not inspect. Nothing was written." >&2
+            exit 2
+        fi
+        if [ -z "$park_held" ]; then
+            echo "$PROG: takeaway: --release parks $bead for a person, and a park states its disposition: --waiting-on <bead> for the wait it holds on (written as a blocks edge), or --no-wait when nothing waits on it. $bead carries no open blocker to hold it, so neither flag leaves the headline an unedged hold — the shape doctor/check-wait-is-an-edge reports and the I1 backlog drains. Nothing was written." >&2
+            exit 2
+        fi
+    fi
 
     # A pool route promises a claim some session can perform. A bead blocked by
     # anything other than its own demand has its method somewhere else: no pool
@@ -597,8 +1106,31 @@ cmd_takeaway() {
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=$no_wait"
+    # --release retires the pour's routing on the anchor: gc.routed_to takes the
+    # new route (empty when none) and gc.execution_routed_to — the stamp a pour
+    # leaves naming the pool it dispatched to — is dropped. That stamp is
+    # execution provenance, not a live dispatch path: deferred-dispatch's reconcile
+    # keys idempotency on its own gc.dispatch_when_ready_slung marker, and arm
+    # refuses on a live route (gc.routed_to) or that marker, so neither reads
+    # gc.execution_routed_to. A release drops it best-effort, so a finished pour's
+    # provenance does not linger on a bead the pour no longer drives.
+    #
+    # The park unassigns the bead, so the identity the last executor stamped goes
+    # with the assignee: gc.session_name and gc.session_id name the session that
+    # held it, and an unassigned bead has no executor for them to name. A
+    # gc.session_name left behind is residue the moment the bead next carries a
+    # route its stamp does not match — the shape doctor/executor-identity-residue
+    # reports on an open, routed bead — and a gc.session_id left behind is the
+    # stale pin the runtime's orphan recovery resolves an owner from.
+    # converse-claim.sh's release_turn clears the same pair when it puts a turn
+    # back. Both are read back after this write and a lone unset retried, the way
+    # the route and the completion proof beside them are: a silent multi-pair drop
+    # would otherwise report a successful release while the very residue
+    # doctor/executor-identity-residue exists to catch survives on the bead.
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
-               --set-metadata "gc.routed_to=$route" --set-metadata "gc.proactive_reaction=1"
+               --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
+               --unset-metadata gc.session_name --unset-metadata gc.session_id \
+               --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
@@ -647,6 +1179,95 @@ cmd_takeaway() {
             echo "$PROG: takeaway: $bead still reads gc.takeaway_settled='$settled_got', not '$no_wait' — the headline is stamped, but the disposition beside it is the one the sitting before it left, so the wait check answers for this bead from a stamp nobody wrote for it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.takeaway_settled=$no_wait" >&2
         fi
     fi
+    # The completion proof is read back like the route beside it. Two readers key
+    # on gc.proactive_reaction=1 as "the release landed": first-reaction-dispose's
+    # retry guard (assets/scripts/first-reaction-dispose.sh) and the proactive
+    # sling loop, which skips a bead already stamped it
+    # (tools/proactive-first-reaction-fixture.sh). It rides the same multi-pair
+    # write as the route, so the same silent drop can leave it empty; a park whose
+    # proof lands empty reads to both as a partial that never completed, and the
+    # next dispose re-releases a bead a worker may already hold. Read it back and
+    # repair it — a repair that also misses is a verb failure, because a caller
+    # reading a zero exit as "released, proof durable" would be wrong.
+    proactive_missed=""
+    if [ -n "$release_park" ]; then
+        proactive_got=$(meta_now "$bead" gc.proactive_reaction)
+        if [ "$proactive_got" != "1" ]; then
+            echo "$PROG: takeaway: gc.proactive_reaction on $bead read back as '$proactive_got', expected '1' — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 || true
+            proactive_got=$(meta_now "$bead" gc.proactive_reaction)
+            if [ "$proactive_got" = "1" ]; then
+                echo "$PROG: takeaway: the proactive-reaction repair landed on $bead" >&2
+            else
+                proactive_missed=1
+            fi
+        fi
+    fi
+    # The pour stamp is cleared best-effort: gc.execution_routed_to names the pool
+    # the pour dispatched this bead to, and a release ends that pour. No arm or
+    # reconcile guard reads it (reconcile keys on its own
+    # gc.dispatch_when_ready_slung marker), so a surviving stamp gates no
+    # re-dispatch — it is only cosmetic provenance. Clear it, retry a lone unset,
+    # and if it still survives, WARN and let the release stand rather than fail the
+    # verb: first-reaction-dispose's --then-route arm runs right after this release,
+    # and failing here on a harmless stamp would skip the arm entirely.
+    exec_missed=""
+    if [ -n "$release_park" ]; then
+        exec_got=$(meta_now "$bead" gc.execution_routed_to)
+        if [ -n "$exec_got" ]; then
+            echo "$PROG: takeaway: gc.execution_routed_to on $bead read back as '$exec_got', expected empty — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.execution_routed_to >/dev/null 2>&1 || true
+            exec_got=$(meta_now "$bead" gc.execution_routed_to)
+            if [ -z "$exec_got" ]; then
+                echo "$PROG: takeaway: the execution-stamp repair landed on $bead" >&2
+            else
+                exec_missed=1
+            fi
+        fi
+    fi
+    # The executor identity the unassign takes with it is read back like the route
+    # and the proof above, and fails the verb the same way: both keys have readers.
+    # A gc.session_name left on the now-open bead is the residue
+    # doctor/executor-identity-residue reports the moment the bead next carries a
+    # route its stamp does not match — the finding this release exists to close. It
+    # rides the same multi-pair write, so the same silent drop can leave it
+    # standing; read it back, retry a lone unset, and fail if it survives.
+    # orphan-dispose.sh verifies the same pair after its own release.
+    sname_missed=""
+    if [ -n "$release_park" ]; then
+        sname_got=$(meta_now "$bead" gc.session_name)
+        if [ -n "$sname_got" ]; then
+            echo "$PROG: takeaway: gc.session_name on $bead read back as '$sname_got', expected empty — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.session_name >/dev/null 2>&1 || true
+            sname_got=$(meta_now "$bead" gc.session_name)
+            if [ -z "$sname_got" ]; then
+                echo "$PROG: takeaway: the session-name repair landed on $bead" >&2
+            else
+                sname_missed=1
+            fi
+        fi
+    fi
+    # gc.session_id is the pin the runtime's orphan recovery resolves an owner
+    # from, so one left behind lets it resolve a dead owner for a bead nobody
+    # holds. Same write, same silent drop, same read-back-and-fail.
+    sid_missed=""
+    if [ -n "$release_park" ]; then
+        sid_got=$(meta_now "$bead" gc.session_id)
+        if [ -n "$sid_got" ]; then
+            echo "$PROG: takeaway: gc.session_id on $bead read back as '$sid_got', expected empty — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.session_id >/dev/null 2>&1 || true
+            sid_got=$(meta_now "$bead" gc.session_id)
+            if [ -z "$sid_got" ]; then
+                echo "$PROG: takeaway: the session-id repair landed on $bead" >&2
+            else
+                sid_missed=1
+            fi
+        fi
+    fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
     # <blocker>", so the edge lands on <bead> — what the board reads. Only the
@@ -677,6 +1298,35 @@ cmd_takeaway() {
     if [ -n "$settled_missed" ]; then
         exit 4
     fi
+    # The completion proof is exit-4, not a warn: unlike the pour stamp below, it
+    # HAS readers, and a missing proof causes the exact re-release the guards it
+    # feeds exist to prevent. The release and edges are kept and named, so a hand
+    # repair finishes it.
+    if [ -n "$proactive_missed" ]; then
+        echo "$PROG: takeaway: $bead is released but gc.proactive_reaction did not stamp as '1' — the completion proof first-reaction-dispose and cmd_sling read to refuse a second release is missing, so a re-offered dispose would re-release this bead. The headline, release and edges are written; stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.proactive_reaction=1" >&2
+        exit 4
+    fi
+    # A surviving session pin is exit-4 like the route and the proof above, not a
+    # warn like the cosmetic pour stamp below: both have readers. A caller reading
+    # a zero exit as "released, identity cleared" would route the bead onward — the
+    # exact next step that turns a surviving gc.session_name into the residue
+    # doctor/executor-identity-residue reports. The release and edges are kept and
+    # named, so a hand repair finishes it.
+    if [ -n "$sname_missed" ]; then
+        echo "$PROG: takeaway: $bead still carries gc.session_name='$sname_got' after release — the executor identity the unassign was meant to take with it, so doctor/executor-identity-residue re-fires the moment this bead next carries a route. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_name" >&2
+        exit 4
+    fi
+    if [ -n "$sid_missed" ]; then
+        echo "$PROG: takeaway: $bead still carries gc.session_id='$sid_got' after release — a stale orphan-recovery pin, so the runtime resolves a dead owner for a bead nobody holds. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_id" >&2
+        exit 4
+    fi
+    # A surviving pour stamp is cosmetic — no arm or reconcile guard reads it — so
+    # it WARNS and the release stands. Failing here would exit 4 into
+    # first-reaction-dispose's die before its --then-route arm, skipping the arm
+    # over a harmless stamp.
+    if [ -n "$exec_missed" ]; then
+        echo "$PROG: takeaway: $bead still carries gc.execution_routed_to='$exec_got' after release — cosmetic provenance a finished pour left; no arm or reconcile guard reads it (deferred-dispatch keys on gc.dispatch_when_ready_slung), so the release stands. Clear it by hand if you want it gone: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
+    fi
     # A route asked for on a closed anchor is refused the same way a route that
     # would not stamp is: the useful writes stand, and the exit is non-zero so
     # no caller reads it as "released to that pool". Routing a disposed bead is
@@ -695,16 +1345,18 @@ cmd_takeaway() {
 }
 
 # ── Verb: demand ─────────────────────────────────────────────────────
-# What a person owes, filed as a bead the work is blocked by — the replacement
-# for parking a subject on prose. A bead is either ready and therefore moving,
-# or blocked on a named bead by an edge; there is no third state a person has
-# to return and hand-clear.
+# What a person owes, filed as a NATIVE human gate (issue_type=gate,
+# await_type=human) the work is blocked by — the replacement for parking a
+# subject on prose. A bead is either ready and therefore moving, or blocked on
+# a named gate by an edge; there is no third state a person has to return and
+# hand-clear. The gate keeps gc.demand_for so every reader of the demand
+# convention keeps working; those readers pass --include-gates because
+# `bd list` hides gate beads by default.
 #
-# The demand is filed as a SIBLING of <gated-bead>: same parent, or parentless
-# when the gated bead has none. That placement is not tidiness. beads REFUSES a
-# `blocks` edge from a parent to its own descendant, because blocked status
-# cascades and the descendant would inherit the block it is meant to lift, so a
-# demand filed as a CHILD could never gate the thing it is about.
+# The gate is grouped as a SIBLING of <gated-bead> — same parent, or parentless
+# when the gated bead has none — so it reads beside the work on the board. The
+# `blocks` edge then runs sibling->sibling; beads REFUSES one from a parent to
+# its own descendant, which is what a demand filed as a CHILD would be.
 #
 # The edge is the record here, not a garnish on it. `takeaway --waiting-on`
 # writes its edge beside prose a human reads, so a rejected edge only warns;
@@ -714,16 +1366,47 @@ cmd_takeaway() {
 # blocked. An --also-blocks target is held to the same terms as the gated bead,
 # and every missing edge is named with its own repair command.
 #
-# One open demand per gated bead: a resumed sitting re-states the same question
-# and gets the existing demand refreshed, never a second blocker for one wait.
+# One open demand per (gated bead, topic): a resumed sitting re-states the same
+# question under the same topic and gets its own demand refreshed, never a second
+# blocker for one wait. The topic scopes the lookup so two sittings on one
+# standing-scope bucket — same gated bead, one visit each, distinct
+# escalation_key — keep their own demand instead of the second refreshing the
+# first's in place and overwriting its title and gc.takeaway, which is the
+# operator's question. An empty topic matches on the gated bead alone, the
+# pre-topic behaviour every other caller keeps.
+#
+# Find both stamped demands and gates whose creation outlived its response. The
+# await_id carries the topic too — gc.demand_for is the stamp external readers
+# key on, while await_id is this verb's private recovery handle — so an unstamped
+# orphan is recoverable under its own topic rather than colliding with a sibling's.
+# Keep lookup errors distinct from an empty result: either a failed read or
+# ambiguous matches must prevent another create. Use a subshell for scratch vars.
+demand_await_id() { if [ -n "${2:-}" ]; then printf 'gc-demand:%s:%s' "$1" "$2"; else printf 'gc-demand:%s' "$1"; fi; }
+demand_lookup() (
+    gated="$1"; topic="${2:-}"
+    aid=$(demand_await_id "$gated" "$topic")
+    raw=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit=0 2>/dev/null) || return 1
+    printf '%s' "$raw" | scrub | jq -ce --arg g "$gated" --arg t "$topic" --arg aid "$aid" '
+        if type != "array" then error("invalid demand list") else
+          [ .[] | select(
+              ((.metadata["gc.demand_for"] // "") == $g
+                 and ($t == "" or (.metadata["gc.demand_topic"] // "") == $t))
+              or (.issue_type == "gate" and .await_type == "human"
+                 and .await_id == $aid)) ]
+          | if length > 1 then
+              error("multiple demand gates; reconcile before retrying: " + (map(.id) | join(", ")))
+            else .[0] // {} end
+        end'
+)
+
 cmd_demand() {
-    gated=""; text=""; by="host"; kind="decision"; who=""; body=""; also=""; npos=0
+    gated=""; text=""; by="host"; who=""; body=""; also=""; topic=""; npos=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)          by="${1#--by=}"; shift ;;
             --by)            shift; [ $# -gt 0 ] || { echo "$PROG: demand: --by requires a value" >&2; exit 2; }; by="$1"; shift ;;
-            --kind=*)        kind="${1#--kind=}"; shift ;;
-            --kind)          shift; [ $# -gt 0 ] || { echo "$PROG: demand: --kind requires a value" >&2; exit 2; }; kind="$1"; shift ;;
+            --topic=*)       topic="${1#--topic=}"; shift ;;
+            --topic)         shift; [ $# -gt 0 ] || { echo "$PROG: demand: --topic requires a value" >&2; exit 2; }; topic="$1"; shift ;;
             --assignee=*)    who="${1#--assignee=}"; shift ;;
             --assignee)      shift; [ $# -gt 0 ] || { echo "$PROG: demand: --assignee requires a value" >&2; exit 2; }; who="$1"; shift ;;
             --body=*)        body="${1#--body=}"; shift ;;
@@ -746,12 +1429,8 @@ cmd_demand() {
     [ -n "$gated" ] || { echo "$PROG: demand needs <gated-bead>" >&2; usage; exit 2; }
     normalize_headline "$text" demand
     text="$HEADLINE"
-    case "$kind" in
-        decision|task) ;;
-        *) echo "$PROG: demand: --kind is 'decision' (a ruling) or 'task' (work only a person can do); got '$kind'" >&2; exit 2 ;;
-    esac
     [ -n "$by" ] || by="host"
-    [ -n "$body" ] || body="What a person owes, filed as a bead so the wait is a graph state rather than a comment. Closing this makes $gated ready, and the pool claims it."
+    [ -n "$body" ] || body="What a person owes, filed as a human gate so the wait is a graph state rather than a comment. Resolving this gate makes $gated ready, and the pool claims it."
 
     path=$(rig_path_for_bead "$gated")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
@@ -780,10 +1459,16 @@ cmd_demand() {
          | map(select(. != "")) | .[0] // ""' 2>/dev/null || true)
     # <<< demand-sibling-shape
 
-    existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
-        | scrub \
-        | jq -r --arg g "$gated" \
-            '[ .[]? | select((.metadata["gc.demand_for"] // "") == $g) | .id ] | first // empty' 2>/dev/null || true)
+    # --include-gates: the demand is a human gate (issue_type=gate), which
+    # `bd list` hides by default; without it every re-state files a second
+    # demand instead of refreshing the one that is already open. The status
+    # set is the demand readers' (signoff, pr-facts, liveness): a gate an
+    # operator deferred or pinned still holds the work there, so a re-state
+    # must refresh it rather than file a second gate beside it.
+    candidate=$(demand_lookup "$gated" "$topic") \
+        || { echo "$PROG: demand: could not establish a unique demand on $gated — stopped before creating another gate." >&2; exit 4; }
+    existing=$(printf '%s' "$candidate" | jq -r --arg g "$gated" \
+        'select((.metadata["gc.demand_for"] // "") == $g) | .id // empty')
 
     if [ -n "$existing" ]; then
         demand="$existing"
@@ -792,6 +1477,7 @@ cmd_demand() {
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled="
+        [ -n "$topic" ] && set -- "$@" --set-metadata "gc.demand_topic=$topic"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
         gc bd update "$demand" "$@" >/dev/null 2>&1 \
             || { echo "$PROG: demand: could not refresh the open demand $demand on $gated" >&2; exit 4; }
@@ -812,31 +1498,82 @@ cmd_demand() {
         fi
         echo "$PROG: demand: refreshed the open demand $demand on $gated; no second bead filed" >&2
     else
-        set -- -t "$kind" --title "$text" -d "$body"
-        [ -n "$parent" ] && set -- "$@" --parent "$parent"
-        demand=$(gc bd create "$@" --json 2>/dev/null \
-            | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+        # File the demand as a NATIVE human gate — issue_type=gate,
+        # await_type=human, the pack's human-escalation state — that blocks the
+        # gated bead. `gc bd update` has no `gate` type, so the gate can only be
+        # born from `gc bd gate create`; the demand metadata is stamped after.
+        # --reason carries the body from birth, so a gate whose stamp never
+        # lands still explains itself to whoever clears it by hand.
+        # await_id is stored with the initial row, before the commit that can
+        # fail without returning an id. It lets this call and later retries
+        # recover the same unstamped gate, even if the first recovery read fails.
+        demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
+        if [ -z "$demand" ]; then
+            demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="$(demand_await_id "$gated" "$topic")" --title "$text" --reason "$body" --json 2>/dev/null \
+                | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+            if [ -z "$demand" ] || [ "$demand" = null ]; then
+                candidate=$(demand_lookup "$gated" "$topic") \
+                    || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: $(demand_await_id "$gated" "$topic")." >&2; exit 4; }
+                demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
+            fi
+        fi
         # A create routed to the wrong ledger returns an id rather than an
         # error, and that id can never carry an edge to $gated — so the prefix
         # is checked, not assumed.
         case "$demand" in
-            ""|null)     echo "$PROG: demand: bd create returned no id — nothing filed on $gated." >&2; exit 4 ;;
+            ""|null)     echo "$PROG: demand: gc bd gate create returned no id and no recoverable demand was found on $gated; creation was not confirmed." >&2; exit 4 ;;
             "$prefix"-*) : ;;
-            *)           echo "$PROG: demand: bd create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Close it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
+            *)           echo "$PROG: demand: gc bd gate create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Resolve it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
         esac
-        set -- --set-metadata "gc.takeaway=$text" \
+        set -- --title "$text" -d "$body" \
+               --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=" \
                --set-metadata "gc.demand_for=$gated" \
                --set-metadata "gc.routed_to=human"
+        [ -n "$topic" ] && set -- "$@" --set-metadata "gc.demand_topic=$topic"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
-        gc bd update "$demand" "$@" >/dev/null 2>&1 \
-            || { echo "$PROG: demand: filed $demand but could not stamp it — it is not on the operator's queue yet. Re-run this command." >&2; exit 4; }
+        stamped=1
+        gc bd update "$demand" "$@" >/dev/null 2>&1 || stamped=0
+        # A non-zero update is not proof the stamp did not land: bd writes the
+        # row before it commits, and a commit that fails after the write exits
+        # non-zero with the metadata in place. Read the key back before treating
+        # the gate as an orphan — resolving a stamped, live gate would release
+        # $gated while a person still owes an answer.
+        if [ "$stamped" -eq 0 ] && [ "$(meta_now "$demand" gc.demand_for)" = "$gated" ]; then
+            echo "$PROG: demand: gc bd update on $demand returned non-zero but gc.demand_for reads back as $gated — the stamp landed; continuing." >&2
+            stamped=1
+        fi
+        if [ "$stamped" -eq 0 ]; then
+            # `gc bd gate create` requires --blocks, so $demand was born already
+            # blocking $gated. Without this stamp it carries no gc.demand_for, so
+            # the existing-demand lookup above cannot find it: a re-run would file
+            # a SECOND gate while this unstamped one keeps $gated blocked, unseen
+            # by every reader that discovers demands by gc.demand_for. Resolve the
+            # orphan before returning so the board is clean and the re-run starts
+            # from no demand at all.
+            if gc bd gate resolve "$demand" >/dev/null 2>&1; then
+                echo "$PROG: demand: filed gate $demand but could not stamp it; resolved the orphan so it no longer blocks $gated. Re-run this command." >&2
+            else
+                echo "$PROG: demand: filed gate $demand but could not stamp it, and could not resolve it — it still blocks $gated with no demand metadata. Clear it by hand, then re-run: gc bd gate resolve $demand" >&2
+            fi
+            exit 4
+        fi
+        # Re-home the gate as the gated bead's SIBLING (best-effort): it is born
+        # parentless, and grouping it under the gated bead's own parent keeps
+        # the board tidy. Non-fatal — a parentless gate blocks exactly as hard,
+        # and the blocks edge runs sibling->sibling either way.
+        [ -n "$parent" ] && gc bd update "$demand" --parent "$parent" >/dev/null 2>&1 || true
     fi
 
     # `dep add <gated> <demand>` reads "<gated> is blocked by <demand>", so the
-    # row lands on the gated bead — the side that is waiting.
+    # row lands on the gated bead — the side that is waiting. `gc bd gate
+    # create` already added the primary edge on a fresh gate; re-adding a
+    # same-type edge is a silent, exit-0 no-op in beads (no warning is
+    # printed), so this pass costs one round-trip and doubles as the repair
+    # should the birth edge not have landed. The loop still owns every
+    # --also-blocks target, and the read-back below is the guarantee for all.
     for _w in $gated $also; do
         [ -n "$_w" ] || continue
         if [ "$_w" = "$demand" ]; then
@@ -877,19 +1614,101 @@ cmd_demand() {
     fi
 
     bust_cache
-    echo "demand $demand blocks $gated (by $by, $kind): $text"
+    echo "demand $demand blocks $gated (by $by${who:+, for $who}): $text"
+}
+
+# ── Verb: resolve ────────────────────────────────────────────────────
+# resolve <reference> — print the LIVE bead a reference resolves to, the same
+# way open/engage/react resolve their subject: a PR number/URL to the anchor
+# that records it, a closed+superseded id to its successor. A live bead id, or
+# any reference the resolver does not recognize (a topic string), prints
+# unchanged; an unresolvable or ambiguous PR, or a superseded-by cycle, is
+# refused (exit 4) naming what it could not resolve. Read-only — it files
+# nothing. gc-visit-open.sh calls this before it decides a reference is a new
+# topic, so a PR number or URL reaches the resolver instead of becoming a topic
+# bead titled with its number.
+cmd_resolve() {
+    resolve_ref=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: resolve: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$resolve_ref" ] || { echo "$PROG: resolve takes one reference" >&2; exit 2; }; resolve_ref="$1"; shift ;;
+        esac
+    done
+    case "$resolve_ref" in "") echo "$PROG: resolve needs <bead-id|pr-number|pr-url>" >&2; usage; exit 2 ;; esac
+    resolve_live_subject "$resolve_ref"
+    printf '%s\n' "$RESOLVED_SUBJECT"
+}
+
+# verify_subject <bead-id> <verb> <nothing-clause> [<subject-ref>] — resolve a
+# bead id to its live row before a write verb acts on it, classifying a
+# non-answer the way `open` does. A probe that did not ANSWER — empty output, or
+# an error OTHER than the "no issues found" not-found error — is a data-plane
+# outage: retryable, existence UNKNOWN, NOT a missing bead. Only a well-formed
+# result that resolves no matching row is a genuine not-found, and an id whose
+# prefix matches no rig is a not-found provable without the data plane. open,
+# engage, dismiss and accept share this one path, so a refused Dolt connection
+# is never reported to the operator as a typo and the message cannot drift
+# between verbs.
+#
+# `gc bd show <id>` is deliberately UNPINNED: it resolves across ledgers
+# regardless of BEADS_DIR, so pinning --db by prefix would false-refuse a real
+# subject. The raw read is captured before scrub so an EMPTY answer stays
+# distinguishable from an error object, and the id is compared for EQUALITY so a
+# row for a different bead is not taken as a resolution.
+#
+# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array),
+# VS_ROW (the matched object), VS_ID (its id), and returns 0. Otherwise prints
+# the classified message to stderr — "$PROG: <verb>: …" suffixed with
+# <nothing-clause> (e.g. "Nothing spawned.") — and returns 4, the fail-closed
+# exit code every caller already uses. <subject-ref> overrides how the id is
+# named in that message (accept names a subject a visit pointed at); empty uses
+# the bare quoted id.
+verify_subject() {
+    _vs_bead="$1"; _vs_verb="$2"; _vs_nothing="$3"
+    _vs_ref="${4:-}"; [ -n "$_vs_ref" ] || _vs_ref="'$_vs_bead'"
+    VS_PAYLOAD=""; VS_ROW=""; VS_ID=""
+    _vs_raw=$(gc bd show "$_vs_bead" --json 2>/dev/null || true)
+    VS_PAYLOAD=$(printf '%s' "$_vs_raw" | scrub)
+    VS_ROW=$(printf '%s' "$VS_PAYLOAD" \
+        | jq -c --arg b "$_vs_bead" \
+            'if type == "array"
+             then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first) // empty
+             else empty end' 2>/dev/null || true)
+    case "$VS_ROW" in ""|null) VS_ROW="" ;; esac
+    if [ -n "$VS_ROW" ]; then
+        VS_ID=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
+    fi
+    [ -n "$VS_ID" ] && return 0
+
+    # No matching row. Not-found is the specific "no issues found" error; any
+    # OTHER error means the read FAILED and existence is unknown — reporting an
+    # outage as a typo sends the operator hunting a bead that is there.
+    _vs_rig=$(rig_name_for_bead "$_vs_bead")
+    _vs_probe_err=$(printf '%s' "$VS_PAYLOAD" \
+        | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+    case "$_vs_probe_err" in *"no issues found"*) _vs_probe_err="" ;; esac
+    if [ -z "$_vs_rig" ]; then
+        echo "$PROG: $_vs_verb: bead not found: $_vs_ref — its id prefix '${_vs_bead%%-*}' matches no rig in 'gc rig list'. $_vs_nothing" >&2
+    elif [ -z "$_vs_raw" ] || [ -n "$_vs_probe_err" ]; then
+        echo "$PROG: $_vs_verb: could not verify $_vs_ref — 'gc bd show' did not answer${_vs_probe_err:+ ($_vs_probe_err)} (data plane down?). $_vs_nothing" >&2
+    else
+        echo "$PROG: $_vs_verb: bead not found: $_vs_ref — no rig ledger answers for that id. $_vs_nothing" >&2
+    fi
+    return 4
 }
 
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a VISIT on the bead — a small child bead in the subject's
-# continuation group, routed to the rig-qualified converse pool (the
+# continuation group, parked on the helm board via `gc.routed_to=human` (the
 # canonical gate-visit lines, formulas/mol-visit.toml). One open visit per
 # subject; the subject must RESOLVE first so a typo cannot manufacture a
 # visit (tk-ujwvt). --reason is the short title tail, --body the brief the
 # converse session reads at claim time — callers with their own origin
 # (gc-visit-open.sh) pass both rather than misreporting the board wording.
 cmd_open() {
-    bead=""; open_reason=""; open_body=""
+    bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) open_reason="${1#--reason=}"; shift ;;
@@ -898,6 +1717,8 @@ cmd_open() {
             --body=*)   open_body="${1#--body=}"; shift ;;
             --body)     shift; [ $# -gt 0 ] || { echo "$PROG: open: --body requires a value" >&2; exit 2; }
                         open_body="$1"; shift ;;
+            --allow-duplicate) open_allow_dup=1; shift ;;
+            --json)     open_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: open: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: open takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
@@ -905,8 +1726,14 @@ cmd_open() {
     done
     case "$bead" in "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
 
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # BEFORE the rig is derived from the id prefix (a PR number has none).
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
+
     # Pin bd at the bead's rig (cross-rig filing) and export its rig as GC_RIG
-    # so the gate-visit POOL line rig-qualifies the converse pool.
+    # so the visit is filed in the subject's rig store and the board gathers it
+    # there.
     path=$(rig_path_for_bead "$bead")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     rig=$(rig_name_for_bead "$bead")
@@ -914,60 +1741,63 @@ cmd_open() {
 
     # The subject must EXIST before anything is filed: fail CLOSED on every
     # unhappy reading — the alternative is filing a visit on an unverified
-    # subject. Distinct messages: each reading needs a different operator move.
+    # subject. verify_subject is the shared resolve+classify that tells a
+    # data-plane outage apart from a genuine not-found.
     # >>> open-subject-exists
-    subject_raw=$(gc bd show "$bead" --json 2>/dev/null || true)
-    # `bd show` answers an ARRAY on success, a bare {"error":…} OBJECT
-    # otherwise; control chars in notes break the parse (must not read as
-    # "missing"). Id compared for EQUALITY with what was typed. Deliberately
-    # UNPINNED: `gc bd show <id>` resolves across ledgers regardless of
-    # BEADS_DIR; pinning --db by prefix would false-refuse a real subject.
-    subject_clean=$(printf '%s' "$subject_raw" | scrub)
-    subject=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
-             else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        # Not-found is the specific "no issues found" error; any OTHER error
-        # means the read FAILED and existence is unknown — reporting an outage
-        # as a typo sends the operator hunting one that is not there.
-        probe_err=$(printf '%s' "$subject_clean" \
-            | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
-        case "$probe_err" in *"no issues found"*) probe_err="" ;; esac
-        if [ -z "$rig" ]; then
-            echo "$PROG: open: bead not found: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list'. No visit filed." >&2
-        elif [ -z "$subject_raw" ] || [ -n "$probe_err" ]; then
-            echo "$PROG: open: could not verify '$bead' — 'gc bd show' did not answer${probe_err:+ ($probe_err)} (data plane down?). No visit filed." >&2
-        else
-            echo "$PROG: open: bead not found: '$bead' — no rig ledger answers for that id. No visit filed." >&2
-        fi
-        exit 4
-    fi
+    verify_subject "$bead" open "No visit filed." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
     # <<< open-subject-exists
 
-    # Already held? A visit records its subject twice — the
-    # gc.continuation_group stamp and the tracks edge — and only the edge has
-    # proved reliable (su-ab9je: the stamp landed empty), so match EITHER.
-    # The $s != "" arm keeps an empty stamp from matching an empty subject.
-    existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
-        | jq -r --arg s "$bead" \
-            '[ .[]? | select((.metadata.task_kind // "") == "visit")
-               | select($s != ""
-                        and (((.metadata["gc.continuation_group"] // "") == $s)
-                             or ([ .dependencies[]?
-                                   | select((.type // "") == "tracks")
-                                   | select((.depends_on_id // "") == $s) ] | length > 0)))
-               | .id ] | first // empty' 2>/dev/null || true)
-    if [ -n "$existing" ]; then
-        echo "$PROG: visit $existing is already open for $bead — a converse session holds it (or will spawn/vacuum it)."
-        echo "       Attach via the sessions picker."
-        return 0
+    # A DONE-band row is a finished item, not open work. Minting a fresh
+    # "operator pick" visit on a closed subject is how a resolved demand still
+    # showing its question gets re-engaged as a new ask. A superseded predecessor
+    # was already redirected to its live successor above, so a closed subject here
+    # is genuinely settled — refuse it rather than promote a glance into a visit.
+    # >>> open-subject-closed
+    subject_status=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then (first(.[] | objects | select((.id // "") == $b)) | .status // "")
+             else "" end' 2>/dev/null || true)
+    if [ "$subject_status" = "closed" ]; then
+        echo "$PROG: open: $bead is closed — a settled item on the DONE band, not open work. No visit filed. To act on it, re-open the bead or file fresh work; a closed row is not a pick." >&2
+        exit 4
+    fi
+    # <<< open-subject-closed
+
+    # Already held? A visit records its subject as a tracks edge to it, with the
+    # gc.continuation_group stamp as the recovery fallback (su-ab9je: the stamp
+    # can land empty). visit-identity.sh is the one matcher, shared with dismiss,
+    # converse-fold and the sweeps; it also names WHICH identity matched, so a
+    # fold is reported (--json and stderr), never a silent no-op.
+    # --allow-duplicate skips the dedup: engage --reason files a fresh visit for
+    # a distinct concern on purpose, even when the subject already has one.
+    if [ -z "$open_allow_dup" ]; then
+        existing_row=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub \
+            | jq -c --arg s "$bead" "$VISIT_IDENTITY_JQ"'
+                [ .[]? | select((.metadata.task_kind // "") == "visit")
+                   | select(visit_covers($s))
+                   | {id, identity: visit_identity_match($s)} ] | first // empty' 2>/dev/null || true)
+        existing=$(printf '%s' "$existing_row" | jq -r 'if type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
+        if [ -n "$existing" ]; then
+            existing_identity=$(printf '%s' "$existing_row" | jq -r '.identity // empty' 2>/dev/null || true)
+            echo "$PROG: open: folded into $existing ($existing_identity) — no visit filed." >&2
+            if [ -n "$open_json" ]; then
+                jq -nc --arg s "$bead" --arg v "$existing" --arg id "$existing_identity" \
+                    '{subject: $s, visit: $v, identity: $id, filed: false}'
+            else
+                echo "$PROG: visit $existing is already open for $bead — parked on the helm board until an operator engages it."
+                echo "       Engage it when ready: $PROG engage $existing"
+            fi
+            return 0
+        fi
     fi
 
     # What this sitting is FOR, in the caller's words; resolved outside the
     # marked block so the block stays a verbatim copy of the canonical form.
-    visit_tail="${open_reason:-operator pick from the board}"
+    # Bounded to a board headline so a long --reason cannot overflow bd's title
+    # cap ("visit: <id> — <reason>"); the full reason is kept in visit_body below.
+    visit_tail=$(visit_headline "${open_reason:-operator pick from the board}")
     if [ -n "$open_body" ]; then
         visit_body="$open_body"
     elif [ -n "$open_reason" ]; then
@@ -977,13 +1807,23 @@ cmd_open() {
     fi
 
     # File the visit — the canonical gate-visit lines (formulas/mol-visit.toml).
+    # The converse routed-pool is retired: a filed visit parks on the helm board
+    # (gc.routed_to=human) and holds no session until an operator engages it
+    # with `gc-helm engage`. `human` is the board's exact gather predicate.
     # >>> gate-visit
-    POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-    VISIT=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
+    POOL="human"
+    # bd create answers an ARRAY (or bare object) carrying the id on success and
+    # a bare {"error":…} OBJECT on failure; extract the id type-guarded and
+    # scrubbed so an error object never crashes jq. The subject already resolved
+    # above, so an empty id here is bd's failure — surface bd's own message.
+    VISIT_JSON=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
         -d "$visit_body" \
-        --json | jq -r '.id // .[0].id')
+        --json 2>/dev/null || true)
+    VISIT=$(printf '%s' "$VISIT_JSON" | scrub \
+        | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-        || { echo "$PROG: open: could not create a visit bead for '$bead' (does it exist?)" >&2; exit 4; }
+        || { create_err=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+             echo "$PROG: open: could not create a visit bead for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
     gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
         --set-metadata "gc.continuation_group=$bead" \
         --set-metadata "task_kind=visit"
@@ -1009,13 +1849,18 @@ cmd_open() {
     # <<< gate-visit
     bust_cache
 
-    echo "$PROG: visit $VISIT filed on $bead (pool $POOL) — a converse session will spawn (cold) or vacuum it (warm)."
-    echo "       Attach via the sessions picker."
+    if [ -n "$open_json" ]; then
+        jq -nc --arg s "$bead" --arg v "$VISIT" \
+            '{subject: $s, visit: $v, identity: "filed", filed: true}'
+    else
+        echo "$PROG: visit $VISIT filed on $bead — parked on the helm board (gc.routed_to=$POOL); no session spawned."
+        echo "       Engage it when ready: $PROG engage $VISIT"
+    fi
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
 # Thin wrapper over tools/gc-proactive.sh `sling` (which owns the
-# budget/cap clamp and the codex-gated mr merge path): slings
+# budget/cap clamp and the correctness-gated mr merge path): slings
 # mol-first-reaction at the bead so a worker writes a first-reaction card
 # and stamps gc.takeaway.
 cmd_react() {
@@ -1038,6 +1883,11 @@ cmd_react() {
     [ -n "$tool" ] && [ -x "$tool" ] \
         || { echo "$PROG: react: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)" >&2; exit 4; }
 
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # (parity with open), before the rig is derived from the id prefix.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
+
     # Pin bd at the bead's rig (parity with open).
     path=$(rig_path_for_bead "$bead")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
@@ -1054,65 +1904,166 @@ cmd_react() {
     set -- sling "$bead"
     [ -n "$nudge" ] && set -- "$@" --nudge
     [ -n "$dry" ] && set -- "$@" --dry-run
-    "$tool" "$@" || { echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2; exit 4; }
+    # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its first-reaction
+    # guard skipped an already-reacted bead: a no-op, not a failure, and NO
+    # reaction was dispatched. Re-raise that as exit 5 so an intake caller
+    # (gc-visit-open) files its own visit instead of waiting for a reaction that
+    # never ran; any other non-zero is a real failure.
+    if "$tool" "$@"; then
+        :
+    else
+        sling_rc=$?
+        if [ "$sling_rc" -eq 3 ]; then
+            echo "$PROG: react: $bead already carries a first reaction — nothing slung (a first reaction happens once). Clear the reaction marker to re-react, or file the visit directly." >&2
+            exit 5
+        fi
+        echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
+        exit 4
+    fi
 
     # The reaction lands async in the slung session; just clear the cache.
     if [ -z "$dry" ]; then bust_cache; fi
 }
 
+# ── The current sitting, inferred from session state ─────────────────
+# The subject of the OPEN visit this session is sitting on. dismiss acts on
+# "the sitting I am in", so when no bead is named it resolves it here instead
+# of making the operator paste an id the session already knows. A converse
+# session is the ASSIGNEE of the visit it holds; the subject is that visit's
+# gc.continuation_group stamp, or its tracks edge when the stamp landed empty
+# (su-ab9je) — the same recovery converse's own visit-fold-check makes, and
+# one cmd_dismiss's stamp-or-edge lookup then finds under the same id.
+# Read from this session's own rig ledger: a visit is filed in its subject's
+# rig and adopted by the converse sitting engaged on it, so the store to read
+# is this session's rig. A converse session runs with GC_RIG and BEADS_DIR
+# unset and so defaults to the city ledger, where the rig-filed visit is absent;
+# rig_db_for_session resolves the rig and the pin below reads it. The scrubbed
+# listing is left in SITTING_LISTING (with the BEADS_DIR it was read under) so
+# dismiss, which re-pins the same rig from the subject id, can skip a second
+# identical read.
+#
+# Sets SITTING_SUBJECT on success (called directly, not in a subshell, so the
+# listing handoff survives). It fails CLOSED, naming the explicit-id
+# form as the fix: no identity, no held visit, or more than one exit 2 (the
+# operator must say which); a listing that failed, did not answer a JSON
+# array, or would not parse exits 4 — a read that did not answer is a runtime
+# fault, not a usage error, and never proof of no sitting. An argument-free
+# verb that guessed the wrong subject would end the wrong sitting, which is
+# the one failure this inference exists to prevent.
+SITTING_SUBJECT=""; SITTING_LISTING=""; SITTING_LISTING_DIR=""
+current_sitting_subject() {
+    _me=$(session_identities)
+    if [ -z "$_me" ]; then
+        echo "$PROG: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset); there is no sitting to infer. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 2
+    fi
+    # Pin the visit lookup at THIS session's rig store. An unresolved rig leaves
+    # the caller default in place, so this never fails the inference outright.
+    _vdb=$(rig_db_for_session)
+    [ -n "$_vdb" ] && export BEADS_DIR="$_vdb"
+    if ! _vjson=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+        echo "$PROG: could not read this session's visits — 'gc bd list' failed. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 4
+    fi
+    _vjson=$(printf '%s' "$_vjson" | scrub)
+    if ! printf '%s' "$_vjson" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "$PROG: could not read this session's visits — 'gc bd list' did not answer a JSON array. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 4
+    fi
+    # One jq pass: the held visits, each reduced to its subject, deduplicated.
+    # A jq failure here is a listing this verb cannot read (an element that is
+    # not an object, metadata that is not a map), not an empty sitting.
+    _subjects=$(printf '%s' "$_vjson" | jq -r --arg ids "$_me" "$VISIT_IDENTITY_JQ"'
+        ($ids | split("\n") | map(select(. != ""))) as $me
+        | [ .[] | objects | . as $v
+            | select((($v.metadata // {}) | objects | .task_kind // "") == "visit")
+            | select(($me | index($v.assignee // "")) != null)
+            | visit_subject ]
+        | map(select(. != "")) | unique | .[]' 2>/dev/null) || {
+        echo "$PROG: could not read this session's visits — 'gc bd list' answered nothing this verb could parse. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 4
+    }
+    if [ -z "$_subjects" ]; then
+        echo "$PROG: no open visit is assigned to this session ($(printf '%s' "$_me" | tr '\n' ' ')); there is no current sitting. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 2
+    fi
+    if [ "$(printf '%s\n' "$_subjects" | wc -l | tr -d ' ')" -gt 1 ]; then
+        echo "$PROG: this session holds more than one open visit (subjects: $(printf '%s' "$_subjects" | tr '\n' ' ')); refusing to guess which sitting. Name one: $PROG dismiss <bead-id>." >&2
+        return 2
+    fi
+    SITTING_SUBJECT="$_subjects"
+    SITTING_LISTING="$_vjson"; SITTING_LISTING_DIR="${BEADS_DIR:-}"
+}
+
 # ── Verb: dismiss ────────────────────────────────────────────────────
-# The operator's explicit "I am done with this". Two writes, because two
-# surfaces hold the subject in view and neither lets go on its own:
+# The operator's explicit "end this sitting". converse runs with no
+# idle_timeout, so a held visit keeps its pane up until something closes the
+# visit; closing it here is the act that ends a sitting the operator no longer
+# wants, and converse-reap ends the now-settled session. The DONE band the
+# subject's closed anchor lands in carries no per-row state — a row leaves only
+# by ageing past GC_HELM_DONE_WINDOW — so dismiss writes nothing to the subject.
 #
-#   the SITTING — converse runs with no idle_timeout, so a held visit keeps
-#   its pane up until something closes the visit. Closing it here is the only
-#   act that ends a sitting the operator no longer wants.
-#
-#   the ROW — a closed anchor keeps its row in the DONE band. gc.dismissed_at
-#   is what the gather reads to stop offering it on the operator's word. A row
-#   also ages out once it has been closed longer than GC_HELM_DONE_WINDOW.
-#
-# Order is: visit half first, row stamp second, and the row stamp runs only if
-# the visit half accounted for every sitting. Inside the visit half the outcome
-# stamp precedes the close on the same rule. A row retired over a sitting that
-# is still up is the failure this verb exists to prevent, and it is the quiet
-# one: the operator sees a cleared row and no longer has anything to look for.
-# Idempotent in both halves.
+# The outcome stamp precedes the close: a visit closed without a gc.outcome is
+# a sitting the board cannot report, and once closed no re-run reaches it. A
+# visit the verb could not account for aborts the run. Idempotent.
 cmd_dismiss() {
-    bead=""; dismiss_reason=""
+    bead=""; dismiss_reason=""; dismiss_json=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) dismiss_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --reason requires a value" >&2; exit 2; }
                         dismiss_reason="$1"; shift ;;
+            --json)     dismiss_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: dismiss: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: dismiss takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
         esac
     done
-    [ -n "$bead" ] || { echo "$PROG: dismiss needs <bead-id>" >&2; usage; exit 2; }
+    # In --json mode the one machine object is the only thing on stdout, so the
+    # human progress lines print to stderr instead; otherwise they print as before.
+    _dmsg() { if [ -n "$dismiss_json" ]; then echo "$@" >&2; else echo "$@"; fi; }
+    if [ -z "$bead" ]; then
+        current_sitting_subject || exit $?
+        bead="$SITTING_SUBJECT"
+        echo "$PROG: dismiss: no bead named; inferred the current sitting's subject $bead from session state" >&2
+    fi
 
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
-    # The subject must resolve before anything is written. Same fail-closed
-    # reading as `open`: a read that did not answer is not a missing bead, and
-    # dismissing an unverified id would stamp a marker nothing ever clears.
-    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
-    subject=$(printf '%s' "$subject_clean" \
+    # The subject must resolve before anything is written — the same
+    # resolve+classify `open` uses, so a read that did not answer is reported as
+    # a data-plane outage, not a missing bead. Dismissing an unverified id would
+    # stamp a marker nothing ever clears.
+    verify_subject "$bead" dismiss "Nothing was written." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+
+    # A VISIT id names its own sitting. The board lists a parked visit as a row
+    # of its own, and engage accepts the visit id straight off that row, so
+    # dismiss must resolve the same union: a visit dismisses the subject it
+    # tracks (its gc.continuation_group stamp, else its tracks edge), the way
+    # the no-argument path resolves the current sitting's subject.
+    subject_kind=$(printf '%s' "$subject_clean" \
         | jq -r --arg b "$bead" \
             'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
+             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.metadata.task_kind // "")
              else empty end' 2>/dev/null || true)
-    if [ -z "$subject" ]; then
-        echo "$PROG: dismiss: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing was written." >&2
-        exit 4
+    if [ "$subject_kind" = "visit" ]; then
+        # subject_clean is a `gc bd show` payload (dependency_type/id edge shape);
+        # visit_subject reads both shapes, so the tracks fallback recovers the
+        # subject here even when the gc.continuation_group stamp landed empty.
+        visit_of=$(printf '%s' "$subject_clean" \
+            | jq -r --arg b "$bead" "$VISIT_IDENTITY_JQ"'
+                if type == "array"
+                then (([ .[] | select(type == "object" and (.id // "") == $b) ] | first) // {} | visit_subject)
+                else "" end' 2>/dev/null || true)
+        if [ -z "$visit_of" ]; then
+            echo "$PROG: dismiss: $bead is a visit that names no subject (no gc.continuation_group stamp and no tracks edge) — nothing to dismiss it under. Nothing was written." >&2
+            exit 4
+        fi
+        echo "$PROG: dismiss: $bead is a visit on $visit_of — dismissing that subject's sitting" >&2
+        bead="$visit_of"
     fi
-    subject_status=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.status // "")
-             else empty end' 2>/dev/null || true)
 
     # Pin bd at the SUBJECT's rig for the visit lookup and close, the way
     # `open` does. `bd list` reads whatever BEADS_DIR names, which in an agent
@@ -1128,32 +2079,42 @@ cmd_dismiss() {
     # a dismiss that missed the visit would leave the sitting it was asked to
     # end still holding the pane.
     #
-    # sitting_failed carries the visit half's verdict to the row half below. A
-    # read that did not answer is not the same as a subject with no visit, so
-    # it fails rather than falling through to the empty case.
+    # sitting_failed records whether every visit was accounted for; an
+    # unaccounted sitting aborts the run below. A read that did not answer is
+    # not the same as a subject with no visit, so it fails rather than falling
+    # through to the empty case.
     #
     # The shape gate is the load-bearing half of that. An exit code of 0 is not
     # an answer on its own: empty stdout and a bare `null` both leave the derive
     # filter below exiting 0 with no visits, which is indistinguishable from a
     # subject that has none. Only a JSON ARRAY is an answer, and an empty one is
     # the honest "no visits".
+    #
+    # An inferred subject arrives with the listing that named it, read under
+    # the store the pin above resolves to (the visit and its sitting share a
+    # rig), so that read is reused rather than repeated; a pin that moved the
+    # store — only possible with an explicit id from another rig — re-reads.
     sitting_failed=0
     visits=""
-    if visits_json=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+    visits_matched="[]"
+    listed=0
+    if [ -n "$SITTING_LISTING" ] && { [ -z "$db" ] || [ "$db" = "$SITTING_LISTING_DIR" ]; }; then
+        visits_json="$SITTING_LISTING"; listed=1
+    elif visits_json=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+        visits_json=$(printf '%s' "$visits_json" | scrub); listed=1
+    fi
+    if [ "$listed" -eq 1 ]; then
         if printf '%s' "$visits_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            visits=$(printf '%s' "$visits_json" \
-                | jq -r --arg s "$bead" \
-                    '[ .[] | select((.metadata.task_kind // "") == "visit")
-                       | select($s != ""
-                                and (((.metadata["gc.continuation_group"] // "") == $s)
-                                     or ([ .dependencies[]?
-                                           | select((.type // "") == "tracks")
-                                           | select((.depends_on_id // "") == $s) ] | length > 0)))
-                       | .id ] | .[]' 2>/dev/null) || {
+            visits_matched=$(printf '%s' "$visits_json" \
+                | jq -c --arg s "$bead" "$VISIT_IDENTITY_JQ"'
+                    [ .[] | select((.metadata.task_kind // "") == "visit")
+                       | select(visit_covers($s))
+                       | {id, identity: visit_identity_match($s)} ]' 2>/dev/null) || {
                 sitting_failed=1
-                visits=""
+                visits_matched="[]"
                 echo "$PROG: dismiss: could not read the visits on $bead — 'gc bd list' answered nothing this verb could parse" >&2
             }
+            visits=$(printf '%s' "$visits_matched" | jq -r '.[].id' 2>/dev/null || true)
         else
             sitting_failed=1
             echo "$PROG: dismiss: could not read the visits on $bead — 'gc bd list' exited 0 without a JSON array of beads" >&2
@@ -1174,95 +2135,1396 @@ cmd_dismiss() {
     for _v in $visits; do
         [ -n "$_v" ] || continue
         _why="dismissed by the operator${dismiss_reason:+: $dismiss_reason}"
-        # gc.outcome is what every reader of a finished sitting looks at:
-        # services/helm/internal/source/facts.go projects it onto the board's
-        # Sitting.Outcome, so a visit closed without one is a sitting the board
-        # cannot report. It is a PRECONDITION of the close rather than a
-        # best-effort write beside it, because the lookup above reads only OPEN
-        # visits. Once the close lands, no re-run of this verb reaches that
-        # visit again, and the missing outcome is permanent. A visit that will
-        # not take the stamp therefore stays open and keeps its pane, which is
-        # the reading this verb already gives a visit that will not close. The
-        # stamp sits outside the force ladder below because a metadata update
-        # does not go through bd's close-authority guard, so it lands on a visit
-        # held by a session name this actor cannot close under. A zero exit is
-        # not proof it landed either: one --set-metadata pair can read back empty
-        # while the call still exits 0, the same store behaviour meta_now guards
-        # against on the takeaway path. So the stamp is read back and repaired
-        # once, and only a visit whose gc.outcome reads "dismissed" enters the
-        # close ladder. The close is irreversible to this verb, so a silently
-        # dropped stamp would otherwise close the visit into the unreportable
-        # state this precondition exists to prevent.
-        if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" >/dev/null 2>&1; then
+        # Name which identity tied this visit to the subject — the same shared
+        # matcher open reports, so a dismiss is never a silent match either.
+        _v_identity=$(printf '%s' "$visits_matched" | jq -r --arg v "$_v" 'map(select(.id == $v)) | .[0].identity // ""' 2>/dev/null || true)
+        echo "$PROG: dismiss: visit $_v covers $bead by ${_v_identity:-unknown} identity" >&2
+        # Both stamps precede and gate the close — the same guard the shared
+        # visit-close.sh applies, which this verb reproduces rather than calls
+        # because it closes over the holder's claim and pins its own rig.
+        # gc.outcome is the word a reader groups a finished sitting by
+        # (services/helm/internal/source/facts.go projects it onto
+        # Sitting.Outcome); gc.outcome_reason is the one-line headline the board
+        # shows for a sitting that left no takeaway (board.Sitting.Headline in
+        # services/helm/internal/board/model.go), and an empty one drops the row
+        # back to the subject's bare title. So an outcome recorded without its
+        # reason still closes the sitting into an illegible row. They are a
+        # PRECONDITION, not best-effort writes beside the close: the lookup above
+        # reads only OPEN visits, so once the close lands no re-run of this verb
+        # reaches the visit and a dropped stamp is permanent. A visit that will
+        # not take both stays open and keeps its pane, the reading this verb
+        # already gives one that will not close. The stamp sits outside the force
+        # ladder below because a metadata update does not pass bd's close-authority
+        # guard, so it lands even on a visit held by a session this actor cannot
+        # close under. A zero exit is not proof it landed: one --set-metadata pair
+        # can read back empty while the call exits 0, the store behaviour meta_now
+        # guards against on the takeaway path. So both are read back and repaired
+        # once, and only a visit whose gc.outcome and gc.outcome_reason both read
+        # back enters the close ladder.
+        if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1; then
             sitting_failed=1
-            echo "$PROG: dismiss: could not stamp gc.outcome on visit $_v; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
+            echo "$PROG: dismiss: could not stamp the outcome on visit $_v; it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
         outcome_got=$(meta_now "$_v" gc.outcome)
-        if [ "$outcome_got" != "dismissed" ]; then
-            gc bd update "$_v" --set-metadata "gc.outcome=dismissed" >/dev/null 2>&1 || true
+        reason_got=$(meta_now "$_v" gc.outcome_reason)
+        if [ "$outcome_got" != "dismissed" ] || [ "$reason_got" != "$_why" ]; then
+            gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1 || true
             outcome_got=$(meta_now "$_v" gc.outcome)
+            reason_got=$(meta_now "$_v" gc.outcome_reason)
         fi
-        if [ "$outcome_got" != "dismissed" ]; then
+        if [ "$outcome_got" != "dismissed" ] || [ "$reason_got" != "$_why" ]; then
             sitting_failed=1
-            echo "$PROG: dismiss: gc.outcome on visit $_v read back as '${outcome_got:-<empty>}', not 'dismissed'; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
+            echo "$PROG: dismiss: the outcome stamps on visit $_v did not read back (gc.outcome='${outcome_got:-<empty>}', gc.outcome_reason='${reason_got:-<empty>}'); it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
+        _closed_this=0
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
-            closed_n=$((closed_n + 1))
-            echo "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
+            closed_n=$((closed_n + 1)); _closed_this=1
+            _dmsg "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
         elif gc bd close "$_v" --reason "$_why" --force >/dev/null 2>&1; then
-            closed_n=$((closed_n + 1))
-            echo "$PROG: dismiss: closed visit $_v over its holder's claim — the sitting on $bead ends"
+            closed_n=$((closed_n + 1)); _closed_this=1
+            _dmsg "$PROG: dismiss: closed visit $_v over its holder's claim — the sitting on $bead ends"
         else
             sitting_failed=1
             echo "$PROG: dismiss: could not close visit $_v; its sitting keeps the pane. Close it by hand: gc bd close $_v --force" >&2
         fi
+        # A closed sitting updates its PR reminder to say so, if the subject has
+        # a PR. update-only, so a visit that never engaged (left no comment)
+        # touches nothing; best effort, never failing the dismiss.
+        if [ "$_closed_this" = 1 ] && [ -x "$VISIT_COMMENT_TOOL" ]; then
+            "$VISIT_COMMENT_TOOL" close --visit "$_v" --subject "$bead" --outcome dismissed --summary "$_why" || true
+        fi
     done
 
-    # The row is the operator's only evidence that a sitting is still up, so it
-    # may not be retired while one is. Nothing is written on this arm: a second
-    # dismiss after the visit is dealt with does both halves.
+    # A visit the verb could not account for aborts the run: each unfinished
+    # visit above says what it needs, and a re-run resumes from there.
     if [ "$sitting_failed" -ne 0 ]; then
         # Any visit that DID close changed the board's Held marker, so the
-        # cache goes even though the row half did not run.
+        # cache goes.
         bust_cache
-        echo "$PROG: dismiss: $bead was NOT dismissed — the sitting is unaccounted for, so its row stays on the board. Nothing was stamped on the subject; each unfinished visit above says what it needs, and a re-run resumes from there." >&2
+        [ -n "$dismiss_json" ] && jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
+            '{subject: $s, matched: $m, closed: $c, ok: false}'
+        echo "$PROG: dismiss: $bead was NOT dismissed — a sitting is unaccounted for. Each unfinished visit above says what it needs, and a re-run resumes from there." >&2
         exit 4
     fi
 
-    set --
-    set -- "$@" --set-metadata "gc.dismissed_at=$(iso_now)" \
-               --set-metadata "gc.dismissed_by=${GC_SESSION_NAME:-operator}"
-    [ -n "$dismiss_reason" ] && set -- "$@" --append-notes "Dismissed from the helm board: $dismiss_reason"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-    if gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1; then
-        # Say which of the two things actually happened. The marker only
-        # retires a DONE row, so on a bead that is still OPEN the row stays —
-        # it is live work, and a verb that claimed to have cleared it would be
-        # teaching the operator that dismiss hides things that still need them.
-        if [ "$subject_status" = "closed" ]; then
-            echo "$PROG: dismiss: $bead marked dismissed — it leaves the board's DONE band"
-        else
-            echo "$PROG: dismiss: $bead marked dismissed (status=${subject_status:-unknown}) — it is still open, so it keeps its live row; the marker retires the DONE row it gets once it closes"
-        fi
+    bust_cache
+    if [ -n "$dismiss_json" ]; then
+        jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
+            '{subject: $s, matched: $m, closed: $c, ok: true}'
     else
-        echo "$PROG: dismiss: could not stamp gc.dismissed_at on '$bead' (rig '${path:-?}'); its row stays on the board" >&2
+        [ "$closed_n" -eq 0 ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
+    fi
+    return 0
+}
+
+# subject_unengaged <subject> — the shell mirror of unengagedVisit in
+# services/helm/internal/board/derive.go. A subject is un-engaged when it has an
+# OPEN visit no one has taken up: none of its visits is in_progress, and none is
+# non-closed while bound to a session (gc.session_name) or an assignee. The
+# assignee arm covers the pending-engagement window — engage binds the visit by
+# assignee while it is still open, before the hook claim promotes it to
+# in_progress and stamps the session.
+#
+# It is the predicate the board derives Accept from, re-read LIVE so accept
+# cannot actuate a recommendation from a stale board row, a copied command, or
+# the window after engage bound the visit. It reads the same union dismiss lists
+# — task_kind=visit matched on the gc.continuation_group stamp OR the tracks edge
+# — under whatever store BEADS_DIR names, which the caller pins at the subject's
+# rig.
+#
+# Fails CLOSED: a listing that did not answer a JSON array is UNKNOWN, not
+# un-engaged. Sets UNENGAGED_STATE (unengaged|engaged|absent|unreadable) and
+# UNENGAGED_WHY for the caller's message; returns 0 only when un-engaged.
+UNENGAGED_STATE=""; UNENGAGED_WHY=""
+# The listing subject_unengaged read, left for a caller that then dismisses the
+# same subject (accept) so cmd_dismiss reuses it rather than scanning the store a
+# second time. Set only once the read parsed as a JSON array, with the BEADS_DIR
+# it was read under — cmd_dismiss reuses it only when its own pin resolves the
+# same store.
+UNENGAGED_LISTING=""; UNENGAGED_LISTING_DIR=""
+subject_unengaged() {
+    _subj="$1"; UNENGAGED_STATE=""; UNENGAGED_WHY=""
+    if ! _uv_json=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+        UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="'gc bd list' failed"; return 1
+    fi
+    _uv_json=$(printf '%s' "$_uv_json" | scrub)
+    if ! printf '%s' "$_uv_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="'gc bd list' did not answer a JSON array"; return 1
+    fi
+    UNENGAGED_LISTING="$_uv_json"; UNENGAGED_LISTING_DIR="${BEADS_DIR:-}"
+    # One jq pass mirroring unengagedVisit: the subject's visits, then the
+    # in_progress and bound suppressor tests and the open test over them, in that
+    # order. A jq failure is a listing this cannot read, not an un-engaged
+    # subject. Output is the state token, and for the engaged case a tab and why.
+    _uv_out=$(printf '%s' "$_uv_json" | jq -r --arg s "$_subj" '
+        [ .[] | objects | . as $v
+          | select((($v.metadata // {}) | objects | .task_kind // "") == "visit")
+          | select($s != ""
+                   and ((($v.metadata["gc.continuation_group"] // "") == $s)
+                        or ([ ($v.dependencies // [])[] | objects
+                              | select((.type // "") == "tracks")
+                              | (.depends_on_id // "") ] | index($s) != null)))
+          | { status: ($v.status // ""), assignee: ($v.assignee // ""),
+              session: ($v.metadata["gc.session_name"] // "") } ] as $V
+        | ([ $V[] | select(.status != "closed" and (.session != "" or .assignee != "")) ] | first) as $bound
+        | if   ([ $V[] | select(.status == "in_progress") ] | length) > 0
+          then "engaged\ta visit is in progress — a conversation is claimed on it"
+          elif $bound != null
+          then if $bound.session != ""
+               then "engaged\ta visit is bound to session \($bound.session)"
+               else "engaged\ta visit is bound to assignee \($bound.assignee) — a pending engagement" end
+          elif ([ $V[] | select(.status == "open") ] | length) > 0
+          then "unengaged"
+          else "absent" end' 2>/dev/null) || {
+        UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="'gc bd list' answered nothing this verb could parse"; return 1
+    }
+    _uv_tab=$(printf '\t')
+    UNENGAGED_STATE=${_uv_out%%"$_uv_tab"*}
+    UNENGAGED_WHY=${_uv_out#*"$_uv_tab"}
+    [ "$UNENGAGED_WHY" = "$_uv_out" ] && UNENGAGED_WHY=""
+    case "$UNENGAGED_STATE" in
+        unengaged) return 0 ;;
+        engaged)   return 1 ;;
+        absent)    UNENGAGED_WHY="no open visit on the subject"; return 1 ;;
+        *) UNENGAGED_STATE="unreadable"; UNENGAGED_WHY="the visit state did not resolve to a known token"; return 1 ;;
+    esac
+}
+
+# accept_mark_dispatched <subject> <formula> — record that Accept dispatched
+# <formula>, and withdraw the live recommendation, in one write:
+# gc.recommended_formula_dispatched=<formula> is the record a re-run reads to
+# resume the dismiss rather than sling again, and stripping gc.recommended_formula
+# — the key the board's Accept derivation reads — stops a later open visit on the
+# same subject from re-offering a formula that already ran (a second dispatch of
+# the same execution). Both writes have a reader, so both are read back and
+# retried once: the strip because a survivor is Accept still live, and the marker
+# because a re-run that finds neither the live key nor the marker reads the
+# subject as discuss-only and cannot resume the dismiss — so a marker the combined
+# write silently dropped would strand a dispatched recommendation with its visit
+# still open. The function returns non-zero if the live key will not clear or the
+# marker will not stick, and the caller then refuses the dismiss, so a survivor
+# never rides through as Accept still live. Idempotent: a resume re-runs it to
+# finish a write a prior run left half-done.
+accept_mark_dispatched() {
+    _amd_subj="$1"; _amd_formula="$2"
+    gc bd update "$_amd_subj" \
+        --set-metadata "gc.recommended_formula_dispatched=$_amd_formula" \
+        --unset-metadata gc.recommended_formula \
+        --append-notes "Accept dispatched $_amd_formula; gc.recommended_formula withdrawn so a later visit cannot re-offer it." \
+        >/dev/null 2>&1 || true
+    _amd_live=$(meta_now "$_amd_subj" gc.recommended_formula)
+    if [ -n "$_amd_live" ]; then
+        gc bd update "$_amd_subj" --unset-metadata gc.recommended_formula >/dev/null 2>&1 || true
+        _amd_live=$(meta_now "$_amd_subj" gc.recommended_formula)
+    fi
+    _amd_mark=$(meta_now "$_amd_subj" gc.recommended_formula_dispatched)
+    if [ "$_amd_mark" != "$_amd_formula" ]; then
+        gc bd update "$_amd_subj" --set-metadata "gc.recommended_formula_dispatched=$_amd_formula" >/dev/null 2>&1 || true
+        _amd_mark=$(meta_now "$_amd_subj" gc.recommended_formula_dispatched)
+    fi
+    [ -z "$_amd_live" ] && [ "$_amd_mark" = "$_amd_formula" ]
+}
+
+# ── Verb: accept ─────────────────────────────────────────────────────
+# Accept a recommendation straight off the board: dispatch the subject's
+# gc.recommended_formula at the subject and dismiss its visit, in one procedural
+# order with no sitting. It is the low-friction actuation of a ruling the human
+# has made (Accept/Discuss flow); the board renders the affordance on a subject
+# whose visit is un-engaged, and this verb performs it.
+# Discuss (engage) stays the path for a recommendation the operator wants to
+# weigh instead.
+#
+# The subject is passed as gc.var.issue so the worker reads its card; a slung
+# formula does not receive the subject's description. Sling FIRST: only a landed
+# dispatch dismisses the visit, so a sling that fails leaves the visit for the
+# operator to retry or Discuss.
+cmd_accept() {
+    bead=""; accept_reason=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --reason=*) accept_reason="${1#--reason=}"; shift ;;
+            --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: accept: --reason requires a value" >&2; exit 2; }
+                        accept_reason="$1"; shift ;;
+            -h|--help)  usage; exit 0 ;;
+            -*) echo "$PROG: accept: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: accept takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    case "$bead" in "") echo "$PROG: accept needs <bead-id>" >&2; usage; exit 2 ;; esac
+
+    # Resolve a PR reference or a settled disposition to the live owning bead,
+    # the same way open/engage/dismiss do.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
+
+    # The subject must resolve before anything is dispatched — the shared
+    # resolve+classify, so an unanswered read fails closed as a data-plane
+    # outage, not a missing bead. The alternative is a sling on a bead that may
+    # not exist.
+    verify_subject "$bead" accept "Nothing dispatched." || exit $?
+    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+
+    # A VISIT id names the recommendation's subject. The board renders Accept on
+    # the folded subject tile, so the common input is the subject id; a visit id
+    # resolves to its subject the way dismiss does — the gc.continuation_group
+    # stamp, else the tracks edge.
+    subject_kind=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.metadata.task_kind // "")
+             else empty end' 2>/dev/null || true)
+    if [ "$subject_kind" = "visit" ]; then
+        visit_of=$(printf '%s' "$subject_clean" \
+            | jq -r --arg b "$bead" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
+                      | (.metadata["gc.continuation_group"] // "") | select(. != "")
+                 else empty end' 2>/dev/null || true)
+        if [ -z "$visit_of" ]; then
+            # `gc bd show` renders a dep as {dependency_type, id}; `gc bd list`
+            # as {type, depends_on_id}. This reads a show payload, but accept the
+            # union so the fallback holds whichever a caller passes.
+            visit_of=$(printf '%s' "$subject_clean" \
+                | jq -r --arg b "$bead" \
+                    'if type == "array"
+                     then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
+                          | [ .dependencies[]? | select(((.dependency_type // .type) // "") == "tracks") | ((.id // .depends_on_id) // "") ] | map(select(. != "")) | first // empty
+                     else empty end' 2>/dev/null || true)
+        fi
+        if [ -z "$visit_of" ]; then
+            echo "$PROG: accept: $bead is a visit that names no subject (no gc.continuation_group stamp and no tracks edge) — nothing to accept. Nothing dispatched." >&2
+            exit 4
+        fi
+        bead="$visit_of"
+        # Re-read so the recommended-formula check reads the SUBJECT, not the
+        # visit that pointed at it — and re-verify it resolves, the same fail-closed
+        # read the first resolve took. A transient failure here leaves subject_clean
+        # empty; without this the formula reads empty and accept would wrongly report
+        # the subject "discuss-only" (exit 2) on a state it could not read, where the
+        # contract is to fail closed (exit 4).
+        verify_subject "$bead" accept "Nothing dispatched." "the subject '$bead' this visit names" || exit $?
+        subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    fi
+
+    # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
+    # records one Accept that already dispatched (its live key stripped in the same
+    # write). Read both from the payload:
+    #  - neither present -> discuss-only: nothing to dispatch, so accept refuses
+    #    rather than dismissing a decision the operator has not made. This is the
+    #    key the board derives Accept-ability from, so a refusal is a row the board
+    #    would not have offered Accept on.
+    #  - the dispatched marker present -> a prior run slung the formula and stripped
+    #    the live key, but did not finish (its dismiss failed, or its strip did not
+    #    stick). RESUME: finish the strip and the dismiss; never sling again — that
+    #    is the second dispatch of the same execution this exists to prevent.
+    _accept_meta() {
+        printf '%s' "$subject_clean" \
+            | jq -r --arg b "$bead" --arg k "$1" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.metadata[$k] // "")
+                 else empty end' 2>/dev/null || true
+    }
+    formula=$(_accept_meta "gc.recommended_formula")
+    dispatched=$(_accept_meta "gc.recommended_formula_dispatched")
+    resume=0
+    if [ -n "$dispatched" ]; then
+        resume=1; formula="$dispatched"
+    elif [ -z "$formula" ]; then
+        echo "$PROG: accept: $bead carries no gc.recommended_formula — it is discuss-only. Engage it to decide. Nothing dispatched." >&2
+        exit 2
+    fi
+
+    # Pin the subject's rig so the sling, the visit lookup, and the dismiss all
+    # act in its store. `gc bd list` answers whatever BEADS_DIR names, so pin it
+    # at the subject's rig the way dismiss does, or a cross-rig subject's visits
+    # read the wrong ledger and the guard below would misjudge them.
+    rig=$(rig_name_for_bead "$bead")
+    [ -n "$rig" ] && export GC_RIG="$rig"
+    path=$(rig_path_for_bead "$bead")
+    [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+
+    # The board offers Accept only on a subject whose visit is un-engaged, but
+    # gc.recommended_formula alone does not prove that state: accept can be run
+    # from a stale board row, a copied command, or the window after engage bound
+    # the visit by assignee. Re-read the live visit state and require the same
+    # un-engaged predicate the board derives Accept from, refusing BEFORE the
+    # sling — and before the dismiss below could force-close a held visit over
+    # its holder's claim. Fail closed: a state this cannot read is not proof the
+    # visit is un-engaged. On a resume the sling already ran, so an absent visit
+    # means the prior run's dismiss also landed and there is nothing left to do.
+    if ! subject_unengaged "$bead"; then
+        case "$UNENGAGED_STATE" in
+            engaged) echo "$PROG: accept: $bead has an engaged visit — $UNENGAGED_WHY. The board offers Accept only on an un-engaged visit; take it up in the sitting (Discuss) or dismiss it there. Nothing dispatched." >&2 ;;
+            absent)
+                if [ "$resume" = 1 ]; then
+                    echo "$PROG: accept: $bead was already dispatched ($formula) and its visit already dismissed — nothing left to do."
+                    exit 0
+                fi
+                echo "$PROG: accept: $bead has no un-engaged open visit — $UNENGAGED_WHY. Accept actuates a recommendation the board is offering; there is nothing here to accept. Nothing dispatched." >&2 ;;
+            *)       echo "$PROG: accept: could not read $bead's live visit state — $UNENGAGED_WHY. Refusing rather than dispatching on an unread state. Nothing dispatched." >&2 ;;
+        esac
         exit 4
     fi
+
+    # Dispatch the recommendation AT the subject: the subject is the routed
+    # anchor (--on) and is also passed as gc.var.issue so a formula that reads its
+    # card by that var finds it. A resume skips the sling — it already ran — and
+    # only finishes the record and the dismiss.
+    if [ "$resume" = 1 ]; then
+        echo "$PROG: accept: $bead already carries a dispatched recommendation ($formula); resuming its dismiss, not dispatching again" >&2
+    elif ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula" --var "issue=$bead"; then
+        echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed." >&2
+        exit 1
+    else
+        echo "$PROG: accept: dispatched $formula at $bead"
+    fi
+
+    # Record the dispatch and withdraw the live recommendation before the dismiss.
+    # If the live key will not clear, refuse the dismiss: a survivor is Accept still
+    # live, which a later open visit on the subject could dispatch a second time.
+    if ! accept_mark_dispatched "$bead" "$formula"; then
+        echo "$PROG: accept: dispatched $formula at $bead, but could not withdraw gc.recommended_formula (it still reads live). NOT dismissing: a later visit could re-offer Accept and dispatch $formula again. Clear gc.recommended_formula on $bead by hand, then dismiss its visit." >&2
+        exit 4
+    fi
+
+    # The recommendation is dispatched, so the operator's decision is made: dismiss
+    # the visit, reusing the listing subject_unengaged already read so cmd_dismiss
+    # does not scan the store a second time. The dismiss verb closes every open
+    # visit on the subject.
+    SITTING_LISTING="$UNENGAGED_LISTING"; SITTING_LISTING_DIR="$UNENGAGED_LISTING_DIR"
+    cmd_dismiss "$bead" --reason "${accept_reason:-accepted: dispatched $formula}"
+}
+
+# ── engage: decision helpers (UI-reusable) ──────────────────────────
+# The four engage decisions — subject, visit, starter, model — resolved from
+# durable state, factored out of the prompt loop so a later helm UI can drive
+# the same logic. The prompt_* wrappers add the one terminal read; the
+# list/find/seed helpers touch no terminal. Prompts print to the foreground
+# (stdout) and read stdin; a closed input (EOF) returns non-zero, so a caller
+# cancels rather than loops.
+
+# engage_list_models — configured converse-<model> tokens, one per line, opus
+# (the work tier) first. Enumerated from the agent dirs the templates live in,
+# so the menu tracks what `gc session new converse-<model>` can resolve.
+engage_list_models() {
+    _elm_all=""
+    for _elm_d in "$ENGAGE_AGENTS_DIR"/converse-*; do
+        [ -d "$_elm_d" ] || continue
+        _elm_m=$(basename "$_elm_d"); _elm_m=${_elm_m#converse-}
+        [ -n "$_elm_m" ] || continue
+        _elm_all="$_elm_all $_elm_m"
+    done
+    # Two passes so opus leads; `if` (not `&&`) keeps a false test from making the
+    # final loop iteration — and so the function — return non-zero under set -e.
+    for _elm_m in $_elm_all; do
+        if [ "$_elm_m" = opus ]; then printf '%s\n' "$_elm_m"; fi
+    done
+    for _elm_m in $_elm_all; do
+        if [ "$_elm_m" != opus ]; then printf '%s\n' "$_elm_m"; fi
+    done
+}
+
+# engage_model_label <token> — the token with an initial capital, for the menu.
+engage_model_label() {
+    printf '%s%s' "$(printf '%s' "$1" | cut -c1 | tr '[:lower:]' '[:upper:]')" \
+                  "$(printf '%s' "$1" | cut -c2-)"
+}
+
+# engage_valid_model <token> — 0 iff the token names a configured variant.
+# Fails OPEN when the list cannot be enumerated (a broken pack), so engage never
+# rejects a model it merely could not confirm; the spawn is the real gate then.
+engage_valid_model() {
+    _evm_list=$(engage_list_models)
+    [ -n "$_evm_list" ] || return 0
+    _evm_ok=1
+    for _evm in $_evm_list; do
+        if [ "$_evm" = "$1" ]; then _evm_ok=0; fi
+    done
+    return "$_evm_ok"
+}
+
+# engage_find_visits <subject> — open visits tracking the subject, one
+# "<id>\t<status>\t<assignee>\t<title>" row per candidate, parked
+# (open+unassigned) first, then held, oldest first within each.
+engage_find_visits() {
+    gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub \
+        | jq -r --arg s "$1" "$VISIT_IDENTITY_JQ"'
+            [ .[]? | select((.metadata.task_kind // "")=="visit") | select(visit_covers($s)) ]
+             | sort_by(((.assignee // "") != ""), ((.status // "") != "open"), (.created_at // ""))
+             | .[] | [.id, (.status // ""), (.assignee // ""), (.title // "")] | @tsv' 2>/dev/null || true
+}
+
+# engage_starter_list — "<key>\t<label>" per starter seed, in menu order.
+engage_starter_list() { sh "$STARTERS_TOOL" list 2>/dev/null || true; }
+# engage_starter_seed <key> <subject> — the seed body with the subject filled in.
+engage_starter_seed() { sh "$STARTERS_TOOL" seed "$1" "$2" 2>/dev/null || true; }
+
+# engage_search_subjects <query> — open non-visit beads whose title contains the
+# query, one "<id>\t<title>" row each. The subject prompt's title search, split
+# out so a UI can populate its own picker from the same rows.
+engage_search_subjects() {
+    gc bd list --status=open,in_progress --title-contains "$1" --json --limit=0 2>/dev/null | scrub \
+        | jq -r '.[]? | select((.metadata.task_kind // "") != "visit") | [.id, (.title // "")] | @tsv' 2>/dev/null || true
+}
+
+# engage_prompt_subject — a typed id, PR number, or URL is taken as-is
+# (downstream verification fails closed on a bogus one); anything else is a
+# title search offering numbered matches. Sets ENGAGE_SUBJECT.
+engage_prompt_subject() {
+    while :; do
+        printf '  Subject? (id or search) › '
+        IFS= read -r _eps_in || return 1
+        _eps_in=${_eps_in# }; _eps_in=${_eps_in% }
+        [ -n "$_eps_in" ] || { printf '  enter a bead id, PR number/URL, or search text\n'; continue; }
+        case "$_eps_in" in
+            *-*|[0-9]*|http://*|https://*) ENGAGE_SUBJECT="$_eps_in"; return 0 ;;
+        esac
+        _eps_rows=$(engage_search_subjects "$_eps_in")
+        if [ -z "$_eps_rows" ]; then
+            printf '  no open bead matches "%s" — try an id or different text\n' "$_eps_in"
+            continue
+        fi
+        _eps_i=0; _eps_map=""
+        while IFS="$TAB" read -r _eps_id _eps_title; do
+            [ -n "$_eps_id" ] || continue
+            _eps_i=$((_eps_i + 1))
+            [ "$_eps_i" -gt 9 ] && { printf '    … more matches; narrow the search\n'; break; }
+            printf '    [%s] %s — %s\n' "$_eps_i" "$_eps_id" "$_eps_title"
+            _eps_map="$_eps_map$_eps_i $_eps_id
+"
+        done <<EOF
+$_eps_rows
+EOF
+        printf '  Which? [1-%s], or type to search again › ' "$_eps_i"
+        IFS= read -r _eps_pick || return 1
+        case "$_eps_pick" in
+            ""|*[!0-9]*) continue ;;
+        esac
+        _eps_sel=$(printf '%s' "$_eps_map" | awk -v n="$_eps_pick" '$1==n{print $2}')
+        [ -n "$_eps_sel" ] && { ENGAGE_SUBJECT="$_eps_sel"; return 0; }
+    done
+}
+
+# engage_prompt_visit_or_starter <subject> — ONE prompt covering both the
+# existing-visit choice and the new-visit starter. Open visits are listed
+# numbered; the starter seeds follow, each keyed by its letter. The single reply
+# resolves as: a number engages that visit; a seed letter opens a new visit on
+# that seed; any other text opens a new visit with that text as its opener;
+# Enter opens a blank new visit. Numbers and letters never collide, so both live
+# in one prompt. Held visits are shown for context but are not selectable. Sets
+# ENGAGE_VISIT_CHOICE to a visit id (engage it) or "new"; on "new" it also sets
+# ENGAGE_STARTER_BODY (the visit body; empty = blank) and ENGAGE_STARTER_TAIL
+# (a short title tail).
+engage_prompt_visit_or_starter() {
+    ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""
+    _epv_i=0; _epv_map=""
+    _epv_rows=$(engage_find_visits "$1")
+    if [ -n "$_epv_rows" ]; then
+        printf '  Subject has open visit(s):\n'
+        # Read whole lines and cut the columns: an empty middle field (an
+        # unassigned visit's assignee) collapses under a whitespace IFS in
+        # `read`, so split with cut, which keeps empty fields.
+        while IFS= read -r _epv_row; do
+            [ -n "$_epv_row" ] || continue
+            _epv_id=$(printf '%s' "$_epv_row" | cut -f1)
+            _epv_st=$(printf '%s' "$_epv_row" | cut -f2)
+            _epv_who=$(printf '%s' "$_epv_row" | cut -f3)
+            _epv_title=$(printf '%s' "$_epv_row" | cut -f4-)
+            [ -n "$_epv_id" ] || continue
+            if [ "$_epv_st" = open ] && [ -z "$_epv_who" ]; then
+                _epv_i=$((_epv_i + 1))
+                printf '    [%s] %s — "%s"\n' "$_epv_i" "$_epv_id" "$_epv_title"
+                _epv_map="$_epv_map$_epv_i $_epv_id
+"
+            else
+                printf '    ( ) %s — "%s"  ⚠ held by %s\n' "$_epv_id" "$_epv_title" "${_epv_who:-a sitting}"
+            fi
+        done <<EOF
+$_epv_rows
+EOF
+    fi
+    # The new-visit starters, keyed by letter; build the menu and a letter->key map.
+    _epv_smenu=""; _epv_smap=""
+    while IFS="$TAB" read -r _eps_key _eps_label _eps_letter; do
+        [ -n "$_eps_key" ] && [ -n "$_eps_letter" ] || continue
+        [ -n "$_epv_smenu" ] && _epv_smenu="$_epv_smenu · "
+        _epv_smenu="$_epv_smenu[$_eps_letter] $_eps_label"
+        _epv_smap="$_epv_smap$_eps_letter $_eps_key
+"
+    done <<EOF
+$(engage_starter_list)
+EOF
+    [ -n "$_epv_smenu" ] && printf '    new:  %s · or type your own opener\n' "$_epv_smenu"
+    if [ "$_epv_i" -gt 0 ]; then
+        printf '  [1-%s] engage a listed visit · a letter or text starts a new one · Enter = new, blank › ' "$_epv_i"
+    else
+        printf '  a letter or text starts a new visit · Enter = new, blank › '
+    fi
+    IFS= read -r _epv_reply || return 1
+    # Enter → a blank new visit (the default).
+    if [ -z "$_epv_reply" ]; then ENGAGE_VISIT_CHOICE="new"; return 0; fi
+    # A seed letter (case-insensitive) → a new visit on that seed.
+    _epv_lc=$(printf '%s' "$_epv_reply" | tr 'A-Z' 'a-z')
+    _epv_seed=$(printf '%s' "$_epv_smap" | awk -v l="$_epv_lc" '$1==l{print $2}')
+    if [ -n "$_epv_seed" ]; then
+        ENGAGE_VISIT_CHOICE="new"
+        ENGAGE_STARTER_BODY=$(engage_starter_seed "$_epv_seed" "$1")
+        ENGAGE_STARTER_TAIL=$(engage_starter_list | awk -F"$TAB" -v k="$_epv_seed" '$1==k{print $2}')
+        return 0
+    fi
+    # A number naming a listed visit → engage it.
+    case "$_epv_reply" in
+        *[!0-9]*) : ;;
+        *)
+            _epv_sel=$(printf '%s' "$_epv_map" | awk -v n="$_epv_reply" '$1==n{print $2}')
+            if [ -n "$_epv_sel" ]; then ENGAGE_VISIT_CHOICE="$_epv_sel"; return 0; fi ;;
+    esac
+    # Anything else → a new visit with the reply verbatim as its opener.
+    ENGAGE_VISIT_CHOICE="new"
+    ENGAGE_STARTER_BODY="$_epv_reply"
+    ENGAGE_STARTER_TAIL=$(printf '%s' "$_epv_reply" | cut -c1-60)
+    return 0
+}
+
+# engage_prompt_model — numbered selection over the configured variants; Enter
+# keeps opus (the work tier). Sets ENGAGE_MODEL.
+engage_prompt_model() {
+    _epm_i=0; _epm_map=""; _epm_menu=""
+    for _epm_m in $(engage_list_models); do
+        _epm_i=$((_epm_i + 1))
+        _epm_lbl=$(engage_model_label "$_epm_m")
+        [ "$_epm_m" = opus ] && _epm_lbl="$_epm_lbl (default)"
+        [ -n "$_epm_menu" ] && _epm_menu="$_epm_menu · "
+        _epm_menu="$_epm_menu[$_epm_i] $_epm_lbl"
+        _epm_map="$_epm_map$_epm_i $_epm_m
+"
+    done
+    if [ "$_epm_i" -eq 0 ]; then ENGAGE_MODEL=opus; return 0; fi
+    printf '  Model — %s   (Enter = Opus) › ' "$_epm_menu"
+    IFS= read -r _epm_reply || return 1
+    case "$_epm_reply" in
+        "") ENGAGE_MODEL=opus; return 0 ;;
+        *[!0-9]*) printf '  (not a listed number; keeping Opus)\n'; ENGAGE_MODEL=opus; return 0 ;;
+    esac
+    _epm_pick=$(printf '%s' "$_epm_map" | awk -v n="$_epm_reply" '$1==n{print $2}')
+    if [ -n "$_epm_pick" ]; then ENGAGE_MODEL="$_epm_pick"; else printf '  (no such choice; keeping Opus)\n'; ENGAGE_MODEL=opus; fi
+    return 0
+}
+
+# engage_prompt_rig — numbered selection over the rigs that carry a converse
+# template (only those can host a sitting). A single such rig is auto-selected;
+# none is an error. Sets ENGAGE_RIG.
+engage_prompt_rig() {
+    enumerate_rigs
+    _epr_i=0; _epr_map=""; _epr_menu=""
+    while IFS="$TAB" read -r _epr_name _epr_path; do
+        [ -n "$_epr_name" ] || continue
+        rig_carries_converse "$_epr_name" || continue
+        _epr_i=$((_epr_i + 1))
+        _epr_map="$_epr_map$_epr_i $_epr_name
+"
+        [ -n "$_epr_menu" ] && _epr_menu="$_epr_menu · "
+        _epr_menu="$_epr_menu[$_epr_i] $_epr_name"
+    done <<EOF
+$(printf '%s' "$RIGS" | jq -r '.[] | [.name, .path] | @tsv' 2>/dev/null)
+EOF
+    if [ "$_epr_i" -eq 0 ]; then
+        echo "$PROG: engage: no rig in this city carries a converse template, so there is nowhere to host a new-subject sitting." >&2
+        return 1
+    fi
+    if [ "$_epr_i" -eq 1 ]; then
+        ENGAGE_RIG=$(printf '%s' "$_epr_map" | awk 'NR==1{print $2}')
+        printf '  Rig: %s (the only converse-capable rig)\n' "$ENGAGE_RIG"
+        return 0
+    fi
+    printf '  Rig — %s › ' "$_epr_menu"
+    IFS= read -r _epr_reply || return 1
+    case "$_epr_reply" in
+        ""|*[!0-9]*) printf '  (not a listed number)\n'; return 1 ;;
+    esac
+    ENGAGE_RIG=$(printf '%s' "$_epr_map" | awk -v n="$_epr_reply" '$1==n{print $2}')
+    [ -n "$ENGAGE_RIG" ] || { printf '  (no such choice)\n'; return 1; }
+    return 0
+}
+
+# engage_create_subject — the --new-subject pre-step. Resolve the target rig,
+# obtain the subject title, and create a fresh operator-origin subject bead in
+# that rig's store. Mutates the caller's engage state the way the engage_prompt_*
+# helpers set ENGAGE_*: on return $bead is the new id and the opener is primed
+# (engage_reason/engage_file_new), so the rest of cmd_engage runs unchanged.
+# Reads new_subject_title, engage_rig, engage_interactive, engage_reason*,
+# engage_template.
+#
+# The subject is created MARKED gc.reaction_owned=1 — a live owner (this engage)
+# already owns reacting to it — so the async first-reaction / proactive worker
+# stands down rather than file a SECOND visit (engage files the one visit itself,
+# below): tools/gc-proactive.sh drops a marked bead from its scan, and
+# formulas/mol-first-reaction.toml consumes the marker and files no visit if one
+# is slung anyway. The marker is set in the `gc bd create` write itself
+# (--metadata), so the scan can never observe the bead unmarked.
+# gc.origin=operator is the honest origin; the force-to-visit invariant is
+# preserved, not relaxed — the subject still gets its one operator-filed visit.
+engage_create_subject() {
+    enumerate_rigs
+    # 1. Resolve the rig: a --rig value, else an interactive prompt, else refuse.
+    if [ -z "$engage_rig" ]; then
+        if [ "$engage_interactive" = 1 ]; then
+            engage_prompt_rig || { echo "$PROG: engage: no rig chosen — nothing created" >&2; exit 2; }
+            engage_rig="$ENGAGE_RIG"
+        else
+            echo "$PROG: engage: --new-subject needs a rig to create the subject in; pass --rig <name> (one-shot) or run interactively." >&2
+            exit 2
+        fi
+    fi
+    _ecs_path=$(printf '%s' "$RIGS" | jq -r --arg n "$engage_rig" '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
+    if [ -z "$_ecs_path" ]; then
+        echo "$PROG: engage: --rig '$engage_rig' matches no rig in 'gc rig list' (known: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null)). Nothing created." >&2
+        exit 4
+    fi
+    if ! rig_carries_converse "$engage_rig"; then
+        echo "$PROG: engage: rig '$engage_rig' ($_ecs_path) carries no converse template, so it can host no converse sitting. Pick a converse-capable rig. Nothing created." >&2
+        exit 4
+    fi
+    if [ ! -d "$_ecs_path/.beads" ]; then
+        echo "$PROG: engage: rig '$engage_rig' has no .beads ledger at $_ecs_path/.beads — nothing created." >&2
+        exit 4
+    fi
+    # 2. The subject title: the positional/pre-filled text, else an interactive
+    #    prompt. It is the new bead's title and, absent a starter, the opener.
+    if [ -z "$new_subject_title" ] && [ "$engage_interactive" = 1 ]; then
+        printf '  New subject — what is it about? › '
+        IFS= read -r new_subject_title || { echo "$PROG: engage: no subject text — nothing created" >&2; exit 2; }
+    fi
+    new_subject_title=$(printf '%s' "$new_subject_title" | sed 's/^ *//; s/ *$//')
+    [ -n "$new_subject_title" ] || { echo "$PROG: engage: --new-subject needs a subject (the new bead's title / what it is about). Nothing created." >&2; exit 2; }
+    # 3. The opener: an explicit --reason/--template wins; otherwise the title
+    #    doubles as it. A new subject always files a fresh visit (engage_file_new),
+    #    so the opener is settled here — mark the starter pre-filled so the
+    #    interactive visit/starter prompt (which lists a subject's EXISTING visits)
+    #    is skipped; a brand-new subject has none.
+    if [ -z "$engage_template" ] && [ "$engage_reason_set" = 0 ]; then
+        engage_reason="$new_subject_title"; engage_reason_set=1
+    fi
+    engage_file_new=1; starter_prefilled=1
+    # 4. Create the subject ATOMICALLY with its markers (see the header note).
+    _ecs_body="Operator-initiated conversation subject (gc-helm engage --new-subject): ${engage_reason:-$new_subject_title}"
+    _ecs_json=$(gc bd create -t task --title "$new_subject_title" -d "$_ecs_body" \
+        --metadata '{"gc.origin":"operator","gc.reaction_owned":"1"}' \
+        --db "$_ecs_path/.beads" --json 2>/dev/null || true)
+    bead=$(printf '%s' "$_ecs_json" | scrub | jq -r 'if type=="array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
+    if [ -z "$bead" ] || [ "$bead" = "null" ]; then
+        _ecs_err=$(printf '%s' "$_ecs_json" | scrub | jq -r 'if type=="object" then (.error // empty) else empty end' 2>/dev/null || true)
+        echo "$PROG: engage: could not create the subject bead in rig '$engage_rig'${_ecs_err:+: $_ecs_err}. Nothing spawned." >&2
+        exit 4
+    fi
+    # Arm the abort backstop the instant the marked subject exists. Every gate
+    # from here to the visit-filing in cmd_engage can still abort (a suspended or
+    # not-running rig, an unknown --template or --model, a store read that will
+    # not confirm the bead), and until the visit is filed an abort would leave this
+    # operator-origin subject owing a visit that nothing supplies: its own
+    # stand-down marker hides it from the async worker (gc-proactive drops a marked
+    # bead, mol-first-reaction consumes-and-ignores it), and even unmarked a first
+    # reaction does not force a visit for gc.origin=operator (actionable/blocked/
+    # close file none). So engage_new_subject_cleanup files that one visit itself on
+    # exit; cmd_engage disarms it once the visit is filed. enumerate_rigs (called at
+    # the top of this function) already set and cleared its own trap and memoizes on
+    # every later call, so it never clobbers this one.
+    _ens_cleanup_bead="$bead"
+    trap 'engage_new_subject_cleanup' EXIT
+    trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+    echo "$PROG: engage: filed subject $bead in rig '$engage_rig' — \"$new_subject_title\"" >&2
+}
+
+# engage_new_subject_cleanup — the abort backstop for --new-subject, armed by
+# engage_create_subject the instant the marked subject exists and disarmed by
+# cmd_engage once the visit is filed. While armed, any exit (an abort gate or a
+# signal) means the live engage stopped before cmd_engage filed the subject's one
+# visit. The subject still owes that visit and the async worker will not supply it
+# — the stand-down marker hides it from the scan, and even unmarked a first
+# reaction does not force a visit for an operator-origin bead. So file the one
+# parked visit here with cmd_open, the same path the happy flow uses: it resolves
+# the subject's rig from its id, dedups, and parks the visit on the board. The
+# marker is LEFT set, exactly as a successful engage leaves it, so the async worker
+# still stands down rather than filing a second. Run cmd_open in a subshell so its
+# own exits cannot abort this trap, and disarm first so it cannot re-enter. A no-op
+# when nothing is armed; it preserves the process's exit code.
+_ens_cleanup_bead=""
+engage_new_subject_cleanup() {
+    _enc_rc=$?
+    [ -n "${_ens_cleanup_bead:-}" ] || return "$_enc_rc"
+    _enc_bead="$_ens_cleanup_bead"
+    _ens_cleanup_bead=""
+    trap - EXIT INT TERM HUP
+    set -- "$_enc_bead"
+    [ -n "${engage_reason:-}" ] && set -- "$@" --reason "$engage_reason"
+    if ( cmd_open "$@" >/dev/null 2>&1 ); then
+        echo "$PROG: engage: the live engage aborted, but filed the one visit new subject $_enc_bead owes — parked on the helm board. Engage it when ready: $PROG engage $_enc_bead" >&2
+    else
+        echo "$PROG: engage: new subject $_enc_bead was created but its visit could NOT be filed (store error?); it still carries the gc.reaction_owned marker. File the visit by hand: $PROG open $_enc_bead" >&2
+    fi
+    return "$_enc_rc"
+}
+
+# ── Verb: engage ─────────────────────────────────────────────────────
+# The operator's "I want to talk about this now" — the spawn-on-engagement
+# entry point. The converse routed-pool is retired: a filed visit PARKS on the
+# helm board (gc.routed_to=human) and holds no session until the operator draws
+# it off the board. engage is that draw. It spawns a manual converse-<model>
+# sitting (origin=manual, which the pool execution backstop never governs),
+# assigns the picked visit to that session's runtime name so the session's own
+# `gc hook --claim` adopts it (ready_assignment) with no pool routing, and
+# attaches. dismiss ends the sitting.
+#
+# The argument is the bead the operator picked off the board. An open visit IS
+# the sitting's visit; a subject resolves to the one open visit tracking it (the
+# union open/dismiss match), and a subject with none gets one filed (parked to
+# the board) so a picked subject still engages.
+#
+# --model selects the tier (opus default, else fable or codex). --no-attach
+# spawns and assigns without attaching — the board picker uses it, then the
+# operator attaches from the session picker, the way a pool sitting was reached
+# before. Attached (the default), the operator lands in the sitting directly.
+cmd_engage() {
+    bead=""; engage_model="opus"; engage_reason=""; engage_attach=1
+    engage_no_input=0; engage_model_set=0; engage_reason_set=0; engage_template=""
+    # Interactive decisions carried into the visit-resolution and output below.
+    engage_body=""; engage_file_new=0; engage_chosen_visit=""; visit_new=0
+    # --new-subject files a FRESH subject bead, then engages it (rig-aware, since
+    # there is no id prefix yet to derive the rig from). --rig names that rig;
+    # --subject names an EXISTING one, so the two are mutually exclusive.
+    engage_new_subject=0; engage_rig=""; engage_subject_flag=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --model=*)   engage_model="${1#--model=}"; engage_model_set=1; shift ;;
+            --model)     shift; [ $# -gt 0 ] || { echo "$PROG: engage: --model requires a value" >&2; exit 2; }
+                         engage_model="$1"; engage_model_set=1; shift ;;
+            --reason=*)  engage_reason="${1#--reason=}"; engage_reason_set=1; shift ;;
+            --reason)    shift; [ $# -gt 0 ] || { echo "$PROG: engage: --reason requires a value" >&2; exit 2; }
+                         engage_reason="$1"; engage_reason_set=1; shift ;;
+            --template=*) engage_template="${1#--template=}"; shift ;;
+            --template)  shift; [ $# -gt 0 ] || { echo "$PROG: engage: --template requires a value" >&2; exit 2; }
+                         engage_template="$1"; shift ;;
+            --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; engage_subject_flag=1; shift ;;
+            --subject)   shift; [ $# -gt 0 ] || { echo "$PROG: engage: --subject requires a value" >&2; exit 2; }
+                         [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; engage_subject_flag=1; shift ;;
+            --new-subject) engage_new_subject=1; shift ;;
+            --rig=*)     engage_rig="${1#--rig=}"; shift ;;
+            --rig)       shift; [ $# -gt 0 ] || { echo "$PROG: engage: --rig requires a value" >&2; exit 2; }
+                         engage_rig="$1"; shift ;;
+            --no-input)  engage_no_input=1; shift ;;
+            --no-attach) engage_attach=0; shift ;;
+            -h|--help)   usage; exit 0 ;;
+            -*) echo "$PROG: engage: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+
+    # --reason and --template both pre-fill the starter — they conflict.
+    if [ -n "$engage_reason" ] && [ -n "$engage_template" ]; then
+        echo "$PROG: engage: --reason and --template both set the opening message — pass only one." >&2
+        exit 2
+    fi
+
+    # Interactive is the DEFAULT on a TTY; --no-input reverts to the flag-driven,
+    # one-shot behavior for scripts/CI. GC_HELM_ASSUME_TTY is a test seam that
+    # forces the interactive path when stdin is a pipe, as in a hermetic test.
+    engage_interactive=0
+    if [ "$engage_no_input" = 0 ] && { [ -t 0 ] || [ -n "${GC_HELM_ASSUME_TTY:-}" ]; }; then
+        engage_interactive=1
+    fi
+    # A pre-filled --reason/--template already commits to a new visit with that
+    # opener, so the interactive visit/starter prompts are skipped for it.
+    starter_prefilled=0
+    if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ]; then starter_prefilled=1; fi
+
+    # --rig names the rig a NEW subject is created in; an existing subject's rig
+    # comes from its id prefix, so --rig is meaningless there. Refuse rather than
+    # silently ignore it.
+    if [ -n "$engage_rig" ] && [ "$engage_new_subject" = 0 ]; then
+        echo "$PROG: engage: --rig applies only with --new-subject; an existing subject's rig is derived from its id. Drop --rig, or add --new-subject to create one." >&2
+        exit 2
+    fi
+
+    # --new-subject: file a FRESH subject bead in a chosen rig, then engage it in
+    # one gesture. The positional argument is the subject TEXT (the new bead's
+    # title), not an id; --subject names an EXISTING bead, so the two conflict.
+    # engage_create_subject resolves the rig, obtains the title, creates the
+    # marked bead, and leaves its id in $bead with the opener primed — after it
+    # the rest of this verb runs unchanged, deriving the rig from the new id's
+    # prefix and filing the ONE visit the marker keeps the async worker from
+    # duplicating.
+    if [ "$engage_new_subject" = 1 ]; then
+        if [ "$engage_subject_flag" = 1 ]; then
+            echo "$PROG: engage: --subject names an existing bead and --new-subject creates one — pass only one." >&2
+            exit 2
+        fi
+        new_subject_title="$bead"; bead=""
+        engage_create_subject
+    fi
+
+    # Subject: prompt when absent on a TTY; a flag or positional pre-fills it.
+    if [ -z "$bead" ]; then
+        if [ "$engage_interactive" = 1 ]; then
+            engage_prompt_subject || { echo "$PROG: engage: no subject given — nothing engaged" >&2; exit 2; }
+            bead="$ENGAGE_SUBJECT"
+        else
+            echo "$PROG: engage needs <bead-id> (a parked visit, or a subject to converse about)" >&2; usage; exit 2
+        fi
+    fi
+
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # (parity with open), before the rig is derived from the id prefix.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
+
+    # Pin bd at the subject's rig, as open/dismiss do, so the visit lookup and
+    # assignment read and write the ledger the picked bead lives in. A prefix
+    # no rig carries is refused here: the converse templates are rig-scoped, so
+    # with no rig there is nowhere to resolve "$template" and nothing to spawn.
+    path=$(rig_path_for_bead "$bead")
+    if [ -z "$path" ]; then
+        echo "$PROG: engage: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list', so there is no rig to resolve the converse template in. Nothing spawned." >&2
+        exit 4
+    fi
+    rig=$(rig_name_for_bead "$bead")
+    # A rig that carries no converse template can host no converse sitting, so an
+    # engage there can only half-act: file a visit and export GC_RIG, then fail at
+    # the spawn, leaving an un-openable visit behind and a GC_RIG that gc bd
+    # rejects. An HQ / city-store bead resolves to the city root, which carries
+    # none. Refuse up front, before any visit is filed or GC_RIG/BEADS_DIR is
+    # exported, so the engage is a clean no-op.
+    if ! rig_carries_converse "$rig"; then
+        echo "$PROG: engage: converse is not available for '$bead': its rig '${rig:-?}' ($path) carries no converse template. HQ/city-store beads are not converse-engageable. Nothing filed, nothing spawned." >&2
+        exit 4
+    fi
+    [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+    [ -n "$rig" ] && export GC_RIG="$rig"
+
+    # A spawned converse sitting is sustained by the RECONCILER — a converse slot
+    # sets nudge="" and idle_timeout=0, so no pool backstop cycles it. A suspended
+    # rig has its agents skipped by the reconciler, and a rig with no agents
+    # running has no live runtime tending it, so on either the sitting never comes
+    # up: engage would report success while the visit sits bound to a session that
+    # never registers, recoverable only by hand. Refuse before
+    # spawning and name the fix. Both flags come from the `gc rig list`
+    # enumerate_rigs already read; a gc that reports neither leaves them empty,
+    # which reads as unknown and does not refuse.
+    rig_suspended=$(rig_suspended_for_bead "$bead")
+    rig_running=$(rig_running_for_bead "$bead")
+    if [ "$rig_suspended" = "true" ]; then
+        echo "$PROG: engage: rig '${rig:-?}' is suspended, so the reconciler skips its agents and a spawned converse sitting would never come up — the visit would strand bound to it. Resume the rig, then re-engage: gc rig resume ${rig:-<rig>}" >&2
+        exit 4
+    fi
+    if [ "$rig_running" = "false" ]; then
+        echo "$PROG: engage: rig '${rig:-?}' has no agents running, so nothing would sustain a spawned converse sitting — the visit would strand bound to a session that never registers. Start the rig first ('gc rig status ${rig:-<rig>}' to see why it is down), then re-engage." >&2
+        exit 4
+    fi
+
+    # The bead must resolve before anything spawns — the shared resolve+classify,
+    # so an unanswered read fails closed as a data-plane outage, not a missing
+    # bead, the way open does.
+    verify_subject "$bead" engage "Nothing spawned." || exit $?
+    bead_row="$VS_ROW"
+    bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
+
+    # The subject a visit id is about — for the grounding line and the success
+    # summary below. visit_subject (visit-identity.sh) reads the tracks edge with
+    # the gc.continuation_group stamp as fallback, in either the `gc bd show`
+    # shape bead_row carries or the `gc bd list` shape, so the same matcher serves
+    # here as in open/dismiss. Empty for a non-visit.
+    visit_subject=""
+    if [ "$bead_kind" = "visit" ]; then
+        visit_subject=$(printf '%s' "$bead_row" | jq -r "$VISIT_IDENTITY_JQ"'visit_subject' 2>/dev/null || true)
+    fi
+
+    # Ground the operator in the bead they picked, before the visit or model
+    # prompt: a typed id, PR number, or URL carries nothing of the bead on its
+    # own, and a title search drops all but the title once a match is chosen.
+    # Interactive only — a --no-input caller named the subject on argv and its
+    # stdout is a script's to parse.
+    if [ "$engage_interactive" = 1 ]; then
+        if [ "$bead_kind" = "visit" ]; then
+            # A visit id names the visit, not the work it is about, and the
+            # join-or-new prompt is skipped for it — so this is the operator's one
+            # look before the model choice. Show the subject the visit tracks, and
+            # the reason it was filed (the visit title's tail after "— ").
+            if [ -n "$visit_subject" ]; then
+                subj_row=$(gc bd show "$visit_subject" --json 2>/dev/null | scrub \
+                    | jq -r --arg b "$visit_subject" \
+                        'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first) else empty end' 2>/dev/null || true)
+                subj_summary=$(printf '%s' "$subj_row" | jq -r '
+                    (.title // "") as $t
+                    | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
+                    | " (" + (.issue_type // "?") + " · " + (.status // "?")
+                      + " · p" + ((.priority // 0) | tostring) + ")"
+                      + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
+                # A subject that does not resolve (cross-store, or a torn row)
+                # still grounds by id rather than dropping the line.
+                printf '  Subject: %s%s\n' "$visit_subject" "$subj_summary"
+            else
+                printf '  Subject: (this visit names no subject — no continuation-group stamp and no tracks edge)\n'
+            fi
+            visit_reason=$(printf '%s' "$bead_row" | jq -r '
+                (.title // "")
+                | (split(" — ") | if length > 1 then (.[1:] | join(" — ")) else .[0] end)
+                | if length > 96 then .[0:95] + "…" else . end' 2>/dev/null || true)
+            [ -n "$visit_reason" ] && printf '  Visit:   "%s"\n' "$visit_reason"
+        else
+            subject_summary=$(printf '%s' "$bead_row" | jq -r '
+                (.title // "") as $t
+                | ($t | if length > 72 then .[0:71] + "…" else . end) as $tt
+                | "  " + (.id // "?")
+                  + " (" + (.issue_type // "?") + " · " + (.status // "?")
+                  + " · p" + ((.priority // 0) | tostring) + ")"
+                  + (if $tt == "" then "" else " — \"" + $tt + "\"" end)' 2>/dev/null || true)
+            [ -n "$subject_summary" ] && printf '%s\n' "$subject_summary"
+        fi
+    fi
+
+    # --template pre-fills the starter with a named seed now that the subject is
+    # known; the seed body becomes the new visit's claim-time brief.
+    if [ -n "$engage_template" ]; then
+        engage_body=$(engage_starter_seed "$engage_template" "$bead")
+        [ -n "$engage_body" ] || { echo "$PROG: engage: unknown --template '$engage_template' (valid: $(engage_starter_list | cut -f1 | tr '\n' ' ' | sed 's/ *$//'))" >&2; exit 2; }
+        engage_reason=$(engage_starter_list | awk -F"$TAB" -v k="$engage_template" '$1==k{print $2}')
+        [ -n "$engage_reason" ] || engage_reason="$engage_template"
+        engage_file_new=1
+    fi
+
+    # Interactive decision for a SUBJECT, in one prompt: engage an existing visit,
+    # or open a new one (blank, on a seed, or with a typed opener). An explicit
+    # visit id names its own visit, and a pre-filled --reason/--template already
+    # chose a new one.
+    if [ "$engage_interactive" = 1 ] && [ "$bead_kind" != "visit" ] && [ "$starter_prefilled" = 0 ]; then
+        engage_prompt_visit_or_starter "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
+        if [ "$ENGAGE_VISIT_CHOICE" = "new" ]; then
+            engage_file_new=1
+            engage_reason="$ENGAGE_STARTER_TAIL"
+            engage_body="$ENGAGE_STARTER_BODY"
+        else
+            engage_chosen_visit="$ENGAGE_VISIT_CHOICE"
+        fi
+    fi
+
+    # Model: prompt when interactive and unset, else the opus default (or the
+    # flag). Validated against the configured variants before the template binds.
+    if [ "$engage_model_set" = 0 ] && [ "$engage_interactive" = 1 ]; then
+        engage_prompt_model || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
+        engage_model="$ENGAGE_MODEL"
+    fi
+    if ! engage_valid_model "$engage_model"; then
+        echo "$PROG: engage: --model must be one of: $(engage_list_models | tr '\n' ' ' | sed 's/ *$//') (got '$engage_model')" >&2
+        exit 2
+    fi
+    template="converse-$engage_model"
+
+    # Resolve the sitting's visit. A visit picked off the board is itself the
+    # visit; a subject resolves to the open visits tracking it (engage_find_visits
+    # at file scope), and a subject with none gets one filed (open parks it to the
+    # board). A subject can carry several open visits — escalate.sh files one per
+    # (subject, key) — so the parked (open, unassigned) ones are preferred over
+    # one a sitting already holds, oldest first; more than one parked visit is an
+    # ambiguity the operator settles interactively or by naming the visit id.
+    visit_row=""
+    # bound_existing marks the path where `engage <subject>` binds a visit that
+    # already existed, as opposed to an explicit visit id or one freshly filed
+    # here. Only that path gets the extra output below: the bound visit's subject
+    # and the --reason alternative. It stays 0 everywhere else.
+    bound_existing=0
+    # A blocks-dep that has since closed is a satisfied gate, so the visit's
+    # premise may be moot. Read once from the pre-spawn dep list, surfaced only on
+    # the bound_existing output.
+    visit_closed_gates=""
+    if [ "$bead_kind" = "visit" ]; then
+        # --reason files a NEW visit, which only makes sense for a subject. An
+        # explicit visit id names one exact visit, so a reason has nowhere to go
+        # here, and silently dropping it is the bug this verb exists to stop.
+        # Refuse and point at the subject form rather than fold it into the
+        # named visit.
+        if [ -n "$engage_reason" ]; then
+            echo "$PROG: engage: --reason files a NEW visit, which needs a subject — but '$bead' is an explicit visit id. Engage the subject with --reason to open a fresh visit, or drop --reason to engage this visit as-is. Nothing spawned." >&2
+            exit 2
+        fi
+        VISIT="$bead"
+        visit_row="$bead_row"
+    elif [ -n "$engage_chosen_visit" ]; then
+        # The operator picked an existing parked visit at the interactive prompt.
+        VISIT="$engage_chosen_visit"
+    else
+        VISIT=""
+        # filed_fresh records that cmd_open below filed a NEW visit, so the bind
+        # block does not misreport a freshly filed visit as a pre-existing one.
+        filed_fresh=0
+        candidates=$(engage_find_visits "$bead")
+        # A --reason, a --template, or an interactive "new visit"
+        # (engage_file_new) files a fresh visit and engages it — even when the
+        # subject already has one; cmd_open's --allow-duplicate marks that
+        # deliberate, and --body carries the starter as the claim-time brief.
+        # With none of those, an existing visit is engaged and only a subject
+        # with none has a visit filed.
+        if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ] || [ -z "$candidates" ]; then
+            if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; then
+                echo "$PROG: engage: filing a new visit on $bead, then engaging it" >&2
+                set -- "$bead" --allow-duplicate
+                [ -n "$engage_reason" ] && set -- "$@" --reason "$engage_reason"
+                [ -n "$engage_body" ] && set -- "$@" --body "$engage_body"
+            else
+                echo "$PROG: engage: no open visit on $bead — filing one to park on the board, then engaging it" >&2
+                set -- "$bead"
+            fi
+            # cmd_open runs in this shell and leaves the new id in VISIT.
+            # Drop its stdout: the "visit filed / engage it when ready" success
+            # lines are terminal advice for a standalone `open`, stale here
+            # because engage binds the sitting itself just below. Errors stay on
+            # stderr and still surface.
+            cmd_open "$@" >/dev/null || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            filed_fresh=1
+            # The visit is filed, so a --new-subject subject is no longer an
+            # orphan — disarm the abort backstop armed in engage_create_subject.
+            # Guarded, so a non-new-subject engage never touches traps.
+            if [ -n "${_ens_cleanup_bead:-}" ]; then
+                _ens_cleanup_bead=""
+                trap - EXIT INT TERM HUP
+            fi
+            [ -n "$VISIT" ] && visit_new=1
+            [ -n "$VISIT" ] || candidates=$(engage_find_visits "$bead")
+        fi
+        if [ -z "$VISIT" ] && [ -n "$candidates" ]; then
+            # Reached without a freshly filed visit means the visit engaged here
+            # already existed on the subject — the bind-a-pre-existing-visit path.
+            [ "$filed_fresh" = 0 ] && bound_existing=1
+            parked=$(printf '%s\n' "$candidates" | awk -F'\t' '$2=="open" && $3=="" {print $1}')
+            parked_n=$(printf '%s\n' "$parked" | grep -c . || true)
+            if [ "$parked_n" -gt 1 ]; then
+                echo "$PROG: engage: $bead has $parked_n parked visits ($(printf '%s\n' "$parked" | tr '\n' ' ' | sed 's/ *$//')) — name the one to engage: $PROG engage <visit-id>" >&2
+                exit 4
+            fi
+            if [ "$parked_n" -eq 1 ]; then
+                VISIT="$parked"
+            else
+                # Nothing parked: every open visit on the subject is held or
+                # pending. Report the first so the guard below names its holder.
+                VISIT="${candidates%%	*}"
+            fi
+        fi
+    fi
+    [ -n "$VISIT" ] || { echo "$PROG: engage: could not resolve a visit for '$bead'. Nothing spawned." >&2; exit 4; }
+    if [ -z "$visit_row" ]; then
+        visit_row=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0] // {}) else {} end' 2>/dev/null || true)
+    fi
+    visit_status=$(printf '%s' "$visit_row" | jq -r '.status // ""' 2>/dev/null || true)
+    visit_owner=$(printf '%s' "$visit_row" | jq -r '.assignee // ""' 2>/dev/null || true)
+
+    # The spawned sitting adopts the visit only through its own hook claim, whose
+    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity-agents.md), and
+    # `bd ready` yields a bead only while it is open and unblocked. A closed or
+    # blocked visit assigned to the sitting never becomes its claim, so the
+    # sitting would wake holding nothing while this command reports success.
+    #
+    # A visit with an assignee is already engaged, or pending engagement:
+    # engage binds the visit to a spawned sitting's runtime name (below) while
+    # the visit is still `open`, and the hook promotes that `open`+assignee pair
+    # through ready_assignment. So a nonempty assignee on a LIVE visit means a
+    # sitting already holds it or is about to; treat it as taken and point the
+    # operator at it rather than spawn a duplicate that overwrites the binding.
+    # A closed visit keeps its last assignee (bd close never clears it), so the
+    # status is settled first — that holder is a sitting that has ended, and an
+    # attach hint at it would be wrong.
+    case "$visit_status" in
+        open)
+            if [ -n "$visit_owner" ]; then
+                # An open visit with an assignee is a pending engagement: engage
+                # binds the visit to a spawned sitting while it is still open, and
+                # the hook adopts that open+assignee pair. So a live owner means a
+                # sitting already holds it or is about to — point the operator
+                # there, do not spawn a duplicate that overwrites the binding.
+                # But a sitting whose rig was suspended (or down) at bind time
+                # never registers, and its visit is then stranded bound to a
+                # session that does not exist. When the owner is
+                # PROVABLY gone from `gc session list`, reclaim it — clear the
+                # binding, re-park on the board — and spawn a fresh sitting, so
+                # the operator's natural retry (`engage <subject>`) recovers it
+                # rather than being pointed at a session that is gone.
+                if sitting_is_gone "$visit_owner"; then
+                    # `gc session list` and this write are two calls: a second
+                    # engage that read the same gone owner can reclaim, spawn, and
+                    # bind a fresh sitting in the window between them. Clear only
+                    # while the visit still holds the gone owner just read —
+                    # --if-assignee "$visit_owner" --if-status open — so this never
+                    # overwrites the binding a concurrent winner installed and
+                    # re-strands the visit. A mismatch writes nothing and exits 13;
+                    # re-read and defer to whoever won.
+                    reclaim_rc=0
+                    # A human-routed bead with no gc.takeaway renders as "no
+                    # question recorded" on the board, so the re-park co-writes
+                    # the headline the human-route-takeaway guard requires of
+                    # every raw park writer, in the same guarded update.
+                    gc bd update "$VISIT" --if-assignee "$visit_owner" --if-status open --assignee "" \
+                        --set-metadata gc.routed_to=human \
+                        --set-metadata "gc.takeaway=Reclaimed from a gone sitting; re-parked for re-engagement." \
+                        --set-metadata "gc.takeaway_at=$(iso_now)" \
+                        --set-metadata gc.takeaway_by=host \
+                        --set-metadata gc.takeaway_settled= \
+                        >/dev/null 2>&1 || reclaim_rc=$?
+                    if [ "$reclaim_rc" -eq 13 ]; then
+                        winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
+                        if [ -n "$winner" ]; then
+                            echo "$PROG: engage: visit $VISIT was reclaimed and re-engaged by '$winner' while this engage read the gone sitting '$visit_owner' — attach to it instead: gc session attach $winner" >&2
+                        else
+                            echo "$PROG: engage: visit $VISIT changed state while this engage read the gone sitting '$visit_owner' — another actor reclaimed it. Re-run: $PROG engage $bead" >&2
+                        fi
+                        exit 4
+                    fi
+                    if [ "$reclaim_rc" -ne 0 ]; then
+                        echo "$PROG: engage: visit $VISIT is bound to the gone sitting '$visit_owner', but re-parking it failed (rc $reclaim_rc) — clear it by hand: gc bd update $VISIT --assignee \"\" --set-metadata gc.routed_to=human" >&2
+                        exit 4
+                    fi
+                    bust_cache
+                    echo "$PROG: engage: reclaimed visit $VISIT from the gone sitting '$visit_owner' (absent from 'gc session list') — re-parked and engaging a fresh sitting" >&2
+                    visit_owner=""
+                else
+                    echo "$PROG: engage: visit $VISIT is pending engagement by the spawned sitting '$visit_owner' — attach to it instead: gc session attach $visit_owner" >&2
+                    exit 4
+                fi
+            fi ;;
+        in_progress)
+            echo "$PROG: engage: visit $VISIT is already engaged by '${visit_owner:-an unnamed holder}' — attach to it instead: gc session attach ${visit_owner:-<holder>}" >&2
+            exit 4 ;;
+        *)
+            echo "$PROG: engage: visit $VISIT is '${visit_status:-unknown}', not open${visit_owner:+ (last held by '$visit_owner')} — a spawned sitting adopts only ready (open, unblocked) assigned work, so it would hold nothing. Nothing spawned." >&2
+            exit 4 ;;
+    esac
+    if ! visit_deps_json=$(gc bd dep list "$VISIT" --direction=down --json 2>/dev/null | scrub \
+        | jq -ce 'if type == "array" then . else error("not an edge array") end' 2>/dev/null); then
+        echo "$PROG: engage: could not read the blockers on visit $VISIT ('gc bd dep list' failed or did not answer with an edge array), so its claimable state is UNPROVEN — refusing to spawn a sitting that may hold nothing. Nothing spawned; retry once the store answers." >&2
+        exit 4
+    fi
+    visit_blockers=$(printf '%s' "$visit_deps_json" \
+        | jq -r '[ .[] | select((.dependency_type // "") == "blocks")
+                       | select((.status // "") != "closed") | .id ] | join(" ")' 2>/dev/null || true)
+    if [ -n "$visit_blockers" ]; then
+        echo "$PROG: engage: visit $VISIT is blocked by $visit_blockers — a blocked bead is not in 'bd ready', so a spawned sitting could not adopt it and would hold nothing. Nothing spawned; engage it once its blockers clear." >&2
+        exit 4
+    fi
+    # A blocks-dep that is now CLOSED is a satisfied gate: whatever this visit was
+    # waiting on has resolved, so its premise may be moot and a bound sitting may
+    # self-dismiss it. Derived from the same read the blocker guard used above.
+    visit_closed_gates=$(printf '%s' "$visit_deps_json" \
+        | jq -r '[ .[] | select((.dependency_type // "") == "blocks")
+                       | select((.status // "") == "closed") | .id ] | join(" ")' 2>/dev/null || true)
+
+    # Spawn the manual sitting WITHOUT attaching, so the visit is assigned before
+    # the session's claim loop runs. Capture the runtime identity from --json:
+    # a multi-session template's stored alias is a qualified form, so the visit
+    # id is not assumed to equal it.
+    #
+    # `gc session new` resolves a bare template through currentRigContext, which
+    # reads GC_DIR (or cwd), NOT the GC_RIG exported above. The converse
+    # templates are rig-scoped, with no city-scoped bare converse-<model>, so
+    # from the city root (where the tmux board picker runs) the bare name matches
+    # no rig and nothing spawns. Point GC_DIR at the subject's rig so the name
+    # resolves to that rig's template.
+    #
+    # gc says WHY a spawn failed only on stderr (template not found in this rig,
+    # alias already held, transport down), so it is kept for the message.
+    # One spawn attempt under the alias in $1: capture the identity JSON on
+    # stdout and gc's reason on stderr (into spawn_why), then parse sid/sname.
+    engage_spawn() {
+        spawn_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-engage-spawn.XXXXXX" 2>/dev/null || printf '')
+        if [ -n "$spawn_errf" ]; then
+            spawn=$(GC_DIR="$path" gc session new "$template" --alias "$1" --no-attach --json 2>"$spawn_errf" | scrub)
+            spawn_why=$(tr '\n' ' ' < "$spawn_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+            rm -f "$spawn_errf" 2>/dev/null || true
+        else
+            spawn=$(GC_DIR="$path" gc session new "$template" --alias "$1" --no-attach --json 2>/dev/null | scrub)
+            spawn_why=""
+        fi
+        sid=$(printf '%s' "$spawn" | jq -r '.session_id // ""' 2>/dev/null || true)
+        sname=$(printf '%s' "$spawn" | jq -r '.session_name // ""' 2>/dev/null || true)
+        swork_dir=$(printf '%s' "$spawn" | jq -r '.work_dir // ""' 2>/dev/null || true)
+    }
+
+    # Spawn under the bare visit id first — it is the alias other engages read
+    # back as a display hint. gascity's ValidateAlias runs before any session is
+    # created and refuses an alias matching the session-id syntax `^gc-[0-9]+$`,
+    # the reserved `human`, an `s-` prefix, or the 64-char cap, every rejection
+    # carrying the sentinel "invalid session alias". A visit on the gascity rig,
+    # whose bead prefix is `gc`, can get an all-numeric id (gc-62297) that reads
+    # as a session id and is refused, leaving the visit un-engageable. On that
+    # sentinel, retry once under a `v-` prefix no rule can match. Keying on gc's
+    # message rather than re-testing ValidateAlias's rules in shell keeps the two
+    # from drifting, and covers every rejection reason with one retry.
+    session_alias=$VISIT
+    engage_spawn "$session_alias"
+    if [ -z "$sname" ] || [ -z "$sid" ]; then
+        case "$spawn_why" in
+            *"invalid session alias"*)
+                session_alias="v-$VISIT"
+                engage_spawn "$session_alias" ;;
+        esac
+    fi
+    if [ -z "$sname" ] || [ -z "$sid" ]; then
+        spawn_hint=""
+        case "$spawn_why" in
+            *"not found"*) spawn_hint=" The converse templates are rig-scoped: rig '${rig:-?}' ($path) does not carry $template, so a visit on a bead there cannot be engaged from that rig." ;;
+            *"alias already"*) spawn_hint=" A session still holds the alias '$session_alias' — a sitting from an earlier engage that never bound; close it (gc session close <id>) and re-run." ;;
+        esac
+        echo "$PROG: engage: 'gc session new $template' did not return a session identity — nothing assigned.${spawn_why:+ gc said: $spawn_why.}$spawn_hint Output: ${spawn:-<empty>}" >&2
+        exit 4
+    fi
+
+    # Bind the visit to the sitting: its assignee is the session's runtime name,
+    # the identity a pool claim would have stamped, so the session's own
+    # `gc hook --claim` adopts it with no pool routing. The bind is CONDITIONAL
+    # on the open+unassigned state the guards above read. `gc session new` takes
+    # real time, so a second engage of the same row can pass those same guards
+    # and spawn its own sitting in the window before this write — an
+    # unconditional update would let the later engage overwrite the first
+    # sitting's binding, stranding it. --if-assignee "" --if-status
+    # open writes only while the visit is still the one the guards saw; a mismatch
+    # writes nothing and exits 13. This engage is then the loser: it must not
+    # overwrite the owner that won.
+    #
+    # Every post-spawn failure CLOSES the sitting it just spawned before it
+    # exits: a converse slot sets nudge="" and idle_timeout=0, so a sitting that
+    # never binds a visit has no idle-claim rescue and would linger holding
+    # nothing. Closed, not suspended — a suspended session bead stays open and
+    # keeps its alias reserved, so the advertised re-run would be refused at
+    # `gc session new --alias` for as long as it lingered.
+    engage_abort() {
+        gc session close "$1" >/dev/null 2>&1 || true
+        echo "$PROG: engage: $2" >&2
+        exit 4
+    }
+    bind_rc=0
+    gc bd update "$VISIT" --if-assignee "" --if-status open --assignee "$sname" >/dev/null 2>&1 || bind_rc=$?
+    if [ "$bind_rc" -eq 13 ]; then
+        winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
+        engage_abort "$sid" "visit $VISIT was engaged by '${winner:-another sitting}' while this sitting spawned — not overwriting. The sitting $sname this engage spawned holds nothing and was closed; attach to the one that won: gc session attach ${winner:-<owner>}"
+    fi
+    if [ "$bind_rc" -ne 0 ]; then
+        engage_abort "$sid" "spawned $sname but the bind of visit $VISIT failed (rc $bind_rc). The sitting holds nothing and was closed; the visit is unchanged — re-run: $PROG engage $bead"
+    fi
+    assigned=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
+    if [ "$assigned" != "$sname" ]; then
+        if [ -n "$assigned" ]; then
+            engage_abort "$sid" "visit $VISIT is held by '$assigned', not the sitting '$sname' this engage spawned — another writer took it after the bind. The sitting holds nothing and was closed; attach to the holder: gc session attach $assigned"
+        fi
+        engage_abort "$sid" "visit $VISIT read back with no assignee after binding it to '$sname' — the bind did not persist. The sitting holds nothing and was closed; the visit is unchanged — re-run: $PROG engage $bead"
+    fi
     bust_cache
-    [ "$closed_n" -eq 0 ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
+
+    # Leave a reminder on the subject's PR that this visit engaged, if it has a
+    # PR. Best effort: pr-visit-comment.sh self-silences when the subject has no
+    # PR or gh is absent, and its failure must not fail an engage that already
+    # bound its visit. (The reason is passed conditionally because /bin/sh word-
+    # splits ${x:+...}, which would break a multi-word reason.)
+    if [ -x "$VISIT_COMMENT_TOOL" ]; then
+        # The PR lives on the SUBJECT, not the visit. Engaging a subject id
+        # leaves $bead the subject; engaging a visit id leaves it the visit,
+        # which names its subject by its gc.continuation_group stamp, else the
+        # tracks edge that stamp is filed alongside. The stamp lands empty on a
+        # minority of visits, and reading only it there falls back to the visit
+        # id and posts the reminder on the wrong bead (or none); cmd_open,
+        # current_sitting_subject, and converse-fold.sh all recover from the edge
+        # for the same reason. visit_row is a `gc bd show` row
+        # (.dependency_type/.id); the read tolerates the `gc bd list` edge shape
+        # (.type/.depends_on_id) too. $bead is the last resort, and IS the
+        # subject in the subject-id case.
+        _pr_subject=$(printf '%s' "$visit_row" | jq -r '
+            (.metadata["gc.continuation_group"] // "") as $g
+            | if $g != "" then $g
+              else ([ (.dependencies // [])[] | objects
+                      | select(((.dependency_type // .type // "") | tostring) == "tracks")
+                      | ((.id // .depends_on_id // "") | tostring) ] | map(select(. != "")) | first // "")
+              end' 2>/dev/null || true)
+        [ -n "$_pr_subject" ] || _pr_subject="$bead"
+        if [ -n "$engage_reason" ]; then
+            "$VISIT_COMMENT_TOOL" engage --visit "$VISIT" --subject "$_pr_subject" --reason "$engage_reason" || true
+        else
+            "$VISIT_COMMENT_TOOL" engage --visit "$VISIT" --subject "$_pr_subject" || true
+        fi
+    fi
+
+    # Human summary on stdout; id-heavy provenance on a single always-on [debug]
+    # line on stderr — never gated behind a verbosity flag, since re-running to
+    # see it would bind a different visit.
+    _eng_which=existing; [ "$visit_new" = 1 ] && _eng_which=new
+    _eng_routed=$(printf '%s' "$visit_row" | jq -r '.metadata["gc.routed_to"] // ""' 2>/dev/null || true)
+    # On the visit-id path $bead IS the visit, so name the subject it tracks
+    # rather than repeat the visit id back as its own "for".
+    _eng_for="$bead"; [ "$bead_kind" = "visit" ] && [ -n "$visit_subject" ] && _eng_for="$visit_subject"
+    printf '✓ %s on %s visit %s for %s\n' "$template" "$_eng_which" "$VISIT" "$_eng_for"
+    printf '  attach: gc session attach %s\n' "$sid"
+    # `engage <subject>` with no --reason binds a visit that already existed, which
+    # may be narrower or already-purposed than the fresh discussion the operator
+    # meant to start. Name what was bound and offer --reason, so the operator can
+    # tell a bound existing thread from a new one rather than reading a bare id.
+    if [ "$bound_existing" = "1" ]; then
+        visit_title=$(printf '%s' "$visit_row" | jq -r '.title // ""' 2>/dev/null || true)
+        visit_label="visit $VISIT"
+        [ -n "$visit_title" ] && visit_label="\"$visit_title\""
+        echo "$PROG: engage: bound the pre-existing $visit_label on $bead, not a fresh discussion. To open a new visit instead, re-run: $PROG engage $bead --reason \"<topic>\""
+        [ -n "$visit_closed_gates" ] && echo "$PROG: engage: heads up: this visit's gate(s) $visit_closed_gates have since closed, so its premise may be satisfied and the sitting may find it moot and self-dismiss."
+    fi
+    printf '[debug] visit=%s sitting=%s (%s) routed_to=%s cont_group=%s work_dir=%s\n' \
+        "$VISIT" "$sid" "$sname" "${_eng_routed:-?}" "$bead" "${swork_dir:-?}" >&2
+
+    # A freshly spawned sitting self-starts from the prompt its launch delivers.
+    # `gc session new` puts the rendered converse prompt on argv (every converse
+    # provider resolves to prompt_mode=arg) and step 1 of that prompt is the claim
+    # block, so a claude sitting (opus, fable) claims its visit, re-checks the
+    # premise, preps, and posts its framing with no keystrokes. Sending it a kick
+    # as well is worse than redundant. engage would deliver the kick while that
+    # self-started turn is still running, so the harness holds it as a deferred
+    # reminder and releases it after the framing lands, and the operator reads a
+    # stale "begin now" once per engage.
+    #
+    # codex is the exception. gascity delivers its prompt the same way, but the
+    # codex CLI is not trusted to consume an argv prompt at launch: its pool slots
+    # carry no prompt template and are primed by an explicit nudge instead. A
+    # codex sitting can wake idle at its prompt, so it keeps a START directive
+    # kick. A bare poke reads as a connectivity check and does not begin the loop,
+    # so the kick names the action. An idle session takes it at once, with no
+    # in-flight turn for the harness to defer it behind. The kick precedes the
+    # attach so the operator lands on a started sitting, and on the --no-attach
+    # board-picker path it starts the sitting for whoever attaches later. A failed
+    # kick is not fatal: the visit is bound, so report it and let the operator
+    # start it by hand.
+    #
+    # A --reason is filed into the visit body by cmd_open, so every sitting reads
+    # it when it claims. The kick also carries it, for the one provider kicked.
+    case "$engage_model" in
+        opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
+        *)
+            kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
+            _kick_opener="${engage_body:-$engage_reason}"
+            [ -n "$_kick_opener" ] && kick="$kick The operator's reason: $_kick_opener"
+            gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
+                || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
+            ;;
+    esac
+
+    # The summary already printed the attach line; on the default path we attach.
+    if [ "$engage_attach" = "1" ]; then
+        gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+    fi
     return 0
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
+    engage)        shift; cmd_engage "$@" ;;
     react)         shift; cmd_react "$@" ;;
+    resolve)       shift; cmd_resolve "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
+    accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm); this script keeps only the write verbs" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, react, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

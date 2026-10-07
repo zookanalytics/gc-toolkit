@@ -39,7 +39,6 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
 done
 "$LEDGER" show --since 48h
-"$LEDGER" append boot "deacon started ($GC_SESSION_NAME)" -
 ```
 
 An open escalation named there is already asked; do not re-file it. A cleanup
@@ -56,16 +55,47 @@ patrol runs the formula's own next-iteration pour; the two have to seed the
 same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
 
 ```bash
-WISP_IDS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
+# >>> patrol-wisp-reconcile
+# The deacon is a city singleton, so it owns every mol-deacon-patrol wisp in
+# the store and reconciles by title alone. GC_RIG arrives unset in a city
+# session and the deacon's assignee carries no rig segment, so the rig filter
+# the per-rig witness and refinery apply would never match the deacon's own
+# wisp. The query stays assignee-blind so an orphan left by an interrupted
+# pour is still collected.
+WISP_ROWS=$(
+  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
+  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
 )
-WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
-for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
+# Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
+# awaiting burn beside the fresh successor it poured, the successor is always
+# the newer created_at — a cycle pours its successor only at its terminal step.
+# Selecting by status adopts the completed (in_progress) cycle and drops the
+# fresh (open) successor.
+WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
+WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
+for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
+# <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
+  POURED=1
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
+# A routine recycle adopts the one live wisp and records nothing: the ledger is
+# a record of actions, and a clean restart is not one. Record a boot line only
+# when startup changed state a later reader needs — a stale wisp burned, or a
+# fresh one poured because none was recoverable — so a tight recycle cadence
+# shows up as the faults it caused, not as one entry per cycle.
+BURNED=$(printf '%s\n' "$WISP_IDS" | sed '1d' | grep -c . || true)
+BOOT=""
+[ "${BURNED:-0}" -gt 0 ] && BOOT="burned $BURNED stale patrol wisp(s)"
+[ -n "${POURED:-}" ] && BOOT="${BOOT:+$BOOT; }poured a fresh wisp (none recoverable)"
+if [ -n "$BOOT" ]; then
+  LEDGER=""
+  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+  done
+  "$LEDGER" append boot "$BOOT ($GC_SESSION_NAME)" -
+fi
 ```
 
 Identity is `$GC_AGENT`, never `$GC_ALIAS`. Then follow the formula. Never
@@ -75,31 +105,47 @@ assign rolls the pour back and keeps the current wisp. Do NOT enter a
 "standing by" idle state between cycles; after next-iteration, run
 `gc hook`.
 
-## Escalation
+## Findings
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+A finding is a BEAD, filed through one writer that dedups repeats by
+situation key. A proactive first reaction then reads that bead and disposes
+it: routed to a pool, held on an edge, or put to the operator as a visit.
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
-  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<the finding, verbatim, + recommendation>"
+GC_RIG="${GC_RIG:-gc-toolkit}" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
 ```
 
-You are city-scoped, so `GC_RIG` arrives unset and escalate.sh's default
-converse pool renders bare, an address no pool holds, and it refuses before
-filing anything. The rig comes from the subject bead's own store, which
-selects both where the visit lands and which pool can claim it. When that
-store does not resolve, escalate against a bead that has one.
+You are city-scoped, so `GC_RIG` arrives unset. It selects the store the
+finding lands in and rig-qualifies the proactive pool whose worker reacts to
+it, so bind it. A finding about a bead in another rig's store is filed with
+that rig's name, so the key meets its earlier occurrences.
 
-Escalate systemic findings (a Dolt outage, an unrestorable backup, a doctor
-finding no open bead tracks); handle the routine directly (stale locks,
-orphan processes, `gc doctor --fix`-able findings). Dedup against existing
-beads city-wide before escalating a doctor finding — your rig store is not
-the city. Context recycling is the cycle-recycle Stop hook's job — never
-something you ask about.
+File systemic findings (a Dolt outage, an unrestorable backup); handle the
+routine directly (stale locks, orphan processes, `gc doctor --fix`-able
+findings). A doctor check's finding is filed by the doctor-sweep step through
+`--check`, which derives its key, so never hand-key one under this `--key`
+recipe. Do not hand-search for an existing bead first: the key decides whether
+this finding already has one, and a bead filed elsewhere for the same cause is
+the reaction's `blocked` exit to find.
+
+An emergency that needs a human NOW and cannot wait for a disposition — a
+crash, data loss, corruption, a security problem — still goes straight to a
+visit:
+
+```bash
+ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
+  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
+```
+
+escalate.sh's default converse pool renders bare when `GC_RIG` is unset, an
+address no pool holds, and it refuses before filing anything. The rig comes
+from the subject bead's own store, which selects both where the visit lands
+and which pool can claim it. Context recycling is the cycle-recycle Stop
+hook's job — never something you ask about.
 
 ## The incident ledger
 
@@ -124,6 +170,8 @@ back to skipping it.
 
 {{ template "heartbeat-no-consent-ui" . }}
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}

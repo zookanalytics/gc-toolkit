@@ -7,8 +7,7 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- `gc` version: `1.4.1`
-- agents: 14 · formulas: 22
+- agents: 18 · formulas: 25
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -31,20 +30,24 @@ covers that dimension.
 
 | agent | bytes | est. tokens |
 |---|---:|---:|
-| [`claude`](agents/claude.md) | 5,716 | 1,429 |
-| [`codex`](agents/codex.md) | 5,716 | 1,429 |
-| [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
-| [`converse`](agents/converse.md) | 45,658 | 11,414 |
-| [`deacon`](agents/deacon.md) | 10,001 | 2,500 |
+| [`claude`](agents/claude.md) | 5,876 | 1,469 |
+| [`codex`](agents/codex.md) | 5,876 | 1,469 |
+| [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
+| [`converse`](agents/converse.md) | 34,153 | 8,538 |
+| [`converse-codex`](agents/converse-codex.md) | 34,153 | 8,538 |
+| [`converse-fable`](agents/converse-fable.md) | 34,153 | 8,538 |
+| [`converse-opus`](agents/converse-opus.md) | 34,153 | 8,538 |
+| [`deacon`](agents/deacon.md) | 13,533 | 3,383 |
+| [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
-| [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
-| [`keeper`](agents/keeper.md) | 22,389 | 5,597 |
-| [`mechanik`](agents/mechanik.md) | 24,535 | 6,133 |
-| [`polecat`](agents/polecat.md) | 20,317 | 5,079 |
-| [`polecat-codex`](agents/polecat-codex.md) | 20,347 | 5,086 |
-| [`proactive`](agents/proactive.md) | 12,467 | 3,116 |
-| [`refinery`](agents/refinery.md) | 8,626 | 2,156 |
-| [`witness`](agents/witness.md) | 12,186 | 3,046 |
+| [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
+| [`keeper`](agents/keeper.md) | 23,569 | 5,892 |
+| [`mechanik`](agents/mechanik.md) | 28,668 | 7,167 |
+| [`polecat`](agents/polecat.md) | 27,091 | 6,772 |
+| [`polecat-codex`](agents/polecat-codex.md) | 27,121 | 6,780 |
+| [`proactive`](agents/proactive.md) | 12,013 | 3,003 |
+| [`refinery`](agents/refinery.md) | 10,950 | 2,737 |
+| [`witness`](agents/witness.md) | 15,605 | 3,901 |
 
 ## Formula recipes
 
@@ -56,28 +59,31 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,921 | 730 |
-| [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
-| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,247 | 811 |
+| [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
+| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,247 | 811 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
-| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,442 | 1,110 |
-| [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,548 | 637 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,149 | 537 |
-| [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 2,661 | 665 |
-| [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 2,596 | 649 |
-| [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 2,632 | 658 |
-| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 3,945 | 986 |
-| [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,400 | 600 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 4,779 | 1,194 |
-| [`mol-review`](formulas/mol-review.md) | `city` | 2,620 | 655 |
+| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
+| [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,285 | 571 |
+| [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
+| [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
+| [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
+| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
+| [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 5,878 | 1,469 |
+| [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
+| [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
-| [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,335 | 1,083 |
-| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 8,626 | 2,156 |
-| [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 3,494 | 873 |
-| [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
-| [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,639 | 659 |
+| [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,840 | 1,210 |
+| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |
+| [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 4,050 | 1,012 |
+| [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 3,554 | 888 |
+| [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
+| [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
+| [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,285 | 821 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
@@ -99,7 +105,11 @@ runs to re-prime after compaction.
 | codex | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | control-dispatcher | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
 | deacon | `city` | 1 | _none_ |
+| demo | `gascity`, `gc-toolkit` | 1 | _none_ |
 | dog | `city` | 1 | _none_ |
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | keeper | `gascity` | 1 | _none_ |

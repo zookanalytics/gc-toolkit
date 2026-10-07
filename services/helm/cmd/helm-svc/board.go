@@ -156,7 +156,10 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 		return boardExitUsage
 	}
 
-	src := source.NewBeadsSource()
+	// Resolve the city once: discovery shells out to gc, and the store read and
+	// the pack-health read below must name the same city.
+	cityPath := source.DiscoverCityPath()
+	src := source.NewBeadsSource(source.WithCityPath(cityPath))
 	if err := src.Check(); err != nil {
 		// Fail loudly. The alternative — falling back to the supervisor HTTP
 		// API — would make `prefix+b` depend on a live sidecar, which is the
@@ -181,7 +184,7 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 
 	now := time.Now().UTC()
 	b := board.BuildBoard(res.Anchors, now, res.Partial, res.PartialErrors, res.Facts)
-	b.PackHealth = source.GatherPackHealth(source.DiscoverCityPath(), now)
+	b.PackHealth = source.GatherPackHealth(cityPath, now)
 
 	limit := opts.limit
 	if limit < 0 {
@@ -222,7 +225,7 @@ type boardView struct {
 // selectView answers the flag: the operator's queue, or the city overview.
 func selectView(b board.Board, all bool, limit int) boardView {
 	if all {
-		return boardView{rows: board.CapRows(board.CityOverview(b.Tiles), limit, board.DefaultMaxParked, board.DefaultMaxDone), render: renderTable}
+		return boardView{rows: board.CapFamilies(board.CityOverview(b.Tiles), limit, board.DefaultMaxDone), render: renderTable}
 	}
 	rows := board.CapQueue(board.OperatorQueue(b.Tiles), limit)
 	return boardView{rows: rows, render: renderQueue, unprovable: len(rows) == 0 && b.Partial}
@@ -391,19 +394,20 @@ func renderPackHealth(w io.Writer, rows []board.PackBuild) {
 }
 
 // renderTable writes the city overview: the header, the pack-build lines, the
-// ranked table, and the legend that says what the bands and the held glyph mean.
+// dependency-family blocks, and the legend that says what a family and its
+// within-family bands mean.
 func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, rigCount int) {
 	fmt.Fprint(w, "gc-helm — cross-rig human-attention board\n")
 	stamp := now.Format("2006-01-02T15:04:05Z")
 	// Both sides of "showing N of M" drop the DONE band, per [closedRows].
-	// CapRows returns DONE and parked rows on top of its live budget, so
+	// CapFamilies returns the closed-anchor families on their own budget, so
 	// len(shown) is a whole board and can exceed the live count it would
 	// otherwise be printed against.
 	//
-	// The band carries its own budget, so it can be capped while the live rows
-	// are not. Printing the closed TOTAL against a capped band says the whole
-	// of it is on screen, which is the completeness this band exists to stop a
-	// reader assuming — so a capped band names both numbers.
+	// The DONE families carry their own budget, so they can be capped while the
+	// live rows are not. Printing the closed TOTAL against a capped band says the
+	// whole of it is on screen, which is the completeness this band exists to stop
+	// a reader assuming — so a capped band names both numbers.
 	done := closedRows(b.Tiles)
 	var shownLive, shownDone int
 	for _, t := range shown {
@@ -440,9 +444,9 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 		return
 	}
 
-	renderRows(w, shown)
+	renderFamilyRows(w, shown)
 	renderSittings(w, b.Sittings, now)
-	renderLegend(w)
+	renderFamilyLegend(w)
 }
 
 // renderRows writes the table proper — the sized header and one line per tile.
@@ -477,9 +481,10 @@ func renderCoverage(c board.PRCoverage, rigCount int) string {
 }
 
 func renderRows(w io.Writer, shown []board.Tile) {
-	// The two identifier columns are sized to what this board actually holds;
-	// every other column carries prose, where a fixed width and a trimmed tail
-	// are the right trade.
+	// The two identifier columns are sized to what this board actually holds —
+	// once, across every section, so a column means the same width in all of
+	// them. Every other column carries prose, where a fixed width and a trimmed
+	// tail are the right trade.
 	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
 	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
 
@@ -491,40 +496,211 @@ func renderRows(w io.Writer, shown []board.Tile) {
 		rule(rigW-1, rigW)+rule(8, colKind)+rule(6, colNM)+
 		rule(35, colFrontier)+strings.Repeat("─", 16)+"\n")
 
-	for _, t := range shown {
-		glyph := " "
-		if t.Held {
-			glyph = "●"
-		}
-		// "—" means THIS ROW has no roll-up, not that its KIND never has one: a
-		// decision never does, and a human/parked bead does exactly when it
-		// decomposed. Printing "—" over a real child set is what hid the open
-		// children of a parked subject (tk-a9k0l); printing 0/0 for a bead that
-		// owns no set at all would be a fabricated count.
-		nm := fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
-		if t.MTotal == 0 {
-			switch t.Kind {
-			case "decision", "human", "parked":
-				nm = "—"
+	// The board is read one attention band at a time. GroupBySection owns the
+	// order and the split, so this and the dashboard cannot disagree about which
+	// band a row is in; ClusterRows owns the fold, so a template that recurs is
+	// one line here and one line there.
+	for _, g := range board.GroupBySection(shown) {
+		fmt.Fprintf(w, "\n%s\n", sectionBanner(g.Key, len(g.Tiles)))
+		for _, cr := range board.ClusterRows(g.Tiles) {
+			if len(cr.Members) > 1 {
+				renderClusterLine(w, cr, idW, rigW)
+				continue
 			}
+			renderTileLine(w, cr.Tile, idW, rigW)
 		}
-		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
-			rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+	}
+}
+
+// renderTileLine writes one anchor's row in the sized columns.
+func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
+	glyph := " "
+	if t.Held {
+		glyph = "●"
+	}
+	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
+		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(acceptCell(t), colNeedsMax)+"\n")
+}
+
+// acceptCell prefixes a row's needs with a compact affordance marker when the
+// row can be Accepted — a recommendation the operator can dispatch and dismiss
+// in one order, the extra move it offers over a discuss-only gate. The marker
+// only flags the affordance; the verb is in the legend and the formula in
+// --json (Tile.AcceptFormula), since the takeaway a recommendation row carries
+// already names it at a glance.
+func acceptCell(t board.Tile) string {
+	if t.Acceptable {
+		return "accept ▸ " + t.Needs
+	}
+	return t.Needs
+}
+
+// nmCell is the "N/M" progress cell. "—" means THIS ROW has no roll-up, not that
+// its KIND never has one: a decision never does, and a human/parked bead does
+// exactly when it decomposed. Printing "—" over a real child set is what hid the
+// open children of a parked subject (tk-a9k0l); printing 0/0 for a bead that owns
+// no set at all would be a fabricated count.
+func nmCell(t board.Tile) string {
+	if t.MTotal == 0 {
+		switch t.Kind {
+		case "decision", "human", "parked":
+			return "—"
+		}
+	}
+	return fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
+}
+
+// wantsPerson reports whether a row's next move is the operator's — the review
+// and gate bands. Model C highlights these within a family with a ● glyph.
+func wantsPerson(t board.Tile) bool {
+	return t.Section == board.SectionReview || t.Section == board.SectionGate
+}
+
+// familyGlyph is the overview's leading marker: ● a row whose next move is a
+// person's (review or gate), ○ a row an open visit holds, ◉ both. The overview's
+// ● is the wants-you highlight, so a visit takes its own glyph here rather than
+// colliding with it. The default queue view has no wants-you axis, so there ●
+// stays free to mean held on its own (renderTileLine).
+func familyGlyph(t board.Tile) string {
+	switch {
+	case wantsPerson(t) && t.Held:
+		return "◉"
+	case wantsPerson(t):
+		return "●"
+	case t.Held:
+		return "○"
+	default:
+		return " "
+	}
+}
+
+// renderFamilyRows writes the city overview as dependency-family blocks: each
+// family is a header naming its root, then the members beneath it ordered by the
+// move they want (board.SectionOrder), with a ● on the rows that want a person.
+// Dependency structure is the top-level axis; the attention band orders and
+// highlights within a family.
+func renderFamilyRows(w io.Writer, shown []board.Tile) {
+	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
+	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
+
+	// One column header for the member rows; the family banner names the root.
+	// BAND replaces SEV: within a family the attention band is the axis.
+	fmt.Fprint(w, rpad(" ", colHeld)+rpad("BAND", colSeverity)+rpad("ID", idW)+
+		rpad("RIG", rigW)+rpad("KIND", colKind)+rpad("N/M", colNM)+
+		rpad("FRONTIER", colFrontier)+"NEEDS\n")
+
+	for _, fam := range board.GroupByFamily(shown) {
+		fmt.Fprintf(w, "\n%s\n", familyBanner(fam.Root))
+		for _, m := range fam.Members {
+			renderMemberLine(w, m, idW, rigW)
+		}
+	}
+}
+
+// familyBanner is the labelled divider that opens a family block: the root's id,
+// kind, roll-up, frontier and needs, with the [familyGlyph] marking when the root
+// itself wants a person, is held by an open visit, or both. The root is the
+// family header rather than a member row, so its own ask rides here.
+func familyBanner(root board.Tile) string {
+	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", familyGlyph(root), root.ID, root.Kind, nmCell(root), root.Frontier)
+	if n := acceptCell(root); n != "" {
+		line += " · " + n
+	}
+	return clip(line, colHeld+2+colNeedsMax)
+}
+
+// renderMemberLine writes one family member: its within-family band, the
+// [familyGlyph] marking a person's move and/or an open visit holding it, and the
+// same columns as an anchor row.
+func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
+	fmt.Fprint(w, rpad(familyGlyph(t), colHeld)+rpad(t.Section, colSeverity)+
+		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(acceptCell(t), colNeedsMax)+"\n")
+}
+
+// renderFamilyLegend is the overview's trailer: what a family is, and what the
+// within-family band column and the marker glyphs mean.
+func renderFamilyLegend(w io.Writer) {
+	fmt.Fprint(w, "\nFamilies (▌) group by dependency structure: a top-level anchor and the children, blockers, reviews and rework that hang off it, so a family reads as one thing\n")
+	fmt.Fprint(w, "BAND orders each family by the move a member wants: review=a pull request · gate=a person must answer · stalled=nothing moving · active=in-flight · cleanup=finished/empty · done=closed\n")
+	fmt.Fprint(w, "● wants YOU (review, gate) · ○ an open visit holds the row · ◉ both. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
+	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway · review/rework=a gate child in flight (resume: prefix+a, then the id)\n")
+	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
+	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
+	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy\n")
+	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
+}
+
+// clusterMemberCap bounds how many members a folded cluster spells out before it
+// says how many more it held. Enough that an ordinary cluster is listed in full,
+// bounded so a fifty-member template does not become the whole board.
+const clusterMemberCap = 8
+
+// renderClusterLine writes a run of rows that share a deterministic template: the
+// count and the shared needs, then ONE line per member carrying its own id, rig
+// and title. A bare id list is a soup that names nothing actionable; folding
+// gathers the rows, it must not strip their context.
+func renderClusterLine(w io.Writer, cr board.ClusterRow, idW, rigW int) {
+	// The count sits where a band/severity would, so a scan down the column still
+	// finds it; the shared needs is the template.
+	fmt.Fprintf(w, "%s%s%s\n", rpad(" ", colHeld),
+		rpad(fmt.Sprintf("%d×", len(cr.Members)), colSeverity), clip(cr.Tile.Needs, colNeedsMax))
+	indent := strings.Repeat(" ", colHeld+colSeverity)
+	for i, m := range cr.Members {
+		if i >= clusterMemberCap {
+			fmt.Fprintf(w, "%s… (+%d more, all in --json)\n", indent, len(cr.Members)-clusterMemberCap)
+			break
+		}
+		fmt.Fprintf(w, "%s%s%s%s\n", indent, rpad(m.ID, idW), rpad(m.Rig, rigW), clip(m.Title, colNeedsMax))
+	}
+}
+
+// sectionBanner is the labeled divider between attention bands. It carries the
+// band's name, a one-line statement of the move it wants, and how many rows are
+// in it, so the operator reads the board as a small set of questions rather than
+// one flat list.
+func sectionBanner(key string, n int) string {
+	label, desc := sectionLabel(key)
+	return fmt.Sprintf("▌ %s · %s · %d", label, desc, n)
+}
+
+// sectionLabel gives a band its display name and the move it asks for. An
+// unknown key (a band a newer derivation added) prints itself rather than
+// vanishing.
+func sectionLabel(key string) (label, desc string) {
+	switch key {
+	case board.SectionReview:
+		return "REVIEW", "a pull request wants you"
+	case board.SectionGate:
+		return "GATE", "a person must answer"
+	case board.SectionStalled:
+		return "STALLED", "open work nothing is moving"
+	case board.SectionActive:
+		return "ACTIVE", "healthy in-flight work"
+	case board.SectionCleanup:
+		return "CLEANUP", "finished or empty — dispose of it"
+	case board.SectionDone:
+		return "DONE", "the anchor itself closed"
+	default:
+		return strings.ToUpper(key), "uncategorised"
 	}
 }
 
 // renderLegend writes the trailer that says what the bands, the kinds and the
 // held glyph mean.
 func renderLegend(w io.Writer) {
-	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
+	fmt.Fprint(w, "\nBands (▌) group by the KIND of move a row wants: REVIEW=a pull request · GATE=a person must answer · STALLED=open work nothing is moving · ACTIVE=healthy in-flight · CLEANUP=finished/empty · DONE=closed\n")
+	fmt.Fprint(w, "A \"N×\" line folds N rows that share one deterministic needs sentence; each member is listed under it with its id, rig and title. A row carrying a takeaway never folds — its sentence is per-bead\n")
+	fmt.Fprint(w, "Legend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
 	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
-	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. gc-helm.sh dismiss <id> clears one now, and a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
+	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. A row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
+	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
 }
 
 // Sitting column widths. SUBJECT and OUTCOME are minimums sized to content by
@@ -532,7 +708,14 @@ func renderLegend(w io.Writer) {
 // truncated outcome word are both unreadable, and HEADLINE is last and unpadded
 // so a wide cell costs nothing.
 const (
-	colSubjectMin  = 12
+	colSubjectMin = 12
+	// colSubjectMax bounds the SUBJECT cell now that it renders the subject's
+	// TITLE (the topic) rather than the bare id: a title runs to any length, and
+	// unbounded it would push every column after it off the row. The cell is
+	// clipped with an ellipsis so a cut topic says it was cut; the full title is
+	// still on the wire, and a takeaway-less row repeats it unclipped in the
+	// HEADLINE.
+	colSubjectMax  = 44
 	colAge         = 7
 	colOutcomeMin  = 10
 	colHeadlineMax = 96
@@ -568,7 +751,7 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 	for _, s := range shown {
 		idW = max(idW, len([]rune(s.ID))+1)
 		rigW = max(rigW, len([]rune(s.Rig))+1)
-		subjW = max(subjW, len([]rune(s.Subject))+1)
+		subjW = max(subjW, len([]rune(clip(s.Topic(), colSubjectMax)))+1)
 		outW = max(outW, len([]rune(s.Outcome))+1)
 	}
 
@@ -585,16 +768,14 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 			// such value, rather than a value that happens to be empty.
 			outcome = "—"
 		}
-		// The takeaway is what the sitting concluded; the title is what it was
-		// called. Preferring the conclusion means a row says something even
-		// when its title is a truncated escalation subject.
-		headline := s.Takeaway
-		if headline == "" {
-			headline = s.Title
-		}
+		// SUBJECT is the topic — the subject bead's title, so the row says what
+		// it is about and not just which id it stands on. HEADLINE is what the
+		// sitting concluded (the takeaway), falling back to that same topic
+		// rather than the visit bead's own generic title. Both are the model's
+		// derivation, shared with the web renderer.
 		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(s.ID, idW)+rpad(s.Rig, rigW)+
-			rpad(s.Subject, subjW)+rpad(shortAge(since, now), colAge)+
-			rpad(outcome, outW)+clip(headline, colHeadlineMax)+"\n")
+			rpad(clip(s.Topic(), colSubjectMax), subjW)+rpad(shortAge(since, now), colAge)+
+			rpad(outcome, outW)+clip(s.Headline(), colHeadlineMax)+"\n")
 	}
 
 	if dropped > 0 {

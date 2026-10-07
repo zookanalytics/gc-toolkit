@@ -1,10 +1,26 @@
 #!/usr/bin/env bash
-# pr-stack — arm 8 of the merge cadence: keep an open PR's body naming every
-# bead whose work is on its head branch.
-# A PR body is composed once, by pr-open.sh, out of one anchor. Commits keep
-# arriving on the branch afterwards — a fold, a rework or rebase hand-back, a
-# stacked bead whose own PR lands into it — and none of them touch the body, so
-# the reviewer approves a scope the body does not describe.
+# pr-stack — arm 12 of the merge cadence: keep an open PR's body current with the
+# anchor, in both managed regions.
+# A PR body is composed once, by pr-open.sh, out of one anchor. Then two things
+# drift it. Commits keep arriving on the branch — a fold, a rework or rebase
+# hand-back, a stacked bead whose own PR lands into it — and none of them touch the
+# `gc:branch-beads` section, so the reviewer approves a scope the body does not
+# describe. And a rework restamps the anchor's `pr_summary`, but pr-open composes
+# the `gc:pr-summary` region only at pre_open_gate and the anchor never returns
+# there once open (lifecycle has no pull_request -> pre_open_gate edge), so the
+# published `## Summary` — the merge surface, and the squash commit message —
+# keeps describing superseded work. This arm closes both: for each open PR it
+# refreshes the `gc:pr-summary` region when the anchor summary moved past it, then
+# re-renders the `gc:branch-beads` section, and lands both in one body edit.
+#
+# The summary refresh acts only on a well-formed `gc:pr-summary` marker pair whose
+# published region is behind the anchor: either its summary text lags the current
+# `pr_summary`, or its handoff bullet still names a pre-rework head. A PR merely
+# opened, whose summary matches and whose region already names the current head, is a
+# no-op, and a legacy markerless or malformed body is left for pr-open's adoption
+# path to establish rather than rewritten here. Its handoff bullet is composed in
+# `refresh` mode — the reworked head has not re-signed-off, so it names the head and
+# points to the PR checks rather than repeating pr-open's pre-open sign-off claim.
 # For each open anchor (a bead carrying merge_result) that records a pr_number:
 # read the branch's bead ledger, three code-written facts unioned —
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
@@ -36,10 +52,11 @@ set -u
 
 PROG="pr-stack"
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
-# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
-# consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # Every status a bead can rest in. The ledger is a record of work that reached
@@ -69,14 +86,13 @@ fi
 ORIGIN_REPO_Q="$ORIGIN_HOST/$ORIGIN_REPO"
 
 # Guarded read: non-zero means "could not tell", never "nothing there".
-bd_list() {
-  local raw rc
-  raw=$(gc bd list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
-}
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# The managed `## Summary` region: markers, composer and splice helpers, shared
+# with pr-open.sh so an opened body and a post-open refresh never diverge.
+# shellcheck source=pr-summary-region.sh
+. "${GC_PR_SUMMARY_LIB:-$_bd_lib_dir/pr-summary-region.sh}" || { echo "cannot source pr-summary-region.sh beside this script" >&2; exit 1; }
 
 # The branch's bead ledger: the three keys the cadence writes when work reaches
 # a branch, unioned and deduped, then the rows that recorded no work removed. A
@@ -183,6 +199,48 @@ append_section() { # <body-file> <section-file> <out-file>
   { cat "$1"; printf '\n%s\n' "$MARK_OPEN"; cat "$2"; printf '%s\n' "$MARK_CLOSE"; } > "$3"
 }
 
+# Bring the gc:pr-summary region current with the anchor. 0 = the region was behind
+# and <out-file> now carries it refreshed; 1 = no change (no summary to publish, no
+# well-formed region, or the region already carries this summary at this head). The
+# region is behind when its summary text lags the anchor OR its handoff bullet names
+# a head other than the current one — a rework that moves the head without touching
+# the summary still restamps the "at <head>" claim. Only a well-formed marker pair
+# (prs_marker_state 0) is rewritten in place: a legacy markerless or malformed body
+# is pr-open's adoption path to establish, not this arm's to reshape. The region is
+# recomposed in `refresh` mode — the reworked head has not re-signed-off, so the
+# handoff bullet names the head and defers the check state to the PR rather than
+# repeating the pre-open sign-off claim.
+refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
+  local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
+  local summary want cur desc checkset branch target phased SECTION
+  summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty' 2>/dev/null)
+  [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || return 1
+  prs_marker_state "$bin" || return 1
+  want=$(strip_summary_heading "$summary")
+  cur=$(prs_region_summary "$bin")
+  # Current only when the summary matches AND the region already names this head:
+  # a head-only rework leaves the summary current but the handoff bullet stale.
+  if [ "$cur" = "$want" ] && prs_region_names_head "$bin" "$head_oid"; then
+    return 1
+  fi
+  desc=$(printf '%s' "$row" | jq -r '.description // empty' 2>/dev/null)
+  checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""' 2>/dev/null)
+  branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty' 2>/dev/null)
+  target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // "main"' 2>/dev/null)
+  # The gates the handoff bullet names, resolved at this head. An unreadable set
+  # leaves the region as it stands this pass rather than publish a bullet that
+  # names no gate.
+  phased=$(prs_resolve_phased "$checkset" "$head_oid") || return 1
+  SECTION=$(mktemp "$STACK_TMP/summary.XXXXXX") || return 1
+  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh "$phased" > "$SECTION" \
+     || [ ! -s "$SECTION" ]; then
+    rm -f "$SECTION"; return 1
+  fi
+  prs_splice_in_place "$bin" "$SECTION" "$bout"
+  rm -f "$SECTION"
+  return 0
+}
+
 # --- enumerate ------------------------------------------------------------------
 # Anchors, not every bead that records a PR: pr-facts.sh stamps pr_number on
 # rework and review children too, and a child is a contributor to the ledger,
@@ -193,8 +251,13 @@ ANCHORS=$(bd_list --status=open --has-metadata-key merge_result) || {
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no open anchors"; exit 0; }
 
-edited=0; current=0; single=0; skipped=0
+edited=0; current=0; single=0; skipped=0; refreshed=0
 SEEN=""
+# Per-anchor scratch (rendered section, current body, spliced body) lives under
+# one trapped directory, so a signal or timeout mid-iteration takes the whole
+# tree with it rather than orphaning gctk-pr-stack.* files in /tmp.
+STACK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-stack.XXXXXX") || { echo "$PROG: cannot create a temp dir" >&2; exit 1; }
+trap 'rm -rf "$STACK_TMP"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 while IFS=$'\t' read -r id branch num; do
   [ -n "${id:-}" ] || continue
   if [ -z "$branch" ] || [ -z "$num" ] || [ -n "${num//[0-9]/}" ]; then continue; fi
@@ -207,10 +270,11 @@ while IFS=$'\t' read -r id branch num; do
   # </dev/null on every call in this loop: it is fed by a heredoc, and a child
   # inheriting its stdin would consume the anchor rows behind it.
   PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
-    --json number,state,headRefName,body </dev/null 2>/dev/null)
+    --json number,state,headRefName,headRefOid,body </dev/null 2>/dev/null)
   got_num=$(printf '%s' "$PR_JSON" | jq -r '(.number // "") | tostring' 2>/dev/null)
   got_head=$(printf '%s' "$PR_JSON" | jq -r '.headRefName // ""' 2>/dev/null)
   got_state=$(printf '%s' "$PR_JSON" | jq -r '.state // ""' 2>/dev/null)
+  got_oid=$(printf '%s' "$PR_JSON" | jq -r '(.headRefOid // "") | tostring' 2>/dev/null)
   if [ -z "$got_num" ] || [ -z "$got_head" ] || [ -z "$got_state" ]; then
     echo "$PROG: $id PR#$num unreadable (num='$got_num' head='$got_head' state='$got_state'); nothing edited" >&2
     skipped=$((skipped + 1)); continue
@@ -222,45 +286,77 @@ while IFS=$'\t' read -r id branch num; do
   # A landed or closed PR is a record, not a thing a reviewer is deciding on.
   [ "$got_state" = "OPEN" ] || continue
 
-  LEDGER=$(ledger_of "$branch") || {
-    echo "$PROG: $id could not read the bead ledger for '$branch'; PR#$num left as it stands" >&2
-    skipped=$((skipped + 1)); continue
-  }
-  n=$(printf '%s' "$LEDGER" | jq 'length' 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
-  # One bead is the ordinary PR, and pr-open.sh already names it.
-  if [ "$n" -lt 2 ]; then single=$((single + 1)); continue; fi
-
-  if ! { SECTION=$(mktemp) && CUR=$(mktemp) && NEW=$(mktemp); }; then
+  # Scratch for this PR: the current body, the branch-beads section, and a splice
+  # target the two region edits accumulate onto in turn.
+  if ! { CUR=$(mktemp "$STACK_TMP/cur.XXXXXX") && SECTION=$(mktemp "$STACK_TMP/section.XXXXXX") && NEW=$(mktemp "$STACK_TMP/new.XXXXXX"); }; then
     echo "$PROG: cannot create a temp file" >&2; exit 1
   fi
-  render_section "$branch" "$id" "$LEDGER" > "$SECTION"
   printf '%s' "$PR_JSON" | jq -r '.body // ""' 2>/dev/null | tr -d '\r' > "$CUR"
-  if [ ! -s "$SECTION" ]; then
-    rm -f "$SECTION" "$CUR" "$NEW"
-    echo "$PROG: $id rendered an empty section for '$branch'; PR#$num left as it stands" >&2
-    skipped=$((skipped + 1)); continue
+  did_summary=0; did_beads=0; beads_n=0; beads_status=""
+
+  # (a) gc:pr-summary — a pull_request anchor. A rework restamps the anchor summary
+  # and no earlier arm republishes it once open, so bring the region current when it
+  # is behind. Scoped to pull_request: a pre_open_gate anchor is arm 6's to refresh
+  # as it adopts and flips, and this is the layer arm 6 cannot reach once the anchor
+  # has left that state. A change folds into CUR so the branch-beads pass below reads
+  # it and both land in one edit.
+  anchor_row=$(printf '%s' "$ANCHORS" | jq -c --arg id "$id" 'map(select(.id == $id)) | .[0] // empty' 2>/dev/null)
+  anchor_mr=$(printf '%s' "$anchor_row" | jq -r '(.metadata.merge_result // "") | tostring' 2>/dev/null)
+  if [ "$anchor_mr" = "pull_request" ] && refresh_summary "$id" "$CUR" "$NEW" "$anchor_row" "$got_oid"; then
+    mv "$NEW" "$CUR"; did_summary=1
   fi
-  marker_state "$CUR"; ms=$?
-  if [ "$ms" = 2 ]; then
-    rm -f "$SECTION" "$CUR" "$NEW"
-    echo "$PROG: $id PR#$num body carries no well-formed marker pair; left alone (an operator edit this cannot reason about)" >&2
-    skipped=$((skipped + 1)); continue
-  fi
-  if [ "$ms" = 0 ] && [ "$(current_section "$CUR")" = "$(cat "$SECTION")" ]; then
-    rm -f "$SECTION" "$CUR" "$NEW"; current=$((current + 1)); continue
-  fi
-  if [ "$ms" = 0 ]; then
-    splice_in_place "$CUR" "$SECTION" "$NEW"
+
+  # (b) gc:branch-beads — a PR carrying more than the opener names every bead on
+  # the branch.
+  if ! LEDGER=$(ledger_of "$branch"); then
+    echo "$PROG: $id could not read the bead ledger for '$branch'; PR#$num branch-beads left as it stands" >&2
+    beads_status=skip
   else
-    append_section "$CUR" "$SECTION" "$NEW"
+    n=$(printf '%s' "$LEDGER" | jq 'length' 2>/dev/null)
+    case "$n" in
+      ''|*[!0-9]*) beads_status=skip ;;
+      *)
+        # One bead is the ordinary PR, and pr-open.sh already names it.
+        if [ "$n" -lt 2 ]; then
+          beads_status=single
+        else
+          render_section "$branch" "$id" "$LEDGER" > "$SECTION"
+          if [ ! -s "$SECTION" ]; then
+            echo "$PROG: $id rendered an empty section for '$branch'; PR#$num branch-beads left as it stands" >&2
+            beads_status=skip
+          else
+            marker_state "$CUR"; ms=$?
+            if [ "$ms" = 2 ]; then
+              echo "$PROG: $id PR#$num body carries no well-formed marker pair; branch-beads left alone (an operator edit this cannot reason about)" >&2
+              beads_status=skip
+            elif [ "$ms" = 0 ] && [ "$(current_section "$CUR")" = "$(cat "$SECTION")" ]; then
+              beads_status=current
+            else
+              if [ "$ms" = 0 ]; then splice_in_place "$CUR" "$SECTION" "$NEW"; else append_section "$CUR" "$SECTION" "$NEW"; fi
+              mv "$NEW" "$CUR"; did_beads=1; beads_n="$n"
+            fi
+          fi
+        fi ;;
+    esac
   fi
-  if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$NEW" </dev/null >/dev/null 2>&1; then
-    edited=$((edited + 1))
-    echo "$PROG: $id PR#$num body now names $n beads on '$branch'"
+
+  # One edit carries whatever moved. When nothing moved, the outcome is accounted
+  # per the sections: a section already current is "current", a lone bead is
+  # "single-bead", an unreadable or malformed section is "skipped".
+  if [ "$did_summary" = 1 ] || [ "$did_beads" = 1 ]; then
+    if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$CUR" </dev/null >/dev/null 2>&1; then
+      if [ "$did_beads" = 1 ]; then edited=$((edited + 1)); echo "$PROG: $id PR#$num body now names $beads_n beads on '$branch'"; fi
+      if [ "$did_summary" = 1 ]; then refreshed=$((refreshed + 1)); echo "$PROG: $id PR#$num summary region refreshed from the anchor's current pr_summary"; fi
+    else
+      echo "$PROG: $id PR#$num body edit failed; retried next pass" >&2
+      skipped=$((skipped + 1))
+    fi
   else
-    echo "$PROG: $id PR#$num body edit failed; retried next pass" >&2
-    skipped=$((skipped + 1))
+    case "$beads_status" in
+      single) single=$((single + 1)) ;;
+      skip)   skipped=$((skipped + 1)) ;;
+      *)      current=$((current + 1)) ;;
+    esac
   fi
   rm -f "$SECTION" "$CUR" "$NEW"
 done <<ANCHORS_EOF
@@ -270,5 +366,5 @@ $(printf '%s' "$ANCHORS" | jq -r '.[]
       (((.metadata // {}).pr_number // "") | tostring) ] | @tsv' 2>/dev/null)
 ANCHORS_EOF
 
-echo "$PROG: $edited edited, $current already current, $single single-bead, $skipped skipped"
+echo "$PROG: $edited edited, $refreshed summary-refreshed, $current already current, $single single-bead, $skipped skipped"
 exit 0

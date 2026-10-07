@@ -1,7 +1,9 @@
 {{ define "polecat-doctrine" }}
 {{ template "operator-profile" . }}
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-polecats" . }}
 
 ## Execute immediately
 
@@ -122,7 +124,7 @@ stands on a branch some OTHER open bead anchors, and every reader that matters
 for the merge — enumerates anchors by `merge_result` and reads that bead. A
 write aimed at the claimed bead lands, errors nowhere, and is never read.
 
-Submit step 4c resolves it: the open bead on this branch that carries a
+Submit step 4b resolves it: the open bead on this branch that carries a
 `merge_result`. Write to the anchor what the anchor's readers read, and to
 your claimed bead everything else.
 
@@ -143,9 +145,13 @@ your claimed bead everything else.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
-  `step-close.sh`, which resolves the bead from the `(assignee, gc.step_ref)`
-  pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the wrong bead
-  after a hook-claim and fail silently.
+  `step-close.sh`, which resolves the bead from the `(gc.root_bead_id,
+  gc.step_ref)` pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the
+  wrong bead after a hook-claim and fail silently, and your assignee names
+  every molecule this pool slot has ever run, not this one. When it refuses
+  because only that assignee names your molecule, re-run it with
+  `--root <root_bead_id>` from your claim; nothing else can tell your chain
+  from an earlier one.
 - **Close the chain in FORWARD order** (first step first, terminal step
   last): each step blocks the next and `bd` refuses to close a blocked
   issue, so the chain only unwinds from the unblocked end. Run the
@@ -163,18 +169,23 @@ bead is handed to the people who need it, and nothing downstream can miss a
 note it never saw. This applies to every write in the done sequence,
 including the `auto_push=false` halt arm.
 
+{{ template "pool-worker-no-consent-ui" . }}
+
 ## Escalation
 
 When blocked, act — do not wait, and do not guess. Where the signal goes
-depends on who can answer it.
+depends on who can answer it. Anything that ends in a hold and a drain needs a
+tracked, routed record filed first. That record is the visit `escalate.sh`
+opens, or a bead a query returns. The hold de-routes the whole molecule, so a
+hold with no such record behind it is a silent strand no reader is ever
+handed. Mail is not that record.
 
-The witness is your first responder. Mail it for anything another agent can
-resolve or should know about: requirements unclear after checking the docs,
+The witness is your first responder for a question another agent can answer
+without you holding the bead: requirements unclear after checking the docs,
 stuck more than fifteen minutes on one problem, tests failing inexplicably
 after two or three attempts, or a fact about shared state you do not own,
-such as a base branch with failing pre-flights, a broken dedupe lookup, or a
-duplicate dispatch on your bead. Use `HELP:` when you need an answer and
-`NOTICE:` when you are reporting a fact.
+such as a base branch with failing pre-flights or a broken dedupe lookup. Use
+`HELP:` when you need an answer and `NOTICE:` when you are reporting a fact.
 
 ```bash
 gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness" -s "HELP: <one line>" -m "Issue: <work-bead>
@@ -185,30 +196,83 @@ The witness triages its inbox every patrol cycle. It unblocks what it can and
 promotes what needs a person into a visit, so mailing it is not a slower route
 to a human. It is the route that spends a human only when one is required.
 
-Escalate directly only when no agent can answer. Missing credentials, external
-access, and decisions that are the operator's to make have no agent-side
-resolution, so send those to a human without the extra hop:
+Escalate directly when no agent can answer: missing credentials, external
+access, or a decision that is the operator's to make. Escalate this way before
+any hold and drain, whatever the reason for the hold. `escalate.sh` files (or
+refreshes) exactly one open visit per situation key, and its exit 0 is the
+release path a human hears about and can claim:
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/molecule-hold.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 "$SCRIPTS/escalate.sh" --subject <work-bead> --key polecat-blocked \
   --message "Blocked: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```
 
-It files (or refreshes) exactly one open visit per situation key, which is
-how a human hears about it.
+For a plain blocker that visit is the whole escalation: continue if possible,
+otherwise leave the bead resumable (branch + notes recorded) and drain.
 
-After either route: continue if possible, otherwise leave the bead resumable
-(branch + notes recorded) and drain. If the ruling that comes back is
-stand-down — the premise was falsified, or a live sitting owns the decision —
-the disposal step is the sitting's
+**Draining without closing your step means holding the molecule first, and the
+hold needs a filed visit before it.** This covers every reason you decline work
+you must not close: a duplicate dispatch, a premise you found falsified, work
+another branch already delivered. A step left `open` is claimable, so the pool
+hands it to a fresh polecat within minutes, that polecat re-derives your refusal
+and leaves it open again, and the cycle burns one pool slot per iteration until
+a human notices. So the hold sets the step `blocked`, which is not-closed and
+not-claimable, and clears the route on the step, on the molecule root, and on
+the root's other steps. Clearing the route without the `blocked` status does not
+stop the loop: the stranded-worker repair sweeps open steps assigned to a
+drained session and re-stamps a route on any it finds unrouted.
+
+But a de-routed molecule with nothing tracking it is worse than the loop. It is
+a silent strand no query returns and no human is asked to clear. So the record
+comes first: `escalate.sh` files the visit that is the release path, and only on
+its success do you hold, and only on the hold's success do you drain:
+
+```bash
+"$SCRIPTS/escalate.sh" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what releases the hold>" \
+  || { echo "escalate.sh recorded no release path; NOT holding or draining, so the step stays claimable and the next worker retries the escalation" >&2; exit 1; }
+"$SCRIPTS/molecule-hold.sh" --step "<formula>.<step-id>" --bead "<the bead_id your gc hook --claim returned>" --reason "<why you declined, and what releases the hold>" \
+  || { echo "molecule-hold did not land; NOT draining — something in the molecule is still claimable" >&2; exit 1; }
+gc runtime drain-ack
+```
+
+`molecule-hold.sh` closes nothing, so whatever a live worker is holding stays
+where it is. Drain only if both landed. `escalate.sh` exits non-zero when it can
+neither file nor find the visit; `molecule-hold.sh` exits non-zero when it
+cannot prove which bead is yours, when duplicate step beads make that ambiguous,
+when the blocking write is refused, or when a route it had to clear survived,
+whether on the molecule root or on a sibling step. A drain after either failed
+leaves something in the molecule claimable.
+
+If the ruling that comes back is stand-down — the premise was falsified, or a
+live sitting owns the decision — the disposal step is the sitting's
 `gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`: it parks the
 anchor and quiesces the molecule's routed steps in one writer, so the chain
 stops re-offering, and `--no-wait` records that the ruling ended the wait
-rather than moving it. Your part stays the same: record, escalate, drain.
+rather than moving it. Your part stays the same: record, escalate, hold, drain.
+
+## Sends to repos we do not own
+
+A `gh` write to a repository outside this rig's origin — an issue, a PR, a
+comment, a review — spends someone else's time, so the operator makes it.
+Hitting an upstream bug while working your bead is ordinary; sending the
+report yourself is not. Park the command instead, with the same `$SCRIPTS`
+resolved above:
+
+```bash
+"$SCRIPTS/upstream-finding.sh" \
+  --message "<what you found, where you hit it, why it earns the send>" \
+  -- gh issue create --repo <owner>/<name> --title "<title>" --body "<body>"
+```
+
+That files one bead carrying the exact command, ready to paste, and asks a
+human through the visit route. Name the target with `--repo` and inline the
+body — the operator pastes it later, from their own shell
+(docs/outbound-sends.md). Then carry on with your bead: the send is not
+yours to wait on.
 
 ## Communication
 

@@ -31,8 +31,9 @@ gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --cit
 
 # Helm — the sibling of prefix+S. prefix+S answers "what's running";
 # prefix+b answers "what needs me": the operator's own queue, oldest first,
-# rendered from `helm-svc board --json`. Pick a row and it files a VISIT on that
-# bead, which a converse session holds for you. See tmux-pick-helm.sh.
+# rendered from `helm-svc board --json`. Pick a row and it engages that bead —
+# `gc-helm engage` spawns a converse sitting on demand, which you attach from
+# prefix+S. See tmux-pick-helm.sh.
 gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
 
 # prefix+B is the city overview — every anchor ranked together. It is a separate
@@ -57,3 +58,13 @@ gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # order against each other. That draft is also what
 # survives a failed intake (tk-w4dp4). See tmux-visit-prompt.sh.
 gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")"
+
+# prefix+A — raise a brand-new topic and converse about it now. Capital A, the
+# sibling of prefix+a: where prefix+a files a bead for triage, this one opens a
+# conversation on a subject that has no bead yet. It runs `gc-helm engage
+# --new-subject` in a NEW window rather than a `run-shell` popup, because engage
+# is a real interactive prompt — rig, subject, model — and tmux's one-line
+# command-prompt cannot carry a subject plus a menu. The city path is baked in
+# for the same reason the pickers bake it: the binding fires from tmux's env,
+# which does not carry Gas City's session env. See tmux-new-subject.sh.
+gcmux bind-key A new-window "$(sq "$CONFIGDIR/assets/scripts/tmux-new-subject.sh") $(sq "$CONFIGDIR") --city-path $(sq "$CITY_PATH")"

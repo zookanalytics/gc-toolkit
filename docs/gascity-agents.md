@@ -205,6 +205,30 @@ only prepends `Dir` when non-empty
 the rig name as Dir (see the polecat example above); city-scoped
 sessions do not.
 
+### Working directory: a rig-scoped agent runs in a rig worktree
+
+An agent's `work_dir` is its session's working directory, and cwd is where
+`gh` and `git` resolve the repo. A directory under the city `.gc` tree
+resolves to the **city** repo, so an agent that inspects a rig's PRs or
+branches from such a cwd gets answers about the wrong repo.
+
+A **rig-scoped** agent therefore runs in a git worktree of the rig it serves:
+`work_dir = ".gc/worktrees/{{.Rig}}/<role>/{{.AgentBase}}"`, with a `pre_start`
+hook running `assets/scripts/worktree-setup.sh` to cut that worktree from the
+rig root before the session starts. This holds for the worker pools (polecat,
+proactive, refinery) and for the coordination roles that shell `gh`/`git`
+(converse and its per-model variants, witness). The worktree is not the rig's
+main checkout (`rigs/<rig>`), so it does not collide with the refinery's home;
+`worktree-reap.sh` protects it as an agent home.
+
+A **city-scoped** agent (mechanik, deacon, dog) spans rigs and has no single
+`{{.Rig}}`, so it stays under `.gc/agents/` and passes the repo explicitly on
+each call (`gh --repo <owner>/<rig>`, `git -C <rig-root>`). A rig-scoped agent
+that legitimately targets a fixed repo the same way (the gascity-keeper
+`keeper`, which drives the upstream repo) declares a `# worktree-exempt:`
+marker instead of taking a worktree. `assets/scripts/agent-worktree-wiring.test.sh`
+holds this wiring.
+
 ## Variant A — Named singletons (`[[named_session]]`)
 
 The named-singleton contract is "at most one of these is running."
@@ -641,14 +665,15 @@ costs against a singleton).
 
 ### Conversations are visits, not per-bead host sessions
 
-A conversation about a bead is ordinary routed work — there is no
-per-bead host session. File a **visit** — a small child bead with
-`task_kind=visit` and `gc.continuation_group=<subject-id>`, routed to the
-rig-qualified `converse` pool (`agents/converse/`; canonical filing lines
-in `formulas/mol-visit.toml`). Pool demand spawns a converse session that
-rebuilds the subject's slice and holds for the operator; warm, the live
-group session vacuums the next visit. See docs/architecture.md, "How
-agents exist and converse".
+A conversation about a bead is a **visit** — a small child bead with
+`task_kind=visit` and `gc.continuation_group=<subject-id>`, routed to
+`human` (`gc.routed_to=human`; canonical filing lines in
+`formulas/mol-visit.toml`). A filed visit parks on the helm board and holds
+no session. The operator draws one off the board and `gc-helm engage`
+spawns a manual `converse-<model>` sitting on demand, binds the visit to
+the session's runtime name so the session's own `gc hook --claim` adopts it
+with no pool routing, and attaches; `gc-helm dismiss` ends it. See
+docs/architecture.md, "How agents exist and converse".
 
 ## Variant D — Patrol agents (overlay)
 
@@ -1294,7 +1319,7 @@ checkout to see whether the arm is present:
 ```bash
 COMMIT=$(gc version --json | jq -r .commit)  # e.g. 3e629adc4-dirty
 COMMIT=${COMMIT%%-dirty}                     # build-tree marker, not part of the rev
-git -C rigs/gascity show "$COMMIT:cmd/gc/cmd_nudge.go" \
+git -C rigs/gascity show "${COMMIT}:cmd/gc/cmd_nudge.go" \
   | grep -c queuedNudgeEpochRetargetable     # 0 = every drift dead-letters
 ```
 

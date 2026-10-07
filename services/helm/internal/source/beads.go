@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +47,12 @@ import (
 // exactly as it does for every `bd` invocation.
 type BeadsSource struct {
 	cityPath string
+	// cityPinned records that a caller supplied cityPath (WithCityPath), so the
+	// constructor must not run discovery over it. Discovery now shells out to gc,
+	// so re-resolving a path the caller already knows would be a needless
+	// subprocess — and, given an explicit empty path, would overwrite the "no
+	// city" the caller meant with whatever gc finds. Tests rely on both.
+	cityPinned bool
 
 	// mu guards stores. Handles are opened lazily and kept for the process
 	// lifetime: a long-lived sidecar re-gathers on every cache miss, and
@@ -59,10 +66,9 @@ type BeadsSource struct {
 	// openStore is injectable so tests can exercise Gather without a live Dolt.
 	openStore func(ctx context.Context, beadsDir string) (beadStore, error)
 
-	// gc reads the two facts no bead carries — session liveness and convoy
-	// ownership — through the `gc` CLI. Injectable for the same reason
-	// openStore is. See gccli.go for why this is a third sanctioned backend
-	// rather than a contract violation.
+	// gc reads the one fact no bead carries — session liveness — through the
+	// `gc` CLI. Injectable for the same reason openStore is. See gccli.go for
+	// why this is a third sanctioned backend rather than a contract violation.
 	gc gcClient
 
 	// now is the gather's clock. Both closed-row windows are measured from it,
@@ -75,18 +81,32 @@ type BeadsSource struct {
 // beadStore is the slice of [beads.Storage] this source uses. Narrowing it to
 // four methods keeps the seam testable with a fake — the full Storage interface
 // is ~70 methods.
+//
+// The two edge reads are BATCHED, not per-anchor: one round-trip resolves the
+// relations of a whole set of anchors. GetDependencyRecordsForIssues reads the
+// OUTBOUND edges an anchor owns (a convoy's `tracks` members; a decision, human,
+// parked or merge bead's `blocks` waits), keyed by the querying issue id.
+// GetDependentRecordsForIssues reads the INBOUND edges — an anchor's
+// parent-child children, whose edge points child->parent — keyed by the target
+// id. Both return raw edge rows; [BeadsSource.hydrate] fetches the far-end
+// issues in one further SearchIssues, which is the join the library's own
+// per-id GetDependenciesWithMetadata ran internally on every call.
 type beadStore interface {
 	SearchIssues(ctx context.Context, query string, filter beads.IssueFilter) ([]*beads.Issue, error)
-	GetDependenciesWithMetadata(ctx context.Context, issueID string) ([]*beads.IssueWithDependencyMetadata, error)
-	GetDependentsWithMetadata(ctx context.Context, issueID string) ([]*beads.IssueWithDependencyMetadata, error)
+	GetDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*beads.Dependency, error)
+	GetDependentRecordsForIssues(ctx context.Context, targetIDs []string) (map[string][]*beads.Dependency, error)
 	Close() error
 }
 
 // BeadsOption configures a BeadsSource.
 type BeadsOption func(*BeadsSource)
 
-// WithCityPath overrides the discovered city root (used by tests).
-func WithCityPath(p string) BeadsOption { return func(s *BeadsSource) { s.cityPath = p } }
+// WithCityPath supplies the city root instead of discovering it — the entrypoint
+// passes the once-resolved path here, and tests pass a fixture. It pins the
+// value, so the constructor runs no discovery over it (an empty string included).
+func WithCityPath(p string) BeadsOption {
+	return func(s *BeadsSource) { s.cityPath = p; s.cityPinned = true }
+}
 
 // withStoreOpener overrides how a rig store is opened (used by tests).
 func withStoreOpener(f func(ctx context.Context, beadsDir string) (beadStore, error)) BeadsOption {
@@ -103,17 +123,22 @@ func withClock(now func() time.Time) BeadsOption {
 	return func(s *BeadsSource) { s.now = now }
 }
 
-// NewBeadsSource builds a source over the city's per-rig bead stores. The city
-// root comes from GC_HELM_CITY_PATH, else GC_CITY_PATH, else GC_CITY.
+// NewBeadsSource builds a source over the city's per-rig bead stores. With no
+// WithCityPath override it discovers the city root itself (see DiscoverCityPath).
 func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
 	s := &BeadsSource{
-		cityPath:  DiscoverCityPath(),
 		stores:    map[string]beadStore{},
 		openStore: openLibraryStore,
 		now:       time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	// Discover only when no caller pinned the path. Discovery shells out to gc,
+	// so re-resolving a WithCityPath value would be a needless subprocess — the
+	// entrypoint resolves the city once for the whole process and passes it in.
+	if !s.cityPinned {
+		s.cityPath = DiscoverCityPath()
 	}
 	if s.gc == nil {
 		s.gc = newGCExec(s.cityPath)
@@ -128,20 +153,80 @@ func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
 // config-respecting entry point, which honours the rig's dolt server-mode
 // settings from .beads/metadata.json.
 func openLibraryStore(ctx context.Context, beadsDir string) (beadStore, error) {
-	return beads.OpenFromConfig(ctx, beadsDir)
+	st, err := beads.OpenFromConfig(ctx, beadsDir)
+	if err != nil {
+		return nil, err
+	}
+	return newLibraryStore(st)
 }
 
-// DiscoverCityPath returns the city root this process should read, from the
-// first of GC_HELM_CITY_PATH, GC_CITY_PATH, GC_CITY that is set. Exported
-// because the entrypoint needs the same answer to locate the visit tool's
-// working directory (cmd/helm-svc wires internal/visit with it) — one
-// resolution, so the board and the write route cannot disagree about which
-// city they are acting on.
+// libraryStore adapts a [beads.Storage] to [beadStore]. It exists for the two
+// batched edge reads: neither is on the base beads.Storage surface, so they are
+// reached the way the library intends — the target-keyed dependents read via
+// [beads.AsDependentQuerier], the source-keyed dependencies read via the same
+// capability type-assertion. A store offering neither fails loud here rather
+// than degrading to a slower path, because the only production backend is Dolt,
+// which always provides both.
+type libraryStore struct {
+	beads.Storage
+	dependents   beads.DependentQuerier
+	dependencies dependencyRecordsQuerier
+}
+
+// dependencyRecordsQuerier is the source-keyed batched read. beads publishes an
+// accessor for the target-keyed mirror ([beads.AsDependentQuerier]) but not for
+// this one, so the seam declares the single method it needs and asserts for it.
+type dependencyRecordsQuerier interface {
+	GetDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*beads.Dependency, error)
+}
+
+func newLibraryStore(st beads.Storage) (*libraryStore, error) {
+	dq, ok := beads.AsDependentQuerier(st)
+	if !ok {
+		return nil, fmt.Errorf("bead store does not support batched dependents reads")
+	}
+	sq, ok := st.(dependencyRecordsQuerier)
+	if !ok {
+		return nil, fmt.Errorf("bead store does not support batched dependency reads")
+	}
+	return &libraryStore{Storage: st, dependents: dq, dependencies: sq}, nil
+}
+
+func (l *libraryStore) GetDependentRecordsForIssues(ctx context.Context, targetIDs []string) (map[string][]*beads.Dependency, error) {
+	return l.dependents.GetDependentRecordsForIssues(ctx, targetIDs)
+}
+
+func (l *libraryStore) GetDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*beads.Dependency, error) {
+	return l.dependencies.GetDependencyRecordsForIssues(ctx, issueIDs)
+}
+
+// DiscoverCityPath returns the city root this process should read. An explicit
+// GC_HELM_CITY_PATH, GC_CITY_PATH or GC_CITY wins, in that order; with none of
+// them set it asks gc — `gc config show` — for the city it would act on and takes
+// that. A plain shell that injects none of those vars still reads a city, the
+// same one gc resolves, rather than a discovery reimplemented here: gc-toolkit
+// runs on Gas City, so gc is the authority on which city to read. A gc that
+// cannot answer — absent, or resolving no city — yields "", the same fail-closed
+// "no city" the callers already handle.
+//
+// Exported because the entrypoint needs the same answer to locate the visit
+// tool's working directory (cmd/helm-svc wires internal/visit with it) — one
+// resolution, so the board and the write route cannot disagree about which city
+// they are acting on. Discovery is a subprocess now, so the entrypoint resolves
+// it once at startup and threads it in, rather than calling this per board build.
 func DiscoverCityPath() string {
 	for _, k := range []string{"GC_HELM_CITY_PATH", "GC_CITY_PATH", "GC_CITY"} {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 			return v
 		}
+	}
+	// The plain-shell case: no city env set. Ask gc which city it resolves. The
+	// discovery client carries no cityPath, so gc resolves from this process's
+	// own context (see gcExec.CityPath); run bounds the call with its own timeout.
+	// Best-effort — any failure resolves to "" and the caller reports "no city
+	// path" exactly as it did before.
+	if p, err := newGCExec("").CityPath(context.Background()); err == nil {
+		return p
 	}
 	return ""
 }
@@ -336,12 +421,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 
-	// Convoy ownership comes from `gc convoy list`, which is city-wide, so it is
-	// read ONCE and joined onto the convoy anchors by id as they are gathered.
-	// A failure leaves every convoy's `owned` null rather than guessing false,
-	// which would promote every convoy in the city to the unowned-orphan band.
 	g := &gatherState{rigByPrefix: map[string]string{}}
-	convoys := s.convoyIndex(ctx, g)
 
 	// One clock for the whole pass, so every window measured against it — the
 	// closed-sitting window, the DONE window, the takeaway spans it feeds —
@@ -357,7 +437,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 			g.note(true, []string{"rig " + r.name + ": " + err.Error()})
 			continue
 		}
-		s.gatherRig(ctx, g, st, r, convoys, now)
+		s.gatherRig(ctx, g, st, r, now)
 		sittings = append(sittings, s.rigSittings(ctx, st, r, g, now)...)
 		roots = append(roots, s.workflowRoots(ctx, st, r, g)...)
 	}
@@ -367,7 +447,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	}
 
 	owners := sessionStates(ctx, s.gc, g)
-	inflight := resolveInflight(ctx, s.gc, roots, owners, g)
+	inflight := resolveInflight(roots, owners)
 
 	return &Result{
 		Anchors:       g.anchors,
@@ -375,21 +455,6 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 		Partial:       g.partial,
 		PartialErrors: g.partialErrs,
 	}, nil
-}
-
-// convoyIndex reads city-wide convoy ownership and progress, keyed by convoy
-// id. An empty map is a legal answer: the join below simply leaves `owned` nil.
-func (s *BeadsSource) convoyIndex(ctx context.Context, g *gatherState) map[string]convoyRow {
-	rows, err := s.gc.Convoys(ctx)
-	if err != nil {
-		g.note(true, []string{"convoy ownership unavailable (owned/progress will be null): " + err.Error()})
-		return nil
-	}
-	out := make(map[string]convoyRow, len(rows))
-	for _, r := range rows {
-		out[r.ID] = r
-	}
-	return out
 }
 
 // typedAnchorKinds are the anchor kinds selected by ISSUE TYPE. The list is
@@ -475,17 +540,17 @@ var metadataAnchors = []metadataAnchor{
 //
 // THE SECOND PASS is the only thing that gives a closed anchor a row: the open
 // queries stop returning it the instant it is answered. It derives into the
-// terminal DONE band, below every live row. `gc-helm dismiss` retires it on the
-// operator's word; doneSince ages it out on a clock once it has been closed
-// longer than the window. That clock is the caller's captured `now`, so every
-// rig is bounded at the same cutoff and a row at the boundary does not turn on
-// which rig the gather reached last.
-func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, now time.Time) {
+// terminal DONE band, below every live row. doneSince ages it out on a clock
+// once it has been closed longer than the window; nothing else retires it, so
+// the band carries no per-row state. That clock is the caller's captured `now`,
+// so every rig is bounded at the same cutoff and a row at the boundary does not
+// turn on which rig the gather reached last.
+func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, now time.Time) {
 	// Children are read at ALL statuses in both passes, so n_closed is a real
 	// count rather than a count of the still-open ones.
-	s.gatherAnchors(ctx, g, st, r, convoys, beads.StatusOpen, nil)
+	s.gatherAnchors(ctx, g, st, r, beads.StatusOpen, nil)
 	if since, ok := doneSince(now); ok {
-		s.gatherAnchors(ctx, g, st, r, convoys, beads.StatusClosed, &since)
+		s.gatherAnchors(ctx, g, st, r, beads.StatusClosed, &since)
 	}
 }
 
@@ -525,10 +590,27 @@ func doneSince(now time.Time) (time.Time, bool) {
 // gatherAnchors runs every anchor kind for one rig at one status. closedAfter
 // is non-nil only on the closed pass, where it both bounds the query and marks
 // the anchors it produces as DONE.
-func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, status beads.Status, closedAfter *time.Time) {
+func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, status beads.Status, closedAfter *time.Time) {
+	// The closed pass feeds only the DONE band, and a lite SELECT (one that drops
+	// the six heavy TEXT columns — description, design, acceptance_criteria,
+	// notes, payload, waiters) carries everything a closed anchor needs. rankScore
+	// orders a SevDone row by recency and discards its weight, so the cross-rig
+	// ref scan that weight feeds cannot move a closed row, and no other reader of a
+	// closed anchor reads a heavy column. The live pass stays full because
+	// crossRigRefs reads an open anchor's description. Labels and metadata are not
+	// heavy columns, so convoy ownership and every tile's metadata hydrate either
+	// way.
+	lite := closedAfter != nil
+
+	// Phase 1 — collect every anchor for this rig+status, typed then
+	// metadata-keyed, WITHOUT reading any edges. Typed kinds are appended first
+	// because BuildBoard's id-dedup keeps the first kind a bead is gathered
+	// under, so a bead that qualifies as both a typed and a metadata-keyed anchor
+	// keeps its typed kind.
+	var pending []pendingAnchor
 	for _, kind := range typedAnchorKinds {
 		it := beads.IssueType(kind)
-		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &status, ClosedAfter: closedAfter})
+		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &status, ClosedAfter: closedAfter, Lite: lite})
 		if err != nil {
 			g.note(true, []string{kind + "s@" + r.name + ": " + err.Error()})
 			continue
@@ -541,43 +623,263 @@ func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st bead
 			if kind == "convoy" && !admitConvoy(iss.Title) {
 				continue
 			}
-			if closedAfter != nil && dismissed(iss) {
-				continue
+			anchor := newAnchor(iss, kind, r)
+			if kind == "convoy" {
+				// Ownership is the convoy bead's own "owned" label, read from the
+				// issue the gather already holds — the same test gascity applies
+				// for `gc convoy list`. No edge and no subprocess: the label rides
+				// the issue row, hydrated by default.
+				applyConvoyOwnership(&anchor, iss.Labels)
 			}
-			a := newAnchor(iss, kind, r)
-			switch kind {
-			case "epic":
-				a.Children = s.parentChildren(ctx, g, st, iss.ID)
-			case "convoy":
-				a.Children = s.convoyChildren(ctx, g, st, iss.ID)
-				applyConvoyOwnership(&a, convoys)
-			case "decision":
-				// A decision needs no roll-up: it is banded by what it IS.
-				// It does need its waiting edges, though — they are half of
-				// the stand-down test (board.ruled), and without them the
-				// "and the work landed" clause would be vacuous for exactly
-				// the kind an operator files a `--waiting-on` edge on.
-				a.Blockers, a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
-			}
-			g.anchors = append(g.anchors, a)
+			pending = append(pending, pendingAnchor{anchor: anchor, kind: kind})
+		}
+	}
+	pending = append(pending, s.collectMetadataAnchors(ctx, g, st, r, status, closedAfter, lite)...)
+	pending = append(pending, s.collectReviewReworkAnchors(ctx, g, st, r, closedAfter)...)
+
+	// Phase 2 — resolve every anchor's edges in a fixed number of batched reads,
+	// never one per anchor. Phase 3 — publish.
+	s.attachEdges(ctx, g, st, r, pending)
+	for i := range pending {
+		g.anchors = append(g.anchors, pending[i].anchor)
+	}
+}
+
+// pendingAnchor is an anchor whose row is built but whose cross-anchor edges are
+// not yet attached. kind is retained (rather than read back off anchor.Kind)
+// because applyConvoyOwnership flips a convoy's Kind to "unowned", and the edge
+// each anchor needs is decided by what it was gathered AS.
+type pendingAnchor struct {
+	anchor board.Anchor
+	kind   string
+}
+
+// needsParentChildren reports the kinds whose roll-up is their parent-child
+// children (the INBOUND edge): epics, and the metadata-keyed kinds, which reach
+// the board as ordinary beads and answer for a set only through this edge.
+func needsParentChildren(kind string) bool {
+	switch kind {
+	case "epic", "human", "parked", "merge":
+		return true
+	}
+	return false
+}
+
+// needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
+// The readers that spend them: board.ruled and the merge row's PR axes
+// (decision, human, parked, merge), and the dependency-family grouping, which
+// climbs a tile to the anchor it blocks — so epic and convoy anchors collect
+// their `blocks` edges to join a blocked epic or convoy to the family it hangs
+// off. A convoy's edges come from the same outbound read that
+// already fetches its `tracks` members; an epic's are added to that read here.
+func needsWaitingEdges(kind string) bool {
+	switch kind {
+	case "decision", "human", "parked", "merge", "epic", "convoy":
+		return true
+	}
+	return false
+}
+
+// attachEdges resolves the relations of every anchor in pending with at most
+// three store reads for the whole set, never one per anchor: one batched
+// INBOUND read (parent-child children), one batched OUTBOUND read (a convoy's
+// `tracks`, everything else's `blocks`), and one SearchIssues that hydrates
+// every far-end issue both name. The read count is fixed by the rig+status
+// pass, so it does not scale with the number of anchors.
+//
+// The two batched reads fail INDEPENDENTLY, and each failure degrades only the
+// roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
+// parent-child roll-ups empty and notes partial. A failed dependencies read
+// leaves `tracks` roll-ups empty AND marks every `blocks`-spending anchor's
+// waits UNKNOWN — not empty — because board.ruled reads an empty wait set as
+// "every recorded wait has landed" and would stand a row down on a graph it
+// could not read.
+func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor) {
+	var dependentIDs, dependencyIDs []string
+	for i := range pending {
+		id := pending[i].anchor.ID
+		if needsParentChildren(pending[i].kind) {
+			dependentIDs = append(dependentIDs, id)
+		}
+		if pending[i].kind == "convoy" || needsWaitingEdges(pending[i].kind) {
+			dependencyIDs = append(dependencyIDs, id)
 		}
 	}
 
-	s.gatherMetadataAnchors(ctx, g, st, r, status, closedAfter)
+	var (
+		depnRecs, depyRecs map[string][]*beads.Dependency
+		depnErr, depyErr   error
+	)
+	if len(dependentIDs) > 0 {
+		depnRecs, depnErr = st.GetDependentRecordsForIssues(ctx, dependentIDs)
+	}
+	if len(dependencyIDs) > 0 {
+		depyRecs, depyErr = st.GetDependencyRecordsForIssues(ctx, dependencyIDs)
+	}
+
+	// Hydrate the far-end issues the two reads reference — the children on the
+	// parent-child edges, the members and blockers on the tracks/blocks ones — in
+	// one SearchIssues. Only the edge types actually spent are hydrated; a
+	// `related` edge that shares a target is never fetched.
+	farEnds := map[string]struct{}{}
+	if depnErr == nil {
+		for _, recs := range depnRecs {
+			for _, d := range recs {
+				if d != nil && string(d.Type) == "parent-child" {
+					farEnds[d.IssueID] = struct{}{}
+				}
+			}
+		}
+	}
+	if depyErr == nil {
+		for _, recs := range depyRecs {
+			for _, d := range recs {
+				if d != nil && (string(d.Type) == "tracks" || string(d.Type) == "blocks") {
+					farEnds[d.DependsOnID] = struct{}{}
+				}
+			}
+		}
+	}
+	issueByID, hydErr := s.hydrate(ctx, st, farEnds)
+
+	dependentsOK := depnErr == nil && hydErr == nil
+	dependenciesOK := depyErr == nil && hydErr == nil
+	if depnErr != nil {
+		g.note(true, []string{"children@" + r.name + ": " + depnErr.Error()})
+	}
+	if depyErr != nil {
+		g.note(true, []string{"waiting@" + r.name + ": " + depyErr.Error()})
+	}
+	if hydErr != nil {
+		g.note(true, []string{"edge-hydrate@" + r.name + ": " + hydErr.Error()})
+	}
+
+	for i := range pending {
+		p := &pending[i]
+		if p.kind == "convoy" {
+			if dependenciesOK {
+				p.anchor.Children = childrenFromEdges(depyRecs[p.anchor.ID], "tracks", outboundFarEnd, issueByID)
+			}
+		} else if needsParentChildren(p.kind) && dependentsOK {
+			p.anchor.Children = childrenFromEdges(depnRecs[p.anchor.ID], "parent-child", inboundFarEnd, issueByID)
+		}
+		// The `blocks` waits come from the SAME outbound read a convoy already
+		// spends on its `tracks`, so a convoy gathers both from one read; an epic
+		// joins that read via needsWaitingEdges. They feed the family grouping for
+		// epic and convoy, and board.ruled and the PR axes for the rest.
+		if needsWaitingEdges(p.kind) {
+			if dependenciesOK {
+				p.anchor.Blockers, p.anchor.WaitingOn, p.anchor.WaitingOnClosed, p.anchor.WaitingUnknown =
+					waitingFromEdges(depyRecs[p.anchor.ID], issueByID)
+			} else {
+				p.anchor.WaitingUnknown = true
+			}
+		}
+	}
 }
 
-// dismissed reports the operator's explicit "take this out of my view", written
-// by `gc-helm dismiss`. Both callers gate it on the CLOSED pass, and that gate
-// is load-bearing rather than an optimisation: the marker retires a DONE row,
-// and a dismissed anchor that is later REOPENED is live work again. Applied to
-// the open pass it would hide that row from the live board — the same
-// disappearance this band exists to stop, with a stale marker as the cause.
-func dismissed(iss *beads.Issue) bool {
-	return strings.TrimSpace(decodeMetadata(iss.Metadata)["gc.dismissed_at"]) != ""
+// hydrate fetches every far-end issue by id in ONE SearchIssues. The IDs filter
+// carries no status scope, so a child or blocker that has since closed is still
+// returned — n_closed and the closed-wait test both need the closed ones. An
+// empty set is not a query.
+func (s *BeadsSource) hydrate(ctx context.Context, st beadStore, ids map[string]struct{}) (map[string]*beads.Issue, error) {
+	if len(ids) == 0 {
+		return map[string]*beads.Issue{}, nil
+	}
+	list := make([]string, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	// Lite: a hydrated far end becomes a board.Child or board.Blocker, and
+	// neither carries a heavy TEXT column, so the edge hydration never needs one.
+	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IDs: list, Lite: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]*beads.Issue, len(issues))
+	for _, iss := range issues {
+		if iss != nil {
+			out[iss.ID] = iss
+		}
+	}
+	return out, nil
 }
 
-// gatherMetadataAnchors runs the metadata-keyed gathers for one rig. They fail
-// independently of each other and of the typed kinds.
+// farEndSide names which id of a raw edge row is the far end — the OTHER bead,
+// the one to hydrate. An inbound (dependents) read keys by the target, so the
+// far end is the source (issue_id); an outbound (dependencies) read keys by the
+// source, so the far end is the target (depends_on_id).
+type farEndSide int
+
+const (
+	inboundFarEnd farEndSide = iota
+	outboundFarEnd
+)
+
+// childrenFromEdges projects the edges of one dependency type onto board
+// children, dropping any whose far-end issue did not hydrate — the same drop the
+// library's WithMetadata join made for a dangling or cross-store edge.
+func childrenFromEdges(recs []*beads.Dependency, want string, side farEndSide, issueByID map[string]*beads.Issue) []board.Child {
+	var out []board.Child
+	for _, d := range recs {
+		if d == nil || string(d.Type) != want {
+			continue
+		}
+		farID := d.DependsOnID
+		if side == inboundFarEnd {
+			farID = d.IssueID
+		}
+		iss, ok := issueByID[farID]
+		if !ok {
+			continue
+		}
+		out = append(out, board.Child{
+			ID:        iss.ID,
+			Status:    string(iss.Status),
+			Assignee:  iss.Assignee,
+			UpdatedAt: iss.UpdatedAt,
+			Metadata:  decodeMetadata(iss.Metadata),
+		})
+	}
+	return out
+}
+
+// waitingFromEdges is [childrenFromEdges]'s sibling for the `blocks` waits, from
+// the same OUTBOUND read: it reports the blockers a subject waits on and which
+// of them have closed. A blocker whose issue did not hydrate is dropped, not
+// counted as unknown — unknown is reserved for a READ that failed, which the
+// caller signals by not calling this at all (see attachEdges).
+func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issue) (blockers []board.Blocker, all, closed []string, unknown bool) {
+	for _, d := range recs {
+		if d == nil || string(d.Type) != "blocks" {
+			continue
+		}
+		iss, ok := issueByID[d.DependsOnID]
+		if !ok {
+			continue
+		}
+		all = append(all, iss.ID)
+		if iss.Status == beads.StatusClosed {
+			closed = append(closed, iss.ID)
+		}
+		md := decodeMetadata(iss.Metadata)
+		blockers = append(blockers, board.Blocker{
+			ID:        iss.ID,
+			Title:     iss.Title,
+			Status:    strings.ToLower(string(iss.Status)),
+			RoutedTo:  md["gc.routed_to"],
+			IssueType: strings.ToLower(string(iss.IssueType)),
+			Assignee:  iss.Assignee,
+			CreatedAt: iss.CreatedAt,
+		})
+	}
+	return blockers, all, closed, false
+}
+
+// collectMetadataAnchors gathers the metadata-keyed anchor ROWS for one rig;
+// their edges are attached later, in the one batched pass gatherAnchors runs
+// over every anchor. The SearchIssues kinds fail independently of each other
+// and of the typed kinds.
 //
 // Both kinds carry a child roll-up, read the same way an epic's is. They used
 // to carry none — "the gather admits the bead itself, not a set it owns" — and
@@ -589,16 +891,20 @@ func dismissed(iss *beads.Issue) bool {
 // from a parent to its own descendant, so the canonical converse shape — file
 // the routed work as a CHILD of the subject — can never express its wait as a
 // waiting edge (tk-2cyxo).
-func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, status beads.Status, closedAfter *time.Time) {
+func (s *BeadsSource) collectMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, status beads.Status, closedAfter *time.Time, lite bool) []pendingAnchor {
 	excluded := make([]beads.IssueType, 0, len(typedAnchorKinds))
 	for _, kind := range typedAnchorKinds {
 		excluded = append(excluded, beads.IssueType(kind))
 	}
+	var out []pendingAnchor
 	for _, ma := range metadataAnchors {
 		filter := beads.IssueFilter{
 			Status:       &status,
 			ClosedAfter:  closedAfter,
 			ExcludeTypes: excluded,
+			// The closed pass reads lite, matching the typed kinds above — see
+			// the rationale in gatherAnchors.
+			Lite: lite,
 			// The board answers for durable city state. A type-keyed query
 			// never reaches the ephemeral wisp side by accident; a query keyed
 			// on a `gc.` metadata field would, because wisps — heartbeats,
@@ -620,76 +926,66 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 			if iss == nil {
 				continue
 			}
-			if closedAfter != nil && dismissed(iss) {
-				continue
-			}
-			a := newAnchor(iss, ma.kind, r)
-			a.Children = s.parentChildren(ctx, g, st, iss.ID)
-			a.Blockers, a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
-			g.anchors = append(g.anchors, a)
+			out = append(out, pendingAnchor{anchor: newAnchor(iss, ma.kind, r), kind: ma.kind})
 		}
 	}
+	return out
 }
 
-// waitingEdges reads the `blocks` blockers of a subject and reports which of
-// them have closed.
+// reviewReworkKinds are the task_kind values that make a not-closed child its
+// own board tile. Each is a family MEMBER — it joins its merge anchor through
+// the `blocks` edge it carries and through metadata.anchor_bead, and is never a
+// root — so a review or rework in flight earns a row of its own rather than
+// leaving the anchor showing an empty gate. The board kind is
+// the task_kind, which board.derive bands as in-flight leaf work.
+var reviewReworkKinds = []string{"review", "rework"}
+
+// collectReviewReworkAnchors gathers the in-flight review and rework children
+// for one rig: a not-closed bead carrying metadata.anchor_bead whose task_kind
+// is review or rework.
 //
-// WHO SPENDS IT. The edge answers one question — "is the work this row was
-// waiting on done?" — and four kinds spend the answer: `parked` through
-// board.dispositionDue, `decision` / `human` through board.ruled, and `merge`
-// through the PR round-trip's two axes, which read the blockers rather than
-// their ids. It is read for those four and not for `epic` or `convoy`, whose
-// bands come from a child roll-up that already says whether their work is
-// moving. gc-helm.sh gathers the first three, so the two boards stay
-// field-for-field identical on every field it has.
+// LIVE pass only (closedAfter nil): a closed review or rework child is a
+// finished round, and the merge anchor it belonged to carries the DONE row, so
+// gathering the closed child would double a row the anchor already answers for.
 //
-// FAILURE REPORTS ITSELF. The two failure shapes are not the same, and only
-// one of them used to be safe. A blocker that IS read but is not closed is
-// simply omitted from the closed list, which the derivation counts as
-// outstanding — the quiet direction. A store that ERRORS yields no blockers at
-// all, and while this read was parked-only that was equally quiet
-// (board.dispositionDue needs a recorded wait to fire, so an empty set fires
-// nothing), it stopped being quiet the moment `decision` and `human` started
-// spending the same edges: board.ruled fires ON the empty set, reading it as
-// "every recorded wait has landed". So the error is returned as unknown rather
-// than as absence, and the derivation keeps the row's band (tk-fhd705). The
-// gather is marked partial either way, so the board also says out loud that it
-// is degraded.
-//
-// gc-helm.sh has no matching state to guard: there, `waiting_on` rides on the
-// SAME `bd list --json` payload that produced the anchor, so a failed read
-// drops the anchor entirely and cannot leave one standing with its edges
-// silently missing. The separate per-anchor query here is what creates the
-// third case.
-func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadStore, id string) (blockers []board.Blocker, all, closed []string, unknown bool) {
-	deps, err := st.GetDependenciesWithMetadata(ctx, id)
-	if err != nil {
-		g.note(true, []string{"waiting@" + id + ": " + err.Error()})
-		return nil, nil, nil, true
+// The status scope is open AND in_progress — a review child is slung and stays
+// open, a rework child is claimed and runs in_progress, and both are "in
+// flight". anchor_bead PRESENCE is required and checked client-side: the store
+// filter matches one key=value at a time, so the task_kind query does the
+// coarse cut and the join key is confirmed here. A child with no anchor cannot
+// join a family and is dropped rather than rendered as a rootless orphan.
+func (s *BeadsSource) collectReviewReworkAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, closedAfter *time.Time) []pendingAnchor {
+	if closedAfter != nil {
+		return nil
 	}
-	for _, d := range deps {
-		if d == nil || string(d.DependencyType) != "blocks" {
+	excluded := make([]beads.IssueType, 0, len(typedAnchorKinds))
+	for _, kind := range typedAnchorKinds {
+		excluded = append(excluded, beads.IssueType(kind))
+	}
+	var out []pendingAnchor
+	for _, kind := range reviewReworkKinds {
+		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
+			Statuses:       []beads.Status{beads.StatusOpen, beads.StatusInProgress},
+			ExcludeTypes:   excluded,
+			MetadataFields: map[string]string{"task_kind": kind},
+			SkipWisps:      true,
+		})
+		if err != nil {
+			g.note(true, []string{kind + "-children@" + r.name + ": " + err.Error()})
 			continue
 		}
-		all = append(all, d.Issue.ID)
-		if d.Issue.Status == beads.StatusClosed {
-			closed = append(closed, d.Issue.ID)
+		g.ok()
+		for _, iss := range issues {
+			if iss == nil {
+				continue
+			}
+			if decodeMetadata(iss.Metadata)["anchor_bead"] == "" {
+				continue
+			}
+			out = append(out, pendingAnchor{anchor: newAnchor(iss, kind, r), kind: kind})
 		}
-		// The same edge, typed. The PR round-trip asks the blockers three
-		// questions the id alone cannot answer — who is due to act on it, what
-		// it is asking for, and when it started asking — and answering them
-		// from this read is what keeps the render path off a second query.
-		md := decodeMetadata(d.Issue.Metadata)
-		blockers = append(blockers, board.Blocker{
-			ID:        d.Issue.ID,
-			Title:     d.Issue.Title,
-			Status:    strings.ToLower(string(d.Issue.Status)),
-			RoutedTo:  md["gc.routed_to"],
-			IssueType: strings.ToLower(string(d.Issue.IssueType)),
-			CreatedAt: d.Issue.CreatedAt,
-		})
 	}
-	return blockers, all, closed, false
+	return out
 }
 
 // newAnchor projects one bead onto a board anchor under the given kind. Kind
@@ -717,6 +1013,9 @@ func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
 		Takeaway:   md["gc.takeaway"],
 		TakeawayAt: md["gc.takeaway_at"],
 		TakeawayBy: md["gc.takeaway_by"],
+		// The first-reaction card the disposition wrote; spent as the tile's
+		// recommendation on an acceptable row.
+		Notes: iss.Notes,
 	}
 }
 
@@ -734,9 +1033,9 @@ func closedAt(iss *beads.Issue) time.Time {
 	return iss.ClosedAt.UTC()
 }
 
-// applyConvoyOwnership folds `gc convoy list`'s view of a convoy onto its
-// anchor: the ownership bool, the convoy's own progress claim, and — when it is
-// NOT owned — the kind flip that makes it the orphan exception.
+// applyConvoyOwnership sets a convoy's ownership from its own "owned" label —
+// the signal gascity keys the `gc convoy list` owned flag on — and, when the
+// convoy is NOT owned, flips its kind to the orphan exception.
 //
 // Under the everything-is-owned law every PR or unit is accounted for by a
 // bead, so an unowned non-machine convoy is exactly what the observer must
@@ -744,20 +1043,12 @@ func closedAt(iss *beads.Issue) time.Time {
 // `sling-*` wrappers and the per-sling `input convoy for …` ones — are already
 // dropped by admitConvoy before this runs.)
 //
-// A convoy MISSING from the index keeps kind "convoy" and a nil `owned`. That
-// is deliberate: absent ownership data is not evidence of an orphan, and
-// guessing false would flag every convoy in the city HIGH the first time
-// `gc convoy list` failed.
-func applyConvoyOwnership(a *board.Anchor, convoys map[string]convoyRow) {
-	row, ok := convoys[a.ID]
-	if !ok {
-		return
-	}
-	owned := row.Owned
+// The label rides the issue row the gather already read and is hydrated by
+// default, so ownership is always known here: there is no missing-data case
+// that leaves `owned` nil.
+func applyConvoyOwnership(a *board.Anchor, labels []string) {
+	owned := slices.Contains(labels, "owned")
 	a.Owned = &owned
-	if row.Progress != nil {
-		a.Progress = &board.Progress{Closed: row.Progress.Closed, Total: row.Progress.Total}
-	}
 	if !owned {
 		a.Kind = "unowned"
 		a.Source = "unowned"
@@ -766,57 +1057,12 @@ func applyConvoyOwnership(a *board.Anchor, convoys map[string]convoyRow) {
 
 // admitConvoy mirrors the SupervisorSource filter: drop the transient MACHINE
 // convoys, which are the auto-generated `sling-*` wrappers and the per-sling
-// `input convoy for …` one-child wrappers. Partitioning the survivors into
-// owned vs. unowned stays deferred — this source could now read the parent edge
-// and decide, but changing WHICH convoys reach the board is a gather change,
-// and tk-x89rn ships the capability without spending it.
+// `input convoy for …` one-child wrappers. The non-machine survivors — owned
+// and unowned alike — all reach the board; applyConvoyOwnership marks each
+// one's ownership from its `owned` label and flips the unowned ones to the
+// orphan exception.
 func admitConvoy(title string) bool {
 	return !strings.HasPrefix(title, "sling-") && !strings.HasPrefix(title, "input convoy for")
-}
-
-// parentChildren returns an anchor's DIRECT children — the beads joined to it
-// by a parent-child edge, which in the beads model points child→parent, so the
-// children are the anchor's DEPENDENTS. Epics answer for their children this
-// way, and so do the metadata-keyed kinds: the relation belongs to the bead,
-// not to the kind.
-func (s *BeadsSource) parentChildren(ctx context.Context, g *gatherState, st beadStore, id string) []board.Child {
-	deps, err := st.GetDependentsWithMetadata(ctx, id)
-	if err != nil {
-		g.note(true, []string{"children@" + id + ": " + err.Error()})
-		return nil
-	}
-	return childrenOf(deps, "parent-child")
-}
-
-// convoyChildren returns a convoy's tracked members. A convoy tracks its
-// members with a `tracks` edge pointing convoy→bead (gascity
-// internal/convoy/membership.go), so the members are what the convoy DEPENDS
-// ON — the opposite direction from an epic's children.
-func (s *BeadsSource) convoyChildren(ctx context.Context, g *gatherState, st beadStore, convoyID string) []board.Child {
-	deps, err := st.GetDependenciesWithMetadata(ctx, convoyID)
-	if err != nil {
-		g.note(true, []string{"convoy " + convoyID + ": " + err.Error()})
-		return nil
-	}
-	return childrenOf(deps, "tracks")
-}
-
-// childrenOf projects the edges of one dependency type onto board children.
-func childrenOf(deps []*beads.IssueWithDependencyMetadata, want string) []board.Child {
-	var out []board.Child
-	for _, d := range deps {
-		if d == nil || string(d.DependencyType) != want {
-			continue
-		}
-		out = append(out, board.Child{
-			ID:        d.Issue.ID,
-			Status:    string(d.Issue.Status),
-			Assignee:  d.Issue.Assignee,
-			UpdatedAt: d.Issue.UpdatedAt,
-			Metadata:  decodeMetadata(d.Issue.Metadata),
-		})
-	}
-	return out
 }
 
 // clonePriority copies the priority into the pointer the model uses. The beads
