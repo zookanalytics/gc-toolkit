@@ -187,6 +187,25 @@ tk-eku5dvv tracks bringing this branch current and porting the pacing and the
 visit order into the Go path. It blocks the anchor, so #1077 cannot land
 without the port.
 
+## The gctk merge port (2026-10-07)
+
+tk-eku5dvv merged main in at 4c9fbef6 and ported the merge arm's pacing and
+visit order into `gctk merge` (services/gctk/internal/cli/merge.go, with the
+rotation in pace.go). The binary now takes `--deadline` and `--cursor`, sends
+the same GraphQL read of the open PRs, puts the same anchors first under the
+same approval rule, and paces the rest through pace-lib.sh's rotation: id order
+after the cursor, wrapping, an anchor recorded once the next visit begins, and
+one paced anchor visited even past the deadline. It prints the same visit
+summary.
+
+merge.test.sh's pacing cases had been appended after `suite()`, so after the
+merge they ran once, on the gctk arm, where 19 of their 29 assertions failed.
+They now sit inside `suite()`, so both arms run them. Their PR numbers moved to
+231-293, so no fixture they write is read by another case when the next arm
+runs the suite. The Go tests cover what that suite does not reach: an open-PR
+stream that breaks partway, a page with no pullRequests, and a cursor that
+cannot be written.
+
 ## Considered and not done
 
 - **Bounding the posture arm.** It is the one arm left ahead of merge whose
