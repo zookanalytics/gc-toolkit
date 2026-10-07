@@ -11,8 +11,11 @@
 # stamped prepare_mode=merge (every branch brought current by merge, never rebase),
 # counted as dispatched only once that stamp AND the route read back, with a
 # child stranded by a lost route stamp re-routed rather than buried by the
-# dedup; stale-gate -> one re-review child per head, carrying mol-review via
-# gc sling --on (dedup, pour read-back, fix_target_pool stamped);
+# dedup, and assigned to the refinery when the classifier finds every conflict
+# inside generated/seed-audit at the head GitHub judged (any other answer, a
+# failed fetch or a moved head keeps the fix pool); stale-gate -> one
+# re-review child per head, carrying mol-review via gc sling --on (dedup, pour
+# read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
 # auto-merge armed skips; a human's review is never dismissed).
 # Also covers --posture-only (the pre-merge arm: records posture, dispatches

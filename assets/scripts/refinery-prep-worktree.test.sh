@@ -13,7 +13,10 @@
 #
 # Runs the REAL blocks extracted verbatim from the formula against a real git
 # repo (worktrees need one) and a stub `gc`. cwd is deliberately the rig root —
-# the exact case that used to strand it.
+# the exact case that used to strand it. Also covers the prepare's conflict
+# handling: a conflict confined to generated/seed-audit is finished by
+# regen-merge.sh and pushed as a fast-forward, while a hand-written conflict, or
+# a host where the resolver is unreachable, still fails the prepare.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

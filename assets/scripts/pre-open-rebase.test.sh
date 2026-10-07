@@ -9,9 +9,11 @@
 # rebase_hold on a bead naming the branch, a live demand, no fix pool); dedup on
 # branch and head against a live child, a stranded child re-routed rather than
 # buried, and an unstamped orphan adopted by title; the read-backs that leave a
-# child unrouted when prepare_mode or the route did not persist; anchors that
-# already carry a PR left to pr-facts.sh; and an unreadable enumeration failing
-# loudly rather than reporting a false all-clear.
+# child unrouted when prepare_mode or the route did not persist; a child whose
+# every conflict is inside generated/seed-audit assigned to the refinery, and
+# every other child, or one with no renderer in its merged tree, still routed to
+# the fix pool; anchors that already carry a PR left to pr-facts.sh; and an
+# unreadable enumeration failing loudly rather than reporting a false all-clear.
 # The premise under the ref guard is asserted directly: `git merge-tree` exits 1
 # for a ref it cannot resolve as well as for a conflict.
 set -uo pipefail
