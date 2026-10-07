@@ -225,7 +225,7 @@ type transitionOpts struct {
 // token is a malformed invocation and returns an error: the empty string it
 // would otherwise take drops --expect's compare-and-swap guard, so a truncated
 // command must fail rather than transition unguarded. An explicitly supplied
-// empty argument (--assignee '' clears the assignee) is a real token and is
+// empty argument (--assignee "" clears the assignee) is a real token and is
 // preserved.
 func parseTransition(args []string) (transitionOpts, error) {
 	var o transitionOpts

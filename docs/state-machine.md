@@ -174,6 +174,8 @@ configuration, not doctrine. Two writers put them there and neither reads the
 diff: `mol-refinery-patrol` stamps its `check_set` var on every transition
 into a gating state, and `gate-ensure.sh --default` normalizes an anchor whose
 set is absent or empty, taking its value from `REFINERY_RECONCILE_CHECK_SET`.
+No patrol pour passes `check_set`, so each patrol wisp renders it from the
+formula default as it stands when that wisp is poured.
 The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
 [authority-map.md](authority-map.md).
@@ -219,11 +221,15 @@ left behind, migrated. The full lane state machine is
 [specs/tk-ztapg/review-cycle-architecture.md](../specs/tk-ztapg/review-cycle-architecture.md).
 
 `approval` takes no marker of its own and is not a check: it is a **universal
-merge rule**. `merge.sh` requires every PR to carry a latest APPROVED review at
-the live head by an account other than the city's, with a standing
-CHANGES_REQUESTED from any other account a veto — no `check.approval` marker and
-no `check_set` token arms it or opts out, and GitHub branch protection is an
-extra layer, not the authority. `lifecycle/lifecycle.toml` records the rule.
+merge rule**. `merge.sh` requires every PR to carry a latest APPROVED review by
+an account other than the city's, with a standing CHANGES_REQUESTED from any
+other account a veto. An approval stands across later pushes until it is
+dismissed, so it counts whatever commit it was given at. A dismissed review is
+dropped before each reviewer's latest review is taken, so it neither approves
+nor vetoes, and it does not hide its author's older approval. No
+`check.approval` marker and no `check_set` token arms it or opts out, and
+GitHub branch protection is an extra layer, not the authority.
+`lifecycle/lifecycle.toml` records the rule.
 What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check
 verdicts** (component-model I7). A verdict binds to no commit: the reviewed oid
@@ -318,8 +324,9 @@ than silently releasing a park a human is relying on.
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
 an unnormalized anchor holds); every check named in `check_set` reads `green`; a
-latest APPROVED review at the live head from a non-city account, with no standing
-CHANGES_REQUESTED (the universal approval rule); no unclosed rework or review
+latest APPROVED review from a non-city account, given at any commit and not
+dismissed since, with no standing CHANGES_REQUESTED (the universal approval
+rule); no unclosed rework or review
 child; PR base equals `merged_target`; GitHub reports CLEAN; no holds
 (`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
 pinned with `--match-head-commit <validated oid>`, so a mid-pass head move

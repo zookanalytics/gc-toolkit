@@ -19,7 +19,7 @@ eight days of clean ticks. `lifecycle.sh` now only execs the binary, and a call
 with no binary to run exits 1 naming the `gctk-build` order. The fallback still
 stands for the other subcommands.
 
-Remaining, one subcommand per PR in this order: `merge`, `gate-ensure`,
+Remaining, one subcommand per PR in this order: `gate-ensure`,
 `pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
 bead. The remaining shell scripts and their fallbacks drop when the last one
 lands.

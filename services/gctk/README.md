@@ -27,9 +27,10 @@ compiled package keeps them from diverging.
 | Subcommand | Replaces | State |
 |---|---|---|
 | `lifecycle` | `assets/scripts/lifecycle.sh` | ported; the script only execs the binary, with no fallback — a call with no binary to run is refused |
+| `merge` | `assets/scripts/merge.sh` | ported; the script remains as the fallback |
 | `pr-status` | `pr-status-label.sh`'s `derive_value` | ported; no fallback — the label is left unchanged when the binary is absent or stale |
 
-Still shell: `gate-ensure`, `pr-open`, `merge`, `pr-facts`, `convoy-graduate`,
+Still shell: `gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
 `signoff`. The spec's port order is `lifecycle` first (everything else calls
 it), then `merge`, then the rest — one subcommand per PR.
 
@@ -56,15 +57,21 @@ suite of its own.
 
 ## Resolution, and a missing binary
 
-`lifecycle.sh` resolves the binary explicitly — `$GCTK_BIN`, else the
+`lifecycle.sh` and `merge.sh` hand the call to `assets/scripts/gctk-resolve.sh`,
+which resolves the binary explicitly — `$GCTK_BIN`, else the
 `.gc/services/gctk/bin/gctk` under `$GC_CITY_PATH`, `$GC_CITY` or
 `$GC_CITY_ROOT`, else the `city_path` that `gc service list --json` reports —
 and `exec`s it. That precedence is the one the rest of the pack reads, and
 `GC_CITY_PATH` leads it because that is the variable a supervisor puts in an
 agent session. The listing is what the cadence itself needs: the order runner
 that execs `refinery-reconcile.sh` carries no city variable at all, so an
-env-only chain would refuse every order-driven transition.
+env-only chain would miss the binary on every order-driven call.
 `doctor/check-cadence-live` resolves by the same env chain.
+
+The two scripts differ in what happens when no binary resolves. `merge.sh`
+calls `gctk_resolve merge "$@"`, which returns so that the script's shell
+answers. `lifecycle.sh` calls `gctk_require lifecycle "$@"`, which refuses the
+call.
 
 Resolution is never a walk up from the script's own path. The hermetic suites
 run from a tree that lives inside a live city, and a filesystem hunt would find
@@ -86,11 +93,9 @@ publishes the binary:
   why the last build failed.
 
 `GCTK_BIN=none` names no binary, so every `lifecycle.sh` call under it is
-refused. For the other cadence subcommands the fallback still stands: each
-script answers until its subcommand's port is deployed. A port's suite cannot
-force that fallback with `GCTK_BIN=none`, because that also leaves
-`lifecycle.sh` nothing to exec. The scripts are deleted when the last port
-lands.
+refused, while `merge.sh` answers from its shell. Merge's fallback still
+stands: its shell answers whenever no current binary resolves. The scripts are
+deleted when the last port lands.
 
 `pr-status` has no fallback either. Its derivation lives only in gctk — the helm
 board (Go) has no shell to fall back to, so a shell copy would be the divergence
@@ -131,8 +136,12 @@ good binary serving the cadence. That is slower iteration in exchange for no
 accidental live surgery on merge logic, and two things make the lag visible:
 `doctor/check-cadence-live` compares `gctk version` against the checkout's
 services/gctk subtree, and the board's PACK rows carry the same comparison
-where the operator already looks. lifecycle.sh makes no such comparison. It has
-no other implementation to prefer, so it runs the binary the order last
+where the operator already looks. For `merge.sh`, gctk-resolve.sh makes the
+same comparison before it execs a city-resolved binary, and a checkout whose
+services/gctk is at another revision — a rig ahead of the lag, a branch that
+changed the port — takes the shell fallback, which is the writer that matches
+its callers. For `lifecycle.sh` it makes no such comparison. There is no other
+implementation to prefer, so lifecycle.sh runs the binary the order last
 published, and the order's lag is never a refused transition.
 
 ## The state table lives once
@@ -161,6 +170,8 @@ scripts is the contract; improving on them silently is how a port diverges.
 ```bash
 cd services/gctk && go test ./...          # the units
 bash assets/scripts/lifecycle.test.sh      # the acceptance bar
+bash assets/scripts/merge.test.sh          # the acceptance bar, both arms
+bash assets/scripts/gctk-resolve.test.sh   # which implementation answers
 ```
 
 Each shell suite that reaches `lifecycle.sh` builds the binary itself and fails

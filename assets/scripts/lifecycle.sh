@@ -43,45 +43,8 @@
 # good binary in place, and that binary keeps answering.
 set -u
 
-# Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
-# GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
-# and the tmux pickers read, and GC_CITY_PATH is the one the supervisor puts in
-# an agent session — else the city `gc service list --json` reports. The
-# listing is what the merge cadence itself needs: the order runner that execs
-# refinery-reconcile.sh carries no city variable at all (docs/
-# refinery-merge-cadence.md). Never a walk up from this file's own path — the
-# hermetic suites run from a tree inside a live city, and a filesystem hunt
-# would find that city's binary instead of the one a suite built from the tree
-# under test.
-#
-# A city-resolved binary is not held to this checkout's services/gctk revision.
-# There is no other implementation to prefer, so refusing a binary the build
-# order has not yet replaced would turn the order's ~5m lag into a refusal of
-# every transition. doctor/check-cadence-live and the board's PACK row report
-# that lag instead.
-GCTK_BIN="${GCTK_BIN:-}"
-_gctk_named="$GCTK_BIN"
-_gctk_city=""
-if [ -z "$GCTK_BIN" ]; then
-    _gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
-    if [ -z "$_gctk_city" ]; then
-        _gctk_city="$(gc service list --json 2>/dev/null | jq -r '.city_path // empty' 2>/dev/null || true)"
-    fi
-    [ -n "$_gctk_city" ] && GCTK_BIN="$_gctk_city/.gc/services/gctk/bin/gctk"
-fi
-if [ "$GCTK_BIN" != "none" ] && [ -n "$GCTK_BIN" ] && [ -x "$GCTK_BIN" ]; then
-    exec "$GCTK_BIN" lifecycle "$@"
-fi
-
-# Nothing to exec. Each arm names what is missing, writes nothing, and exits 1,
-# the code every caller already reads as a refused transition.
-if [ "$_gctk_named" = "none" ]; then
-    echo "lifecycle: GCTK_BIN=none names no binary, and gctk lifecycle is the only implementation; nothing was written" >&2
-elif [ -n "$_gctk_named" ]; then
-    echo "lifecycle: GCTK_BIN=$_gctk_named is not an executable gctk binary; nothing was written" >&2
-elif [ -z "$_gctk_city" ]; then
-    echo "lifecycle: no city to find the gctk binary in — GC_CITY_PATH, GC_CITY and GC_CITY_ROOT are unset and \`gc service list --json\` named none. Set one of them, or GCTK_BIN; nothing was written" >&2
-else
-    echo "lifecycle: no gctk binary at $GCTK_BIN, so nothing was written. The gctk-build order (orders/gctk-build.toml) publishes it: a fresh city has one after the order's first build, $_gctk_city/.gc/services/gctk/build-status.json records why the last build failed, and assets/scripts/gc-gctk-build.sh builds it now" >&2
-fi
-exit 1
+# gctk-resolve.sh resolves the binary and execs `gctk lifecycle`, or refuses the
+# call when there is none to run. It never returns here.
+# shellcheck source=gctk-resolve.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/gctk-resolve.sh" || { echo "lifecycle: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+gctk_require lifecycle "$@"
