@@ -352,7 +352,8 @@ since_format = "RFC 3339 UTC"
 # The metadata-key registry: every key the pack writes, grouped and defined. A
 # key absent from the groups below is not pack state (docs/component-model.md
 # §2-§3), and doctor/check-state-space flags a bead carrying a key whose writer
-# was retired. Each key's definition names five things a reader needs and only
+# was retired (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it
+# there). Each key's definition names five things a reader needs and only
 # two of which the value shows: what WRITES it, what READS it, what its ABSENCE
 # means, how it is CLEARED, and its value TYPE. Prose is spent where a reader
 # cannot recover those from the group and the sections above; a key whose
@@ -857,7 +858,7 @@ keys = [
   "escalation_key", "escalation_raised_by",
   "escalation.recurrences", "escalation.recurrence_last",
   "stale_escalated_at", "stale_escalated_to",
-  "visit.recheck", "sweep.*", "triage.*", "stall_root",
+  "visit.recheck", "sweep.*", "triage.*",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -902,10 +903,6 @@ keys = [
 #   escalate.sh), triage.last_seen the last pass a subject was seen (set to the
 #   time when present, cleared to empty when gone), and triage.hold a
 #   held-by-design marker ([holds] marker_keys).
-# stall_root — the stalled root a visit sits on, read by the converse scripts
-#   (the item a hold, fold or sign-off acts on, else the subject) and by
-#   gate-visit-sweep.sh. The pack has no writer of it; it is set by whatever
-#   opens the visit. A bead id.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by

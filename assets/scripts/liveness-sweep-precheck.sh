@@ -29,8 +29,8 @@
 set -uo pipefail
 
 # The one definition of what subject a visit covers, shared with liveness-sweep.sh
-# and gc-helm.sh. Exposes $VISIT_IDENTITY_JQ. This precheck reads only the
-# identity (no stall_root), mirroring liveness-sweep.sh's convgroups arm.
+# and gc-helm.sh. Exposes $VISIT_IDENTITY_JQ, which this precheck reads the way
+# liveness-sweep.sh's convgroups arm does.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
