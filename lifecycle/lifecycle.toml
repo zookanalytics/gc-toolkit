@@ -352,7 +352,8 @@ since_format = "RFC 3339 UTC"
 # The metadata-key registry: every key the pack writes, grouped and defined. A
 # key absent from the groups below is not pack state (docs/component-model.md
 # §2-§3), and doctor/check-state-space flags a bead carrying a key whose writer
-# was retired. Each key's definition names five things a reader needs and only
+# was retired (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it
+# there). Each key's definition names five things a reader needs and only
 # two of which the value shows: what WRITES it, what READS it, what its ABSENCE
 # means, how it is CLEARED, and its value TYPE. Prose is spent where a reader
 # cannot recover those from the group and the sections above; a key whose
@@ -725,6 +726,14 @@ keys = [
   # The provenance cutover, mechanics in [posture] above. Written once per
   # anchor; signoff.sh reads it for the same test.
   "pr_provenance_since",
+  # How far the review threads have answered past pr_comment_watermark and
+  # pr_review_watermark: every inline comment (or counted review body) above the
+  # watermark through this id was confirmed answered by the last thread read.
+  # pr-facts.sh writes them when a read moves them and skips the read on a pass
+  # whose newest feedback sits at or below both, so feedback answered off the
+  # watermark is not re-read on every pass. They never stand in for the
+  # watermarks: a routing writes those, and the write-back reads only those.
+  "pr_comment_answered", "pr_review_answered",
 ]
 
 [metadata.pr_round_trip]
@@ -852,7 +861,7 @@ keys = [
   "escalation_key", "escalation_raised_by",
   "escalation.recurrences", "escalation.recurrence_last",
   "stale_escalated_at", "stale_escalated_to",
-  "visit.recheck", "sweep.*", "triage.*", "stall_root",
+  "visit.recheck", "sweep.*", "triage.*",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -897,10 +906,6 @@ keys = [
 #   escalate.sh), triage.last_seen the last pass a subject was seen (set to the
 #   time when present, cleared to empty when gone), and triage.hold a
 #   held-by-design marker ([holds] marker_keys).
-# stall_root — the stalled root a visit sits on, read by the converse scripts
-#   (the item a hold, fold or sign-off acts on, else the subject) and by
-#   gate-visit-sweep.sh. The pack has no writer of it; it is set by whatever
-#   opens the visit. A bead id.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
