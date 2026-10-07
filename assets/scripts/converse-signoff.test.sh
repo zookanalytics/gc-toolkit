@@ -1598,9 +1598,12 @@ case "${2:-}" in
     show)
         case "${3:-}" in
             v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
+                    --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
                     '[{id:"v-x",metadata:(({"task_kind":"visit"}
                         +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
-                        +(if $tp=="" then {} else {"escalation_key":$tp} end)))}]' ;;
+                        +(if $tp=="" then {} else {"escalation_key":$tp} end)
+                        +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)))}
+                      +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
             *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
                  else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
         esac ;;
@@ -1773,6 +1776,30 @@ run_so
 have "the takeaway targets the subject it is handed" 'takeaway item-q' "$SOLOG"
 lacks "…and no other bead" 'takeaway item-x' "$SOLOG" \
       "the takeaway reached item-x, a bead this sitting was not handed"
+
+# The sign-off writes to the subject. Step 1 passes it, and the visit records it
+# twice, as its tracks edge and as its gc.continuation_group stamp, so an absent
+# --subject is recovered from the visit the way converse-fold.sh recovers it.
+# With neither, the cut-short discharge would close the visit's demand and then
+# re-state the wait on an empty bead id, dropping the operator's question; it
+# refuses before any write instead.
+echo "── an absent --subject is recovered from the visit, and refused when the visit names none ──"
+SOARGS=(--visit v-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_TRACKS=item-t
+eq "$SO_RC" "0" "a sign-off with no --subject runs when the visit tracks its subject"
+have "…the takeaway lands on the tracked subject" 'helm[RIG] takeaway item-t cut-short — need input --by converse' "$SOLOG"
+have "…and the moved wait is re-stated on it" 'helm[RIG] demand item-t still need X --by converse' "$SOLOG"
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_GROUP=item-g
+have "with no tracks edge, the gc.continuation_group stamp names the subject" \
+     'helm[RIG] demand item-g still need X --by converse' "$SOLOG"
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1
+eq "$SO_RC" "2" "a visit that names no subject is refused (exit 2)"
+case "$SO_OUT" in *"no subject"*) ok "…and the refusal says why" ;;
+                  *) bad "…and the refusal says why" "got: $SO_OUT" ;; esac
+lacks "…before the visit's demand is closed, so the operator's question survives" 'gate resolve d-v' "$SOGC" \
+      "the sign-off closed the visit demand with no subject to re-state it on"
+lacks "…and before any takeaway or demand is written" 'helm[' "$SOLOG" \
+      "a write reached gc-helm.sh with no subject"
 
 echo "── the WAIT disposition passes through as repeated flags ──"
 SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z --waiting-on tk-a --waiting-on tk-b)

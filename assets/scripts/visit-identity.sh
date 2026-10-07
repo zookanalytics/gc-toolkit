@@ -3,8 +3,10 @@
 #
 # Sourced (never executed) by every script that must agree on visit coverage:
 # gc-helm.sh (open, dismiss, engage), converse-fold.sh and converse-claim.sh
-# (sitting membership), and the sweeps (gate-visit-sweep.sh, liveness-sweep.sh,
-# liveness-sweep-precheck.sh). One definition, no copies.
+# (sitting membership), converse-hold.sh and converse-signoff.sh (the subject a
+# hold or sign-off writes to when none is passed), and the sweeps
+# (gate-visit-sweep.sh, liveness-sweep.sh, liveness-sweep-precheck.sh). One
+# definition, no copies.
 #
 # Coverage is a visit's DIRECT graph-native identity to its subject: the outgoing
 # `tracks` edge, with the `gc.continuation_group` stamp as the recovery fallback

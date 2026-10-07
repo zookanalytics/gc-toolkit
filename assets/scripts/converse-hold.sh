@@ -38,9 +38,12 @@
 #                like the conversation demand — if the merge hold does not
 #                land, exit 1.
 #   VISIT        the visit bead reaching its hold (environment)
-#   SUBJECT      its continuation group, which the hold writes to (environment)
+#   SUBJECT      its continuation group, which the hold writes to (environment);
+#                when empty, the subject the visit records (its tracks edge,
+#                else its gc.continuation_group stamp)
 # Exit: 0 the hold is real and stamped — post the framing; 1 a gate failed —
-# do NOT post the framing, raise the failure in the thread; 2 usage.
+# do NOT post the framing, raise the failure in the thread; 2 usage, or no
+# subject resolves — nothing was written, do NOT post the framing.
 set -u
 
 # >>> control-char-scrub
@@ -50,6 +53,13 @@ set -u
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# The one definition of what subject a visit covers (its tracks edge, the
+# gc.continuation_group stamp as fallback), shared with converse-fold.sh and the
+# sweeps. Exposes $VISIT_IDENTITY_JQ.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || { echo "converse-hold: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
 
 # One positional (the need) plus the optional --hold-merge flag, in any order.
 # The need is a sentence, never a flag, so the first non-flag argument is it.
@@ -72,6 +82,15 @@ command -v jq >/dev/null 2>&1 || { echo "converse-hold: jq is required" >&2; exi
 command -v gc >/dev/null 2>&1 || { echo "converse-hold: gc is required" >&2; exit 2; }
 
 V=$(gc bd show "$VISIT" --json | scrub)
+# Every write below lands on the subject or the visit. Step 1 resolves SUBJECT,
+# and the visit records it twice, as its tracks edge and as its
+# gc.continuation_group stamp, so an empty one is recovered here the way
+# converse-fold.sh recovers it. With neither, the takeaway and the demand would
+# address an empty bead id, so the hold refuses before it writes anything.
+if [ -z "$SUBJECT" ]; then
+  SUBJECT=$(printf '%s' "$V" | jq -r "$VISIT_IDENTITY_JQ"'(.[0] // {}) | visit_subject' 2>/dev/null || true)
+fi
+[ -n "$SUBJECT" ] || { echo "converse-hold: no subject — \$SUBJECT is empty and $VISIT names none (no tracks edge, no gc.continuation_group stamp); nothing was filed, so do NOT post the framing" >&2; exit 2; }
 # The demand's topic scopes it to THIS sitting. Under a standing scope the
 # subject is a shared bucket that two concurrent sittings both write to; without
 # a topic the second sitting's demand on it (the conversation wait on a pre-PR

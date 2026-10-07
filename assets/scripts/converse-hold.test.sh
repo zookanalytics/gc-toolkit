@@ -55,9 +55,12 @@ case "${2:-}" in
     show)
         hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
         jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
+            --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
             '[{id:"v-x", metadata:(({"task_kind":"visit"}
                 + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
-                + (if $tp == "" then {} else {"escalation_key":$tp} end)))}]' ;;
+                + (if $tp == "" then {} else {"escalation_key":$tp} end)
+                + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
+              + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]' ;;
     update)
         [ -n "${HLOG:-}" ] && printf 'gc %s\n' "$*" >>"$HLOG"
         # The gc.hold_demand write on the visit is the stamp gate under test; the
@@ -200,6 +203,22 @@ legacy() {
     [ "$?" = 0 ] && echo held || echo refused
 }
 is "the pre-fix update-or-echo framed on a success-no-persist stamp" "$(legacy 0 0)" "held"
+
+# Step 1 passes SUBJECT, and the visit records it twice, as its tracks edge and
+# as its gc.continuation_group stamp, so an empty SUBJECT is recovered from the
+# visit the way converse-fold.sh recovers it. With neither, the takeaway and the
+# demand would address an empty bead id, so the hold refuses before any write.
+echo "── an empty SUBJECT is recovered from the visit, and refused when the visit names none ──"
+run SUBJECT= STUB_TRACKS=item-t
+is "a hold with no SUBJECT proceeds when the visit tracks its subject" "$(verdict)" "held"
+has "…and the demand gates the tracked subject" "helm[RIG] demand item-t need X --by converse" "$(calls)"
+run SUBJECT= STUB_GROUP=item-g
+has "with no tracks edge, the gc.continuation_group stamp names the subject" \
+    "helm[RIG] demand item-g need X --by converse" "$(calls)"
+run SUBJECT=
+is "a visit that names no subject is refused (exit 2)" "$RC" "2"
+has "…and the refusal says why" "no subject" "$OUT"
+hasnt "…before any takeaway or demand is written" "helm[" "$(calls)"
 
 echo "── the lifecycle transition is conditioned on the subject being unanchored ──"
 run STUB_STATE=unanchored

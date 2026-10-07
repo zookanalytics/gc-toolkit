@@ -30,7 +30,10 @@
 #     [--no-wait | --waiting-on <bead> ...] \
 #     [--ruling "<one line>"] [--still-owed "<≤140 chars>"] [--route <rig>/<agent>|human]
 #   --outcome is required. --ruled defaults to `no`. --ruled yes requires
-#   --ruling and --route; --ruled no requires --still-owed.
+#   --ruling and --route; --ruled no requires --still-owed. --subject defaults
+#   to the subject the visit records (its tracks edge, else its
+#   gc.continuation_group stamp); with neither, the sign-off refuses and writes
+#   nothing.
 set -u
 
 # >>> control-char-scrub
@@ -52,6 +55,13 @@ WAIT=()
 
 die() { echo "converse-signoff: $1" >&2; exit 2; }
 
+# The one definition of what subject a visit covers (its tracks edge, the
+# gc.continuation_group stamp as fallback), shared with converse-fold.sh and the
+# sweeps. Exposes $VISIT_IDENTITY_JQ.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=visit-identity.sh
+. "$HERE/visit-identity.sh" || die "cannot source visit-identity.sh from $HERE"
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --visit)      shift; [ $# -gt 0 ] || die "--visit needs a value"; VISIT="$1" ;;
@@ -63,7 +73,7 @@ while [ $# -gt 0 ]; do
     --route)      shift; [ $# -gt 0 ] || die "--route needs a value"; ROUTE="$1" ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
-    -h|--help)    sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            die "unknown argument '$1'" ;;
   esac
   shift
@@ -82,6 +92,16 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
 V=$(gc bd show "$VISIT" --json | scrub)
+# Every write below lands on the subject or the visit. The caller passes the
+# subject step 1 resolved, and the visit records it twice, as its tracks edge
+# and as its gc.continuation_group stamp, so an absent --subject is recovered
+# here the way converse-fold.sh recovers it. With neither, a cut-short sign-off
+# would close the visit's demand and then fail to re-state it on an empty bead
+# id, dropping the operator's open question, so it refuses before any write.
+if [ -z "$SUBJECT" ]; then
+  SUBJECT=$(printf '%s' "$V" | jq -r "$VISIT_IDENTITY_JQ"'(.[0] // {}) | visit_subject' 2>/dev/null || true)
+fi
+[ -n "$SUBJECT" ] || die "no subject: --subject was not given and visit $VISIT names none (no tracks edge, no gc.continuation_group stamp); nothing was written — re-run with --subject <id>"
 # The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
 # on a shared standing-scope bucket (same subject, distinct escalation_key)
 # keeps its own demand: this sign-off neither resolves it nor overwrites its
