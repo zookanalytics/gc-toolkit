@@ -1441,6 +1441,16 @@ jq -c 'map(if .id == "H10" then .metadata.merge_result = "pull_request" elif .id
 out=$(pace --deadline "$(( $(date +%s) + 600 ))")
 has "$out" "(2 needing action first)" "a new merge_result and a new check_set each put their anchor first"
 
+echo "# needing action first: a merge_hold lifted since the last visit puts the anchor first"
+# The hold stands down the anchor's review dispatch, so the visit after an
+# operator lifts it is the one that dispatches what waited on it.
+store "[$(anchor N10 pre_open_gate none "" polecat/n10 "$GE_SETTLED"',"merge_hold":"true"'), $(anchor N20 pre_open_gate none "" polecat/n20 "$GE_SETTLED")]"
+rm -f "$CUR" "$CUR".*
+pace --deadline "$(( $(date +%s) + 600 ))" >/dev/null
+jq -c 'map(if .id == "N10" then del(.metadata.merge_hold) else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+out=$(pace --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "(1 needing action first)" "the lifted hold puts its anchor first"
+
 echo "# a child list that does not read keeps the stamp and verdict rules and records no marks"
 store "[$(anchor J10 pre_open_gate none "" polecat/j10 "$GE_SETTLED"), $(anchor J20 pre_open_gate "" "" polecat/j20 "$GE_SETTLED")]"
 rm -f "$CUR" "$CUR".*

@@ -3728,7 +3728,10 @@ eq "$(pf_views)" "301,302" "with no basis yet every posture is read per PR"
 has "$out" "0 unchanged since the basis they were derived from, 2 read per PR" "…and the summary says so"
 eq "$(meta_pinned PB1 pr_posture),$(meta_pinned PB2 pr_posture)" "none@sha-301,none@sha-302" "…and records each posture"
 out=$(run_basis)
-eq "$(pf_views)" "" "the next pass reads no PR whose basis has not moved"
+eq "$(pf_views)" "301,302" "the next pass derives each posture again, to confirm the basis the first derivation recorded"
+has "$out" "0 unchanged since the basis they were derived from, 2 read per PR" "…so it keeps none yet"
+out=$(run_basis)
+eq "$(pf_views)" "" "the pass after reads no PR whose confirmed basis has not moved"
 hasnt "$(cat "$STUB_GH_LOG")" "/pulls/301/" "…and none of its feedback lists"
 has "$out" "2 unchanged since the basis they were derived from, 0 read per PR" "…and counts them kept"
 eq "$(meta_pinned PB1 pr_posture)" "none@sha-301" "…while the posture stands"
@@ -3741,23 +3744,31 @@ eq "$(meta PB2 pr_merge_state)" "DIRTY@sha-302" "…and is recorded from the bat
 eq "$(meta_pinned PB2 pr_posture)" "none@sha-302" "…beside the posture it kept"
 
 echo "# posture basis: a new review, a new comment, a push or a new review decision reads the PR again"
+# A PR read for a change is read once more on the pass after, which confirms its
+# new basis, so each step settles before the next one moves the other PR.
 open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]}')" "$(open_node 302 DIRTY)"
 out=$(run_basis)
 eq "$(pf_views)" "301" "a review the count shows reads that PR whole; the untouched one is kept"
+out=$(run_basis)
+eq "$(pf_views)" "301" "…and the pass after reads it once more, to confirm its new basis"
 open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]}')" "$(open_node 302 DIRTY '' '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
 out=$(run_basis)
 eq "$(pf_views)" "302" "a Conversation comment reads its PR again"
+run_basis >/dev/null
 open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]} | .updatedAt = "2026-10-02T00:00:00Z"')" "$(open_node 302 DIRTY '' '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
 out=$(run_basis)
 eq "$(pf_views)" "301" "an updatedAt that moved reads its PR again"
+run_basis >/dev/null
 open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]} | .updatedAt = "2026-10-02T00:00:00Z"')" "$(open_node 302 DIRTY APPROVED '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
 out=$(run_basis)
 eq "$(pf_views)" "302" "a review decision that moved reads its PR again"
+run_basis >/dev/null
 printf '%s' "$(prview 301 OPEN CLEAN MERGEABLE | jq -c '.headRefOid = "sha-301b"')" > "$GH_DIR/pr_view_301.json"
 open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]} | .updatedAt = "2026-10-02T00:00:00Z" | .headRefOid = "sha-301b"')" "$(open_node 302 DIRTY APPROVED '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
 out=$(run_basis)
 eq "$(pf_views)" "301" "a push reads its PR again"
 eq "$(meta_pinned PB1 pr_posture)" "none@sha-301b" "…and pins the posture to the new head"
+run_basis >/dev/null
 out=$(run_basis)
 eq "$(pf_views)" "" "with nothing moved, both are kept again"
 
@@ -3765,10 +3776,32 @@ echo "# posture basis: a watermark or a posture another arm moved reads the PR a
 bmut PB2 '.metadata.pr_issue_comment_watermark = "7001"'
 out=$(run_basis)
 eq "$(pf_views)" "302" "a watermark the routing advanced reads the PR again"
+run_basis >/dev/null
 bmut PB1 '.metadata.pr_posture = "commented@sha-301b@2026-10-01T00:00:00Z"'
 out=$(run_basis)
 eq "$(pf_views)" "301" "a posture the bead no longer carries is derived again, never restored from the basis"
 eq "$(meta_pinned PB1 pr_posture)" "none@sha-301b" "…and the derivation records what the PR says"
+out=$(run_basis)
+eq "$(pf_views)" "301" "…as a candidate the next pass confirms, since another arm read the PR otherwise"
+out=$(run_basis)
+eq "$(pf_views)" "" "…after which it is kept again"
+
+echo "# posture basis: a derivation is kept only once the next pass derives it again"
+# The batched read shows a review on PB6 that the review list does not return
+# yet: GitHub answered the two requests from different moments. The first
+# derivation reads none and records it only as a candidate, which keeps
+# nothing. The next pass derives again, now reads the review, and records it.
+store "[$(anchor PB6 306 "$UTCUT")]"
+printf '%s' "$(prview 306 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_306.json"
+open_prs "$(open_node 306 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9306}]}')"
+rm -f "$BASIS"
+out=$(run_basis)
+eq "$(meta_pinned PB6 pr_posture)" "none@sha-306" "a review list behind the batched read derives none"
+printf '%s\n' '[{"id":9306,"user":{"login":"alice"},"state":"COMMENTED","body":"rename this","submitted_at":"2026-10-07T12:00:00Z"}]' > "$GH_DIR/reviews_306.json"
+out=$(run_basis)
+eq "$(pf_views)" "306" "the next pass derives the posture again rather than keep the first derivation's"
+eq "$(meta_pinned PB6 pr_posture)" "commented@sha-306" "…and records the review it now reads"
+rm -f "$GH_DIR/reviews_306.json"
 
 echo "# posture basis: a commented posture, or one an unengaged-thread candidate decided, keeps none"
 # PB3 holds an unanswered Conversation comment, so its posture is commented. PB4
@@ -3796,7 +3829,9 @@ rm -f "$BASIS"
 out=$(run_basis)
 eq "$(meta_pinned PB5 pr_posture)" "changes_requested@sha-305" "the review decision decides the posture"
 out=$(run_basis)
-eq "$(pf_views)" "" "…so nothing else can move it, and the next pass reads no PR"
+eq "$(pf_views)" "305" "…the next pass derives it again to confirm the basis"
+out=$(run_basis)
+eq "$(pf_views)" "" "…and nothing else can move it, so the pass after reads no PR"
 
 echo "# posture basis: a batched read that fails reads every PR per PR"
 out=$(STUB_OPEN_PRS_FAIL=1 run_basis)
@@ -3872,6 +3907,27 @@ eq "$(pf_views)" "361,363" "…the lower id ahead of the rotation, which still g
 has "$out" "1 needing action wait for the next pass" "…and the merged one the deadline left is named for the next pass"
 out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$FWCUR" 2>&1)
 has "$out" "recorded FW2 — PR#362 is MERGED" "the next pass records the merge it was owed"
+
+echo "# full walk: an approved conflicting PR the conflict arm stands down on rotates, and goes first once released"
+# HD2 is under a merge_hold, HD3 a rebase_hold, and HD4 is armed to re-dispatch:
+# the conflict arm files no merge-in for any of them, so none takes a first visit
+# every pass. Releasing HD2's hold makes it owe the merge-in again.
+HD_APPROVED_DIRTY() { printf ',"pr_posture":"approved@sha-%s@2026-10-01T00:00:00Z","pr_merge_state":"DIRTY@sha-%s"%s' "$1" "$1" "$2"; }
+store "[$(anchor HD1 381),
+        $(anchor HD2 382 "$(HD_APPROVED_DIRTY 382 ',"merge_hold":"true"')"),
+        $(anchor HD3 383 "$(HD_APPROVED_DIRTY 383 ',"rebase_hold":"true"')"),
+        $(anchor HD4 384 "$(HD_APPROVED_DIRTY 384 ',"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"')")]"
+printf '%s' "$(prview 381 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_381.json"
+for n in 382 383 384; do printf '%s' "$(prview "$n" OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_$n.json"; done
+open_prs "$(open_node 381)" "$(open_node 382 DIRTY APPROVED)" "$(open_node 383 DIRTY APPROVED)" "$(open_node 384 DIRTY APPROVED)"
+HDCUR="$TMP/pr-facts-hd.cursor"; rm -f "$HDCUR" "$HDCUR".*
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$HDCUR" 2>&1)
+has "$out" "(0 needing action first)" "a held, rebase-held or armed approved conflicting PR is not put first"
+has "$out" "PR#382 conflicts but a hold is set" "…and the conflict arm stands down on it when the rotation reaches it"
+bmut HD2 'del(.metadata.merge_hold)'
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$HDCUR" 2>&1)
+has "$out" "(1 needing action first)" "with its hold released it goes first"
+has "$out" "PR#382 conflicts with 'main'; filed merge-mode rework" "…and its merge-in is filed"
 rm -f "$GH_DIR/open_prs.json"
 
 fi # part pacing

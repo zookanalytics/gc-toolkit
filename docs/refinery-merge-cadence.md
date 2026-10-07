@@ -79,7 +79,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    release it with nothing on the PR moving, and neither does a posture an
    unengaged-thread candidate decided, because that answer turns on bead state.
    `updatedAt` cannot stand in for the counts: GitHub can leave it at the first
-   of several reviews submitted seconds apart.
+   of several reviews submitted seconds apart. The batched read and the per-PR
+   reads are separate requests, and GitHub can answer one of them from a moment
+   ahead of the other, so a derivation's lists can be older than the facts the
+   batched read gave. A derivation therefore records its basis only as a
+   candidate, which keeps no posture. The next pass derives the posture again,
+   and a derivation that reads the same facts and derives the same posture
+   confirms the basis. A PR that moved is therefore read whole on two passes.
 2. **merge.sh** — `pull_request → merged`. It runs the moment its one
    same-pass interlock, the posture record above, is done. Landing is the main
    way an anchor leaves the gating set, and every arm that walks that set costs
@@ -343,9 +349,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    no machine verdict (never visited; a `check_set` of `none` or `off` never
    gets one), and one whose mark moved since this arm last visited it. The mark
    joins `merge_result`, the draft markers and `check_set`, which decide the
-   lanes a stage dispatches, with the ids of the anchor's live children, so a
-   review, validation pass, finding or fix unit opening or closing puts the
-   anchor first; a review this arm opens joins the mark its own visit records.
+   lanes a stage dispatches, `merge_hold`, which holds the anchor's review
+   dispatch while it is set, and the ids of the anchor's live children. A hold
+   lifting, or a review, validation pass, finding or fix unit opening or
+   closing, puts the anchor first; a review this arm opens joins the mark its
+   own visit records.
    Then it visits the rest in id order starting after the last one a pass
    finished (`gate-ensure.cursor` in the pass state dir), wrapping, and starts no
    new anchor once its share is spent. The first group rotates on
@@ -423,10 +431,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    approved PR the posture arm recorded `DIRTY` at its head with no rework child
    in flight (it owes a merge-in), and a PR whose head, base, draft flag, review
    decision, or review or comment count changed since this walk last visited
-   it. The marks live in `pr-facts.cursor.seen`, and a walk with none records
-   them and puts nothing first for a change. The write-back sweep reads GitHub
-   only for the anchors carrying a disposition, at least four calls each, so it
-   runs under the same deadline in a rotation of its own
+   it. An approved conflicting PR under a `merge_hold`, a `rebase_hold` or an
+   armed re-dispatch owes no merge-in, because the conflict arm stands down on
+   each, so it rotates with the rest until the hold lifts. The marks live in
+   `pr-facts.cursor.seen`, and a walk with none records them and puts nothing
+   first for a change. The write-back sweep reads GitHub only for the anchors
+   carrying a disposition, at least four calls each, so it runs under the same
+   deadline in a rotation of its own
    (`pr-facts.cursor.writeback`), with one anchor visited even on a pass whose
    walk spent the deadline. It visits first an anchor whose disposition, a
    watermark, or its live children changed since the sweep last visited it: a
@@ -612,7 +623,7 @@ how a pass ended:
 | `-- (<n>) <arm> (started <ts>)` | an arm started; its output follows |
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
 | `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
-| `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers every PR on a pass whose batched read failed (a `WARN` line names it), on the first pass after the script changes, and on one that found no `pr-posture.seen` |
+| `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |

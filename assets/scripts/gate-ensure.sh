@@ -544,17 +544,18 @@ total=$(printf '%s' "$ROWS" | awk 'NF { n++ } END { print n + 0 }')
 # visited it; a check_set of none or off never gets one), and one whose mark
 # moved since this arm last visited it. The mark joins merge_result, the draft
 # markers pr-open records and check_set, which decide the lanes a stage
-# dispatches, with the ids of the anchor's live children: a review, validation
-# pass, finding or fix unit opening or closing is what turns a waiting lane into
-# one owed a dispatch or a validator, and a review closing is what lets the
-# anchor settle. A review this arm opens is added to the mark its visit records,
-# so its own dispatch does not bring the anchor back first. An anchor recorded
-# `progressing` whose children have not moved is waiting on them, so it rotates
-# with the rest. First anchors rotate on <cursor>.first, the rest on <cursor>,
-# and <cursor>.seen holds the marks. A walk with no marks yet records them all
-# and puts first only the anchors that owe a stamp or have no verdict. A child
-# list that does not read leaves those two rules and records no marks.
-# Unpaced, the walk keeps the enumerated order.
+# dispatches, merge_hold, which holds the anchor's review dispatch while it is
+# set, and the ids of the anchor's live children. A hold lifting, or a review,
+# validation pass, finding or fix unit opening or closing, is what turns a
+# waiting lane into one owed a dispatch or a validator, and a review closing is
+# what lets the anchor settle. A review this arm opens is added to the mark its
+# visit records, so its own dispatch does not bring the anchor back first. An
+# anchor recorded `progressing` whose children have not moved is waiting on
+# them, so it rotates with the rest. First anchors rotate on <cursor>.first, the
+# rest on <cursor>, and <cursor>.seen holds the marks. A walk with no marks yet
+# records them all and puts first only the anchors that owe a stamp or have no
+# verdict. A child list that does not read leaves those two rules and records
+# no marks. Unpaced, the walk keeps the enumerated order.
 stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
 pace_start "$CURSOR" "$DEADLINE"
 pace_seen_start "${CURSOR:+$CURSOR.seen}"
@@ -565,7 +566,7 @@ declare -A GE_MARK=() GE_KIDS=()
 ge_mark_child() {
   local k="${GE_KIDS[$1]-}"
   [ -n "${GE_MARK[$1]-}" ] || return 0
-  k=$(printf '%s\n' ${k//,/ } "$2" | awk 'NF' | LC_ALL=C sort -u | paste -sd, -)
+  k=$(printf '%s\n' "${k//,/$'\n'}" "$2" | awk 'NF' | LC_ALL=C sort -u | paste -sd, -)
   GE_KIDS["$1"]="$k"
   GE_MARK["$1"]="${GE_MARK[$1]%|*}|$k"
   pace_seen_mark "${GE_MARK[$1]}"
@@ -605,7 +606,7 @@ $(printf '%s' "$ROWS" | jq -r '
     . as $row | (.metadata // {}) as $m
     | [ (.id // ""), ($m["gc.pr_close_disposition_kind"] // ""), ($m["pr.machine"] // ""),
         ($m.check_set // ""),
-        ([ $m.merge_result, $m.opened_as_draft, $m.draft_readied, $m.check_set ]
+        ([ $m.merge_result, $m.opened_as_draft, $m.draft_readied, $m.check_set, $m.merge_hold ]
          | map((. // "") | tostring) | join("|")) ]
     | map(tostring | gsub("[\u001f\n]"; " ")) + [ $row | tojson ] | join("\u001f")' 2>/dev/null)
 SPLIT_EOF

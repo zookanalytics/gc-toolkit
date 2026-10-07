@@ -37,9 +37,10 @@
 # that pass rather than let it validate against a fact from an earlier tick.
 # --posture-only with --seen <file> reads every open PR in one batched GraphQL
 # call, merge state included, and keeps in <file> the facts each anchor's
-# posture was last derived from. An anchor whose facts all read the same, and
-# whose bead still carries that posture at that head, keeps it without the
-# per-PR reads; any other anchor is read as before.
+# posture was derived from, once two derivations a pass apart agree on them. An
+# anchor whose facts all read the same, and whose bead still carries that
+# posture at that head, keeps it without the per-PR reads; any other anchor is
+# read as before.
 # Unanswered review feedback routes to something — a fix-pool rework child
 # carrying the review bodies and inline comments verbatim, or a visit when a
 # human already holds the anchor — with the watermarks advancing only once that
@@ -912,6 +913,12 @@ pace_start "$CURSOR" "$DEADLINE"
 # basis, because a routing or a visit can release it with nothing on the PR
 # moving. A visit that keeps or earns no basis records "-", which matches
 # nothing, so the next pass reads that anchor whole.
+# The batched read and the per-PR reads are separate requests, and GitHub can
+# answer one of them from a moment ahead of the other, so one derivation can
+# read lists older than the basis it would be kept under. A derivation therefore
+# records its basis as a candidate, "?<posture>#<basis>", which keeps no
+# posture. The next pass derives the posture again, and only a derivation that
+# reads the same basis and derives the same posture as the candidate confirms it.
 PF_CODE_FP="$(cksum < "$0" 2>/dev/null | cut -d' ' -f1)-$(printf '%s' "$CITY_OWN_DEF" | cksum | cut -d' ' -f1)"
 if [ "$POSTURE_ONLY" = 1 ] && [ -n "$SEEN" ]; then
   open_prs_read "$POSTURE_PR_FIELDS" 25 \
@@ -931,7 +938,10 @@ fi
 # left the open list (a merge or a close to record), an approved PR the posture
 # arm recorded as DIRTY at its head with no rework child in flight (it owes a
 # merge-in), and any PR that changed since this walk last visited it (a review,
-# a comment, a push, a new base, a draft flip). First anchors rotate on
+# a comment, a push, a new base, a draft flip). An approved conflicting PR under
+# a merge_hold, a rebase_hold or an armed re-dispatch owes no merge-in, because
+# the conflict arm stands down on each, so it rotates with the rest until the
+# hold lifts. First anchors rotate on
 # <cursor>.first, the rest on <cursor>, and <cursor>.seen holds each anchor's
 # activity mark as the walk last saw it. A walk with no marks yet records them
 # all and puts nothing first for a change, so its first pass is the plain
@@ -952,7 +962,7 @@ if [ -n "$CURSOR" ]; then
       KIDS_REWORK["*"]=unreadable
     fi
   fi
-  while IFS=$'\x1f' read -r cid cnum cpost cms arow; do
+  while IFS=$'\x1f' read -r cid cnum cpost cms chold crhold carmed arow; do
     [ -n "${arow:-}" ] || continue
     grp=rest
     cact="${OPEN_ACT[$cnum]-}"
@@ -967,6 +977,7 @@ if [ -n "$CURSOR" ]; then
         grp=first
       elif [ "${cpost%%@*}" = approved ] && [ "${cms%%@*}" = DIRTY ] && [ "${cms#*@}" = "$cphead" ] \
            && { [ -z "$cact" ] || [ "${cact%%|*}" = "$cphead" ]; } \
+           && ! is_held "$chold" && ! is_held "$crhold" && [ -z "$carmed" ] \
            && [ -z "${KIDS_REWORK["*"]-}" ] && [ "${KIDS_REWORK[$cid]-0}" != 1 ]; then
         grp=first
       elif [ -n "$cact" ] && pace_seen_changed "$cid" "$cact"; then
@@ -982,7 +993,8 @@ if [ -n "$CURSOR" ]; then
   done <<SPLIT_EOF
 $(printf '%s' "$ANCHORS" | jq -r '
     .[] | . as $row | (.metadata // {}) as $m
-    | [ (.id // ""), ($m.pr_number // ""), ($m.pr_posture // ""), ($m.pr_merge_state // "") ]
+    | [ (.id // ""), ($m.pr_number // ""), ($m.pr_posture // ""), ($m.pr_merge_state // ""),
+        ($m.merge_hold // ""), ($m.rebase_hold // ""), ($m["gc.dispatch_when_ready"] // "") ]
     | map(tostring | gsub("[\u001f\n]"; " ")) + [ $row | tojson ] | join("\u001f")' 2>/dev/null)
 SPLIT_EOF
   first_rows=$(printf '%s' "$first_rows" | pace_order "$PACE_FIRST_CURSOR")
@@ -1021,11 +1033,12 @@ while IFS= read -r tagged; do
   armed=$(printf '%s' "$row" | jq -r '.metadata["gc.dispatch_when_ready"] // ""')
 
   # --- the posture basis, as this pass's batched read shows it -----------------
-  # SHORT=1 when the basis --seen kept for this anchor reads the same now and the
-  # bead still carries the posture it produced at the read's head: the batched
-  # read then stands in for the pinned read, and the posture below is kept
-  # rather than derived again.
-  SHORT=0; SHORT_P=""; PFP=""; UH_CANDIDATE=0
+  # SHORT=1 when the confirmed basis --seen kept for this anchor reads the same
+  # now and the bead still carries the posture it produced at the read's head:
+  # the batched read then stands in for the pinned read, and the posture below is
+  # kept rather than derived again. A candidate's "?<posture>" names no posture
+  # the case below accepts, so a candidate keeps nothing.
+  SHORT=0; SHORT_P=""; PFP=""; UH_CANDIDATE=0; b_seen=""
   if [ "$POSTURE_ONLY" = 1 ] && [ -n "${OPEN_PR[$num]-}" ]; then
     IFS=$'\x1f' read -r b_since b_rwm b_cwm b_iwm b_have <<< "$(printf '%s' "$row" | jq -r '
       (.metadata // {}) as $m
@@ -1463,13 +1476,19 @@ CHILDREN_EOF
   # The basis a current posture earns, kept by --seen: only one the batched read
   # describes (the head this posture is pinned to), and only a value the PR's own
   # facts decide. A `commented` posture, or one an unengaged-thread candidate had
-  # a say in, can change with nothing on the PR moving, so it keeps none.
+  # a say in, can change with nothing on the PR moving, so it keeps none. A
+  # derivation confirms the candidate the last pass recorded when it reads the
+  # same basis and derives the same posture; otherwise it records its own
+  # candidate. A posture kept on a confirmed basis keeps that basis.
   if [ "$POSTURE_ONLY" = 1 ] && [ "$pinned" = 1 ] && [ -n "$PFP" ] \
      && [ "$head_oid" = "${OPEN_ACT[$num]%%|*}" ]; then
     case "$posture" in
-      changes_requested) pace_seen_mark "$posture#$PFP" ;;
-      approved|review_required|none)
-        [ "$SHORT" != 1 ] && [ "$UH_CANDIDATE" = 1 ] || pace_seen_mark "$posture#$PFP" ;;
+      approved|review_required|none|changes_requested)
+        if [ "$SHORT" = 1 ] || { [ "$UH_CANDIDATE" != 1 ] && [ "$b_seen" = "?$posture#$PFP" ]; }; then
+          pace_seen_mark "$posture#$PFP"
+        elif [ "$UH_CANDIDATE" != 1 ]; then
+          pace_seen_mark "?$posture#$PFP"
+        fi ;;
     esac
   fi
 
