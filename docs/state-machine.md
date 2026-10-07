@@ -252,19 +252,31 @@ Feedback from a person is review the branch has never been answered against.
 validation pass on the batch (see "Review cycle",
 `specs/tk-ztapg/review-cycle-architecture.md`): `gate-ensure.sh`'s quiescence
 holds a fresh whole-diff review off the anchor while the validator rules the
-batch. What makes a batch operator feedback is the author — the posture
-derivation counts only ids written by a login other than the city's own, so
-`signoff.sh`'s verdicts (posted under that login), re-reviews, and rework
-hand-backs (which post nothing) are not it.
+batch. What makes an item feedback is its provenance, not its author: every
+review, inline comment, and conversation comment that is not the city's own
+post is feedback, whoever wrote it. The city's own post is one that
+`assets/scripts/pr-post.sh` marked, which is every post the pack makes —
+`signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
+replies, the visit reminder, a demo delivery. A model review the operator runs
+under the city's GitHub account is unmarked, so it is feedback like a person's.
+Rework hand-backs post nothing.
+
+A PR's posts from before the city marked anything carry no mark. Each anchor
+records the instant `pr-facts.sh` first read its open PR
+(`pr_provenance_since`), and an unmarked post under the city's login from
+before that instant is still the city's own, so the notices already on a PR do
+not turn into feedback all at once. Without the instant, every post under that
+login is the city's own. `tools/lint-learned.d/pr-post-bypass.sh` fails any
+post in the pack that does not go through the helper.
 
 `pr-facts.sh` records each batch once: it opens the validation pass, routes the
 batch, and advances the watermark, which stops the batch being re-read once its
 comments are answered and the posture stops being `commented`.
 
-A standing `CHANGES_REQUESTED` from the city's own reviewer raises no batch:
-every id in a batch is authored by a login other than the city's, so a codex
-veto is not operator feedback. A human's is, on the same terms as any other
-feedback — it routes to a rework child or a visit and opens a validation pass.
+A standing `CHANGES_REQUESTED` that is the city's own post raises no batch, so
+a codex veto is not operator feedback. Any other is, on the same terms as any
+other feedback — it routes to a rework child or a visit and opens a validation
+pass.
 
 The validator rules each finding in that batch, and every ruling ends the
 finding closed or converts it to a visit: a `must-fix` holds the merge until its
@@ -350,6 +362,7 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
 | `pr_review_watermark` | `<id>` | highest routed `pulls/N/reviews` id |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
+| `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
 
 The postures, in the precedence the derivation applies:
 
@@ -397,9 +410,10 @@ one does. The veto holds the merge; it answers nothing, and the objections
 under it are exactly the feedback that most needs routing. A human's
 `CHANGES_REQUESTED` body therefore joins the review id space beside a
 COMMENTED one, and the inline comments underneath join the comment space. The
-city's own veto raises no batch, because both spaces count only ids authored by
-some other login — `signoff.sh`'s rework loop owns those, and reaches them
-through the review bead rather than through this arm. A review that is later
+city's own veto raises no batch, because every space counts only ids that are
+not the city's own post (see [Operator feedback](#operator-feedback)) —
+`signoff.sh`'s rework loop owns those, and reaches them through the review bead
+rather than through this arm. A review that is later
 dismissed leaves both `COMMENTED` and `CHANGES_REQUESTED`, so the same read
 that would have counted it drops it. The comment space asks a narrower question
 of each inline comment's parent review: whether that review was dismissed. A

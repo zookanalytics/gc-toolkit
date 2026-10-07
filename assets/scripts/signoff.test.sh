@@ -987,6 +987,22 @@ hasnt "$(cat "$STUB_GH_LOG")" "reviews/222/dismissals" "a human's block is NEVER
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/333/dismissals" "a block at the reviewed commit stands"
 eq "$(meta tk-anc signoff_dismissed)" "111@$OID_HEAD" "signoff_dismissed pairs the retraction"
 
+echo "# supersede: past the anchor's provenance cutover, only the city's own review is ours to dismiss"
+# The same login runs model reviews (an operator's /code-review) and posts the
+# city's verdicts. Past pr_provenance_since an unmarked review under it is
+# feedback; a marked one, or an unmarked one from before the cutover, is ours.
+reset "$(printf '%s' "$ANCHOR_PR" | jq -c '.metadata.pr_provenance_since = "2026-10-07T00:00:00Z"')"
+export STUB_REVIEWS='{"id":444,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T01:00:00Z","body":"model review: fix the race"}
+{"id":555,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T02:00:00Z","body":"verdict\n\n<!-- gc:city -->"}
+{"id":666,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-06T23:00:00Z","body":"an older block of ours"}'
+"$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/444/dismissals" "an unmarked review under our login after the cutover is feedback, never dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/555/dismissals" "a marked review of ours past the cutover is dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/666/dismissals" "an unmarked review of ours from before the cutover is still ours"
+export STUB_REVIEWS='{"id":111,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":222,"user":{"login":"a-human"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":333,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_HEAD"'"}'
+
 echo "# supersede holds on a moved head"
 reset "$ANCHOR_PR"
 STUB_PR_HEAD="$OID_NEWHEAD" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1

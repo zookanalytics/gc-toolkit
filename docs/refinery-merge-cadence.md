@@ -263,7 +263,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
-   rework child or a visit. The posture write is idempotent, so re-running it
+   rework child or a visit. Feedback is every review, inline comment and
+   conversation comment that is not the city's own post
+   ([state-machine.md](state-machine.md#operator-feedback)), whoever wrote it.
+   The posture write is idempotent, so re-running it
    here after arm 2 costs nothing when nothing changed. The routing runs in two
    places by design: arm 3 picks the feedback up early, before merge, and this
    arm re-runs the same routing idempotently — a landed batch's watermark and
@@ -292,8 +295,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    batch has nothing left owing. The reactions are written first and bounded per
    pass; when the cap or a failed write leaves one owing, that pass replies to
    and resolves nothing, so no thread is answered over a comment still awaiting
-   its acknowledgement. A thread a human answered after the city's own is left
-   open, and so is one holding a comment above the mark: no batch covers that
+   its acknowledgement. A thread with a post after the city's own reply that is
+   not itself the city's own is left open, and so is one holding a comment above
+   the mark: no batch covers that
    comment, so nothing has answered it, and resolving would put the thread past
    every later pass. A `visit:` disposition earns the reaction but never a
    reply, because no commit answered it. Idempotence is read back off GitHub,

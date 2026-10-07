@@ -1068,6 +1068,23 @@ out=$(STUB_DROP_KEYS="D4:signoff_dismissed" run)
 has "$out" "marker did not persist; NOT dismissing" "an unrecorded marker fails closed"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and the dismissal is withheld"
 
+echo "# …past the cutover, an unmarked CHANGES_REQUESTED under our login is feedback: never dismissed"
+store "[$(anchor D5 164 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 164 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_164.json"
+printf '[{"id":905,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/reviews_164.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a model review's block is left standing"
+eq "$(meta D5 signoff_dismissed)" "<absent>" "…and no marker is recorded"
+
+echo "# …and a marked CHANGES_REQUESTED past the cutover is ours: dismissed"
+store "[$(anchor D6 165 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 165 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_165.json"
+printf '[{"id":906,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","body":"\\n\\n<!-- gc:city -->","commit_id":"sha-OLD","submitted_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/reviews_165.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/165/reviews/906/dismissals" "the city's own marked block is dismissed"
+
 echo "# posture: an anchor blocked on a human approval says so"
 # The sl-bgmuy/PR#552 fixture: check green at the live head, nothing in flight,
 # and by the pack's old accounting indistinguishable from an anchor progressing.
@@ -1605,17 +1622,18 @@ eq "$(meta Vc signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset 
 eq "$(meta Vc pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it, not to work"
 
 echo "# a verdict the city posted itself is not feedback, and opens no pass"
-# Identity, not shape: signoff.sh posts its verdicts under the city's own login
-# and a rework hand-back posts nothing at all, so neither reaches this arm.
+# Provenance, not shape: signoff.sh posts its verdicts through pr-post.sh, which
+# marks them as the city's own, and a rework hand-back posts nothing at all, so
+# neither reaches this arm.
 store "[$(anchor R3 57 ',"merge_hold":"true","gc.routed_to":"human"')]"
 printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_57.json"
-printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Signoff verdict: request-changes","commit_id":"sha-57"}]' \
+printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Signoff verdict: request-changes\\n\\n<!-- gc:city -->","commit_id":"sha-57"}]' \
   > "$GH_DIR/reviews_57.json"
-printf '[{"id":8700,"user":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3"}]' > "$GH_DIR/comments_57.json"
+printf '[{"id":8700,"user":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3\\n\\n<!-- gc:city -->"}]' > "$GH_DIR/comments_57.json"
 # The city's own inline nit sits in a RESOLVED thread. The unengaged backstop (a
-# separate arm) counts only unresolved self-login threads, so it finds nothing
-# here and the posture is review_required.
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-57","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-57","databaseId":100,"author":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_57.json"
+# separate arm) counts only unresolved threads holding an unmarked comment, so it
+# finds nothing here and the posture is review_required.
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-57","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-57","databaseId":100,"author":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_57.json"
 out=$(run)
 eq "$(meta_pinned R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
 eq "$(vpass_id R3)" "<none>" "…so no validation pass opens"
@@ -1766,12 +1784,12 @@ eq "$(meta_pinned P4 pr_posture)" "none@sha-43" "its inline comments are what th
 echo "# the city's own comment is not a human waiting"
 store "[$(anchor P2 41)]"
 printf '%s' "$(prview 41 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_41.json"
-printf '[{"id":6002,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"replayed verdict"}]' > "$GH_DIR/reviews_41.json"
-printf '[{"id":6001,"user":{"login":"gc-city-bot"},"body":"replayed verdict"}]' > "$GH_DIR/comments_41.json"
+printf '[{"id":6002,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"replayed verdict\\n\\n<!-- gc:city -->"}]' > "$GH_DIR/reviews_41.json"
+printf '[{"id":6001,"user":{"login":"gc-city-bot"},"body":"replayed verdict\\n\\n<!-- gc:city -->"}]' > "$GH_DIR/comments_41.json"
 # The replayed verdict sits in a RESOLVED thread. The unengaged backstop counts
-# only unresolved self-login threads, so it finds nothing here and the posture is
-# the approval this test asserts.
-printf '%s\n' '{"reviews":[],"threads":[{"id":"T-41","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-41","databaseId":100,"author":{"login":"gc-city-bot"},"body":"replayed verdict","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_41.json"
+# only unresolved threads holding an unmarked comment, so it finds nothing here
+# and the posture is the approval this test asserts.
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-41","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-41","databaseId":100,"author":{"login":"gc-city-bot"},"body":"replayed verdict\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_41.json"
 out=$(run)
 eq "$(meta_pinned P2 pr_posture)" "approved@sha-41" "our own replayed verdict is not an outstanding comment"
 eq "$(meta P2 pr_comment_watermark)" "<absent>" "…and nothing was watermarked"
@@ -1905,12 +1923,92 @@ eq "$(meta new-2 source_review)" "9800" "…and names the review"
 echo "# …the city's OWN CHANGES_REQUESTED files nothing: that is signoff's loop"
 store "[$(anchor P9 54)]"
 printf '%s' "$(prview 54 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_54.json"
-printf '[{"id":9900,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","body":"finding","commit_id":"sha-54"}]' > "$GH_DIR/reviews_54.json"
-printf '[{"id":9901,"user":{"login":"gc-city-bot"},"body":"finding"}]' > "$GH_DIR/comments_54.json"
+printf '[{"id":9900,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","body":"finding\\n\\n<!-- gc:city -->","commit_id":"sha-54"}]' > "$GH_DIR/reviews_54.json"
+printf '[{"id":9901,"user":{"login":"gc-city-bot"},"body":"finding\\n\\n<!-- gc:city -->"}]' > "$GH_DIR/comments_54.json"
 out=$(run)
 eq "$(meta_pinned P9 pr_posture)" "changes_requested@sha-54" "the veto is recorded"
+hasnt "$out" "feedback history unreadable" "…off review lists that read cleanly"
 hasnt "$out" "routed to rework" "…and this arm files nothing against the city's own verdict"
 eq "$(meta P9 pr_comment_watermark)" "<absent>" "…nor watermarks it"
+
+echo "# provenance: an unmarked review under the city's own login after the cutover is feedback"
+# The operator runs model reviews (/code-review, codex, gemini) under the city's
+# GitHub account. Past the anchor's pr_provenance_since an unmarked review there
+# routes like a person's: its body and its inline comments go to a rework child,
+# and each becomes a finding sourced to the account that posted it.
+CUT=',"pr_provenance_since":"2026-10-07T00:00:00Z"'
+store "[$(anchor PV1 156 "$CUT")]"
+printf '%s' "$(prview 156 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_156.json"
+printf '[{"id":9700,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Automated code review: two findings below.","commit_id":"sha-156","submitted_at":"2026-10-07T01:00:00Z"}]' > "$GH_DIR/reviews_156.json"
+printf '[{"id":9701,"user":{"login":"gc-city-bot"},"body":"Bound the re-read per pass.","path":"assets/scripts/merge.sh","line":12,"pull_request_review_id":9700,"created_at":"2026-10-07T01:00:00Z"}]' > "$GH_DIR/comments_156.json"
+out=$(run)
+has "$out" "routed to rework:" "the model review routes like a person's"
+eq "$(meta PV1 pr_review_watermark)" "9700" "…its body advances the review mark"
+eq "$(meta PV1 pr_comment_watermark)" "9701" "…its inline comment advances the comment mark"
+eq "$(meta_pinned PV1 pr_posture)" "commented@sha-156" "…and the posture holds the merge as commented"
+PV1C=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "PV1") | .id ] | .[0] // ""' "$STUB_STORE")
+has "$(desc "$PV1C")" "Bound the re-read per pass." "the child carries the inline comment verbatim"
+has "$(desc "$PV1C")" "assets/scripts/pr-post.sh" "…and tells the fixer to reply through pr-post.sh"
+has "$(meta "$PV1C" rejection_reason)" "pr-post.sh" "…as its rejection_reason does"
+eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "PV1")
+           | select((.metadata["finding.source"] // "") == "human:gc-city-bot") ] | length' "$STUB_STORE")" "2" "…and each item is a finding sourced to the account it came from"
+eq "$(jq '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) ] | length' "$STUB_STORE")" "0" "…so the unengaged-thread backstop has nothing to file"
+
+echo "# provenance: the mark under any other login claims nothing — a quoting human is feedback"
+store "[$(anchor PV2 157 "$CUT")]"
+printf '%s' "$(prview 157 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_157.json"
+echo '[]' > "$GH_DIR/reviews_157.json"
+echo '[]' > "$GH_DIR/comments_157.json"
+printf '[{"id":881001,"user":{"login":"human1"},"body":"> quoting the bot\\n\\n<!-- gc:city -->\\n\\nthis is still wrong","created_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/issue_comments_157.json"
+out=$(run)
+has "$out" "issue 881001" "the human's comment routes though it carries the mark"
+eq "$(meta PV2 pr_issue_comment_watermark)" "881001" "…and advances the conversation mark"
+
+echo "# provenance: an unmarked post under our login from BEFORE the cutover is still the city's own"
+# The notices a PR already carried when the city began marking stay the city's,
+# so they do not all turn into feedback at once.
+store "[$(anchor PV3 158 "$CUT")]"
+printf '%s' "$(prview 158 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_158.json"
+printf '[{"id":9800,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Signoff verdict: approve","commit_id":"sha-158","submitted_at":"2026-10-05T00:00:00Z"}]' > "$GH_DIR/reviews_158.json"
+echo '[]' > "$GH_DIR/comments_158.json"
+printf '[{"id":881002,"user":{"login":"gc-city-bot"},"body":"Pre-open signoff (comment-only — not an approval)","created_at":"2026-10-05T00:00:00Z"}]' > "$GH_DIR/issue_comments_158.json"
+out=$(run)
+hasnt "$out" "routed to rework" "the older unmarked notices route nothing"
+eq "$(meta_pinned PV3 pr_posture)" "review_required@sha-158" "…and hold no posture"
+eq "$(meta PV3 pr_review_watermark)" "<absent>" "…nor move a mark"
+
+echo "# provenance: the first read of an open PR stamps its cutover, once — drafts included"
+store "[$(anchor PV4 159), $(anchor PV6 167)]"
+printf '%s' "$(prview 159 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_159.json"
+printf '%s' "$(prview 167 OPEN CLEAN MERGEABLE)" | jq -c '.isDraft = true' > "$GH_DIR/pr_view_167.json"
+for n in 159 167; do echo '[]' > "$GH_DIR/reviews_$n.json"; echo '[]' > "$GH_DIR/comments_$n.json"; done
+out=$(run_posture)
+PV4S=$(meta PV4 pr_provenance_since)
+case "$PV4S" in
+  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ok "the posture pass stamps a UTC instant on a first read" ;;
+  *) bad "the posture pass stamps a UTC instant on a first read" "got '$PV4S'" ;;
+esac
+case "$(meta PV6 pr_provenance_since)" in
+  [0-9][0-9][0-9][0-9]-*Z) ok "…a draft PR is stamped too, before anyone can review it unmarked" ;;
+  *) bad "…a draft PR is stamped too, before anyone can review it unmarked" "got '$(meta PV6 pr_provenance_since)'" ;;
+esac
+# A stamp from an earlier pass, so a rewrite would show as a changed value.
+jq -c '[ .[] | if .id == "PV4" then .metadata.pr_provenance_since = "2026-10-07T00:00:00Z" else . end ]' "$STUB_STORE" > "$TMP/pv4.json" \
+  && mv "$TMP/pv4.json" "$STUB_STORE"
+out=$(run)
+eq "$(meta PV4 pr_provenance_since)" "2026-10-07T00:00:00Z" "a recorded instant is never rewritten"
+
+echo "# provenance: a malformed cutover reads every post under our login as the city's own"
+store "[$(anchor PV5 163 ',"pr_provenance_since":"last tuesday"')]"
+printf '%s' "$(prview 163 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_163.json"
+echo '[]' > "$GH_DIR/reviews_163.json"
+echo '[]' > "$GH_DIR/comments_163.json"
+printf '[{"id":881003,"user":{"login":"gc-city-bot"},"body":"landed abc123"}]' > "$GH_DIR/issue_comments_163.json"
+out=$(run)
+has "$out" "is not a UTC instant" "the malformed stamp is named"
+hasnt "$out" "feedback history unreadable" "…the lists read cleanly"
+hasnt "$out" "routed to rework" "…and the unmarked post under our login routes nothing"
+eq "$(meta PV5 pr_provenance_since)" "last tuesday" "…and the stamp is left for a person to read"
 
 echo "# …an unreadable review list still records the veto, and routes nothing"
 store "[$(anchor PA 55)]"
@@ -1998,7 +2096,7 @@ printf '%s' "$(prview 88 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_88.json"
 threads 88 '{"reviews":[],"threads":[],"issue_comments":[
   {"id":"IC-88","databaseId":50,"author":{"login":"johnzook"},"reactionGroups":[]},
   {"id":"IC-88-hi","databaseId":80,"author":{"login":"johnzook"},"reactionGroups":[]},
-  {"id":"IC-88-self","databaseId":40,"author":{"login":"gc-city-bot"},"reactionGroups":[]}]}'
+  {"id":"IC-88-self","databaseId":40,"author":{"login":"gc-city-bot"},"body":"landed\n\n<!-- gc:city -->","reactionGroups":[]}]}'
 out=$(run)
 eq "$(reacted 88 IC-88)" "true" "the routed Conversation comment got its EYES reaction"
 eq "$(reacted 88 IC-88-hi)" "false" "a Conversation comment above the mark earns none"
@@ -2367,9 +2465,18 @@ hasnt "$(gh_since "$mark")" "RESOLVE" "…and nothing is resolved under it"
 echo "# our own comments are never acknowledged"
 store "[$(anchor W7 46 "$(wb_meta rework:K7)"), $(child K7 open)]"
 printf '%s' "$(prview 46 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_46.json"
-threads 46 "$(printf '%s' "$(one_thread 46)" | jq -c '.threads[0].comments.nodes[0].author.login = "gc-city-bot"')"
+threads 46 "$(printf '%s' "$(one_thread 46)" | jq -c '.threads[0].comments.nodes[0].author.login = "gc-city-bot"
+  | .threads[0].comments.nodes[0].body = "a city notice\n\n<!-- gc:city -->"')"
 out=$(run)
 eq "$(reacted 46 NC-46)" "false" "the city does not react to itself"
+
+echo "# …but an unmarked comment under our login past the cutover was feedback, so it is acknowledged"
+store "[$(anchor W7B 166 "$(wb_meta rework:K7B)"',"pr_provenance_since":"2026-10-07T00:00:00Z"'), $(child K7B open)]"
+printf '%s' "$(prview 166 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_166.json"
+threads 166 "$(printf '%s' "$(one_thread 166)" | jq -c '.threads[0].comments.nodes[0].author.login = "gc-city-bot"
+  | .threads[0].comments.nodes[0].createdAt = "2026-10-07T01:00:00Z"')"
+out=$(run)
+eq "$(reacted 166 NC-166)" "true" "the routed model-review comment gets its EYES reaction"
 
 echo "# a review body that produced the bead is acknowledged too"
 store "[$(anchor W8 47 "$(wb_rmeta rework:K8 55)"), $(child K8 open)]"
@@ -2483,18 +2590,20 @@ out=$(run)
 has "$out" "identity did not certify for the write-back" "the foreign PR is refused"
 eq "$(reacted 51 NC-51)" "false" "…and NOTHING was written back"
 
-echo "# a review posted under our OWN login leaves unresolved threads arm 7 never routes"
-# The gap: an outside review agent (or an operator-run review) posts findings on a
-# green PR under the automation's own login. arm 7 counts only other logins, so it
-# routes nothing; the check stays green, and until this backstop nothing flagged it.
-store "[$(anchor UT1 60)]"
+echo "# an unmarked review under our OWN login from before the cutover leaves threads arm 7 never routes"
+# The gap: an outside review agent (or an operator-run review) posted findings on
+# a green PR under the automation's own login before the city marked its posts.
+# arm 7 reads such a post as the city's own, so it routes nothing; the check
+# stays green, and until this backstop nothing flagged it.
+UTCUT=',"pr_provenance_since":"2026-10-07T00:00:00Z"'
+store "[$(anchor UT1 60 "$UTCUT")]"
 printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
-printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null}]' > "$GH_DIR/comments_60.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_60.json"
 echo '[]' > "$GH_DIR/reviews_60.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-60","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-60","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_60.json"
 out=$(run)
 has "$out" "unengaged review-thread finding" "the backstop flags the otherwise-clear PR"
-hasnt "$out" "routed to rework:" "arm 7 routed nothing — the finding is under our own login"
+hasnt "$out" "routed to rework:" "arm 7 routed nothing — the finding is the city's own by the cutover"
 UTVID=$(jq -r '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) | .id ] | .[0] // empty' "$STUB_STORE")
 [ -n "$UTVID" ] && ok "a visit was filed" || bad "no visit filed"
 eq "$(meta "$UTVID" pr_number)" "60" "…stamped with the PR so merge.sh holds the merge"
@@ -2502,9 +2611,9 @@ eq "$(meta "$UTVID" anchor_bead)" "UT1" "…and anchored to the gating bead"
 eq "$(meta UT1 pr_unengaged_threads)" "sha-60" "…and the anchor is head-watermarked against re-filing"
 
 echo "# a RESOLVED thread is done — the finding exists but nothing is flagged"
-store "[$(anchor UT2 61)]"
+store "[$(anchor UT2 61 "$UTCUT")]"
 printf '%s' "$(prview 61 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
-printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_61.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_61.json"
 echo '[]' > "$GH_DIR/reviews_61.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-61","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-61","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_61.json"
 out=$(run)
@@ -2512,18 +2621,18 @@ hasnt "$out" "unengaged review-thread finding" "a resolved thread raises nothing
 eq "$(meta UT2 pr_unengaged_threads)" "<absent>" "…and no head watermark is written"
 
 echo "# a thread we already replied into is arm 7's or the write-back's to finish, not ours"
-store "[$(anchor UT3 62)]"
+store "[$(anchor UT3 62 "$UTCUT")]"
 printf '%s' "$(prview 62 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
-printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_62.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_62.json"
 echo '[]' > "$GH_DIR/reviews_62.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-62","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-62","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]},{"id":"NC-62b","databaseId":0,"author":{"login":"gc-city-bot"},"body":"noted <!-- gc-writeback -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_62.json"
 out=$(run)
 hasnt "$out" "unengaged review-thread finding" "a thread carrying our own reply is left to the write-back"
 
 echo "# a live child already on the anchor owns the follow-up — no second signal, no thread read"
-store "[$(anchor UT4 63), {\"id\":\"rw-63\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Address review comments on PR#63\",\"metadata\":{\"anchor_bead\":\"UT4\"}}]"
+store "[$(anchor UT4 63 "$UTCUT"), {\"id\":\"rw-63\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Address review comments on PR#63\",\"metadata\":{\"anchor_bead\":\"UT4\"}}]"
 printf '%s' "$(prview 63 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_63.json"
-printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_63.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_63.json"
 echo '[]' > "$GH_DIR/reviews_63.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-63","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-63","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_63.json"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
@@ -2532,9 +2641,9 @@ hasnt "$out" "unengaged review-thread finding" "an in-flight child on the anchor
 hasnt "$(gh_since "$mark")" "graphql" "…and the threads are not even read"
 
 echo "# a thread read that fails files nothing — the backstop fails closed"
-store "[$(anchor UT5 64)]"
+store "[$(anchor UT5 64 "$UTCUT")]"
 printf '%s' "$(prview 64 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_64.json"
-printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_64.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_64.json"
 echo '[]' > "$GH_DIR/reviews_64.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-64","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-64","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_64.json"
 out=$(STUB_GQL_READ_FAIL=1 run)
@@ -2552,14 +2661,15 @@ eq "$(meta UT5 pr_posture)" "<absent>" "…recording no review_required posture 
 echo "# ORDER: the merge-hold is set in the PRE-MERGE posture pass, not after merge"
 # refinery-reconcile runs pr-facts --posture-only, then merge.sh, then the full
 # pr-facts. merge.sh reads posture off the bead and holds only on commented@; it
-# never reads threads. So a clean green PR with a self-login unresolved thread
+# never reads threads. So a clean green PR with an unresolved thread under a
+# pre-cutover review of ours
 # has to read `commented` after --posture-only ALONE — before merge.sh runs —
 # and the posture pass must dispatch nothing. The full pass that follows files
 # the one visit the hold stands for; a later posture pass holds off that standing
 # visit without re-reading the threads.
-store "[$(anchor UT6 66)]"
+store "[$(anchor UT6 66 "$UTCUT")]"
 printf '%s' "$(prview 66 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_66.json"
-printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null}]' > "$GH_DIR/comments_66.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_66.json"
 echo '[]' > "$GH_DIR/reviews_66.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-66","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-66","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_66.json"
 out=$(run_posture)
@@ -2617,9 +2727,10 @@ store "[$(anchor IC2 93)]"
 printf '%s' "$(prview 93 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_93.json"
 echo '[]' > "$GH_DIR/reviews_93.json"
 echo '[]' > "$GH_DIR/comments_93.json"
-printf '[{"id":880001,"user":{"login":"gc-city-bot"},"body":"landed abc123"}]' > "$GH_DIR/issue_comments_93.json"
+printf '[{"id":880001,"user":{"login":"gc-city-bot"},"body":"landed abc123\\n\\n<!-- gc:city -->"}]' > "$GH_DIR/issue_comments_93.json"
 out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "our own conversation comment mints no child"
+hasnt "$out" "feedback history unreadable" "…read off a Conversation list that read cleanly"
 eq "$(meta IC2 pr_issue_comment_watermark)" "<absent>" "…and moves no mark"
 
 echo "# …an unreadable Conversation read holds the posture rather than clearing it"

@@ -63,7 +63,8 @@ PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 # pr-facts.sh uses for the human feedback batch's pass. Overridable for the test.
 VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
 # The single writer of the city's PR posts. A post-open verdict goes through it
-# so the review carries the city's provenance mark.
+# so the review carries the city's mark, and the superseded-block dismissal asks
+# its definition of the city's own review (gc_city_own) rather than the login.
 PR_POST="$HERE/pr-post.sh"
 
 usage() {
@@ -531,7 +532,9 @@ ensure_validation_pass() {
 
 # A pass at a new head retracts the city's OWN superseded CHANGES_REQUESTED,
 # else the PR stays BLOCKED on a dead commit while the bead reads green.
-# Guards, all fail-closed: our handle only (a human's block is a real veto);
+# Guards, all fail-closed: our own review only — one pr-post.sh marked, or one
+# under our handle from before the anchor's provenance cutover (gc_city_own); a
+# human's block, or an unmarked review under our handle after it, is a real veto;
 # a commit other than the reviewed one; the reviewed commit still the live
 # head; auto-merge definitely disarmed (with it armed, a dismissal can let
 # GitHub merge server-side, past the approval rule merge.sh enforces);
@@ -539,17 +542,23 @@ ensure_validation_pass() {
 # so no dismissal goes unrecorded.
 dismiss_superseded() {
   [ -n "$POST_OPEN" ] || return 0
-  local handle live raw rc stale rid paired
+  local handle live raw rc stale rid paired owndef since
   handle=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
   [ -n "$handle" ] || return 0
+  owndef=$("$PR_POST" own-def 2>/dev/null) && [ -n "$owndef" ] || return 0
+  since=$(row_meta "$ANCHOR_ROW" pr_provenance_since)
+  case "$since" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+    *) since="" ;;
+  esac
   live=$(live_head)
   [ "$live" = "$REVIEWED_OID" ] || return 0
   raw=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json autoMergeRequest 2>/dev/null) || return 0
   printf '%s' "$raw" | jq -e 'type == "object" and has("autoMergeRequest") and .autoMergeRequest == null' >/dev/null 2>&1 || return 0
   raw=$(gh api --hostname "$PR_HOST" --paginate "repos/$PR_REPO/pulls/$PR_NUMBER/reviews?per_page=100" --jq '.[]' 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] || return 0
-  stale=$(printf '%s' "$raw" | jq -rs --arg h "$handle" --arg oid "$REVIEWED_OID" \
-    '.[] | select((.user.login // "") == $h and .state == "CHANGES_REQUESTED" and (.commit_id // "") != $oid) | .id' 2>/dev/null)
+  stale=$(printf '%s' "$raw" | jq -rs --arg h "$handle" --arg since "$since" --arg oid "$REVIEWED_OID" "$owndef"'
+    .[] | select(gc_city_own($h; $since) and .state == "CHANGES_REQUESTED" and (.commit_id // "") != $oid) | .id' 2>/dev/null)
   for rid in $stale; do
     gc bd update "$ANCHOR" --set-metadata "signoff_dismissed=$rid@$REVIEWED_OID" >/dev/null 2>&1 || true
     paired=$(row_meta "$(bd_json show "$ANCHOR")" signoff_dismissed)
