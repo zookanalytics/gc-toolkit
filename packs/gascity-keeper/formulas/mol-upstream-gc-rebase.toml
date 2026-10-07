@@ -187,7 +187,7 @@ else
             --set-metadata aborted_at=workspace-setup \
             --status=open \
             --assignee="$REQUESTING_KEEPER" \
-            --notes "Refused to mint backup_ref: HEAD ($HEAD_SHA) does not match {{origin_remote}}/{{upstream_branch}} ($PRE_REBASE_TIP). Resume requires manual recovery."
+            --append-notes "Refused to mint backup_ref: HEAD ($HEAD_SHA) does not match {{origin_remote}}/{{upstream_branch}} ($PRE_REBASE_TIP). Resume requires manual recovery."
         gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: aborted at workspace-setup (backup_ref mint refused) — operator engagement needed (metadata.aborted_at=workspace-setup)" || true
         gc runtime drain-ack
         exit 1
@@ -647,7 +647,7 @@ gc bd update {{issue}} \
   --set-metadata aborted_at=install \
   --status=open \
   --assignee="$REQUESTING_KEEPER" \
-  --notes "$(cat <<EOF
+  --append-notes "$(cat <<EOF
 Rebase and tests passed but {{install_command}} FAILED (aborted_at=install).
 
 Worktree: $WORKTREE
@@ -714,7 +714,7 @@ gc bd update {{issue}} \
   --set-metadata aborted_at=push \
   --status=open \
   --assignee="$REQUESTING_KEEPER" \
-  --notes "$(cat <<EOF
+  --append-notes "$(cat <<EOF
 git push {{origin_remote}} HEAD:rebase/{{issue}} FAILED (aborted_at=push).
 The rebased history is intact in the worktree; the refinery force-push to
 {{upstream_branch}} has NOT fired yet.
@@ -829,7 +829,7 @@ gc mail send {{notify_recipient}} -s "gascity rebase: ready for refinery handoff
 **3. Append the summary to bead notes** (markdown; the resolutions section
 may be a full table — it is the durable forensic record):
 ```bash
-gc bd update {{issue}} --notes "<summary>"
+gc bd update {{issue}} --append-notes "<summary>"
 ```
 
 **4. Hand off to refinery.** The overlay recognises rebase beads via

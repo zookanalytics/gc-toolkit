@@ -23,7 +23,8 @@
 # standing CHANGES_REQUESTED from any other account vetoes); no unclosed
 # rework/review child or open must-fix finding (metadata keys naming this PR AND
 # dependency edges, the finding held by its own blocks edge; unreadable holds);
-# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
+# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only; an UNKNOWN,
+# which is GitHub still computing it, read again within one budget per pass);
 # generated/seed-audit current at the MERGE RESULT (its inputs re-hashed in the
 # tree `git merge-tree` writes, so a render clobbered by a base that moved holds
 # and escalates rather than landing). The FULL
@@ -49,6 +50,17 @@ PROG="merge"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+
+# THE SHELL BELOW IS THE FALLBACK. `gctk merge` (services/gctk) is the ported
+# implementation and answers whenever the build order has published a binary;
+# this script runs when it has not — a fresh city, a build that failed, a rig
+# checkout ahead of the deployed binary. Both must stay correct while the
+# fallback stands, so merge.test.sh runs its whole body against both.
+# gctk-resolve.sh decides which one answers.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+gctk_resolve merge "$@"
+
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The composable "may this anchor be finalized?" precondition set. An open visit
 # tracking the anchor holds its merge — subject-scoped via the anchor's incoming
@@ -295,8 +307,7 @@ while IFS= read -r row; do
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
 
   # --- pinned PR read --------------------------------------------------------
-  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
-    --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url 2>/dev/null)
+  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json "$PR_FIELDS" 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "$PROG: PR#$num view failed; merge held (anchor $id, retry next pass)"
     held=$((held + 1)); continue
@@ -493,8 +504,12 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num referencing-bead read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   }
-  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null | scrub)
-  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null | scrub)
+  # A probe that exited non-zero is unreadable whatever it printed — bd_list's
+  # contract for the list reads, since a failed read can print an empty array.
+  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null) || children=""
+  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null) || blockers=""
+  children=$(printf '%s' "$children" | scrub)
+  blockers=$(printf '%s' "$blockers" | scrub)
   if ! printf '%s' "$children" | jq -e 'type == "array"' >/dev/null 2>&1 \
      || ! printf '%s' "$blockers" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "$PROG: PR#$num dependency probe unreadable; merge held (anchor $id)"
@@ -632,6 +647,35 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
 
+  # --- UNKNOWN: GitHub has not computed this PR against its current base -------
+  # A merge this arm makes moves the base under every later candidate on that
+  # base, so their pinned reads answer UNKNOWN. The pinned read started the
+  # computation, so read it again before deciding, within the pass's re-read
+  # budget (gh_pr_view_settled, bd-lib.sh). Every read here comes after the
+  # latest merge this pass made, because merges happen only at the end of an
+  # iteration. A computed answer is judged below like any pinned
+  # one, so BEHIND and DIRTY keep their own handling. Every pinned field outside
+  # the mergeability facts was validated above, so a re-read that changes one is
+  # a different PR from the one those gates passed. A re-read that fails is held
+  # like a failed pinned read and records nothing.
+  unknown_note=""
+  if [ "$merge_state" = "UNKNOWN" ] && [ "$MERGE_STATE_REREADS" -gt 0 ]; then
+    gh_pr_view_settled "$num" "$ORIGIN_REPO_Q" "$PR_FIELDS" "$PR_JSON"; rr=$?
+    case "$rr" in
+      0) PR_JSON="$PR_REREAD_JSON"; merge_state="$PR_REREAD_STATE"
+         echo "$PROG: PR#$num answered UNKNOWN on the pinned read and $merge_state on re-read $PR_REREADS (anchor $id)" ;;
+      2) echo "$PROG: PR#$num changed between the pinned read and re-read $PR_REREADS of its UNKNOWN merge state ($PR_REREAD_CHANGED); merge held (anchor $id)"
+         held=$((held + 1)); continue ;;
+      3) echo "$PROG: PR#$num view failed on re-read $PR_REREADS of its UNKNOWN merge state; merge held (anchor $id, retry next pass)"
+         held=$((held + 1)); continue ;;
+      *) if [ "$PR_REREADS" -gt 0 ]; then
+           unknown_note=" after $PR_REREADS re-read(s); the pass's re-read budget is spent"
+         else
+           unknown_note="; not re-read, the pass's re-read budget is spent"
+         fi ;;
+    esac
+  fi
+
   # --- mergeStateStatus: CLEAN, or UNSTABLE decided on required contexts only ----
   case "$merge_state" in
     CLEAN) : ;;
@@ -735,7 +779,7 @@ while IFS= read -r row; do
       else
         record_machine "$id" "settled" "$head_oid" "$aroute"
       fi
-      echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'); merge held (anchor $id)"
+      echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'$unknown_note); merge held (anchor $id)"
       held=$((held + 1)); continue ;;
   esac
   if [ -z "$head_oid" ]; then

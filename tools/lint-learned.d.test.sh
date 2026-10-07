@@ -8,7 +8,8 @@
 # every executable in lint-learned.d/ as a detector, so a test file in that
 # directory would be run as one.
 #
-# Covered: raw-bd-invocation, mktemp-untemplated, bd-helper-in-scope.
+# Covered: raw-bd-invocation, mktemp-untemplated, bd-helper-in-scope,
+# bd-notes-replace.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -782,6 +783,151 @@ out=$(@J@ show "$1")
 FIX
 runbd "$TMP/lint-learned.d/other-detector.sh"
 eq "$RC" 0 "a file under lint-learned.d/ is skipped"
+
+echo "── bd-notes-replace: what is a finding ──"
+
+# Fixtures spell the flag @NOTES@ and a bare client @BD@, for the reason the
+# other detectors use placeholders: the runner scans this file too, and a
+# literal write here would be a finding against the test that proves it.
+DET_NR="$HERE/lint-learned.d/bd-notes-replace.sh"
+[ -x "$DET_NR" ] || { echo "no detector at $DET_NR"; exit 1; }
+runnr() { OUT="$("$DET_NR" "$@" 2>&1)"; RC=$?; }
+plantnr() { sed -e 's/@NOTES@/--notes/g' -e 's/@BD@/bd/g' > "$1"; }
+
+# Every spelling a notes write takes in this pack, one per line.
+plantnr "$TMP/replace.sh" <<'FIX'
+#!/usr/bin/env bash
+gc bd update "$X" @NOTES@ "done"
+@BD@ update "$X" @NOTES@="done"
+gc_bd update "$X" @NOTES@ "done"
+gc bd --rig "$R" update "$X" @NOTES@ "done"
+"$BIN/gc" bd update "$X" --status=open @NOTES@ "done"
+OUT="$(gc bd update "$X" @NOTES@ "done" 2>&1)"
+FIX
+runnr "$TMP/replace.sh"
+eq "$RC" 1 "a file that replaces notes exits 1"
+for n in 2 3 4 5 6 7; do
+    has "$OUT" "replace.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 6 "and nothing else is"
+has "$OUT" "bd-notes-replace" "the finding names the rule"
+has "$OUT" "fix: --append-notes" "the finding names the fix"
+
+# A flag on a continued line belongs to the command it continues, and is
+# reported where that command opens. A substitution between `update` and the
+# flag is one word of the command, not its end.
+plantnr "$TMP/continued.sh" <<'FIX'
+#!/usr/bin/env bash
+gc bd update "$X" \
+    --set-metadata "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --status=open \
+    @NOTES@ "done"
+echo between
+gc bd update "$X" --assignee="$(whoami)" @NOTES@ "$(cat <<EOF
+the body
+EOF
+)"
+gc bd update "$X" --set-metadata at=$(date -u +%s) @NOTES@ "done"
+FIX
+runnr "$TMP/continued.sh"
+eq "$RC" 1 "continued and substituted writes are found"
+has "$OUT" "continued.sh:2:" "a continued write is reported where it opens"
+has "$OUT" "continued.sh:7:" "a write whose value is a here-doc substitution is reported"
+has "$OUT" "continued.sh:11:" "an unquoted substitution before the flag does not end the command"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 3 "and nothing else is"
+
+# A formula recipe is run as written, so a fenced write is a finding and the
+# same words in prose are not. A placeholder's stray quote in one fence does
+# not carry into the next.
+plantnr "$TMP/recipe.toml" <<'FIX'
+description = """
+Prose may say gc bd update {{issue}} @NOTES@ and it is not a finding.
+```bash
+gc bd update {{issue}} --set-metadata reason=<what's wrong>
+```
+
+```bash
+gc bd update {{issue}} @NOTES@ "<summary>"
+```
+"""
+FIX
+runnr "$TMP/recipe.toml"
+eq "$RC" 1 "a formula recipe that replaces notes exits 1"
+has "$OUT" "recipe.toml:8:" "the fenced write is reported, past an unclosed quote in the fence before it"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "prose outside a fence is not"
+
+# A prompt or fragment carries its recipes in plain fences, often indented
+# under a list item, and in marker-fenced snippets.
+plantnr "$TMP/prompt.md" <<'FIX'
+Never write `gc bd update <id> @NOTES@`: it replaces the field.
+
+1. Record the card:
+   ```bash
+   gc bd update <id> @NOTES@ "..."       # the first-reaction card
+   ```
+
+# >>> marked-snippet
+gc bd update "$W" @NOTES@ "x"
+# <<< marked-snippet
+FIX
+runnr "$TMP/prompt.md"
+eq "$RC" 1 "a prompt recipe that replaces notes exits 1"
+has "$OUT" "prompt.md:5:" "an indented fenced write is reported"
+has "$OUT" "prompt.md:9:" "a marker-fenced write is reported"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "inline code in prose is not"
+
+echo "── bd-notes-replace: what is not ──"
+
+# Appends, other commands, and the shape stated as data: in a comment, a
+# string, a multi-line string, a here-doc body, or a case pattern.
+plantnr "$TMP/appends.sh" <<'FIX'
+#!/usr/bin/env bash
+# gc bd update "$X" @NOTES@ "done"   <- a commented-out write is prose
+gc bd update "$X" --append-notes "done"   # never @NOTES@
+gc bd update "$X" --append-notes "$(printf 'was %s' "$Y")"
+gc bd create "title" @NOTES@ "a new bead has no notes to erase"
+gc bd update "$X" --status=open; echo @NOTES@
+gc bd update "$X" --status=open && printf '%s\n' @NOTES@
+gc bd update "$X" @NOTES@-file findings.md
+gc bd update "$X" --append-notes 'never @NOTES@ here, it replaces'
+gc bd update "$X" --append-notes "never @NOTES@ here, it replaces"
+echo "never run gc bd update X @NOTES@ y"
+hasnt "$LOG" "bd update X @NOTES@" "a test that pins the shape holds it as data"
+msg="first line
+gc bd update X @NOTES@ y
+last line"
+cat <<'EOF'
+gc bd update X @NOTES@ y
+EOF
+case "$1" in
+    @NOTES@) shift; note="${1:-}" ;;
+esac
+FIX
+runnr "$TMP/appends.sh"
+eq "$RC" 0 "appends, other commands, comments, strings and here-doc bodies are clean"
+eq "$OUT" "" "a clean file prints nothing"
+
+echo "── bd-notes-replace: scope ──"
+
+mkdir -p "$TMP/specs/tk-x" "$TMP/generated/agents" "$TMP/lint-learned.d"
+cp "$TMP/replace.sh" "$TMP/specs/tk-x/repro.sh"
+cp "$TMP/prompt.md" "$TMP/generated/agents/prompt.md"
+cp "$TMP/replace.sh" "$TMP/lint-learned.d/other-detector.sh"
+cp "$TMP/replace.sh" "$TMP/replace.go"
+runnr "$TMP/specs/tk-x/repro.sh" "$TMP/generated/agents/prompt.md" \
+    "$TMP/lint-learned.d/other-detector.sh" "$TMP/replace.go" "$TMP/does-not-exist.sh"
+eq "$RC" 0 "specs/, generated/, the detector directory, other file types and missing paths are skipped"
+
+echo "── bd-notes-replace: a detector that cannot scan says so ──"
+
+# A scan that does not run reads every file as clean, so the detector must
+# report itself broken rather than pass.
+mkdir -p "$TMP/shim-awk"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/shim-awk/awk"
+chmod +x "$TMP/shim-awk/awk"
+OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_NR" "$TMP/replace.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
+has "$OUT" "detector cannot scan it" "and says which file it could not scan"
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"
