@@ -52,7 +52,26 @@ case "$sub" in
         if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
         exit 0 ;;
       *--status=closed*)
-        if [ -n "${PRIOR_VISITS:-}" ] && [ -f "${PRIOR_VISITS:-}" ]; then cat "$PRIOR_VISITS"; fi
+        # Model the server-side --metadata-field KEY=VALUE narrow: the store
+        # returns only rows whose metadata[KEY] equals VALUE. A stamp-keyed
+        # query (gc.continuation_group=<subject>) therefore hides a visit whose
+        # stamp landed empty — the refile-guard defect. Without this the mock
+        # would serve every prior regardless of the field, so a stamp-only query
+        # and a task_kind query are indistinguishable and the bug cannot repro.
+        if [ -n "${PRIOR_VISITS:-}" ] && [ -f "${PRIOR_VISITS:-}" ]; then
+          mf=""; prev=""
+          for a in "$@"; do
+            [ "$prev" = "--metadata-field" ] && { mf="$a"; break; }
+            case "$a" in --metadata-field=*) mf="${a#--metadata-field=}"; break ;; esac
+            prev="$a"
+          done
+          if [ -n "$mf" ]; then
+            jq --arg k "${mf%%=*}" --arg v "${mf#*=}" \
+               '[.[] | select(((.metadata // {})[$k] // "") == $v)]' "$PRIOR_VISITS"
+          else
+            cat "$PRIOR_VISITS"
+          fi
+        fi
         exit "${GC_LIST_RC:-0}" ;;
       *blocked,deferred*) cat "${FAKE_WIDEN:-/dev/null}" 2>/dev/null || printf '[]'; exit 0 ;;
       *open,in_progress*) cat "$FAKE_LIVE"; exit 0 ;;
@@ -376,7 +395,7 @@ eq "$(cat "$ESC_CALLS")" "" "an edge-only visit (empty stamp) still reads as liv
 
 echo "── the re-file guard suppresses only a dispositioned identical SET ──"
 NEWKEY="$(printf '%s' "$EXPECT_SURVIVORS" | tr ',' '\n' | sort | paste -sd, -)"
-prior() { printf '[{"id":"%s","metadata":{"task_kind":"visit","gc.outcome":"%s","sweep.new_ids":"%s"}}]' "$3" "$1" "$2" > "$TMP/prior.json"; }
+prior() { printf '[{"id":"%s","metadata":{"task_kind":"visit","gc.outcome":"%s","sweep.new_ids":"%s","gc.continuation_group":"tk-subject"}}]' "$3" "$1" "$2" > "$TMP/prior.json"; }
 prior dispositioned "$NEWKEY" v-done
 PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
 eq "$(cat "$ESC_CALLS")" "" "the same NEW set, already dispositioned, is not re-filed"
@@ -391,6 +410,20 @@ prior dispositioned "$NEWKEY" v-failed
 PRIOR_VISITS="$TMP/prior.json" GC_LIST_RC=1 run_sweep ABSENT
 eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
    "a failing closed-visit listing files, even when what it printed matches"
+# The empty-stamp shape: a dispositioned prior identified ONLY by its tracks
+# edge still suppresses. The stamp-keyed server query could not see it and
+# re-filed a settled agenda; the edge-union resolution (visit_covers) does.
+printf '[{"id":"v-edge-done","metadata":{"task_kind":"visit","gc.outcome":"dispositioned","sweep.new_ids":"%s","gc.continuation_group":""},"dependencies":[{"issue_id":"v-edge-done","depends_on_id":"tk-subject","type":"tracks"}]}]' \
+    "$NEWKEY" > "$TMP/prior.json"
+PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "" "an empty-stamp, edge-only dispositioned prior still suppresses the re-file"
+# …and visit_covers must DISCRIMINATE by subject: a dispositioned prior with the
+# same set but covering a DIFFERENT subject (no edge here, stamp names another)
+# is not this subject's prior, so it files.
+printf '[{"id":"v-elsewhere","metadata":{"task_kind":"visit","gc.outcome":"dispositioned","sweep.new_ids":"%s","gc.continuation_group":"some-other-subject"}}]' \
+    "$NEWKEY" > "$TMP/prior.json"
+PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a dispositioned prior on a DIFFERENT subject does not suppress this one"
 
 echo "── fail-safe: an unreadable listing aborts, files nothing, keeps the baseline ──"
 GC_READY_FAIL=1 run_sweep "old-baseline"

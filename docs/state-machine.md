@@ -601,11 +601,13 @@ review's result set.
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
   and cannot assert it.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
-  acting on the anchor — an open `must-fix` finding on any lane, a fix unit in
-  flight, a validation pass in flight, or a full review already in flight on
-  the lane. One authority computes the set, so it cannot disagree with itself
-  about whether a review was already out, and a review that read a mid-change
-  diff would raise only the no-op rework the declination texts are full of.
+  acting on the anchor — a fix unit in flight (including the one answering an
+  open `must-fix` finding on any lane), a validation pass in flight, or a full
+  review already in flight on the lane. A `must-fix` finding no fix unit answers
+  holds the merge, not the dispatch. One authority computes the set, so it
+  cannot disagree with itself about whether a review was already out, and a
+  review that read a mid-change diff would raise only the no-op rework the
+  declination texts are full of.
   There is no dispatch ceiling: quiescence forbids the redundant round a ceiling
   would have bounded, and the runaway shapes it used to catch — a reviewer that
   dies after claim, a rework child filed with its dependency edge reversed —
