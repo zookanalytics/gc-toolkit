@@ -33,6 +33,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/rebase-check.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-rebase-check-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }

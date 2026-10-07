@@ -739,11 +739,14 @@ WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
-# The classify block matches visit coverage through the shared predicate, which
-# liveness-sweep.sh sources before it. Supply the same defs ($VISIT_IDENTITY_JQ)
-# from the real lib so the extracted block resolves them and cannot drift.
+# The classify block matches visit coverage and standing records through two
+# shared definitions, which liveness-sweep.sh sources before it. Supply the same
+# defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ) from the real libs so the
+# extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/visit-identity.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/standing-kinds.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
@@ -770,6 +773,31 @@ eq "$MISSING" "" "every classifier candidate also survives the precheck (contain
 [ "$PRE_N" -gt "$CLASSIFY_N" ] \
     && ok "the precheck is the LOOSER filter ($PRE_N survivors vs $CLASSIFY_N candidates)" \
     || bad "the precheck is the LOOSER filter" "precheck $PRE_N, classifier $CLASSIFY_N — the non-local exclusions are not showing up"
+
+echo "── the no-resolver census reads each lane's marker under its token's own case ──"
+# The extracted block runs with HAVE_RESOLVER=0, the sweep's fallback, which takes
+# the gates from the check_set itself. A mixed-case token reads check.<Token> —
+# the key signoff stamps — so an all-green anchor is gated, while the same anchor
+# missing that marker is still a candidate (the positive control).
+MFIX="$TMP/mfix"; mkdir -p "$MFIX"
+cat > "$MFIX/ready.json" <<'JSON'
+[
+  {"id":"f-mixed-green","title":"pre-open, mixed-case lanes green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}},
+  {"id":"f-mixed-red","title":"pre-open, mixed-case lane not green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green"}}
+]
+JSON
+READY="$MFIX/ready.json"; export READY
+# shellcheck disable=SC1090
+. "$TMP/classify.sh"
+MIXED_IDS=",$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")'),"
+case "$MIXED_IDS" in
+  *",f-mixed-green,"*) bad "an all-green mixed-case anchor is gated, not a candidate" "candidates: $MIXED_IDS" ;;
+  *) ok "an all-green mixed-case anchor is gated, not a candidate" ;;
+esac
+case "$MIXED_IDS" in
+  *",f-mixed-red,"*) ok "…while one missing its check.Arch marker is still a candidate" ;;
+  *) bad "…while one missing its check.Arch marker is still a candidate" "candidates: $MIXED_IDS" ;;
+esac
 
 echo "── holder liveness gates the visit exclusions (mirrors liveness-sweep.sh) ──"
 # A live-held visit excludes its subject (the pass can skip it); a dead-held

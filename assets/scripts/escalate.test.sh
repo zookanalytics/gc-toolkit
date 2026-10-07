@@ -706,6 +706,44 @@ eq "$rc" 2 "a key outside [A-Za-z0-9._-] is rejected"
 out=$("$SUT" --subject tk-a --key k1 --message m --nonsense 2>&1); rc=$?
 eq "$rc" 2 "an unknown argument is rejected"
 
+echo "# a --subject that is not one bead id is refused before the store is touched"
+# An unquoted expansion that does not word-split (zsh) hands escalate.sh an id
+# and the word beside it as one argument. Filed, the visit's group would be the
+# joined string, which no later dedup or retract call matches, and its tracks
+# edge would name no bead. The refusal comes before any gc call, so nothing is
+# listed, created or closed.
+gccalls() { grep -c . "$STUB_GC_LOG"; }
+reset
+out=$("$SUT" --subject "tk-a 2026-10-04T07:07:52Z" --key witness-refinery-queue --message m 2>&1); rc=$?
+eq "$rc" 2 "an id joined to a timestamp by a space is a usage error"
+eq "$(visits)" "0" "and files no visit"
+eq "$(gccalls)" "0" "and makes no gc call at all"
+has "$out" "--subject must be one bead id" "and names the subject as the fault"
+has "$out" "read -r SID SWHEN" "and names the read-each-field fix"
+reset
+out=$("$SUT" --subject $'tk-a\ntk-b' --key k1 --message m 2>&1); rc=$?
+eq "$rc" 2 "a newline-joined id list is refused too"
+eq "$(visits)" "0" "and files no visit"
+reset
+out=$("$SUT" --subject $'tk-a\t2026-10-04T07:07:52Z' --key k1 --message m 2>&1); rc=$?
+eq "$rc" 2 "a tab-joined pair is refused too"
+eq "$(visits)" "0" "and files no visit"
+reset
+"$SUT" --subject tk-a --key witness-refinery-queue --message m >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "the same call with the id alone files"
+eq "$(meta vis-1 gc.continuation_group)" "tk-a" "with the id as the visit's group"
+reset
+"$SUT" --subject tk-9tbbk.2 --key k1 --message m >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "a child bead id (dotted) is one bead id and files"
+eq "$(meta vis-1 gc.continuation_group)" "tk-9tbbk.2" "with the child id as the visit's group"
+# The retract path takes the same guard. The seeded visit carries the joined
+# string as its group, so an unguarded retract would match it and close it.
+reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub 2026-10-04T07:07:52Z — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"witness-refinery-queue","gc.continuation_group":"tk-sub 2026-10-04T07:07:52Z","gc.routed_to":"human"}}]'
+out=$("$SUT" --retract --subject "tk-sub 2026-10-04T07:07:52Z" --key witness-refinery-queue --message m 2>&1); rc=$?
+eq "$rc" 2 "--retract refuses a joined subject as a usage error"
+eq "$(vccount)" "0" "and closes nothing, not even a visit whose group is the same joined string"
+eq "$(gccalls)" "0" "and makes no gc call at all"
+
 echo "# a moot or benign verdict suppresses a re-file inside the window"
 # The open-visit dedup above sees only OPEN visits, so without this window a
 # detector whose condition outlives the sitting re-files the identical
