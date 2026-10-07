@@ -247,7 +247,7 @@ gc bd update "$WORK" \
   --assignee="$KEEPER_TARGET" \
   --set-metadata aborted_at=refinery-race-loss \
   --set-metadata rejection_reason="rebase race loss: origin/main advanced" \
-  --notes "$(cat <<EOF
+  --append-notes "$(cat <<EOF
 Refinery refused the force-push: origin/main advanced after the rebase
 polecat finished (--force-with-lease lease miss). The rebased branch
 ($BRANCH) is no longer landable as-is.
