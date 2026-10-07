@@ -52,10 +52,6 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-case "$DEADLINE" in
-  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
-            DEADLINE="" ;;
-esac
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The two shared readers of the review graph: lane-state derives a lane's green
 # state (the same helper merge.sh asks, so publishing and merging never
@@ -427,13 +423,11 @@ while IFS= read -r tagged; do
   group="${tagged%%$'\t'*}"
   row="${tagged#*$'\t'}"
   id=$(printf '%s' "$row" | jq -r '.id // empty')
-  if [ -n "$id" ]; then
-    pace_visit "$group" "$id"; case $? in 1) continue ;; 2) break ;; esac
-  fi
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // empty')
   [ -n "$target" ] || target="main"
   if [ -z "$id" ] || [ -z "$branch" ]; then skipped=$((skipped + 1)); continue; fi
+  pace_visit "$group" "$id"; case $? in 1) continue ;; 2) break ;; esac
 
   SUP_NUM=""; SUP_URL=""; SUP_HEAD=""
   find_pr "$id" "$branch" "$target"
@@ -745,9 +739,9 @@ ready_n=$(printf '%s' "$ready_rows" | awk 'NF { n++ } END { print n + 0 }')
 pace_start "$READY_CURSOR" "$DEADLINE"
 while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
   [ -n "$rid" ] && [ -n "$rnum" ] || continue
-  pace_visit rest "$rid"; case $? in 1) continue ;; 2) break ;; esac
   # A disposed PR is pr-facts.sh's to close; it is never surfaced.
   [ -z "$rdisp" ] || continue
+  pace_visit rest "$rid"; case $? in 1) continue ;; 2) break ;; esac
   # It may be a draft: ask GitHub (the one read this arm pays, bounded to
   # un-readied drafts). A closed/merged PR is pr-facts.sh's; an unreadable read
   # retries next pass.

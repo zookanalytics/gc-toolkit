@@ -98,10 +98,6 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-case "$DEADLINE" in
-  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
-            DEADLINE="" ;;
-esac
 # Pre-build the repeatable --var args once; every review dispatched this pass
 # reuses them. The +"${..[@]}" guard keeps set -u happy on the empty default.
 SLING_VAR_ARGS=()
@@ -531,7 +527,6 @@ while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   [ -n "$id" ] || continue
-  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
   # A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind when its PR
   # was withdrawn or superseded — still enumerates here (open, merge_result set) until
   # pr-facts.sh's terminal close lands, but its lane is moot: a review or validator
@@ -546,6 +541,7 @@ while IFS= read -r row; do
     echo "$PROG: $id carries a PR-close disposition (gc.pr_close_disposition_kind=$disposition); disposed, awaiting pr-facts terminal close — no review or validation dispatched"
     disposed=$((disposed + 1)); continue
   fi
+  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
   branch=$(meta_of "$row" branch)
   target=$(meta_of "$row" merged_target)
   [ -n "$target" ] || target=$(meta_of "$row" target)

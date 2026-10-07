@@ -27,11 +27,20 @@
 # The walk itself:
 #   pace_start <cursor-file> <deadline>
 #   while IFS= read -r row; do
-#     ...
+#     ...                         the arm's free skips: tests on the row alone
 #     pace_visit <group> "$id"; case $? in 1) continue ;; 2) break ;; esac
-#     ...
+#     ...                         the first read that costs, and the rest
 #   done
 #   pace_end
+#
+# pace_start takes the deadline as the arm received it. A value that is not
+# epoch seconds leaves the walk unpaced, and the first such value warns once
+# per process, so each arm hands its --deadline through unchecked.
+#
+# pace_visit goes after the arm's free skips and before its first read that
+# costs: a gh call, a bead read or write, a git probe. A walk that starts past
+# its deadline is guaranteed one visit, and an anchor the arm then skips for
+# free would spend that visit and leave the walk with no progress made.
 #
 # pace_visit's group says how the anchor is paced. `rest` anchors rotate: an
 # anchor is recorded as finished when the walk's next visit begins, so a walk
@@ -86,6 +95,13 @@ pace_start() { # <cursor-file> <deadline-epoch-secs>
   PACE_CURSOR="${1:-}"
   PACE_FIRST_CURSOR="${1:+$1.first}"
   PACE_DEADLINE="${2:-}"
+  case "$PACE_DEADLINE" in
+    *[!0-9]*)
+      [ "${PACE_DEADLINE_WARNED:-0}" = 1 ] \
+        || echo "${PROG:-pace}: WARN --deadline '$PACE_DEADLINE' is not epoch seconds; this pass is not paced" >&2
+      PACE_DEADLINE_WARNED=1
+      PACE_DEADLINE="" ;;
+  esac
   PACE_VISITED=0
   PACE_FIRST_VISITED=0
   PACE_FIRST_SKIPPED=0

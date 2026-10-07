@@ -153,10 +153,6 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-case "$DEADLINE" in
-  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
-            DEADLINE="" ;;
-esac
 [ "$POSTURE_ONLY" = 1 ] && { DEADLINE=""; CURSOR=""; }
 
 command -v gh >/dev/null 2>&1 || exit 0
@@ -804,8 +800,8 @@ while IFS= read -r row; do
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
   [ -n "$id" ] || continue
-  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
+  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // ""')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   prurl=$(printf '%s' "$row" | jq -r '.metadata.pr_url // ""')

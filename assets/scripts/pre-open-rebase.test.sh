@@ -308,6 +308,16 @@ has "$OUT" "the next pass resumes at P3" "the next pass resumes after the cursor
 OUT=$(run --fix-pool "$POOL")
 has "$OUT" "visited 3 of 3 pre-open anchors" "with no pacing args every anchor is observed"
 has "$OUT" "clean=3 " "…all three"
+
+echo "# pacing: an anchor the walk skips for free does not spend its one visit past the deadline"
+# Q1 names no branch, so the walk passes it without a probe. It leads the
+# rotation and the deadline has passed, so the visit the walk is owed goes to
+# Q2.
+reset "$(pre Q1 "")" "$(pre Q2 polecat/tk-ok)"
+rm -f "$PCUR"
+OUT=$(run --fix-pool "$POOL" --deadline 1 --cursor "$PCUR")
+has "$OUT" "clean=1 " "the visit goes to the first anchor that costs a probe"
+has "$OUT" "visited 1 of 2 pre-open anchors" "…counted once"
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

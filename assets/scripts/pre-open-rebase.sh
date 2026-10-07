@@ -59,10 +59,6 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-case "$DEADLINE" in
-  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every anchor" >&2
-            DEADLINE="" ;;
-esac
 
 # Where the probe parks the branch tips it compares. Its own namespace, so
 # nothing here can move a branch or a remote-tracking ref; the same device
@@ -158,15 +154,13 @@ pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
-  if [ -n "$id" ]; then
-    pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
-  fi
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // empty')
   [ -n "$target" ] || target="$DEFAULT_BRANCH"
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
   if [ -z "$id" ] || [ -z "$branch" ]; then skipped=$((skipped + 1)); continue; fi
+  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
 
   # --- observe: does this branch still merge into its target? --------------------
   # Both sides are read out of the namespace the pass fetch filled, so the

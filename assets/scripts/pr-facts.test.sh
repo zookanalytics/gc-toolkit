@@ -3324,6 +3324,18 @@ out=$("$SUT" --posture-only --deadline 1 --cursor "$PFCUR" 2>&1)
 eq "$(pf_views)" "83,81,82" "the posture-only mode reads every PR, in the enumerated order, whatever pacing it is handed"
 hasnt "$out" "visited " "…and reports no pacing"
 
+echo "# pacing: an anchor the walk skips for free does not spend its one visit past the deadline"
+# PQ1 names no PR number, so the walk passes it without a read. It leads the
+# rotation and the deadline has passed, so the visit the walk is owed goes to
+# PQ2.
+store "[$(anchor PQ1 x), $(anchor PQ2 84)]"
+printf '%s' "$(prview 84 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_84.json"
+rm -f "$PFCUR"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "84" "the visit goes to the first anchor that costs a read"
+has "$out" "visited 1 of 2 PR anchors" "…counted once"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

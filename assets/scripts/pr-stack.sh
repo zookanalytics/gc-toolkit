@@ -61,10 +61,6 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-case "$DEADLINE" in
-  *[!0-9]*) echo "$PROG: WARN --deadline '$DEADLINE' is not epoch seconds; this pass visits every PR" >&2
-            DEADLINE="" ;;
-esac
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes

@@ -820,6 +820,22 @@ has "$out" "visited 3 of 3 draft PRs" "…and reports the whole walk"
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 eq "$(drafts)" "111,112,113" "with no pacing args the draft walk is unbounded"
 
+echo "# pacing: a draft the walk skips for free does not spend its one visit past the deadline"
+# pd121 is disposed, so the walk passes it without a read. It leads the
+# rotation and the deadline has passed, so the visit the walk is owed goes to
+# pd122.
+for n in 121 122; do
+  printf '%s' "$(prrow "$n" OPEN "polecat/pd$n" "sha-pd$n" main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_$n.json"
+done
+store "[$(pr_anchor pd121 polecat/pd121 121 'correctness,demo' sha-pd121 | jq -c '.metadata["gc.pr_close_disposition_kind"]="superseded"'),
+        $(pr_anchor pd122 polecat/pd122 122 'correctness,demo' sha-pd122 | jq -c '.metadata.merge_hold="true"')]"
+RCUR="$TMP/ready-skip.cursor"; rm -f "$RCUR" "$RCUR.first" "$RCUR.ready"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1)
+has "$(cat "$STUB_GH_LOG")" "pr view 122" "the visit goes to the first draft that costs a read"
+hasnt "$(cat "$STUB_GH_LOG")" "pr view 121" "…and the disposed draft is passed without one"
+has "$out" "visited 1 of 2 draft PRs" "…counted once"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

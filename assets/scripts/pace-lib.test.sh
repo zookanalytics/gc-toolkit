@@ -3,7 +3,8 @@
 # share: the rotation order after a cursor, the cursor write, the deadline, and
 # the per-group bookkeeping (exempt never stops, first skips past the deadline
 # and rotates on a cursor of its own, rest stops and resumes at the anchor it
-# stopped at, and one anchor of each paced group is always visited).
+# stopped at, and one anchor of each paced group is always visited), and the
+# deadline check pace_start makes for every arm.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pace-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -87,6 +88,15 @@ pace_visit first f1; pace_visit first f2; pace_visit rest a
 eq "$(cat "$CUR.first" 2>/dev/null)" "f2" "the last first anchor is recorded when the first rest visit begins, so a kill there does not redo it"
 pace_end
 eq "$(cat "$CUR" 2>/dev/null)" "a" "pace_end records the rest anchor in hand"
+
+echo "# pace_start: a deadline that is not epoch seconds leaves the walk unpaced"
+rm -f "$CUR"
+eq "$(walk soon rest:a rest:b rest:c 2>/dev/null)" "a,b,c" "a deadline that is not epoch seconds visits every anchor"
+err=$( { walk soon rest:a >/dev/null; walk 12.5 rest:b >/dev/null; } 2>&1 )
+has "$err" "--deadline 'soon' is not epoch seconds" "…and says so"
+eq "$(printf '%s\n' "$err" | grep -c 'is not epoch seconds')" 1 "…once per process, however many walks start with one"
+err=$( { walk "" rest:a >/dev/null; } 2>&1 )
+eq "$err" "" "an empty deadline is no deadline, and warns nothing"
 
 echo "# a cursor write that fails warns once and the walk goes on"
 CUR="$TMP/no-such-dir/walk.cursor"

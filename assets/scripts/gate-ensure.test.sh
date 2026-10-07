@@ -1231,6 +1231,16 @@ out=$(pace --deadline 1)
 eq "$(meta S30 check_set)" "correctness" "the pass starts at the first id after the cursor"
 eq "$(meta S10 check_set)" "<absent>" "…not at the top of the list"
 
+echo "# a disposed anchor the pass skips for free does not spend its one visit past the deadline"
+# V10 is disposed, so the pass passes it without a read. It leads the rotation
+# and the deadline has passed, so the visit the pass is owed goes to V20.
+store "[$(anchor V10 pull_request correctness "" polecat/v10 ',"gc.pr_close_disposition_kind":"not-needed"'),
+        $(anchor V20 pre_open_gate "" "" polecat/v20)]"
+rm -f "$CUR"
+out=$(pace --deadline 1)
+eq "$(meta V20 check_set)" "correctness" "the visit goes to the first anchor that costs a read"
+has "$out" "visited 1 of 2 gating anchors" "…counted once"
+
 echo "# no --deadline visits every anchor; an unwritable cursor warns and the pass still runs"
 store "[$(anchor T1 pre_open_gate "" "" polecat/t1), $(anchor T2 pull_request "" "" polecat/t2)]"
 out=$("$SUT" --default correctness --fix-pool "$FIXP" --cursor "$TMP/no-such-dir/gate.cursor" 2>&1); rc=$?
