@@ -35,6 +35,11 @@
 # --posture-only exits non-zero when any anchor is left without a current
 # posture and nothing standing already holds it: the caller holds merge.sh for
 # that pass rather than let it validate against a fact from an earlier tick.
+# --posture-only with --seen <file> reads every open PR in one batched GraphQL
+# call, merge state included, and keeps in <file> the facts each anchor's
+# posture was last derived from. An anchor whose facts all read the same, and
+# whose bead still carries that posture at that head, keeps it without the
+# per-PR reads; any other anchor is read as before.
 # Unanswered review feedback routes to something — a fix-pool rework child
 # carrying the review bodies and inline comments verbatim, or a visit when a
 # human already holds the anchor — with the watermarks advancing only once that
@@ -103,9 +108,11 @@
 # feedback up); --deadline <epoch-secs> and --cursor <file> pace the per-anchor
 # walk of the feedback and full modes, and the full mode's write-back sweep on a
 # cursor of its own (pace-lib.sh): each walk is a rotation that starts no new
-# anchor past the deadline. The posture-only mode is never paced, because
-# merge.sh needs every posture current. Caller: refinery-reconcile.sh
-# (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
+# anchor past the deadline, and visits first the anchors that need action. The
+# posture-only mode is never paced, because merge.sh needs every posture
+# current; --seen <file> is its record of what it read. Caller:
+# refinery-reconcile.sh (BEADS_ACTOR projected to the refinery identity).
+# Fail-closed on identity.
 set -u
 
 PROG="pr-facts"
@@ -166,7 +173,7 @@ PR_POST="$SCRIPTS_DIR/pr-post.sh"
 CITY_OWN_DEF=$("$PR_POST" own-def) && [ -n "$CITY_OWN_DEF" ] \
   || { echo "$PROG: the PR posting helper did not print its provenance definition; cannot tell the city's own posts from feedback" >&2; exit 1; }
 
-FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""
+FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""; SEEN=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool)            FIX_POOL="${2:-}"; shift 2 ;;
@@ -174,10 +181,12 @@ while [ $# -gt 0 ]; do
     --route-comments-only) ROUTE_ONLY=1; shift ;;
     --deadline)            DEADLINE="${2:-}"; shift 2 ;;
     --cursor)              CURSOR="${2:-}"; shift 2 ;;
+    --seen)                SEEN="${2:-}"; shift 2 ;;
     *) shift ;;
   esac
 done
 [ "$POSTURE_ONLY" = 1 ] && { DEADLINE=""; CURSOR=""; }
+[ "$POSTURE_ONLY" = 1 ] || SEEN=""
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -733,9 +742,15 @@ unengaged_thread_count() { # <pr-number> — count on stdout; non-zero = could n
 # On the FIRST pass that reads the threads it sets UT_COUNT so the full pass files
 # the one visit without a second read; a later pass holds off the standing visit
 # and leaves UT_COUNT empty.
+# UH_CANDIDATE is 1 once the cheap pre-gate below finds such a post. Past it the
+# answer also turns on bead state (the lane markers, the standing visit, the
+# children in flight), which the PR's own facts do not show, so the posture arm
+# keeps no basis for that anchor and reads it whole every pass.
 UT_COUNT=""
+UH_CANDIDATE=0
 unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
   local id="$1" num="$2" head="$3" row="$4" cmts="$5" sf g m grn=1 stamp inflight utc
+  UH_CANDIDATE=0
   [ -n "$head" ] && [ -n "$num" ] && [ -n "$SELF_LOGIN" ] && [ -n "$cmts" ] || return 1
   # Cheap pre-gate off the comments already fetched: the gap is an unmarked
   # comment under OUR OWN login that arm 7 read as the city's own, which only a
@@ -745,6 +760,7 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
     [ .[] | select(gc_city_own($self; $since)) | select(gc_city_marked | not) ] | length' 2>/dev/null)
   case "$sf" in ''|*[!0-9]*) sf=0 ;; esac
   [ "$sf" -gt 0 ] || return 1
+  UH_CANDIDATE=1
   # Only a green check hides findings: a red lane is already re-reviewing. The one
   # resolver names the declared lanes and drops the non-lanes; the marker read is
   # the census's own fast green check, kept. The resolver's exit status is
@@ -834,19 +850,160 @@ fi
 
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
+# --- the open PRs, in one read -----------------------------------------------------
+# One paginated GraphQL read lists every open PR with the facts that move when a
+# person or a push acts on it: the head, the base, the draft flag, the review
+# decision, and the count and newest id of its reviews and of its Conversation
+# comments. An inline comment arrives inside a review of its own, so it moves the
+# review count too. updatedAt alone would not do: GitHub can leave it at the
+# first of several reviews submitted seconds apart, so a later one does not move
+# it. OPEN_ACT holds each PR's activity mark, the facts joined in one line, and a
+# PR missing from a read that answered has left the open list.
+# The posture arm asks for the merge state as well. GitHub computes that per PR
+# on request and times out on about a hundred at once, so that read pages 25 PRs
+# at a time.
+OPEN_PR_FIELDS='number isDraft headRefOid baseRefName reviewDecision updatedAt
+  reviews(last:1){totalCount nodes{databaseId}} comments(last:1){totalCount nodes{databaseId}}'
+POSTURE_PR_FIELDS='state url headRefName isCrossRepository headRepository{name}
+  headRepositoryOwner{login} mergeStateStatus'
+declare -A OPEN_PR=() OPEN_ACT=() OPEN_UPD=()
+OPEN_READ=0
+open_prs_read() { # <extra node fields> <page size>; fills OPEN_PR, OPEN_ACT, OPEN_UPD; non-zero = could not tell
+  local q raw lines n act upd node
+  q='query($owner:String!,$repo:String!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequests(states:OPEN,first:'"$2"',after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{'"$OPEN_PR_FIELDS $1"'}}}}'
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$q" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" 2>/dev/null) || return 1
+  lines=$(printf '%s' "$raw" | scrub | jq -rs '
+    def v: ((. // "") | tostring | gsub("[[:space:]]"; "_")) as $s | if $s == "" then "-" else $s end;
+    [ .[] | .data.repository.pullRequests ] as $pages
+    | if ($pages | length) == 0 or ([ $pages[] | select(. == null) ] | length) > 0
+      then error("no pullRequests in response") else $pages[].nodes[]? end
+    | select((.number // null) != null)
+    | ([ (.headRefOid | v), (.baseRefName | v), ((.isDraft // false) | tostring), (.reviewDecision | v),
+         "\(.reviews.totalCount // 0):\(.reviews.nodes[0].databaseId // 0)",
+         "\(.comments.totalCount // 0):\(.comments.nodes[0].databaseId // 0)" ] | join("|")) as $act
+    | "\(.number) \($act) \(.updatedAt | v) \(tojson)"' 2>/dev/null) || return 1
+  while IFS=' ' read -r n act upd node; do
+    [ -n "$n" ] && [ -n "$node" ] || continue
+    OPEN_PR["$n"]="$node"; OPEN_ACT["$n"]="$act"; OPEN_UPD["$n"]="$upd"
+  done <<< "$lines"
+  OPEN_READ=1
+}
+
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
-postured=0; answered=0; unpostured=0; reaped=0
+postured=0; answered=0; unpostured=0; reaped=0; pkept=0; pread=0
 # The anchor's provenance cutover, set per anchor below and read by every
 # gc_city_own call the anchor's arms make.
 PSINCE=""
 pace_start "$CURSOR" "$DEADLINE"
-while IFS= read -r row; do
-  [ -n "${row:-}" ] || continue
+
+# --- the posture basis: what each anchor's posture was last derived from -------
+# The posture is derived from the PR's head, review decision, reviews and
+# comments, the anchor's watermarks and provenance cutover, the acting login,
+# and this script, and from nothing else while no unengaged-thread candidate is
+# in play. The basis joins those facts as the batched read gives them, and
+# --seen keeps it beside the posture it produced. An anchor whose basis reads the
+# same this pass, and whose bead still carries that posture at the read's head,
+# keeps the posture without the per-PR reads. A posture of `commented` keeps no
+# basis, because a routing or a visit can release it with nothing on the PR
+# moving. A visit that keeps or earns no basis records "-", which matches
+# nothing, so the next pass reads that anchor whole.
+PF_CODE_FP="$(cksum < "$0" 2>/dev/null | cut -d' ' -f1)-$(printf '%s' "$CITY_OWN_DEF" | cksum | cut -d' ' -f1)"
+if [ "$POSTURE_ONLY" = 1 ] && [ -n "$SEEN" ]; then
+  open_prs_read "$POSTURE_PR_FIELDS" 25 \
+    || echo "$PROG: WARN the batched open-PR read did not answer; every posture is read per PR this pass" >&2
+  pace_seen_start "$SEEN"
+else
+  pace_seen_start "${CURSOR:+$CURSOR.seen}"
+fi
+
+# --- visit order: the anchors that need action first, the rest in rotation -------
+# A paced walk visits first what its arm can act on, then rotates through the
+# rest after its cursor (pace-lib.sh), so an idle anchor is still reached. The
+# feedback arm puts first an anchor whose recorded posture is `commented`
+# (feedback no routing has answered yet) or a `changes_requested` whose PR
+# changed since this arm last visited it, since that posture alone cannot say
+# whether its feedback is routed. The full walk puts first an anchor whose PR
+# left the open list (a merge or a close to record), an approved PR the posture
+# arm recorded as DIRTY at its head with no rework child in flight (it owes a
+# merge-in), and any PR that changed since this walk last visited it (a review,
+# a comment, a push, a new base, a draft flip). First anchors rotate on
+# <cursor>.first, the rest on <cursor>, and <cursor>.seen holds each anchor's
+# activity mark as the walk last saw it. A walk with no marks yet records them
+# all and puts nothing first for a change, so its first pass is the plain
+# rotation plus the anchors that owe something now. Unpaced, the walk keeps the
+# enumerated order.
+first_rows=""; rest_rows=""; first_n=0
+declare -A KIDS_REWORK=()
+if [ -n "$CURSOR" ]; then
+  open_prs_read "" 100 \
+    || echo "$PROG: WARN the open-PR list did not answer; this walk orders by what the anchors record" >&2
+  if [ "$ROUTE_ONLY" != 1 ]; then
+    if kid_lines=$(bd_live_children); then
+      while IFS=$'\t' read -r ka _kids krw; do
+        [ -n "$ka" ] && KIDS_REWORK["$ka"]="$krw"
+      done <<< "$kid_lines"
+    else
+      echo "$PROG: WARN the anchors' live children did not read; an approved conflicting PR is not put first this pass" >&2
+      KIDS_REWORK["*"]=unreadable
+    fi
+  fi
+  while IFS=$'\x1f' read -r cid cnum cpost cms arow; do
+    [ -n "${arow:-}" ] || continue
+    grp=rest
+    cact="${OPEN_ACT[$cnum]-}"
+    if [ "$ROUTE_ONLY" = 1 ]; then
+      case "${cpost%%@*}" in
+        commented) grp=first ;;
+        changes_requested) [ -n "$cact" ] && pace_seen_changed "$cid" "$cact" && grp=first ;;
+      esac
+    else
+      cphead="${cpost#*@}"; cphead="${cphead%%@*}"
+      if [ "$OPEN_READ" = 1 ] && [ -z "$cact" ]; then
+        grp=first
+      elif [ "${cpost%%@*}" = approved ] && [ "${cms%%@*}" = DIRTY ] && [ "${cms#*@}" = "$cphead" ] \
+           && { [ -z "$cact" ] || [ "${cact%%|*}" = "$cphead" ]; } \
+           && [ -z "${KIDS_REWORK["*"]-}" ] && [ "${KIDS_REWORK[$cid]-0}" != 1 ]; then
+        grp=first
+      elif [ -n "$cact" ] && pace_seen_changed "$cid" "$cact"; then
+        grp=first
+      fi
+    fi
+    if [ "$PACE_SEEN_FRESH" = 1 ] && [ -n "$cact" ]; then pace_seen_put "$cid" "$cact"; fi
+    if [ "$grp" = first ]; then
+      first_rows="$first_rows$arow"$'\n'; first_n=$((first_n + 1))
+    else
+      rest_rows="$rest_rows$arow"$'\n'
+    fi
+  done <<SPLIT_EOF
+$(printf '%s' "$ANCHORS" | jq -r '
+    .[] | . as $row | (.metadata // {}) as $m
+    | [ (.id // ""), ($m.pr_number // ""), ($m.pr_posture // ""), ($m.pr_merge_state // "") ]
+    | map(tostring | gsub("[\u001f\n]"; " ")) + [ $row | tojson ] | join("\u001f")' 2>/dev/null)
+SPLIT_EOF
+  first_rows=$(printf '%s' "$first_rows" | pace_order "$PACE_FIRST_CURSOR")
+  rest_rows=$(printf '%s' "$rest_rows" | pace_order "$CURSOR")
+else
+  rest_rows=$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+fi
+
+while IFS= read -r tagged; do
+  [ -n "${tagged:-}" ] || continue
+  group="${tagged%%$'\t'*}"
+  row="${tagged#*$'\t'}"
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
   [ -n "$id" ] || continue
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
-  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
+  # The mark this visit records: the posture arm's starts as "-" and earns its
+  # basis only at the end; a paced walk records the PR's activity mark.
+  vmark="${OPEN_ACT[$num]-}"
+  [ "$POSTURE_ONLY" != 1 ] || vmark="-"
+  pace_visit "$group" "$id" "$vmark"; case $? in 1) continue ;; 2) break ;; esac
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // ""')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   prurl=$(printf '%s' "$row" | jq -r '.metadata.pr_url // ""')
@@ -863,8 +1020,35 @@ while IFS= read -r row; do
   # human clears it.
   armed=$(printf '%s' "$row" | jq -r '.metadata["gc.dispatch_when_ready"] // ""')
 
+  # --- the posture basis, as this pass's batched read shows it -----------------
+  # SHORT=1 when the basis --seen kept for this anchor reads the same now and the
+  # bead still carries the posture it produced at the read's head: the batched
+  # read then stands in for the pinned read, and the posture below is kept
+  # rather than derived again.
+  SHORT=0; SHORT_P=""; PFP=""; UH_CANDIDATE=0
+  if [ "$POSTURE_ONLY" = 1 ] && [ -n "${OPEN_PR[$num]-}" ]; then
+    IFS=$'\x1f' read -r b_since b_rwm b_cwm b_iwm b_have <<< "$(printf '%s' "$row" | jq -r '
+      (.metadata // {}) as $m
+      | [ $m.pr_provenance_since, $m.pr_review_watermark, $m.pr_comment_watermark,
+          $m.pr_issue_comment_watermark, $m.pr_posture ]
+      | map((. // "") | tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)"
+    PFP="$PF_CODE_FP|$SELF_LOGIN|$b_since|$b_rwm|$b_cwm|$b_iwm|${OPEN_UPD[$num]-}|${OPEN_ACT[$num]-}"
+    b_seen=$(pace_seen_get "$id")
+    SHORT_P="${b_seen%%#*}"
+    if [ -n "$b_since" ] && [ -n "$SELF_LOGIN" ] && [ "${b_seen#*#}" = "$PFP" ]; then
+      case "$SHORT_P" in
+        approved|review_required|none|changes_requested)
+          case "$b_have" in "$SHORT_P@${OPEN_ACT[$num]%%|*}@"?*) SHORT=1 ;; esac ;;
+      esac
+    fi
+  fi
+
   # --- pinned identity read (merge.sh's field set, plus labels) -----------------
-  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json "$PR_FIELDS,labels" 2>/dev/null)
+  if [ "$SHORT" = 1 ]; then
+    PR_JSON="${OPEN_PR[$num]}"
+  else
+    PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json "$PR_FIELDS,labels" 2>/dev/null)
+  fi
   if [ -z "$PR_JSON" ]; then
     echo "$PROG: PR#$num view failed; NOTHING recorded for $id (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
@@ -1132,7 +1316,14 @@ CHILDREN_EOF
     # and a weaker posture written here would clear a standing `commented` that
     # is holding the merge. Record nothing; hold what stands.
     echo "$PROG: $id — PR#$num posture not recorded: the acting login is unresolved" >&2
+  elif [ "$SHORT" = 1 ]; then
+    # Nothing the posture was derived from has moved since: no review, comment
+    # or push, the same review decision, watermarks and cutover. Deriving it
+    # again would read the same lists and answer the same value.
+    posture="$SHORT_P"
+    pkept=$((pkept + 1))
   else
+    [ "$POSTURE_ONLY" != 1 ] || pread=$((pread + 1))
     revs_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100") || revs_raw=""
     cmts_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/comments?per_page=100") || cmts_raw=""
     # The Conversation tab is a third feedback space in its own id range: operator
@@ -1267,6 +1458,18 @@ CHILDREN_EOF
       commented@*) : ;;
       *) unpostured=$((unpostured + 1))
          echo "$PROG: $id — PR#$num posture is not current; merge must not read it this pass" >&2 ;;
+    esac
+  fi
+  # The basis a current posture earns, kept by --seen: only one the batched read
+  # describes (the head this posture is pinned to), and only a value the PR's own
+  # facts decide. A `commented` posture, or one an unengaged-thread candidate had
+  # a say in, can change with nothing on the PR moving, so it keeps none.
+  if [ "$POSTURE_ONLY" = 1 ] && [ "$pinned" = 1 ] && [ -n "$PFP" ] \
+     && [ "$head_oid" = "${OPEN_ACT[$num]%%|*}" ]; then
+    case "$posture" in
+      changes_requested) pace_seen_mark "$posture#$PFP" ;;
+      approved|review_required|none)
+        [ "$SHORT" != 1 ] && [ "$UH_CANDIDATE" = 1 ] || pace_seen_mark "$posture#$PFP" ;;
     esac
   fi
 
@@ -2455,15 +2658,18 @@ GATES
       fi ;;
   esac
 done <<ROWS_EOF
-$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR")
+$(printf '%s\n' "$first_rows" | awk 'NF { print "first\t" $0 }')
+$(printf '%s\n' "$rest_rows" | awk 'NF { print "rest\t" $0 }')
 ROWS_EOF
 pace_end
 if [ -n "$CURSOR$DEADLINE" ]; then
-  if [ -n "$PACE_RESUME_AT" ]; then
-    echo "$PROG: visited $PACE_VISITED of $(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null) PR anchors before the deadline; the next pass resumes at $PACE_RESUME_AT"
-  else
-    echo "$PROG: visited $PACE_VISITED of $(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null) PR anchors"
+  paced="visited $PACE_VISITED of $(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null) PR anchors ($first_n needing action first)"
+  if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
+    paced="$paced before the deadline"
+    [ -z "$PACE_RESUME_AT" ] || paced="$paced; the next pass resumes at $PACE_RESUME_AT"
+    [ "$PACE_FIRST_SKIPPED" -eq 0 ] || paced="$paced; $PACE_FIRST_SKIPPED needing action wait for the next pass"
   fi
+  echo "$PROG: $paced"
 fi
 
 
@@ -2557,8 +2763,60 @@ fi
 WB_CURSOR="${CURSOR:+$CURSOR.writeback}"
 wb_due=$(printf '%s' "${WB_ANCHORS:-[]}" | jq '[ .[]? | select(((.metadata.pr_comment_disposition // "") | tostring) != "") ] | length' 2>/dev/null)
 pace_start "$WB_CURSOR" "$DEADLINE"
-while IFS= read -r wrow; do
-  [ -n "${wrow:-}" ] || continue
+pace_seen_start "${WB_CURSOR:+$WB_CURSOR.seen}"
+# --- write-back visit order: an anchor with something new to answer first --------
+# The sweep owes a write when a batch is routed (the disposition or a watermark
+# moves) or when work answering one closes (a rework child, a finding, a
+# validation pass leaves the anchor's live children). Its mark joins the
+# disposition, the three watermarks and the live child ids, so an anchor whose
+# mark moved since the sweep last visited it goes first, on
+# <cursor>.writeback.first, and the rest rotate on <cursor>.writeback.
+# <cursor>.writeback.seen holds the marks. A sweep with no marks yet records
+# them and puts nothing first; a child list that does not read leaves the sweep
+# a plain rotation that records no marks.
+wb_first=""; wb_rest=""; wb_first_n=0
+declare -A WB_MARK=()
+if [ -n "$WB_CURSOR" ] && [ -n "$WB_ANCHORS" ]; then
+  declare -A WB_KIDS=()
+  wb_kids_ok=0
+  if kid_lines=$(bd_live_children); then
+    wb_kids_ok=1
+    while IFS=$'\t' read -r ka kids _krw; do
+      [ -n "$ka" ] && WB_KIDS["$ka"]="$kids"
+    done <<< "$kid_lines"
+  else
+    echo "$PROG: WARN the anchors' live children did not read; the write-back sweep rotates without putting any anchor first" >&2
+  fi
+  while IFS=$'\x1f' read -r wcid wcdisp wcfields arow; do
+    [ -n "${arow:-}" ] || continue
+    grp=rest
+    if [ "$wb_kids_ok" = 1 ] && [ -n "$wcdisp" ]; then
+      WB_MARK["$wcid"]="$wcdisp|$wcfields|${WB_KIDS[$wcid]-}"
+      pace_seen_changed "$wcid" "${WB_MARK[$wcid]}" && grp=first
+      [ "$PACE_SEEN_FRESH" != 1 ] || pace_seen_put "$wcid" "${WB_MARK[$wcid]}"
+    fi
+    if [ "$grp" = first ]; then
+      wb_first="$wb_first$arow"$'\n'; wb_first_n=$((wb_first_n + 1))
+    else
+      wb_rest="$wb_rest$arow"$'\n'
+    fi
+  done <<WB_SPLIT_EOF
+$(printf '%s' "$WB_ANCHORS" | jq -r '
+    .[] | . as $row | (.metadata // {}) as $m
+    | [ (.id // ""), ($m.pr_comment_disposition // ""),
+        ([ $m.pr_comment_watermark, $m.pr_review_watermark, $m.pr_issue_comment_watermark ]
+         | map((. // "") | tostring) | join("|")) ]
+    | map(tostring | gsub("[\u001f\n]"; " ")) + [ $row | tojson ] | join("\u001f")' 2>/dev/null)
+WB_SPLIT_EOF
+  wb_first=$(printf '%s' "$wb_first" | pace_order "$PACE_FIRST_CURSOR")
+  wb_rest=$(printf '%s' "$wb_rest" | pace_order "$WB_CURSOR")
+else
+  wb_rest=$(printf '%s' "${WB_ANCHORS:-[]}" | jq -c '.[]?' 2>/dev/null)
+fi
+while IFS= read -r wtagged; do
+  [ -n "${wtagged:-}" ] || continue
+  wgroup="${wtagged%%$'\t'*}"
+  wrow="${wtagged#*$'\t'}"
   wid=$(printf '%s' "$wrow" | jq -r '.id // empty')
   [ -n "$wid" ] || continue
   disp=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_comment_disposition // "") | tostring')
@@ -2624,7 +2882,7 @@ while IFS= read -r wrow; do
     echo "$PROG: $wid — PR#$wnum write-back skipped: the acting login is unresolved (every write keys off telling our own comments from a human's)" >&2
     continue
   }
-  pace_visit rest "$wid"; case $? in 1) continue ;; 2) break ;; esac
+  pace_visit "$wgroup" "$wid" "${WB_MARK[$wid]-}"; case $? in 1) continue ;; 2) break ;; esac
   wbranch=$(printf '%s' "$wrow" | jq -r '.metadata.branch // ""')
   wprurl=$(printf '%s' "$wrow" | jq -r '.metadata.pr_url // ""')
 
@@ -3133,19 +3391,22 @@ WB_REVIEW_CLEARS
     fi
   fi
 done <<WB_ROWS
-$(printf '%s' "$WB_ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$WB_CURSOR")
+$(printf '%s\n' "$wb_first" | awk 'NF { print "first\t" $0 }')
+$(printf '%s\n' "$wb_rest" | awk 'NF { print "rest\t" $0 }')
 WB_ROWS
 pace_end
 if [ -n "$CURSOR$DEADLINE" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-  if [ -n "$PACE_RESUME_AT" ]; then
-    echo "$PROG: write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments before the deadline; the next pass resumes at $PACE_RESUME_AT"
-  else
-    echo "$PROG: write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments"
+  wpaced="write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments ($wb_first_n with something new first)"
+  if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
+    wpaced="$wpaced before the deadline"
+    [ -z "$PACE_RESUME_AT" ] || wpaced="$wpaced; the next pass resumes at $PACE_RESUME_AT"
+    [ "$PACE_FIRST_SKIPPED" -eq 0 ] || wpaced="$wpaced; $PACE_FIRST_SKIPPED with something new wait for the next pass"
   fi
+  echo "$PROG: $wpaced"
 fi
 
 if [ "$POSTURE_ONLY" = 1 ]; then
-  echo "$PROG: posture-only — $postured postures recorded, $unpostured not current, $skipped skipped"
+  echo "$PROG: posture-only — $postured postures recorded, $unpostured not current, $skipped skipped; $pkept unchanged since the basis they were derived from, $pread read per PR"
   # Only this mode's exit code gates anything: refinery-reconcile runs it
   # immediately before merge.sh and holds the merge arm on a non-zero. The full
   # pass runs after merge, where the same rc would gate nothing.
