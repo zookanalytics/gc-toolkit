@@ -1334,6 +1334,51 @@ out=$(run)
 has "$out" "routed to rework" "the Conversation comment routes the batch"
 eq "$(meta AE9 pr_review_watermark)" "900" "…and the review mark stays at the dismissed review's id, never the older 800"
 
+echo "# a review whose every inline comment its thread answered is answered, body and all"
+# The incident's shape: a COMMENTED review with a summary body over its inline
+# comments, each answered by the city in-thread and resolved. Dropping only the
+# comments left the review id above its mark, so the batch still fired and the
+# false hold stood.
+store "[$(anchor AF1 179)]"
+printf '%s' "$(prview 179 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_179.json"
+printf '[{"id":9100,"user":{"login":"human1"},"state":"COMMENTED","body":"Sticking with comments on the docs change."}]' > "$GH_DIR/reviews_179.json"
+printf '[{"id":9101,"user":{"login":"human1"},"body":"one","path":"a.md","line":1,"pull_request_review_id":9100},{"id":9102,"user":{"login":"human1"},"body":"two","path":"b.md","line":1,"pull_request_review_id":9100},{"id":9103,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.md","line":1,"in_reply_to_id":9101,"pull_request_review_id":9110},{"id":9104,"user":{"login":"gc-city-bot"},"body":"fixed","path":"b.md","line":1,"in_reply_to_id":9102,"pull_request_review_id":9111}]' > "$GH_DIR/comments_179.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-179a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-179a","databaseId":9101,"fullDatabaseId":"9101","author":{"login":"human1"},"body":"one","reactionGroups":[]},{"id":"NC-179c","databaseId":9103,"fullDatabaseId":"9103","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}},{"id":"T-179b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-179b","databaseId":9102,"fullDatabaseId":"9102","author":{"login":"human1"},"body":"two","reactionGroups":[]},{"id":"NC-179d","databaseId":9104,"fullDatabaseId":"9104","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_179.json"
+out=$(run)
+eq "$(meta_pinned AF1 pr_posture)" "review_required@sha-179" "the answered review holds nothing: not commented"
+hasnt "$out" "routed to" "…and routes nothing, neither a rework nor a visit"
+eq "$(meta AF1 pr_review_watermark)" "<absent>" "…and no batch moved the review mark"
+
+echo "# a review with one inline comment still outstanding keeps its body in the batch"
+# Comment 9201 was answered and 9202 was not, so the review is not answered: its
+# body and 9202 route, and 9201 does not.
+store "[$(anchor AF2 180)]"
+printf '%s' "$(prview 180 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_180.json"
+printf '[{"id":9200,"user":{"login":"human1"},"state":"COMMENTED","body":"Two things below."}]' > "$GH_DIR/reviews_180.json"
+printf '[{"id":9201,"user":{"login":"human1"},"body":"first thing","path":"a.md","line":1,"pull_request_review_id":9200},{"id":9202,"user":{"login":"human1"},"body":"second thing","path":"b.md","line":1,"pull_request_review_id":9200},{"id":9203,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.md","line":1,"in_reply_to_id":9201,"pull_request_review_id":9210}]' > "$GH_DIR/comments_180.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-180a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-180a","databaseId":9201,"fullDatabaseId":"9201","author":{"login":"human1"},"body":"first thing","reactionGroups":[]},{"id":"NC-180c","databaseId":9203,"fullDatabaseId":"9203","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}},{"id":"T-180b","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-180b","databaseId":9202,"fullDatabaseId":"9202","author":{"login":"human1"},"body":"second thing","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_180.json"
+out=$(run)
+eq "$(meta_pinned AF2 pr_posture)" "commented@sha-180" "the review with an outstanding comment keeps the PR commented"
+eq "$(meta AF2 pr_review_watermark)" "9200" "…its body routes"
+eq "$(meta AF2 pr_comment_watermark)" "9202" "…with the outstanding comment"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AF2") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "Two things below." "the work order carries the review body"
+has "$CB" "second thing" "…and the outstanding comment"
+hasnt "$CB" "first thing" "…and not the comment its thread answered"
+
+echo "# a review submitted late over comments the mark already passed still routes"
+# The mark passed 9301 before review 9300 (opened earlier, submitted later) became
+# visible. The review is answered only on the threads' word, never the mark's:
+# 9301's thread is open, so the body routes.
+store "[$(anchor AF3 181 ',"pr_comment_watermark":9305')]"
+printf '%s' "$(prview 181 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_181.json"
+printf '[{"id":9300,"user":{"login":"human1"},"state":"COMMENTED","body":"Late review body."}]' > "$GH_DIR/reviews_181.json"
+printf '[{"id":9301,"user":{"login":"human1"},"body":"late comment","path":"a.md","line":1,"pull_request_review_id":9300}]' > "$GH_DIR/comments_181.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-181","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-181","databaseId":9301,"fullDatabaseId":"9301","author":{"login":"human1"},"body":"late comment","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_181.json"
+out=$(run)
+eq "$(meta_pinned AF3 pr_posture)" "commented@sha-181" "the late review is outstanding"
+eq "$(meta AF3 pr_review_watermark)" "9300" "…and its body routes"
+
 echo "# a feedback batch past the OS per-argument limit still renders"
 # tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
 # per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as

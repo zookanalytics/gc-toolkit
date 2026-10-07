@@ -658,6 +658,51 @@ max_foreign_id() { # <rows-json>
   case "$n" in ''|*[!0-9]*) n=0 ;; esac
   printf '%s' "$n"
 }
+# The highest id among the reviews in <reviews-json> whose body counts as
+# feedback, or 0: written by a login other than ours, COMMENTED or
+# CHANGES_REQUESTED, and carrying a body. A review with an empty body carries
+# only its inline comments, which the comment space already sees; counting it
+# would leave a posture no comment id can ever answer. CHANGES_REQUESTED counts
+# beside COMMENTED: an operator uses it to mean "change this", and it is the
+# feedback the loop most has to answer. A dismissed review is in neither state,
+# so a dismissal takes its ids out of the batch.
+max_counted_review_id() { # <reviews-json>
+  local n
+  n=$(printf '%s' "$1" | jq -r --arg self "$SELF_LOGIN" '
+    [ .[] | select(((.user.login // "") | tostring) != $self)
+      | (((.state // "") | tostring)) as $st
+      | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
+      | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
+      | (.id // 0) ] | max // 0' 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
+# The reviews whose bodies the review threads have answered, as a JSON array of
+# ids: each carries at least one inline comment, and every one of those is in
+# <answered-ids>. A review's body frames the inline comments it carries, so a
+# sitting that answered each of them in its thread has answered the review. Only
+# the thread read confirms a comment here. A comment the watermark already passed
+# is not taken as answered on the mark's word, so a review submitted late over
+# such comments still routes. A review with no inline comment has no thread to
+# answer it and is never listed. The lists go in on stdin, the way
+# feedback_body takes them.
+answered_review_ids() { # <reviews-json> <comments-json> <answered-ids-json>
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$3"; } | jq -nc '
+    (input) as $revs | (input) as $cmts | (input) as $ans
+    | (reduce $ans[] as $a ({}; .[$a | tostring] = true)) as $done
+    | (reduce $cmts[] as $c ({};
+        (($c.pull_request_review_id // "") | tostring) as $r
+        | if $r == "" then . else .[$r] += [ (($c.id // 0) | tostring) ] end)) as $by
+    | [ $revs[] | (.id // 0) as $id | ($by[$id | tostring] // []) as $mine
+        | select(($mine | length) > 0 and all($mine[]; $done[.] == true)) | $id ]' 2>/dev/null
+}
+# <rows-json> less every row whose id is in <ids-json>.
+drop_ids() { # <rows-json> <ids-json>
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; } | jq -nc '
+    (input) as $rows | (input) as $ids
+    | (reduce $ids[] as $i ({}; .[$i | tostring] = true)) as $gone
+    | [ $rows[] | select($gone[(.id // 0) | tostring] != true) ]' 2>/dev/null
+}
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
 # out of the batch leaves the comments under it routing. A dismissal is the only
@@ -1124,7 +1169,7 @@ CHILDREN_EOF
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
   posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
-  revs_raw=""; cmts_raw=""; cmts_live=""; cmts_open=""; icmts_raw=""
+  revs_raw=""; revs_open=""; cmts_raw=""; cmts_live=""; cmts_open=""; icmts_raw=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
@@ -1168,46 +1213,36 @@ CHILDREN_EOF
         echo "$PROG: $id — PR#$num could not filter retired reviews out of the comment list; counting it unfiltered" >&2
         cmts_live="$cmts_raw"
       fi
-      # Drop inline comments that sit on a resolved review thread, so feedback
-      # answered off the watermark stops reading as unanswered and holding the
-      # merge. The thread read runs only when a comment sits above the watermark
-      # (where the comment path would otherwise fire), and a read that cannot
+      # Drop the feedback the review threads have answered, so feedback answered
+      # off the watermark stops reading as unanswered and holding the merge: an
+      # inline comment its thread answered, and a review whose every inline
+      # comment was. The threads are read only when feedback sits above a
+      # watermark, where the batch would otherwise fire, and a read that cannot
       # answer leaves the batch unfiltered: an unreadable read never drops an
       # objection. cmts_live stays whole for unengaged_holds, which reads it below.
-      cmts_open="$cmts_live"
+      cmts_open="$cmts_live"; revs_open="$revs_raw"
       raw_max_c=$(max_foreign_id "$cmts_live")
-      if [ "$raw_max_c" -gt "$cwm" ]; then
-        if review_threads_load "$num" && ans_ids=$(answered_comment_ids); then
-          cmts_filtered=$(printf '%s' "$cmts_live" | jq -c --argjson ans "$ans_ids" '
-            [ .[] | select(.id as $i | ($ans | index($i)) == null) ]' 2>/dev/null)
-          if [ -n "$cmts_filtered" ]; then
-            cmts_open="$cmts_filtered"
+      raw_max_r=$(max_counted_review_id "$revs_raw")
+      if [ "$raw_max_c" -gt "$cwm" ] || [ "$raw_max_r" -gt "$rwm" ]; then
+        if review_threads_load "$num" && ans_c=$(answered_comment_ids); then
+          if ans_r=$(answered_review_ids "$revs_raw" "$cmts_live" "$ans_c") \
+             && c_kept=$(drop_ids "$cmts_live" "$ans_c") && [ -n "$c_kept" ] \
+             && r_kept=$(drop_ids "$revs_raw" "$ans_r") && [ -n "$r_kept" ]; then
+            cmts_open="$c_kept"; revs_open="$r_kept"
           else
-            echo "$PROG: $id — PR#$num could not drop answered comments; counting the batch unfiltered" >&2
+            echo "$PROG: $id — PR#$num could not drop answered feedback; counting the batch unfiltered" >&2
           fi
         else
-          echo "$PROG: $id — PR#$num review-thread resolution unreadable; counting the comment batch unfiltered" >&2
+          echo "$PROG: $id — PR#$num review-thread resolution unreadable; counting the feedback batch unfiltered" >&2
         fi
       fi
-      # A review with an empty body carries only its inline comments, which the
-      # comment read below already sees; counting it here would leave a posture
-      # no comment id can ever answer. CHANGES_REQUESTED counts beside
-      # COMMENTED: an operator uses it to mean "change this", and it is the
-      # feedback the loop most has to answer. A dismissed review is in neither
-      # state, so a dismissal takes its ids out of the batch.
-      max_r=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" '
-        [ .[] | select(((.user.login // "") | tostring) != $self)
-          | (((.state // "") | tostring)) as $st
-          | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
-          | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
-          | (.id // 0) ] | max // 0' 2>/dev/null)
+      max_r=$(max_counted_review_id "$revs_open")
       max_c=$(max_foreign_id "$cmts_open")
       # An issue comment carries no review state and no inline path; every one
       # under a login other than ours is feedback the loop has to answer, the
       # same test the inline space uses. Its ids are a separate range, so it
       # earns its own watermark rather than sharing max_c's.
       max_i=$(max_foreign_id "$icmts_raw")
-      case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
       # The routing transition writes these three back as the watermarks, and a
       # mark only rises. A count can fall below its mark: the threads drop the
       # comments they answered, a dismissal retires a review and its comments, and
@@ -1685,7 +1720,7 @@ REAP_EOF
     [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
     [ -n "$armed" ]         && why="the anchor is armed to re-dispatch when ready"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
-    CSRC=$(feedback_reviews "$revs_raw" "$rwm")
+    CSRC=$(feedback_reviews "$revs_open" "$rwm")
     DISP=""
     if [ "$choice" = "rework" ]; then
       # Same choice as the CONFLICTING arm's `stale-base-dispatch-mode`: the child
@@ -1705,7 +1740,7 @@ REAP_EOF
       # comment gets the wider key.
       CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c)"
       [ "$max_i" -gt 0 ] && CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c, issue $max_i)"
-      CBODY=$(feedback_body "$revs_raw" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm")
+      CBODY=$(feedback_body "$revs_open" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm")
       [ -n "$CBODY" ] || CBODY="Unanswered review feedback on PR#$num (through review $max_r, comment $max_c, issue $max_i). The bodies could not be rendered; read them at $live_url."
       CBODY="## Unanswered review feedback on PR#$num
 
@@ -2032,7 +2067,7 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num finding tool not found ($FINDING); NOT watermarking (the batch has no findings for the validator to rule)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    if ! frecs=$(feedback_findings "$revs_raw" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm") \
+    if ! frecs=$(feedback_findings "$revs_open" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm") \
        || ! printf '%s' "$frecs" | jq -e 'type == "array"' >/dev/null 2>&1; then
       echo "$PROG: WARN $id — PR#$num could not render the feedback findings; NOT watermarking (retry next pass)" >&2
       skipped=$((skipped + 1)); continue

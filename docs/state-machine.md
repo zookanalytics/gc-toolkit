@@ -396,7 +396,10 @@ login written after the comment. That is how feedback answered by a path other
 than this arm, such as a sitting that replies in-thread and resolves the thread,
 stops holding the merge. A comment written after the city's last reply in the
 thread stays outstanding, because a reply does not reopen a resolved thread, and
-a thread resolved with no reply from the city answers nothing.
+a thread resolved with no reply from the city answers nothing. A review body
+above its watermark is answered once the thread read has answered every inline
+comment the review carries, since the body frames those comments. A review with
+no inline comment has no thread to answer it and stays on the watermark.
 
 A `changes_requested` posture reads and watermarks the same ids a `commented`
 one does. The veto holds the merge; it answers nothing, and the objections
