@@ -27,10 +27,15 @@
 #   --pr       the PR to attach to: a number (resolved against our origin) or a
 #              full PR URL (which must live in our origin).
 #   --subject  a bead whose pr_number / pr_url names the PR, when --pr is absent.
+#              When that bead is a fix unit (task_kind=rework), the delivery is
+#              its landing: on a successful attach the fix unit records the
+#              attached comment's URL as durable evidence and is closed, so the
+#              review cycle resolves its finding the way a landed commit would.
 #   --body     comment text; the player is appended after it. A factual default
 #              is used when omitted.
 #
-# Exit: 0 delivered, 2 bad arguments, 1 anything that stopped the delivery.
+# Exit: 0 delivered (and, for a fix-unit subject, closed), 2 bad arguments,
+#   1 anything that stopped the delivery or left a fix-unit subject unclosed.
 set -u
 
 PROG=demo-deliver
@@ -151,4 +156,41 @@ if [ "$RC" -ne 0 ]; then
 fi
 printf '%s\n' "$OUT"
 echo "$PROG: delivered $FILE to PR#$PR on $ORIGIN_REPO_Q"
+
+# >>> demo-deliver-close-fix-unit
+# When the delivery is FOR a fix unit (a task_kind=rework --subject), the
+# delivery is that fix unit's landing: a delivered demo answers its finding the
+# way a merged commit does. Record the attached comment's URL as the fix unit's
+# durable evidence and close the fix unit, in one write, so gate-ensure's
+# close-answered resolves the finding off the closed fix unit (it reads the fix
+# unit's closed status, not a commit) and pr-facts cites this evidence in place
+# of a head commit. A plain or hand-attached demo — any delivery with no rework
+# --subject — keeps the no-close behavior; closing it is out of this seam.
+#
+# Fail closed: a successful attach that cannot record evidence and close the fix
+# unit leaves the finding open, which is the wedge this seam exists to remove, so
+# it exits 1 naming the posted comment. A retry re-posts the demo (this seam is
+# not idempotent); a visible duplicate comment is the accepted cost of never
+# leaving a delivered fix silently holding the merge.
+if [ -n "$SUBJECT" ] && command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  [ -n "${SUBJ_JSON:-}" ] || SUBJ_JSON=$(gc bd show "$SUBJECT" --json 2>/dev/null | scrub)
+  SUBJ_KIND=$(printf '%s' "${SUBJ_JSON:-}" | jq -r '.[0].metadata.task_kind // ""' 2>/dev/null)
+  if [ "$SUBJ_KIND" = "rework" ]; then
+    # gh prints the created comment's URL on stdout; that URL is the evidence.
+    COMMENT_URL=$(printf '%s\n' "$OUT" | grep -Eo 'https://[^[:space:]]+#issuecomment-[0-9]+' | tail -1)
+    [ -n "$COMMENT_URL" ] || COMMENT_URL=$(printf '%s\n' "$OUT" | grep -Eo 'https?://[^[:space:]]+' | tail -1)
+    if [ -z "$COMMENT_URL" ]; then
+      echo "$PROG: attached to PR#$PR but could not read the comment URL from gh output; fix unit $SUBJECT left OPEN (no durable evidence to cite)" >&2
+      exit 1
+    fi
+    if gc bd update "$SUBJECT" --set-metadata artifact_url="$COMMENT_URL" --status=closed \
+         --append-notes "Artifact delivered to PR#$PR on $ORIGIN_REPO_Q ($COMMENT_URL). Delivery is this fix unit's landing; closed so stage-3 resolution treats it as addressed." >/dev/null 2>&1; then
+      echo "$PROG: closed fix unit $SUBJECT (artifact delivered: $COMMENT_URL)"
+    else
+      echo "$PROG: attached to PR#$PR ($COMMENT_URL) but could NOT record evidence and close fix unit $SUBJECT; its finding stays open until the fix unit closes" >&2
+      exit 1
+    fi
+  fi
+fi
+# <<< demo-deliver-close-fix-unit
 exit 0

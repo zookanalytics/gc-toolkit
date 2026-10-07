@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-open — arm 6 of the merge cadence: pre_open_gate -> pull_request.
+# pr-open — arm 3 of the merge cadence: pre_open_gate -> pull_request.
 # For each pre_open_gate anchor: adopt an existing OPEN or MERGED PR for the
 # branch (never open a twin) — an OPEN PR's body is first refreshed from the
 # anchor's current pr_summary, so a rework's restamp reaches the published merge
@@ -23,6 +23,11 @@
 # gc:pr-summary markers), so an adoption re-splices a fresh region while keeping
 # text an operator or a later arm (pr-stack) added; the region writes its own
 # `## Summary` heading, so a stored pr_summary that repeats one is de-duplicated.
+# Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
+# anchors gate-ensure last recorded as settled, and whose rows carry no hold
+# this arm applies, are visited first and the rest after them, each group in a
+# rotation of its own, and no new anchor starts past the deadline. The
+# draft-to-ready arm's walk is paced the same way, on a rotation of its own.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
 
@@ -37,6 +42,16 @@ scrub() { tr -d '\000-\037'; }
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$SCRIPTS_DIR/pace-lib.sh" || { echo "$PROG: cannot source pace-lib.sh beside this script" >&2; exit 1; }
+DEADLINE=""; CURSOR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --deadline) DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)   CURSOR="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The two shared readers of the review graph: lane-state derives a lane's green
 # state (the same helper merge.sh asks, so publishing and merging never
@@ -377,19 +392,58 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pre_open_gate) || 
 }
 [ "$ANCHORS" != "[]" ] || echo "$PROG: no pre-open anchors to open; the draft-to-ready arm still runs"
 
+# --- visit order: the anchors most likely to open first, each group in rotation
+# The walk's cost grows with the pre-open set, so a deadline can stop it. An
+# anchor gate-ensure last recorded as settled (every pre-open lane green and
+# nothing owed) is visited first, unless its own row carries a hold the gate
+# below applies: an operator's merge_hold or rebase_hold, or no check_set.
+# gate-ensure settles a green anchor whatever holds it, and a held anchor in the
+# first group spends a visit an openable one needs. Opening an anchor takes it
+# out of this set, so a pass the deadline stops still opened what it reached.
+# An anchor in the first group can still be held, by a PR a human closed at
+# this head or by a lane that left green after gate-ensure last visited it, so
+# the group rotates on a cursor of its own: in a fixed order the same held
+# anchors would lead every pass and the deadline would keep the ones behind
+# them from ever opening. The grouping only orders the walk; every anchor still
+# meets the full gate below. The others rotate after the arm's own cursor
+# (pace-lib.sh).
+pace_start "$CURSOR" "$DEADLINE"
+first_rows=""; rest_rows=""
+while IFS=$'\x1f' read -r machine mhold rhold cs arow; do
+  [ -n "${arow:-}" ] || continue
+  if [ "${machine#settled@}" != "$machine" ] && ! is_held "$mhold" && ! is_held "$rhold" \
+     && [ -n "$(printf '%s' "$cs" | tr -d '[:space:],')" ]; then
+    first_rows="$first_rows$arow"$'\n'
+  else
+    rest_rows="$rest_rows$arow"$'\n'
+  fi
+done <<SPLIT_EOF
+$(printf '%s' "$ANCHORS" | jq -r '
+    .[] | . as $row | (.metadata // {}) as $m
+    | [ ($m["pr.machine"] // ""), ($m.merge_hold // ""), ($m.rebase_hold // ""), ($m.check_set // "") ]
+    | map(tostring | gsub("[\u001f\n]"; " ")) + [ $row | tojson ] | join("\u001f")' 2>/dev/null)
+SPLIT_EOF
+first_rows=$(printf '%s' "$first_rows" | pace_order "$PACE_FIRST_CURSOR")
+rest_rows=$(printf '%s' "$rest_rows" | pace_order "$CURSOR")
+first_n=$(printf '%s' "$first_rows" | awk 'NF { n++ } END { print n + 0 }')
+rest_n=$(printf '%s' "$rest_rows" | awk 'NF { n++ } END { print n + 0 }')
+
 opened=0; flipped=0; held=0; skipped=0
 # The body file is removed after each create; the trap covers the window
 # a signal can land in, which is the whole `gh pr create` call.
 BODY=""
 trap 'rm -f "$BODY" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-while IFS= read -r row; do
-  [ -n "${row:-}" ] || continue
+while IFS= read -r tagged; do
+  [ -n "${tagged:-}" ] || continue
+  group="${tagged%%$'\t'*}"
+  row="${tagged#*$'\t'}"
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // empty')
   [ -n "$target" ] || target="main"
   if [ -z "$id" ] || [ -z "$branch" ]; then skipped=$((skipped + 1)); continue; fi
+  pace_visit "$group" "$id"; case $? in 1) continue ;; 2) break ;; esac
 
   SUP_NUM=""; SUP_HEAD=""
   find_pr "$id" "$branch" "$target"
@@ -468,8 +522,8 @@ while IFS= read -r row; do
   # helper merge.sh asks). green is a state of the lane, not a claim about a commit.
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   # Empty is never the checkless opt-out: that is the 'none' sentinel. Empty
-  # means never normalized, and gate-ensure — arm 1 of this same pass — stamps
-  # the declared default. Publishing under it would open the PR ungated.
+  # means never normalized, and gate-ensure stamps the declared default when it
+  # reaches the anchor. Publishing under it would open the PR ungated.
   if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
     echo "$PROG: $id branch '$branch' has no normalized check_set (empty is never the 'none' opt-out); no PR opened — gate-ensure stamps the default"
     held=$((held + 1)); continue
@@ -649,8 +703,19 @@ GATES
     skipped=$((skipped + 1))
   fi
 done <<ANCHORS_EOF
-$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s\n' "$first_rows" | awk 'NF { print "first\t" $0 }')
+$(printf '%s\n' "$rest_rows" | awk 'NF { print "rest\t" $0 }')
 ANCHORS_EOF
+pace_end
+
+paced="visited $PACE_VISITED of $((first_n + rest_n)) pre-open anchors ($first_n settled and unheld first)"
+if [ -n "$PACE_RESUME_AT" ]; then
+  echo "$PROG: $paced before the deadline; the next pass resumes at $PACE_RESUME_AT"
+elif [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
+  echo "$PROG: $paced before the deadline; $PACE_FIRST_SKIPPED settled and unheld anchors wait for the next pass"
+else
+  echo "$PROG: $paced"
+fi
 
 # --- arm: draft -> ready -------------------------------------------------------
 # A PR the refinery opened or adopted as a draft — recorded as opened_as_draft at
@@ -665,18 +730,34 @@ ANCHORS_EOF
 # reads it again and gate-ensure dispatches its later phases. A store that would
 # not enumerate fails the arm loudly (exit 1 after the summary), the way the
 # pre-open arm does, rather than report nothing to ready.
+# This walk runs after the pre-open walk, under the same deadline, and rotates on
+# a cursor of its own (pace-lib.sh). A draft this arm holds stays a candidate (an
+# operator's hold, a must-fix finding, a gate not yet green), so in a fixed order
+# the same drafts would lead every pass while the deadline kept the drafts behind
+# them waiting. One draft is always visited, so this walk still makes progress on
+# a pass whose pre-open walk reached the deadline.
 READY_FAILED=""
 if ! READY_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request); then
   echo "$PROG: could not enumerate pull_request anchors; the draft-to-ready arm did not run, failing loudly rather than reporting nothing to ready" >&2
   READY_FAILED=1; READY_ANCHORS="[]"
 fi
 readied=0
-# One jq does the prefilter and pulls the fields, unit-separated so an empty field
-# (an unset hold) keeps its place.
+# One jq does the prefilter, the candidates are put in walk order, and a second jq
+# pulls the fields, unit-separated so an empty field (an unset hold) keeps its
+# place.
+READY_CURSOR="${CURSOR:+$CURSOR.ready}"
+ready_rows=$(printf '%s' "$READY_ANCHORS" | jq -c '
+    .[]?
+    | select(((.metadata.opened_as_draft // "") | tostring) != ""
+             and ((.metadata.draft_readied // "") | tostring) == "")' 2>/dev/null \
+  | pace_order "$READY_CURSOR")
+ready_n=$(printf '%s' "$ready_rows" | awk 'NF { n++ } END { print n + 0 }')
+pace_start "$READY_CURSOR" "$DEADLINE"
 while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
   [ -n "$rid" ] && [ -n "$rnum" ] || continue
   # A disposed PR is pr-facts.sh's to close; it is never surfaced.
   [ -z "$rdisp" ] || continue
+  pace_visit rest "$rid"; case $? in 1) continue ;; 2) break ;; esac
   # It may be a draft: ask GitHub (the one read this arm pays, bounded to
   # un-readied drafts). A closed/merged PR is pr-facts.sh's; an unreadable read
   # retries next pass.
@@ -736,15 +817,20 @@ RGATESEOF
     echo "$PROG: $rid PR#$rnum draft gates green but 'gh pr ready' did not land; stays draft (retry next pass)" >&2
   fi
 done <<READY_EOF
-$(printf '%s' "$READY_ANCHORS" | jq -r '
-    .[]?
-    | select(((.metadata.opened_as_draft // "") | tostring) != ""
-             and ((.metadata.draft_readied // "") | tostring) == "")
-    | [ (.id // ""), (.metadata.check_set // ""), (.metadata.pr_number // ""),
-        (.metadata.merge_hold // ""), (.metadata.rebase_hold // ""),
-        (.metadata["gc.pr_close_disposition_kind"] // "") ]
+$(printf '%s\n' "$ready_rows" | jq -r '
+    [ (.id // ""), (.metadata.check_set // ""), (.metadata.pr_number // ""),
+      (.metadata.merge_hold // ""), (.metadata.rebase_hold // ""),
+      (.metadata["gc.pr_close_disposition_kind"] // "") ]
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)
 READY_EOF
+pace_end
+if [ "$ready_n" -gt 0 ]; then
+  if [ -n "$PACE_RESUME_AT" ]; then
+    echo "$PROG: visited $PACE_VISITED of $ready_n draft PRs before the deadline; the next pass resumes at $PACE_RESUME_AT"
+  else
+    echo "$PROG: visited $PACE_VISITED of $ready_n draft PRs"
+  fi
+fi
 
 echo "$PROG: $opened opened, $flipped flipped, $readied readied, $held held, $skipped skipped"
 [ -z "$READY_FAILED" ] || exit 1

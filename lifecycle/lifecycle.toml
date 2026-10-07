@@ -411,7 +411,7 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
-  "pr_summary", "merge_record_failures", "fold_target",
+  "pr_summary", "merge_record_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
@@ -524,6 +524,15 @@ keys = [
 #   count that bead in the branch's PR-body ledger as work already on the branch.
 #   No pack script writes it. Absent means nothing was folded. Never cleared. A
 #   branch name.
+# artifact_url — the delivered artifact a rework fix unit lands instead of a
+#   commit, the sibling of merged_sha for a unit that lands no commit.
+#   demo-deliver.sh writes it on the fix unit (task_kind=rework) when it attaches
+#   a demo to the PR and closes the unit in the same write, recording the attached
+#   comment's URL as the delivery evidence. pr-facts.sh's write-back reads it to
+#   cite that URL when it resolves the finding's thread, rather than a head commit
+#   the artifact never made. Absent means the fix unit lands a commit, cited at the
+#   PR head as usual. Never cleared — it is the closed unit's durable evidence. A
+#   comment URL.
 # opened_as_draft — the head oid a PR was opened (or adopted) as a draft at,
 #   because its check_set names an `open-as-draft` check that gates the
 #   draft->ready flip. pr-open.sh writes it on the pull_request transition: on a

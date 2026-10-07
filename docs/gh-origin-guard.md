@@ -23,6 +23,11 @@ targets is not one the session owns. `gh issue new` and `gh pr new`, gh's
 aliases for the two create verbs, are folded to `create` and refused the same
 way.
 
+`gh api` reaches the same REST endpoints. A call whose method writes — POST,
+PATCH, PUT, or DELETE, set with `-X`/`--method` or defaulted to POST by gh when
+fields are added — is refused when its endpoint names a repository the session
+does not own. The repository comes from the endpoint path, not from a flag.
+
 Reads are untouched. `gh issue view`, `gh pr view`, `gh pr diff`, `gh search`
 and the rest reach any repository normally, so research on an upstream project
 keeps working.
@@ -93,6 +98,30 @@ Host, owner, and name are all compared, lowercased. The host is part of the
 identity, because dropping it would let the same owner and name on a different
 forge read as a repository we own.
 
+`gh api` is resolved from its endpoint, because it names the repository there
+rather than in `--repo`. The guard reads `repos/OWNER/REPO` from the endpoint
+path, accepting a leading slash and a full REST URL, and maps the api host
+(`api.github.com`, or `HOST/api/v3` on an enterprise forge) back to the forge
+host a remote names. A full URL names its own host. Any other endpoint resolves
+on the forge `--hostname` names, or else on the host an unqualified owner/name
+is completed with.
+
+The method, the fields, and the endpoint are read from the flags the way gh
+parses them. A single-dash token is a run of shorthand flags, so `-iX POST` sets
+the method and `-iftitle=x` adds a field, just as `-i -X POST` and
+`-i -f title=x` do.
+
+`{owner}` and `{repo}` placeholders, and gh's older `:owner` and `:repo`
+spellings, are filled from the repository `GH_REPO` names, or else from the
+working directory's `origin`. gh fills them before it reads the host or the
+path, and the guard does the same. Only the owner and the name come from that
+repository. The host stays the one the endpoint names, and a concrete owner or
+name beside a placeholder stays in the target. So
+`https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues` run from our
+checkout is a write to `gitlab.example.com`, not to our origin, and
+`repos/someone/{repo}/issues` is a write to `someone`'s repository. An endpoint
+naming no repository is handled under what the guard does not cover.
+
 ## What the session owns
 
 `GC_RIG_ROOT` is authoritative and narrow. A rig agent is measured against its
@@ -117,6 +146,12 @@ A write verb whose target cannot be established is refused. If no repository we
 own can be resolved, or the target resolves to nothing, there is no way to show
 the write lands somewhere we own, and "outside" is the safe reading.
 
+The subject of that rule is a write aimed at a repository. A `gh api` write to a
+`repos/OWNER/REPO` endpoint with no concrete owner and name, including one whose
+placeholders have no `GH_REPO` or `origin` to fill them, is such a write and is
+refused; an endpoint that names no repository at all is not, and is left alone
+rather than refused.
+
 The cost of that choice is small. Every `gh` write in this repo lives inside a
 script, and those scripts run in a rig checkout where the origin resolves.
 
@@ -127,8 +162,10 @@ The hook inspects the command an agent types into Bash. These are outside it:
 - **`gh` inside a script.** Running `assets/scripts/pr-open.sh` shows the hook
   that command, not the `gh` calls the script makes. Those scripts already pin
   `--repo` to an origin they resolve themselves.
-- **`gh api`.** The REST endpoints reach the same writes. The ruling names the
-  five porcelain verbs and the guard implements exactly those.
+- **graphql and non-repository `gh api` endpoints.** A `gh api` write to a
+  `repos/OWNER/REPO` endpoint is covered, but a graphql mutation carries its
+  repository in the query body, and an endpoint such as `gists` or `user` names
+  no repository to measure. Both are left alone.
 - **Codex agents.** `dog` and `polecat-codex` never read
   `.claude/settings.json`, so no `.claude` hook reaches them.
 - **A missing `jq`.** The hook parses its payload with `jq` and stays silent

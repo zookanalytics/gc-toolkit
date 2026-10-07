@@ -62,9 +62,12 @@ STUB
 chmod +x "$STUBS/gh"
 
 # gc stub: `gc rig list --json` maps $RIG_PREFIX to $RIG_PATH (empty => no rigs);
-# `gc bd show` returns a subject carrying $STUB_PR_NUMBER / $STUB_PR_URL. The knob
-# names are STUB_-prefixed on purpose: the script's own $PR_URL variable would
-# otherwise shadow an un-prefixed knob and the stub would read it back empty.
+# `gc bd show` returns a subject carrying $STUB_PR_NUMBER / $STUB_PR_URL and, when
+# set, $STUB_TASK_KIND (so a case can make the subject a fix unit); `gc bd update`
+# logs its argv to $GCLOG and fails when $GC_STUB_UPDATE_FAIL is set, so a case can
+# assert the fix-unit close and exercise the fail-closed write path. The knob names
+# are STUB_-prefixed on purpose: the script's own $PR_URL variable would otherwise
+# shadow an un-prefixed knob and the stub would read it back empty.
 cat >"$STUBS/gc" <<'STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
@@ -73,8 +76,16 @@ if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
   exit 0
 fi
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then
-  jq -nc --arg n "${STUB_PR_NUMBER:-}" --arg u "${STUB_PR_URL:-}" \
-    '[{id:"tk-sub", metadata:( ({} + (if $n=="" then {} else {pr_number:$n} end)) + (if $u=="" then {} else {pr_url:$u} end) )}]'
+  jq -nc --arg n "${STUB_PR_NUMBER:-}" --arg u "${STUB_PR_URL:-}" --arg k "${STUB_TASK_KIND:-}" \
+    '[{id:"tk-sub", metadata:(
+        ({} + (if $n=="" then {} else {pr_number:$n} end))
+            + (if $u=="" then {} else {pr_url:$u} end)
+            + (if $k=="" then {} else {task_kind:$k} end) )}]'
+  exit 0
+fi
+if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
+  printf '%s\n' "$*" >>"${GCLOG:?}"
+  [ -n "${GC_STUB_UPDATE_FAIL:-}" ] && exit 1
   exit 0
 fi
 exit 0
@@ -82,30 +93,35 @@ STUB
 chmod +x "$STUBS/gc"
 
 GHLOG="$TMPD/gh.log"
+GCLOG="$TMPD/gc.log"
 # run [KEY=VAL ...] [--no-gh] -- <sut args...>
 # Per-call knobs, so nothing leaks between cases; combined stdout+stderr is
 # returned so an assertion can read either the delivery line or the refusal.
+# $GCLOG captures `gc bd update` argv so a case can assert the fix-unit close.
 run() {
-  local ver="2.101.0" fail="" prn="" pru="" rigpath="" rigpre="tk" nogh=""
+  local ver="2.101.0" fail="" prn="" pru="" rigpath="" rigpre="tk" nogh="" kind="" updfail=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      GH_STUB_VER=*)  ver="${1#*=}" ;;
-      GH_STUB_FAIL=*) fail="${1#*=}" ;;
-      PR_NUMBER=*)    prn="${1#*=}" ;;
-      PR_URL=*)       pru="${1#*=}" ;;
-      RIG_PATH=*)     rigpath="${1#*=}" ;;
-      RIG_PREFIX=*)   rigpre="${1#*=}" ;;
-      --no-gh)        nogh=1 ;;
-      --)             shift; break ;;
-      *)              break ;;
+      GH_STUB_VER=*)   ver="${1#*=}" ;;
+      GH_STUB_FAIL=*)  fail="${1#*=}" ;;
+      PR_NUMBER=*)     prn="${1#*=}" ;;
+      PR_URL=*)        pru="${1#*=}" ;;
+      RIG_PATH=*)      rigpath="${1#*=}" ;;
+      RIG_PREFIX=*)    rigpre="${1#*=}" ;;
+      TASK_KIND=*)     kind="${1#*=}" ;;
+      GC_UPDATE_FAIL=*) updfail="${1#*=}" ;;
+      --no-gh)         nogh=1 ;;
+      --)              shift; break ;;
+      *)               break ;;
     esac
     shift
   done
   [ -n "$nogh" ] && rm -f "$STUBS/gh"
-  : >"$GHLOG"
+  : >"$GHLOG"; : >"$GCLOG"
   ( cd "$REPO" && env -i \
-      PATH="$STUBS:$FARM" HOME="$HOMEDIR" GC_RIG_ROOT="$REPO" GHLOG="$GHLOG" \
+      PATH="$STUBS:$FARM" HOME="$HOMEDIR" GC_RIG_ROOT="$REPO" GHLOG="$GHLOG" GCLOG="$GCLOG" \
       GH_STUB_VER="$ver" GH_STUB_FAIL="$fail" STUB_PR_NUMBER="$prn" STUB_PR_URL="$pru" \
+      STUB_TASK_KIND="$kind" GC_STUB_UPDATE_FAIL="$updfail" \
       RIG_PATH="$rigpath" RIG_PREFIX="$rigpre" \
       bash "$SUT" "$@" 2>&1 )
 }
@@ -206,6 +222,38 @@ hasnt "Demo capture for this PR" "$GH" "the default body is not used when overri
 echo "# a missing --file is a usage error (exit 2)"
 out="$(run -- --pr 41)"; rc=$?
 ok "missing --file exits 2" "[ '$rc' = 2 ]"
+
+echo "# a fix-unit subject (task_kind=rework): the delivery records the artifact URL and closes it"
+out="$(run PR_NUMBER=61 TASK_KIND=rework RIG_PATH="$REPO" RIG_PREFIX=tk -- --file "$MP4" --subject tk-sub)"; rc=$?
+ok "fix-unit delivery exits 0" "[ '$rc' = 0 ]"
+GC="$(cat "$GCLOG")"
+has "bd update tk-sub" "$GC" "the fix unit is updated"
+has "artifact_url=https://github.com/acme/widgets/pull/stub#issuecomment-1" "$GC" "the attached comment URL is recorded as durable evidence"
+has "--status=closed" "$GC" "the fix unit is closed, so close-answered resolves its finding"
+has "--append-notes" "$GC" "the note is appended, never replacing the dispatch note"
+has "closed fix unit tk-sub" "$out" "it reports closing the fix unit"
+
+echo "# a plain (non-rework) subject closes nothing — today's behavior is unchanged"
+out="$(run PR_NUMBER=62 TASK_KIND=task RIG_PATH="$REPO" RIG_PREFIX=tk -- --file "$MP4" --subject tk-sub)"; rc=$?
+ok "plain-subject delivery exits 0" "[ '$rc' = 0 ]"
+hasnt "bd update tk-sub" "$(cat "$GCLOG")" "no fix-unit close for a non-rework subject"
+
+echo "# a direct --pr delivery (no subject) is a hand/plain attach and closes nothing"
+out="$(run -- --file "$MP4" --pr 63)"; rc=$?
+ok "direct --pr delivery exits 0" "[ '$rc' = 0 ]"
+hasnt "bd update" "$(cat "$GCLOG")" "a delivery with no subject closes no fix unit"
+
+echo "# fail closed: a successful attach whose close write fails exits 1, naming the posted comment"
+out="$(run PR_NUMBER=64 TASK_KIND=rework GC_UPDATE_FAIL=1 RIG_PATH="$REPO" RIG_PREFIX=tk -- --file "$MP4" --subject tk-sub)"; rc=$?
+ok "close-write failure exits 1" "[ '$rc' = 1 ]"
+has "could NOT record evidence and close fix unit tk-sub" "$out" "it says the fix unit was not closed"
+has "pull/stub#issuecomment-1" "$out" "…and names the comment that WAS posted, so the state is visible"
+has "pr comment 64" "$(cat "$GHLOG")" "the attach itself did happen"
+
+echo "# the fix-unit close never fires when the attach itself failed (fail closed)"
+out="$(run PR_NUMBER=65 TASK_KIND=rework GH_STUB_FAIL=1 RIG_PATH="$REPO" RIG_PREFIX=tk -- --file "$MP4" --subject tk-sub)"; rc=$?
+ok "attach failure exits 1" "[ '$rc' = 1 ]"
+hasnt "bd update tk-sub" "$(cat "$GCLOG")" "nothing is closed when nothing was delivered"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "PASS: all demo-deliver assertions passed"; else echo "FAIL: demo-deliver had failures"; fi
