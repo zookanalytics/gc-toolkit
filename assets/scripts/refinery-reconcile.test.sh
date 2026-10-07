@@ -206,11 +206,14 @@ near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 200 "REFINERY_RECONCILE_ARM
 : > "$ARM_LOG"; T0=$(date -u +%s)
 REFINERY_RECONCILE_PASS_BUDGET_SECS=soon drive > /dev/null
 near "$(offset "$(grep '^merge.sh' "$ARM_LOG")")" 60 "an unparseable budget falls back to the 420s default"
-# The shares divide among the arms that take one, so the count the driver
-# divides by must be the number of arms it paces.
-paced=$(grep -cE '^[[:space:]]*pace_args [a-z-]+$' "$RUNNER")
-lit=$(sed -n 's/^PACED_LEFT=\([0-9][0-9]*\)$/\1/p' "$RUNNER")
-eq "$paced" "$lit" "PACED_LEFT counts every pace_args call in the runner"
+# The shares split among the arms still on PACED_ARMS, so the arms the runner
+# paces or skips must be exactly that list, in its order: an arm paced but not
+# listed would take a share no split counted, and one listed but never reached
+# would shrink every share ahead of it.
+listed=$(sed -n 's/^PACED_ARMS=(\(.*\))$/\1/p' "$RUNNER" | tr ' ' ',')
+called=$(grep -oE '^[[:space:]]*pace_(args|skip) [a-z-]+$' "$RUNNER" | awk '{ print $2 }' | awk '!seen[$0]++' | paste -sd, -)
+[ -n "$listed" ] && ok "PACED_ARMS is readable from the runner" || bad "PACED_ARMS is not readable from the runner"
+eq "$called" "$listed" "the runner paces exactly the arms PACED_ARMS lists, in its order"
 
 echo "# gate-ensure rc=3 is reported, and holds and fails nothing"
 # merge has already run when gate-ensure does, and merge.sh and pr-open.sh each

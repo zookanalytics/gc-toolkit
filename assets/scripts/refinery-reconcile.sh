@@ -17,9 +17,9 @@
 # projected: it closes duplicate dispatches through bead-rehome; no merge
 # authority), pr-stack (PR bodies only — both managed regions; no projection,
 # no merge authority).
-# Seven of them walk a set that grows with the queue and share the pass budget
-# (see PASS_BUDGET_SECS below): merge, pr-open, pr-feedback, pre-open-rebase,
-# gate-ensure, pr-facts and pr-stack.
+# The arms that walk a set growing with the queue share the pass budget (see
+# PASS_BUDGET_SECS and PACED_ARMS below): merge, pr-open, pr-feedback,
+# pre-open-rebase, gate-ensure, pr-facts and pr-stack.
 # Landing is the main way an anchor leaves the gating set, and pr-open is what
 # puts an anchor in front of the operator for the approval merge waits on. The
 # arms that iterate that set grow in cost with it, so one placed ahead of these
@@ -291,20 +291,30 @@ run_pass() { # <label> <script> [args...]
   log "-- $label: done in $(( $(date -u +%s) - t0 ))s (rc=$rc)"
   return "$rc"
 }
-# The paced arms, in pass order: merge, pr-open, pr-feedback, pre-open-rebase,
-# gate-ensure, pr-facts, pr-stack. pace_args hands the next one its cursor and
-# its share of what the pass budget has left, in PACE_ARGS.
-PACED_LEFT=7
-pace_args() { # <cursor-name>
-  local now share
+# The paced arms, in pass order, each named for its cursor. pace_args hands the
+# next one its cursor and an equal share of what the pass budget has left, split
+# among it and the arms still on this list, in PACE_ARGS, and takes it off the
+# list. pace_skip takes off an arm this pass will not run, so the arms behind it
+# split its share.
+PACED_ARMS=(merge pr-open pr-feedback pre-open-rebase gate-ensure pr-facts pr-stack)
+pace_skip() { # <arm>
+  local a left=()
+  for a in ${PACED_ARMS[@]+"${PACED_ARMS[@]}"}; do
+    [ "$a" = "$1" ] || left+=("$a")
+  done
+  PACED_ARMS=(${left[@]+"${left[@]}"})
+}
+pace_args() { # <arm>
+  local now share n=${#PACED_ARMS[@]}
   now=$(date -u +%s)
   PACE_ARGS=(--cursor "$STATE_DIR/$1.cursor")
+  [ "$n" -gt 0 ] || n=1
   if [ "$PASS_BUDGET_SECS" -gt 0 ]; then
-    share=$(( (PASS_T0 + PASS_BUDGET_SECS - now) / PACED_LEFT ))
+    share=$(( (PASS_T0 + PASS_BUDGET_SECS - now) / n ))
     [ "$share" -lt "$ARM_FLOOR_SECS" ] && share="$ARM_FLOOR_SECS"
     PACE_ARGS+=(--deadline "$(( now + share ))")
   fi
-  [ "$PACED_LEFT" -gt 1 ] && PACED_LEFT=$((PACED_LEFT - 1))
+  pace_skip "$1"
   return 0
 }
 
@@ -339,7 +349,7 @@ if [ "$MERGE_HELD" = 1 ]; then
   mark_merge held
   # The held arm spends none of the pass budget, so the paced arms behind it
   # divide its share among themselves.
-  PACED_LEFT=$((PACED_LEFT - 1))
+  pace_skip merge
 else
   # `reached` before merge, `decided` after: a pass killed between them leaves
   # `reached`, which the next pass reads as a merge arm that never finished.
