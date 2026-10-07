@@ -87,8 +87,8 @@ until its work merges, so `closed` always means landed.
 You run city-scoped, so `gc bd` and `gc convoy` resolve to the city store
 unless you name a rig. A dispatch bead left there is invisible to the rig's
 polecat pool, which reads only the rig store — it maroons, claimable by no
-one. Name the rig on every dispatch create with `--rig <rig>`: the same
-`<rig>` you sling to.
+one. Name the rig with `--rig <rig>` on every dispatch create and on every
+link between dispatch beads: the same `<rig>` you sling to.
 
 A **shared input artifact** (a decisions doc, a spec several polecats need
 before any produce mergeable work) is never committed directly to the default
@@ -114,9 +114,14 @@ RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $
 CONVOY=$(GC_RIG=<rig> "{{ .ConfigDir }}/assets/scripts/convoy-seed.sh" --rig-root "$RIG_ROOT" \
     --name "<initiative>" --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
-# File child work beads in the rig's store under the convoy and sling normally.
+# File child work beads in the rig's store under the convoy, read the link back,
+# and sling normally. The link and its read-back name the rig too: a dep add
+# that crosses stores prints success and exits 0 with no edge to read back, and
+# a child slung unlinked opens its PR against the default branch.
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
-gc bd dep add "$WORK" "$CONVOY" --type=parent-child
+gc bd --rig <rig> dep add "$WORK" "$CONVOY" --type=parent-child
+LINKED=$(gc bd --rig <rig> dep list "$WORK" --direction=down -t parent-child --json | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY" '[.[]? | select(.id == $c)] | length')
+[ "${LINKED:-0}" -ge 1 ] || { echo "$WORK reads no parent-child edge to $CONVOY; not slinging" >&2; exit 1; }
 gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # inherits metadata.target via convoy walk
 ```
 
