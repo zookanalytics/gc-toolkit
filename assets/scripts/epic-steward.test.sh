@@ -61,12 +61,26 @@ store "[$(epic EPB open '{"epic_handle":"h","epic_hypothesis":"for X, Y, signal 
 run_sut
 if esc_has file EPB epic-floor; then ok "a hypothesis+handle epic missing boundaries still owes its floor"; else bad "expected a file/EPB/epic-floor visit"; fi
 if esc_has retract EPB epic-floor; then bad "a partial floor must not retract the floor visit"; else ok "a partial floor does not retract the floor visit"; fi
+# Contract order: the rest of the contract waits for the whole floor, so a partial
+# floor files the floor visit alone and never the contract visit beside it.
+if esc_has file EPB epic-contract; then bad "a partial floor (no boundaries) must not file the contract visit"; else ok "a partial floor (no boundaries) does not file the contract visit"; fi
+eq "$(esc_count)" "1" "a partial floor (no boundaries) files the floor visit and nothing else"
 
 # --- 1b. the same when the handle is the missing field: a hypothesis and
-# boundaries but NO handle still owes the floor. -------------------------------
+# boundaries but NO handle still owes the floor, and still owes no contract. ----
 store "[$(epic EPH open '{"epic_hypothesis":"for X, Y, signal Z","epic_boundaries":"not the neighbor"}')]"
 run_sut
 if esc_has file EPH epic-floor; then ok "a hypothesis+boundaries epic missing a handle still owes its floor"; else bad "expected a file/EPH/epic-floor visit"; fi
+if esc_has file EPH epic-contract; then bad "a partial floor (no handle) must not file the contract visit"; else ok "a partial floor (no handle) does not file the contract visit"; fi
+eq "$(esc_count)" "1" "a partial floor (no handle) files the floor visit and nothing else"
+
+# --- 1c. a hypothesis alone is a partial floor too: the contract arm keys on the
+# whole floor, not on the hypothesis, so the operator is asked for the handle and
+# boundaries before any closure checks or indicators. ---------------------------
+store "[$(epic EPO open '{"epic_hypothesis":"for X, Y, signal Z"}')]"
+run_sut
+if esc_has file EPO epic-floor; then ok "a hypothesis-only epic owes its floor"; else bad "expected a file/EPO/epic-floor visit"; fi
+if esc_has file EPO epic-contract; then bad "a hypothesis-only epic must not file the contract visit"; else ok "a hypothesis-only epic does not file the contract visit"; fi
 
 # --- 2. contract: a complete floor (handle, hypothesis, boundaries) but closure
 # and indicators missing. The floor concern has cleared, so that visit is

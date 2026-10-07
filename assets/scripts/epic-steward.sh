@@ -122,8 +122,15 @@ retract_visit() {
 # never makes this arm stop asking while the gate still holds the close.
 epic_ruling_valid() { case "${1:-}" in persevere|pivot|close) return 0 ;; *) return 1 ;; esac; }
 
+# floor_set <has-handle> <has-hypothesis> <has-boundaries> — true only when all
+# three floor fields docs/epics.md names are recorded. The one definition of a set
+# floor: arm_floor owes the floor until it holds, and arm_contract waits for it,
+# so the two arms cannot disagree about where the floor ends.
+floor_set() { [ "$1" = true ] && [ "$2" = true ] && [ "$3" = true ]; }
+
 # --- arms -------------------------------------------------------------------
-# Each arm takes the epic id and the plain contract strings the pass already read.
+# Each arm takes the epic id and the flags the pass already derived (field
+# presence, and for arm_contract the set floor); arm_ruling also takes the ruling.
 # All three wear the same shape: when the concern is OWED, file one deduped visit;
 # when it has CLEARED, retract the visit the arm would have filed, so a visit never
 # outlives the condition that justified it (orders/epic-steward.toml). retract is
@@ -137,7 +144,7 @@ arm_floor() { # <epic> <has-handle> <has-hypothesis> <has-boundaries>  (presence
   # to be read, classified into, and judged complete. Owe the floor until all
   # three are recorded, so a hypothesis with no handle or boundaries is a partial
   # floor still owed, not a set floor.
-  if [ "$_a_handle" = true ] && [ "$_a_hyp" = true ] && [ "$_a_bnd" = true ]; then
+  if floor_set "$_a_handle" "$_a_hyp" "$_a_bnd"; then
     retract_visit "$_a_epic" "epic-floor" "the floor contract is recorded (a handle, a hypothesis, and boundaries)"
     return 0
   fi
@@ -152,10 +159,14 @@ arm_floor() { # <epic> <has-handle> <has-hypothesis> <has-boundaries>  (presence
 Draft and ratify the missing field(s) and record them on the epic. A rough hypothesis is enough to start. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
 }
 
-arm_contract() { # <epic> <has-hypothesis> <has-closure> <has-indicators>  (presence flags)
-  _a_epic="$1"; _a_hyp="$2"; _a_clo="$3"; _a_ind="$4"
-  # No floor yet: arm_floor owns that; a contract presupposes a hypothesis.
-  [ "$_a_hyp" = true ] || return 0
+arm_contract() { # <epic> <floor-set> <has-closure> <has-indicators>  (flags)
+  _a_epic="$1"; _a_floor="$2"; _a_clo="$3"; _a_ind="$4"
+  # The rest of the contract is elaborated on top of the floor (docs/epics.md), so
+  # this arm waits for the whole floor, which arm_floor owns until it is set. A
+  # hypothesis alone is not a floor: closure checks and indicators test an outcome
+  # inside the epic's boundaries, and asking for them first asks the operator to
+  # define done for an epic whose scope is not yet agreed.
+  [ "$_a_floor" = true ] || return 0
   if [ "$_a_clo" = true ] && [ "$_a_ind" = true ]; then
     retract_visit "$_a_epic" "epic-contract" "the contract is complete; a closure condition and leading indicators are recorded"
     return 0
@@ -164,7 +175,7 @@ arm_contract() { # <epic> <has-hypothesis> <has-closure> <has-indicators>  (pres
   [ "$_a_clo" = true ] || _a_need="a closure condition (epic_closure_condition: 3-6 operator-runnable checks that each fail today)"
   [ "$_a_ind" = true ] || _a_need="${_a_need:+$_a_need and }1-3 leading indicators (epic_indicators)"
   file_visit "$_a_epic" "epic-contract" \
-"This epic has a hypothesis but is missing $_a_need, so it has no agreed test of done and no in-flight signal to steer by.
+"This epic's floor contract is set but it is missing $_a_need, so it has no agreed test of done and no in-flight signal to steer by.
 
 Fill in the rest of the contract on the epic. docs/epic-stewardship.md names the fields; docs/epics.md is the contract. Subject: epic $_a_epic."
 }
@@ -238,8 +249,9 @@ EPICS_JSON=$(bd_list --type=epic --status=open,in_progress,blocked,deferred,hook
 while IFS=$'\037' read -r epic handle hyp bnd clo ind ruling; do
   [ -n "$epic" ] || continue
   checked=$((checked + 1))
+  floor=false; floor_set "$handle" "$hyp" "$bnd" && floor=true
   arm_floor    "$epic" "$handle" "$hyp" "$bnd"
-  arm_contract "$epic" "$hyp" "$clo" "$ind"
+  arm_contract "$epic" "$floor" "$clo" "$ind"
   arm_ruling   "$epic" "$hyp" "$ruling"
 done < <(printf '%s' "$EPICS_JSON" | jq -r '
   def present: (. // "" | tostring | length > 0);

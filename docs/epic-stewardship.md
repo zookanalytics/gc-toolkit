@@ -70,12 +70,15 @@ floor fields are recorded the arm retracts any floor visit it filed.
 
 ### Rest of the contract
 
-Once an epic has a hypothesis but is missing its closure condition
-(`epic_closure_condition`) or its leading indicators (`epic_indicators`), the
-contract arm files a visit asking for whichever is absent. The floor is enough to
-start work; the rest of the contract gives the epic an agreed test of done and an
-in-flight signal to steer by. Once both are recorded the arm retracts the contract
-visit.
+Once an epic's floor is set (all three floor fields recorded) but it is missing
+its closure condition (`epic_closure_condition`) or its leading indicators
+(`epic_indicators`), the contract arm files a visit asking for whichever is
+absent. The floor is enough to start work; the rest of the contract gives the
+epic an agreed test of done and an in-flight signal to steer by. The arm stays
+silent while the floor is partial, a hypothesis alone included. The rest of the
+contract is elaborated on top of the floor ([epics.md](epics.md)), and closure
+checks and indicators test an outcome inside the epic's boundaries, so the floor
+visit comes first. Once both are recorded the arm retracts the contract visit.
 
 ### Hypothesis ruling
 
@@ -84,9 +87,12 @@ no ruling is recorded (`epic_ruling` absent), the ruling arm files a visit: the
 epic is complete but cannot close until its hypothesis is answered. An epic
 closes by a ruling — persevere, pivot, or close — after a validation step, never
 as a side effect of its last unit merging ([epics.md](epics.md)). A ruling
-presupposes a hypothesis, so the arm stays silent on an epic that still owes its
-floor. Once a ruling is recorded, the arm retracts the visit, releasing the
-finalize hold so the epic can close.
+presupposes a hypothesis, so the arm stays silent on an epic that has none. It
+keys on the hypothesis alone, not the whole floor, because that is the trigger
+the finalize gate's ruling requirement uses: every epic the gate would hold for
+want of a ruling is asked for one once its units have landed. Once a ruling is
+recorded, the arm retracts the visit, releasing the finalize hold so the epic can
+close.
 
 ### Membership (deferred)
 
