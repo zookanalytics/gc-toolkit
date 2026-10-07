@@ -30,19 +30,27 @@
 # non-blocking, so the gate holds only THIS bead's finalization and touches
 # neither the bead's readiness nor its children (docs/finalize-gate.md).
 #
-# One exception, named by the caller: --except-visit <id> is the visit that
-# caller filed to report its own refused finalization of this bead. That visit
-# asks for the retry, so holding the retry on it would keep the bead from ever
-# finalizing once the obstruction it reported cleared. It is excepted only while
-# OPEN; once a person claims it (in_progress) it holds like any other visit, so
-# the finalization never lands under a live conversation.
+# One exception, named by the caller: --except-key <escalation-key> is the
+# situation key under which that caller files, through escalate.sh, its report of
+# a refused finalization of this bead. That report asks for the retry, so holding
+# the retry on it would keep the bead from ever finalizing once the obstruction
+# it reported cleared. A visit is excepted only when it carries that
+# escalation_key, is stamped for this bead (gc.continuation_group), and nobody is
+# engaged in it: it is open, with no assignee and no bound session
+# (gc.session_name). That is the helm board's engagement test (engagedVisit in
+# services/helm/internal/board/derive.go). Engage binds a visit's assignee while
+# it is still open, so an open visit with an assignee is already engaged. Every
+# visit filed under the key for this bead is excepted alike, twins included. A
+# visit a person has engaged holds like any other, and so does every visit under
+# another key. Each visit is read once, so a visit engaged after that read does
+# not hold an act already under way.
 #
 # FAIL CLOSED. A tracker list that does not read, or does not answer with a JSON
 # array, refuses the finalization: an unreadable probe is never an all-clear,
 # because the act it guards cannot be taken back.
 #
 # Usage:
-#   finalize-gate.sh check <bead-id> [--except-visit <visit-id>]
+#   finalize-gate.sh check <bead-id> [--except-key <escalation-key>]
 #     exit 0 — every clause passed; the bead may be finalized (no output)
 #     exit 1 — a clause refuses (an open visit, or a probe that failed closed);
 #              the one-line reason is printed to stdout for the caller to log
@@ -62,12 +70,28 @@ PROG="finalize-gate"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-# clause_no_open_visit <bead-id> [<except-visit-id>] — prints a one-line refusal
+# The rule both probes apply to a tracker row, as a jq definition spliced ahead
+# of each probe's program, which binds $s to the bead and $ex to the excepted
+# escalation key (empty for none). A visit holds while it is open or
+# in_progress, except an open one filed under $ex for $s that nobody is engaged
+# in (see the block comment above).
+_FGV_HOLDS_JQ='
+  def holds:
+    ((.status // "open") | tostring) as $st
+    | $st == "in_progress"
+      or ($st == "open"
+          and ($ex == ""
+               or ((.metadata.escalation_key // "") | tostring) != $ex
+               or ((.metadata["gc.continuation_group"] // "") | tostring) != $s
+               or ((.assignee // "") | tostring) != ""
+               or ((.metadata["gc.session_name"] // "") | tostring) != ""));'
+
+# clause_no_open_visit <bead-id> [<except-key>] — prints a one-line refusal
 # reason and returns 1 when an OPEN visit covers the bead, or when a probe fails
 # closed; prints nothing and returns 0 when no open visit covers it. Coverage is
 # the shared visit identity: PROBE 1 reads the incoming tracks edge, PROBE 2 the
-# gc.continuation_group fallback (see the block comment above). The excepted
-# visit is skipped in both probes while its status is open.
+# gc.continuation_group fallback (see the block comment above). Both probes judge
+# a row by the one holds rule above.
 clause_no_open_visit() {
     _fgv_bead="$1"
     _fgv_except="${2:-}"
@@ -80,13 +104,11 @@ clause_no_open_visit() {
     # `error` on a non-array aborts jq non-zero, read below as unreadable — an
     # all-clear is only a clean array that named no open visit.
     _fgv_hit=$(printf '%s' "$_fgv_raw" | scrub \
-        | jq -r --arg ex "$_fgv_except" '
+        | jq -r --arg s "$_fgv_bead" --arg ex "$_fgv_except" "$_FGV_HOLDS_JQ"'
             if type != "array" then error("not an array")
             else [ .[]?
                      | select((.metadata.task_kind // "") == "visit")
-                     | select(((.status // "open") | tostring) as $st
-                              | ($st == "open" or $st == "in_progress"))
-                     | select(((.id // "") != $ex) or (((.status // "open") | tostring) != "open"))
+                     | select(holds)
                      | .id ] | .[0] // "" end' 2>/dev/null) || {
         echo "open-visit probe unreadable (tracker filter failed) — refusing finalize on $_fgv_bead (fail-closed)"
         return 1
@@ -106,14 +128,12 @@ clause_no_open_visit() {
         return 1
     }
     _fgv_cands=$(printf '%s' "$_fgv_stamped" | scrub \
-        | jq -r --arg s "$_fgv_bead" --arg ex "$_fgv_except" '
+        | jq -r --arg s "$_fgv_bead" --arg ex "$_fgv_except" "$_FGV_HOLDS_JQ"'
             if type != "array" then error("not an array")
             else ( .[]?
                      | select((.metadata.task_kind // "") == "visit")
                      | select((.metadata["gc.continuation_group"] // "") == $s)
-                     | select(((.status // "open") | tostring) as $st
-                              | ($st == "open" or $st == "in_progress"))
-                     | select(((.id // "") != $ex) or (((.status // "open") | tostring) != "open"))
+                     | select(holds)
                      | .id ) end' 2>/dev/null) || {
         echo "open-visit probe unreadable (stamp filter failed) — refusing finalize on $_fgv_bead (fail-closed)"
         return 1
@@ -133,7 +153,7 @@ clause_no_open_visit() {
     return 0
 }
 
-# finalize_gate_check <bead-id> [<except-visit-id>] — run the clause set in order;
+# finalize_gate_check <bead-id> [<except-key>] — run the clause set in order;
 # the first clause to refuse prints its reason (on stdout) and stops the set.
 finalize_gate_check() {
     [ -n "${1:-}" ] || { echo "$PROG: check requires a bead id" >&2; return 2; }
@@ -152,13 +172,16 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
             _fg_except=""
             while [ $# -gt 0 ]; do
                 case "$1" in
-                    --except-visit)
-                        [ -n "${2:-}" ] || { echo "$PROG: --except-visit needs a visit id" >&2; exit 2; }
+                    --except-key)
+                        [ -n "${2:-}" ] || { echo "$PROG: --except-key needs an escalation key" >&2; exit 2; }
+                        # escalate.sh's own key charset, so the key can only name a
+                        # situation that script could have filed.
+                        case "$2" in *[!A-Za-z0-9._-]*) echo "$PROG: --except-key must contain only [A-Za-z0-9._-] (got '$2')" >&2; exit 2 ;; esac
                         _fg_except="$2"; shift 2 ;;
                     *) echo "$PROG: unknown argument '$1'" >&2; exit 2 ;;
                 esac
             done
             finalize_gate_check "$_fg_bead" "$_fg_except"; exit $? ;;
-        *) echo "usage: $PROG check <bead-id> [--except-visit <visit-id>]" >&2; exit 2 ;;
+        *) echo "usage: $PROG check <bead-id> [--except-key <escalation-key>]" >&2; exit 2 ;;
     esac
 fi

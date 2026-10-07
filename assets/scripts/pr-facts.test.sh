@@ -135,13 +135,13 @@ export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # refusals it reports without closing (4 transient, 5/6 a human is needed).
 # It also models the two real holds on that close, each exit 5, in the real
 # order. The finalize gate runs first, and it is the real finalize-gate.sh: an
-# OPEN visit on the origin holds the close, except the one visit --except-visit
-# names while that visit is open. Without it, a stub that ignored visits would
-# pass an anchor its own escalation holds forever. Then the close is NOT --force,
-# so an OPEN bead that still `blocks` the origin refuses it. Without that, a stub
-# that closed straight through a blocking rework child would green-light the
-# strand pr-facts's dispose-children-first order exists to prevent — an anchor
-# stranded open behind a rework child it cannot close.
+# OPEN visit on the origin holds the close, except a visit filed under the key
+# --except-key names that nobody is engaged in. Without it, a stub that ignored
+# visits would pass an anchor its own escalation holds forever. Then the close is
+# NOT --force, so an OPEN bead that still `blocks` the origin refuses it. Without
+# that, a stub that closed straight through a blocking rework child would
+# green-light the strand pr-facts's dispose-children-first order exists to
+# prevent — an anchor stranded open behind a rework child it cannot close.
 cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
@@ -152,13 +152,13 @@ while [ $# -gt 0 ]; do
     --origin)          shift; origin="${1:-}" ;;
     --successor)       shift; succ="${1:-}" ;;
     --successor-store) shift; store="${1:-}" ;;
-    --except-visit)    shift; except="${1:-}" ;;
+    --except-key)      shift; except="${1:-}" ;;
   esac
   shift || true
 done
 rc="${STUB_REHOME_RC:-0}"
 if [ "$rc" != "0" ]; then echo "bead-rehome (stub): refusing rc=$rc" >&2; exit "$rc"; fi
-fg=(check "$origin"); [ -n "$except" ] && fg+=(--except-visit "$except")
+fg=(check "$origin"); [ -n "$except" ] && fg+=(--except-key "$except")
 if ! why=$("$(dirname "$0")/finalize-gate.sh" "${fg[@]}" 2>/dev/null); then
   echo "bead-rehome (stub): the close is held: $why (exit 5)" >&2
   exit 5
@@ -511,14 +511,15 @@ has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it i
 
 # A refused close escalates under pr-dispose-failed.<num>, and that visit tracks
 # the anchor. It reports this arm's own failed close and asks for the next pass's
-# retry, so the retry excepts it from the finalize gate while it is open and
-# retracts it moot once the close lands. Held by it instead, the anchor could not
-# close even after the obstruction it reported cleared. dvisit seeds the visit
-# escalate.sh files: stamped with its key and its subject's group, and tracked
-# onto the subject by the edge each case seeds beside it.
-dvisit() { # id subject key [status]
-  printf '{"id":"%s","status":"%s","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
-    "$1" "${4:-open}" "$3" "$2"
+# retry, so the retry names its key to the finalize gate, which excepts the visit
+# while nobody is engaged in it, and retracts it moot once the close lands. Held
+# by it instead, the anchor could not close even after the obstruction it
+# reported cleared. dvisit seeds the visit escalate.sh files: stamped with its key
+# and its subject's group, and tracked onto the subject by the edge each case
+# seeds beside it. An assignee seeds a visit someone has engaged.
+dvisit() { # id subject key [status] [assignee]
+  printf '{"id":"%s","status":"%s","assignee":"%s","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
+    "$1" "${4:-open}" "${5:-}" "$3" "$2"
 }
 # How many visits in the store carry a situation key, whatever their status.
 nvisits() { jq --arg k "$1" '[ .[] | select((.metadata.escalation_key // "") == $k) ] | length' "$STUB_STORE"; }
@@ -535,7 +536,7 @@ printf '%s' "$(prview 120 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_120.json"
 out=$(run)
 eq "$(bstatus F2n)" "closed" "the anchor closes once the obstruction its escalation reported has cleared"
 eq "$(meta F2n 'gc.superseded_by')" "tk-n" "…through the sanctioned terminal close"
-has "$(cat "$STUB_REHOME_LOG")" "--origin F2n --successor tk-n --kind re-homed --except-visit VN" "bead-rehome is told the arm's own visit does not hold this retry"
+has "$(cat "$STUB_REHOME_LOG")" "--origin F2n --successor tk-n --kind re-homed --except-key pr-dispose-failed.120" "bead-rehome is told the arm's own visits do not hold this retry"
 eq "$(bstatus VN)" "closed" "the arm's own visit is retracted once the close lands"
 eq "$(meta VN 'gc.outcome')" "moot" "…closed moot: the obstruction it reported is gone"
 has "$(cat "$STUB_ESC_LOG")" "--retract --subject F2n --key pr-dispose-failed.120" "…through escalate.sh's retract verb"
@@ -554,6 +555,32 @@ has "$out" "held by open visit VC" "…held by the claimed visit"
 eq "$(bstatus VC)" "in_progress" "the claimed visit is its holder's to conclude"
 hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…so nothing retracts it"
 eq "$(nvisits pr-dispose-failed.121)" "1" "…and no second visit is filed beside it"
+
+echo "# a pr-dispose-failed visit bound by assignee (engaged, not yet claimed) still holds the close"
+# Engage binds the visit's assignee while it is still open, before the sitting's
+# claim promotes it. The board reads that as engaged, and so does the gate.
+: > "$STUB_DEPS"
+store "[$(anchor F2oa 124 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-oa"'), $(dvisit VE F2oa pr-dispose-failed.124 open lx-sitting)]"
+printf 'VE|tracks|F2oa\n' > "$STUB_DEPS"
+printf '%s' "$(prview 124 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_124.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2oa)" "open" "the anchor is left OPEN while a person is engaging the visit"
+has "$out" "held by open visit VE" "…held by the engaged visit"
+eq "$(bstatus VE)" "open" "the engaged visit is untouched"
+eq "$(meta VE 'gc.outcome')" "<absent>" "…with no outcome stamped on it"
+
+echo "# twin pr-dispose-failed visits on the anchor are both excepted"
+# escalate.sh files a second visit when its dedup listing is unreadable. Both
+# carry the arm's key and the anchor's stamp, so neither holds the retry.
+: > "$STUB_DEPS"
+store "[$(anchor F2t 125 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-t"'), $(dvisit VT1 F2t pr-dispose-failed.125), $(dvisit VT2 F2t pr-dispose-failed.125)]"
+printf 'VT1|tracks|F2t\nVT2|tracks|F2t\n' > "$STUB_DEPS"
+printf '%s' "$(prview 125 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_125.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2t)" "closed" "the anchor closes with twin visits of the arm's own situation open"
+hasnt "$out" "held by open visit VT" "…neither twin holds it"
 
 echo "# a standing obstruction keeps its one visit; the pass after it clears closes the anchor"
 : > "$STUB_DEPS"

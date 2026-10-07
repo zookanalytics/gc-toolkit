@@ -746,6 +746,8 @@ When `bead-rehome.sh` refuses the close, the anchor stays open with its marker,
 and the arm files one visit under `pr-dispose-failed.<num>` naming the
 obstruction. Every later pass retries the close. That visit tracks the anchor,
 but it reports the arm's own failed close and asks for exactly that retry. So
-the retry names it to `finalize-gate.sh` as excepted while it is open, and
-retracts it as moot once the close lands. A visit a person has claimed holds the
-close like any other, and every other open visit on the anchor still holds it.
+the retry names its key to `finalize-gate.sh`, which excepts every visit filed
+under that key for the anchor while nobody is engaged in it, and the arm
+retracts those visits as moot once the close lands. A visit a person has engaged
+holds the close like any other, and every other open visit on the anchor still
+holds it.

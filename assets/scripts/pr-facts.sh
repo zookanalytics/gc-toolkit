@@ -1021,13 +1021,14 @@ CHILDREN_EOF
         # anchor too, and it asks for exactly this retry: "clear the obstruction
         # and the next refinery pass retries". If the finalize gate held the
         # retry on it, the anchor could not close even after that obstruction
-        # cleared. So bead-rehome excepts the visit from the gate while it is
-        # open, and the visit is retracted moot once the close lands. A visit a
-        # person has claimed still holds the close and is theirs to conclude. A
+        # cleared. So the retry names the arm's key to the gate, which excepts
+        # every visit filed under it for this anchor that nobody is engaged in,
+        # and those visits are retracted moot once the close lands. A visit a
+        # person has engaged still holds the close and is theirs to conclude. A
         # refused close leaves the visit open, so a standing obstruction keeps
         # its one visit and nothing is re-filed.
         own_vid=$(visit_for "$id" "pr-dispose-failed.$num") || own_vid=""
-        EXCEPT_ARG=(); [ -n "$own_vid" ] && EXCEPT_ARG=(--except-visit "$own_vid")
+        EXCEPT_ARG=(--except-key "pr-dispose-failed.$num")
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
                    ${STORE_ARG[@]+"${STORE_ARG[@]}"} ${EXCEPT_ARG[@]+"${EXCEPT_ARG[@]}"} \

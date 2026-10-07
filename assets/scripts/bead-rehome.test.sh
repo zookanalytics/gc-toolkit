@@ -41,7 +41,7 @@
 #   (w) a dropped gc.outcome_reason refuses the close too — the board shows the
 #       reason as the sitting's headline, so an outcome without it is unreadable;
 #   (x) an open visit on the origin holds the close at the finalize gate;
-#   (y) --except-visit reaches that gate, and nothing is excepted without it.
+#   (y) --except-key reaches that gate, and nothing is excepted without it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -254,15 +254,16 @@ eq "$(field alpha m.gc.superseded_by al-vhold)" bt-vsucc "…the pointer is stil
 has "$(cat "$TMP/err")" "the close is held" "…stderr says the close is held"
 has "$(cat "$TMP/err")" "held by open visit" "…and carries the gate's reason"
 
-# --- (y) --except-visit reaches the finalize gate, and only when given -----
-# The caller's own report of an earlier refused close asks for this retry, so it
-# is named to the gate, which owns what an exception may pass.
+# --- (y) --except-key reaches the finalize gate, and only when given -------
+# The caller's own reports of an earlier refused close ask for this retry, so
+# their escalation key is named to the gate, which owns what an exception may
+# pass.
 mkbead alpha open al-except
 mkbead beta  open bt-except
 : > "$FG_LOG"
-rc=0; run --origin al-except --successor bt-except --kind not-needed --except-visit vis-own || rc=$?
-eq "$rc" 0 "a close naming an excepted visit lands when the gate passes"
-eq "$(cat "$FG_LOG")" "check al-except --except-visit vis-own" "the gate is asked with the caller's excepted visit"
+rc=0; run --origin al-except --successor bt-except --kind not-needed --except-key pr-dispose-failed.7 || rc=$?
+eq "$rc" 0 "a close naming an excepted key lands when the gate passes"
+eq "$(cat "$FG_LOG")" "check al-except --except-key pr-dispose-failed.7" "the gate is asked with the caller's excepted key"
 mkbead alpha open al-noexcept
 mkbead beta  open bt-noexcept
 : > "$FG_LOG"
