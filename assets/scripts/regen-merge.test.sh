@@ -8,11 +8,13 @@
 # Covers classify's verdicts (regenerable, a hand-written conflict beside the
 # generated one, a merged tree with no renderer, a clean merge, an unresolvable
 # rev, unrelated histories) and resolve: the merge committed with both parents,
-# the tree rendered from the merged inputs, the commit naming what it resolved,
+# the tree rendered from the merged inputs, a generated path only one side
+# changed kept as that side committed it, the commit naming what it resolved,
 # no hook run; and every refusal leaving the stopped merge for the caller's abort
-# and committing nothing: a hand-written conflict, no renderer, a failed render,
-# a hung render, a render that moves a path both sides merged cleanly, and a
-# render that writes outside its tree.
+# and committing nothing: a hand-written conflict, no renderer, an unstaged
+# change besides the conflicts (left in place), a failed render, a hung render,
+# a render that moves a path neither side changed or only one side changed, and
+# a render that writes outside its tree.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,7 +59,7 @@ for f in "$ROOT"/inputs/*.txt; do
   printf '| %s | %s |\n' "$n" "$(wc -c < "$f" | tr -d ' ')" >> "$OUT/INDEX.md"
   cp "$f" "$OUT/$n.md"
 done
-[ -z "${STUB_RENDER_DRIFT:-}" ] || echo "a line neither side committed" >> "$OUT/inputs/a.txt.md"
+[ -z "${STUB_RENDER_DRIFT:-}" ] || echo "a line neither side committed" >> "$OUT/$STUB_RENDER_DRIFT"
 [ -z "${STUB_RENDER_OUTSIDE:-}" ] || echo "stray" >> "$ROOT/notes.txt"
 echo "wrote generated/seed-audit (stub)"
 RENDER
@@ -84,6 +86,11 @@ git -C "$R" checkout -q -b feat-norender "$FEAT"
 git -C "$R" rm -q assets/scripts/render-seed-audit.sh; git -C "$R" commit -qm "feat-norender drops the renderer"
 git -C "$R" checkout -q -b feat-clean "$BASE"
 echo other > "$R/other.txt"; git -C "$R" add other.txt; git -C "$R" commit -qm "feat-clean touches no input"
+# feat-c also adds an input only it renders, so the copy of that input is a
+# generated path one side changed.
+git -C "$R" checkout -q -b feat-c "$FEAT"
+printf 'c1\nc2\n' > "$R/inputs/c.txt"; commit_on feat-c "feat-c adds an input"
+FEAT_C=$(git -C "$R" rev-parse HEAD)
 git -C "$R" checkout -q main
 sed -i 's/^b6$/b6 moved by main/' "$R/inputs/b.txt"
 sed -i 's/^n2$/n2 by main/' "$R/notes.txt"
@@ -157,6 +164,15 @@ has "$msg" "generated/seed-audit/SOURCES.txt" "the commit message names what it 
 has "$msg" "regen-merge.sh" "…and how"
 [ -e "$TMP/hook-ran" ] && bad "the commit ran the pre-commit hook" || ok "the commit ran no hook, so nothing re-rendered past the check"
 
+echo "# resolve: a generated path only one side changed"
+# git takes feat-c's copy of its new input, and a render of the merged inputs
+# writes the same file back.
+W=$(stopped_merge feat-c)
+out=$("$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 0 "a merge with a generated path only one side changed resolves"
+eq "$(git -C "$W" diff --name-only "$FEAT_C" HEAD -- generated/seed-audit/inputs/c.txt.md)" "" \
+  "…and keeps that path exactly as the side that changed it committed it"
+
 echo "# resolve refuses, and leaves the stopped merge for the caller's abort"
 refused() { # <worktree> <head-before> <label>
   eq "$(merging "$1")" "yes" "$3: the merge is still in progress for the caller to abort"
@@ -177,6 +193,16 @@ eq "$rc" 1 "a merged tree with no renderer is refused"
 has "$out" "carries no assets/scripts/render-seed-audit.sh" "…saying what is missing"
 refused "$W" "$(git -C "$R" rev-parse feat-norender)" "no renderer"
 
+# The render would read the edit and the commit would leave it out, and the
+# undo after the render must only ever reach the render's own writes.
+W=$(stopped_merge feat)
+echo "an edit nobody staged" >> "$W/inputs/a.txt"
+out=$("$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 1 "an unstaged change besides the conflicts is refused"
+has "$out" "inputs/a.txt" "…naming the changed path"
+has "$(cat "$W/inputs/a.txt")" "an edit nobody staged" "…and the change is left in place, not undone"
+refused "$W" "$FEAT" "unstaged change"
+
 W=$(stopped_merge feat)
 out=$(STUB_RENDER_FAIL=1 "$SUT" resolve --dir "$W" 2>&1); rc=$?
 eq "$rc" 1 "a failed render is refused"
@@ -194,15 +220,21 @@ if command -v timeout >/dev/null 2>&1; then
   refused "$W" "$FEAT" "hung render"
 fi
 
-# The discriminating case. Every check before this one passes: each unmerged
-# path is generated and the render succeeds. The render also moves a file both
-# sides merged cleanly, which is a render that disagrees with what both sides
-# committed — a person's question, not a resolution.
+# The discriminating cases. Every check before these passes: each unmerged path
+# is generated and the render succeeds. The render also moves a generated file
+# that neither side changed, or that only one side changed, so it disagrees with
+# what the base or that side committed: a person's question, not a resolution.
 W=$(stopped_merge feat)
-out=$(STUB_RENDER_DRIFT=1 "$SUT" resolve --dir "$W" 2>&1); rc=$?
-eq "$rc" 1 "a render that moves a cleanly-merged path is refused"
+out=$(STUB_RENDER_DRIFT=inputs/a.txt.md "$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 1 "a render that moves a path neither side changed is refused"
 has "$out" "generated/seed-audit/inputs/a.txt.md" "…naming the path it moved"
 refused "$W" "$FEAT" "drifting render"
+
+W=$(stopped_merge feat-c)
+out=$(STUB_RENDER_DRIFT=inputs/c.txt.md "$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 1 "a render that moves a path only one side changed is refused"
+has "$out" "generated/seed-audit/inputs/c.txt.md" "…naming the path it moved"
+refused "$W" "$FEAT_C" "one-sided drift"
 
 W=$(stopped_merge feat)
 out=$(STUB_RENDER_OUTSIDE=1 "$SUT" resolve --dir "$W" 2>&1); rc=$?

@@ -35,9 +35,10 @@
 # leaked machine path produces, and settling that is a person's job. A refusal
 # commits nothing and leaves the stopped merge for the caller to abort.
 #   exit 0  the merge is committed
-#        1  refused: a conflict outside the generated tree, no renderer, a failed
-#           render, or a render that moved a path only one side, or neither, had
-#           changed
+#        1  refused: a conflict outside the generated tree, no renderer, an
+#           unstaged change besides the conflicts, a failed render, or a render
+#           that wrote outside the tree or moved a path only one side, or
+#           neither, had changed
 #        2  usage, or no merge in progress
 #
 # Callers: mol-refinery-patrol's prepare step (resolve), pr-facts.sh and
@@ -103,7 +104,7 @@ run_bounded() {
 }
 
 resolve() { # <worktree>
-  local dir="$1" mh unmerged outside mt_out mt_rc mt mt_paths render_out new changed both mb stray msg_file subject
+  local dir="$1" mh unmerged outside dirty mt_out mt_rc mt mt_paths render_out new changed both mb stray msg_file subject
   git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || die "$dir is not a git worktree"
   mh=$(git -C "$dir" rev-parse --verify --quiet MERGE_HEAD 2>/dev/null) || die "no merge in progress in $dir"
   unmerged=$(git -C "$dir" diff --name-only --diff-filter=U 2>/dev/null) || refuse "could not list the unmerged paths"
@@ -112,6 +113,14 @@ resolve() { # <worktree>
   outside=$(outside_tree "$unmerged")
   [ -z "$outside" ] || refuse "conflicts outside $GEN_TREE need a person: $(printf '%s' "$outside" | tr '\n' ' ')"
   [ -f "$dir/$GEN_RENDERER" ] || refuse "the merged tree carries no $GEN_RENDERER to render $GEN_TREE with"
+  # The render reads the working tree and the commit takes the index, so an
+  # unstaged change would shape the render and stay out of the commit. With
+  # none present here, every unstaged change the check after the render finds
+  # is the render's own, and undoing those discards nothing a person wrote.
+  dirty=$(git -C "$dir" diff --name-only 2>/dev/null) || refuse "could not list the unstaged changes"
+  dirty=$(LC_ALL=C comm -23 <(sorted "$dirty") <(printf '%s\n' "$unmerged"))
+  [ -z "$dirty" ] \
+    || refuse "unstaged changes besides the conflicts would feed the render and stay out of the commit: $(printf '%s' "$dirty" | head -5 | tr '\n' ' ')"
 
   # The baseline the render is held to: git's own auto-merge of the same two
   # commits, which must name exactly the paths the stopped merge left unmerged.
