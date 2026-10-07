@@ -227,14 +227,17 @@ fi
 resolves `metadata.target=integration/<convoy-id>` for the child at sling time.
 It is an idempotent precondition of the sling, so it runs here, before every
 sling including a resumed one. A child slung without it opens its PR against
-the default branch, so the link is read back before the sling, and a link that
-did not land fails the step with `gc.design_armed` unstamped, which leaves the
-arm for a resume to re-run:
+the default branch, so the link is read back before the sling. The read-back
+decides, not the add's exit status: a resume re-runs the add on an edge the
+failed pass may already have written, and an add refused on an existing edge
+looks the same as one that wrote nothing. A link that does not read back fails
+the step with `gc.design_armed` unstamped, which leaves the arm for a resume to
+re-run:
 ```bash
-ARMED=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.design_armed"] // empty')
+ARMED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_armed"] // empty')
 # >>> arm-design-dispatch
 if [ -z "$ARMED" ]; then
-  gc bd dep add "$DESIGN_CHILD" "$CONVOY_ID" --type=parent-child || { echo "linking design child $DESIGN_CHILD under convoy $CONVOY_ID failed; not slinging" >&2; exit 1; }
+  gc bd dep add "$DESIGN_CHILD" "$CONVOY_ID" --type=parent-child || echo "dep add of design child $DESIGN_CHILD under convoy $CONVOY_ID returned non-zero (already linked?); reading the edge back" >&2
   LINKED=$(gc bd dep list "$DESIGN_CHILD" --direction=down -t parent-child --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY_ID" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
   [ "${LINKED:-0}" -ge 1 ] 2>/dev/null || { echo "design child $DESIGN_CHILD reads no parent-child edge to convoy $CONVOY_ID after the link; not slinging" >&2; exit 1; }
   gc sling "$POOL" "$DESIGN_CHILD" --on mol-polecat-work || { echo "sling of design child failed" >&2; exit 1; }
@@ -340,14 +343,15 @@ convoy link resolves `metadata.target=integration/<convoy-id>` for the child,
 and under design-gated the `blocks` edge is what keeps the deferred dispatch
 from firing before the design closes. Both are idempotent preconditions of the
 dispatch, so they run here, before every dispatch including a resumed one, and
-each is read back before anything dispatches. An edge that did not land fails
-the step with `gc.impl_armed` unstamped, which leaves the arm for a resume to
+each is read back before anything dispatches. As in arm-design, the read-back
+decides, not the add's exit status. An edge that does not read back fails the
+step with `gc.impl_armed` unstamped, which leaves the arm for a resume to
 re-run:
 ```bash
-ARMED=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.impl_armed"] // empty')
+ARMED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_armed"] // empty')
 # >>> arm-implementation-dispatch
 if [ -z "$ARMED" ]; then
-  gc bd dep add "$IMPL_CHILD" "$CONVOY_ID" --type=parent-child || { echo "linking implementation child $IMPL_CHILD under convoy $CONVOY_ID failed; not dispatching" >&2; exit 1; }
+  gc bd dep add "$IMPL_CHILD" "$CONVOY_ID" --type=parent-child || echo "dep add of implementation child $IMPL_CHILD under convoy $CONVOY_ID returned non-zero (already linked?); reading the edge back" >&2
   LINKED=$(gc bd dep list "$IMPL_CHILD" --direction=down -t parent-child --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY_ID" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
   [ "${LINKED:-0}" -ge 1 ] 2>/dev/null || { echo "implementation child $IMPL_CHILD reads no parent-child edge to convoy $CONVOY_ID after the link; not dispatching" >&2; exit 1; }
   if [ "$DESIGN_GATED" = "true" ]; then
@@ -355,7 +359,7 @@ if [ -z "$ARMED" ]; then
     # closure, when its checkpoint PR merges with the operator's approval,
     # fires the sling. dep add's second id is the blocker, so the design
     # blocks the implementation here.
-    gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks || { echo "holding implementation child $IMPL_CHILD behind design child $DESIGN_CHILD failed; not arming" >&2; exit 1; }
+    gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks || echo "dep add holding implementation child $IMPL_CHILD behind design child $DESIGN_CHILD returned non-zero (already held?); reading the edge back" >&2
     HELD=$(gc bd dep list "$IMPL_CHILD" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg d "$DESIGN_CHILD" '[.[]? | select(.id == $d)] | length' 2>/dev/null)
     [ "${HELD:-0}" -ge 1 ] 2>/dev/null || { echo "implementation child $IMPL_CHILD reads no blocks edge from design child $DESIGN_CHILD after the add; not arming" >&2; exit 1; }
     "$SCRIPTS/deferred-dispatch.sh" arm "$IMPL_CHILD" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "deferred-dispatch arm failed" >&2; exit 1; }

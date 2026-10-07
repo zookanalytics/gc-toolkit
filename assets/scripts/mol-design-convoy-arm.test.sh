@@ -13,8 +13,13 @@
 # stamped only after every setup write landed and read back. A parent-child link
 # that is missing sends the child's PR to the default branch, and a missing
 # blocks edge lets the deferred dispatch sling the implementation before the
-# design is approved. Each case below breaks one write and checks that nothing
-# downstream of it ran: no sling, no arm, and no marker.
+# design is approved. Each failure case below breaks one write and checks that
+# nothing downstream of it ran: no sling, no arm, and no marker.
+#
+# The read-back decides whether an edge landed, not the add's exit status. A
+# resume re-runs every add on edges the failed pass may already have written,
+# and bd may refuse the duplicate, so the resume cases give each add a non-zero
+# exit over an edge that reads back and check that the arm completes.
 #
 # EXECUTES the real snippets extracted verbatim between the formula markers, so
 # the test cannot drift from the shipped instruction. No live city or network.
@@ -131,6 +136,9 @@ done
 # The gc stub logs every call, one line each, and answers by env:
 #   DEP_ADD_PARENT_RC / DEP_ADD_BLOCKS_RC  exit of `gc bd dep add ... --type=<t>`
 #   LIST_PARENT / LIST_BLOCKS              JSON `gc bd dep list ... -t <t> --json` prints
+# The add and the list answer independently, so a non-zero add over a listed
+# edge is bd refusing a duplicate, and a zero add over an empty list is a write
+# that reported success and recorded nothing.
 #   SLING_RC, UPDATE_RC                    exit of `gc sling` / `gc bd update`
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'STUB'
@@ -200,13 +208,24 @@ for sh in "${SHELLS[@]}"; do
     && ok "[$sh] arm-design: links the design child under the convoy" \
     || bad "[$sh] arm-design: no parent-child link under the convoy"
 
-  export DEP_ADD_PARENT_RC=1
+  export DEP_ADD_PARENT_RC=1 LIST_PARENT='[]'
   run_arm arm-design-dispatch "$sh"
-  stopped && ok "[$sh] arm-design: a failed link fails the step" \
+  stopped && ok "[$sh] arm-design: a failed link that reads no edge back fails the step" \
     || bad "[$sh] arm-design: a failed link passed"
   not_logged "sling " && not_logged "gc.design_armed" \
     && ok "[$sh] arm-design: a failed link neither slings nor stamps" \
     || bad "[$sh] arm-design: a failed link still slung or stamped"
+
+  # resume: the edge is present from the failed first pass, bd refuses the duplicate
+  export DEP_ADD_PARENT_RC=1 LIST_PARENT="$PARENT_OK"
+  run_arm arm-design-dispatch "$sh"
+  eq "$RC" "0" "[$sh] arm-design resume: an existing edge that reads back is slung and stamped"
+  logged "sling " && logged "gc.design_armed=1" \
+    && ok "[$sh] arm-design resume: the arm completes" \
+    || bad "[$sh] arm-design resume: did not complete"
+  grep -q 'reading the edge back' "$TMP/arm.err" \
+    && ok "[$sh] arm-design resume: the refused add is reported" \
+    || bad "[$sh] arm-design resume: the refused add passed silently"
 
   export DEP_ADD_PARENT_RC=0 LIST_PARENT='[]'
   run_arm arm-design-dispatch "$sh"
@@ -247,13 +266,24 @@ for sh in "${SHELLS[@]}"; do
   logged "gc.impl_armed=1" && ok "[$sh] arm-impl gated: gc.impl_armed is stamped" \
     || bad "[$sh] arm-impl gated: gc.impl_armed not stamped"
 
-  export DEP_ADD_BLOCKS_RC=1
+  export DEP_ADD_BLOCKS_RC=1 LIST_BLOCKS='[]'
   run_arm arm-implementation-dispatch "$sh"
   stopped && not_logged "deferred-dispatch" && not_logged "gc.impl_armed" \
-    && ok "[$sh] arm-impl gated: a failed blocks edge neither arms nor stamps" \
+    && ok "[$sh] arm-impl gated: a failed blocks edge that reads no edge back neither arms nor stamps" \
     || bad "[$sh] arm-impl gated: a failed blocks edge still armed or stamped (rc=$RC)"
 
-  export DEP_ADD_BLOCKS_RC=0 LIST_BLOCKS='[]'
+  # resume: both edges are present from the failed first pass, bd refuses both duplicates
+  export DEP_ADD_PARENT_RC=1 DEP_ADD_BLOCKS_RC=1 LIST_PARENT="$PARENT_OK" LIST_BLOCKS="$BLOCKS_OK"
+  run_arm arm-implementation-dispatch "$sh"
+  eq "$RC" "0" "[$sh] arm-impl gated resume: existing edges that read back are armed and stamped"
+  logged "deferred-dispatch arm dz-impl" && logged "gc.impl_armed=1" \
+    && ok "[$sh] arm-impl gated resume: the arm completes" \
+    || bad "[$sh] arm-impl gated resume: did not complete"
+  [ "$(grep -c 'reading the edge back' "$TMP/arm.err")" = "2" ] \
+    && ok "[$sh] arm-impl gated resume: both refused adds are reported" \
+    || bad "[$sh] arm-impl gated resume: a refused add passed silently"
+
+  export DEP_ADD_PARENT_RC=0 DEP_ADD_BLOCKS_RC=0 LIST_BLOCKS='[]'
   run_arm arm-implementation-dispatch "$sh"
   stopped && not_logged "deferred-dispatch" && not_logged "gc.impl_armed" \
     && ok "[$sh] arm-impl gated: a blocks edge that does not read back stops before the arm" \
@@ -288,11 +318,19 @@ for sh in "${SHELLS[@]}"; do
     && ok "[$sh] arm-impl all-in-one: no blocks edge and no deferred arm" \
     || bad "[$sh] arm-impl all-in-one: held behind the design anyway"
 
-  export DEP_ADD_PARENT_RC=1
+  export DEP_ADD_PARENT_RC=1 LIST_PARENT='[]'
   run_arm arm-implementation-dispatch "$sh"
   stopped && not_logged "sling " && not_logged "gc.impl_armed" \
-    && ok "[$sh] arm-impl all-in-one: a failed link neither slings nor stamps" \
+    && ok "[$sh] arm-impl all-in-one: a failed link that reads no edge back neither slings nor stamps" \
     || bad "[$sh] arm-impl all-in-one: a failed link still slung or stamped (rc=$RC)"
+
+  # resume: the edge is present from the failed first pass, bd refuses the duplicate
+  export DEP_ADD_PARENT_RC=1 LIST_PARENT="$PARENT_OK"
+  run_arm arm-implementation-dispatch "$sh"
+  eq "$RC" "0" "[$sh] arm-impl all-in-one resume: an existing edge that reads back is slung and stamped"
+  logged "sling rig/gc-toolkit.polecat dz-impl" && logged "gc.impl_armed=1" \
+    && ok "[$sh] arm-impl all-in-one resume: the arm completes" \
+    || bad "[$sh] arm-impl all-in-one resume: did not complete"
 
   export DEP_ADD_PARENT_RC=0 ARMED=1
   run_arm arm-implementation-dispatch "$sh"

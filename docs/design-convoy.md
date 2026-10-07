@@ -49,8 +49,10 @@ records its result on the subject (`gc.design_convoy_id`, `gc.design_child`,
 `gc.impl_child`, and the `*_armed` markers), so a crashed run resumes without
 creating a second convoy, child, or workflow. An arm stamps its `*_armed` marker
 only after every setup write it made has landed and read back. A link or
-`blocks` edge that fails, or does not read back, fails the step with the marker
-unstamped, so the resume re-runs that arm rather than skipping it.
+`blocks` edge that does not read back fails the step with the marker unstamped,
+so the resume re-runs that arm rather than skipping it. The read-back decides,
+not the add's exit status, because a resumed add can meet an edge the failed
+pass already wrote.
 
 The implementation is one child, not a fan-out: the design defines the
 breakdown, so the child carries "split into multiple beads if the design
