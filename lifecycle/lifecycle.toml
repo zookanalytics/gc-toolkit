@@ -289,6 +289,14 @@ merge_state_key = "pr_merge_state"
 comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 issue_comment_watermark_key = "pr_issue_comment_watermark"
+# What the watermarks count is feedback: every review, inline comment and
+# conversation comment that is not the city's own post, whoever wrote it. The
+# city's own post carries the mark pr-post.sh appends, or is an unmarked post
+# under the city's login from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ),
+# when its posts did not yet carry one. pr-facts.sh stamps it the first time it
+# reads the open PR; absent or malformed, every post under the city's login is
+# the city's own.
+provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
 # the merge until it closes — the child through a blocks edge, the visit through
@@ -711,6 +719,9 @@ keys = [
   # only when a later head still carries the threads, so the same head never
   # re-files.
   "pr_unengaged_threads",
+  # The provenance cutover, mechanics in [posture] above. Written once per
+  # anchor; signoff.sh reads it for the same test.
+  "pr_provenance_since",
 ]
 
 [metadata.pr_round_trip]

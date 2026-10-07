@@ -336,6 +336,7 @@ has "$ghlog" "pr create --repo github.com/zook/gc-toolkit --base main --head pol
 hasnt "$ghlog" "--draft" "the PR is non-draft"
 has "$ghlog" "pr view 77 --repo github.com/zook/gc-toolkit" "read back BY NUMBER, pinned"
 has "$ghlog" "pr comment 77" "the verdict was replayed as a comment"
+has "$ghlog" "<!-- gc:city -->" "the replayed verdict carries the city's provenance mark (posted through pr-post.sh)"
 hasnt "$ghlog" "pr review" "never an approval"
 
 echo "# the body summarizes the diff, and demotes the dispatch text"
@@ -414,6 +415,7 @@ out=$("$SUT" 2>&1)
 has "$out" "superseding closed PR#50" "the fresh PR names the headstone"
 eq "$(meta D1 pr_number)" "51" "the fresh PR is the recorded identity"
 has "$(cat "$STUB_GH_LOG")" "pr comment 50" "the superseded PR got the pointer comment"
+has "$(cat "$STUB_GH_LOG")" "$(printf 're-gated at `sha-d1-n`.\n\n<!-- gc:city -->')" "the pointer comment carries the city's provenance mark"
 
 echo "# closed-unmerged at the SAME head is a human decision"
 store "[$(pre D2 polecat/d2), $(rev D2)]"

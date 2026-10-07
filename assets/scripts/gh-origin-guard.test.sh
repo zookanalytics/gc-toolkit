@@ -58,6 +58,14 @@
 #        owner and name, so the host stays the endpoint's and a concrete owner
 #        or name beside one stays in the target; GET and graphql are left alone,
 #        and an endpoint naming no repository is out of the guard's domain
+#   (26) a post on our own repository — gh pr|issue comment, gh pr review, a
+#        gh api write to a comment, reply or review endpoint, a graphql mutation
+#        that posts — passes only when its body, inline or in a readable file,
+#        carries the city's provenance mark; an approval or change request, an
+#        editor body, standard input and a shell-built body are refused; a
+#        reaction, dismissal, re-request or delete posts no body and passes; a
+#        post inside a here-document body is not held to the mark, while the
+#        origin rule still reads the body and the commands after it
 
 set -u
 
@@ -154,7 +162,7 @@ denied "pr review --repo third party"     "$RIG" "gh pr review 12 --repo get-con
 echo "  -- the rig's own origin"
 allowed "issue create at own origin"   "$RIG" "gh issue create --repo zookanalytics/gc-toolkit --title 'x' --body 'y'"
 allowed "pr create at own origin"      "$RIG" "gh pr create --repo zookanalytics/gc-toolkit --base main --title 'x'"
-allowed "pr comment at own origin"     "$RIG" "gh pr comment 587 --repo zookanalytics/gc-toolkit --body 'y'"
+allowed "pr comment at own origin"     "$RIG" "gh pr comment 587 --repo zookanalytics/gc-toolkit --body 'y <!-- gc:city -->'"
 allowed "implicit target in rig cwd"   "$RIG" "gh pr create --base main --title 'x' --body 'y'"
 allowed "implicit issue in rig cwd"    "$RIG" "gh issue create --title 'x' --body 'y'"
 
@@ -292,7 +300,7 @@ denied  "popd leaves the target unresolved" "$RIG" "pushd $SANDBOX/third >/dev/n
 # these from becoming false refusals that teach agents to distrust the guard.
 echo "  -- prose that looks like a command"
 allowed "verb words inside a title" "$RIG" "gh issue create --title 'gh issue create fails on --repo get-convex/agent'"
-allowed "verb words inside a body"  "$RIG" "gh pr comment 587 --body 'run gh pr review --repo get-convex/agent next'"
+allowed "verb words inside a body"  "$RIG" "gh pr comment 587 --body 'run gh pr review --repo get-convex/agent next <!-- gc:city -->'"
 allowed "a plain echo"              "$RIG" "echo 'gh issue create --repo get-convex/agent'"
 allowed "a grep for the verb"       "$RIG" "grep -rn 'gh issue create' assets/"
 denied  "quoted third-party target"  "$RIG" "gh issue create --repo \"get-convex/agent\" --title 'x'"
@@ -356,17 +364,17 @@ echo "  -- URL operand names the repository"
 denied  "issue comment url at third party" "$RIG" "gh issue comment https://github.com/get-convex/agent/issues/353 --body 'x'"
 denied  "pr comment url at third party"    "$RIG" "gh pr comment https://github.com/get-convex/agent/pull/12 --body 'x'"
 denied  "pr review url at third party"     "$RIG" "gh pr review https://github.com/get-convex/agent/pull/12 --request-changes --body 'x'"
-allowed "issue comment url at own origin"  "$RIG" "gh issue comment https://github.com/zookanalytics/gc-toolkit/issues/1 --body 'x'"
-allowed "pr comment url at own origin"     "$RIG" "gh pr comment https://github.com/zookanalytics/gc-toolkit/pull/12 --body 'x'"
+allowed "issue comment url at own origin"  "$RIG" "gh issue comment https://github.com/zookanalytics/gc-toolkit/issues/1 --body 'x <!-- gc:city -->'"
+allowed "pr comment url at own origin"     "$RIG" "gh pr comment https://github.com/zookanalytics/gc-toolkit/pull/12 --body 'x <!-- gc:city -->'"
 # gh writes where the URL points even when --repo disagrees, so an owned --repo
 # must not shield an off-origin URL.
 denied  "off-origin url beats owned --repo" "$RIG" "gh pr comment https://github.com/get-convex/agent/pull/12 --repo zookanalytics/gc-toolkit --body 'x'"
 # A number or a branch names no repository, so it resolves the way a flagless
 # call does — against the working directory — and a URL sitting in a --body is
 # prose, not the operand.
-allowed "number operand resolves to cwd"   "$RIG" "gh pr comment 12 --body 'x'"
-allowed "branch operand resolves to cwd"   "$RIG" "gh pr comment feature/x --body 'x'"
-allowed "url in a body is not the target"  "$RIG" "gh pr comment 12 --body 'see https://github.com/get-convex/agent/pull/1 for context'"
+allowed "number operand resolves to cwd"   "$RIG" "gh pr comment 12 --body 'x <!-- gc:city -->'"
+allowed "branch operand resolves to cwd"   "$RIG" "gh pr comment feature/x --body 'x <!-- gc:city -->'"
+allowed "url in a body is not the target"  "$RIG" "gh pr comment 12 --body 'see https://github.com/get-convex/agent/pull/1 for context <!-- gc:city -->'"
 
 # --- (22) issue new / pr new are create ----------------------------------
 # gh exposes create as `issue new` and `pr new`. The whitelist named only
@@ -470,11 +478,111 @@ denied  "api placeholder with nothing to fill"   "$SANDBOX/plain" "gh api -X POS
 # --hostname chooses the forge an unqualified endpoint resolves on.
 denied  "api --hostname to another forge"        "$RIG" "gh api --hostname gitlab.example.com -X POST repos/zookanalytics/gc-toolkit/issues"
 # A writing method whose endpoint names no repos/OWNER/REPO path resolves to
-# nothing and is refused; graphql and non-repo endpoints are left alone.
+# nothing and is refused; graphql and non-repo endpoints are left alone by the
+# origin rule (a graphql post is held to the mark, in section 26).
 denied  "api POST a malformed repos path"        "$RIG" "gh api -X POST repos/zookanalytics"
 allowed "api graphql mutation is left alone"     "$RIG" "gh api graphql -f query=mutation{x}"
 allowed "api POST to a non-repo endpoint"        "$RIG" "gh api -X POST gists -f files=x"
 allowed "api GET own repo detail is a read"      "$RIG" "gh api repos/zookanalytics/gc-toolkit"
+
+# --- (26) a post on our own repository carries the city's mark ------------
+# pr-facts.sh tells the city's own posts from feedback by the provenance mark
+# pr-post.sh appends, not by the author, so an unmarked post under the city's
+# login reads back as feedback and loops into rework. On an owned repository a
+# post passes only when its body visibly carries the mark; the write-back's
+# marker counts, as it does for pr-facts. The mark is read from the body or from
+# a body file, never guessed at in a body the shell builds as the command runs.
+echo "  -- unmarked posts on our own repository"
+MARKED="$SANDBOX/marked.md";     printf 'Fixed on the branch.\n\n<!-- gc:city -->\n' > "$MARKED"
+UNMARKED="$SANDBOX/unmarked.md"; printf 'Fixed on the branch.\n' > "$UNMARKED"
+printf 'Fixed.\n\n<!-- gc:city -->\n' > "$RIG/reply.md"
+printf '{"body":"plain"}\n' > "$SANDBOX/unmarked.json"
+denied  "pr comment, unmarked body"                 "$RIG" "gh pr comment 5 --body 'Fixed on the branch.'"
+allowed "pr comment, marked body"                   "$RIG" "gh pr comment 5 --body 'Fixed on the branch. <!-- gc:city -->'"
+allowed "pr comment, the write-back marker"         "$RIG" "gh pr comment 5 --body 'Fixed. <!-- gc-writeback -->'"
+denied  "issue comment, unmarked body"              "$RIG" "gh issue comment 5 --body 'Fixed on the branch.'"
+denied  "pr comment by url, unmarked"               "$RIG" "gh pr comment https://github.com/zookanalytics/gc-toolkit/pull/5 -b 'x'"
+allowed "pr comment, attached -b, marked"           "$RIG" "gh pr comment 5 -b'x <!-- gc:city -->'"
+allowed "pr comment, -b= form, marked"              "$RIG" "gh pr comment 5 -b='x <!-- gc:city -->'"
+allowed "pr comment, --body= form, marked"          "$RIG" "gh pr comment 5 --body='x <!-- gc:city -->'"
+denied  "pr comment, the last body wins"            "$RIG" "gh pr comment 5 -b 'x <!-- gc:city -->' -b 'plain'"
+denied  "pr comment, a shell-built body"            "$RIG" 'gh pr comment 5 --body "$(cat body.md)"'
+denied  "pr comment, a variable body"               "$RIG" 'gh pr comment 5 --body "$BODY"'
+allowed "pr comment, marked body file"              "$RIG" "gh pr comment 5 --body-file $MARKED"
+allowed "pr comment, -F marked body file"           "$RIG" "gh pr comment 5 -F $MARKED"
+allowed "pr comment, relative body file"            "$RIG" "gh pr comment 5 --body-file reply.md"
+allowed "pr comment, relative body file after cd"   "$SANDBOX/plain" "cd $RIG && gh pr comment 5 --body-file=reply.md"
+denied  "pr comment, unmarked body file"            "$RIG" "gh pr comment 5 --body-file $UNMARKED"
+denied  "pr comment, a body file that is not there" "$RIG" "gh pr comment 5 --body-file $SANDBOX/nope.md"
+denied  "pr comment, body from standard input"      "$RIG" "cat $MARKED | gh pr comment 5 --body-file -"
+denied  "pr comment, editor body"                   "$RIG" "gh pr comment 5 --editor"
+denied  "pr comment, browser body"                  "$RIG" "gh pr comment 5 -w"
+denied  "pr comment, edit-last unmarked"            "$RIG" "gh pr comment 5 --edit-last --body 'plain'"
+allowed "pr comment, delete-last posts nothing"     "$RIG" "gh pr comment 5 --delete-last --yes"
+denied  "pr review, unmarked comment review"        "$RIG" "gh pr review 5 --comment --body 'looks fine'"
+allowed "pr review, marked comment review"          "$RIG" "gh pr review 5 --comment --body 'looks fine <!-- gc:city -->'"
+denied  "pr review, an approval"                    "$RIG" "gh pr review 5 --approve"
+denied  "pr review, a marked change request"        "$RIG" "gh pr review 5 --request-changes --body 'x <!-- gc:city -->'"
+denied  "pr review, -r in a shorthand run"          "$RIG" "gh pr review 5 -rb 'x <!-- gc:city -->'"
+denied  "pr review, -a with a marked body"          "$RIG" "gh pr review 5 -a -b 'x <!-- gc:city -->'"
+allowed "issue and pr create post no feedback"      "$RIG" "gh pr create --title 'x' --body 'plain'"
+# gh api reaches the same comment and review endpoints.
+denied  "api thread reply, unmarked"                "$RIG" "gh api repos/zookanalytics/gc-toolkit/pulls/5/comments/9/replies -f body=plain"
+allowed "api thread reply, write-back marker"       "$RIG" "gh api repos/zookanalytics/gc-toolkit/pulls/5/comments/9/replies -f 'body=Fixed. <!-- gc-writeback -->'"
+denied  "api comment edit, unmarked"                "$RIG" "gh api -X PATCH repos/zookanalytics/gc-toolkit/issues/comments/9 -f body=plain"
+allowed "api comment edit, marked"                  "$RIG" "gh api --method PATCH repos/zookanalytics/gc-toolkit/issues/comments/9 --raw-field 'body=x <!-- gc:city -->'"
+denied  "api conversation comment, unmarked"        "$RIG" "gh api repos/zookanalytics/gc-toolkit/issues/5/comments --field body=plain"
+allowed "api conversation comment, marked file"     "$RIG" "gh api repos/zookanalytics/gc-toolkit/issues/5/comments -F body=@$MARKED"
+denied  "api conversation comment, unmarked input"  "$RIG" "gh api repos/zookanalytics/gc-toolkit/issues/5/comments --input $SANDBOX/unmarked.json"
+denied  "api review with no body"                   "$RIG" "gh api repos/zookanalytics/gc-toolkit/pulls/5/reviews -f event=APPROVE"
+denied  "api placeholder reply, unmarked"           "$RIG" "gh api repos/{owner}/{repo}/pulls/5/comments/9/replies -f body=plain"
+allowed "api reaction posts no body"                "$RIG" "gh api -X POST repos/zookanalytics/gc-toolkit/issues/comments/9/reactions -f content=eyes"
+allowed "api dismissal posts no body"               "$RIG" "gh api -X PUT repos/zookanalytics/gc-toolkit/pulls/5/reviews/7/dismissals -f message=x"
+allowed "api re-request posts no body"              "$RIG" "gh api -X POST repos/zookanalytics/gc-toolkit/pulls/5/requested_reviewers -f 'reviewers[]=x'"
+allowed "api delete posts nothing"                  "$RIG" "gh api -X DELETE repos/zookanalytics/gc-toolkit/issues/comments/9"
+allowed "api issue create is not a comment"         "$RIG" "gh api -X POST repos/zookanalytics/gc-toolkit/issues -f title=x -f body=plain"
+denied  "api marked comment off origin is refused"  "$RIG" "gh api repos/get-convex/agent/issues/5/comments -f 'body=x <!-- gc:city -->'"
+# A graphql mutation that posts names no repository; its body rides in a
+# variable of any name, so any field carrying the mark counts. The mutation's
+# name is held in a variable here: spelled as a call, the pack's bypass lint
+# would read this test as a post.
+MUT="addPullRequestReviewThreadReply"
+GQL="mutation(\$t:ID!,\$b:String!){${MUT}(input:{pullRequestReviewThreadId:\$t,body:\$b}){clientMutationId}}"
+denied  "graphql thread reply, unmarked"            "$RIG" "gh api graphql -f query='$GQL' -f t=PRRT_x -f b=plain"
+allowed "graphql thread reply, marked"              "$RIG" "gh api graphql -f query='$GQL' -f t=PRRT_x -f 'b=Fixed. <!-- gc-writeback -->'"
+allowed "graphql thread reply, marked body file"    "$RIG" "gh api graphql -f query='$GQL' -f t=PRRT_x -F b=@$MARKED"
+allowed "graphql query is not a post"               "$RIG" "gh api graphql -f query='query{viewer{login}}'"
+allowed "graphql resolve is not a post"             "$RIG" "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"x\"}){thread{id}}}'"
+UREFUSAL="$(run "$RIG" "gh pr comment 5 --body 'plain'")"
+printf '%s' "$UREFUSAL" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("pr-post.sh")' >/dev/null 2>&1 \
+    && ok "the refusal names pr-post.sh" || bad "the refusal names pr-post.sh" "$UREFUSAL"
+printf '%s' "$UREFUSAL" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("carries no city mark")' >/dev/null 2>&1 \
+    && ok "…and says the body carries no mark" || bad "…and says the body carries no mark" "$UREFUSAL"
+printf '%s' "$(run "$RIG" "gh pr review 5 --approve")" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("never approves")' >/dev/null 2>&1 \
+    && ok "an approval is refused for what it is" || bad "an approval is refused for what it is" "no 'never approves' in the reason"
+rm -f "$RIG/reply.md"
+
+# A here-document body is far more often text an agent is writing, a note or a
+# doc that names these commands, than commands it runs, so a post found in one
+# is not held to the mark. The origin rule still reads it, and quote state
+# starts fresh on each side of a body, so the commands after one are still seen.
+echo "  -- here-document bodies"
+# lines <line>... — the lines joined into one command, so no line of a test
+# command stands on a physical line of its own here, where the pack's bypass
+# lint would read it as one.
+lines() { local IFS=$'\n'; printf '%s' "$*"; }
+BTK='`'
+allowed "a body that names a post verb"           "$RIG" "$(lines "cat > notes.md <<'R'" "Post with ${BTK}gh pr comment${BTK}, never by hand." 'R')"
+allowed "a body that spells out an unmarked post" "$RIG" "$(lines "cat > notes.md <<'R'" "Run ${BTK}gh pr comment 5 --body x${BTK} to see the refusal." 'R')"
+allowed "a <<- body with a tab-indented end"      "$RIG" "$(lines 'cat > notes.md <<-R' "	${BTK}gh pr comment 5 --body x${BTK}" '	R' 'echo done')"
+allowed "two bodies queued on one line"           "$RIG" "$(lines 'cat <<A >a; cat <<B >b' "${BTK}gh pr comment 5 --body x${BTK}" 'A' "${BTK}gh pr review 5 --approve${BTK}" 'B')"
+allowed "a body naming a posting mutation"        "$RIG" "$(lines "cat > notes.md <<'R'" "gh api graphql -f query='mutation{${MUT}(input:{}){clientMutationId}}' -f b=plain" 'R')"
+denied  "the origin rule still reads a body"      "$RIG" "$(lines "bash <<'EOF'" 'gh issue create --repo get-convex/agent --title x' 'EOF')"
+denied  "a post after a body is held to the mark" "$RIG" "$(lines "cat > notes.md <<'R'" 'text' 'R' 'gh pr comment 5 --body plain')"
+denied  "a quote in a body does not hide a post"  "$RIG" "$(lines "cat > notes.md <<'R'" "don't" 'R' 'gh pr comment 5 --body plain')"
+allowed "…and a marked post after it passes"      "$RIG" "$(lines "cat > notes.md <<'R'" "don't" 'R' "gh pr comment 5 --body 'x <!-- gc:city -->'")"
+denied  "a here-string opens no body"             "$RIG" "$(lines "cat <<< 'x'" 'gh pr comment 5 --body plain')"
+denied  "<<EOF inside a quoted body is no opener" "$RIG" "$(lines 'gh pr comment 5 --body "see <<EOF here <!-- gc:city -->"' 'gh pr comment 6 --body plain')"
 
 # --- (14) everything else stays silent -----------------------------------
 echo "  -- non-events"
