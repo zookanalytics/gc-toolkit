@@ -1,6 +1,6 @@
 ---
 name: gctk — promote the merge-cadence cluster from shell to one Go binary
-description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. Scoped 2026-08-24; lifecycle ported and the build/deploy/status machinery landed 2026-08-26 (tk-utjreo); the remaining subcommands follow one PR at a time.
+description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. Scoped 2026-08-24; lifecycle ported and the build/deploy/status machinery landed 2026-08-26 (tk-utjreo); lifecycle's shell fallback dropped 2026-10-05 (tk-crzvfv); the remaining subcommands follow one PR at a time.
 ---
 
 # gctk: the compiled data plane
@@ -13,9 +13,15 @@ Landed 2026-08-26 (tk-utjreo): `services/gctk`, the `lifecycle` port, the
 build/deploy pattern below, the fallback wiring, the build-status file, and its
 board rows. `services/gctk/README.md` carries the operating detail.
 
+Landed 2026-10-05 (tk-crzvfv): `lifecycle`'s shell fallback dropped, ahead of
+the teardown, once the build order had published a current binary through
+eight days of clean ticks. `lifecycle.sh` now only execs the binary, and a call
+with no binary to run exits 1 naming the `gctk-build` order. The fallback still
+stands for the other subcommands.
+
 Remaining, one subcommand per PR in this order: `gate-ensure`,
 `pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
-bead. The shell scripts and the driver's fallback drop when the last one
+bead. The remaining shell scripts and their fallbacks drop when the last one
 lands.
 
 ## The language rule (add to the review charter when it lands)
@@ -68,7 +74,9 @@ build in the exec path),
 launcher resolves the prebuilt binary. Until the binary exists at the
 deployed path, the shell scripts remain — the driver prefers `gctk` when
 present, falls back to the script during migration, and drops the fallback
-when the last port lands.
+when the last port lands. `lifecycle` dropped its fallback early (tk-crzvfv):
+with no binary to run, `lifecycle.sh` refuses the call and names the build
+order, and a build that fails keeps the last good binary answering.
 
 **Failure-mode tradeoff, stated:** a script edit is live from the working
 tree instantly; a gctk change rides the build order (~5m) and a broken build

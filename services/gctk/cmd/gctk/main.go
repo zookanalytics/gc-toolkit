@@ -16,11 +16,13 @@
 //
 // Ported so far: lifecycle, merge and pr-status. The rest of the merge-cadence
 // cluster (gate-ensure, pr-open, pr-facts, convoy-graduate, signoff) still runs
-// as shell. assets/scripts/lifecycle.sh and assets/scripts/merge.sh remain as
-// fallbacks for a city whose gctk build has not landed yet; pr-status has none
-// by design — its tri-state lives only in gctk so the status: label and the helm
-// board share one code path, so when the binary is absent or stale
-// pr-status-label.sh leaves the label unchanged rather than deriving it in shell.
+// as shell. assets/scripts/merge.sh remains as the fallback for a city whose
+// gctk build has not landed yet. lifecycle has no shell fallback:
+// assets/scripts/lifecycle.sh only execs this binary, and refuses the call when
+// there is none to run. pr-status has none by design — its tri-state lives only
+// in gctk so the status: label and the helm board share one code path, so when
+// the binary is absent or stale pr-status-label.sh leaves the label unchanged
+// rather than deriving it in shell.
 package main
 
 import (
@@ -33,7 +35,7 @@ import (
 
 const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
-  gctk merge                      merge cadence arm 4 — the single writer of merged truth (assets/scripts/merge.sh)
+  gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
   gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
   gctk version                    the revision this binary was built from
 
@@ -74,7 +76,7 @@ func run(args []string, stdout, stderr *os.File) int {
 var sourceRev string
 
 // version reports the revision this binary was built from. It is what
-// lifecycle.sh and doctor/check-cadence-live compare against the checkout: a
+// doctor/check-cadence-live compares against the checkout: a
 // cadence running a binary built from other sources is the failure mode the
 // build order's ~5m lag makes possible, and the operator has no other way to
 // see it. The build order's stamp wins because it names the module's own
