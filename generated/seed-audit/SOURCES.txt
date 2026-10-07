@@ -58,7 +58,7 @@ agents/witness/agent.toml
 agents/witness/prompt.template.md
 6dc57aa4811ae551eff65cada2f74fa65eb68eba355e83d59473315b652691ce
 assets/scripts/render-seed-audit.sh
-ec82668bf652e4d3830f7c59c352c7dbb133b21d8fed4f419fac5f0d9919d987
+55c24857783bc65b132e9b5b77430d413a306af15bc1b95d8c43bd79d90fe8ef
 formulas/mol-deacon-patrol.toml
 07d6f0db15dab10e9d25e5fcb6e403d5289291cd321e3ef08d6df671d4e136d3
 formulas/mol-dog-shutdown-dance.toml
@@ -92,7 +92,7 @@ packs/gascity-keeper/agents/keeper/PROVENANCE.md
 packs/gascity-keeper/agents/keeper/agent.toml
 e03ff8554313e0215b60392d145a521f1ec991ba32fd2e7ad100aff2eaab8f96
 packs/gascity-keeper/agents/keeper/prompt.template.md
-e7ccf97fca84d3ab3df732932a39d15c96c389ddb9596624e99e13fdace4d83c
+2867e1fe591b40e01e464867261d78e484b5b04f533a94dca86d6fdc81145df7
 packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml
 d5b13c84ac7c9665a11ec44aa4276f3f72864f3f94ca7260dd6976806ef595bf
 packs/gascity-keeper/formulas/mol-upstream-gc-rebase-rework.toml
@@ -102,13 +102,19 @@ packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml
 packs/gascity-keeper/formulas/mol-upstream-gc-sync.toml
 c3391ea526124520afe8b974ebaf8ed5d0e3a20bebc8d7838115188718211125
 packs/gascity-keeper/pack.toml
-e84856c3af15e76904d3bd57b8053a602b85c9f13dfde2e9de77a4d6abff0ed5
+efb27bf2431416e15ed2049185f2935dcf0469c3dc00cd96d8e0b84df94274d7
 packs/gascity-keeper/template-fragments/polecat-patterns.template.md
 f9d69d1728248383a376f8449a3798366b9d8f7a8cd232488f6f4dbe4e05c0b1
 packs/gascity-keeper/template-fragments/rebase-conventions.template.md
 4d97d69161e8a1146a177fb7cba276281d0c279e0d00f0dc299b41f9ce1a0896
 packs/gascity-keeper/template-fragments/refinery-rebase-handling.template.md
 1559243ea2048c81230333589e308135191fb8136977a546ab78600539ce2f13
+packs/gascity-keeper/template-fragments/watch-dispatched-work.template.md
+a6333144bdeae8e504c1902803f8c778c2fb1f75bbbfbcb3ea43938cabdfa856
+packs/gascity-keeper/template-fragments/work-quality-base.template.md
+94a12ec830210d88ee03f1f7bd8fe38fb4badafc21d1291ba6fe828feabcd81d
+packs/gascity-keeper/template-fragments/work-quality-system.template.md
+21c2744ba65bcade77af7826ccba6d2bb3a8b0fc40475b8c13380f41eed5ce4a
 template-fragments/bead-disposition.template.md
 90aa9989fdcc1e2705b7eaae4fa3f816bdba16bdae4af3cc98b2febfc26a2976
 template-fragments/canonical-self-rename.template.md
@@ -132,7 +138,7 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 4cc4ec151e31b86d2d38f6d435d98361cc710274c5a1a884c23d45bbde434d69
 template-fragments/polecat-doctrine.template.md
-22431ec42516601f2b91c67d58495f5c2ecaeb80955b864cff43d946054170d1
+54d129dcdfef4299118ac99cbbef4f134aeaaa51e3c7594692a18402f3b2e4cd
 template-fragments/pool-worker-no-consent-ui.template.md
 bdecf75ec1e37c3a47c55f1cf186240e5f71d0d13abe0d6249e786f0997da517
 template-fragments/scratch-reclaim.template.md
