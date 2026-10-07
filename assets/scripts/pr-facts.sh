@@ -363,8 +363,11 @@ WB_GLYPH_AWAITING="❓"
 # resolves back with the comments it defers, since a thread answered before its
 # comment is acknowledged claims the city acted on something it never showed it
 # had picked up. A swap owed on a comment answered in an earlier pass draws on
-# the same cap.
-WB_REACT_CAP=50
+# the same cap. PR_FACTS_REACT_CAP overrides the cap. Anything but a positive
+# integer written without a leading zero keeps 50, because a cap of 0 would
+# hold every batch's answers forever.
+WB_REACT_CAP="${PR_FACTS_REACT_CAP:-50}"
+case "$WB_REACT_CAP" in *[!0-9]*|0*) WB_REACT_CAP=50 ;; esac
 # <<< pr-writeback-contract
 # >>> comment-batch-ledger
 # Each comment id space keeps a ledger of the batches routed under it:
