@@ -3339,22 +3339,26 @@ has "$out" "visited 1 of 2 PR anchors" "…counted once"
 echo "# pacing: the write-back sweep rotates on a cursor of its own under the same deadline"
 # Three anchors carry a routed comment batch, enumerated out of id order. A
 # deadline of epoch 1 has always passed, so the sweep acknowledges one anchor's
-# comments per pass, on a rotation apart from the walk's.
-store "[$(anchor WP3 93 "$(wb_meta rework:KP3)"), $(anchor WP1 91 "$(wb_meta rework:KP1)"),
-        $(anchor WP2 92 "$(wb_meta rework:KP2)"), $(child KP1 open), $(child KP2 open), $(child KP3 open)]"
-for n in 91 92 93; do
+# comments per pass, on a rotation apart from the walk's. The PR numbers are
+# ones no earlier section uses, and each PR's issue comments are emptied too,
+# because the walk visits the same anchors and would route a comment an earlier
+# section left behind, which changes what the sweep owes.
+store "[$(anchor WP3 193 "$(wb_meta rework:KP3)"), $(anchor WP1 191 "$(wb_meta rework:KP1)"),
+        $(anchor WP2 192 "$(wb_meta rework:KP2)"), $(child KP1 open), $(child KP2 open), $(child KP3 open)]"
+for n in 191 192 193; do
   printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"
   threads "$n" "$(one_thread "$n")"
+  printf '[]' > "$GH_DIR/issue_comments_$n.json"
 done
 WBCUR="$TMP/pr-facts-wb.cursor"; rm -f "$WBCUR" "$WBCUR.writeback"
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
-eq "$(reacted 91 NC-91),$(reacted 92 NC-92),$(reacted 93 NC-93)" "true,false,false" "past the deadline the sweep still acknowledges one anchor, the lowest id"
+eq "$(reacted 191 NC-191),$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false,false" "past the deadline the sweep still acknowledges one anchor, the lowest id"
 has "$out" "write-back visited 1 of 3 anchors with routed comments before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
 eq "$(cat "$WBCUR.writeback" 2>/dev/null)" "WP1" "the sweep records its progress on a cursor of its own"
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
-eq "$(reacted 92 NC-92),$(reacted 93 NC-93)" "true,false" "the next pass resumes the sweep after its cursor"
+eq "$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false" "the next pass resumes the sweep after its cursor"
 out=$("$SUT" --fix-pool "$FIX" --deadline "$(( $(date +%s) + 600 ))" --cursor "$WBCUR" 2>&1)
-eq "$(reacted 93 NC-93)" "true" "a deadline that has not passed lets the sweep reach every anchor"
+eq "$(reacted 193 NC-193)" "true" "a deadline that has not passed lets the sweep reach every anchor"
 has "$out" "write-back visited 3 of 3 anchors with routed comments" "…and reports the whole sweep"
 out=$("$SUT" --fix-pool "$FIX" 2>&1)
 hasnt "$out" "write-back visited" "an unpaced pass reports no write-back pacing"
