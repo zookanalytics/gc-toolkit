@@ -43,7 +43,7 @@ in the discard list below it.
 | **Anchor** | the single open bead that owns a PR and carries its checks | N claimants on one PR ⇒ the weakest check-set decides the merge |
 | **Convoy** | tracked set with one landing target | no unit larger than a bead can land, and integration branches cannot graduate |
 | **Formula + step bead** | a workflow materialised as beads | a crashed session resumes by reconstructing intent from prose |
-| **Check-set + check marker** | declared merge preconditions, each bound to a commit | merges depend on whoever remembers to look |
+| **Check-set + check lane** | the merge preconditions an anchor declares in `check_set`, one lane per check. A lane's `check.<g>` marker carries one bare state word that names no commit, and the reviewed commit is recorded on the review bead as `reviewed_oid`. `lane-state.sh` derives a lane's green from its reviews. [state-machine.md](state-machine.md#checks) owns the vocabulary. | merges depend on whoever remembers to look |
 | **Pool + route** | demand addressed to a role, not to a session | dispatch names a mortal process |
 | **Order** | controller-owned recurring pass, no LLM | cadence becomes an invisible daemon |
 | **Agent session** | one mortal executor with an identity | nothing can be claimed, and nothing can be recycled |
@@ -130,9 +130,10 @@ The machine itself — states, transitions, writers, checks — is drawn once, i
   the same writer, and the write is idempotent.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
-  commit, but the anchor-local authorization set — `check.*`, `merge_hold`,
-  `pr_posture`, `merged_target` — does not move the head; the pre-merge
-  re-read is what catches a mid-pass write to any of them.
+  commit, but the authorization set — `merge_hold`, `pr_posture`,
+  `merged_target`, and every declared lane's derived green — does not move
+  the head; the pre-merge re-read, which re-derives each lane through
+  `lane-state.sh`, is what catches a mid-pass change to any of them.
 
 ---
 
