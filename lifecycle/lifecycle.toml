@@ -889,13 +889,14 @@ keys = [
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key is the dedup identity — one open bead per key, narrowed to
+# it). finding.key is the dedup identity — one live bead per key, narrowed to
 # finding.about when the finding names a subject bead. finding.scope is which
 # patrol filed it; finding.digest is the message hash that tells a recurrence
 # with changed text from an identical one. finding.occurrences counts the
 # recurrences and finding.first_seen/finding.last_seen bracket them.
-# finding.recurrence_of names the earlier CLOSED finding a reappearance repeats,
-# so a fix that did not hold is visible.
+# finding.recurrence_of names the earlier finding a reappearance repeats: a
+# closed one, or one held at blocked with nothing open left to wait on. Either
+# way a fix that did not hold is visible.
 keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",
