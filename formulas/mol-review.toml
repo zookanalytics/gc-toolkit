@@ -170,37 +170,38 @@ Three dots — compare against the merge-base, so you review what the branch
 changed rather than what the base moved on underneath it. A large diff gets
 read in chunks, not sampled.
 
-**2. Run the tests at the pinned commit** in a throwaway detached worktree,
-so they run against exactly what you reviewed:
-Run it as ONE shell: the trap is what removes the worktree, and it fires
-when that shell exits.
+**2. Run the tests at the pinned commit** in a detached worktree inside this
+review's workspace, so they run against exactly what you reviewed. The
+workspace is a directory named for the review bead, and it belongs to the
+review rather than to any one shell: `add` returns the same worktree each time
+it runs, so a later block gets it back by running these lines again.
 ```bash
-REPO=$(git rev-parse --show-toplevel)
-REVIEW_WT=$(mktemp -d "${TMPDIR:-/tmp}/gc-review-$REVIEW_BEAD.XXXXXX")
-# The trap owns the teardown, so every exit reaches it — a failing suite, a
-# timeout, an interrupt. A worktree left behind keeps its registration too,
-# and a registration whose directory still exists is one `git worktree prune`
-# cannot reclaim: it needs the removal to have run.
-review_wt_rm() {
-  cd "$REPO" 2>/dev/null || true
-  git -C "$REPO" worktree remove --force "$REVIEW_WT" 2>/dev/null || rm -rf "$REVIEW_WT"
-  git -C "$REPO" worktree prune
-}
-trap review_wt_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
-cd "$REVIEW_WT"
 # >>> review-lease-keepalive
 # Keep this review claim's lease in the future across the suites: a claim's
 # lease has a fixed five-minute TTL and a suite can outlive it, so a live
 # reviewer whose lease expired reads to a lease consumer like a dead one.
 # Refresh $CLAIMED_STEP_BEAD_ID through the keepalive while each suite runs
 # (best-effort — an unresolved wrapper runs the command plain and never fails it).
-LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
 # <<< review-lease-keepalive
+# >>> review-workspace-add
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID") || exit 1
+cd "$REVIEW_WT"
+# <<< review-workspace-add
 # run the suites the diff touches through hb, e.g. `hb bash -c '<suite>'`;
 # record real pass/fail counts
 ```
+Anything else the review writes to disk, such as a log, probe output, or a
+second worktree at the base, goes in the workspace beside `wt`
+(`dirname "$REVIEW_WT"`), never loose in `/tmp`. The verdict step removes the
+workspace when the review ends there, and the hourly review-workspace-reap
+order removes any workspace whose review bead has closed
+(docs/review-workspace.md).
+
 A failing suite is not automatically a finding: check whether it fails on the
 base too. A pre-existing failure belongs in the verdict as context, not as
 this branch's defect.
@@ -452,16 +453,20 @@ The pour retired gc.routed_to and this workflow's steps are now closed, so no
 second authority remains; restoring the route returns the bead to the pool's
 routed tier as a formula-less review bead whose body carries the method note
 (the documented recovery shape), so the next claim genuinely resumes — an
-unrecorded verdict is recoverable; a hand-rolled one is not.
+unrecorded verdict is recoverable; a hand-rolled one is not. The review's
+workspace stays where it is, and the reviewer who claims the bead next gets
+the same worktree back from `review-workspace.sh add`.
 
-**3. Close this workflow's step chain, then drain.** Terminal step: it still
-closes its own bead — that is how a graph.v2 step advances, and skipping it
-leaves an open assigned step bead that re-pools a fresh worker every cycle,
-indefinitely. Forward order is mandatory (each step blocks the next); close
-only through step-close.sh, which resolves by (gc.root_bead_id,
-gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead after a claim.
-Never close `workflow-finalize` (the control-dispatcher's):
+**3. Close this workflow's step chain, remove the workspace, then drain.**
+Terminal step: it still closes its own bead — that is how a graph.v2 step
+advances, and skipping it leaves an open assigned step bead that re-pools a
+fresh worker every cycle, indefinitely. Forward order is mandatory (each step
+blocks the next); close only through step-close.sh, which resolves by
+(gc.root_bead_id, gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead
+after a claim. Never close `workflow-finalize` (the control-dispatcher's):
 ```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
@@ -469,6 +474,9 @@ done
 for STEP in load-dispatch review verdict-and-drain; do
   "$SC" --step "mol-review.$STEP" --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
 done
+# >>> review-workspace-remove
+[ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"
+# <<< review-workspace-remove
 gc runtime drain-ack
 ```
 
@@ -477,6 +485,7 @@ touch the anchor. Done means gone.
 
 **Exit criteria:** exactly one signoff.sh call succeeded (or findings are
 appended and, after the chain closed, the bead's route is restored so the
-pool can re-claim it), step chain closed forward, drain acknowledged.
+pool can re-claim it), step chain closed forward, the workspace removed unless
+the bead went back to the pool, drain acknowledged.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

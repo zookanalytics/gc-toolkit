@@ -146,7 +146,7 @@ export TARGET_LOG="$TMP/target.log"
 run_region() {
     : > "$TARGET_LOG"
     rm -f "$TMP/hb-ran"
-    ( cd "$TMP" && env GC_PACK_DIR="$2" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" REPO="$TMP/no-repo" \
+    ( cd "$TMP" && env GC_PACK_DIR="$2" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
         CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
         REVIEW_BEAD=tk-review-bead WORK_BEAD_ID=tk-work-bead \
         bash -c '. "$1" && hb touch "$2"' _ "$1" "$TMP/hb-ran" )
