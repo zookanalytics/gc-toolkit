@@ -57,10 +57,20 @@
 # whose markers are not one well-formed pair is left alone rather than
 # rewritten every pass. Any read that fails skips that anchor — a truncated
 # ledger published as the whole ledger is worse than last pass's section.
+# Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk over the open
+# PRs: a rotation, with no new PR started past the deadline (pace-lib.sh).
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
 
 PROG="pr-stack"
+DEADLINE=""; CURSOR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --deadline) DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)   CURSOR="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -99,6 +109,8 @@ ORIGIN_REPO_Q="$ORIGIN_HOST/$ORIGIN_REPO"
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
 # The managed `## Summary` region (markers, composer and splice helpers) and the
 # title composer (cc_title), shared with pr-open.sh so an opened PR and a
 # post-open refresh never diverge.
@@ -223,7 +235,7 @@ append_section() { # <body-file> <section-file> <out-file>
 # repeating the pre-open sign-off claim.
 refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
-  local summary want cur desc checkset branch target SECTION
+  local summary want cur desc checkset branch target phased SECTION
   summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty' 2>/dev/null)
   [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || return 1
   prs_marker_state "$bin" || return 1
@@ -238,8 +250,12 @@ refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""' 2>/dev/null)
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty' 2>/dev/null)
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // "main"' 2>/dev/null)
+  # The gates the handoff bullet names, resolved at this head. An unreadable set
+  # leaves the region as it stands this pass rather than publish a bullet that
+  # names no gate.
+  phased=$(prs_resolve_phased "$checkset" "$head_oid") || return 1
   SECTION=$(mktemp "$STACK_TMP/summary.XXXXXX") || return 1
-  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh > "$SECTION" \
+  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh "$phased" > "$SECTION" \
      || [ ! -s "$SECTION" ]; then
     rm -f "$SECTION"; return 1
   fi
@@ -277,12 +293,13 @@ ANCHORS=$(bd_list --status=open --has-metadata-key merge_result) || {
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no open anchors"; exit 0; }
 
 edited=0; current=0; single=0; skipped=0; refreshed=0; retitled=0
-SEEN=""
+SEEN=""; prs=0
 # Per-anchor scratch (rendered section, current body, spliced body) lives under
 # one trapped directory, so a signal or timeout mid-iteration takes the whole
 # tree with it rather than orphaning gctk-pr-stack.* files in /tmp.
 STACK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-stack.XXXXXX") || { echo "$PROG: cannot create a temp dir" >&2; exit 1; }
 trap 'rm -rf "$STACK_TMP"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+pace_start "$CURSOR" "$DEADLINE"
 while IFS=$'\t' read -r id branch num; do
   [ -n "${id:-}" ] || continue
   if [ -z "$branch" ] || [ -z "$num" ] || [ -n "${num//[0-9]/}" ]; then continue; fi
@@ -291,6 +308,8 @@ while IFS=$'\t' read -r id branch num; do
   # composed twice.
   case " $SEEN " in *" $num "*) continue ;; esac
   SEEN="$SEEN $num"
+  prs=$((prs + 1))
+  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
 
   # </dev/null on every call in this loop: it is fed by a heredoc, and a child
   # inheriting its stdin would consume the anchor rows behind it.
@@ -322,8 +341,8 @@ while IFS=$'\t' read -r id branch num; do
 
   # (a) gc:pr-summary — a pull_request anchor. A rework restamps the anchor summary
   # and no earlier arm republishes it once open, so bring the region current when it
-  # is behind. Scoped to pull_request: a pre_open_gate anchor is arm 6's to refresh
-  # as it adopts and flips, and this is the layer arm 6 cannot reach once the anchor
+  # is behind. Scoped to pull_request: a pre_open_gate anchor is arm 3's to refresh
+  # as it adopts and flips, and this is the layer arm 3 cannot reach once the anchor
   # has left that state. A change folds into CUR so the branch-beads pass below reads
   # it and both land in one edit.
   anchor_row=$(printf '%s' "$ANCHORS" | jq -c --arg id "$id" 'map(select(.id == $id)) | .[0] // empty' 2>/dev/null)
@@ -406,11 +425,17 @@ while IFS=$'\t' read -r id branch num; do
   fi
   rm -f "$SECTION" "$CUR" "$NEW"
 done <<ANCHORS_EOF
-$(printf '%s' "$ANCHORS" | jq -r '.[]
-  | [ ((.id // "") | tostring),
+$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR" | jq -r '
+    [ ((.id // "") | tostring),
       (((.metadata // {}).branch // "") | tostring),
       (((.metadata // {}).pr_number // "") | tostring) ] | @tsv' 2>/dev/null)
 ANCHORS_EOF
+pace_end
 
+if [ -n "$PACE_RESUME_AT" ]; then
+  echo "$PROG: visited $PACE_VISITED PRs before the deadline; the next pass resumes at $PACE_RESUME_AT"
+else
+  echo "$PROG: visited $PACE_VISITED of $prs PRs"
+fi
 echo "$PROG: $edited edited, $refreshed summary-refreshed, $retitled retitled, $current already current, $single single-bead, $skipped skipped"
 exit 0
