@@ -230,11 +230,11 @@ your claimed bead everything else.
 | your step beads | **you**, via `assets/scripts/step-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
-- **Never close the work bead** — no `bd close`, no `--status=closed` — even
-  if the work looks already merged, and equally when it is a child whose
-  anchor is elsewhere. Hand it to the refinery with a note: merge-push is
-  where a bead leaves the anchor class and closes, and it is the only thing
-  that verifies a merge.
+- **Never close the work bead** — no `bd close`, no
+  `bd update --status=closed` — even if the work looks already merged, and
+  equally when it is a child whose anchor is elsewhere. Hand it to the
+  refinery with a note: merge-push is where a bead leaves the anchor class
+  and closes, and it is the only thing that verifies a merge.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
@@ -261,6 +261,29 @@ diagnosis, added requirements, reviewer corrections — at the exact moment the
 bead is handed to the people who need it, and nothing downstream can miss a
 note it never saw. This applies to every write in the done sequence,
 including the `auto_push=false` halt arm.
+
+
+## No consent UI
+
+**You are a pool worker. NEVER invoke `AskUserQuestion`, `/handoff`, or any
+other blocking consent UI — about anything.** The prohibition is on the
+MECHANISM, not on a list of topics: if a question would park your turn until
+an operator presses a key, you do not ask it, whatever it is about. There is no
+approval wait, and a consent prompt manufactures one — a pool worker stopped at
+a prompt cannot be un-nudged, because typing at a pending prompt types into the
+UI and not into you, so it keeps its pool slot and reports `active` while doing
+no work until a person walks past its pane. Your turn ends at the formula's
+terminal step, never at a prompt.
+
+**What to do instead — none of these block, and each leaves a durable record a
+pending prompt does not:**
+- **A requirement is unclear, or another agent could answer:** mail the witness
+  (`HELP:`), per Escalation.
+- **A decision only the operator can make, or work you must decline and cannot
+  close:** file the visit with `escalate.sh`, then hold the molecule and drain,
+  per Escalation. The visit is the release path a human can claim.
+- **`/handoff` is operator-initiated** — never proposed via consent UI.
+
 
 ## Escalation
 

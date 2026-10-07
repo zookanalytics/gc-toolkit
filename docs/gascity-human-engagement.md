@@ -296,15 +296,17 @@ data plane never blocks an intake.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
 `mol-first-reaction` at the new subject. That formula triages the subject and
-takes one of its five dispositions; it files a visit from its `advance-and-drain`
-step on the two that put the subject to the operator, a ruling or a recommend. A
+takes one of its five dispositions. On the two that put the subject to the
+operator, a ruling or a recommend, its `advance-and-drain` step files a human
+gate on the subject, and `gate-visit-sweep` files the visit that resolves it on
+its next pass (see "How a sitting ends" below). A
 ruling is Discuss-only: the reaction judges the capture a genuine fork, an
 irreversible or destructive action, or a policy call, and the operator arrives at
 a framed conversation with a first-reaction card already written. A recommend
 adds an action the operator can Accept: the reaction names the move and the
 execution mol, and the visit offers Accept beside Discuss. When the reaction
 judges the action clear and reversible, it routes the capture, holds it, or hands
-it to a validating closer, and files no visit. The script
+it to a validating closer, and puts nothing to the operator. The script
 files nothing on the reaction path; a second visit would split one conversation
 into two sittings of the same subject.
 
@@ -502,9 +504,24 @@ bead first, files the demand, wires the edge, and then reads the edge back
 off the gated bead — exiting non-zero when it did not land, because a
 demand with no edge leaves the work reading ready while a person still
 owes an answer, which is precisely the state the verb exists to remove.
-One open demand per gated bead: a resumed sitting that re-states the same
-question refreshes the existing demand rather than giving one wait two
-blockers.
+One open demand per gated bead and topic: a resumed sitting that re-states
+the same question under the same topic (`--topic`, the visit's
+escalation_key) refreshes its own demand rather than giving one wait two
+blockers. The topic scopes the lookup so two sittings on one shared
+standing-scope bucket each keep their own demand — without it the second
+would refresh the first's gate in place and overwrite the operator question
+it holds. An absent topic matches on the gated bead alone, the behaviour
+every caller that files no topic keeps.
+
+`converse-hold.sh` passes the visit's escalation_key as the topic on every
+demand a sitting files. The discharge in `converse-signoff.sh` resolves only
+demands the sitting itself filed, never the first unassigned demand on the
+item. The conversation demand is the one `gc.hold_demand` names, the id
+`converse-hold.sh` stamps on the visit. Any other demand, such as a
+`--hold-merge` demand on the anchor or a hold that predates the stamp, is found
+by the same topic-scoped lookup, keyed on the visit's escalation_key. So a
+sign-off under a standing scope resolves or re-states its own operator question
+and leaves a sibling topic's untouched.
 
 The gate is the STATE; the visit is its RESOLUTION. Because the operator does
 not read the "human" mailbox, the notify order is a durable record, not the
@@ -524,6 +541,21 @@ no visit — the work is theirs to perform and close, and converse's discharge
 skips assigned demands on purpose — and neither does a gate whose gated bead
 is no longer open, which the sweep names on stderr until it is resolved by
 hand.
+
+The proactive first reaction is the gate's producer for a bead it cannot carry
+forward on its own. Its ruling and recommend exits (`first-reaction-dispose.sh`)
+file the gate through `gc-helm.sh demand` under the topic `first-reaction`, with
+the reaction's takeaway as the question, and hold the subject on it. The topic
+keeps the gate the reaction's own: a re-run refreshes it, and a demand a sitting
+already holds on the subject keeps its question. The sweep's next pass files the
+visit, so a subject can wait up to one cooldown, two minutes, on a gate with no
+visit. A sitting resolves the gate when the operator rules, through converse's
+discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
+resolves every open, unassigned demand on the subject, the reaction's gate among
+them, after it dispatches the recommended mol and before it dismisses the
+subject's visits. Dismissing the visit without an answer leaves the gate open
+and the question owed, with no second visit offered unless `gc.gate_visit` is
+unset.
 
 ### A conversation does not freeze its subject; a merge hold is an opt-in
 
@@ -554,7 +586,9 @@ conversation wait cannot ride the closing visit — a demand left on a closed vi
 is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
 — so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
 the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
-abandoned question is answered or the demand is resolved.
+abandoned question is answered or the demand is resolved. The moved wait carries
+the sitting's topic, so it refreshes this sitting's own demand on the anchor and
+never a sibling sitting's.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that
@@ -891,10 +925,14 @@ session that dies between the stamp and the close leaves a visit that is
 `in_progress`, assigned, and carrying a final outcome. It is complete in
 every way except the one that ends it, and the claim result says only
 `existing_assignment`, so the hold answers and the prompt goes back to
-waiting. The close never runs. `assets/scripts/liveness-sweep.sh` reads
-the still-live visit as `conversing`, which keeps its subject out of the
-unnamed-wait census for as long as the strand stands, so nothing else
-raises it either.
+waiting. The close never runs. Two nets catch what the missing close would
+otherwise strand. When the same session re-claims the visit, `action=finish`
+performs the close (below). When the session is gone and no re-claim reaches it,
+`assets/scripts/liveness-sweep.sh` is the backstop: it counts a visit as
+`conversing` only while its holder session is listed in a live state, so a
+visit stranded by a dead session — one gone from the session list, or lingering
+in it as archived or closed — returns its subject to the unnamed-wait census
+rather than masking it.
 
 `action=finish` is keyed on the stamp. Every path that writes `gc.outcome`
 closes the visit immediately after it, so a `task_kind=visit` still open
