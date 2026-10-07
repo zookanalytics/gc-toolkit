@@ -37,12 +37,13 @@ manual dismiss.
 
 When nothing important is pending, sign off. Write the durable trace first,
 then post the sign-off as the thread's last word, and close the visit last of
-all. `converse-signoff.sh` writes the
-durable trace and discharges the hold; you tell it what this sitting
-settled. Resolve the demand gate when it settled the question (`--ruled
-yes`, with the `--ruling` it resolves with and the `--route` the item is
-released to); re-state it when it did not (`--ruled no`, with what is
-`--still-owed`). What is waiting on the item is yours to state: one
+all. `converse-signoff.sh` writes the durable trace and discharges whichever
+demands the hold filed — the conversation wait on the visit, and any explicit
+merge hold on the anchor; you tell it what this sitting settled. It resolves
+each demand gate when the sitting settled the question (`--ruled yes`, with the
+`--ruling` it resolves with and the `--route` the item is released to) and
+re-states each when it did not (`--ruled no`, with what is `--still-owed`).
+What is waiting on the item is yours to state: one
 `--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`
 when it settled the subject and nothing is waiting, and NEITHER where the
 subject is parked for a person.

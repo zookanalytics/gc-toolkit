@@ -48,8 +48,9 @@ Definitions:
   subject: a visit that names its own target carries it as `stall_root`,
   and with no target named the item is the subject. A standing scope
   (`task_kind=triage-subject`) carries one visit per distinct item, so
-  its group is a bucket. Step 5 stamps the takeaway and files the demand
-  on `$ITEM`, never on that bucket.
+  its group is a bucket. Step 5 stamps the takeaway and files the
+  conversation demand on the gated bead (the visit for a PR anchor, the item
+  otherwise), never on that bucket.
 - **Topic** — what makes two visits the same sitting, which is not always
   a bead: `stall_root` when the visit names a target, `escalation_key`
   when `escalate.sh` filed it for one situation, the subject otherwise.
@@ -66,8 +67,10 @@ Definitions:
   throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
   sitting ends only when its VISIT closes (**How this thread ends**). The
   hold IS a demand, so the hold-time stamp (step 5) is mandatory: it files
-  the gate the item blocks on and re-surfaces under, and a hold that files
-  none parks a bead nothing re-asks.
+  the gate the conversation blocks on — the visit, so the subject's merge is
+  not frozen while you talk — and a hold that files none parks a bead nothing
+  re-asks. To pause the merge too, step 5 takes an explicit opt-in demand on
+  the anchor.
 
 **A wait is an edge onto a bead, and a bead is either ready or blocked.**
 There is no parked state: what a person owes is a demand bead, what a
@@ -205,10 +208,11 @@ The loop, every visit:
    prevent. Re-read it. If it stays unreadable, hold the sitting and mail the
    witness `HELP:`, and do not `drain-ack` it and do not work it.
 
-   **`BEGAN=recheck`** — no key, but the item still carries an open demand.
-   That demand is a hold's own trace. It belongs to a sitting that held
-   before this key existed, or to a sibling on the shared item, and neither
-   can be closed on the strength of a missing key. Fall through to step 2 and
+   **`BEGAN=recheck`** — no key, but an open demand still gates the item or
+   this visit (a PR-anchor conversation files its demand on the visit). That
+   demand is a hold's own trace. It belongs to a sitting that held before this
+   key existed, or to a sibling on the shared item, and neither can be closed
+   on the strength of a missing key. Fall through to step 2 and
    re-check the premise, but treat the demand as the hold it is, not as a
    benign wait to hand back: close here ONLY if the premise is moot, the
    frontier routed or the bead closed or the sitting settled elsewhere. A
@@ -216,8 +220,8 @@ The loop, every visit:
    which re-files the demand and stamps `gc.hold_demand`, so the next restart
    reads it as `yes`.
 
-   **`BEGAN=no`** — the visit read cleanly, carries no key, and its item
-   holds no open demand, so nothing here earned a hold: fall through to step 2
+   **`BEGAN=no`** — the visit read cleanly, carries no key, and no open demand
+   gates it or its item, so nothing here earned a hold: fall through to step 2
    and re-check the premise. A visit whose premise died between filing and
    claiming closes there, and its benign exits still apply, an open PR on the
    operator's own review queue or a known acceptable state, because no hold of
@@ -510,11 +514,16 @@ visit, say) keeps that format. Operator-initiated form: the
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
-     (converse and its per-model variants). Seeded empty: every current
-     work-quality standard is either universal (work-quality-base) or specific
-     to the polecat and system classes, which fix defects and run the work and
-     audit passes converse does not. Holds a standard that applies to converse
-     but not to every authoring role. -->
+     (converse and its per-model variants). Holds the authoring standards for
+     the human class only; universal standards live in work-quality-base. -->
+
+<!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, pr:zookanalytics/signal-loom#533 adopted:2026-10-03 -->
+- When the ask is to simplify, or is about architecture or the big picture,
+  the deliverable is a target the system can be measured against — what the
+  thing would be if built once, correctly — not an enumeration of what to
+  merge, delete, or leave alone. The tell is cheap: a cleanup list can be
+  produced entirely from current state, while a target model cannot, because
+  it must propose something.
 
 
 

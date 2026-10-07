@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # pr-summary-region.sh — compose the managed `## Summary` region of a PR body and
-# splice it into a published body. Shared by the writer that opens a PR
-# (pr-open.sh, the create and pre_open_gate-adoption paths) and the arm that keeps
-# an already-open PR's body current with a reworked anchor summary (pr-stack.sh).
-# Sourced, never executed.
+# splice it into a published body, and compose the PR's title. Shared by the
+# writer that opens a PR (pr-open.sh, the create and pre_open_gate-adoption paths)
+# and the arm that keeps an already-open PR's body and title current with a
+# reworked anchor (pr-stack.sh). Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way bd-lib.sh is:
 #   # shellcheck source=pr-summary-region.sh
@@ -22,15 +22,28 @@
 PRS_MARK_OPEN="<!-- gc:pr-summary -->"
 PRS_MARK_CLOSE="<!-- /gc:pr-summary -->"
 
-# The lanes a check_set declares, one per line. Same drop list merge.sh's
-# lanes_of applies, so publishing and merging judge one anchor by one rule:
-# none/off is the gateless-by-choice sentinel, and approval is evidenced by an
-# external GitHub review, which cannot exist before the PR does. The drop test
-# is case-insensitive; what survives keeps its case, because it names a lane.
-gates_of() { # <check_set>
-  printf '%s' "${1:-}" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' \
-    | grep -Eiv '^(none|off|approval)$'
-  return 0
+# The anchor's gates, by phase, come from review-checks.sh — the one resolver that
+# knows none/off are the gateless sentinels and approval is a merge rule, not a
+# lane — so publishing and merging judge one anchor by one rule. The composer
+# never resolves: a caller resolves once with prs_resolve_phased and hands the set
+# to compose_managed, so the gate a writer holds on, its draft decision and the
+# body it publishes all read one answer.
+_prs_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd 2>/dev/null)" || _prs_lib_dir="."
+PRS_REVIEW_CHECKS="$_prs_lib_dir/review-checks.sh"
+
+# Every gate through the draft stage at <head_oid>, `<name>\t<phase>` per line.
+# A caller that resolves the anchor's gates itself names its own resolver, so its
+# gate and its body cannot ask two different ones. Non-zero when the resolver is
+# missing or fails: an unreadable set is never an empty one, and the caller holds.
+prs_resolve_phased() { # <check_set> <head_oid> [<resolver>]
+  local resolver="${3:-$PRS_REVIEW_CHECKS}"
+  [ -x "$resolver" ] || return 1
+  "$resolver" --resolve --check-set "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null
+}
+
+# One phase band of a resolved set: the names tagged <phase>, one per line.
+prs_band() { # <phased> <phase>
+  printf '%s\n' "${1:-}" | awk -F'\t' -v p="$2" '$2 == p { print $1 }'
 }
 
 # The region always writes its own `## Summary`, so a stored pr_summary that opens
@@ -57,10 +70,13 @@ strip_summary_heading() { # <text>
 # have not re-signed-off there, and one of them may be actively requesting
 # changes. It names the current head and points to the PR's own checks for the
 # live status instead.
-compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> [<mode>]
+#
+# <phased> is the anchor's resolved gate set (prs_resolve_phased at <head_oid>);
+# the two bands the bullets name are partitioned from it here.
+compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> <mode> <phased>
   local summary="$1" desc="$2" id="$3" branch="$4" target="$5" checkset="$6" head_oid="$7" sup_num="$8" sup_head="$9"
-  local mode="${10:-open}"
-  local greened
+  local mode="${10:-open}" phased="${11:-}"
+  local greened draftg
   # A standing banner leads the region when the base is an integration branch, so a
   # reviewer reads it before the diff: approving mints this phase into
   # integration/<convoy-id> and main does not move, the broader review running at
@@ -87,7 +103,10 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
   fi
   echo; echo "## Refinery handoff"; echo
   printf -- '- Issue: `%s`\n- Source branch: `%s`\n- Target: `%s`\n' "$id" "$branch" "$target"
-  greened=$(gates_of "$checkset" | paste -sd, -)
+  # The pre-open gates signed off before the PR opened; the open-as-draft gates run
+  # against the open PR.
+  greened=$(prs_band "$phased" pre-open | paste -sd, -)
+  draftg=$(prs_band "$phased" open-as-draft | paste -sd, -)
   if [ "$mode" = refresh ]; then
     if [ -n "$greened" ]; then
       printf -- '- Head `%.8s`; gates `%s`; see the PR checks for current status.\n' "$head_oid" "$greened"
@@ -101,6 +120,7 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
       printf -- '- Anchor declares no pre-open gate (`check_set=%s`); opened at `%.8s`.\n' "$checkset" "$head_oid"
     fi
   fi
+  [ -n "$draftg" ] && printf -- '- Draft-stage gates `%s` run against the open PR before it is marked ready for review.\n' "$draftg"
   [ -n "$sup_num" ] && printf -- '- Supersedes #%s (closed unmerged at `%.8s`); re-implemented and re-gated at `%.8s`.\n' \
     "$sup_num" "$sup_head" "$head_oid"
   return 0
@@ -226,4 +246,36 @@ prs_establish_region() { # <body-file> <section-file> <out-file>
     state == "tail" { print }
     END { exit (opened && state != "to_handoff") ? 0 : 1 }
   ' "$1" > "$3"
+}
+
+# The PR title opens with a conventional-commit type, then carries the anchor's
+# own title; each writer appends the bead id. pr-open.sh composes it at create
+# and pr-stack.sh keeps an open PR's title equal to it, so both read the type
+# from here and a title the create wrote is one the refresh already agrees with.
+# A conventional-commit PR-title check (which product repos run on every PR)
+# requires the title to open with a type token: `type:` or `type(scope):`.
+# Bead titles carry none, so one is derived from the bead's issue_type. A
+# title that already opens with a recognized conventional type is left
+# untouched, so a bead a human already titled `fix(x): …` is not
+# double-prefixed. The derived types are ordinary conventional types every
+# such check accepts; the recognized set is wider so any hand-written prefix
+# survives. The prefix test is a regex match on the title itself rather than a
+# pipe into `grep -q`, for the pipefail reason prs_region_names_head gives, and
+# it reads only the title's opening, where the type has to be.
+CONVENTIONAL_TYPES='build|chore|docs|feat|fix|ops|perf|refactor|revert|security|style|test'
+cc_type_for() { # <issue_type> — the conventional-commit type for a bead kind
+  case "${1:-}" in
+    bug)          printf 'fix' ;;
+    feature|feat) printf 'feat' ;;
+    docs)         printf 'docs' ;;
+    *)            printf 'chore' ;;
+  esac
+}
+cc_title() { # <title> <issue_type> — <title>, guaranteed to open with a type
+  local re='^('"$CONVENTIONAL_TYPES"')(\([^)]+\))?!?: '
+  if [[ ${1:-} =~ $re ]]; then
+    printf '%s' "$1"
+  else
+    printf '%s: %s' "$(cc_type_for "$2")" "$1"
+  fi
 }

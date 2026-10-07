@@ -101,7 +101,10 @@ chmod +x "$BIN/helm-stub"
 # already under a live sitting whose visit names it only as stall_root; g9
 # carries a typed (boolean) opt-out; tk-glegacy is a legacy demand
 # (issue_type=decision, no await_type) that must be swept like a current human
-# gate (its id avoids the tk-g1 prefix so a substring check cannot alias it).
+# gate (its id avoids the tk-g1 prefix so a substring check cannot alias it);
+# tk-gvis gates a bead that is ITSELF a visit (an anchored hold files its
+# conversation demand on the visit) and must self-cover rather than file a
+# visit-on-a-visit.
 cat > "$TMP/gates.json" <<'JSON'
 [
  {"id":"tk-g1","issue_type":"gate","await_type":"human","status":"open","title":"pick the backend","metadata":{"gc.demand_for":"tk-w1"}},
@@ -113,7 +116,8 @@ cat > "$TMP/gates.json" <<'JSON'
  {"id":"tk-g7","issue_type":"gate","await_type":"human","status":"open","title":"work already closed","metadata":{"gc.demand_for":"tk-w7"}},
  {"id":"tk-g8","issue_type":"gate","await_type":"human","status":"open","title":"held by a live sitting","metadata":{"gc.demand_for":"tk-w8"}},
  {"id":"tk-g9","issue_type":"gate","await_type":"human","status":"open","title":"typed opt-out","metadata":{"gc.demand_for":"tk-w9","gc.gate_visit":false}},
- {"id":"tk-glegacy","issue_type":"decision","status":"open","title":"legacy decision demand","metadata":{"gc.demand_for":"tk-wlegacy"}}
+ {"id":"tk-glegacy","issue_type":"decision","status":"open","title":"legacy decision demand","metadata":{"gc.demand_for":"tk-wlegacy"}},
+ {"id":"tk-gvis","issue_type":"gate","await_type":"human","status":"open","title":"anchored hold, demand on the visit","metadata":{"gc.demand_for":"tk-vself"}}
 ]
 JSON
 # Live fixture: every gated bead except tk-w7, plus the sitting on tk-run whose
@@ -124,7 +128,8 @@ cat > "$TMP/live.json" <<'JSON'
  {"id":"tk-w5","status":"open"},{"id":"tk-w6","status":"open"},{"id":"tk-w8","status":"open"},
  {"id":"tk-w9","status":"open"},{"id":"tk-wlegacy","status":"open"},{"id":"tk-run","status":"open"},
  {"id":"tk-vis8","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-run","stall_root":"tk-w8"},
-  "dependencies":[{"type":"tracks","depends_on_id":"tk-run"}]}
+  "dependencies":[{"type":"tracks","depends_on_id":"tk-run"}]},
+ {"id":"tk-vself","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-vself"}}
 ]
 JSON
 printf '[]\n' > "$TMP/empty.json"
@@ -153,6 +158,8 @@ hasnt "$(cat "$HELM_LOG")" "open tk-w7" "(CLOSEDWORK) a gate whose gated bead is
 has  "$ERR" "tk-g7 blocks tk-w7, which is not open" "(CLOSEDWORK) …and names the gate that outlived its work"
 hasnt "$(cat "$HELM_LOG")" "open tk-w8" "(HELD) a gated bead already under a sitting (by stall_root) gets no second visit"
 has  "$(cat "$GC_LOG")" "bd update tk-g8 --set-metadata gc.gate_visit=tk-vis8" "(HELD) …and that sitting's visit is recorded on the gate"
+hasnt "$(cat "$HELM_LOG")" "open tk-vself" "(SELFVISIT) a gate whose gated bead is itself a visit files no visit-on-a-visit"
+has  "$(cat "$GC_LOG")" "bd update tk-gvis --set-metadata gc.gate_visit=tk-vself" "(SELFVISIT) …and the gated visit is self-recorded as the gate's visit"
 has  "$(cat "$GC_LOG")" "bd update tk-g1 --set-metadata gc.gate_visit=tk-v-tk-w1" "(STAMP) the filed visit's id is recorded on its gate"
 hasnt "$(cat "$GC_LOG")" "bd update tk-g2" "(STAMP) an opted-out gate is not touched"
 hasnt "$(cat "$GC_LOG")" "bd update tk-g7" "(STAMP) a gate on closed work is not stamped — it stays visible until resolved"
@@ -160,7 +167,7 @@ has  "$(cat "$GC_LOG")" "--include-gates" "(INCLUDEGATES) the enumeration un-hid
 has  "$(cat "$HELM_LOG")" "gc bd gate resolve tk-g1" "(BODY) the visit body says how to resolve the gate"
 has  "$(cat "$HELM_LOG")" "open tk-wlegacy" "(LEGACY) a legacy gc.demand_for demand with no await_type is swept like a human gate"
 has  "$(cat "$GC_LOG")" "bd update tk-glegacy --set-metadata gc.gate_visit=tk-v-tk-wlegacy" "(LEGACY) …and the filed visit is recorded on the legacy gate"
-has  "$OUT" "filed 2 visit(s); 1 gate(s) already under a visit; 1 gate(s) on closed work" "(SUMMARY) the pass reports what it did, by kind"
+has  "$OUT" "filed 2 visit(s); 2 gate(s) already under a visit; 1 gate(s) on closed work" "(SUMMARY) the pass reports what it did, by kind"
 
 # ── loud-fail: a visit that will not file must surface ────────────────────────
 HELM_FAIL_BEAD="tk-w1"; run "$TMP/gates.json"; HELM_FAIL_BEAD=""

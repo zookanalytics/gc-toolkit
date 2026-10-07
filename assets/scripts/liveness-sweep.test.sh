@@ -12,6 +12,14 @@ SCRIPT="$HERE/liveness-sweep.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# The census phases its pre-open gates against review-checks.toml; the SUT runs
+# in place, so by default it would read the live pack's index and classify these
+# fixtures' synthetic lanes (codex, ci) as non-pre-open. Point the override at a
+# missing file so the census takes its pre-phase drop and these fixtures are
+# judged on their lane names alone, hermetically. The phase-aware path has its
+# own case at the end, with a controlled index.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
+
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
@@ -73,6 +81,11 @@ case "$sub" in
     printf '{"id":"tk-subj-new"}\n'; exit 0 ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$GC_CALLS"; exit 0 ;;
+  "session list")
+    # The holder-liveness read. GC_SESSION_FAIL = an outage (unreadable list).
+    [ -n "${GC_SESSION_FAIL:-}" ] && exit 1
+    if [ -n "${FAKE_SESSIONS:-}" ] && [ -f "${FAKE_SESSIONS:-}" ]; then cat "$FAKE_SESSIONS"; else printf '{"sessions":[]}\n'; fi
+    exit 0 ;;
 esac
 exit 0
 GC
@@ -171,6 +184,7 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-inputconvoy","title":"input convoy for c-plain","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
   {"id":"c-slingconvoy","title":"sling-c-plain","issue_type":"convoy"},
   {"id":"c-synthconvoy","title":"a machine convoy under another name","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"c-synthconvoy-bool","title":"a machine convoy whose gc.synthetic reads back as a boolean","issue_type":"convoy","metadata":{"gc.synthetic":true}},
   {"id":"c-realconvoy","title":"an unowned floating convoy — the orphan to catch","issue_type":"convoy","metadata":{}},
   {"id":"c-titletalk","title":"input convoy for tk-x never closes","issue_type":"bug","metadata":{}},
   {"id":"c-slingtalk","title":"sling-created convoys are never reaped","issue_type":"bug","metadata":{}},
@@ -209,6 +223,16 @@ cat > "$TMP/widen.json" <<'JSON'
 ]
 JSON
 export FAKE_READY="$TMP/ready.json" FAKE_LIVE="$TMP/live.json" FAKE_WIDEN="$TMP/widen.json"
+
+# The holder-liveness session set: lx-live-1 is listed (a visit it holds still
+# converses); a session absent from this set (e.g. lx-dead-9) is a gone sitting.
+# The existing visits above are all UNCLAIMED, so they cover regardless of this.
+cat > "$TMP/sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"testrig__conv-lx-live-1","agent_name":"testrig/testrig.tk-livevisit"}
+]}
+JSON
+export FAKE_SESSIONS="$TMP/sessions.json"
 
 # bd show fixtures: the worked-via-convoy and landed-husk chains.
 printf '%s\n' '[{"id":"conv-live","issue_type":"convoy","dependencies":[{"id":"c-worked","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-live.json"
@@ -281,7 +305,7 @@ for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \
             c-demand-live c-demand-widen \
             c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
-            c-slingconvoy c-synthconvoy c-wisp-order c-husk-step-1 c-husk-step-2 \
+            c-slingconvoy c-synthconvoy c-synthconvoy-bool c-wisp-order c-husk-step-1 c-husk-step-2 \
             c-rootvisit-step c-parented c-trackslive; do
     case ",$EXPECT_SURVIVORS," in
         *",$drop,"*) bad "dropped $drop" "still in the survivor set" ;;
@@ -635,6 +659,97 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── the phase-aware census asks the resolver, with a controlled index ──"
+# A real index (not the missing-file fallback the rest of this file uses):
+# correctness reads the diff (pre-open), demo needs the preview (open-as-draft).
+# codex is declared NOWHERE — a legacy token the resolver defaults to pre-open,
+# the case the old re-implemented phase filter DROPPED, classing a green
+# legacy-token anchor as un-gated and flagging it.
+PH_IDX="$TMP/phase-index.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$PH_IDX"
+printf '%s\n' '[
+  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
+  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.correctness":"green"}},
+  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.demo":"green"}},
+  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}}
+]' > "$TMP/ph-ready.json"
+GC_REVIEW_CHECKS_INDEX="$PH_IDX" FAKE_READY="$TMP/ph-ready.json" run_sweep ABSENT
+eq "$RC" "0" "the phase-aware pass completes"
+# Only ph-preopen-ungreen is an unnamed wait: the legacy codex token gated pre-open
+# (resolver default, not dropped) and its green read as converged; the open-as-draft
+# demo did NOT hold the pre-open census; a genuinely ungreen pre-open lane still does.
+# The mixed-case lane reads its marker under the token's own case (check.Arch), the
+# key signoff stamps, so it reads green rather than flagged.
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
+   "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
+
+echo "── holder liveness gates the conversing class (readable session list) ──"
+# Two visits track two ready subjects: one held by a live session (lx-live-1 is
+# in FAKE_SESSIONS), one by a gone session (lx-dead-9 is not). A third subject is
+# a visit bead left in the ready set by that gone session. The live-held subject
+# stays covered; the dead-held subject and the stranded visit bead return to the
+# census. Self-contained fixtures — the suite above clobbers the shared ones.
+cat > "$TMP/hl-ready.json" <<'JSON'
+[
+  {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+]
+JSON
+cat > "$TMP/hl-live.json" <<'JSON'
+[
+  {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-live","status":"in_progress","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+]
+JSON
+printf '[]\n' > "$TMP/hl-widen.json"
+FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
+case ",$BL," in *",hl-live-subj,"*) bad "live-held visit over-surfaces" "hl-live-subj surfaced though lx-live-1 is alive" ;; *) ok "a live-held visit keeps its subject out of the census" ;; esac
+case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held visit returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
+case ",$BL," in *",hl-ready-deadvisit,"*) ok "a visit stranded ready by a gone session surfaces (arm 1)" ;; *) bad "stranded visit bead hidden" "hl-ready-deadvisit stayed conversing (baseline: $BL)" ;; esac
+
+echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not live ──"
+# A sitting that lingers in the list as closed/archived is dead, per helm's
+# ownerLive — its held visit must stop covering its subject. A holder listed in
+# any other state (asleep here) is live and keeps covering, so the gate excludes
+# the terminal states only, not everything that is not "active".
+cat > "$TMP/hl-term-sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
+  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
+  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+]}
+JSON
+cat > "$TMP/hl-term-ready.json" <<'JSON'
+[
+  {"id":"hl-closed-subj","title":"subject of a visit held by a CLOSED session","issue_type":"task","metadata":{}},
+  {"id":"hl-arch-subj","title":"subject of a visit held by an ARCHIVED session","issue_type":"task","metadata":{}},
+  {"id":"hl-asleep-subj","title":"subject of a visit held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
+]
+JSON
+cat > "$TMP/hl-term-live.json" <<'JSON'
+[
+  {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-closed","status":"in_progress","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-v-arch","status":"in_progress","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-v-asleep","status":"in_progress","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+]
+JSON
+FAKE_SESSIONS="$TMP/hl-term-sessions.json" FAKE_READY="$TMP/hl-term-ready.json" FAKE_LIVE="$TMP/hl-term-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BLT="$(cat "$BASELINE_FILE" 2>/dev/null)"
+case ",$BLT," in *",hl-closed-subj,"*) ok "a CLOSED but still-listed holder returns its subject to the census" ;; *) bad "closed-held subject hidden" "hl-closed-subj stayed masked (baseline: $BLT)" ;; esac
+case ",$BLT," in *",hl-arch-subj,"*) ok "an ARCHIVED but still-listed holder returns its subject to the census" ;; *) bad "archived-held subject hidden" "hl-arch-subj stayed masked (baseline: $BLT)" ;; esac
+case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held visit over-surfaces" "hl-asleep-subj surfaced though lx-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
+
+echo "── an unreadable session list keeps every visit covering (unprovable death) ──"
+GC_SESSION_FAIL=1 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
+BLF="$(cat "$BASELINE_FILE" 2>/dev/null)"
+for hidden in hl-dead-subj hl-ready-deadvisit hl-live-subj; do
+  case ",$BLF," in *",$hidden,"*) bad "fail-open surfaced $hidden" "an unreadable session list must hide nothing new (baseline: $BLF)" ;; *) ok "unreadable session list → $hidden keeps covering" ;; esac
+done
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"

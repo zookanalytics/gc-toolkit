@@ -1,8 +1,15 @@
 description = """
 Refinery patrol loop — merge JUDGMENT only. Poured as a root-only wisp:
 
-  gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var check_set={{check_set}}
+  gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}}
   gc bd update $WISP --assignee=$GC_AGENT
+
+The pour passes the rig's identity and nothing else, so the merge policy is
+the formula's default as it stood when this wisp was poured. It is rendered
+here for the steps that read it:
+
+  default_merge_strategy={{default_merge_strategy}}
+  check_set={{check_set}}
 
 Each wisp is ONE iteration: find one assigned work bead, prepare its branch,
 run the rig's checks, decide (land / gate / reject), pour the next wisp,
@@ -26,7 +33,8 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
-preexisting-failure-dedup, one-anchor-per-pr, patrol-wisp-reconcile) — keep
+preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
+patrol-wisp-reconcile, patrol-pour-vars) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes)."""
 formula = "mol-refinery-patrol"
@@ -57,7 +65,7 @@ default = ""
 
 [vars.lint_command]
 description = "Lint command. Empty = skip."
-default = ""
+default = "tools/lint.sh $(git diff --name-only origin/main...HEAD)"
 
 [vars.test_command]
 description = "Test command (when run_tests is true)."
@@ -72,7 +80,7 @@ description = "Default target branch for merges."
 default = "main"
 
 [vars.default_merge_strategy]
-description = "Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline."
+description = "Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
 default = "mr"
 
 [vars.delete_merged_branches]
@@ -84,7 +92,7 @@ description = "After a direct merge, best-effort fast-forward the rig's canonica
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a standing non-city APPROVED review), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured, and a changed default reaches the next wisp."
 default = "correctness,triage"
 
 [[steps]]
@@ -137,13 +145,21 @@ returns a bead here clears the field first.
 # tr -d '[:cntrl:]' drops the control bytes JSON forbids raw before the parse.
 # The shape guard then fails CLOSED on anything still unparseable, so a broken
 # read ends the turn visibly instead of reading as an empty queue.
-WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=25 --json | tr -d '[:cntrl:]')
+# The window is unbounded (--limit=0). Selection orders by priority then
+# created_at, but bd sorts server-side on one field at a time, so any bounded
+# single-key window can truncate off the bead this sort should pick: a newer
+# high-priority handoff would fall past a created-ordered window, and the oldest
+# within a band would fall past a priority-ordered one. Fetching the whole
+# assigned-handoff set lets the client-side sort below see every candidate.
+# created_at ranks wait time; updated_at does not, because any later write to a
+# waiting handoff re-stamps it, so it tracks last-touched rather than age.
+WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=0 --json | tr -d '[:cntrl:]')
 if ! printf '%s' "$WORK_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "find-work: work list did not parse as a JSON array (bd unreadable, or a payload no scrub could rescue) — ending the turn without claiming; the next patrol retries." >&2
   gc runtime drain-ack
   exit 0
 fi
-WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
+WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
 WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
 if [ -n "$WORK_PARKED" ]; then
   echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the cadence, never by find-work; flag only — do not re-gate it, do not clear it here." >&2
@@ -151,9 +167,13 @@ fi
 # <<< find-work-select
 ```
 
-`${GC_RIG:+--rig}` scopes to this refinery's rig store; `--limit=25` (not 1)
-because the filter is client-side — a parked anchor at the head of a 1-row
-window would starve a queue with real work behind it. Flag, never rewrite.
+`${GC_RIG:+--rig}` scopes to this refinery's rig store; `--limit=0` fetches the
+whole assigned-handoff set, because selection orders by priority then created_at
+and bd sorts on one field server-side, so any bounded window could truncate off
+the bead the client-side sort would pick. An unbounded window also means a
+parked anchor can never crowd real work out of it; the client-side filter drops
+the anchors and the sort takes the highest-priority, oldest-within-band
+handoff. Flag, never rewrite.
 
 If found: confirm `metadata.branch` exists (`gc bd show $WORK --json`),
 default `metadata.target` to {{target_branch}}, note the id, close this
@@ -250,14 +270,26 @@ duplicate):
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
 # >>> mr-aware-rejection
-LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+LC=""; POOL_ROUTE=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -z "$LC" ] && [ -x "$c/assets/scripts/lifecycle.sh" ] && LC="$c/assets/scripts/lifecycle.sh"
+  [ -z "$POOL_ROUTE" ] && [ -x "$c/assets/scripts/pool-route.sh" ] && POOL_ROUTE="$c/assets/scripts/pool-route.sh"
 done
 if [ -z "$LC" ]; then
   echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
+if [ -z "$POOL_ROUTE" ]; then
+  echo "pool-route.sh not found — NOT repooling $WORK to an address no pool is proved to claim; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+POLECAT_ROUTE=$("$POOL_ROUTE" {{binding_prefix}}polecat) || {
+  echo "no live polecat pool claims {{binding_prefix}}polecat — repooling the rejection there strands it unclaimed with a rejection_reason nobody reads; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+}
 BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
   echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
@@ -265,7 +297,7 @@ if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/nul
   exit 1
 fi
 PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-"$LC" transition "$WORK" --to unanchored --assignee "" --route "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
+"$LC" transition "$WORK" --to unanchored --assignee "" --route "$POLECAT_ROUTE" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
 # <<< mr-aware-rejection
 ```
 
@@ -321,14 +353,26 @@ the same fail-closed lifecycle repool as the rebase step:
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="<failure summary>"
 # >>> mr-aware-rejection
-LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+LC=""; POOL_ROUTE=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -z "$LC" ] && [ -x "$c/assets/scripts/lifecycle.sh" ] && LC="$c/assets/scripts/lifecycle.sh"
+  [ -z "$POOL_ROUTE" ] && [ -x "$c/assets/scripts/pool-route.sh" ] && POOL_ROUTE="$c/assets/scripts/pool-route.sh"
 done
 if [ -z "$LC" ]; then
   echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
+if [ -z "$POOL_ROUTE" ]; then
+  echo "pool-route.sh not found — NOT repooling $WORK to an address no pool is proved to claim; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+POLECAT_ROUTE=$("$POOL_ROUTE" {{binding_prefix}}polecat) || {
+  echo "no live polecat pool claims {{binding_prefix}}polecat — repooling the rejection there strands it unclaimed with a rejection_reason nobody reads; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+}
 BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
   echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
@@ -336,7 +380,7 @@ if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/nul
   exit 1
 fi
 PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-"$LC" transition "$WORK" --to unanchored --assignee "" --route "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
+"$LC" transition "$WORK" --to unanchored --assignee "" --route "$POLECAT_ROUTE" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
 # <<< mr-aware-rejection
 # >>> rejection-branch-keep
 # $BEAD_JSON is the read the repool above shape-validated, so an unreadable
@@ -832,8 +876,12 @@ title = "Pour next iteration and loop"
 needs = ["patrol-summary"]
 description = """
 Pour the next wisp BEFORE burning this one, and GUARD the assign — a poured
-but unassigned wisp reaches no hook and drops the loop. Forward every
-declared var: a --root-only pour materializes no defaults.
+but unassigned wisp reaches no hook and drops the loop. Pass exactly the
+vars the startup pour passes: target_branch, rig_name and binding_prefix,
+the rig identity the formula cannot know. Pass nothing else. An omitted var
+renders the formula's current default on the new wisp, while a passed one
+keeps the first wisp's value for as long as the chain runs, so a default
+changed on main would never reach it.
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
 current wisp has to work: a wisp is an EPHEMERAL molecule, which means
@@ -846,7 +894,7 @@ CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-refinery-patrol")][0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var check_set={{check_set}} --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next refinery wisp; not burning."
   gc runtime drain-ack

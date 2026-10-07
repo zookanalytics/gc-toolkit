@@ -12,9 +12,9 @@
 # visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
 # a sling into a downed pool fails invisibly; today's tool always says yes),
-# and when the subject already carries a first reaction so the sling is a no-op
-# that dispatches nothing (gc-helm react exit 5): nothing would file the visit,
-# so this does.
+# and when the subject already carries a first reaction (gc-helm react exit 5)
+# or a live workflow already drives it (exit 6), so the sling is a no-op that
+# dispatches nothing: nothing would file the visit, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy, tk-lzdty) · 4 runtime failure.
 set -u
@@ -407,12 +407,16 @@ if [ -n "$REACT" ]; then
     # No reaction was dispatched, so nothing downstream will file the visit —
     # fall through and file it directly; a conversation beats a bead nobody is
     # coming to. gc-helm react exit 5 is the already-reacted no-op (the guard
-    # slung nothing because a first reaction happens once), distinct from a real
-    # sling failure: name the actual cause so the visit body the converse
-    # session reads is accurate.
+    # slung nothing because a first reaction happens once) and exit 6 the
+    # live-workflow no-op (the guard slung nothing because a reaction never races
+    # work in flight), both distinct from a real sling failure: name the actual
+    # cause so the visit body the converse session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
         note "$PROG: subject $SUBJECT already carries a first reaction — no new reaction was slung; filing the visit directly"
         REACT_WHY="no: subject already carries a first reaction (a first reaction happens once)"
+    elif [ "$REACT_RC" -eq 6 ]; then
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was slung; filing the visit directly"
+        REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     else
         note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
         REACT_WHY="no: the first-reaction sling failed"
