@@ -1492,6 +1492,49 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 	}
 }
 
+// TestGatherAnchorOwnWorkflowCountsOnItsTile pins the in-flight join across the
+// gather/board boundary for an anchor that is itself the slung work bead. Its
+// input convoy tracks the anchor's own bead, so the gather keys Facts.Inflight
+// by the anchor's id, and the tile built from that gather must count the live
+// molecule. The board tests hand-build their Facts, so only a board fed by a
+// real gather proves the producer and the reader agree on the key.
+func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
+	st := populatedStore()
+	st.issues["task"] = append(st.issues["task"],
+		issue("tk-slung", "Land the slung fix", "task", 2, testNow,
+			`{"merge_result":"pre_open_gate","branch":"polecat/tk-slung"}`),
+		issue("tk-root9", "mol-polecat-work", "task", 2, testNow,
+			`{"gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+	)
+	// An idle child, so a tile that missed the anchor's own molecule would band
+	// stranded rather than merely read zero.
+	st.depsUp["tk-slung"] = []*beads.IssueWithDependencyMetadata{
+		withDepType(child("tk-kid", "open", testNow, ""), "parent-child"),
+	}
+	st.depsDown["tk-icv9"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-slung", "open", testNow, ""), "tracks")}
+
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st}, withGCClient(liveGC()))
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if got := res.Facts.Inflight["tk-slung"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+		t.Fatalf("the join is keyed by the convoy's member, here the anchor's own bead: got %v", res.Facts.Inflight)
+	}
+
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == "tk-slung" })
+	if i < 0 {
+		t.Fatalf("the merge anchor has no tile among %d", len(b.Tiles))
+	}
+	tl := b.Tiles[i]
+	if tl.InProgressLive != 1 || tl.InFlight != 1 || tl.Stranded {
+		t.Errorf("the anchor's own live molecule counts on its tile: in_progress_live=%d in_flight=%d stranded=%v (want 1, 1, false)",
+			tl.InProgressLive, tl.InFlight, tl.Stranded)
+	}
+}
+
 // TestGatherCarriesPrefixesAndDescription pins the two anchor-side inputs the
 // cross-rig scan needs: every rig's prefix/name, and the anchor's prose.
 func TestGatherCarriesPrefixesAndDescription(t *testing.T) {
