@@ -5,7 +5,8 @@
 # (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT in that precedence, then
 # `gc service list --json`); a named city with no binary; the skew guard that
 # holds a city-resolved binary to this checkout's services/gctk tree (matched,
-# skewed, unstamped, a hand build's commit stamp, -dirty); arguments passed
+# skewed, unstamped, a hand build's commit stamp, -dirty); GCTK_FALLBACK, which
+# forces only the subcommands it names onto their shell; arguments passed
 # through verbatim; GCTK_SCRIPTS_DIR exported as the helper's directory; and
 # gctk_require, which runs the same chain with no skew guard and no fallback:
 # it execs the binary, or refuses with exit 1 and never returns to its script.
@@ -85,9 +86,9 @@ export PATH="$TMP/bin:$PATH"
 # Every case starts from no resolution input at all, whatever the ambient
 # session exports, and passes an argument with a space in it.
 run() { env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT -u GCTK_SCRIPTS_DIR \
-            -u FAKE_SERVICE_CITY -u FAKE_GCTK_VERSION "$@" "$PORT" a "b c" 2>&1; }
+            -u GCTK_FALLBACK -u FAKE_SERVICE_CITY -u FAKE_GCTK_VERSION "$@" "$PORT" a "b c" 2>&1; }
 runreq() { env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT -u GCTK_SCRIPTS_DIR \
-            -u FAKE_SERVICE_CITY -u FAKE_GCTK_VERSION "$@" "$REQ" a "b c" 2>&1; }
+            -u GCTK_FALLBACK -u FAKE_SERVICE_CITY -u FAKE_GCTK_VERSION "$@" "$REQ" a "b c" 2>&1; }
 SDIR="$REPO/assets/scripts"
 
 echo "# an explicit GCTK_BIN"
@@ -136,6 +137,14 @@ hasnt "$out" "GCTK fakesub" "…and the skewed binary does not run"
 out=$(run GC_CITY_PATH="$CITY" FAKE_GCTK_VERSION=0000000000000000000000000000000000000000)
 has "$out" "SHELL-FALLBACK a b c" "a stamp naming no object in this checkout takes the shell"
 
+echo "# GCTK_FALLBACK: one port's shell, forced by name"
+out=$(run GCTK_BIN="$TMP/named-gctk" GCTK_FALLBACK=fakesub)
+eq "$out" "SHELL-FALLBACK a b c" "GCTK_FALLBACK naming the subcommand forces its shell over a named binary"
+out=$(run GC_CITY_PATH="$CITY" FAKE_GCTK_VERSION="$TREE" GCTK_FALLBACK="other,fakesub")
+eq "$out" "SHELL-FALLBACK a b c" "…and over a current city binary, named anywhere in a comma-separated list"
+out=$(run GCTK_BIN="$TMP/named-gctk" GCTK_FALLBACK="other fakesubx fake")
+eq "$out" "NAMED-GCTK fakesub a b c dir=$SDIR" "a list naming only other subcommands leaves this one on the binary"
+
 echo "# gctk_require: the binary, or a refusal that never returns"
 out=$(runreq GCTK_BIN="$TMP/named-gctk"); rc=$?
 eq "$rc|$out" "0|NAMED-GCTK fakereq a b c dir=$SDIR" "GCTK_BIN is exec'd with the subcommand, the arguments and GCTK_SCRIPTS_DIR"
@@ -143,6 +152,8 @@ out=$(runreq FAKE_SERVICE_CITY="$CITY")
 eq "$out" "GCTK fakereq a b c dir=$SDIR" "the same city chain resolves, down to gc service list"
 out=$(runreq GC_CITY_PATH="$CITY" FAKE_GCTK_VERSION="$OLD_COMMIT")
 eq "$out" "GCTK fakereq a b c dir=$SDIR" "a city binary built from another services/gctk revision still answers, with no warning"
+out=$(runreq GCTK_BIN="$TMP/named-gctk" GCTK_FALLBACK=fakereq)
+eq "$out" "NAMED-GCTK fakereq a b c dir=$SDIR" "GCTK_FALLBACK is not read: there is no shell to force"
 
 out=$(runreq GCTK_BIN=none GC_CITY_PATH="$CITY"); rc=$?
 eq "$rc" "1" "GCTK_BIN=none is refused with exit 1, even with a city named"

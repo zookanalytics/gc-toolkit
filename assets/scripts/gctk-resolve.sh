@@ -11,12 +11,16 @@
 #
 # gctk_resolve execs `gctk <subcommand> "$@"` when a usable binary resolves, so
 # it returns only when none does, and the script's own shell answers instead.
-# GCTK_BIN=none forces that shell.
+# GCTK_BIN=none forces that shell. GCTK_FALLBACK forces it for the subcommands
+# it names (space- or comma-separated) and leaves the binary serving every
+# other call. A suite drives merge.sh's shell that way, because that shell
+# records every landing through lifecycle.sh, which needs the binary.
 #
 # gctk_require is for a script that is only the exec (lifecycle.sh). It execs
 # the binary the same chain resolves. When there is none, it names what is
 # missing and exits 1, so it never returns. GCTK_BIN=none names no binary and is
-# refused like a missing one.
+# refused like a missing one. GCTK_FALLBACK is not read, because there is no
+# shell to fall back to.
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
@@ -67,8 +71,9 @@ _gctk_locate() {
 }
 
 gctk_resolve() { # <subcommand> [args...]
-    local sub="$1" mod want have mapped
+    local sub="$1" forced="${GCTK_FALLBACK:-}" mod want have mapped
     shift
+    case " ${forced//,/ } " in *" $sub "*) return 0 ;; esac
     _gctk_locate
     if [ -n "$_gctk_city" ] && [ -x "$_gctk_bin" ]; then
         mod="$_gctk_resolve_dir/../../services/gctk"

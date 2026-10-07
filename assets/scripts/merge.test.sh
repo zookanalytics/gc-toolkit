@@ -19,27 +19,13 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# Build the port BEFORE the harness puts stub binaries on PATH: the stub git
-# answers nothing, and a toolchain that consults it for a VCS stamp would be
-# reading a fixture. -buildvcs=false keeps the build off that path entirely; no
-# assertion here reads a version.
-GCTK_BUILT=""
-GCTK_BUILD_LOG="$TMP/gctk-build.log"
-GO_PRESENT=0
-if command -v go >/dev/null 2>&1; then
-    GO_PRESENT=1
-    if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
-        GCTK_BUILT="$TMP/gctk"
-    fi
-fi
-
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
-# merge.sh records every landing through lifecycle.sh, which execs gctk.
+# merge.sh's shell records every landing through lifecycle.sh, which execs
+# gctk, and the same build is the gctk arm's binary.
 harness_build_gctk
 harness_init
 
@@ -95,9 +81,10 @@ approved() { # num [oid]
 # TWO ARMS, ONE BODY. The merge writer exists twice during the gctk migration —
 # `gctk merge` (services/gctk) and the shell fallback in merge.sh — and a caller
 # cannot tell which answered. So every assertion below runs against both: arm
-# "shell" forces the fallback with GCTK_BIN=none, arm "gctk" points GCTK_BIN at
-# a freshly built binary and reaches it through merge.sh, which also proves the
-# preference wiring.
+# "shell" forces merge's fallback with GCTK_FALLBACK=merge, arm "gctk" reaches
+# the freshly built binary through merge.sh, which also proves the preference
+# wiring. GCTK_BIN names that build in both arms, because the shell records
+# every landing through lifecycle.sh, and lifecycle.sh has no fallback.
 suite() {
 
 echo "# happy path"
@@ -1381,22 +1368,34 @@ has "$out" "PR#127 held by unclosed rework/review bead blk-es2 (open); merge hel
 
 }
 
-echo "## arm: shell fallback (GCTK_BIN=none)"
-export GCTK_BIN=none
+# An arm proves nothing about which implementation answered unless the hand-off
+# is checked directly. merge's stdout is byte-identical across the two, so a
+# sentinel on the resolved path is the discriminator: it names itself, the
+# subcommand it was handed, and the helper directory the binary resolves its
+# siblings in.
+SENTINEL="$TMP/sentinel-gctk"
+printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s dir=%%s\\n" "$*" "${GCTK_SCRIPTS_DIR:-}"\n' > "$SENTINEL"
+chmod +x "$SENTINEL"
+
+echo "## arm: shell fallback (GCTK_FALLBACK=merge)"
+export GCTK_FALLBACK=merge
 suite
+# With a binary named, merge.sh keeps the call, and the landing it records
+# still reaches that binary through lifecycle.sh.
+store "[$(anchor SF1 133), $(rev SF1)]"
+printf '%s' "$(prview 133 OPEN CLEAN)" > "$GH_DIR/pr_view_133.json"
+approved 133
+out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
+hasnt "$out" "SENTINEL-GCTK merge" "GCTK_FALLBACK=merge keeps merge.sh on its shell with a binary named"
+has "$out" "SENTINEL-GCTK lifecycle transition SF1 --to merged" "…and the shell records the landing through lifecycle.sh, which execs that binary"
+rm -f "$GH_DIR/pr_view_133.json" "$GH_DIR/reviews_133.json"
+unset GCTK_FALLBACK
 
 echo
 echo "## arm: gctk merge (reached through merge.sh)"
 if [ -n "$GCTK_BUILT" ]; then
     export GCTK_BIN="$GCTK_BUILT"
     suite
-    # The arm proves nothing unless merge.sh actually handed off. merge's stdout
-    # is byte-identical across the two, so a sentinel on the resolved path is the
-    # discriminator: it names itself, the subcommand merge.sh must pass it, and
-    # the helper directory the binary resolves its siblings in.
-    SENTINEL="$TMP/sentinel-gctk"
-    printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s dir=%%s\\n" "$*" "${GCTK_SCRIPTS_DIR:-}"\n' > "$SENTINEL"
-    chmod +x "$SENTINEL"
     out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
     has "$out" "SENTINEL-GCTK merge" "merge.sh execs \$GCTK_BIN with the merge subcommand when it resolves"
     has "$out" "dir=$SD" "…exporting its own directory as GCTK_SCRIPTS_DIR"
@@ -1423,10 +1422,8 @@ if [ -n "$GCTK_BUILT" ]; then
     eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
     out=$(GCTK_SCRIPTS_DIR="$SD" "$GCTK_BUILT" merge 2>&1)
     has "$out" "merged + recorded SD1" "the control: the same direct run with the helper directory named merges"
-elif [ "$GO_PRESENT" -eq 0 ]; then
-    bad "no Go toolchain: the gctk merge port was NOT exercised, and this suite is its acceptance bar"
 else
-    bad "gctk did not build; the port was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+    bad "gctk was not built, so the gctk merge port was NOT exercised, and this suite is its acceptance bar"
 fi
 
 echo

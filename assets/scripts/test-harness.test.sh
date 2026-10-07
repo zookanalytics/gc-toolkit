@@ -11,21 +11,21 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-test-harness-test.XXXXXX")"; trap 'rm -rf
 . "$HERE/test-harness.sh"
 
 # Seed the environment a polecat/agent session exports, an inherited gctk
-# binary path, and the build a suite makes before harness_init
-# (harness_build_gctk sets GCTK_BUILT pre-init because the stub git must not
-# answer the Go build).
+# binary path and forced fallback, and the build a suite makes before
+# harness_init (harness_build_gctk sets GCTK_BUILT pre-init because the stub git
+# must not answer the Go build).
 export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=loomington
 export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=lx-live
 export GC_TRIGGER_BEAD_ID=tk-live GC_RIG_ROOT=/live/rigs/gc-toolkit
 export BEADS_DIR=/live/beads BEADS_ACTOR=live-actor
-export GCTK_BIN=/live/city/.gc/services/gctk/bin/gctk
+export GCTK_BIN=/live/city/.gc/services/gctk/bin/gctk GCTK_FALLBACK=merge
 GCTK_BUILT="$TMP/gctk"
 
 # Capture the seed before harness_init runs — it is the call under test AND it
 # resets PASS/FAIL, so every assertion has to come after it. The captures let a
 # post-init assertion prove the seed was really set, so "cleared" is a real
 # transition and not a variable that was never there.
-SEED_GC_RIG="${GC_RIG:-}"; SEED_BEADS_DIR="${BEADS_DIR:-}"
+SEED_GC_RIG="${GC_RIG:-}"; SEED_BEADS_DIR="${BEADS_DIR:-}"; SEED_GCTK_FALLBACK="${GCTK_FALLBACK:-}"
 
 harness_init
 
@@ -53,6 +53,10 @@ eq "${GC_NO_API:-}" "1" "harness_init pins GC_NO_API=1 so a gctk read hits the s
 # to that build, never to the binary an inherited GCTK_BIN names.
 eq "$GCTK_BUILT" "$TMP/gctk"  "harness_init preserves a pre-init GCTK_BUILT"
 eq "$GCTK_BIN"   "$TMP/gctk"  "harness_init pins GCTK_BIN to the suite's own build, over an inherited one"
+# An inherited GCTK_FALLBACK would put a port onto its shell in a suite that
+# meant to test the binary, so harness_init clears it.
+eq "$SEED_GCTK_FALLBACK" "merge" "seed: GCTK_FALLBACK was set before harness_init"
+eq "${GCTK_FALLBACK-<unset>}" "<unset>" "harness_init clears an inherited GCTK_FALLBACK"
 
 # A suite that built nothing reaches no binary at all: lifecycle.sh refuses
 # under GCTK_BIN=none, and that refusal is what such a suite sees.

@@ -43,8 +43,9 @@ harness_init() {
   # a logged sling argv, so an inherited value would settle a hermetic assertion
   # on the operator's shell rather than on the code. Clear both namespaces so the
   # harness owns the environment; a suite that wants a rig exports it after
-  # harness_init returns. GCTK_* is left alone: GCTK_BIN is pinned just below,
-  # from the binary harness_build_gctk left in GCTK_BUILT.
+  # harness_init returns. GCTK_* is left out of that sweep, because GCTK_BUILT
+  # carries the binary harness_build_gctk left; GCTK_BIN and GCTK_FALLBACK are
+  # pinned just below.
   unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
@@ -53,8 +54,11 @@ harness_init() {
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
   # binary at all: lifecycle.sh refuses under GCTK_BIN=none, and
-  # pr-status-label.sh derives nothing.
+  # pr-status-label.sh derives nothing. No port's shell is forced either: a
+  # suite that tests one sets GCTK_FALLBACK after harness_init, the way
+  # merge.test.sh's shell arm does.
   export GCTK_BIN="${GCTK_BUILT:-none}"
+  unset GCTK_FALLBACK
   [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
   # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
   # bead reads prefer the running supervisor's API, and these suites run inside

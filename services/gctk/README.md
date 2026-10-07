@@ -94,8 +94,12 @@ publishes the binary:
 
 `GCTK_BIN=none` names no binary, so every `lifecycle.sh` call under it is
 refused, while `merge.sh` answers from its shell. Merge's fallback still
-stands: its shell answers whenever no current binary resolves. The scripts are
-deleted when the last port lands.
+stands: its shell answers whenever no current binary resolves. A suite cannot
+reach that shell with `GCTK_BIN=none`, because the shell records every landing
+through `lifecycle.sh`, which would then have nothing to exec. It sets
+`GCTK_FALLBACK=merge` instead. That forces merge's shell alone and leaves
+`GCTK_BIN` on the binary the suite built, which is how `merge.test.sh`'s shell
+arm runs. The scripts are deleted when the last port lands.
 
 `pr-status` has no fallback either. Its derivation lives only in gctk — the helm
 board (Go) has no shell to fall back to, so a shell copy would be the divergence
