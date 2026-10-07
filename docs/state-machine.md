@@ -132,9 +132,9 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | checks armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 6) | every `pre-open` check in `check_set` reads `green`; the PR opens as a draft when `check_set` names an `open-as-draft` check, else ready |
-| pull_request draft → ready | `pr-open.sh` (cadence arm 6, draft-to-ready) | every `pre-open` and `open-as-draft` check reads `green`; `gh pr ready` surfaces it. GitHub `isDraft` flips; `merge_result` stays `pull_request` |
-| pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated (incl. the universal approval rule; a draft PR is skipped); close + record in one call |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 3) | every `pre-open` check in `check_set` reads `green`; the PR opens as a draft when `check_set` names an `open-as-draft` check, else ready |
+| pull_request draft → ready | `pr-open.sh` (cadence arm 3, draft-to-ready) | every `pre-open` and `open-as-draft` check reads `green`; `gh pr ready` surfaces it. GitHub `isDraft` flips; `merge_result` stays `pull_request` |
+| pull_request → merged | `merge.sh` (cadence arm 2) | full authorization set validated (incl. the universal approval rule; a draft PR is skipped); close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 7) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
@@ -458,10 +458,10 @@ universal approval besides.
 `assets/scripts/pr-status-label.sh` is the single writer. `pr-open.sh` sets the
 label when it opens a PR and when it flips a draft to ready, and `signoff.sh`
 flips it on each of the city's own verdicts. A human's review moves it in the
-merge cadence's pre-merge arms, in the pass that records the review. The posture
-arm re-derives the label for an anchor whose posture value it changes: an
-approval, a comment, a change request, or a dismissal. The feedback arm
-re-derives it for an anchor whose feedback batch it routes into live work. A
+merge cadence's posture and feedback arms, in the pass that records the review.
+The posture arm re-derives the label for an anchor whose posture value it
+changes: an approval, a comment, a change request, or a dismissal. The feedback
+arm re-derives it for an anchor whose feedback batch it routes into live work. A
 head or merge state that moves under an unchanged posture value does not
 re-derive the label there. GitHub reports `UNKNOWN` while it computes a PR's
 mergeability, so those moves are most posture writes, and re-deriving on them

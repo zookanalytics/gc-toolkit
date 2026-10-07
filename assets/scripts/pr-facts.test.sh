@@ -20,7 +20,7 @@
 # anchor it could not make current in its EXIT CODE, which is what holds
 # merge.sh for that pass);
 # Also covers the status: label moving in the arm that records a review: each
-# pre-merge arm re-derives it for an anchor whose posture value it changes or
+# early arm re-derives it for an anchor whose posture value it changes or
 # whose feedback batch it routes, a merge state moving alone is left to the full
 # pass, and the full pass's own re-derive reads the labels its sweep just wrote;
 # Also covers the POSTURE record and the comment watermark: the declared
@@ -3147,11 +3147,10 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "tracked as a follow-up for after the merge" "…the dismiss message names the deferral"
 
-# ---- --route-comments-only: route operator feedback early, before merge --------
-# The tk-8qtkvv divergence: --posture-only stamps commented/changes_requested on
-# the cheap pre-merge tick, but routing lived only in the full arm at the pass
-# TAIL (after merge). A pass the timeout killed in between left the feedback
-# stamped-as-seen yet unrouted for hours. This mode routes on the early tick too:
+# ---- --route-comments-only: route operator feedback early in the pass ----------
+# --posture-only stamps commented/changes_requested on the pre-merge tick, and
+# the full arm routes only at the pass TAIL. A pass the timeout killed in between
+# would leave the feedback stamped-as-seen yet unrouted. This mode routes early:
 # it does the SAME routing the full arm does, then stops — no write-back sweep,
 # no MERGED/CLOSED reconciliation, none of the non-feedback arms.
 # The `new-N` bead counter is high this late in the run, so the child id is read
@@ -3227,7 +3226,7 @@ out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" \
   "the full pass dispatches the conflict-rework on the same fixture"
 
-echo "# …but a CONFLICTING anchor WITH feedback is routed pre-merge — not deferred while it conflicts (tk-f9x2nb, #861)"
+echo "# …but a CONFLICTING anchor WITH feedback is routed early — not deferred while it conflicts (tk-f9x2nb, #861)"
 # The complement of RC9: route-comments-only still files no merge-in child, but a
 # conflicting anchor that owes feedback now falls through to the feedback arm and
 # routes it, so operator feedback is picked up before the merge rather than
@@ -3238,7 +3237,7 @@ echo '[]' > "$GH_DIR/reviews_161.json"
 printf '[{"id":16100,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/comments_161.json"
 : > "$STUB_SESSION_LOG"
 out=$(run_route)
-has "$(meta CF2 pr_comment_disposition)" "rework:" "route-comments-only routes the conflicting anchor's feedback pre-merge"
+has "$(meta CF2 pr_comment_disposition)" "rework:" "route-comments-only routes the conflicting anchor's feedback early"
 eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))] | length' "$STUB_STORE")" "0" \
   "…and files no merge-in child (the full pass owns that; the feedback child brings the branch current)"
 VP2=$(vpass_id CF2)
@@ -3258,7 +3257,7 @@ out=$(run)
 eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same fixture"
 
 # ---- the status: label moves in the arm that records a review ----------------
-# A human's review changes the label's inputs in the pre-merge arms: --posture-only
+# A human's review changes the label's inputs in the early arms: --posture-only
 # records the new posture value, and --route-comments-only routes the feedback
 # into live work on the anchor. Each re-derives the label there, so the PR list
 # shows the review without waiting for the full pass at the tail. These cases run
@@ -3339,6 +3338,66 @@ run >/dev/null 2>&1          # the branch-dedup probe refetches (invalidated) an
 unset GC_RECONCILE_BD_CACHE
 twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
+
+echo "# pacing: --deadline stops the per-anchor walk after one anchor and --cursor resumes after it"
+# Three clean OPEN PRs, enumerated out of id order. A deadline of epoch 1 has
+# always passed, so a paced pass reads exactly one PR; the posture-only mode
+# ignores the pacing pair, because merge.sh needs every posture current.
+store "[$(anchor PP3 83), $(anchor PP1 81), $(anchor PP2 82)]"
+for n in 81 82 83; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+PFCUR="$TMP/pr-facts.cursor"; rm -f "$PFCUR"
+pf_views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "81" "a passed deadline reads the lowest id's PR and no other"
+has "$out" "visited 1 of 3 PR anchors before the deadline; the next pass resumes at PP2" "…and names where the next pass resumes"
+eq "$(cat "$PFCUR" 2>/dev/null)" "PP1" "the cursor records the anchor finished"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "82" "the full mode resumes after the cursor the same way"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --posture-only --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "83,81,82" "the posture-only mode reads every PR, in the enumerated order, whatever pacing it is handed"
+hasnt "$out" "visited " "…and reports no pacing"
+
+echo "# pacing: an anchor the walk skips for free does not spend its one visit past the deadline"
+# PQ1 names no PR number, so the walk passes it without a read. It leads the
+# rotation and the deadline has passed, so the visit the walk is owed goes to
+# PQ2.
+store "[$(anchor PQ1 x), $(anchor PQ2 84)]"
+printf '%s' "$(prview 84 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_84.json"
+rm -f "$PFCUR"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
+eq "$(pf_views)" "84" "the visit goes to the first anchor that costs a read"
+has "$out" "visited 1 of 2 PR anchors" "…counted once"
+
+echo "# pacing: the write-back sweep rotates on a cursor of its own under the same deadline"
+# Three anchors carry a routed comment batch, enumerated out of id order. A
+# deadline of epoch 1 has always passed, so the sweep acknowledges one anchor's
+# comments per pass, on a rotation apart from the walk's. The PR numbers are
+# ones no earlier section uses, and each PR's issue comments are emptied too,
+# because the walk visits the same anchors and would route a comment an earlier
+# section left behind, which changes what the sweep owes.
+store "[$(anchor WP3 193 "$(wb_meta rework:KP3)"), $(anchor WP1 191 "$(wb_meta rework:KP1)"),
+        $(anchor WP2 192 "$(wb_meta rework:KP2)"), $(child KP1 open), $(child KP2 open), $(child KP3 open)]"
+for n in 191 192 193; do
+  printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"
+  threads "$n" "$(one_thread "$n")"
+  printf '[]' > "$GH_DIR/issue_comments_$n.json"
+done
+WBCUR="$TMP/pr-facts-wb.cursor"; rm -f "$WBCUR" "$WBCUR.writeback"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
+eq "$(reacted 191 NC-191),$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false,false" "past the deadline the sweep still acknowledges one anchor, the lowest id"
+has "$out" "write-back visited 1 of 3 anchors with routed comments before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
+eq "$(cat "$WBCUR.writeback" 2>/dev/null)" "WP1" "the sweep records its progress on a cursor of its own"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
+eq "$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false" "the next pass resumes the sweep after its cursor"
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(( $(date +%s) + 600 ))" --cursor "$WBCUR" 2>&1)
+eq "$(reacted 193 NC-193)" "true" "a deadline that has not passed lets the sweep reach every anchor"
+has "$out" "write-back visited 3 of 3 anchors with routed comments" "…and reports the whole sweep"
+out=$("$SUT" --fix-pool "$FIX" 2>&1)
+hasnt "$out" "write-back visited" "an unpaced pass reports no write-back pacing"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
