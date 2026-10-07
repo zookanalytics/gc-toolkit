@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# bd-lib.test.sh — hermetic tests for the bd_list memoization.
+# bd-lib.test.sh — hermetic tests for the bd_list memoization and the
+# bd_live_children read.
 #
 # The cache is off unless GC_RECONCILE_BD_CACHE names a directory, and the
 # refinery-reconcile order is its only caller (it clears per arm and removes the
@@ -84,6 +85,29 @@ eq "$(cache_files)" 0 "cache: a server error is not stored"
 reset_log
 bd_list --status=open >/dev/null
 eq "$(list_calls)" 1 "cache: the read after an error is a fresh miss"
+
+# --- bd_live_children: one read, the live children grouped by anchor ----------
+unset GC_RECONCILE_BD_CACHE
+store '[
+  {"id":"tk-r2","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
+  {"id":"tk-f1","status":"in_progress","metadata":{"anchor_bead":"tk-anc","task_kind":"finding"}},
+  {"id":"tk-w1","status":"blocked","metadata":{"anchor_bead":"tk-two","task_kind":"rework"}},
+  {"id":"tk-v1","status":"open","metadata":{"anchor_bead":"tk-two","task_kind":"validation"}},
+  {"id":"tk-c1","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"rework"}},
+  {"id":"tk-x1","status":"open","metadata":{"task_kind":"rework"}},
+  {"id":"tk-e1","status":"open","metadata":{"anchor_bead":""}}
+]'
+reset_log
+lc=$(bd_live_children); rc=$?
+eq "$rc" 0 "bd_live_children reads the store"
+eq "$(printf '%s\n' "$lc" | sort | paste -sd';' -)" "tk-anc	tk-f1,tk-r2	0;tk-two	tk-v1,tk-w1	1" \
+  "one line per anchor: its live child ids sorted, and whether a rework child is among them"
+eq "$(list_calls)" 1 "…in one read of the store"
+export STUB_LIST_FAIL=1
+lc=$(bd_live_children); rc=$?
+unset STUB_LIST_FAIL
+[ "$rc" -ne 0 ] && ok "an unreadable store is reported non-zero" || bad "an unreadable store read as no children"
+eq "$lc" "" "…with nothing printed, so no caller reads it as no children"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
