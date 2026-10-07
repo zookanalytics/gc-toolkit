@@ -75,9 +75,9 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 single_flight_acquire "$STATE_DIR" "${EPIC_STEWARD_LOCK_STALL_SECS:-900}"
 case "$SF_STATUS" in
   held) : ;;
-  inflight) echo "$PROG[$RIG]: $SF_MSG" ; exit 0 ;;
-  stalled)  echo "$PROG[$RIG]: $SF_MSG" >&2 ; exit 1 ;;
-  unguarded) echo "$PROG[$RIG]: single-flight UNGUARDED ($SF_MSG) — refusing to run any arm" >&2 ; exit 1 ;;
+  inflight) echo "${PROG}[$RIG]: $SF_MSG" ; exit 0 ;;
+  stalled)  echo "${PROG}[$RIG]: $SF_MSG" >&2 ; exit 1 ;;
+  unguarded) echo "${PROG}[$RIG]: single-flight UNGUARDED ($SF_MSG) — refusing to run any arm" >&2 ; exit 1 ;;
 esac
 
 # No per-pass epic cap. Epics are a coarse per-rig anchor (few per rig), the pass
@@ -102,7 +102,7 @@ file_visit() {
   if "$ESCALATE" --subject "$_es_epic" --key "$_es_key" --message "$_es_msg" </dev/null >/dev/null 2>&1; then
     filed=$((filed + 1))
   else
-    echo "$PROG[$RIG]: escalate.sh failed to file '$_es_key' on $_es_epic" >&2
+    echo "${PROG}[$RIG]: escalate.sh failed to file '$_es_key' on $_es_epic" >&2
     failed=$((failed + 1))
   fi
 }
@@ -197,7 +197,7 @@ arm_ruling() { # <epic> <has-hypothesis> <ruling>  (presence flag, then the enum
     # going silently dark on a persistent breakage (flag drift, store permission)
     # that only the doctor backstop would catch, and only after a hand-close. The
     # pass still continues — the next tick retries the whole set.
-    echo "$PROG[$RIG]: children probe unreadable for $_a_epic — ruling arm skipped it this pass" >&2
+    echo "${PROG}[$RIG]: children probe unreadable for $_a_epic — ruling arm skipped it this pass" >&2
     failed=$((failed + 1))
     return 0
   fi
@@ -212,7 +212,7 @@ arm_ruling() { # <epic> <has-hypothesis> <ruling>  (presence flag, then the enum
   # arm could not judge this epic, rather than silently miscounting it.
   _a_unknown=$(printf '%s' "$_a_kids" | jq '[ .[] | select((.status // null) == null) ] | length' 2>/dev/null)
   if [ "${_a_unknown:-0}" -gt 0 ] 2>/dev/null; then
-    echo "$PROG[$RIG]: $_a_epic has ${_a_unknown} unit(s) with no embedded status (cross-store?) — ruling arm cannot judge completeness this pass" >&2
+    echo "${PROG}[$RIG]: $_a_epic has ${_a_unknown} unit(s) with no embedded status (cross-store?) — ruling arm cannot judge completeness this pass" >&2
     failed=$((failed + 1))
     return 0
   fi
@@ -233,7 +233,7 @@ An epic closes by a ruling on its hypothesis — persevere, pivot, or close — 
 # miss a blocked, deferred, hooked, or pinned epic whose units all land — no
 # ruling visit would ever be filed and the gate would hold its close forever.
 EPICS_JSON=$(bd_list --type=epic --status=open,in_progress,blocked,deferred,hooked,pinned) || {
-  echo "$PROG[$RIG]: could not read live epics (bd_list failed) — nothing stewarded this pass" >&2
+  echo "${PROG}[$RIG]: could not read live epics (bd_list failed) — nothing stewarded this pass" >&2
   exit 1
 }
 
@@ -264,5 +264,5 @@ done < <(printf '%s' "$EPICS_JSON" | jq -r '
           (.metadata.epic_ruling // "" | tostring | gsub("[\\n\\r]"; " ")) ]
       | join("\u001f")' 2>/dev/null)
 
-echo "$PROG[$RIG]: checked $checked live epic(s), filed or refreshed $filed visit(s), $failed failure(s)"
+echo "${PROG}[$RIG]: checked $checked live epic(s), filed or refreshed $filed visit(s), $failed failure(s)"
 [ "$failed" -eq 0 ]

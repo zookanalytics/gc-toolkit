@@ -32,6 +32,9 @@
 # treated as a live pass (inflight), never stalled — a torn holder write must not
 # promote a healthy pass to "wedged".
 
+# SF_STATUS and SF_MSG are results the sourcing caller reads; shellcheck lints
+# this file alone, so it cannot see that read and reports them unused.
+# shellcheck disable=SC2034
 single_flight_acquire() {
   _sf_state="$1"; _sf_stall="${2:-900}"
   SF_STATUS=""; SF_MSG=""; SF_HOLDER_INFO=""

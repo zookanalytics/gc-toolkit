@@ -17,8 +17,6 @@
 
 set -u
 
-dir="${GC_PACK_DIR:-.}"
-
 errors=(); warnings=(); notes=()
 # >>> doctor-budget
 # One deadline for the whole check, anchored at process start. `gc doctor
