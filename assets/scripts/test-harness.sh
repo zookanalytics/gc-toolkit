@@ -110,15 +110,17 @@ mk_sut_dir() { # <dir> <file>...
   mkdir -p "$d"
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
-  # bd-lib.sh is the shared bead-store read library many SUTs source by sibling
-  # path, and gctk-resolve.sh is what every ported script (lifecycle.sh among
-  # them) sources the same way; copy both beside them so those sources resolve
-  # in the private dir. They sit beside this harness, so they are found whatever
-  # the SUT's own directory is.
+  # bd-lib.sh (the shared bead-store reads) and pace-lib.sh (the cadence arms'
+  # visit order and time budget) are libraries SUTs source by sibling path, and
+  # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
+  # the same way; copy them beside the SUT so those sources resolve in the
+  # private dir. They sit beside this harness, so they are found whatever the
+  # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/gctk-resolve.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
+  return 0
 }
 
 _write_gc_stub() {
@@ -629,6 +631,16 @@ case "$sub" in
         return 1
       }
       case "$gqquery" in
+        *pullRequests\(states:OPEN*)
+          # merge.sh's visit-order read: every open PR, served as one page from
+          # open_prs.json (a list of PR nodes). No fixture is an empty list, in
+          # which every anchor's PR has left the open list.
+          [ -z "${STUB_OPEN_PRS_FAIL:-}" ] || exit 1
+          of="$G/open_prs.json"
+          if [ -s "$of" ]; then nodes=$(cat "$of"); else nodes='[]'; fi
+          printf '%s' "$nodes" | jq -c '{data: {repository: {pullRequests: {
+              pageInfo: {hasNextPage: false, endCursor: null}, nodes: .}}}}' || exit 1
+          exit 0 ;;
         *addReaction*)
           [ "${STUB_REACT_RC:-0}" = "0" ] || exit "${STUB_REACT_RC:-0}"
           sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
