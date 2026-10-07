@@ -6,20 +6,19 @@
 # A standing scope (task_kind=triage-subject) carries one visit per distinct
 # situation under a single continuation group, so the group is a bucket, not a
 # topic. Keying the fold on the group alone folds unrelated sittings together
-# (one lost) or folds two live sittings into each other (both lost). The item
-# is the subject; the TOPIC that decides sameness is a `key:`-prefixed
-# escalation_key, else the subject; and the lowest-id tiebreak plus the
-# tracks-edge recovery of an empty group stamp are each load-bearing.
+# (one lost) or folds two live sittings into each other (both lost). The TOPIC
+# that decides sameness is a `key:`-prefixed escalation_key, else the subject;
+# and the lowest-id tiebreak plus the tracks-edge recovery of an empty group
+# stamp are each load-bearing.
 # assets/scripts/converse-fold-scope.test.sh runs this against every one of
 # those shapes.
 #
 # Inputs (environment, or positional fallback):
 #   VISIT    the visit bead just claimed (required; $1)
 #   SUBJECT  its continuation group; may be empty and recovered here ($2)
-# Output: four eval-able assignments on stdout, each value single-quoted so a
+# Output: three eval-able assignments on stdout, each value single-quoted so a
 # caller can `eval` them without a metacharacter in the data becoming syntax —
 #   SUBJECT=<recovered-or-passed group>
-#   ITEM=<the bead step 5 writes to>
 #   TOPIC=<what decides sameness>
 #   HOLDER=<$VISIT when you hold it, another visit's id to fold into it,
 #           EMPTY when the listing did not read (hold, do not fold)>
@@ -64,12 +63,10 @@ V=$(gc bd show "$VISIT" --json | scrub)
 if [ -z "$SUBJECT" ]; then
   SUBJECT=$(printf '%s' "$V" | jq -r "$VISIT_IDENTITY_JQ"'(.[0] // {}) | visit_subject')
 fi
-ITEM="$SUBJECT"
-# The item is a bead, because step 5 writes to it. The TOPIC is what
-# decides sameness, and it is not always a bead: an escalate.sh visit
-# carries its situation in escalation_key, which is the only stamp that
-# tells two findings of one bucket apart. The `key:` prefix keeps a key
-# and a bead id from ever comparing equal. This one definition computes
+# The TOPIC decides sameness, and it is not always a bead: an escalate.sh
+# visit carries its situation in escalation_key, which is the only stamp
+# that tells two findings of one bucket apart. The `key:` prefix keeps a
+# key and a bead id from ever comparing equal. This one definition computes
 # the topic of this visit and of every sibling it is compared against.
 TOPIC_JQ='
   def topic($subject):
@@ -100,6 +97,5 @@ else
 fi
 
 printf 'SUBJECT=%s\n' "$(shq "$SUBJECT")"
-printf 'ITEM=%s\n' "$(shq "$ITEM")"
 printf 'TOPIC=%s\n' "$(shq "$TOPIC")"
 printf 'HOLDER=%s\n' "$(shq "$HOLDER")"

@@ -27,8 +27,14 @@ know something, now knows it, and the sitting closes.
 
 Definitions:
 
-- **Subject** — the bead the dialogue is about. Its id is the
-  continuation group every one of its visits carries.
+- **Subject** — the bead the dialogue is about, and the bead steps 5
+  and 7 write to. Its id is the continuation group every one of its
+  visits carries. A standing scope (`task_kind=triage-subject`) carries
+  one visit per distinct situation, so its group is a bucket that
+  sibling sittings share, and each demand a sitting files there carries
+  its visit's `escalation_key`. Step 5 stamps the takeaway and files the
+  conversation demand on the gated bead: the visit for a PR anchor, the
+  subject otherwise.
 - **Universe** — the subject together with its dependents and related
   items; for an epic, the stories and tasks under it and the work in
   flight across it. A sitting reasons over that whole scope rather than
@@ -44,13 +50,6 @@ Definitions:
   at claim time (step 2). A `tracks` edge carries its subject, never
   `parent-child`, which would transmit the subject's blocked state to the
   visit and make it unclaimable (`formulas/mol-visit.toml`).
-- **Item** — the bead step 5 and step 7 write to, which is the subject.
-  A standing scope (`task_kind=triage-subject`) carries one visit per
-  distinct situation, so its group is a bucket that sibling sittings
-  share, and each demand a sitting files there carries its visit's
-  `escalation_key`. Step 5 stamps the takeaway and files the
-  conversation demand on the gated bead: the visit for a PR anchor, the
-  item otherwise.
 - **Topic** — what makes two visits the same sitting, which is not always
   a bead: `escalation_key` when `escalate.sh` filed the visit for one
   situation, the subject otherwise. The fold check keys on `$TOPIC`.
@@ -163,7 +162,7 @@ The loop, every visit:
 
    **`action=finish` — this visit's sitting is over and only its close is
    missing.** Everything durable a sitting writes had already landed when
-   the session died: the takeaway on the item, the demand and the hold
+   the session died: the takeaway on the subject, the demand and the hold
    discharged, and `gc.outcome` stamped on the visit. What was lost is the
    `gc bd close` that follows that stamp, and the claimer performs it as it
    hands the line back. Then go to step 8 and claim again.
@@ -207,10 +206,10 @@ The loop, every visit:
    prevent. Re-read it. If it stays unreadable, hold the sitting and mail the
    witness `HELP:`, and do not `drain-ack` it and do not work it.
 
-   **`BEGAN=recheck`** — no key, but an open demand still gates the item or
+   **`BEGAN=recheck`** — no key, but an open demand still gates the subject or
    this visit (a PR-anchor conversation files its demand on the visit). That
    demand is a hold's own trace. It belongs to a sitting that held before this
-   key existed, or to a sibling on the shared item, and neither can be closed
+   key existed, or to a sibling on the shared subject, and neither can be closed
    on the strength of a missing key. Fall through to step 2 and
    re-check the premise, but treat the demand as the hold it is, not as a
    benign wait to hand back: close here ONLY if the premise is moot, the
@@ -220,7 +219,7 @@ The loop, every visit:
    reads it as `yes`.
 
    **`BEGAN=no`** — the visit read cleanly, carries no key, and no open demand
-   gates it or its item, so nothing here earned a hold: fall through to step 2
+   gates it or its subject, so nothing here earned a hold: fall through to step 2
    and re-check the premise. A visit whose premise died between filing and
    claiming closes there, and its benign exits still apply, an open PR on the
    operator's own review queue or a known acceptable state, because no hold of
@@ -233,7 +232,7 @@ The loop, every visit:
    On a fresh claim (`action=work`), before prepping, resolve what this
    sitting is about and who holds it with `converse-fold.sh` (it takes
    `$VISIT` and `$SUBJECT`, recovers an empty `$SUBJECT` from the `tracks`
-   edge, and prints `SUBJECT` / `ITEM` / `TOPIC` / `HOLDER`):
+   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER`):
    ```bash
    # eval the two assignments the fold reads (both bead ids). HOLDER="" first,
    # so a read that did not resolve leaves it empty — the "hold" case below.
@@ -298,7 +297,7 @@ Rules:
   argument reaches the wrong answer.
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then step
   7 with `--ruled no` and `gc.outcome=cut-short` — sign-off included — and
-  drain. The decision is still open, so `--ruled no` keeps the item
+  drain. The decision is still open, so `--ruled no` keeps the subject
   `held`, re-states its demand rather than closing it, and the refreshed
   stamp earns the next visit. This is the ONLY path to `cut-short`, and a
   sitting the operator has not ruled on is never ended to unblock

@@ -40,9 +40,9 @@ all. `converse-signoff.sh` writes the durable trace and discharges whichever
 demands the hold filed — the conversation wait on the visit, and any explicit
 merge hold on the anchor; you tell it what this sitting settled. It resolves
 each demand gate when the sitting settled the question (`--ruled yes`, with the
-`--ruling` it resolves with and the `--route` the item is released to) and
-re-states each when it did not (`--ruled no`, with what is `--still-owed`).
-What is waiting on the item is yours to state: one
+`--ruling` it resolves with and the `--route` the subject is released to)
+and re-states each when it did not (`--ruled no`, with what is
+`--still-owed`). What is waiting on the subject is yours to state: one
 `--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`
 when it settled the subject and nothing is waiting, and NEITHER where the
 subject is parked for a person.
@@ -56,7 +56,7 @@ VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
 ```
 **Set `--ruled` from what this sitting actually settled.** The gate
 starts shut, so `--ruled no` re-states the wait rather than dropping it;
-`--ruled yes` resolves it and releases a `held` item. A demand a named
+`--ruled yes` resolves it and releases a `held` subject. A demand a named
 person must perform is assigned, and the discharge leaves it alone —
 that one is theirs to close.
 

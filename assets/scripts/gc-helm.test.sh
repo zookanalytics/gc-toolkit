@@ -2672,8 +2672,8 @@ grep -q 'cap is 140' <<< "$DERR" \
 printf '[]\n' > "$D_LIST"
 
 # ── demand --topic: one open demand per (gated bead, topic) ───────────────────
-# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
-# files a demand on it. Keyed on the gated bead alone, the second refreshes the
+# Under a standing scope two sittings share one bucket subject and each files a
+# demand on it. Keyed on the gated bead alone, the second refreshes the
 # first's gate in place and overwrites the operator question it holds. --topic
 # scopes the demand to the sitting (its escalation_key), so each keeps its own.
 

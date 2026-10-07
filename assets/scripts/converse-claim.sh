@@ -174,7 +174,7 @@ fi
 # step 7), so a visit still open while carrying one is a sitting whose record
 # is complete and whose close did not run. Held, it is offered back to its own
 # session for as long as the pool has demand, and the close never runs. The
-# item keeps whatever headline it has: the hold stamped one when the sitting
+# subject keeps whatever headline it has: the hold stamped one when the sitting
 # began, and a closing takeaway that failed on the way out is not recovered
 # here.
 #
@@ -240,20 +240,20 @@ if [ "$REASON" = "existing_assignment" ]; then
     # sitting that reached its hold, and a claim that died before step 2 ever
     # re-checked the premise. The trace only a real hold leaves is gc.hold_demand,
     # which step 5 stamps on THIS visit before it waits; it is attributable
-    # because it lives on the visit, so a sibling holding the same item cannot
-    # forge it. Absence is three answers, not one: a visit bead that will not read
-    # is UNKNOWN and must not license a close; no key but an open demand still on
-    # the item is a hold that predates the key or a sibling's on the shared item
-    # (RECHECK); only a clean read with no key and no open item demand is a claim
-    # that plainly never began (NO). The yes/unknown/recheck/no RULES are the
-    # caller's; this reports the reading.
+    # because it lives on the visit, so a sibling holding the same subject
+    # cannot forge it. Absence is three answers, not one: a visit bead that will
+    # not read is UNKNOWN and must not license a close; no key but an open demand
+    # still on the subject is a hold that predates the key or a sibling's on the
+    # shared subject (RECHECK); only a clean read with no key and no open subject
+    # demand is a claim that plainly never began (NO). The yes/unknown/recheck/no
+    # RULES are the caller's; this reports the reading.
     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and ((.[0].id // "") != "")' >/dev/null 2>&1; then
         BEGAN=unknown
     elif printf '%s' "$BEAD_JSON" | jq -e '(.[0].metadata["gc.hold_demand"] // "") != ""' >/dev/null 2>&1; then
         BEGAN=yes
     else
-        # A hold's demand gates one of two beads: the ITEM ($GROUP, the subject)
-        # for a pre-PR item or an explicit merge hold, the VISIT ($BEAD) for the
+        # A hold's demand gates one of two beads: the SUBJECT ($GROUP) for a
+        # pre-PR subject or an explicit merge hold, the VISIT ($BEAD) for the
         # conversation wait on a PR anchor (converse-hold.sh files it there so the
         # merge keeps moving). Match either, or an anchored hold whose
         # gc.hold_demand stamp did not persist reads as NO — a dead pre-step-2

@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 # converse-signoff.sh — step 7 of the converse loop: write the durable trace a
-# finished sitting owes to the item, and discharge the hold, BEFORE the sign-off
-# is posted and the visit is closed.
+# finished sitting owes to the subject, and discharge the hold, BEFORE the
+# sign-off is posted and the visit is closed.
 #
-# It stamps the closing takeaway on the item, reads it back, and discharges the
-# demands the hold filed. A conversation wait gates the VISIT, an explicit merge
-# hold gates the anchor; a sitting may have filed either or both, and each is
-# discharged. One question decides each discharge: did the decision this hold
+# It stamps the closing takeaway on the subject, reads it back, and discharges
+# the demands the hold filed. A conversation wait gates the VISIT, an explicit
+# merge hold gates the anchor; a sitting may have filed either or both, and each
+# is discharged. One question decides each discharge: did the decision this hold
 # waited on land here (--ruled yes) or not (--ruled no)?
 #   --ruled yes: the operator ruled in this thread. Each gate is RESOLVED (a
-#     pre-gate demand is closed on the same terms), and where the item still
+#     pre-gate demand is closed on the same terms), and where the subject still
 #     reads `held` it is released back to the pool that owns it.
 #   --ruled no:  cut short, or the question outlived the sitting. The wait is
-#     consolidated onto the ITEM — a demand gating the VISIT is closed and
+#     consolidated onto the SUBJECT — a demand gating the VISIT is closed and
 #     re-stated there — so it outlives the visit's close, the liveness sweep
-#     (keyed on gc.demand_for=<item>) re-offers the next sitting, and on a PR
-#     anchor the merge waits; a pre-PR item stays `held`.
-# `held` is keyed to this sitting's outcome, not to the state read off the item,
-# because the cut-short exit runs this same discharge on an item still waiting.
+#     (keyed on gc.demand_for=<subject>) re-offers the next sitting, and on a PR
+#     anchor the merge waits; a pre-PR subject stays `held`.
+# `held` follows this sitting's outcome, not the state read off the subject,
+# because the cut-short exit runs this discharge on a subject still waiting.
 #
-# What is waiting on the item is the caller's to state: one --waiting-on per
+# What is waiting on the subject is the caller's to state: one --waiting-on per
 # bead it ROUTED work into, --no-wait when it settled the subject and nothing is
 # waiting, and NEITHER where the subject is parked for a person. The writers
 # (gc-helm.sh, lifecycle.sh) are SEARCHED for on the candidate roots.
@@ -74,21 +74,20 @@ done
 case "$RULED" in yes|no) ;; *) die "--ruled must be yes or no" ;; esac
 if [ "$RULED" = yes ]; then
   [ -n "$RULING" ] || die "--ruled yes requires --ruling (the reason the gate resolves with)"
-  [ -n "$ROUTE" ]  || die "--ruled yes requires --route (where the item is released to)"
+  [ -n "$ROUTE" ]  || die "--ruled yes requires --route (where the subject is released to)"
 else
-  [ -n "$STILL_OWED" ] || die "--ruled no requires --still-owed (what the item still waits on)"
+  [ -n "$STILL_OWED" ] || die "--ruled no requires --still-owed (what the subject still waits on)"
 fi
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
 V=$(gc bd show "$VISIT" --json | scrub)
-ITEM="$SUBJECT"
 # The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
-# on a shared standing-scope bucket (same item, distinct escalation_key) keeps its
-# own demand: this sign-off neither resolves it nor overwrites its operator
-# question with a re-state. escalation_key is that per-sitting discriminator,
-# empty on an ordinary visit — which keeps the pre-topic behaviour. An array so
-# an empty topic expands to no argument under zsh.
+# on a shared standing-scope bucket (same subject, distinct escalation_key)
+# keeps its own demand: this sign-off neither resolves it nor overwrites its
+# operator question with a re-state. escalation_key is that per-sitting
+# discriminator, empty on an ordinary visit — which keeps the pre-topic
+# behaviour. An array so an empty topic expands to no argument under zsh.
 TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
 DEMAND_TOPIC=()
 [ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
@@ -96,8 +95,8 @@ HELM=""
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
 done
-[ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the item carries no trace of this sitting"
-# What is waiting on $ITEM now that this sitting is over. Three shapes,
+[ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the subject carries no trace of this sitting"
+# What is waiting on $SUBJECT now that this sitting is over. Three shapes,
 # exactly one true, and this sitting is the last reader that can tell them
 # apart: one --waiting-on per bead it ROUTED work into; --no-wait when it
 # settled the subject and nothing is waiting; EMPTY only where the subject
@@ -108,24 +107,24 @@ done
 # call dies with `unknown flag` on exactly the sittings the flag exists for.
 # "${WAIT[@]}" expands to nothing when empty and to one argument per element
 # otherwise, in both bash and zsh.
-"$HELM" takeaway "$ITEM" "$OUTCOME" --by converse "${WAIT[@]}" \
-  || echo "TAKEAWAY FAILED on $ITEM — re-run it before closing; nothing below records this sitting"
-# Read the takeaway back on the ITEM. The gc.outcome check below proves the
-# VISIT stamp and says nothing about the item, so a takeaway that died still
+"$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]}" \
+  || echo "TAKEAWAY FAILED on $SUBJECT — re-run it before closing; nothing below records this sitting"
+# Read the takeaway back on the SUBJECT. The gc.outcome check below proves the
+# VISIT stamp and says nothing about the subject, so a takeaway that died still
 # closes clean — the unstamped close this block exists to prevent, one bead
 # over.
-gc bd show "$ITEM" --json | scrub \
+gc bd show "$SUBJECT" --json | scrub \
   | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
-  || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
+  || echo "NO TAKEAWAY ON $SUBJECT — do not close until it lands"
 # Discharge the hold. A conversation wait gates the VISIT (the default — a
 # conversation does not freeze its subject) and an explicit merge hold gates the
-# ITEM; a sitting may have filed either or both. --include-gates: a demand is a
-# human gate, hidden from `bd list` by default, so the discharge would otherwise
-# never find it.
+# SUBJECT; a sitting may have filed either or both. --include-gates: a demand is
+# a human gate, hidden from `bd list` by default, so the discharge would
+# otherwise never find it.
 HELD_DEMAND=$(printf '%s' "$V" | jq -r '.[0].metadata["gc.hold_demand"] // ""')
 DEMANDS_JSON=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 | scrub)
 # The open, unassigned demand THIS sitting filed on a given bead, or empty. Under
-# a standing scope sibling sittings share the item and each holds its own
+# a standing scope sibling sittings share the subject and each holds its own
 # topic-keyed demand on it, so a first match on gc.demand_for alone would resolve
 # or re-state a sibling's operator question. converse-hold stamps the
 # conversation demand's id as gc.hold_demand on the visit, so that exact demand
@@ -157,7 +156,7 @@ if [ "$RULED" = yes ]; then
   # releases the merge. A demand filed before demands were gates
   # (issue_type=decision) is refused by `gate resolve` ("is not a gate issue"),
   # so it is closed on the same terms instead.
-  for GATED in "$VISIT" "$ITEM"; do
+  for GATED in "$VISIT" "$SUBJECT"; do
     DEMAND=$(demand_on "$GATED")
     [ -n "$DEMAND" ] || continue
     gc bd gate resolve "$DEMAND" --reason "$RULING" \
@@ -177,46 +176,46 @@ if [ "$RULED" = yes ]; then
   done
 else
   # STILL OWED — cut short, or the question outlived the sitting. The wait must
-  # persist on the ITEM, not on the VISIT: the liveness return trip keys on
-  # gc.demand_for=<item>, so a demand there re-offers the next sitting, and on a
-  # PR anchor it also freezes the merge — a sitting that abandoned an unresolved
-  # question is the one case the merge should wait. A demand gating the VISIT
-  # cannot carry that wait: the visit is this sitting's record and converse-settle
-  # closes it next, stranding any demand left on it as a gate on closed work that
-  # gate-visit-sweep names on stderr forever and `gate resolve` readies nothing.
-  # So move it — close the visit demand, re-state the wait on the ITEM under this
-  # sitting's topic (idempotent: one open demand per gated bead and topic, so an
-  # anchor already holding this sitting's opt-in merge demand is simply refreshed,
-  # and a sibling sitting's demand on a shared bucket is left alone). A sitting
-  # that filed NO demand re-states none: the discharge records only the waits the
-  # hold actually took.
+  # persist on the SUBJECT, not on the VISIT: the liveness return trip keys on
+  # gc.demand_for=<subject>, so a demand there re-offers the next sitting, and
+  # on a PR anchor it also freezes the merge — a sitting that abandoned an
+  # unresolved question is the one case the merge should wait. A demand gating
+  # the VISIT cannot carry that wait: the visit is this sitting's record and
+  # converse-settle closes it next, stranding any demand left on it as a gate on
+  # closed work that gate-visit-sweep names on stderr forever and `gate resolve`
+  # readies nothing. So move it — close the visit demand, re-state the wait on
+  # the SUBJECT under this sitting's topic (idempotent: one open demand per
+  # gated bead and topic, so an anchor already holding this sitting's opt-in
+  # merge demand is simply refreshed, and a sibling sitting's demand on a shared
+  # bucket is left alone). A sitting that filed NO demand re-states none: the
+  # discharge records only the waits the hold actually took.
   VD=""
-  [ "$VISIT" != "$ITEM" ] && VD=$(demand_on "$VISIT")
-  ID=$(demand_on "$ITEM")
+  [ "$VISIT" != "$SUBJECT" ] && VD=$(demand_on "$VISIT")
+  ID=$(demand_on "$SUBJECT")
   if [ -n "$VD" ]; then
-    gc bd gate resolve "$VD" --reason "cut short; wait re-stated on $ITEM" \
-      || gc bd close "$VD" --reason "cut short; wait re-stated on $ITEM"
+    gc bd gate resolve "$VD" --reason "cut short; wait re-stated on $SUBJECT" \
+      || gc bd close "$VD" --reason "cut short; wait re-stated on $SUBJECT"
     # Settle its board question so the closed demand does not linger asking;
-    # the live wait now rides the ITEM demand below.
-    "$HELM" takeaway "$VD" "cut short; wait moved to $ITEM" --by converse --no-wait \
+    # the live wait now rides the SUBJECT demand below.
+    "$HELM" takeaway "$VD" "cut short; wait moved to $SUBJECT" --by converse --no-wait \
       || echo "COULD NOT STAMP the moved-wait note on $VD — the board may still show its question"
   fi
   if [ -n "$VD" ] || [ -n "$ID" ]; then
-    "$HELM" demand "$ITEM" "$STILL_OWED" --by converse "${DEMAND_TOPIC[@]}"
+    "$HELM" demand "$SUBJECT" "$STILL_OWED" --by converse "${DEMAND_TOPIC[@]}"
   fi
 fi
 # `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
-# runs this same block on an item still waiting, so the release is keyed to
-# this sitting's outcome rather than to the state read off the item. Erring
+# runs this same block on a subject still waiting, so the release is keyed to
+# this sitting's outcome rather than to the state read off the subject. Erring
 # toward the hold leaves a bead visibly routed to a person; erring the other
 # way restores the untraceable wait this state exists to end.
 LC=""
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
 done
-if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" = "held" ]; then
-  "$LC" transition "$ITEM" --to unanchored --route "$ROUTE" \
-    || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
+if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$SUBJECT" 2>/dev/null)" = "held" ]; then
+  "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
+    || echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"
 fi
 
 # Stash what the visit's PR-reminder close will say, for the writer that runs

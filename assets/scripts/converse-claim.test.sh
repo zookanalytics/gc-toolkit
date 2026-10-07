@@ -8,7 +8,7 @@
 #
 # The regression this suite pins: a demand is filed by gc-helm as a NATIVE
 # human gate (issue_type=gate), which `bd list` hides unless --include-gates.
-# A visit with no gc.hold_demand whose item still carries such a gate-demand is
+# A visit with no gc.hold_demand whose subject still carries such a gate-demand is
 # a live wait (RECHECK); reading the demand list without --include-gates makes
 # the gate invisible and misjudges it NO. The stub below hides gate rows unless
 # --include-gates is present, so the shipped reader must pass the flag to see
@@ -52,9 +52,9 @@ bash -n "$SUT" && ok "converse-claim.sh: valid bash" \
 #   bd show <id> --json  -> the visit v-x with optional gc.hold_demand
 #         (HOLD_DEMAND) and gc.outcome (OUTCOME) and status (SHOW_STATUS);
 #         SHOW_MODE=unreadable returns [] for the cannot-read-the-visit arm.
-#   bd list ... --json   -> a gate-demand on DEMAND_ITEM (default g, the claim's
-#         group, which is the item), but ONLY when --include-gates is present;
-#         a flagless list returns []. An empty DEMAND_ITEM means no demand
+#   bd list ... --json   -> a gate-demand on DEMAND_FOR (default g, the claim's
+#         group, which is the subject), but ONLY when --include-gates is present;
+#         a flagless list returns []. An empty DEMAND_FOR means no demand
 #         exists on any read.
 #   bd close <id>        -> exits CLOSE_RC (default 0).
 # Any other call exits 2, so a script that grows one fails here, not live.
@@ -81,7 +81,7 @@ case "${1:-}" in
                 exit 0 ;;
             list)
                 want=0; for a in "$@"; do [ "$a" = "--include-gates" ] && want=1; done
-                di="${DEMAND_ITEM-g}"
+                di="${DEMAND_FOR-g}"
                 if [ -n "$di" ] && [ "$want" = 1 ]; then
                     jq -nc --arg i "$di" '[{id:"d-x", metadata:{"gc.demand_for":$i}}]'
                 else
@@ -106,14 +106,14 @@ run() {
 }
 began() { printf '%s\n' "$OUT" | grep -m1 '^premise-gate: BEGAN=' | sed 's/^premise-gate: BEGAN=//'; }
 
-echo "── REGRESSION: a gate-only demand on the item is a live wait, not a dead claim ──"
+echo "── REGRESSION: a gate-only demand on the subject is a live wait, not a dead claim ──"
 run
 is   "a gate-demand hidden from a flagless list still reads BEGAN=recheck" "$(began)" "recheck"
 has  "the hold verdict is unchanged on stdout" "action=hold bead=v-x group=g reason=already-underway" "$OUT"
 is   "…and the hold exit code is 3" "$RC" "3"
 
 # Why the flag is load-bearing, shown against the very stub the script drives.
-seen() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_ITEM=g bash -c "gc bd list --status=open,in_progress $1 --json --limit=0" ); }
+seen() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_FOR=g bash -c "gc bd list --status=open,in_progress $1 --json --limit=0" ); }
 is   "the fixture hides the gate-demand from a flagless bd list" "$(seen '' | jq -c .)" "[]"
 has  "…and reveals it only with --include-gates" "d-x" "$(seen --include-gates)"
 
@@ -133,7 +133,7 @@ else
 fi
 OLD
 chmod +x "$TMPD/oldread"
-oldbegan() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_ITEM=g bash "$TMPD/oldread" g ); }
+oldbegan() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_FOR=g bash "$TMPD/oldread" g ); }
 is   "the pre-fix flagless reader reads the live gate-demand as NO" "$(oldbegan)" "no"
 
 echo "── the rest of the BEGAN state machine ──"
@@ -141,23 +141,23 @@ run HOLD_DEMAND=d-x
 is   "a visit already carrying gc.hold_demand is BEGAN=yes" "$(began)" "yes"
 run SHOW_MODE=unreadable
 is   "a visit bead that will not read is BEGAN=unknown (never licenses a close)" "$(began)" "unknown"
-run DEMAND_ITEM=
-is   "no open demand on the item at all is BEGAN=no" "$(began)" "no"
-run DEMAND_ITEM=item-x
+run DEMAND_FOR=
+is   "no open demand on the subject at all is BEGAN=no" "$(began)" "no"
+run DEMAND_FOR=item-x
 is   "an open demand on a bead that is neither the group nor the visit is BEGAN=no" "$(began)" "no"
 
 echo "── an anchored hold files its demand on the VISIT: still BEGAN=recheck ──"
-# A PR-anchor conversation files its demand on the visit, not the item. A hold
+# A PR-anchor conversation files its demand on the visit, not the subject. A hold
 # whose gc.hold_demand stamp did not persist must still read as a live wait off
 # that visit demand — else the caller closes an engaged sitting as a dead premise
 # and orphans the demand on the visit it just closed.
-run DEMAND_ITEM=v-x
+run DEMAND_FOR=v-x
 is   "a demand gating the visit reads BEGAN=recheck, not no" "$(began)" "recheck"
 has  "…and the hold verdict stands" "action=hold bead=v-x group=g reason=already-underway" "$OUT"
-# The pre-fix reader keyed only on the item, so a visit-gating demand read as a
-# dead claim — the same regression the item-gating control above proves, on the
+# The pre-fix reader keyed only on the subject, so a visit-gating demand read as a
+# dead claim — the same regression the subject-gating control above proves, on the
 # anchored path the Phase A change introduced.
-oldbegan_visit() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_ITEM=v-x bash "$TMPD/oldread" g ); }
+oldbegan_visit() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_FOR=v-x bash "$TMPD/oldread" g ); }
 is   "the pre-fix reader misjudges a visit-gating demand as NO" "$(oldbegan_visit)" "no"
 
 echo "── the other top-level verdicts still hold ──"

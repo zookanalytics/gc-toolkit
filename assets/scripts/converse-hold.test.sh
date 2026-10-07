@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # converse-hold.test.sh — the step-5 hold mechanism (assets/scripts/converse-hold.sh):
-# the takeaway on the GATED bead (visit for a PR anchor, item otherwise, so the
+# the takeaway on the GATED bead (visit for a PR anchor, subject otherwise, so the
 # hold marker sits beside its edge), the demand gate, the gc.hold_demand
 # stamp-and-readback gate, the --hold-merge opt-in (a second demand on the anchor,
 # failing closed), and the held lifecycle transition. The gates fail CLOSED:
@@ -61,7 +61,7 @@ case "${2:-}" in
     update)
         [ -n "${HLOG:-}" ] && printf 'gc %s\n' "$*" >>"$HLOG"
         # The gc.hold_demand write on the visit is the stamp gate under test; the
-        # gc.gate_visit write on the demand (an anchored-item hold) is best-effort,
+        # gc.gate_visit write on the demand (an anchored-subject hold) is best-effort,
         # dialed by GATE_VISIT_RC so the refused-stamp path can be exercised.
         case "$*" in
             *gc.hold_demand=*)
@@ -107,7 +107,7 @@ HELM
 }
 # a lifecycle.sh under PACK: state -> $STUB_STATE (default unanchored), transition
 # logs and exits $STUB_LC_RC (default 0). STUB_STATE_RC models the real `state`'s
-# failure shape — an unreadable or undeclared item prints NOTHING and exits
+# failure shape — an unreadable or undeclared subject prints NOTHING and exits
 # non-zero — so the suite can prove the gate fails closed when the read fails.
 cat >"$PACK/assets/scripts/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
@@ -151,12 +151,12 @@ verdict() { [ "$RC" = 0 ] && echo held || echo refused; }
 echo "── the happy path: demand lands, stamp persists, the hold proceeds ──"
 run
 is "a landed demand and a persisted stamp let the hold proceed" "$(verdict)" "held"
-has "the takeaway headline is 'holding — <need>' on the item" "helm[RIG] takeaway item-x holding — need X --by converse" "$(calls)"
-has "the demand is filed on the item with the bare need text" "helm[RIG] demand item-x need X --by converse" "$(calls)"
+has "the takeaway headline is 'holding — <need>' on the subject" "helm[RIG] takeaway item-x holding — need X --by converse" "$(calls)"
+has "the demand is filed on the subject with the bare need text" "helm[RIG] demand item-x need X --by converse" "$(calls)"
 is "the stamp persisted the demand id on the visit" "$(cat "$PERSIST" 2>/dev/null)" "d-x"
-has "an unanchored item is transitioned to held, routed to a person" "lc transition item-x --to held --route human" "$(calls)"
+has "an unanchored subject is transitioned to held, routed to a person" "lc transition item-x --to held --route human" "$(calls)"
 
-echo "── the item is the subject ──"
+echo "── the hold writes to the subject it is handed ──"
 run SUBJECT=item-y
 has "the hold writes to the subject it is handed" "takeaway item-y holding" "$(calls)"
 hasnt "…and to no other bead" "takeaway item-x" "$(calls)"
@@ -201,24 +201,24 @@ legacy() {
 }
 is "the pre-fix update-or-echo framed on a success-no-persist stamp" "$(legacy 0 0)" "held"
 
-echo "── the lifecycle transition is conditioned on the item being unanchored ──"
+echo "── the lifecycle transition is conditioned on the subject being unanchored ──"
 run STUB_STATE=unanchored
-has "an unanchored item is transitioned to held" "lc transition item-x --to held" "$(calls)"
+has "an unanchored subject is transitioned to held" "lc transition item-x --to held" "$(calls)"
 run STUB_STATE=held
 hasnt "a non-unanchored state is not transitioned to held" "lc transition" "$(calls)"
-has "a pre-PR off-ramp (held) is not a PR anchor, so it fails closed to the ITEM" "demand item-x" "$(calls)"
+has "a pre-PR off-ramp (held) is not a PR anchor, so it fails closed to the SUBJECT" "demand item-x" "$(calls)"
 hasnt "…so the demand never gates the visit" "demand v-x" "$(calls)"
 
-echo "── an anchored item: the conversation demand gates the VISIT, not the item ──"
+echo "── an anchored subject: the conversation demand gates the VISIT, not the subject ──"
 # A conversation about a PR anchor must not freeze the merge (operator ruling):
 # its wait gates the visit, and the subject anchor keeps moving. Only a pre-PR
-# (unanchored) item takes the demand itself, which the default case above proves.
+# (unanchored) subject takes the demand itself, which the default case above proves.
 run STUB_STATE=pull_request
-is "an anchored item still lets the hold proceed" "$(verdict)" "held"
+is "an anchored subject still lets the hold proceed" "$(verdict)" "held"
 has "the demand is filed on the VISIT, so the anchor is never blocked" "helm[RIG] demand v-x need X --by converse" "$(calls)"
-hasnt "…and NOT on the item, so the merge is not frozen" "demand item-x" "$(calls)"
+hasnt "…and NOT on the subject, so the merge is not frozen" "demand item-x" "$(calls)"
 has "the visit is recorded as the gate's own visit, so gate-visit-sweep files no second one" "gc bd update d-x --set-metadata gc.gate_visit=v-x" "$(calls)"
-hasnt "…and an anchored item is not transitioned to held" "lc transition" "$(calls)"
+hasnt "…and an anchored subject is not transitioned to held" "lc transition" "$(calls)"
 is "the hold_demand stamp still lands on the visit" "$(cat "$PERSIST" 2>/dev/null)" "d-x"
 has "the takeaway headline lands on the VISIT (the gated bead), beside its edge" "helm[RIG] takeaway v-x holding — need X --by converse" "$(calls)"
 hasnt "…and NOT on the anchor, which would be an unedged hold the board reads as holding" "takeaway item-x" "$(calls)"
@@ -234,14 +234,14 @@ has "…and says the gate_visit stamp could not be written" "could not stamp gc.
 # demand cannot land on.
 run STUB_STATE=pre_open_gate
 has "a pre-open-gate anchor gates the visit" "demand v-x" "$(calls)"
-hasnt "…never the item" "demand item-x" "$(calls)"
+hasnt "…never the subject" "demand item-x" "$(calls)"
 run STUB_STATE=merged
 has "a merged (closed) anchor gates the visit" "demand v-x" "$(calls)"
-hasnt "…never a demand on the closed item" "demand item-x" "$(calls)"
+hasnt "…never a demand on the closed subject" "demand item-x" "$(calls)"
 
 echo "── --hold-merge: the opt-in files a second demand on the anchor ──"
 # The conversation demand gates the visit; --hold-merge adds the merge hold — a
-# second demand on the ITEM, the blocks edge the merge sweep honors.
+# second demand on the SUBJECT, the blocks edge the merge sweep honors.
 run_hold_merge STUB_STATE=pull_request
 is "an anchored hold with --hold-merge proceeds" "$(verdict)" "held"
 has "the conversation demand still gates the visit" "helm[RIG] demand v-x need X --by converse" "$(calls)"
@@ -251,38 +251,38 @@ has "…and a second demand freezes the merge on the anchor" "helm[RIG] demand i
 run_hold_merge STUB_STATE=pull_request STUB_MERGE_DEMAND_RC=4
 is "a merge-hold demand that fails refuses the framing" "$(verdict)" "refused"
 has "…and says the merge is NOT held" "NO MERGE-HOLD DEMAND FILED on item-x" "$OUT"
-# A no-op on an unanchored item: its single demand already gates it (GATED=item),
+# A no-op on an unanchored subject: its single demand already gates it (GATED=subject),
 # so the flag files no redundant second one.
 run_hold_merge STUB_STATE=unanchored
-is "--hold-merge on an unanchored item still proceeds" "$(verdict)" "held"
+is "--hold-merge on an unanchored subject still proceeds" "$(verdict)" "held"
 is "…and files exactly one demand (no redundant merge hold)" "$(calls | grep -c 'demand item-x')" "1"
-hasnt "…and never a visit demand on an unanchored item" "demand v-x" "$(calls)"
+hasnt "…and never a visit demand on an unanchored subject" "demand v-x" "$(calls)"
 
 echo "── the visit's escalation_key scopes every demand the sitting files ──"
-# Under a standing scope sibling sittings share the item. Each demand this sitting
+# Under a standing scope sibling sittings share the subject. Each demand this sitting
 # files carries the visit's escalation_key as its topic, so neither sitting's
-# demand on the shared item refreshes the other's gate in place.
+# demand on the shared subject refreshes the other's gate in place.
 run STUB_TOPIC=finding-b
-has "a pre-PR item's conversation demand carries the topic" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
+has "a pre-PR subject's conversation demand carries the topic" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
 run_hold_merge STUB_STATE=pull_request STUB_TOPIC=finding-b
 has "an anchored hold's visit demand carries the topic" "helm[RIG] demand v-x need X --by converse --topic finding-b" "$(calls)"
 has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
 run_hold_merge STUB_STATE=pull_request
 hasnt "an ordinary visit (no escalation_key) files no topic" "--topic" "$(calls)"
 
-echo "── fail closed: an unreadable or missing lifecycle state gates the ITEM ──"
+echo "── fail closed: an unreadable or missing lifecycle state gates the SUBJECT ──"
 # The gate switches to the visit only for a PROVEN PR-anchor state. A state that
-# cannot be read must fail closed to the item — defaulting to the visit would drop
-# a pre-PR item's blocking edge and let it keep moving while a person owes an
+# cannot be read must fail closed to the subject — defaulting to the visit would drop
+# a pre-PR subject's blocking edge and let it keep moving while a person owes an
 # answer (the regression this rework closes).
 run STUB_STATE_RC=2
 is "a failed state read still lets the hold proceed" "$(verdict)" "held"
-has "…with the demand on the ITEM (fail closed)" "demand item-x" "$(calls)"
+has "…with the demand on the SUBJECT (fail closed)" "demand item-x" "$(calls)"
 hasnt "…and never on the visit" "demand v-x" "$(calls)"
 hasnt "…and no held transition on an unprovable state" "lc transition" "$(calls)"
 run GC_RIG_ROOT="$FOREIGN"
 has "a missing lifecycle writer still finds the demand writer" "helm[CITY]" "$(calls)"
-has "…and with no state readable, the demand fails closed to the ITEM" "helm[CITY] demand item-x need X --by converse" "$(calls)"
+has "…and with no state readable, the demand fails closed to the SUBJECT" "helm[CITY] demand item-x need X --by converse" "$(calls)"
 hasnt "…never the visit" "demand v-x" "$(calls)"
 
 echo "── the writers are searched for on the candidate roots, not assumed ──"

@@ -127,8 +127,8 @@ unreadable() {
     printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/list.json"
 }
 
-# run_block <visit-id> <subject-id> — prints SUBJECT=… / ITEM=… / TOPIC=… /
-# HOLDER=… as converse-fold.sh resolves them. Runs the script with the stub
+# run_block <visit-id> <subject-id> — prints SUBJECT=… / TOPIC=… / HOLDER=…
+# as converse-fold.sh resolves them. Runs the script with the stub
 # first on PATH and cwd outside any checkout.
 run_block() {
     (
@@ -188,8 +188,8 @@ is "positive control: the old group-only rule saw a sibling for both" \
 is "positive control: the pre-fix block folded two distinct findings together" \
     "$(legacy_holder v-two sub)" "v-one"
 out="$(run_block v-one sub)"
-is "the item is the SUBJECT — a takeaway target has to be a bead" \
-    "$(field "$out" ITEM)" "sub"
+is "the subject stays the bucket, since a takeaway target has to be a bead" \
+    "$(field "$out" SUBJECT)" "sub"
 is "the topic is the visit's own key, not the bucket" \
     "$(field "$out" TOPIC)" "key:doctor-dolt-noms-size"
 is "v-one holds its own sitting" "$(field "$out" HOLDER)" "v-one"
@@ -217,7 +217,7 @@ echo "── a subject with no escalation_key still dedups (ordinary shape) ─�
 # switch dedup off for the shape that always needed it.
 fixture "$(visit v-two sub sess-2)" "$(visit v-one sub sess-1)"
 out="$(run_block v-two sub)"
-is "the item is the subject" "$(field "$out" ITEM)" "sub"
+is "the subject passes through" "$(field "$out" SUBJECT)" "sub"
 is "with no key the topic is the subject" "$(field "$out" TOPIC)" "sub"
 is "the higher id still folds into the lower" "$(field "$out" HOLDER)" "v-one"
 is "the lower id still holds" "$(holder v-one sub)" "v-one"
@@ -314,12 +314,11 @@ is "an unresolvable SIBLING is not a holder for a known subject" "$(holder v-two
 fixture "$(visit v-one '' sess-1)" "$(visit v-two sub sess-2)"
 is "…and it does not match a subject it cannot be shown to share" "$(holder v-two sub)" "v-two"
 
-# A recovered subject is the item, and the key still scopes the fold once the
-# subject is recovered — recovery must not flatten two situations back into
-# one bucket topic.
+# The key still scopes the fold once the subject is recovered — recovery must
+# not flatten two situations back into one bucket topic.
 fixture "$(visit v-two '' sess-2 sub key-beta)" "$(visit v-one sub sess-1 '' key-alpha)"
 out="$(run_block v-two '')"
-is "a recovered subject is the item" "$(field "$out" ITEM)" "sub"
+is "the subject is recovered from the tracks edge" "$(field "$out" SUBJECT)" "sub"
 is "…and siblings about different situations still do not fold" "$(field "$out" HOLDER)" "v-two"
 
 # Neither recording present: nothing can scope the fold, so it must not
@@ -346,21 +345,21 @@ have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"
 # The stamp moved out of the prompt into the two scripts that write it. The hold
 # stamps the GATED bead — the visit for a PR anchor, so the hold marker sits
-# beside its demand edge (doctor/check-wait-is-an-edge), the item otherwise — and
-# the sign-off stamps the item.
+# beside its demand edge (doctor/check-wait-is-an-edge), the subject otherwise —
+# and the sign-off stamps the subject.
 HOLD_SUT="$REPO/assets/scripts/converse-hold.sh"
 SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
 if grep -q 'takeaway "\$GATED"' "$HOLD_SUT"; then
-    ok "the hold stamps the gated bead (visit or item)"
+    ok "the hold stamps the gated bead (visit or subject)"
 else
-    bad "the hold stamps the gated bead (visit or item)" \
+    bad "the hold stamps the gated bead (visit or subject)" \
         "converse-hold.sh no longer stamps takeaway \"\$GATED\" — a hold marker off its edge is unedged"
 fi
-if grep -q 'takeaway "\$ITEM"' "$SIGNOFF_SUT"; then
-    ok "the sign-off stamps the item"
+if grep -q 'takeaway "\$SUBJECT"' "$SIGNOFF_SUT"; then
+    ok "the sign-off stamps the subject"
 else
-    bad "the sign-off stamps the item" \
-        "converse-signoff.sh no longer stamps takeaway \"\$ITEM\""
+    bad "the sign-off stamps the subject" \
+        "converse-signoff.sh no longer stamps takeaway \"\$SUBJECT\""
 fi
 
 echo "── step 1 lifts the claim and the fold into one script call each ──"
@@ -413,17 +412,17 @@ esac
 # tells a real hold from a dead claim by a trace only a sitting past step 5
 # leaves: step 5 stamps the demand's id on the VISIT bead as gc.hold_demand
 # before it waits. The key is on the visit, so it is attributable — a sibling
-# sitting on the same item stamps the shared item's demand and takeaway, never
-# this visit's gc.hold_demand, so it cannot forge the trace.
+# sitting on the same subject stamps the shared subject's demand and takeaway,
+# never this visit's gc.hold_demand, so it cannot forge the trace.
 #
 # A missing key is not one answer but three, because absence is not proof a
 # sitting never began. A visit bead that will not read is UNKNOWN: it fails
-# closed to a hold, never a close. No key but an open demand still on the item
-# is a hold that predates the key, or a sibling's on the shared item: RECHECK
-# re-tests the premise and closes only a moot one, and re-stamping the key on a
-# live premise heals a legacy hold, while the item's demand never forges a
-# resume. Only a clean read with no key and no open item demand is a claim that
-# plainly never began, which routes to step 2's close.
+# closed to a hold, never a close. No key but an open demand still on the
+# subject is a hold that predates the key, or a sibling's on the shared subject:
+# RECHECK re-tests the premise and closes only a moot one, and re-stamping the
+# key on a live premise heals a legacy hold, while the subject's demand never
+# forges a resume. Only a clean read with no key and no open subject demand is a
+# claim that plainly never began, which routes to step 2's close.
 echo "── the hold-arm premise gate ships in converse-claim.sh ──"
 if [ -x "$CLAIMER" ]; then
     ok "converse-claim.sh is present and executable"
@@ -446,7 +445,7 @@ began() {
     ) | sed -n 's/^premise-gate: BEGAN=//p' | tail -1
 }
 # The gate reads one thing: gc.hold_demand on THIS visit's bead. hv_demand
-# builds a sibling demand on the shared item — the trace the OLD item-level gate
+# builds a sibling demand on the shared subject — the trace the OLD gate
 # keyed on — kept here to prove this gate ignores it.
 hv_reset() { rm -f "$FIXDIR"/*.json; printf '[]\n' >"$FIXDIR/list.json"; }
 hv_visit() { # id [hold_demand]
@@ -455,7 +454,7 @@ hv_visit() { # id [hold_demand]
             + (if $hd == "" then {} else {"gc.hold_demand":$hd} end))}]' \
         >"$FIXDIR/show-$1.json"
 }
-hv_demand() { # demand-id item-id — a sibling open demand naming the item
+hv_demand() { # demand-id subject-id — a sibling open demand naming the subject
     jq -nc --arg id "$1" --arg i "$2" '[{id:$id, assignee:"", metadata:{"gc.demand_for":$i}}]' \
         >"$FIXDIR/list.json"
 }
@@ -472,19 +471,19 @@ hv_reset
 hv_visit v-held d-held
 is "gc.hold_demand resolves BEGAN=yes (re-open at step 4)" "$(began v-held sub)" "yes"
 
-echo "── no key but an open demand on the item: a legacy hold or a sibling's ──"
+echo "── no key but an open demand on the subject: a legacy hold or a sibling's ──"
 # A hold filed before this trace existed carries no gc.hold_demand on its visit,
-# only the demand on the item, and every hold the shipped prompt filed is that
-# shape; a sibling's hold on a shared item is too. Absent the key the two are
-# one shape, and the gate must not close on the missing key: it re-checks the
-# premise (recheck), which closes only a moot premise and re-opens a live one,
-# re-stamping the key so the next restart reads it clean. Keyed on the visit it
-# still cannot forge a resume: recheck re-checks the premise, it does not
-# re-open a sitting on the item's demand alone.
+# only the demand on the subject, and every hold the shipped prompt filed is
+# that shape; a sibling's hold on a shared subject is too. Absent the key the
+# two are one shape, and the gate must not close on the missing key: it
+# re-checks the premise (recheck), which closes only a moot premise and re-opens
+# a live one, re-stamping the key so the next restart reads it clean. Keyed on
+# the visit it still cannot forge a resume: recheck re-checks the premise, it
+# does not re-open a sitting on the subject's demand alone.
 hv_reset
-hv_visit v-legacy             # no gc.hold_demand; the item still carries its demand
-hv_demand d-x sub             # the open demand on the item (a legacy hold's, or a sibling's)
-is "no key + an open item demand resolves BEGAN=recheck (fail closed, not a close)" "$(began v-legacy sub)" "recheck"
+hv_visit v-legacy             # no gc.hold_demand; the subject still carries its demand
+hv_demand d-x sub             # the open demand on the subject (a legacy hold's, or a sibling's)
+is "no key + an open subject demand resolves BEGAN=recheck (fail closed, not a close)" "$(began v-legacy sub)" "recheck"
 
 echo "── the visit key stands even when its demand is no longer open ──"
 # A ruling can close the demand while the sitting still holds. The trace is the
@@ -511,7 +510,7 @@ have "an unreadable read holds rather than closes (BEGAN=unknown)" \
     'BEGAN=unknown' "$PROMPT"
 have "an unreadable read mails the witness rather than draining" \
     'hold the sitting and mail the' "$PROMPT"
-have "an open item demand without the key re-checks (BEGAN=recheck)" \
+have "an open subject demand without the key re-checks (BEGAN=recheck)" \
     'BEGAN=recheck' "$PROMPT"
 have "recheck closes only a moot premise, not on the demand" \
     'close here ONLY if the premise is moot' "$PROMPT"

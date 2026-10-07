@@ -451,7 +451,7 @@ POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 # (converse-signoff.sh, step 7 of agents/converse/prompt.template.md). A wisp
 # is burned at the end of the iteration that poured it, so on a wisp subject
 # both writes address a bead that no longer exists, and the sitting's own guard
-# ("NO TAKEAWAY ON $ITEM") cannot be satisfied at all.
+# ("NO TAKEAWAY ON $SUBJECT") cannot be satisfied at all.
 #
 # So an ephemeral subject is redirected rather than filed on: the visit hangs
 # on this store's standing triage subject, and the wisp survives as
