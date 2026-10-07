@@ -46,22 +46,40 @@ esac
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH" HIST_DIR="$TMP/hist" HIST_ARGS="$TMP/hist-args.log"
-# GCTK_BIN is pinned to a path that does not exist so arm 3 stays out of every
-# order case: unset, it would resolve through the AMBIENT city and read the live
-# binary, which is neither hermetic nor what those cases are about. The gctk
-# cases below override it deliberately. An order case that hand-rolls its own
-# `bash "$CHECK"` loses that pin, so vary ORDERS_JSON or RIGS_JSON and call this.
-# GC_CITY_PATH is pinned the same way, to a fixture city (empty by default) so
-# the registration arm never reads the AMBIENT city.toml; the disable cases set
-# CITY_DIR to a fixture that carries [[orders.overrides]] / skip entries.
-run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/no-such-gctk}" GC_CITY_PATH="${CITY_DIR:-$TMP/empty-city}" bash "$CHECK" 2>&1; }
-
 # A pack dir that is its own git repo, so arm 3 has a tree revision to compare
-# against. Local and never pushed; the identity is scaffolding.
+# against. Local and never pushed; the identity is scaffolding. The identity is
+# the services/gctk subtree, not the commit: the build order records and stamps
+# that, so a commit touching nothing under it is not a mismatch.
+mkdir -p "$TMP/pack/services/gctk/cmd/gctk"
+echo 'package main' > "$TMP/pack/services/gctk/cmd/gctk/main.go"
+git -C "$TMP/pack" init -q >/dev/null 2>&1
+git -C "$TMP/pack" add -A >/dev/null 2>&1
+git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m fixture >/dev/null 2>&1
+PACK_REV=$(git -C "$TMP/pack/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
+PACK_COMMIT=$(git -C "$TMP/pack" rev-parse HEAD 2>/dev/null)
+[ -n "$PACK_REV" ] && ok "the fixture pack has a revision for arm 3 to compare" \
+                   || bad "no fixture revision; the gctk arm would pass vacuously"
+
 gctk_stub() { # <version-output> -> installs a fake gctk at $TMP/bin/gctk-stub
     printf '#!/bin/sh\n[ "$1" = version ] && echo "%s"\n' "$1" > "$TMP/bin/gctk-stub"
     chmod +x "$TMP/bin/gctk-stub"
 }
+# The binary every order case runs against: deployed, and built from this
+# fixture checkout, so arm 3 notes a match and adds nothing to those cases.
+printf '#!/bin/sh\n[ "$1" = version ] && echo "%s"\n' "$PACK_REV" > "$TMP/bin/gctk-current"
+chmod +x "$TMP/bin/gctk-current"
+
+# GCTK_BIN is pinned to that binary so arm 3 stays out of every order case:
+# unset, it would resolve through the AMBIENT city and read the live binary,
+# which is neither hermetic nor what those cases are about, and a missing binary
+# is a finding of its own. The gctk cases below override it deliberately. An
+# order case that hand-rolls its own `bash "$CHECK"` loses that pin, so vary
+# ORDERS_JSON or RIGS_JSON and call this.
+# GC_CITY_PATH is pinned the same way, to a fixture city (empty by default) so
+# the registration arm never reads the AMBIENT city.toml; the disable cases set
+# CITY_DIR to a fixture that carries [[orders.overrides]] / skip entries.
+run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/bin/gctk-current}" GC_CITY_PATH="${CITY_DIR:-$TMP/empty-city}" bash "$CHECK" 2>&1; }
 
 # Fully healthy registry: tick on both rigs, gated on both, citywide unbound.
 cat > "$TMP/orders.json" <<'EOF'
@@ -135,27 +153,17 @@ eq "$RC" "1" "an unreadable order registry warns, never passes"
 OUT=$(HIST_RC=1 run_check); RC=$?
 eq "$RC" "1" "an unreadable history warns (the liveness arm did not run)"
 
-# --- 8. arm 3: the deployed gctk is the one this checkout describes -------------
+# --- 8. arm 3: a gctk is deployed, and it is the one this checkout describes ----
 # Orders can fire perfectly while the cadence runs logic several commits old,
 # because the data plane is a binary a build order publishes. Nothing in arms 1
-# and 2 can see that.
-# The identity is the services/gctk subtree, not the commit: the build order
-# records and stamps that, so a commit touching nothing under it is not a
-# mismatch.
-mkdir -p "$TMP/pack/services/gctk/cmd/gctk"
-echo 'package main' > "$TMP/pack/services/gctk/cmd/gctk/main.go"
-git -C "$TMP/pack" init -q >/dev/null 2>&1
-git -C "$TMP/pack" add -A >/dev/null 2>&1
-git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m fixture >/dev/null 2>&1
-PACK_REV=$(git -C "$TMP/pack/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
-PACK_COMMIT=$(git -C "$TMP/pack" rev-parse HEAD 2>/dev/null)
-[ -n "$PACK_REV" ] && ok "the fixture pack has a revision for arm 3 to compare" \
-                   || bad "no fixture revision; the gctk arm would pass vacuously"
-
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "no deployed binary is the supported migration state, not a finding"
-has "$OUT" "shell fallbacks" "and it says which implementation is answering"
+# and 2 can see that, nor a binary that was never published at all.
+#
+# lifecycle.sh execs the binary and has no other implementation, so a missing
+# one is an error: every lifecycle transition is refused until one lands.
+OUT=$(GCTK_BIN="$TMP/no-such-gctk" run_check); RC=$?
+eq "$RC" "2" "no deployed binary is an ERROR — lifecycle.sh has nothing else to exec"
+has "$OUT" "no binary at $TMP/no-such-gctk" "the finding names where the binary should be"
+has "$OUT" "gctk-build" "…and the order that publishes it"
 
 gctk_stub "$PACK_REV"
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
@@ -209,11 +217,20 @@ OUT=$(check_by_city GC_CITY_PATH="$CITY"); RC=$?
 eq "$RC" "0" "GC_CITY_PATH alone resolves the deployed binary"
 has "$OUT" "matches this checkout" "and the arm compared it, rather than reporting no deploy"
 
+# A named city with nothing at the path lifecycle.sh would exec: a fresh city
+# before the gctk-build order's first build, or one whose builds never succeed.
+mkdir -p "$TMP/bare-city"
+OUT=$(check_by_city GC_CITY_PATH="$TMP/bare-city"); RC=$?
+eq "$RC" "2" "a named city with no binary deployed is an ERROR"
+has "$OUT" "no binary at $TMP/bare-city/.gc/services/gctk/bin/gctk" "and the finding names the path lifecycle.sh would exec"
+
 # The control. Same city on disk, named by nothing: without it the case above
-# would also pass on a resolver that found the binary by some other route.
+# would also pass on a resolver that found the binary by some other route. With
+# no city to look in, the arm reports that it did not look, not that the binary
+# is missing.
 OUT=$(check_by_city); RC=$?
-eq "$RC" "0" "no city named at all is still the supported migration state"
-has "$OUT" "shell fallbacks" "and the arm says the fallback is what answers there"
+eq "$RC" "1" "no city named at all WARNS: the arm could not look"
+has "$OUT" "was NOT checked" "and it says the binary was not checked, rather than calling it missing"
 
 # --- 9. no orders/ at all is vacuously OK ---------------------------------------------
 mkdir -p "$TMP/empty-pack"
