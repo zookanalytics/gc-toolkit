@@ -1208,6 +1208,15 @@ CHILDREN_EOF
       # earns its own watermark rather than sharing max_c's.
       max_i=$(max_foreign_id "$icmts_raw")
       case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
+      # The routing transition writes these three back as the watermarks, and a
+      # mark only rises. A count can fall below its mark: the threads drop the
+      # comments they answered, a dismissal retires a review and its comments, and
+      # a comment can be deleted. Written back, a fallen mark would re-route every
+      # comment under it that its thread later lost, and the next batch's floor
+      # would overlap the ranges already recorded in pr_comment_batch.
+      [ "$max_c" -ge "$cwm" ] || max_c="$cwm"
+      [ "$max_r" -ge "$rwm" ] || max_r="$rwm"
+      [ "$max_i" -ge "$iwm" ] || max_i="$iwm"
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # A review posted under OUR OWN login leaves unresolved finding threads arm 7
       # never counts — it reads other logins — so `unanswered` stays 0 while the

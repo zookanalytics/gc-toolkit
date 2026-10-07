@@ -1304,6 +1304,36 @@ out=$(run)
 eq "$(meta_pinned AE7 pr_posture)" "commented@sha-176" "a resolved thread with no reply of ours stays commented"
 eq "$(meta AE7 pr_comment_watermark)" "5601" "…and its comment routes"
 
+echo "# a batch routed by another space never lowers the comment watermark"
+# 5701 was routed (mark 5701); 5702 arrived and both threads were answered, so
+# the threads drop every comment and the filtered count is 0. A Conversation
+# comment then routes the batch, and the transition writes the comment mark
+# back: it has to stay at 5701, or every answered comment under it would route
+# again the moment its thread lost the answer.
+store "[$(anchor AE8 177 ',"pr_comment_watermark":5701')]"
+printf '%s' "$(prview 177 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_177.json"
+echo '[]' > "$GH_DIR/reviews_177.json"
+printf '[{"id":5701,"user":{"login":"human1"},"body":"one","path":"a.sh","line":1},{"id":5702,"user":{"login":"human1"},"body":"two","path":"b.sh","line":1},{"id":5703,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.sh","line":1,"in_reply_to_id":5701},{"id":5704,"user":{"login":"gc-city-bot"},"body":"fixed","path":"b.sh","line":1,"in_reply_to_id":5702}]' > "$GH_DIR/comments_177.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-177a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-177a","databaseId":5701,"fullDatabaseId":"5701","author":{"login":"human1"},"body":"one","reactionGroups":[]},{"id":"NC-177c","databaseId":5703,"fullDatabaseId":"5703","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}},{"id":"T-177b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-177b","databaseId":5702,"fullDatabaseId":"5702","author":{"login":"human1"},"body":"two","reactionGroups":[]},{"id":"NC-177d","databaseId":5704,"fullDatabaseId":"5704","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_177.json"
+printf '[{"id":7701,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/issue_comments_177.json"
+out=$(run)
+has "$out" "routed to rework" "the Conversation comment routes the batch"
+eq "$(meta AE8 pr_comment_watermark)" "5701" "…and the comment mark stays where it was, never 0"
+eq "$(meta AE8 pr_issue_comment_watermark)" "7701" "…while the Conversation mark advances"
+
+echo "# a dismissal never lowers the review watermark"
+# Review 900 was routed (mark 900) and then dismissed, so the highest counted
+# review is the older 800. A Conversation comment routing the batch writes the
+# review mark back, and it stays at 900.
+store "[$(anchor AE9 178 ',"pr_review_watermark":900')]"
+printf '%s' "$(prview 178 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_178.json"
+printf '[{"id":800,"user":{"login":"human1"},"state":"COMMENTED","body":"older"},{"id":900,"user":{"login":"human1"},"state":"DISMISSED","body":"retired"}]' > "$GH_DIR/reviews_178.json"
+echo '[]' > "$GH_DIR/comments_178.json"
+printf '[{"id":7801,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/issue_comments_178.json"
+out=$(run)
+has "$out" "routed to rework" "the Conversation comment routes the batch"
+eq "$(meta AE9 pr_review_watermark)" "900" "…and the review mark stays at the dismissed review's id, never the older 800"
+
 echo "# a feedback batch past the OS per-argument limit still renders"
 # tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
 # per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as
