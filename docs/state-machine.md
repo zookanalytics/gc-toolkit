@@ -761,4 +761,8 @@ the retry names its key to `finalize-gate.sh`, which excepts every visit filed
 under that key for the anchor while nobody is engaged in it, and the arm
 retracts those visits as moot once the close lands. A visit a person has engaged
 holds the close like any other, and every other open visit on the anchor still
-holds it.
+holds it. When a retry is refused for a different obstruction than the one the
+visit names, the arm rewrites the description of each such visit nobody is
+engaged in to name the new one. A retract that does not land is retried by
+every full pass, which retracts an open `pr-dispose-failed.<num>` visit nobody
+is engaged in once its anchor reads closed with its `gc.superseded_by` pointer.
