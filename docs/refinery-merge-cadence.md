@@ -463,12 +463,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    arm 3 composes that region only at `pre_open_gate` and an open anchor never
    returns there, so the published `## Summary` — the merge surface, and the
    squash commit message — would otherwise keep describing superseded work. When
-   the region is a well-formed marker pair whose summary is behind the anchor's
-   current `pr_summary`, this arm recomposes and re-splices it; a region already
-   current, a legacy markerless body (arm 3's adoption path establishes that), or
-   a malformed shape is left alone. The recompose uses `refresh` mode: the
-   reworked head has not re-signed-off, so the handoff bullet names the head and
-   defers to the PR's checks rather than repeating arm 3's pre-open sign-off line.
+   the region is a well-formed marker pair whose handoff bullet names a head other
+   than the PR's or says the PR opened green (a CI result the static body cannot
+   know), or whose summary is behind the anchor's current `pr_summary`, this arm
+   recomposes and re-splices it; a region already current, a legacy markerless
+   body (arm 3's adoption path establishes that), or a malformed shape is left
+   alone. The recompose uses `refresh` mode: the reworked head has not
+   re-signed-off, so the handoff bullet names the head and defers to the PR's
+   checks rather than repeating arm 3's pre-open sign-off line.
 
    The title: arm 3 writes it once, at create, composed from the anchor's title
    (a conventional-commit type, the title, then the bead id), and the squash
