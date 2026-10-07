@@ -842,11 +842,27 @@ gc bd update {{issue}} \
   --set-metadata branch=rebase/{{issue}} \
   --set-metadata target={{upstream_branch}}
 
-# Reassign to the rig-scoped refinery. ${GC_RIG:+$GC_RIG/} yields "<rig>/"
-# under a rig session, empty in HQ-only cities; the binding-qualified name
-# carries the gc-toolkit. prefix (the refinery comes from gc-toolkit's
-# import into gascity).
-REFINERY_TARGET="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
+# Reassign to the rig-scoped refinery (imported from gc-toolkit into gascity).
+# pool-route.sh qualifies gc-toolkit.refinery with GC_RIG and proves it against
+# the live agent set, so a bare name the refinery's exact-match queue never reads
+# is refused rather than stamped (an unreadable roster returns it UNVERIFIED — a
+# route nobody can check still beats an outage). It lives in gc-toolkit's own
+# pack, reached here through the city's gc-toolkit rig; when it cannot be found at
+# all the handoff falls back to the qualified construction rather than block on a
+# helper this pack does not own.
+POOL_ROUTE=""
+for c in "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts" "${GC_PACK_DIR:-}/../../assets/scripts" "${GC_RIG_ROOT:-}/assets/scripts"; do
+  [ -x "$c/pool-route.sh" ] && { POOL_ROUTE="$c/pool-route.sh"; break; }
+done
+if [ -n "$POOL_ROUTE" ]; then
+  REFINERY_TARGET=$("$POOL_ROUTE" gc-toolkit.refinery) || {
+    echo "refinery address gc-toolkit.refinery is claimed by no live agent — NOT handing {{issue}} to an address its exact-match queue never reads; leaving it for the next pass" >&2
+    gc runtime drain-ack
+    exit 1
+  }
+else
+  REFINERY_TARGET="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
+fi
 gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET"
 
 # Wake/nudge are best-effort — refinery's watcher catches the assignment

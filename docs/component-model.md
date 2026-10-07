@@ -43,7 +43,7 @@ in the discard list below it.
 | **Anchor** | the single open bead that owns a PR and carries its checks | N claimants on one PR ⇒ the weakest check-set decides the merge |
 | **Convoy** | tracked set with one landing target | no unit larger than a bead can land, and integration branches cannot graduate |
 | **Formula + step bead** | a workflow materialised as beads | a crashed session resumes by reconstructing intent from prose |
-| **Check-set + check marker** | declared merge preconditions, each bound to a commit | merges depend on whoever remembers to look |
+| **Check-set + check lane** | the merge preconditions an anchor declares in `check_set`, one lane per check. A lane's `check.<g>` marker carries one bare state word that names no commit, and the reviewed commit is recorded on the review bead as `reviewed_oid`. `lane-state.sh` derives a lane's green from its reviews. [state-machine.md](state-machine.md#checks) owns the vocabulary. | merges depend on whoever remembers to look |
 | **Pool + route** | demand addressed to a role, not to a session | dispatch names a mortal process |
 | **Order** | controller-owned recurring pass, no LLM | cadence becomes an invisible daemon |
 | **Agent session** | one mortal executor with an identity | nothing can be claimed, and nothing can be recycled |
@@ -130,9 +130,10 @@ The machine itself — states, transitions, writers, checks — is drawn once, i
   the same writer, and the write is idempotent.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
-  commit, but the anchor-local authorization set — `check.*`, `merge_hold`,
-  `pr_posture`, `merged_target` — does not move the head; the pre-merge
-  re-read is what catches a mid-pass write to any of them.
+  commit, but the authorization set — `merge_hold`, `pr_posture`,
+  `merged_target`, and every declared lane's derived green — does not move
+  the head; the pre-merge re-read, which re-derives each lane through
+  `lane-state.sh`, is what catches a mid-pass change to any of them.
 
 ---
 
@@ -338,7 +339,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
 | `assets/scripts/review-workspace.sh` | review | A review's directory on disk, named for its review bead: makes the worktree the review tests in, removes the directory at the verdict step, and, as the review-workspace-reap order's pass, removes the directories of reviews that closed some other way. |
-| `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up `discovered-from` the anchor and closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
+| `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up that the anchor `blocks` and that is `discovered-from` the finding, then closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
 | `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every check reader agrees without a stored `check.<lane>` marker. |
 | `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined, or needs-you — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker and never touches the anchor. |
 | `assets/scripts/validate-dispatch-body.sh` | review | Emits the dispatch note a validation-pass bead carries. |
@@ -357,7 +358,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
 | `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize; leaves reviews, human visits, and the anchor itself alone. No merge authority. |
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 11: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
-| `assets/scripts/pr-stack.sh` | merge | Arm 12: keeps each open PR's body current with its anchor in both managed regions — the branch-beads section, and the `pr-summary` region a rework moved past. Writes only PR bodies. No merge authority. |
+| `assets/scripts/pr-stack.sh` | merge | Arm 12: keeps each open PR current with its anchor — the branch-beads section, the `pr-summary` region a rework moved past, and the title composed from the anchor's. Writes only PR bodies and titles. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
 | `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of five dispositions: route the bead to a pool, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or file a visit for the operator's judgment. It sits in visit because its product is a bead the human no longer has to triage. |
