@@ -44,8 +44,8 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix, including trailing dot when bound."
-default = ""
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol re-routes a rejected bead to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route and the refinery keeps the bead."
+default = "gc-toolkit."
 
 [vars.rig_name]
 description = "Rig this patrol serves; injected by the pour (forwarded verbatim by next-iteration). Declared so the {{rig_name}} token in the pour commands resolves instead of surviving literally."
@@ -226,7 +226,6 @@ if ! gc bd update $WORK --set-metadata prepare_mode="$PREPARE_MODE" >/dev/null 2
   gc runtime drain-ack
   exit 1
 fi
-git fetch --prune origin
 # Stage the branch under prep in a dedicated worktree, never the session's cwd.
 # The refinery often runs in the rig canonical checkout, and a checkout there
 # survives any interrupt before cleanup (a suspend mid-flow), stranding the rig
@@ -234,9 +233,14 @@ git fetch --prune origin
 # git dir (no working tree sees it), and is checked out DETACHED: it creates no
 # local branch, so it cannot collide with a rig root already stranded on `temp`
 # (the exact state this flow must survive), and the root's HEAD never moves.
-# Every step that touches the prepared head resolves this same path; a leftover
-# from an interrupted iteration is cleared first.
-RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+# Every step that touches the prepared head resolves this same path through the
+# same rig-root lookup, so all of them name one repo. The lookup never falls
+# back to cwd, and an empty root fails closed because `git -C ""` follows cwd.
+# A leftover from an interrupted iteration is cleared first.
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+git -C "$RIG_ROOT" fetch --prune origin
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 git -C "$RIG_ROOT" worktree remove --force "$PREP_WT" 2>/dev/null || true
 # Check the add result before any conflict path can run: a failed staging is
@@ -336,7 +340,9 @@ every check THERE — the rig root's checkout is never touched. Resolve the same
 path and enter it first, then run each configured check in order, skipping
 empty ones:
 ```bash
-RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 cd "$PREP_WT"
 {{setup_command}}
@@ -601,7 +607,9 @@ branch that merges to a no-op is a false completion. Never silently retry. The
 prepared head is the detached prep worktree's HEAD (the rebase step staged it
 there), so resolve that path and read its commit rather than a `temp` branch:
 ```bash
-RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
 if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
@@ -625,25 +633,28 @@ review"/"Cannot update this protected ref") auto-promotes the bead to
 untouched and still holds the prepared head for the PR push. Any other push
 failure stops the wisp.
 ```bash
+# >>> direct-merge-push
 set -e
-RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
 MERGE_WT="$MERGE_PARENT/target"
 # $PUSH_ERR is allocated further down but torn down here: every arm that reads
 # it exits without reaching a removal of its own.
 PUSH_ERR=""
-merge_scratch_rm() { git worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
+merge_scratch_rm() { git -C "$RIG_ROOT" worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
 trap merge_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
+git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
 TEMP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-git worktree add --detach "$MERGE_WT" "origin/$TARGET"
+git -C "$RIG_ROOT" worktree add --detach "$MERGE_WT" "origin/$TARGET"
 git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
 MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
 PUSH_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-refinery-patrol.XXXXXX")
 if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
-  git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-  REMOTE=$(git rev-parse "origin/$TARGET")
+  git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
+  REMOTE=$(git -C "$RIG_ROOT" rev-parse "origin/$TARGET")
   if [ "$MERGED_SHA" != "$REMOTE" ]; then
     echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
     gc runtime drain-ack; exit 1
@@ -658,14 +669,15 @@ else
     *) echo "Push failed: $(cat "$PUSH_ERR"). STOP. Debug and retry; do NOT continue."; gc runtime drain-ack; exit 1 ;;
   esac
 fi
+# <<< direct-merge-push
 ```
 After a successful direct merge: tear down the prep worktree (`git -C
 "$RIG_ROOT" worktree remove --force "$PREP_WT"` — it is detached and holds no
 branch, and the rig root's HEAD was never moved, so nothing is restored); if
-delete_merged_branches = "true", `git push origin --delete $BRANCH`; and if
-auto_ff_rig_main = "true", best-effort ff the rig canonical checkout
-(`$GC_RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort on
-its failure.
+delete_merged_branches = "true", `git -C "$RIG_ROOT" push origin --delete
+"$BRANCH"`; and if auto_ff_rig_main = "true", best-effort ff the rig canonical
+checkout (`$RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort
+on its failure.
 
 **If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
 pushes the prepared branch and transitions the anchor into the gated
@@ -679,7 +691,9 @@ history — derived from ancestry, not the branch name:
 # The prepared head is the detached prep worktree's HEAD (the rebase step staged
 # it there), never a branch in the rig root; push it from there so the root's
 # HEAD is never moved to it.
-RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 # Deliberately NO fetch here. `--force-with-lease` with no explicit expected
 # value compares against the LOCAL remote-tracking ref, so a fetch immediately

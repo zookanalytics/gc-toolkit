@@ -85,6 +85,28 @@ export GC_RIG=gc-toolkit
 BOUND=$(GC_RIG="$("$SUT" gc-yxpj8)" sh -c 'printf "[%s]" "$GC_RIG"')
 eq "$BOUND" "[gascity]" "the output binds straight into GC_RIG with no trailing junk"
 
+# The city's own store answers to its rig name in this mode, but `gc bd` ignores
+# that name as GC_RIG. --db prints the path, which selects every store.
+run lx-abc12
+eq "$OUT" "loomington" "a city-store bead names the city's rig"
+run --db lx-abc12
+eq "$RC" "0" "--db resolves a city-store bead (rc)"
+eq "$OUT" "/c/.beads" "  ... to the city's own .beads path"
+run --db gc-yxpj8
+eq "$OUT" "/c/rigs/gascity/.beads" "--db resolves a rig bead to that rig's .beads path, whatever the caller's GC_RIG"
+
+STUB_RIGS='{"rigs":[{"name":"unbound","prefix":"ub","path":""}]}' run --db ub-abc12
+eq "$RC" "1" "--db refuses a rig that reports no path"
+eq "$OUT" "" "  ... printing no path to stdout"
+has "$ERR" "reports no path" "  ... and saying why"
+run --db zz-abc12
+eq "$RC" "1" "--db refuses an unknown prefix"
+eq "$OUT" "" "  ... printing no path to stdout"
+run --db
+eq "$RC" "2" "--db with no bead is a usage error"
+run --db tk-3y6toq extra
+eq "$RC" "2" "--db with a second argument is a usage error"
+
 echo
 echo "escalation-rig: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
