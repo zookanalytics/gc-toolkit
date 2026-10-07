@@ -54,10 +54,11 @@ cat >"$BIN/gc" <<'STUB'
 case "${2:-}" in
     show)
         hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
-        jq -nc --arg sr "${STUB_STALL-item-x}" --arg hd "$hd" \
+        jq -nc --arg sr "${STUB_STALL-item-x}" --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
             '[{id:"v-x", metadata:(({"task_kind":"visit"}
                 + (if $sr == "" then {} else {"stall_root":$sr} end)
-                + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)))}]' ;;
+                + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
+                + (if $tp == "" then {} else {"escalation_key":$tp} end)))}]' ;;
     update)
         [ -n "${HLOG:-}" ] && printf 'gc %s\n' "$*" >>"$HLOG"
         # The gc.hold_demand write on the visit is the stamp gate under test; the
@@ -258,6 +259,18 @@ run_hold_merge STUB_STATE=unanchored
 is "--hold-merge on an unanchored item still proceeds" "$(verdict)" "held"
 is "…and files exactly one demand (no redundant merge hold)" "$(calls | grep -c 'demand item-x')" "1"
 hasnt "…and never a visit demand on an unanchored item" "demand v-x" "$(calls)"
+
+echo "── the visit's escalation_key scopes every demand the sitting files ──"
+# Under a standing scope sibling sittings share the item. Each demand this sitting
+# files carries the visit's escalation_key as its topic, so neither sitting's
+# demand on the shared item refreshes the other's gate in place.
+run STUB_TOPIC=finding-b
+has "a pre-PR item's conversation demand carries the topic" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
+run_hold_merge STUB_STATE=pull_request STUB_TOPIC=finding-b
+has "an anchored hold's visit demand carries the topic" "helm[RIG] demand v-x need X --by converse --topic finding-b" "$(calls)"
+has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
+run_hold_merge STUB_STATE=pull_request
+hasnt "an ordinary visit (no escalation_key) files no topic" "--topic" "$(calls)"
 
 echo "── fail closed: an unreadable or missing lifecycle state gates the ITEM ──"
 # The gate switches to the visit only for a PROVEN PR-anchor state. A state that

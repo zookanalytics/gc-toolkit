@@ -33,6 +33,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # membership), kept per the tk-fhlqce ruling, not part of this identity.
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
+# The one definition of the standing kinds, shared with liveness-recheck.sh, the
+# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
+# classify block splices in.
+# shellcheck source=standing-kinds.sh
+. "$HERE/standing-kinds.sh" || { echo "$PROG: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -254,6 +259,33 @@ done < "$TMP/roots"
 HUSK_STEPS=$(jq -R . < "$HUSK_TMP" | jq -sc 'map(select(length > 0)) | unique')
 HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | unique')
 
+# --- live sitting identities: "conversing" requires a live holder -------------
+# A visit covers its subject (and is itself conversing) only while the sitting
+# holding it is live. This pass is mechanical but reads sessions here — the one
+# liveness source the pack trusts (mol-witness-patrol, dead-molecule-dispose):
+# a holder GONE from the session list is dead, and so is one still listed in a
+# terminal state — archived or closed, the dead states helm's ownerLive keys on
+# (services/helm/internal/board/derive.go); a holder listed in any other state
+# is live. $LIVE_SESSIONS_JSON is every name a LIVE listed session carries
+# (id, session_name, alias, name, agent_name); a claim writes one of assignee /
+# gc.session_id / gc.session_name. An UNCLAIMED visit names no holder and always
+# covers — it is a pending escalation, not a dead sitting. On an unreadable list
+# $LIVENESS_KNOWN stays false and the classifier keeps every visit covering: an
+# unprovable death is not a death, and the subject is still named by its open
+# visit meanwhile.
+LIVE_SESSIONS_JSON="[]"
+LIVENESS_KNOWN=false
+SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
+if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/dev/null 2>&1; then
+    LIVE_SESSIONS_JSON=$(printf '%s' "$SESS_RAW" \
+        | jq -c '[ (.sessions // [])[]? | select((.state // "") as $s | ($s != "archived") and ($s != "closed")) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)
+    if printf '%s' "$LIVE_SESSIONS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        LIVENESS_KNOWN=true
+    else
+        LIVE_SESSIONS_JSON="[]"
+    fi
+fi
+
 # --- classify -----------------------------------------------------------------
 # One jq over the ready set: every drop is a NAMED class; the survivors are
 # the unnamed waits. Structural edges (2i) fold in from ALIVE — a parent is
@@ -276,10 +308,56 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # $demanded is the one non-edge read, and it exists for one case: gc-helm.sh
 # warns on stderr when a demand's `blocks` edge does not land, and nothing
 # repairs it, so that bead reads ready while a person owes an answer on it.
+# The pre-open gate set per pre_open_gate anchor, from the ONE resolver — the same
+# review-checks.sh --resolve pr-open.sh and merge.sh ask — so an undeclared or
+# legacy token (codex) gates pre-open here exactly as it does there, instead of
+# this sweep re-deriving the phase filter and dropping it (which classed a green
+# legacy-token anchor as un-gated and flagged it). The census counts only the
+# gates that must be green BEFORE the PR opens, so an open-as-draft check (demo),
+# which runs against the open PR, never holds a pre_open_gate anchor as not-yet-
+# gated. Built once per pass as a {anchor-id: [gates]} map, read by
+# pre_open_all_green below. If the resolver script is absent (have_resolver=0) the
+# jq falls back to the pre-phase none/off/approval drop. Either way a gate keeps
+# the case of its check_set token, deduped case-insensitively: gate-ensure
+# dispatches that token as the check_name and signoff stamps `check.<token>`, so
+# the census reads the marker under the same key every other reader does.
+_LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
+# rig's own review-checks.toml beside the pack) so a hermetic test can point it at
+# a fixture, or at a missing file for the no-index fallback (every non-sentinel
+# token gates). Passed as --file when readable; otherwise the resolver resolves it
+# itself (the inherited env override, then the working tree).
+_LS_IDX="${GC_REVIEW_CHECKS_INDEX-$_LS_DIR/../../review-checks.toml}"
+PREOPEN_GATES_MAP="{}"; HAVE_RESOLVER=0
+if [ -x "$_LS_DIR/review-checks.sh" ]; then
+  HAVE_RESOLVER=1
+  _ls_idx_arg=()
+  [ -r "$_LS_IDX" ] && _ls_idx_arg=(--file "$_LS_IDX")
+  PREOPEN_GATES_MAP=$(
+    jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
+           | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
+    | while IFS=$'\t' read -r _aid _acs; do
+        [ -n "$_aid" ] || continue
+        _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
+             ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null) || continue
+        printf '%s\n' "$_g" | jq -R . | jq -sc --arg id "$_aid" \
+          'map(select(length > 0)) | {($id): .}'
+      done \
+    | jq -sc 'add // {}' 2>/dev/null)
+  [ -n "$PREOPEN_GATES_MAP" ] || PREOPEN_GATES_MAP="{}"
+fi
+
 # >>> classify
+# PREOPEN_GATES_MAP and HAVE_RESOLVER are set above for the whole-sweep run;
+# default them here as well, since the precheck test extracts this marked block
+# and sources it on its own under `set -u`.
+[ -n "${HAVE_RESOLVER:-}" ] || HAVE_RESOLVER=0
+[ -n "${PREOPEN_GATES_MAP:-}" ] || PREOPEN_GATES_MAP="{}"
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
-      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" "$VISIT_IDENTITY_JQ"'
+      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" \
+      --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
+      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
@@ -289,7 +367,8 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   def pr_age:
     (try (((.updated // "") | tostring) | fromdateiso8601) catch null)
     | if . == null then null else (($nowepoch - .) / 86400 | floor) end;
-  def standing_kinds: ["triage-subject", "feedback-pattern"];
+  # standing_kinds, from standing-kinds.sh:
+  '"$STANDING_KINDS_JQ"'
   # A workflow root, a scope latch and a step-spec sidecar carry a route and no
   # executable body. The route names the run, it is not an offer. Both readers
   # that serve or count pool work refuse them on gc.kind: the hook at
@@ -304,7 +383,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     (.issue_type // "") == "convoy"
     and ((((.title // "") | startswith("sling-"))
           or ((.title // "") | startswith("input convoy for"))
-          or ((.metadata["gc.synthetic"] // "") == "true")));
+          or (((.metadata["gc.synthetic"] // "") | tostring) == "true")));
   # The tracking bead of an order is a wisp: issue_type task, no metadata
   # until it closes, and no edges, so its id and its title are the only
   # durable structural signals it carries. Both are machine-minted and
@@ -316,16 +395,32 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     and ((.title // "") | startswith("order:"));
   def pre_open_all_green:
     (.metadata // {}) as $m
-    | (($m.check_set // "")
-        | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
-        | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
+    | (if $have_resolver == "1" then ($preopen_gates[(.id // "")] // [])
+       else (($m.check_set // "")
+             | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
+             | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))
+             | reduce .[] as $t ([]; if any(.[]; ascii_downcase == ($t | ascii_downcase)) then . else . + [$t] end))
+       end) as $gates
     | ($gates | length) > 0
       and all($gates[]; ($m["check." + .] // "") == "green");
+  # A visit holder is live — or it has none, or liveness is unreadable. A claim
+  # writes one of assignee / gc.session_id / gc.session_name; $livesessions holds
+  # every name a listed (live) session carries. No holder is an UNCLAIMED visit,
+  # a pending escalation that still covers. $livenessknown false is an unreadable
+  # session list, where an unprovable death is not a death — keep covering.
+  def holder_live:
+    ([ (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "") ]
+     | map(select(. != ""))) as $holders
+    | if ($holders | length) == 0 then true
+      elif ($livenessknown | not) then true
+      else any($holders[]; . as $h | ($livesessions | index($h)) != null)
+      end;
   # Live-visit subjects: every subject a live visit covers by its shared identity
   # (tracks edge, gc.continuation_group fallback — the stamp alone has landed
   # empty on a live visit, su-ab9je). visit_identity_subjects is visit-identity.sh.
   ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
+     | select(holder_live)
      | visit_identity_subjects[] ]) as $convgroups
   # stall_root visits: a SEPARATE liveness question from coverage — a stalled
   # sitting parked on a workflow ROOT keeps the ready steps under that root off
@@ -359,7 +454,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif topology_kind then "topology"
          elif ((.metadata["gc.routed_to"] // "") != "") then "routed-and-claimable"
          elif (($worked | index($b.id)) != null) then "worked"
-         elif ((.metadata.task_kind // "") == "visit") then "conversing"
+         elif ((.metadata.task_kind // "") == "visit") and holder_live then "conversing"
          elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
          elif (($demanded | index($b.id)) != null) then "held-by-design"
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
@@ -491,8 +586,8 @@ stale_escalations
 
 # --- landed-fix wedge: a must-fix finding whose fix landed but did not close ---
 # gate-ensure closes a must-fix finding once its fix unit lands, which releases
-# the re-gate the open finding held. If that close is ever missed the finding
-# stays open, holds the re-gate through quiescence forever, and wedges the
+# the publish and the merge the open finding held. If that close is ever missed
+# the finding stays open, holds the publish (pr-open.sh) forever, and wedges the
 # anchor at pre_open_gate with the fix already on the branch — the silent
 # multi-day strand this backstop exists to make loud. Two shapes reach it: the
 # finding's fix-unit edge is present and all closed, and the finding carries NO
@@ -548,12 +643,12 @@ wedged_fix_escalations() {
         fi
         if [ -n "$edgeless" ]; then
             body="landed-fix wedge (edge-less): anchor $anchor is held at pre_open_gate by must-fix finding $fid, which carries NO fix-unit edge, yet its lane ($lane) fix unit has already closed — the fix is on the branch.
-The missing close-ordering edge hides the landed fix from the normal close, so the finding stays open and the anchor cannot re-gate or open its PR until $fid closes.
-Disposition: close $fid to release the re-gate (its fix landed, matched by lane), then find why the close-ordering edge was never hung (finding.sh set-disposition / anchor_fix_unit)."
+The missing close-ordering edge hides the landed fix from the normal close, so the finding stays open and the anchor cannot open its PR until $fid closes.
+Disposition: close $fid to release the publish (its fix landed, matched by lane), then find why the close-ordering edge was never hung (finding.sh set-disposition / anchor_fix_unit)."
         else
             body="landed-fix wedge: anchor $anchor is held at pre_open_gate by must-fix finding $fid whose fix unit has already closed — the fix is on the branch.
-gate-ensure closes such a finding each pass so the re-gate proceeds; this one is still open, so that close is not running, and the anchor cannot re-gate or open its PR until $fid closes.
-Disposition: close $fid to release the re-gate (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
+gate-ensure closes such a finding each pass so the publish proceeds; this one is still open, so that close is not running, and the anchor cannot open its PR until $fid closes.
+Disposition: close $fid to release the publish (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
         fi
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "$PROG: dry-run: would escalate $anchor [landed-fix-wedge] (finding $fid)"
@@ -633,15 +728,25 @@ sweep_visit() {
     # Re-file guard: an agenda a sitting already closed out `dispositioned` is
     # not news. The test is the id SET; a cut-short or unreadable prior files.
     # Fail-open on a non-zero read even when it printed a matching array.
+    #
+    # Resolve the prior visit's subject by the shared visit identity
+    # (visit_covers: the tracks edge, else the gc.continuation_group stamp), the
+    # same union the live-visit guard above uses — never the stamp alone. A visit
+    # whose stamp landed empty still carries the tracks edge, so a stamp-keyed
+    # server query cannot see it and re-files an agenda already settled. The
+    # listing narrows to visits by task_kind (a field independent of the stamp)
+    # and applies visit_covers client-side, because the edge is not a
+    # metadata-field the server can match on.
     local new_key prior_rc prior refile=""
     new_key=$(printf '%s' "$NEW" | jq -r '[.[].id] | sort | join(",")')
     prior_rc=0
-    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; else gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
+    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field task_kind=visit --limit=0 --json; else gc bd list --status=closed --metadata-field task_kind=visit --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
     if [ "$prior_rc" -eq 0 ]; then
-        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" '
+        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" --arg s "$SWEEP_SUBJECT" "$VISIT_IDENTITY_JQ"'
             if type == "array" then
               [ .[]
                 | select(((.metadata // {}).task_kind // "") == "visit")
+                | select(visit_covers($s))
                 | select((((.metadata // {})["gc.outcome"] // "") | tostring) == "dispositioned")
                 | select(((((.metadata // {})["sweep.new_ids"] // "") | tostring)
                           | split(",") | map(select(length > 0)) | sort | join(",")) == $key)

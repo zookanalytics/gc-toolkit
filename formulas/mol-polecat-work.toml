@@ -469,14 +469,22 @@ git checkout -B "$BRANCH" "origin/{{base_branch}}"
 gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH"
 ```
 
-**Record the resolved worktree.** `self-review` and `submit-and-exit` read
-`work_dir` from this bead to locate the checkout. Three paths reach here: a
-fresh create, a reuse of a recorded worktree, and a rework child that adopts
-the anchor's already-checked-out worktree. Stamp the directory you are in now,
-so every path records it. Re-stamping the same path is a no-op.
+**Record the resolved worktree and work branch.** `self-review` and
+`submit-and-exit` read `work_dir` from this bead to locate the checkout. Three
+paths reach here: a fresh create, a reuse of a recorded worktree, and a rework
+child that adopts the anchor's already-checked-out worktree. Stamp the directory
+you are in now, so every path records it; re-stamping the same path is a no-op.
+`gc.work_branch` is recorded here too: the claim stamps it from the pool
+worktree's base checkout, not the branch the work lands on, and the close gate
+checks `gc.work_commit` is reachable on it. Every path is already on the real
+branch here, so record that.
 ```bash
 # >>> workspace-setup-record-worktree
-gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$(pwd)"
+RECORD=(--set-metadata work_dir="$(pwd)")
+WORK_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+# A detached HEAD has no branch to record; skip it rather than blank the key.
+[ -n "$WORK_BRANCH" ] && [ "$WORK_BRANCH" != "HEAD" ] && RECORD+=(--set-metadata gc.work_branch="$WORK_BRANCH")
+gc bd update "$WORK_BEAD_ID" "${RECORD[@]}"
 # <<< workspace-setup-record-worktree
 ```
 
@@ -1215,6 +1223,29 @@ The query asks the branch, not the state name: every state that carries a
 unreadable probe resolves to empty and the step behaves as it did before this
 block existed — degraded to the dispatch-text fallback, never stranded.
 
+**4c. Check the anchor's title.** The PR's title is composed from the anchor's
+title: `pr-open.sh` writes it at create, `pr-stack.sh` keeps an open PR's title
+equal to it, and the squash merge takes its commit subject from it. Like the
+summary, it names the branch, not this pass. A rework that changed what the
+branch does, or fresh work that ended narrower or broader than what was filed,
+leaves a title naming work the branch does not do. Read it:
+
+```bash
+gc bd show "${GATING_ANCHOR:-$WORK_BEAD_ID}" --json | jq -r '.[0].title // empty'
+```
+
+When it no longer names what the branch does, set `ANCHOR_TITLE` to one line of
+plain words that does. Leave out the conventional-commit type and the bead id:
+the PR title adds both. When the title still fits, leave it empty:
+
+```bash
+ANCHOR_TITLE=""
+```
+
+The handoff below writes it onto the anchor, never onto the PR. The merge
+cadence composes the PR title from the anchor, so a title typed into the PR
+alone is replaced on its next pass.
+
 **5. The refinery handoff (three writes).** The transition carries target, PR
 summary, notes, refinery assignee, cleared route, and cleared session pins.
 It takes three `gc bd update` calls, not one. A single update that reassigns
@@ -1252,11 +1283,14 @@ left in place names a session that has since drained, and a bead the live
 refinery holds reads as an absent orphan. Only these two pins are cleared —
 they are the ones the owner filter reads.
 
-The summary is the one field addressed to a bead other than the claimed one.
-When 4b named an anchor, it is stamped there in its own write, before the
-handoff: it is metadata on a bead this session does not hold, and a failure to
-land it costs a good PR body, not the handoff. Everything the refinery reads
-still arrives in the three writes below.
+The summary and a retitle are addressed to the anchor, which is not always the
+claimed bead. When 4b named an anchor, each is written there in its own write,
+before the handoff: they land on a bead this session does not hold, and a
+failure to land either costs the PR a current body or title, not the handoff.
+On fresh work the claimed bead is the anchor. The summary rides the first
+handoff write, and a retitle is a write of its own ahead of it, so a title bd
+refuses cannot roll the handoff back. Everything the refinery reads still
+arrives in the three writes below.
 
 ```bash
 # >>> submit-target-consume
@@ -1294,6 +1328,9 @@ if [ -n "$PR_SUMMARY" ]; then
     else
         HANDOFF_META+=(--set-metadata pr_summary="$PR_SUMMARY")
     fi
+fi
+if [ -n "$(printf '%s' "${ANCHOR_TITLE:-}" | tr -d '[:space:]')" ]; then
+    gc bd update "${GATING_ANCHOR:-$WORK_BEAD_ID}" --title "$ANCHOR_TITLE" || echo "the retitle did not reach ${GATING_ANCHOR:-$WORK_BEAD_ID}; the PR title stays composed from the title it has"
 fi
 HANDOFF_OK=0
 if gc bd update "$WORK_BEAD_ID" "${HANDOFF_META[@]}" --append-notes "Implemented: <brief summary>" && gc bd update "$WORK_BEAD_ID" --status=open && gc bd update "$WORK_BEAD_ID" --assignee="$REFINERY_TARGET"; then HANDOFF_OK=1; fi
