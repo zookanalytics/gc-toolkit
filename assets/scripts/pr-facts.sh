@@ -483,6 +483,42 @@ retract_dispose_visits() {
     fi
   done
 }
+# refresh_dispose_visits <anchor> <num> <message> <kids-note> — keep the
+# disposition arm's refused-close report current. escalate.sh files the visit
+# once and dedups every later refusal onto it, so a close refused for a new
+# reason would leave the visit naming an obstruction that has already cleared.
+# Each open visit under pr-dispose-failed.<num> for the anchor that nobody is
+# engaged in takes this pass's message as its description when that differs.
+# The note naming the parked children an earlier pass disposed is carried
+# forward: they are closed by now, so this pass names none, and the note is how
+# an operator who reverses the disposition knows what to restore.
+refresh_dispose_visits() {
+  local a="$1" key="pr-dispose-failed.$2" msg="$3" kids="$4" rows v old want
+  local kids_lead=" The branch's parked rework/rebase children ("
+  rows=$(gc bd list --status=open --metadata-field "escalation_key=$key" \
+           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    old=$(printf '%s' "$rows" | jq -r --arg v "$v" '.[] | select(.id == $v) | (.description // "")' 2>/dev/null)
+    want="$msg$kids"
+    if [ -z "$kids" ]; then
+      case "$old" in *"$kids_lead"*) want="$msg$kids_lead${old#*"$kids_lead"}" ;; esac
+    fi
+    [ "$old" = "$want" ] && continue
+    if gc bd update "$v" --description "$want" >/dev/null 2>&1; then
+      echo "$PROG: $a — refreshed its pr-dispose-failed visit $v with this pass's refusal"
+    else
+      echo "$PROG: $a — could not refresh its pr-dispose-failed visit $v; it still names an earlier refusal" >&2
+    fi
+  done <<REFRESH_EOF
+$(printf '%s' "$rows" | jq -r --arg k "$key" --arg s "$a" '.[]
+    | select(((.metadata.escalation_key // "") | tostring) == $k)
+    | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+    | .id' 2>/dev/null)
+REFRESH_EOF
+}
 mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
   # Atomic birth for a rework child: every identity key lands together, or the
   # child is not left behind to be misread. A child stamped with only some of its
@@ -1127,8 +1163,9 @@ CHILDREN_EOF
           printf '%s\n' "$rout" >&2
           kids_disposed_note=""
           [ -n "$disposed_kids" ] && kids_disposed_note=" The branch's parked rework/rebase children ($disposed_kids) were ALREADY disposed (closed not-needed -> $disp_succ) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
-          escalate "$id" "pr-dispose-failed.$num" \
-            "PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand.$kids_disposed_note"
+          dmsg="PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand."
+          escalate "$id" "pr-dispose-failed.$num" "$dmsg$kids_disposed_note"
+          refresh_dispose_visits "$id" "$num" "$dmsg" "$kids_disposed_note"
           skipped=$((skipped + 1)); continue
         fi
       fi ;;

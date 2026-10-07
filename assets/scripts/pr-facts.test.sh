@@ -624,6 +624,48 @@ has "$out" "held by open visit VR" "…held by the visit the arm does not own"
 eq "$(bstatus VQ)" "open" "the arm's own visit stays open: the close it asks for has not landed"
 eq "$(bstatus VR)" "open" "…and the other visit is untouched"
 
+# A visit's description: the report a person reads when they open or engage it.
+vdesc() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .description) // "<absent>"' "$STUB_STORE"; }
+# The arm's own visit as an earlier pass filed it: its description names the
+# obstruction that pass hit, and the parked children it disposed, if any.
+dvisit_desc() { # id subject key description [assignee]
+  jq -nc --arg id "$1" --arg s "$2" --arg k "$3" --arg d "$4" --arg a "${5:-}" \
+    '{id: $id, status: "open", assignee: $a, title: "visit", description: $d, notes: "",
+      metadata: {escalation_key: $k, "gc.continuation_group": $s, task_kind: "visit", "gc.routed_to": "human"}}'
+}
+
+echo "# a close refused for a new reason refreshes the visit's description"
+# escalate.sh dedups every later refusal onto the visit it filed first, so the
+# arm rewrites that visit's description when this pass's refusal differs. The
+# note naming the children an earlier pass disposed is carried forward.
+: > "$STUB_DEPS"
+OLD_REPORT="PR#131 was closed with a pre-recorded disposition, but bead-rehome.sh could not consummate it (rc=5): has an OPEN blocker BOLD. The anchor is left OPEN carrying the marker. The branch's parked rework/rebase children (K9) were ALREADY disposed (closed not-needed -> tk-x) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
+store "[$(anchor F2x 131 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-x"'), $(dvisit_desc VX F2x pr-dispose-failed.131 "$OLD_REPORT"), $(dvisit VR2 F2x an-unrelated-question)]"
+printf 'VX|tracks|F2x\nVR2|tracks|F2x\n' > "$STUB_DEPS"
+printf '%s' "$(prview 131 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_131.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2x)" "open" "the close is refused, now by another open visit"
+has "$(vdesc VX)" "held by open visit VR2" "the visit's description names this pass's obstruction"
+hasnt "$(vdesc VX)" "BOLD" "…and no longer the blocker an earlier pass hit"
+has "$(vdesc VX)" "The branch's parked rework/rebase children (K9) were ALREADY disposed" "…while the children an earlier pass disposed stay named"
+has "$out" "refreshed its pr-dispose-failed visit VX" "the refresh is reported"
+eq "$(nvisits pr-dispose-failed.131)" "1" "…on the one visit, with nothing re-filed"
+REFRESHED="$(vdesc VX)"
+out=$(run)
+eq "$(vdesc VX)" "$REFRESHED" "a pass refused for the same reason leaves the description as it is"
+hasnt "$out" "refreshed its pr-dispose-failed visit VX" "…and writes nothing"
+
+echo "# a visit someone is engaged in keeps its description"
+: > "$STUB_DEPS"
+store "[$(anchor F2y 132 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-y"'), $(dvisit_desc VY F2y pr-dispose-failed.132 "an earlier report" lx-sitting)]"
+printf 'VY|tracks|F2y\n' > "$STUB_DEPS"
+printf '%s' "$(prview 132 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_132.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2y)" "open" "the engaged visit holds the close"
+eq "$(vdesc VY)" "an earlier report" "…and its description is left to the person in it"
+
 echo "# a retract that does not land after the close is retried by the next full pass"
 # The closed anchor leaves the enumeration, so the arm never reaches it again.
 # The sweep ahead of the anchor loop reads the open visit, finds its subject
