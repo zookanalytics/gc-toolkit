@@ -297,14 +297,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    `review-wedge` key rather than holding the anchor in silence. It escalates
    on the second consecutive sighting, because `mol-review`'s failure arm
    closes its chain before it restores the bead's route. No dispatch goes out
-   while anything is acting on the anchor — an open `must-fix` finding on any
-   lane, a fix unit in flight, a validation pass in flight, or a full review
-   already in flight on the lane — which is the QUIESCENCE predicate one
-   authority computes so it cannot disagree with itself about whether a review
-   was already out. The same authority also releases that hold: it closes a
-   `must-fix` finding once every fix unit answering it has closed, so a fix that
-   has landed on the branch stops holding the re-gate rather than wedging the
-   anchor at `pre_open_gate`. A review that read a mid-change diff would raise
+   while anything is acting on the anchor — a fix unit in flight (including the
+   one answering an open `must-fix` finding on any lane), a validation pass in
+   flight, or a full review already in flight on the lane — which is the
+   QUIESCENCE predicate one authority computes so it cannot disagree with itself
+   about whether a review was already out. The hold names the actor. A
+   `must-fix` finding no fix unit answers is a demand on the anchor, not an
+   actor: it holds the merge through its `blocks` edge and keeps the anchor
+   `progressing`, but it does not hold the dispatch, and the arm reports it as
+   unanswered. The same authority also releases a finding: on the first pass
+   after every fix unit answering a `must-fix` finding has closed, it closes the
+   finding, so a fix that has landed on the branch stops holding the publish
+   and the merge. A review that read a mid-change diff would raise
    only the no-op rework the declination texts are full of. There is no dispatch
    ceiling: quiescence forbids the redundant round a ceiling would have bounded,
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
