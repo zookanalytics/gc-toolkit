@@ -79,7 +79,7 @@ harness_init() {
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   # STUB_SHOW_NOTICE: when set to a rig name, `gc bd show` leads its stdout with a
   # `gc bd: answering from the rig "<name>" store` notice line, the contaminant a
-  # real read can carry. Unset = clean JSON (the historical behaviour).
+  # real read can carry. Unset leaves the JSON clean.
   export STUB_SHOW_NOTICE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
