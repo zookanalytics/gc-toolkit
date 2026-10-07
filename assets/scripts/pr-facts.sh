@@ -95,8 +95,9 @@
 # operator feedback and stops after it, skipping the write-back sweep and every
 # non-feedback arm, so a pass killed before the full arm has still picked the
 # feedback up); --deadline <epoch-secs> and --cursor <file> pace the per-anchor
-# walk of the feedback and full modes (pace-lib.sh): a rotation, with no new
-# anchor started past the deadline. The posture-only mode is never paced, because
+# walk of the feedback and full modes, and the full mode's write-back sweep on a
+# cursor of its own (pace-lib.sh): each walk is a rotation that starts no new
+# anchor past the deadline. The posture-only mode is never paced, because
 # merge.sh needs every posture current. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
@@ -2404,6 +2405,12 @@ fi
 # connection here is read to exhaustion. `gh --paginate` follows exactly one
 # cursor, so the reviews and the threads are separate reads rather than one
 # nested query, and neither carries a second cursor for it to choose between.
+#
+# Those reads cost at least four GitHub calls an anchor, so the sweep is paced
+# like the walk above (pace-lib.sh): the same deadline, a rotation on a cursor
+# of its own (<cursor>.writeback), and one anchor visited even on a pass whose
+# walk spent the deadline. The batch history below is reconciled on every
+# anchor ahead of the pacing, because it reads no GitHub.
 WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$num){
@@ -2461,6 +2468,9 @@ elif ! WB_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_req
   echo "$PROG: write-back sweep skipped — could not re-read the anchors" >&2
   WB_ANCHORS=""
 fi
+WB_CURSOR="${CURSOR:+$CURSOR.writeback}"
+wb_due=$(printf '%s' "${WB_ANCHORS:-[]}" | jq '[ .[]? | select(((.metadata.pr_comment_disposition // "") | tostring) != "") ] | length' 2>/dev/null)
+pace_start "$WB_CURSOR" "$DEADLINE"
 while IFS= read -r wrow; do
   [ -n "${wrow:-}" ] || continue
   wid=$(printf '%s' "$wrow" | jq -r '.id // empty')
@@ -2523,6 +2533,7 @@ while IFS= read -r wrow; do
     echo "$PROG: $wid — PR#$wnum write-back skipped: the acting login is unresolved (every write keys off telling our own comments from a human's)" >&2
     continue
   }
+  pace_visit rest "$wid"; case $? in 1) continue ;; 2) break ;; esac
   wbranch=$(printf '%s' "$wrow" | jq -r '.metadata.branch // ""')
   wprurl=$(printf '%s' "$wrow" | jq -r '.metadata.pr_url // ""')
 
@@ -2974,8 +2985,16 @@ WB_REVIEW_CLEARS
     fi
   fi
 done <<WB_ROWS
-$(printf '%s' "$WB_ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s' "$WB_ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$WB_CURSOR")
 WB_ROWS
+pace_end
+if [ -n "$CURSOR$DEADLINE" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+  if [ -n "$PACE_RESUME_AT" ]; then
+    echo "$PROG: write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments before the deadline; the next pass resumes at $PACE_RESUME_AT"
+  else
+    echo "$PROG: write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments"
+  fi
+fi
 
 if [ "$POSTURE_ONLY" = 1 ]; then
   echo "$PROG: posture-only — $postured postures recorded, $unpostured not current, $skipped skipped"

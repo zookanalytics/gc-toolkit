@@ -3336,6 +3336,29 @@ out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFC
 eq "$(pf_views)" "84" "the visit goes to the first anchor that costs a read"
 has "$out" "visited 1 of 2 PR anchors" "…counted once"
 
+echo "# pacing: the write-back sweep rotates on a cursor of its own under the same deadline"
+# Three anchors carry a routed comment batch, enumerated out of id order. A
+# deadline of epoch 1 has always passed, so the sweep acknowledges one anchor's
+# comments per pass, on a rotation apart from the walk's.
+store "[$(anchor WP3 93 "$(wb_meta rework:KP3)"), $(anchor WP1 91 "$(wb_meta rework:KP1)"),
+        $(anchor WP2 92 "$(wb_meta rework:KP2)"), $(child KP1 open), $(child KP2 open), $(child KP3 open)]"
+for n in 91 92 93; do
+  printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"
+  threads "$n" "$(one_thread "$n")"
+done
+WBCUR="$TMP/pr-facts-wb.cursor"; rm -f "$WBCUR" "$WBCUR.writeback"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
+eq "$(reacted 91 NC-91),$(reacted 92 NC-92),$(reacted 93 NC-93)" "true,false,false" "past the deadline the sweep still acknowledges one anchor, the lowest id"
+has "$out" "write-back visited 1 of 3 anchors with routed comments before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
+eq "$(cat "$WBCUR.writeback" 2>/dev/null)" "WP1" "the sweep records its progress on a cursor of its own"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
+eq "$(reacted 92 NC-92),$(reacted 93 NC-93)" "true,false" "the next pass resumes the sweep after its cursor"
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(( $(date +%s) + 600 ))" --cursor "$WBCUR" 2>&1)
+eq "$(reacted 93 NC-93)" "true" "a deadline that has not passed lets the sweep reach every anchor"
+has "$out" "write-back visited 3 of 3 anchors with routed comments" "…and reports the whole sweep"
+out=$("$SUT" --fix-pool "$FIX" 2>&1)
+hasnt "$out" "write-back visited" "an unpaced pass reports no write-back pacing"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

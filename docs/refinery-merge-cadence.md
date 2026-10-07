@@ -354,8 +354,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    reply, because no commit answered it. Idempotence is read back off GitHub,
    so a repeat pass writes nothing and a failed write is retried by the next
    one. The per-anchor walk runs in a rotation under the arm's share of the
-   pass budget; the write-back sweep reads only the anchors carrying a
-   disposition and is not paced.
+   pass budget. The write-back sweep reads GitHub only for the anchors carrying
+   a disposition, at least four calls each, so it runs under the same deadline
+   in a rotation of its own (`pr-facts.cursor.writeback`), with one anchor
+   visited even on a pass whose walk spent the deadline.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
