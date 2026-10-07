@@ -87,6 +87,25 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     exit 1
 fi
 
+# bash backs a `<<<` here-string longer than a pipe buffer with a temp file in
+# $TMPDIR. Under disk pressure that file cannot be created, the redirection fails
+# without stopping this check (it is set -u, not set -e), and the loop it feeds
+# runs zero times: a non-empty set read as empty, which falls through to the OK
+# line. Each enumeration below is staged into a file under this checked, templated
+# temp dir and read with a plain `< "$file"`, which keeps the loop in the current
+# shell so the finding arrays survive it. A staging failure is loud, never a
+# forged all-clear. The dir and its files die with this process.
+ENUM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-epic-closed-implies-ruled.XXXXXX" 2>/dev/null) || {
+    echo "cannot determine whether closed epics were ruled (I14)"
+    detail "could not create a temp directory to stage the store enumerations (mktemp -d failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+}
+trap 'rm -rf "$ENUM_TMP" 2>/dev/null' EXIT
+if ! printf '%s\n' "$scopes" > "$ENUM_TMP/scopes"; then
+    echo "cannot determine whether closed epics were ruled (I14)"
+    detail "could not stage the store enumeration (temp-file write failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+fi
 while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
@@ -138,6 +157,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
     [ -n "$rows" ] || continue
+    if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
+        warnings+=("$label: could not stage the closed-epic enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
+        continue
+    fi
     n_disposed=0; n_legacy=0
     while IFS=$'\037' read -r kind id ruling; do
         [ -n "$kind" ] || continue
@@ -155,14 +178,14 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             exempt-disposed) n_disposed=$((n_disposed + 1)) ;;
             exempt-legacy)   n_legacy=$((n_legacy + 1)) ;;
         esac
-    done <<< "$rows"
+    done < "$ENUM_TMP/rows"
     if [ "$n_disposed" -gt 0 ]; then
         notes+=("$label: $n_disposed closed epic(s) carry gc.superseded_by (retired into a successor), so they were not judged")
     fi
     if [ "$n_legacy" -gt 0 ]; then
         notes+=("$label: $n_legacy closed epic(s) predate epic stewardship (no recorded hypothesis), so no ruling is expected of them")
     fi
-done <<< "$scopes"
+done < "$ENUM_TMP/scopes"
 
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")

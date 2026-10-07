@@ -156,6 +156,45 @@ else
     ok "the check is ledger-only (no gh calls)"
 fi
 
+# --- 9. disk pressure must not forge an all-clear ----------------------------
+# bash backs a `<<<` here-string longer than a pipe buffer with a temp file;
+# under disk pressure that file cannot be created and the loop it feeds runs zero
+# times, so a store fed through one reads as empty and the check prints its OK
+# line. The check stages each enumeration through a checked `mktemp -d` instead.
+# This mktemp stub stands in for a full /tmp at each staging point:
+# STAGE_FAIL=mktemp fails the command, and STAGE_FAIL=scopes or rows hands back a
+# dir in which that staging file cannot be written, because a directory already
+# sits at its path. bash's own here-string temp file never goes through the
+# mktemp command, so a check that still feeds the scopes loop or the rows loop
+# from `<<<` reports the epic and fails the matching case.
+cat > "$TMP/bin/mktemp" <<'MK'
+#!/usr/bin/env bash
+if [ "${STAGE_FAIL:-}" = "mktemp" ]; then
+    echo "mktemp: stubbed disk-pressure failure" >&2; exit 1
+fi
+d="$(dirname "$0")/../stage.$$"
+mkdir -p "$d/${STAGE_FAIL:-}" && printf '%s\n' "$d"
+MK
+chmod +x "$TMP/bin/mktemp"
+store "$(epic Edp closed '{"epic_hypothesis":"for X"}')"
+# Mirror: through the stub with nothing failed, the fixture yields its finding,
+# so the assertions below are not vacuously satisfied by an empty store or a
+# broken stub.
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "mirror: the fixture reports its finding when staging works"
+has "$OUT" "epic Edp" "mirror: the finding names the epic"
+for fail in mktemp scopes rows; do
+  OUT=$(STAGE_FAIL=$fail run_check); RC=$?
+  eq "$RC" "1" "a failed $fail staging warns (1): it neither passes (0) nor errors (2)"
+  hasnt "$OUT" "OK:" "a failed $fail staging does not forge the OK line"
+  hasnt "$OUT" "epic Edp" "a failed $fail staging judges nothing it did not read"
+  case "$fail" in
+    rows) has "$OUT" "this store was NOT checked" "a failed rows staging names the store it skipped" ;;
+    *)    has "$OUT" "not an all-clear" "a failed $fail staging says nothing was scanned" ;;
+  esac
+done
+rm -f "$TMP/bin/mktemp"
+
 echo
 echo "check-epic-closed-implies-ruled: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
