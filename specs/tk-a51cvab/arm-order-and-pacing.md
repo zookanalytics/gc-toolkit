@@ -206,6 +206,19 @@ runs the suite. The Go tests cover what that suite does not reach: an open-PR
 stream that breaks partway, a page with no pullRequests, and a cursor that
 cannot be written.
 
+Main then moved to 92893140 with #1076 (tk-moje52c), which reads an `UNKNOWN`
+merge state again inside the merge arm, in merge.sh and in gctk merge alike.
+tk-eku5dvv's self-review merged it in at eda53752, and neither change needed
+adapting to the other. The re-read runs at the CLEAN check, the merge's last
+validation, so an anchor reaches it in whichever group the visit order put it,
+and the order already counts a recorded `UNKNOWN` as landable. The conflicts
+were two places where both sides added lines: the field initializer in
+`Merge()` and the end of merge.test.sh's `suite()`. The merge kept every line,
+with main's re-read cases ahead of the pacing cases. Their PR numbers (150-163)
+do not overlap the pacing cases' (231-293). The re-read waits at most ten
+seconds a pass at the defaults, which adds to the pass-length estimate under
+"For the city override's release".
+
 ## Considered and not done
 
 - **Bounding the posture arm.** It is the one arm left ahead of merge whose
