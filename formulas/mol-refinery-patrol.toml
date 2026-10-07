@@ -44,7 +44,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol re-routes a rejected bead to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat, so the bead is re-dispatched to an address no pool holds."
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol re-routes a rejected bead to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route and the refinery keeps the bead."
 default = "gc-toolkit."
 
 [vars.rig_name]
