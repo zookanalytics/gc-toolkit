@@ -26,8 +26,8 @@
 # Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
 # anchors gate-ensure last recorded as settled, and whose rows carry no hold
 # this arm applies, are visited first and the rest after them, each group in a
-# rotation of its own, and no new anchor starts past the deadline. The draft-to-ready arm's walk is paced the same way, on a
-# rotation of its own.
+# rotation of its own, and no new anchor starts past the deadline. The
+# draft-to-ready arm's walk is paced the same way, on a rotation of its own.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
 
