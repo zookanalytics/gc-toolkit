@@ -12,7 +12,9 @@
 #     two blocks; a merge commit that also edits a file the merge did not
 #     conflict on; a commit of its own after the merge; a merge of a branch that
 #     is not the base; an octopus merge; a pushed head that does not descend from
-#     the start; a modify/delete conflict; a binary conflict; an unreadable base.
+#     the start; a modify/delete conflict; a binary conflict; an unreadable base;
+#     a git read that fails (the generated-tier attributes, a commit's own
+#     change, the list of commits), which never reads as mechanical.
 # guard, with gc, gh and escalate.sh stubbed:
 #   a bead that is not a merge-in child, and a mechanical bring-current, write
 #   nothing; a judgment on an approved PR files the visit FIRST, then
@@ -236,10 +238,49 @@ bring
 eq "$(git -C "$R" diff --name-only --diff-filter=U)" "generated/r.txt" "the render conflicts"
 resolve generated/r.txt 'r-rendered-from-both\n'
 eq "$(verdict "$(cls)")" "mechanical" "a regenerated render is machine-written, not a choice"
+GEN_R="$R"; GEN_A="$A"; GEN_MERGE=$(git -C "$R" rev-parse HEAD)
 printf 'r-rendered-again\n' > "$R/generated/r.txt"; git -C "$R" commit -qam "chore: regenerate"
 eq "$(verdict "$(cls)")" "mechanical" "…and so is a commit that touches only the generated tier"
+GEN_REGEN=$(git -C "$R" rev-parse HEAD)
 printf 'hand edit\n' > "$R/notes.txt"; git -C "$R" add notes.txt; git -C "$R" commit -qm "docs: a note"
 eq "$(verdict "$(cls)")" "judgment" "a commit outside the tier is judgment again"
+
+echo "# classify: a git read that fails is judgment, never mechanical"
+# What the guard cannot read it cannot show to be mechanical. A shim on PATH
+# refuses the one git subcommand FAIL_GIT names and runs the real git for every
+# other, so each read fails alone, over the generated-tier history above, whose
+# exemption is what a failed read would otherwise hand out.
+REAL_GIT=$(command -v git)
+mkdir -p "$TMP/failgit"
+cat > "$TMP/failgit/git" <<SHIM
+#!/usr/bin/env bash
+sub=""; i=1
+while [ "\$i" -le "\$#" ]; do
+  case "\${!i}" in
+    -c|-C) i=\$((i + 2)) ;;
+    -*) i=\$((i + 1)) ;;
+    *) sub="\${!i}"; break ;;
+  esac
+done
+[ -n "\${FAIL_GIT:-}" ] && [ "\$sub" = "\$FAIL_GIT" ] && exit 128
+exec "$REAL_GIT" "\$@"
+SHIM
+chmod +x "$TMP/failgit/git"
+failcls() { # <git-subcommand> <from> <to>
+  ( cd "$R" && FAIL_GIT="$1" PATH="$TMP/failgit:$PATH" "$SUT" classify --from "$2" --to "$3" --base refs/remotes/origin/main )
+}
+R="$GEN_R"; A="$GEN_A"
+eq "$(verdict "$(failcls no-such-subcommand "$A" "$GEN_REGEN")")" "mechanical" \
+   "control: the shim refusing nothing leaves the generated-tier bring-current mechanical"
+out=$(failcls check-attr "$A" "$GEN_MERGE")
+eq "$(verdict "$out")" "judgment" "an attribute read that fails exempts nothing"
+has "$out" "generated/r.txt conflicted" "…so the render's conflict is judged like any file's"
+out=$(failcls diff-tree "$GEN_MERGE" "$GEN_REGEN")
+eq "$(verdict "$out")" "judgment" "a commit of its own whose change cannot be read is judgment"
+has "$out" "\"chore: regenerate\" is a commit of its own, and what it changed could not be read" "…and says so"
+out=$(failcls rev-list "$A" "$GEN_REGEN")
+eq "$(verdict "$out")" "judgment" "a history whose commits cannot be listed is judgment"
+has "$out" "could not be listed" "…and says so"
 
 echo "# classify: merging anything but the base is judgment, and so is an octopus"
 R="$CLEAN_R"; A="$CLEAN_A"

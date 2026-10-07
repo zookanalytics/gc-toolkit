@@ -97,12 +97,17 @@ empty_blob() {
 }
 
 # NUL-separated paths on stdin, the ones .gitattributes at <commit> does not mark
-# linguist-generated on stdout, NUL-separated.
+# linguist-generated on stdout, NUL-separated. An attribute read that fails
+# exempts nothing, so every path goes on to be judged.
 reviewed_paths() { # <commit>
-  git check-attr -z --stdin --source "$1" linguist-generated 2>/dev/null \
-    | while IFS= read -r -d '' p && IFS= read -r -d '' _attr && IFS= read -r -d '' val; do
-        [ "$val" = "set" ] || printf '%s\0' "$p"
-      done
+  cat > "$WORK/paths"
+  if ! git check-attr -z --stdin --source "$1" linguist-generated <"$WORK/paths" >"$WORK/attrs" 2>/dev/null; then
+    cat "$WORK/paths"
+    return
+  fi
+  while IFS= read -r -d '' p && IFS= read -r -d '' _attr && IFS= read -r -d '' val; do
+    [ "$val" = "set" ] || printf '%s\0' "$p"
+  done <"$WORK/attrs"
 }
 
 # True when git reads <blob> as binary, by its own test: a diff from the empty
@@ -267,7 +272,7 @@ classify_merge() { # <c> <p1> <p2>
 
 # The commits <to> adds over <from> along the branch's own line, each judged.
 classify() { # <from> <to> <base-ref>
-  local from="$1" to="$2" base="$3" c parents p1 p2 n subj
+  local from="$1" to="$2" base="$3" c commits parents p1 p2 n subj
   VERDICT="mechanical"; REASONS=""
   [ -n "$WORK" ] || WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-bring-current-guard.XXXXXX") || { judge "no scratch directory to replay the merge in"; return; }
   from=$(git rev-parse -q --verify "$from^{commit}" 2>/dev/null) || { judge "the start of the bring-current ($1) is not a commit here"; return; }
@@ -284,14 +289,20 @@ classify() { # <from> <to> <base-ref>
     judge "the pushed head $(short "$to") does not descend from $(short "$from"): the branch history was rewritten"
     return
   fi
-  for c in $(git rev-list --first-parent "$from..$to" 2>/dev/null); do
+  if ! commits=$(git rev-list --first-parent "$from..$to" 2>/dev/null); then
+    judge "the commits from $(short "$from") to $(short "$to") could not be listed"
+    return
+  fi
+  for c in $commits; do
     parents=$(git rev-list --parents -n 1 "$c" 2>/dev/null)
     set -- $parents
     shift
     n=$#
     subj=$(git log -1 --format=%s "$c" 2>/dev/null)
     if [ "$n" -eq 1 ]; then
-      if [ -n "$(git diff-tree -r -z --no-renames --name-only "$1" "$c" 2>/dev/null | reviewed_paths "$c" | tr '\0' '\n')" ]; then
+      if ! git diff-tree -r -z --no-renames --name-only "$1" "$c" >"$WORK/own" 2>/dev/null; then
+        judge "$(short "$c") \"$subj\" is a commit of its own, and what it changed could not be read"
+      elif [ -n "$(reviewed_paths "$c" <"$WORK/own" | tr '\0' '\n')" ]; then
         judge "$(short "$c") \"$subj\" is a commit of its own, not part of a merge"
       fi
       continue
