@@ -417,6 +417,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key`. A proactive first reaction disposes it: routed to a pool, held on an edge, or put to the operator as a visit. |
 | `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |
 | `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |
+| `assets/scripts/single-flight.sh` | shared primitive | The per-rig pass lock a cadence order holds, so one pass never overlaps the next tick and a lock held past its stall bound is reported as a wedged pass. Sourced by `refinery-reconcile.sh` and `epic-steward.sh`. |
 | `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. `doctor/check-seed-audit-current` reports its freshness in a checkout; its `--check-merge` mode is what `merge.sh` gates a landing on. |
 | `assets/scripts/step-close.sh` | shared primitive | A graph.v2 step advances only by closing its own bead, and every formula's steps end here. |
 | `assets/scripts/worktree-setup.sh` | shared primitive | Agent `pre_start` worktree creation, for the polecat, polecat-codex, refinery, and proactive templates. |
