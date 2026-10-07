@@ -66,7 +66,8 @@ eq "$(approvals "[$(rv 1 human1 APPROVED 2026-08-20T00:00:00Z),$(rv 3 human1 APP
 
 echo "# every reader sources the one definition"
 READERS="assets/scripts/merge.sh
-assets/scripts/pr-facts.sh"
+assets/scripts/pr-facts.sh
+assets/scripts/bring-current-guard.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

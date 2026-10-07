@@ -1206,6 +1206,62 @@ awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-
 eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
    "control: chain-less store-only arm drains with the chain open (the defect is real)"
 
+# --- 6c. The bring-current guard. ---------------------------------------------
+# A merge-in child that took judgment on an approved PR must not reach the
+# handoff before its guard has filed the visit and dismissed the approval, and a
+# guard that cannot finish must hand nothing off: the open bead is what keeps
+# blocking the anchor's merge until a re-run finishes the guard. So the block
+# sits after the verified push, which gives it the pushed head, and before the
+# handoff, and it reads the origin head from before the push.
+BCG_BLOCK="$(extract submit-bring-current-guard)"
+[ -n "$BCG_BLOCK" ] \
+  && ok "bring-current guard extracted between submit-bring-current-guard markers" \
+  || bad "bring-current-guard extraction EMPTY — markers missing from $TOML"
+case "$BCG_BLOCK" in
+  *\\*) bad "the guard block contains a backslash — TOML line-ending escapes will mangle it" ;;
+  *)    ok  "the guard block is backslash-free" ;;
+esac
+PRE_LN=$(grep -n '^PRE_PUSH_HEAD=' "$TOML" | head -1 | cut -d: -f1)
+PUSH_LN=$(grep -n '^git push origin HEAD ' "$TOML" | head -1 | cut -d: -f1)
+VERIFY_LN=$(grep -n 'PUSH VERIFICATION FAILED' "$TOML" | head -1 | cut -d: -f1)
+BCG_LN=$(grep -n '^# >>> submit-bring-current-guard$' "$TOML" | cut -d: -f1)
+CONSUME_LN=$(grep -n '^# >>> submit-target-consume$' "$TOML" | cut -d: -f1)
+{ [ -n "$PRE_LN" ] && [ -n "$PUSH_LN" ] && [ "$PRE_LN" -lt "$PUSH_LN" ]; } \
+  && ok "the origin head is read before the push" \
+  || bad "PRE_PUSH_HEAD must be read before the push (read ${PRE_LN:-?}, push ${PUSH_LN:-?})"
+{ [ -n "$VERIFY_LN" ] && [ -n "$BCG_LN" ] && [ -n "$CONSUME_LN" ] && [ "$BCG_LN" -gt "$VERIFY_LN" ] && [ "$BCG_LN" -lt "$CONSUME_LN" ]; } \
+  && ok "the guard runs after the verified push and before the handoff" \
+  || bad "the guard must sit between the push verification and the handoff (verify ${VERIFY_LN:-?}, guard ${BCG_LN:-?}, handoff ${CONSUME_LN:-?})"
+
+cat > "$TMP/pack/assets/scripts/bring-current-guard.sh" <<'BCG'
+#!/usr/bin/env bash
+printf 'GUARD\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_GUARD_ARGV:-/dev/null}"
+exit "${FAKE_GUARD_RC:-0}"
+BCG
+chmod +x "$TMP/pack/assets/scripts/bring-current-guard.sh"
+# run_bcg <guard-rc> [pre-push-head] -> "<rc>|<trace>"
+run_bcg() {
+  : > "$TMP/log"; : > "$TMP/guard-argv"
+  printf '%s\n' "$BCG_BLOCK" > "$TMP/bcg.sh"
+  local rc=0
+  FAKE_GUARD_RC="$1" FAKE_GUARD_ARGV="$TMP/guard-argv" FAKE_LOG="$TMP/log" \
+    LOCAL_HEAD=sha-local PRE_PUSH_HEAD="${2-sha-pre}" \
+    bash "$TMP/bcg.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(trace)"
+}
+eq "$(run_bcg 0)" "0|GUARD" "a guard that finishes lets the handoff proceed, with no drain"
+eq "$(cat "$TMP/guard-argv")" "guard --bead tk-work --to sha-local --from sha-pre" \
+   "…called on the claimed bead with the pushed head and the origin head from before the push"
+eq "$(run_bcg 1)" "1|GUARD,DRAIN" "a guard that cannot finish drains before any handoff write"
+grep -q "BRING-CURRENT GUARD DID NOT FINISH" "$TMP/out" \
+  && ok "…and says the bead is not handed off" \
+  || bad "the guard failure must say the bead is not handed off"
+eq "$(run_bcg 0 '')" "0|GUARD" "an unread origin head still runs the guard, which decides what that means"
+eq "$(cat "$TMP/guard-argv")" "guard --bead tk-work --to sha-local --from " \
+   "…passing the empty start through rather than dropping the flag"
+rm -f "$TMP/pack/assets/scripts/bring-current-guard.sh"
+
 # --- 7. The branch release. ---------------------------------------------------
 # Releasing the branch destroys the shape section 1's gate asserts, so it is
 # ordered behind every durable write the step owes. Ahead of one, a session

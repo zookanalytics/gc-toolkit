@@ -620,6 +620,11 @@ review's result set.
   none is in flight. An unapproved one records its posture and gets nothing: a
   bring-current costs a polecat round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is.
+  The child's handoff runs `bring-current-guard.sh`: a bring-current git made
+  on its own, or whose conflicts kept both sides' insertions whole, leaves the
+  approval standing, and one that took judgment files a visit on the anchor and
+  dismisses the approval, so materially changed code is re-reviewed rather than
+  landed under the approval given before it.
   A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
   closed child does not, so a branch still CONFLICTING with nothing in flight is

@@ -449,6 +449,13 @@ if [ -n "$REJECTION" ]; then
     # force-push it. prepare_mode is stamped merge; an absent stamp resolves to
     # merge here too, so a dropped stamp never triggers a rewrite.
     echo "resuming rejected branch by MERGE (git merge --no-edit origin/{{base_branch}}); never rebase or force-push"
+    # The PR head this bring-current starts from, recorded before the merge
+    # moves HEAD. submit-and-exit's bring-current guard reads what the push
+    # added from here, so a session that re-runs the handoff after the push
+    # still sees the whole bring-current.
+    RESUME_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+    RESUME_FROM=$(git rev-parse -q --verify "refs/remotes/origin/$RESUME_BRANCH" || git rev-parse HEAD)
+    gc bd update "$WORK_BEAD_ID" --set-metadata bring_current_from="$RESUME_FROM"
     git merge --no-edit origin/{{base_branch}}
     # Conflicts (likely the rejection reason): resolve, git add, git commit.
     gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
@@ -1107,10 +1114,10 @@ echo "landing target: $LANDING_TARGET"
 committed (`chore: capture remaining work ($WORK_BEAD_ID)`) — never push
 with untracked work left behind.
 
-**3. auto_push=false halt arm, then push.** The halt arm is a TERMINAL exit,
-so it carries its own copy of the chain-close block — `exit 0` never reaches
-step 5, and each fenced block is its own shell (the test pins the copy
-byte-identical to step 7's, +2 indent):
+**3. auto_push=false halt arm, then push, then the bring-current guard.** The
+halt arm is a TERMINAL exit, so it carries its own copy of the chain-close
+block — `exit 0` never reaches step 5, and each fenced block is its own shell
+(the test pins the copy byte-identical to step 7's, +2 indent):
 
 ```bash
 # >>> submit-auto-push-halt
@@ -1154,6 +1161,9 @@ if [ "$AUTO_PUSH" = "false" ]; then
   exit 0
 fi
 # <<< submit-auto-push-halt
+# The origin head before this push: where the bring-current guard below starts
+# reading when no resume recorded a start of its own.
+PRE_PUSH_HEAD=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 git push origin HEAD || { echo "PUSH FAILED — bead stays with polecat. A non-fast-forward rejection means the branch moved under you; re-fetch, MERGE origin in, and retry — never force-push (branches are brought current by merge, never rebase)."; gc runtime drain-ack; exit 1; }
 # Verify the ref is actually on origin before trusting the push.
 REMOTE_REF=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
@@ -1163,7 +1173,28 @@ if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
     gc runtime drain-ack
     exit 1
 fi
+# >>> submit-bring-current-guard
+BCG=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/bring-current-guard.sh" ] && { BCG="$c/assets/scripts/bring-current-guard.sh"; break; }
+done
+: "${BCG:?bring-current-guard.sh not found in the pack; a merge-in child is not handed off without its guard}"
+if ! "$BCG" guard --bead "$WORK_BEAD_ID" --to "$LOCAL_HEAD" --from "${PRE_PUSH_HEAD:-}"; then
+  echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_BEAD_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard."
+  gc runtime drain-ack
+  exit 1
+fi
+# <<< submit-bring-current-guard
 ```
+
+The bring-current guard runs for every handoff and acts only on a merge-in
+child, the bead pr-facts.sh's conflict arm files for an approved PR whose
+branch conflicts. Bringing that branch current either took no judgment (git
+merged it, or each conflict kept both sides' insertions whole), and the
+approval stands, or it took judgment, and the guard files a visit on the anchor
+and dismisses the approval so the operator re-reviews what changed. A guard
+that cannot finish hands nothing off: the bead stays open and still blocks the
+anchor, so nothing lands under an approval the guard could not check.
 
 **4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the
