@@ -24,9 +24,9 @@
 # text an operator or a later arm (pr-stack) added; the region writes its own
 # `## Summary` heading, so a stored pr_summary that repeats one is de-duplicated.
 # Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
-# anchors gate-ensure last recorded as settled are visited first and the rest
-# after them, each group in a rotation of its own, and no new anchor starts
-# past the deadline. The draft-to-ready arm's walk is paced the same way, on a
+# anchors gate-ensure last recorded as settled, and whose rows carry no hold
+# this arm applies, are visited first and the rest after them, each group in a
+# rotation of its own, and no new anchor starts past the deadline. The draft-to-ready arm's walk is paced the same way, on a
 # rotation of its own.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
@@ -390,25 +390,37 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pre_open_gate) || 
 
 # --- visit order: the anchors most likely to open first, each group in rotation
 # The walk's cost grows with the pre-open set, so a deadline can stop it. An
-# anchor gate-ensure last recorded as settled (every lane green, nothing owed)
-# is visited first: opening one takes it out of this set, so a pass the
-# deadline stops still opened what it reached. A settled anchor this arm holds
-# (an operator's merge_hold on a green branch, a PR a human closed at this
-# head) stays settled, so the settled group rotates on a cursor of its own: in
-# a fixed order the same held anchors would lead every pass and the deadline
-# would keep the settled anchors behind them from ever opening. The settled
-# mark only orders the walk; every anchor still meets the full gate below. The
-# others rotate after the arm's own cursor (pace-lib.sh).
+# anchor gate-ensure last recorded as settled (every pre-open lane green and
+# nothing owed) is visited first, unless its own row carries a hold the gate
+# below applies: an operator's merge_hold or rebase_hold, or no check_set.
+# gate-ensure settles a green anchor whatever holds it, and a held anchor in the
+# first group spends a visit an openable one needs. Opening an anchor takes it
+# out of this set, so a pass the deadline stops still opened what it reached.
+# An anchor in the first group can still be held, by a PR a human closed at
+# this head or by a lane that left green after gate-ensure last visited it, so
+# the group rotates on a cursor of its own: in a fixed order the same held
+# anchors would lead every pass and the deadline would keep the ones behind
+# them from ever opening. The grouping only orders the walk; every anchor still
+# meets the full gate below. The others rotate after the arm's own cursor
+# (pace-lib.sh).
 pace_start "$CURSOR" "$DEADLINE"
-if split_rows=$(printf '%s' "$ANCHORS" | jq -r '
-      .[] | (if ((.metadata["pr.machine"] // "") | tostring | startswith("settled@"))
-             then "first" else "rest" end) + "\t" + tojson' 2>/dev/null); then
-  first_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "first" { print $2 }' | pace_order "$PACE_FIRST_CURSOR")
-  rest_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "rest" { print $2 }' | pace_order "$CURSOR")
-else
-  first_rows=""
-  rest_rows=$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
-fi
+first_rows=""; rest_rows=""
+while IFS=$'\x1f' read -r machine mhold rhold cs arow; do
+  [ -n "${arow:-}" ] || continue
+  if [ "${machine#settled@}" != "$machine" ] && ! is_held "$mhold" && ! is_held "$rhold" \
+     && [ -n "$(printf '%s' "$cs" | tr -d '[:space:],')" ]; then
+    first_rows="$first_rows$arow"$'\n'
+  else
+    rest_rows="$rest_rows$arow"$'\n'
+  fi
+done <<SPLIT_EOF
+$(printf '%s' "$ANCHORS" | jq -r '
+    .[] | . as $row | (.metadata // {}) as $m
+    | [ ($m["pr.machine"] // ""), ($m.merge_hold // ""), ($m.rebase_hold // ""), ($m.check_set // "") ]
+    | map(tostring | gsub("[\u001f\n]"; " ")) + [ $row | tojson ] | join("\u001f")' 2>/dev/null)
+SPLIT_EOF
+first_rows=$(printf '%s' "$first_rows" | pace_order "$PACE_FIRST_CURSOR")
+rest_rows=$(printf '%s' "$rest_rows" | pace_order "$CURSOR")
 first_n=$(printf '%s' "$first_rows" | awk 'NF { n++ } END { print n + 0 }')
 rest_n=$(printf '%s' "$rest_rows" | awk 'NF { n++ } END { print n + 0 }')
 
@@ -692,11 +704,11 @@ $(printf '%s\n' "$rest_rows" | awk 'NF { print "rest\t" $0 }')
 ANCHORS_EOF
 pace_end
 
-paced="visited $PACE_VISITED of $((first_n + rest_n)) pre-open anchors ($first_n settled first)"
+paced="visited $PACE_VISITED of $((first_n + rest_n)) pre-open anchors ($first_n settled and unheld first)"
 if [ -n "$PACE_RESUME_AT" ]; then
   echo "$PROG: $paced before the deadline; the next pass resumes at $PACE_RESUME_AT"
 elif [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
-  echo "$PROG: $paced before the deadline; $PACE_FIRST_SKIPPED settled anchors wait for the next pass"
+  echo "$PROG: $paced before the deadline; $PACE_FIRST_SKIPPED settled and unheld anchors wait for the next pass"
 else
   echo "$PROG: $paced"
 fi

@@ -551,7 +551,7 @@ heads() { grep -o 'pr list --head [^ ]*' "$STUB_GH_LOG" | awk '{print $4}' | pas
 out=$("$SUT" --deadline 1 --cursor "$OCUR" 2>&1); rc=$?
 eq "$rc" 0 "a paced pass exits 0"
 eq "$(heads)" "polecat/q3,polecat/q1" "past the deadline one settled anchor goes first, then one other anchor"
-has "$out" "visited 2 of 4 pre-open anchors (2 settled first) before the deadline; the next pass resumes at Q2" "the pass names its pacing and where the rotation resumes"
+has "$out" "visited 2 of 4 pre-open anchors (2 settled and unheld first) before the deadline; the next pass resumes at Q2" "the pass names its pacing and where the rotation resumes"
 eq "$(cat "$OCUR" 2>/dev/null)" "Q1" "the cursor records the other anchor, never a settled one"
 eq "$(cat "$OCUR.first" 2>/dev/null)" "Q3" "the settled anchors rotate on a cursor of their own"
 : > "$STUB_GH_LOG"
@@ -560,10 +560,28 @@ eq "$(heads)" "polecat/q4,polecat/q2" "the next pass resumes both rotations afte
 : > "$STUB_GH_LOG"
 out=$("$SUT" --deadline "$(( $(date +%s) + 600 ))" --cursor "$OCUR" 2>&1)
 eq "$(heads)" "polecat/q3,polecat/q4,polecat/q1,polecat/q2" "a deadline that has not passed visits every anchor, settled first"
-has "$out" "visited 4 of 4 pre-open anchors (2 settled first)" "…and reports the whole walk"
+has "$out" "visited 4 of 4 pre-open anchors (2 settled and unheld first)" "…and reports the whole walk"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 eq "$(heads)" "polecat/q3,polecat/q4,polecat/q1,polecat/q2" "with no pacing args the walk is unbounded, settled first"
+
+echo "# pacing: a settled anchor this arm holds on its own row is not visited first"
+# R2 to R5 all carry a settled verdict, but R3 has an operator's merge_hold, R4
+# a rebase_hold and R5 no check_set, and the gate holds each of those whatever
+# its lanes say. Only R2 goes first; the held three rotate with R1, which is not
+# settled.
+store "[$(pre R1 polecat/r1), $(pre R2 polecat/r2 "$SETTLED"),
+        $(pre R3 polecat/r3 "$SETTLED"',"merge_hold":"true"'),
+        $(pre R4 polecat/r4 "$SETTLED"',"rebase_hold":"true"'),
+        $(pre R5 polecat/r5 "$SETTLED" "")]"
+OCUR="$TMP/open-held.cursor"; rm -f "$OCUR" "$OCUR.first"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$OCUR" 2>&1)
+eq "$(heads)" "polecat/r2,polecat/r1" "past the deadline the one settled, unheld anchor goes first, then one other"
+has "$out" "visited 2 of 5 pre-open anchors (1 settled and unheld first) before the deadline; the next pass resumes at R3" "the held settled anchors wait in the other rotation"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(heads)" "polecat/r2,polecat/r1,polecat/r3,polecat/r4,polecat/r5" "unpaced, the held settled anchors are visited among the rest"
 
 echo "# the phase model: an open-as-draft check opens the PR as a draft, and a later arm surfaces it"
 # A controlled index so the test does not depend on the live pack's review-checks.toml:

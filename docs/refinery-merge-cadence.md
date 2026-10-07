@@ -164,14 +164,16 @@ the cadence — the arms run whether or not any refinery session is awake.
    in the same pass, for the reasons merge does not. A pass that ends inside
    this arm still makes progress: an anchor it opened has left its domain, and
    an open interrupted before its record is adopted by the next pass rather
-   than opened twice. It walks under its share of the pass budget: the anchors
-   gate-ensure last recorded as `settled` first (the mark only orders the walk;
-   each still meets the full gate), then the rest, with at least one of each
-   visited every pass. Each group rotates on a cursor of its own
-   (`pr-open.cursor.first` and `pr-open.cursor` in the pass state dir), because
-   a settled anchor this arm holds, such as an operator's `merge_hold` on a
-   green branch, stays settled, and in a fixed order it would lead every pass
-   while the settled anchors behind it waited. For each anchor whose
+   than opened twice. It walks under its share of the pass budget: first the
+   anchors gate-ensure last recorded as `settled` whose rows carry no hold this
+   arm applies (`merge_hold`, `rebase_hold`, an empty `check_set`), because
+   gate-ensure settles a green anchor whatever holds it; then the rest, with at
+   least one of each group visited every pass. The grouping only orders the
+   walk, and each anchor still meets the full gate. Each group rotates on a
+   cursor of its own (`pr-open.cursor.first` and `pr-open.cursor` in the pass
+   state dir), because a first-group anchor this arm still holds, such as one
+   whose PR a human closed at this head, stays in the group, and in a fixed
+   order it would lead every pass while the anchors behind it waited. For each anchor whose
    every `pre-open` check in `check_set` reads `green` (the one resolver names
    that set — `none`/`off` and the universal `approval` rule dropped; an empty
    set is held, never read as ungated): adopt an existing PR for the branch or
