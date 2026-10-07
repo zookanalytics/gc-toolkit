@@ -1,7 +1,8 @@
 # lifecycle.toml — the declared state space of the anchor lifecycle.
 # The anchor state is `status` x `merge_result`. This file is the single source
-# of truth: assets/scripts/lifecycle.sh embeds the same table as shell constants
-# (marked block `lifecycle-state-table`) and lifecycle.test.sh fails on drift.
+# of truth: gctk lifecycle, which assets/scripts/lifecycle.sh execs, carries the
+# executable copy (services/gctk/internal/lifecycle), and lifecycle.test.sh fails
+# on drift.
 # Every metadata key the pack writes is enumerated in [metadata]; a key not
 # listed here is not pack state (docs/component-model.md §2-§3).
 

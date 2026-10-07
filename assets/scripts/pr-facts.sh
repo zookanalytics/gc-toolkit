@@ -91,10 +91,14 @@
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
 # Args: --fix-pool <pool>; --posture-only (the cheap pre-merge arm: record
-# posture and stop); --route-comments-only (the pre-merge arm that routes
+# posture and stop); --route-comments-only (the early arm that routes
 # operator feedback and stops after it, skipping the write-back sweep and every
 # non-feedback arm, so a pass killed before the full arm has still picked the
-# feedback up). Caller: refinery-reconcile.sh
+# feedback up); --deadline <epoch-secs> and --cursor <file> pace the per-anchor
+# walk of the feedback and full modes, and the full mode's write-back sweep on a
+# cursor of its own (pace-lib.sh): each walk is a rotation that starts no new
+# anchor past the deadline. The posture-only mode is never paced, because
+# merge.sh needs every posture current. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
 
@@ -130,6 +134,13 @@ RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 # abandoning + filing a rework-or-close visit; it stamps gc.superseded_by, the
 # explicit terminal state doctor/check-closed-implies-landed accepts.
 REHOME="$SCRIPTS_DIR/bead-rehome.sh"
+# The guarded visit close. Both visit retires below go through it, so a retired
+# visit carries gc.outcome and gc.outcome_reason, the board's outcome and headline
+# for a sitting that left no takeaway, and both stamps read back before the close.
+# pr-facts holds none of the visits it retires, and bd's close verb refuses a bead
+# assigned to another actor, so both pass --force. visit-close.sh still tries the
+# plain close first, so an unassigned visit closes without the override.
+VISIT_CLOSE="$SCRIPTS_DIR/visit-close.sh"
 # The dispatch note a validation-pass bead carries, naming mol-validate as its
 # method. The human-feedback arm opens such a pass below; a validator that
 # claims the bead reads this note to know the pass is a mol-validate pour.
@@ -139,15 +150,18 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
 
-FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0
+FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool)            FIX_POOL="${2:-}"; shift 2 ;;
     --posture-only)        POSTURE_ONLY=1; shift ;;
     --route-comments-only) ROUTE_ONLY=1; shift ;;
+    --deadline)            DEADLINE="${2:-}"; shift 2 ;;
+    --cursor)              CURSOR="${2:-}"; shift 2 ;;
     *) shift ;;
   esac
 done
+[ "$POSTURE_ONLY" = 1 ] && { DEADLINE=""; CURSOR=""; }
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -391,6 +405,8 @@ ALL_STATUSES="$LIVE_STATUSES,closed"
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pace-lib.sh
+. "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -501,7 +517,9 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
   # refinery a rework of no PR, which it resolves to merge_strategy=direct and a
   # push straight to the target branch — the same partial-write wedge one field
   # over. merge_strategy is always minted "mr"; the PR keys must read back the
-  # values this child was minted with.
+  # values this child was minted with. pr_number is compared as a string: the
+  # create payload stores it as one, and a --set-metadata re-stamp stores it as
+  # a number.
   gc bd show "$1" --json 2>/dev/null | scrub | jq -r \
     --arg ab "$2" --arg br "$3" --arg tg "$4" --arg rr "$5" --arg pm "$6" --arg ep "$7" --arg pn "$8" '
     (.[0].metadata // {}) as $m
@@ -510,7 +528,7 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
        and ($m.rejection_reason // "") == $rr and ($m.prepare_mode // "") == $pm
        and ($m.merge_strategy // "") == "mr"
        and ($m.existing_pr // "") == $ep and ($m.pr_url // "") == $ep
-       and ($m.pr_number // "") == $pn) | tostring' 2>/dev/null
+       and (($m.pr_number // "") | tostring) == $pn) | tostring' 2>/dev/null
 }
 
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
@@ -755,7 +773,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 # still clears its visits, and in every rig's cadence so each store cleans its own.
 # Fail closed on an unreadable subject: a visit whose anchor cannot be read this
 # pass is left for the next, never retired on a read that did not land.
-# The pre-merge arms (--posture-only, --route-comments-only) write nothing here.
+# The early arms (--posture-only, --route-comments-only) write nothing here.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if av_visits=$(bd_list --status=open --metadata-field "escalation_key=merge-blocked-approval"); then
     while IFS="$(printf '\t')" read -r avid avsubj; do
@@ -768,8 +786,8 @@ if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
           continue
         fi
       fi
-      if gc bd update "$avid" --status=closed --set-metadata gc.outcome=moot \
-           --append-notes "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence files no merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null 2>&1; then
+      if "$VISIT_CLOSE" --visit "$avid" --outcome moot --force \
+           --reason "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence files no merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null; then
         echo "$PROG: retired stale merge-blocked-approval visit $avid (subject ${avsubj:-<none>} ${avstate:-none-recorded})"
       else
         echo "$PROG: could not retire stale merge-blocked-approval visit $avid; leaving it for the operator" >&2
@@ -786,12 +804,14 @@ fi
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
 postured=0; answered=0; unpostured=0; reaped=0
+pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
   [ -n "$id" ] || continue
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
+  pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // ""')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   prurl=$(printf '%s' "$row" | jq -r '.metadata.pr_url // ""')
@@ -808,9 +828,8 @@ while IFS= read -r row; do
   # human clears it.
   armed=$(printf '%s' "$row" | jq -r '.metadata["gc.dispatch_when_ready"] // ""')
 
-  # --- pinned identity read (same shape as merge.sh) ----------------------------
-  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
-    --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url,labels 2>/dev/null)
+  # --- pinned identity read (merge.sh's field set, plus labels) -----------------
+  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json "$PR_FIELDS,labels" 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "$PROG: PR#$num view failed; NOTHING recorded for $id (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
@@ -839,7 +858,7 @@ while IFS= read -r row; do
   [ -n "$target" ] || target="$base"
 
   # --- PR merged (out-of-band, or a died record): record it ----------------------
-  # Reconciliation is the full pass's; the pre-merge arms (--posture-only,
+  # Reconciliation is the full pass's; the early arms (--posture-only,
   # --route-comments-only) reconcile no terminal state, so a MERGED or CLOSED
   # anchor falls through to the OPEN filter.
   if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
@@ -956,8 +975,8 @@ CHILDREN_EOF
         # does not land this pass.
         vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
         if [ -n "$vid" ]; then
-          if gc bd update "$vid" --status=closed --set-metadata gc.outcome=moot \
-               --append-notes "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null 2>&1; then
+          if "$VISIT_CLOSE" --visit "$vid" --outcome moot --force \
+               --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null; then
             echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
           else
             echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
@@ -1021,7 +1040,7 @@ CHILDREN_EOF
   # open one, so this seam stays independent of the draft gate below. Best-effort
   # and idempotent — pr-status-label.sh derives working/needs-review/needs-attention
   # from the anchor's own state and writes only on a change. This sweep is the full
-  # pass's alone: it costs a derivation per anchor, which the pre-merge arms spend
+  # pass's alone: it costs a derivation per anchor, which the early arms spend
   # only where they change one of the label's inputs (the posture record and the
   # feedback routing below).
   cur_labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
@@ -1186,17 +1205,17 @@ CHILDREN_EOF
 
   # merge.sh reads posture off the bead and never asks GitHub, so the record has
   # to be no older than the merge arm that reads it. --posture-only is the
-  # earliest pre-merge pass: it writes the posture and stops here.
+  # pre-merge pass: it writes the posture and stops here.
   # --route-comments-only runs on into the feedback-routing arm below (and stops
-  # after it), so operator feedback is picked up before merge too rather than
-  # waiting for the full pass at the tail; every other dispatch arm is the full
-  # pass's, after merge.
+  # after it), so operator feedback is picked up ahead of the slow arms rather
+  # than waiting for the full pass at the tail; every other dispatch arm is the
+  # full pass's.
   [ "$POSTURE_ONLY" != 1 ] || continue
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   if [ -n "$rec_target" ] && [ -n "$base" ] && [ "$rec_target" != "$base" ]; then
-    # A pre-merge arm defers retarget handling to the full pass. A retargeted
+    # An early arm defers retarget handling to the full pass. A retargeted
     # anchor does not merge this pass, and its feedback is not routed while it
     # sits on the wrong base, so the early feedback arm skips it.
     [ "$ROUTE_ONLY" != 1 ] || continue
@@ -1388,7 +1407,7 @@ REAP_EOF
       skipped=$((skipped + 1)); continue
     fi
     # Past the skip guards, the anchor is dispatchable. When it also owes
-    # unanswered feedback, or on a pre-merge routing pass (--route-comments-only),
+    # unanswered feedback, or on an early routing pass (--route-comments-only),
     # this arm files no merge-in child: the feedback arm below dispatches a
     # prepare_mode=merge child that brings this same branch current (a MERGE of
     # origin/$base on resume) as it answers, so a merge-in child here would only
@@ -2363,8 +2382,16 @@ GATES
       fi ;;
   esac
 done <<ROWS_EOF
-$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR")
 ROWS_EOF
+pace_end
+if [ -n "$CURSOR$DEADLINE" ]; then
+  if [ -n "$PACE_RESUME_AT" ]; then
+    echo "$PROG: visited $PACE_VISITED of $(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null) PR anchors before the deadline; the next pass resumes at $PACE_RESUME_AT"
+  else
+    echo "$PROG: visited $PACE_VISITED of $(printf '%s' "$ANCHORS" | jq 'length' 2>/dev/null) PR anchors"
+  fi
+fi
 
 
 # --- PR write-back: acknowledge on pickup, reply and resolve on landing --------
@@ -2386,6 +2413,12 @@ ROWS_EOF
 # connection here is read to exhaustion. `gh --paginate` follows exactly one
 # cursor, so the reviews and the threads are separate reads rather than one
 # nested query, and neither carries a second cursor for it to choose between.
+#
+# Those reads cost at least four GitHub calls an anchor, so the sweep is paced
+# like the walk above (pace-lib.sh): the same deadline, a rotation on a cursor
+# of its own (<cursor>.writeback), and one anchor visited even on a pass whose
+# walk spent the deadline. The batch history below is reconciled on every
+# anchor ahead of the pacing, because it reads no GitHub.
 WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$num){
@@ -2434,7 +2467,7 @@ acked=0; replied=0; resolved=0
 owe() { local i; for i in $(printf '%s' "$1" | tr ',' ' '); do
   case " $wowing " in *" $i "*) : ;; *) wowing="$wowing $i" ;; esac
 done; }
-# The pre-merge arms answer for the merge arm (--posture-only) or route feedback
+# The early arms answer for the merge arm (--posture-only) or route feedback
 # early (--route-comments-only) and write nothing to GitHub; the full pass that
 # follows them carries the write-back.
 if [ "$POSTURE_ONLY" = 1 ] || [ "$ROUTE_ONLY" = 1 ]; then
@@ -2443,6 +2476,9 @@ elif ! WB_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_req
   echo "$PROG: write-back sweep skipped — could not re-read the anchors" >&2
   WB_ANCHORS=""
 fi
+WB_CURSOR="${CURSOR:+$CURSOR.writeback}"
+wb_due=$(printf '%s' "${WB_ANCHORS:-[]}" | jq '[ .[]? | select(((.metadata.pr_comment_disposition // "") | tostring) != "") ] | length' 2>/dev/null)
+pace_start "$WB_CURSOR" "$DEADLINE"
 while IFS= read -r wrow; do
   [ -n "${wrow:-}" ] || continue
   wid=$(printf '%s' "$wrow" | jq -r '.id // empty')
@@ -2505,6 +2541,7 @@ while IFS= read -r wrow; do
     echo "$PROG: $wid — PR#$wnum write-back skipped: the acting login is unresolved (every write keys off telling our own comments from a human's)" >&2
     continue
   }
+  pace_visit rest "$wid"; case $? in 1) continue ;; 2) break ;; esac
   wbranch=$(printf '%s' "$wrow" | jq -r '.metadata.branch // ""')
   wprurl=$(printf '%s' "$wrow" | jq -r '.metadata.pr_url // ""')
 
@@ -2956,8 +2993,16 @@ WB_REVIEW_CLEARS
     fi
   fi
 done <<WB_ROWS
-$(printf '%s' "$WB_ANCHORS" | jq -c '.[]' 2>/dev/null)
+$(printf '%s' "$WB_ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$WB_CURSOR")
 WB_ROWS
+pace_end
+if [ -n "$CURSOR$DEADLINE" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+  if [ -n "$PACE_RESUME_AT" ]; then
+    echo "$PROG: write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments before the deadline; the next pass resumes at $PACE_RESUME_AT"
+  else
+    echo "$PROG: write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments"
+  fi
+fi
 
 if [ "$POSTURE_ONLY" = 1 ]; then
   echo "$PROG: posture-only — $postured postures recorded, $unpostured not current, $skipped skipped"
@@ -2966,11 +3011,11 @@ if [ "$POSTURE_ONLY" = 1 ]; then
   # pass runs after merge, where the same rc would gate nothing.
   [ "$unpostured" -eq 0 ] || exit 1
 elif [ "$ROUTE_ONLY" = 1 ]; then
-  # The early feedback arm, run right after the posture arm and before merge, so
-  # operator feedback is routed on the same tick the posture is stamped instead of
-  # waiting for the full pass at the tail. Its rc holds nothing: routing is
-  # best-effort and the full pass re-runs it idempotently, so refinery-reconcile
-  # reports a non-zero but never holds merge on it.
+  # The early feedback arm, run after merge and pr-open and ahead of the slow
+  # arms, so operator feedback is routed on the tick the posture is stamped
+  # instead of waiting for the full pass at the tail. Its rc holds nothing:
+  # routing is best-effort and the full pass re-runs it idempotently, so
+  # refinery-reconcile reports a non-zero but never holds merge on it.
   echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
 else
   echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
