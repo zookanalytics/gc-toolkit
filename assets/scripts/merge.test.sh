@@ -5,7 +5,7 @@
 # (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, approval arms + veto,
 # CLEAN/UNSTABLE handling, BLOCKED naming its cause from reviewThreads +
-# reviewDecision, an UNKNOWN merge state read again a bounded number of times so
+# reviewDecision, an UNKNOWN merge state read again within one budget per pass so
 # one pass lands every approved clean PR); the recorded pr_posture hold, read off
 # the anchor;
 # identity refusals (fork, url/branch mismatch); the record for a PR already
@@ -1158,12 +1158,15 @@ eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed
 
 # GitHub computes mergeability lazily. A merge moves the base under every sibling,
 # and each sibling's first read after it answers UNKNOWN while the computation that
-# read started runs. pr_view_<n>.queue/ scripts that first read; the fixture is the
-# computed answer every later read gets.
+# read started runs. pr_view_<n>.queue/ scripts the reads in order; the fixture is
+# the computed answer every later read gets.
 unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
-unknown_first() { # num
+queue_answer() { # num seq answer: read <seq> gets <answer>
   mkdir -p "$GH_DIR/pr_view_$1.queue"
-  printf '%s' "$(prview "$1" OPEN UNKNOWN)" > "$GH_DIR/pr_view_$1.queue/1.json"
+  printf '%s' "$3" > "$GH_DIR/pr_view_$1.queue/$2.json"
+}
+unknown_first() { # num
+  queue_answer "$1" 01 "$(prview "$1" OPEN UNKNOWN)"
 }
 pinned_reads() { # num: reads of the pinned field set, re-reads included
   grep -c "^pr view $1 --repo github.com/zook/gc-toolkit --json state,isDraft," "$STUB_GH_LOG" || true
@@ -1185,7 +1188,7 @@ has "$out" "PR#131 answered UNKNOWN on the pinned read and CLEAN on re-read 1" "
 eq "$(pinned_reads 131)" "2" "the first re-read finds the state computed and the sibling reads no further"
 eq "$(pinned_reads 130)" "1" "a PR whose pinned read is already computed is not re-read"
 
-echo "# an UNKNOWN that stays UNKNOWN is read a bounded number of times, then held settled"
+echo "# an UNKNOWN that stays UNKNOWN is read until the pass's budget is spent, then held settled"
 store "[$(anchor RR4 133), $(rev RR4)]"
 printf '%s' "$(prview 133 OPEN UNKNOWN)" > "$GH_DIR/pr_view_133.json"
 approved 133
@@ -1196,11 +1199,42 @@ printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/sleep.log" > 
 chmod +x "$TMP/sleepbin/sleep"; : > "$TMP/sleep.log"
 : > "$STUB_GH_LOG"
 out=$(PATH="$TMP/sleepbin:$PATH" "$SUT" 2>&1)
-has "$out" "not mergeable yet (mergeStateStatus='UNKNOWN' after 3 re-read(s)); merge held" "a state still UNKNOWN after the last re-read holds for the pass"
+has "$out" "not mergeable yet (mergeStateStatus='UNKNOWN' after 3 re-read(s); the pass's re-read budget is spent); merge held" "a state still UNKNOWN when the budget is spent holds for the pass"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 eq "$(pinned RR4)" "settled@sha-133" "…and records settled, like any unready state that owes a person nothing"
 eq "$(pinned_reads 133)" "4" "the pinned read plus the default three re-reads"
 eq "$(tr '\n' ' ' < "$TMP/sleep.log")" "5 5 " "the first re-read goes out at once and each later one waits the default 5s"
+
+echo "# the budget belongs to the pass: once one PR spends it, a later UNKNOWN is not re-read"
+# A mergeability computation stalled across the repository leaves every candidate
+# UNKNOWN. The pass spends its three re-reads on the first and holds the rest on
+# their pinned reads, so a stall costs the pass one PR's re-reads, not one per PR.
+store "[$(anchor RR9 138), $(rev RR9), $(anchor RR10 139), $(rev RR10)]"
+for n in 138 139; do
+  printf '%s' "$(prview "$n" OPEN UNKNOWN)" > "$GH_DIR/pr_view_$n.json"
+  approved "$n"
+done
+: > "$TMP/sleep.log"; : > "$STUB_GH_LOG"
+out=$(PATH="$TMP/sleepbin:$PATH" "$SUT" 2>&1)
+has "$out" "PR#138 not mergeable yet (mergeStateStatus='UNKNOWN' after 3 re-read(s); the pass's re-read budget is spent); merge held" "the first UNKNOWN spends the pass's three re-reads"
+eq "$(pinned_reads 138)" "4" "…in its pinned read and three re-reads"
+has "$out" "PR#139 not mergeable yet (mergeStateStatus='UNKNOWN'; not re-read, the pass's re-read budget is spent); merge held" "the next UNKNOWN holds without a re-read"
+eq "$(pinned_reads 139)" "1" "…so its pinned read is its only read"
+eq "$(pinned RR10)" "settled@sha-139" "…and records settled, as an UNKNOWN held on its pinned read does"
+eq "$(tr '\n' ' ' < "$TMP/sleep.log")" "5 5 " "the pass waits only between the first PR's re-reads"
+
+echo "# a re-read that answers a computed state spends none of the budget"
+# Two siblings each answer UNKNOWN once and CLEAN on their first re-read. With a
+# budget of one, both land only because a deciding re-read costs nothing.
+store "[$(anchor RR11 140), $(rev RR11), $(anchor RR12 141), $(rev RR12)]"
+for n in 140 141; do
+  printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
+  unknown_first "$n"
+  approved "$n"
+done
+out=$(MERGE_STATE_REREADS=1 "$SUT" 2>&1)
+has "$out" "merge: 2 merged," "with a budget of one, both PRs whose first re-read computed land"
+has "$out" "PR#141 answered UNKNOWN on the pinned read and CLEAN on re-read 1" "…the second re-read after the first one decided"
 
 echo "# MERGE_STATE_REREADS=0 turns the re-read off"
 store "[$(anchor RR5 134), $(rev RR5)]"
@@ -1212,7 +1246,27 @@ out=$(MERGE_STATE_REREADS=0 "$SUT" 2>&1)
 has "$out" "not mergeable yet (mergeStateStatus='UNKNOWN'); merge held" "with no re-reads the pinned UNKNOWN holds for the pass"
 eq "$(pinned_reads 134)" "1" "…on the pinned read alone"
 
-echo "# a re-read that finds the head moved holds: the gates passed a different commit"
+echo "# a re-read that fails holds like a failed pinned read, not as GitHub still computing"
+# An empty answer is gh failing, and an unparseable one is no answer either.
+# Neither says anything about the merge state, so neither is recorded.
+store "[$(anchor RR13 142), $(rev RR13), $(anchor RR14 143), $(rev RR14)]"
+for n in 142 143; do
+  printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
+  unknown_first "$n"
+  approved "$n"
+done
+queue_answer 142 02 ""
+queue_answer 143 02 "gh: not json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#142 view failed on re-read 1 of its UNKNOWN merge state; merge held (anchor RR13, retry next pass)" "an empty re-read holds as a failed view"
+has "$out" "PR#143 view failed on re-read 1 of its UNKNOWN merge state; merge held (anchor RR14, retry next pass)" "…and so does an unparseable one"
+hasnt "$out" "not mergeable yet" "…neither is reported as an UNKNOWN merge state"
+eq "$(machine RR13)" "<absent>" "…the failed read records nothing"
+eq "$(machine RR14)" "<absent>" "…for either PR"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+echo "# a re-read that finds the head moved holds, naming what changed"
 store "[$(anchor RR6 135), $(rev RR6)]"
 printf '%s' "$(prview 135 OPEN CLEAN)" | jq -c '.headRefOid = "sha-135-pushed"' > "$GH_DIR/pr_view_135.json"
 unknown_first 135
@@ -1221,7 +1275,7 @@ unknown_first 135
 approved 135
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "PR#135 moved between the pinned read and re-read 1 of its UNKNOWN merge state; merge held" "a head that moved between the reads holds"
+has "$out" "PR#135 changed between the pinned read and re-read 1 of its UNKNOWN merge state (headRefOid 'sha-135' -> 'sha-135-pushed'); merge held" "a head that moved between the reads holds, and the log names both heads"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged on a head the gates never validated"
 
 echo "# a re-read that computes DIRTY keeps DIRTY's handling"
@@ -1236,8 +1290,7 @@ has "$(reason RR7)" "conflicts" "…and the reason names the conflict"
 echo "# a re-read that computes BLOCKED names its cause from the re-read, not the pinned read"
 store "[$(anchor RR8 137), $(rev RR8)]"
 printf '%s' "$(prview 137 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_137.json"
-mkdir -p "$GH_DIR/pr_view_137.queue"
-printf '%s' "$(prview 137 OPEN UNKNOWN)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_137.queue/1.json"
+queue_answer 137 01 "$(prview 137 OPEN UNKNOWN | jq -c '.reviewDecision = "APPROVED"')"
 approved 137
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
