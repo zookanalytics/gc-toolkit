@@ -181,6 +181,19 @@ eq "$(marked '{"body":"plain"}')" false "an unmarked body carries no mark"
 eq "$(marked '{"body":null}')" false "a null body carries no mark"
 eq "$(marked "{\"body\":\"x $MARK\"}")" true "gc_city_marked reads the body alone"
 
+echo "# no file in the pack posts to a pull request outside pr-post.sh"
+if [ -x "$DETECTOR" ] && git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
+  FILES="$TMPD/files"
+  if git -C "$REPO" ls-files -z >"$FILES"; then
+    BYPASS="$(cd "$REPO" && xargs -0 "$DETECTOR" <"$FILES" 2>&1)"; DRC=$?
+    eq "$DRC" 0 "the bypass detector is clean over every tracked file"
+    [ "$DRC" -eq 0 ] || printf '%s\n' "$BYPASS" | sed 's/^/     /'
+  else
+    bad "the bypass detector is clean over every tracked file" "git ls-files failed"
+  fi
+else
+  bad "the bypass detector is clean over every tracked file" "no detector at $DETECTOR, or $REPO is not a checkout"
+fi
 
 echo
 echo "pr-post.test.sh: $PASS passed, $FAIL failed"
