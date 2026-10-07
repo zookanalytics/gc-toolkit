@@ -14,9 +14,9 @@
 # and committing nothing: a hand-written conflict, no renderer, an unstaged
 # change or an untracked file besides the conflicts (left in place), a failed
 # render, a hung render, a render that moves a path neither side changed or only
-# one side changed, and a render that writes outside its tree, to a tracked file
-# or to a file it creates (removed, even where the abort writes back a path the
-# merge deleted).
+# one side changed, and a render that writes outside its tree, changing a
+# tracked file, creating a file, or both (every write undone, even where the
+# abort writes back a path the merge deleted).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,7 +62,7 @@ for f in "$ROOT"/inputs/*.txt; do
   cp "$f" "$OUT/$n.md"
 done
 [ -z "${STUB_RENDER_DRIFT:-}" ] || echo "a line neither side committed" >> "$OUT/$STUB_RENDER_DRIFT"
-[ -z "${STUB_RENDER_OUTSIDE:-}" ] || echo "stray" >> "$ROOT/notes.txt"
+[ -z "${STUB_RENDER_OUTSIDE:-}" ] || echo "stray" >> "$ROOT/$STUB_RENDER_OUTSIDE"
 [ -z "${STUB_RENDER_CREATE:-}" ] || echo "stray" > "$ROOT/$STUB_RENDER_CREATE"
 echo "wrote generated/seed-audit (stub)"
 RENDER
@@ -256,7 +256,7 @@ has "$out" "generated/seed-audit/inputs/c.txt.md" "…naming the path it moved"
 refused "$W" "$FEAT_C" "one-sided drift"
 
 W=$(stopped_merge feat)
-out=$(STUB_RENDER_OUTSIDE=1 "$SUT" resolve --dir "$W" 2>&1); rc=$?
+out=$(STUB_RENDER_OUTSIDE=notes.txt "$SUT" resolve --dir "$W" 2>&1); rc=$?
 eq "$rc" 1 "a render that writes outside its tree is refused"
 has "$out" "changed files outside generated/seed-audit" "…as such"
 refused "$W" "$FEAT" "out-of-tree render"
@@ -279,6 +279,18 @@ out=$(STUB_RENDER_CREATE=notes.txt "$SUT" resolve --dir "$W" 2>&1); rc=$?
 eq "$rc" 1 "a render that recreates a path the merge deleted is refused"
 has "$out" "created files outside generated/seed-audit: notes.txt" "…naming the path"
 refused "$W" "$FEAT" "recreated path"
+eq "$(cat "$W/notes.txt" 2>/dev/null)" "$(git -C "$R" show "$FEAT:notes.txt")" "…and the abort writes the branch's copy back"
+
+# A render that changes one file outside its tree and creates another is undone
+# both ways before the refusal, because a created file left in place stops the
+# caller's abort from ending the merge.
+W=$(stopped_merge feat main-gone)
+out=$(STUB_RENDER_OUTSIDE=inputs/a.txt STUB_RENDER_CREATE=notes.txt "$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 1 "a render that changes one file outside its tree and creates another is refused"
+has "$out" "changed files outside generated/seed-audit" "…naming the change"
+has "$out" "created files outside generated/seed-audit: notes.txt" "…and the created path"
+eq "$(cat "$W/inputs/a.txt")" "$(git -C "$R" show "$FEAT:inputs/a.txt")" "…with the changed file restored"
+refused "$W" "$FEAT" "changed and created"
 eq "$(cat "$W/notes.txt" 2>/dev/null)" "$(git -C "$R" show "$FEAT:notes.txt")" "…and the abort writes the branch's copy back"
 
 echo "# resolve with nothing to resolve"

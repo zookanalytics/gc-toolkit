@@ -109,7 +109,7 @@ run_bounded() {
 }
 
 resolve() { # <worktree>
-  local dir="$1" mh unmerged outside dirty loose mt_out mt_rc mt mt_paths render_out created gone p new changed both mb stray msg_file subject
+  local dir="$1" mh unmerged outside dirty loose mt_out mt_rc mt mt_paths render_out wrote created gone p new changed both mb stray msg_file subject
   git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || die "$dir is not a git worktree"
   mh=$(git -C "$dir" rev-parse --verify --quiet MERGE_HEAD 2>/dev/null) || die "no merge in progress in $dir"
   unmerged=$(git -C "$dir" diff --name-only --diff-filter=U 2>/dev/null) || refuse "could not list the unmerged paths"
@@ -147,27 +147,28 @@ resolve() { # <worktree>
   git -C "$dir" add -A -- "$GEN_TREE" || refuse "could not stage $GEN_TREE"
   [ -z "$(git -C "$dir" diff --name-only --diff-filter=U 2>/dev/null)" ] \
     || refuse "paths are still unmerged after the render"
-  # The renderer writes inside its own tree. A change anywhere else in the
-  # working tree would be left out of the commit while the checks that run next
-  # read it. Those writes are undone before the refusal, because the caller's
-  # abort refuses a path carrying unstaged changes on top of merged ones.
+  # The renderer writes inside its own tree, and the staging took every change
+  # and new file in it. Anything else the render changed or created would be left
+  # out of the commit while the checks that run next read it. A created file is
+  # no unstaged change, so `git diff` misses it and the untracked listing finds
+  # it. Both kinds are undone before the one refusal, because the caller's abort
+  # stops on either: it refuses a path carrying unstaged changes on top of merged
+  # ones, and it will not write a path back over an untracked file, which a
+  # render that recreates a path the merge deleted leaves there. git clean takes
+  # each created file by its literal path and deletes no tracked file.
+  wrote=""
   if ! git -C "$dir" diff --quiet 2>/dev/null; then
     git -C "$dir" checkout -- . >/dev/null 2>&1 || true
-    refuse "the render changed files outside $GEN_TREE"
+    wrote="changed files outside $GEN_TREE"
   fi
-  # A file the render created is no unstaged change, so the check above misses
-  # it, and the staging took every new file inside the tree. Any file untracked
-  # now is one the render wrote outside it. Those are removed before the refusal
-  # too, because the caller's abort will not write a path back over an untracked
-  # file, and a render that recreates a path the merge deleted leaves one there.
-  # git clean takes each by its literal path and deletes no tracked file.
   created=$(untracked "$dir" 2>/dev/null) || refuse "could not list the untracked files after the render"
   if [ -n "$created" ]; then
     gone=()
     while IFS= read -r -d '' p; do gone+=("$p"); done < <(untracked "$dir" -z 2>/dev/null)
     [ "${#gone[@]}" -eq 0 ] || git -C "$dir" --literal-pathspecs clean -f -q -- "${gone[@]}" >/dev/null 2>&1 || true
-    refuse "the render created files outside $GEN_TREE: $(printf '%s' "$created" | head -5 | tr '\n' ' ')"
+    wrote="${wrote:+$wrote, and }created files outside $GEN_TREE: $(printf '%s' "$created" | head -5 | tr '\n' ' ')"
   fi
+  [ -z "$wrote" ] || refuse "the render $wrote"
   new=$(git -C "$dir" write-tree 2>/dev/null) || refuse "could not write the resolved tree"
   changed=$(git -C "$dir" diff --name-only --no-renames "$mt" "$new" 2>/dev/null) \
     || refuse "could not compare the resolved tree with git's auto-merge"
