@@ -190,9 +190,16 @@ check_set_sentinel = "none"
 # out (docs/state-machine.md is the vocabulary's normative source); it is kept
 # here as the declaration the state-space invariant (I2/I6) describes.
 marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
-# `approval` as a check_set member is satisfied only by an external APPROVED
-# review at the live head, never by a check.approval marker.
-approval_member = "approval"
+# Approval is a UNIVERSAL merge rule, not a check_set member: merge.sh requires
+# every PR to carry a latest APPROVED review by an account other than the city's,
+# standing across later pushes until it is dismissed, with a standing
+# CHANGES_REQUESTED from any other account a veto. A dismissed review is dropped
+# before each reviewer's latest is taken, so it neither approves nor vetoes, and
+# it does not hide its author's older approval. No check.approval marker and no
+# check_set token arm or opt out of it; GitHub branch protection is an extra
+# layer, not the authority. Declaration only, like the rest of this section (the
+# rule lives in merge.sh).
+approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
 # I1 holds that a hold is a `blocks` edge to a live bead in the same store, so
@@ -397,6 +404,7 @@ keys = [
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
   "pr_summary", "merge_record_failures", "fold_target",
+  "opened_as_draft", "draft_readied",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -508,6 +516,21 @@ keys = [
 #   count that bead in the branch's PR-body ledger as work already on the branch.
 #   No pack script writes it. Absent means nothing was folded. Never cleared. A
 #   branch name.
+# opened_as_draft — the head oid a PR was opened (or adopted) as a draft at,
+#   because its check_set names an `open-as-draft` check that gates the
+#   draft->ready flip. pr-open.sh writes it on the pull_request transition: on a
+#   draft it created, or on an adopted draft only when the city's own login
+#   authored it and its timeline carries no conversion to draft. Its PRESENCE is
+#   what tells the draft-to-ready arm this is a draft the refinery owns the flip
+#   of (not an operator's manual draft or re-draft) and tells gate-ensure.sh the
+#   anchor is still in the open-as-draft stage. Absent means the PR opened ready,
+#   or is a draft someone else owns. Never cleared. An oid.
+# draft_readied — the head oid a PR was read ready at (pr-open.sh): the head the
+#   draft-to-ready arm flipped it at, or the head it already read ready at,
+#   whatever holds the anchor. Its PRESENCE stops that arm re-reading the PR
+#   every pass and stops it ever re-flipping a PR an operator later re-drafted,
+#   and tells gate-ensure.sh the anchor reached the ready-for-review stage.
+#   Absent means the arm has not read it ready. Never cleared. An oid.
 
 [metadata.gates]
 keys = [
@@ -520,7 +543,7 @@ keys = [
 ]
 # check_set and check.<g> carry their mechanics in [gates] above: check_set is
 # the comma list of check names (default `correctness,triage` stamped by gate-ensure.sh when
-# empty, sentinel `none` the opt-out, `approval` the external-review lane), and
+# empty, sentinel `none` the opt-out), and
 # empty is never `none` — a reader holds the merge closed on it. check.<g> is
 # one lane marker per check, the only value the pack writes into it being `green`
 # (signoff.sh); its state is otherwise DERIVED by lane-state.sh, and it is
@@ -528,10 +551,10 @@ keys = [
 # retarget (pr-facts.sh).
 #
 # signoff_dismissed — `<github-review-id>@<oid>`: a stale GitHub review the city
-#   dismissed at that head, which arms the external-approval requirement.
-#   Written by signoff.sh and pr-facts.sh, each reading it back before the
-#   irreversible dismissal; read by merge.sh. Absent means that path armed
-#   nothing. Never cleared.
+#   dismissed at that head. Written by signoff.sh and pr-facts.sh, each reading it
+#   back before the irreversible dismissal, so no dismissal goes unrecorded. A
+#   record only: no gate reads it, since approval is a universal merge rule that
+#   no dismissal arms or relaxes. Never cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same update that closes the review bead (signoff.sh; review-outcome.sh
 #   writes `approve` on a back-lane outcome). lane-state.sh derives a lane green

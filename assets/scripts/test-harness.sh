@@ -49,12 +49,12 @@ harness_init() {
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
-  export STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
+  export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
-  export STUB_PR_EDIT_RC=0
+  export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
@@ -82,10 +82,14 @@ mk_sut_dir() { # <dir> <file>...
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
   # bd-lib.sh is the shared bead-store read library many SUTs source by sibling
-  # path; copy it beside them so that source resolves in the private dir. It sits
-  # beside this harness, so it is found whatever the SUT's own directory is.
-  local lib; lib="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/bd-lib.sh"
-  [ -f "$lib" ] && cp "$lib" "$d/"
+  # path, and gctk-resolve.sh is what every ported script (lifecycle.sh among
+  # them) sources the same way; copy both beside them so those sources resolve
+  # in the private dir. They sit beside this harness, so they are found whatever
+  # the SUT's own directory is.
+  local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  for lib in "$here/bd-lib.sh" "$here/gctk-resolve.sh"; do
+    [ -f "$lib" ] && cp "$lib" "$d/"
+  done
 }
 
 _write_gc_stub() {
@@ -182,6 +186,25 @@ case "$verb" in
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
+    # STUB_LIST_FAIL_ON fails only the list reads whose argv carries that text
+    # (e.g. one --metadata-field), so a suite can break one enumeration of several.
+    if [ -n "${STUB_LIST_FAIL_ON:-}" ]; then
+      case "$*" in *"$STUB_LIST_FAIL_ON"*) echo "gc: simulated list failure" >&2; exit 1 ;; esac
+    fi
+    # STUB_LIST_PARTIAL="<text>": a list whose arguments contain <text> prints
+    # `[]` and exits 1 — a store error mid-query that still printed an array.
+    if [ -n "${STUB_LIST_PARTIAL:-}" ]; then
+      case " $* " in
+        *"$STUB_LIST_PARTIAL"*) echo '[]'; echo "gc: simulated mid-query store error" >&2; exit 1 ;;
+      esac
+    fi
+    # STUB_LIST_TRAILING="<text>": a list whose arguments contain <text> prints
+    # its answer, then a line that is not JSON, and exits 0 — a stream with
+    # unreadable bytes after the array.
+    ltrail=""
+    if [ -n "${STUB_LIST_TRAILING:-}" ]; then
+      case " $* " in *"$STUB_LIST_TRAILING"*) ltrail=1 ;; esac
+    fi
     statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -213,6 +236,7 @@ case "$verb" in
         '[ .[] | select((((.metadata // {})[$k]) // "" | tostring) == $v) ]')
     done
     printf '%s\n' "$out"
+    [ -z "$ltrail" ] || echo 'gc: simulated trailing output'
     ;;
   update)
     id="${1:-}"; shift || true
@@ -339,6 +363,11 @@ case "$verb" in
     case "${1:-}" in
       list)
         [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
+        # STUB_DEP_PARTIAL: the probe prints `[]` and exits 1, a failed read
+        # that still printed an array.
+        [ -n "${STUB_DEP_PARTIAL:-}" ] && { echo '[]'; echo "gc bd dep: simulated store error" >&2; exit 1; }
+        # STUB_DEP_TRAILING: the probe prints its answer, then a line that is
+        # not JSON, and exits 0 — unreadable bytes after the array.
         id="${2:-}"; shift 2 || true
         dir=""; dtyp=""
         while [ $# -gt 0 ]; do
@@ -361,7 +390,8 @@ case "$verb" in
             else                  { if (b == id) print a }   # legacy: who names me
           }' "$D")
         jq -c --arg ids "$ids" '($ids | split("\n")) as $want
-          | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S"
+          | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S" || exit $?
+        [ -z "${STUB_DEP_TRAILING:-}" ] || echo 'gc bd dep: simulated trailing output'
         ;;
       add)
         a="${2:-}"; b="${3:-}"; ty="parent-child"; shift 3 || true
@@ -434,6 +464,7 @@ case "$sub" in
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment) exit 0 ;;
+      ready)   exit "${STUB_PR_READY_RC:-0}" ;;
       edit)
         # The edit MUTATES the fixture the next `pr view` serves, so a second
         # pass over an unchanged store is idempotent because the caller read
@@ -584,6 +615,9 @@ case "$sub" in
           jq -c '{data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
                 nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+          # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
+          # hands back when a later page came back garbled.
+          [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"
           exit 0 ;;
         *PullRequestReviewThread*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
@@ -675,6 +709,13 @@ case "$sub" in
         [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
         [ -z "${STUB_ISSUE_LIST_RC:-}" ] || exit "$STUB_ISSUE_LIST_RC"
         f="$G/issue_comments_$n.json"
+        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
+      */issues/*/timeline*)
+        # A PR's timeline events ({event: ...} rows). An absent fixture is a PR
+        # with no events; STUB_TIMELINE_RC models a timeline read that fails.
+        n="${path##*/issues/}"; n="${n%%/*}"
+        [ -z "${STUB_TIMELINE_RC:-}" ] || exit "$STUB_TIMELINE_RC"
+        f="$G/timeline_$n.json"
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */rules/branches/*)
         b="${path##*/rules/branches/}"

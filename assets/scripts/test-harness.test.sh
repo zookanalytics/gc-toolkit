@@ -75,6 +75,37 @@ hasnt " $(down_blockers tk-blk) " " tk-kd " "...not the reverse — the first op
 gc bd dep tk-blk --blocks tk-kd
 has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> lands the same orientation as the dep add form"
 
+# mk_sut_dir carries the libraries a copied SUT sources by sibling path. A copy
+# of lifecycle.sh without gctk-resolve.sh beside it refuses every call, so the
+# suites that copy it would fail on the harness rather than the code.
+mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
+[ -f "$TMP/sut/bd-lib.sh" ] && ok "mk_sut_dir copies bd-lib.sh beside the SUT" || bad "mk_sut_dir left bd-lib.sh out"
+[ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
+out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
+hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
+
+# The partial-read knobs model a store error that still printed an array: a
+# matching list, or any dep probe, prints [] and exits 1.
+out="$(STUB_LIST_PARTIAL="merge_result=pull_request" gc bd list --status=open --metadata-field merge_result=pull_request --json 2>/dev/null)"; rc=$?
+eq "$out|$rc" "[]|1" "STUB_LIST_PARTIAL: a matching list prints [] and exits 1"
+out="$(STUB_LIST_PARTIAL="merge_result=pull_request" gc bd list --status=open --json 2>/dev/null)"; rc=$?
+eq "$rc" "0" "STUB_LIST_PARTIAL: a list that does not match answers normally"
+out="$(STUB_DEP_PARTIAL=1 gc bd dep list tk-kd --direction=down -t blocks --json 2>/dev/null)"; rc=$?
+eq "$out|$rc" "[]|1" "STUB_DEP_PARTIAL: the dep probe prints [] and exits 1"
+
+# The trailing-bytes knobs model a stream that is unreadable only after its
+# array: a matching list, or any dep probe, prints its answer at exit 0 and then
+# a line that fails the `jq -e 'type == "array"'` gate the scripts read through.
+is_array() { printf '%s' "$1" | jq -e 'type == "array"' >/dev/null 2>&1; }
+out="$(STUB_LIST_TRAILING="merge_result=pull_request" gc bd list --status=open --metadata-field merge_result=pull_request --json 2>/dev/null)"; rc=$?
+eq "$rc|$(printf '%s\n' "$out" | head -1 | jq -r 'type' 2>/dev/null)" "0|array" "STUB_LIST_TRAILING: a matching list prints its array and exits 0"
+if is_array "$out"; then bad "STUB_LIST_TRAILING: the stream still passes the array gate"; else ok "STUB_LIST_TRAILING: …and the bytes after it fail the array gate"; fi
+out="$(STUB_LIST_TRAILING="merge_result=pull_request" gc bd list --status=open --json 2>/dev/null)"
+if is_array "$out"; then ok "STUB_LIST_TRAILING: a list that does not match answers normally"; else bad "STUB_LIST_TRAILING: a list that does not match carried the tail"; fi
+out="$(STUB_DEP_TRAILING=1 gc bd dep list tk-kd --direction=down -t blocks --json 2>/dev/null)"; rc=$?
+eq "$rc|$(printf '%s\n' "$out" | head -1 | jq -r 'type' 2>/dev/null)" "0|array" "STUB_DEP_TRAILING: the dep probe prints its array and exits 0"
+if is_array "$out"; then bad "STUB_DEP_TRAILING: the stream still passes the array gate"; else ok "STUB_DEP_TRAILING: …and the bytes after it fail the array gate"; fi
+
 # The gc bd update stub stores a --set-metadata value with real bd's typing. A
 # value that parses as a JSON number, true, false or null is stored typed, so
 # `k=1` reads back as the number 1, and a jq compare of it against the string

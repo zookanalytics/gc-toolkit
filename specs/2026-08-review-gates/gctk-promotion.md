@@ -13,7 +13,7 @@ Landed 2026-08-26 (tk-utjreo): `services/gctk`, the `lifecycle` port, the
 build/deploy pattern below, the fallback wiring, the build-status file, and its
 board rows. `services/gctk/README.md` carries the operating detail.
 
-Remaining, one subcommand per PR in this order: `merge`, `gate-ensure`,
+Remaining, one subcommand per PR in this order: `gate-ensure`,
 `pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
 bead. The shell scripts and the driver's fallback drop when the last one
 lands.
