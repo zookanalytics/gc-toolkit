@@ -739,11 +739,14 @@ WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
-# The classify block matches visit coverage through the shared predicate, which
-# liveness-sweep.sh sources before it. Supply the same defs ($VISIT_IDENTITY_JQ)
-# from the real lib so the extracted block resolves them and cannot drift.
+# The classify block matches visit coverage and standing records through two
+# shared definitions, which liveness-sweep.sh sources before it. Supply the same
+# defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ) from the real libs so the
+# extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/visit-identity.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/standing-kinds.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"

@@ -159,11 +159,14 @@ while IFS=$'\t' read -r notice_id gate_id; do
         verdict=resolved
     fi
 
-    # verdict is gone|resolved -> the notice is stale. A close that FAILS is
-    # reported and counted skipped; it must not read as reaped.
+    # verdict is gone|resolved -> the notice is stale. core mails these notices
+    # assigned to "human" for the operator's board, so the close must --force
+    # past the store's assignee guard; this pass only ever forces a notice it
+    # has proved stale. A close that FAILS is reported and counted skipped; it
+    # must not read as reaped.
     if [ "$DRY_RUN" -eq 1 ]; then
         closed_gate=$((closed_gate + 1))
-    elif "$GC" bd close "$notice_id" --db "$CITY_DB" --reason "human gate $gate_id $verdict; stale notification wisp retired (notification-wisp-reap)" >/dev/null 2>&1; then
+    elif "$GC" bd close "$notice_id" --db "$CITY_DB" --force --reason "human gate $gate_id $verdict; stale notification wisp retired (notification-wisp-reap)" >/dev/null 2>&1; then
         closed_gate=$((closed_gate + 1))
     else
         skipped_gate=$((skipped_gate + 1))
@@ -209,9 +212,11 @@ esc_processed=0
 while IFS=$'\t' read -r dup_id keep_id; do
     [ -n "$dup_id" ] || continue
     esc_processed=$((esc_processed + 1))
+    # These copies are assigned to "human" for the operator's board, so --force
+    # past the store's assignee guard; only a proven duplicate is closed here.
     if [ "$DRY_RUN" -eq 1 ]; then
         closed_esc=$((closed_esc + 1))
-    elif "$GC" bd close "$dup_id" --db "$CITY_DB" --reason "duplicate escalation notice; superseded by $keep_id (same situation); collapsed by notification-wisp-reap" >/dev/null 2>&1; then
+    elif "$GC" bd close "$dup_id" --db "$CITY_DB" --force --reason "duplicate escalation notice; superseded by $keep_id (same situation); collapsed by notification-wisp-reap" >/dev/null 2>&1; then
         closed_esc=$((closed_esc + 1))
     else
         echo "$PROG: could not close duplicate escalation notice $dup_id (keep $keep_id) — left for the next pass" >&2

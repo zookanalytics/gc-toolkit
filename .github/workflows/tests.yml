@@ -9,8 +9,8 @@ name: tests
 # state; it is only a CI-cost lever here.
 # The suite is hermetic: each test stubs gc/bd and works in its own temp dir,
 # so the runner image needs no gc binary and no running city — only bash, git,
-# jq (preinstalled on ubuntu-latest) and a Go toolchain for the gctk build that
-# lifecycle.test.sh exercises.
+# jq (preinstalled on ubuntu-latest) and a Go toolchain for the gctk builds
+# that several suites make (see the setup-go step).
 
 on:
   pull_request:
@@ -42,9 +42,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # lifecycle.test.sh builds services/gctk from source; the rest of the
-      # suite is shell-only. go.mod names the toolchain version. gctk is
-      # stdlib-only (no go.sum), so module caching has nothing to cache.
+      # lifecycle.sh execs gctk and has no other implementation, so every
+      # suite whose scripts reach it builds services/gctk from source, and so
+      # does pr-status-label.test.sh; the rest of the suite is shell-only.
+      # go.mod names the toolchain version. gctk is stdlib-only (no go.sum), so
+      # module caching has nothing to cache.
       - uses: actions/setup-go@v5
         with:
           go-version-file: services/gctk/go.mod
