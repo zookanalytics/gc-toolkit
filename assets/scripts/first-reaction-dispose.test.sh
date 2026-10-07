@@ -804,6 +804,14 @@ export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.proactive_reaction":"1"}}
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "2" "(REACTED) gc.proactive_reaction=1 alone also refuses a second dispose"
 
+# bd stores the release's `--set-metadata gc.proactive_reaction=1` as the JSON
+# number 1, so the refusal must read the number the same as the string.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"ruling","gc.proactive_reaction":1}}]'
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
+eq "$RC" "2" "(REACTED) the number form bd stores refuses a second dispose too"
+hasnt "HELM" "$LOG" "(REACTED) …with no re-release"
+has "gc.first_reaction=ruling" "$ERR" "(REACTED) …naming the prior disposition"
+
 # Positive finding only: an unreadable bead is not evidence of a prior reaction.
 export FAKE_SHOW_JSON='not json'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat

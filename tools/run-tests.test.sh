@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run-tests.test.sh — the serial re-run that tells a parallel-contention false
-# failure from a real one.
+# failure from a real one, and the runs a file with parts is split into.
 #
 # A file can fail under -j for a reason that is not its own: a sibling job
 # saturates the host and a command the file spawned is killed, so an assertion
@@ -9,6 +9,10 @@
 # too is a real failure. That reclassification is what this pins.
 #
 # Asserted here:
+#   - a file with parts runs once per declared part, each run handed its part
+#     and the declared list, and each with its own timeout, report line, serial
+#     re-run and failure dump; only the opening comment block declares parts,
+#     and a malformed declaration is a usage error;
 #   - a file that fails once then passes is recovered on serial re-run (default);
 #   - a file that fails every time stays failed and the suite exits 1;
 #   - --no-retry and --retry 0 report the raw parallel result;
@@ -151,6 +155,109 @@ reset_state
 run "$FIX/pass.test.sh" "$FIX/flaky.test.sh" "$FIX/afail.test.sh"
 eq "$RC" 1 "one unrecoverable failure fails the suite despite a recovery"
 has "$OUT" "2 passed (1 recovered on serial re-run), 1 failed" "the summary splits recovered from real"
+
+# A file with parts declares them in its opening comment block. Each fixture
+# below records the part each run was handed, so the assertions read what the
+# runner exported, not just what it printed.
+cat > "$FIX/parts.test.sh" <<'F'
+#!/usr/bin/env bash
+# run-tests-parts: one two three
+echo "${RUN_TESTS_PART-unset}|${RUN_TESTS_PARTS-unset}" >> "$RUNTESTS_FIXTURE_STATE/parts.runs"
+F
+
+# Part two fails its first run and passes after; the other parts always pass.
+cat > "$FIX/partflaky.test.sh" <<'F'
+#!/usr/bin/env bash
+# run-tests-parts: one two three
+c="$RUNTESTS_FIXTURE_STATE/partflaky.$RUN_TESTS_PART"
+n=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$c"
+[ "$RUN_TESTS_PART" != two ] || [ "$n" -ge 2 ]
+F
+
+# Part two always fails, printing which part produced the log.
+cat > "$FIX/partfail.test.sh" <<'F'
+#!/usr/bin/env bash
+# run-tests-parts: one two
+echo "PARTMARKER $RUN_TESTS_PART"
+[ "$RUN_TESTS_PART" != two ]
+F
+
+# Part slow outlasts a short timeout; part quick does not.
+cat > "$FIX/partslow.test.sh" <<'F'
+#!/usr/bin/env bash
+# run-tests-parts: quick slow
+[ "$RUN_TESTS_PART" != slow ] || sleep 20
+F
+
+# A declaration below the opening comment block is not one.
+cat > "$FIX/lateparts.test.sh" <<'F'
+#!/usr/bin/env bash
+# no parts are declared up here
+echo "${RUN_TESTS_PART-unset}" >> "$RUNTESTS_FIXTURE_STATE/late.runs"
+: <<'X'
+# run-tests-parts: never
+X
+F
+
+printf '#!/usr/bin/env bash\n# run-tests-parts: one bad/name\n' > "$FIX/badparts.test.sh"
+printf '#!/usr/bin/env bash\n# run-tests-parts: one one\n' > "$FIX/dupparts.test.sh"
+
+echo "── parts: a file with parts runs once per part, told its part and every declared part ──"
+reset_state
+run "$FIX/parts.test.sh"
+eq "$RC" 0 "every part passes, so the suite passes"
+eq "$(sort "$STATE/parts.runs" | tr '\n' ' ')" "one|one two three three|one two three two|one two three " \
+  "each declared part ran exactly once, handed its own name and the declared list"
+has "$OUT" "1 files as 3 runs" "the header counts the runs beside the files"
+has "$OUT" "parts.test.sh[two] (" "each run is reported under its file and part"
+has "$OUT" "3 passed, 0 failed, 3 total" "the summary counts runs"
+
+echo "── parts: a failed part re-runs serially on its own ──"
+reset_state
+run "$FIX/partflaky.test.sh"
+eq "$RC" 0 "the part that failed under -j recovers serially"
+has "$OUT" "partflaky.test.sh[two] (recovered serially after 1 attempt" "the recovery names the part"
+eq "$(cat "$STATE/partflaky.one") $(cat "$STATE/partflaky.two") $(cat "$STATE/partflaky.three")" "1 2 1" \
+  "only the failed part ran again"
+
+echo "── parts: a part that fails serially too is reported and dumped by itself ──"
+reset_state
+run "$FIX/partfail.test.sh"
+eq "$RC" 1 "a part that fails alone too fails the suite"
+has "$OUT" "partfail.test.sh[two] (failed serially too)" "the failure names the part"
+has "$OUT" "----- $FIX/partfail.test.sh[two] -----" "the dump is headed by the part"
+has "$OUT" "PARTMARKER two" "the dump shows that part's log"
+hasnt "$OUT" "PARTMARKER one" "a part that passed is not dumped"
+has "$OUT" "1 passed, 1 failed, 2 total" "the passing part still counts as a pass"
+
+echo "── parts: each part has its own timeout ──"
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 2 --no-retry "$FIX/partslow.test.sh" 2>&1)"; RC=$?
+eq "$RC" 1 "the part that outlasts the timeout fails the suite"
+has "$OUT" "TIMEOUT    $FIX/partslow.test.sh[slow]" "the timeout is the slow part's"
+has "$OUT" "1 passed, 1 failed" "the quick part passes under the same limit"
+
+echo "── parts: only the opening comment block declares parts ──"
+reset_state
+RUN_TESTS_PART=leaked run "$FIX/lateparts.test.sh"
+eq "$RC" 0 "a file whose only declaration sits below its opening comments runs"
+eq "$(cat "$STATE/late.runs")" "unset" "it runs once, as a whole file, with no part exported, whatever the caller had set"
+has "$OUT" "run-tests: 1 files, 1 parallel" "no runs beyond the file are counted"
+
+echo "── parts: --list prints one line per run ──"
+run --list "$FIX/parts.test.sh" "$FIX/pass.test.sh"
+eq "$RC" 0 "--list exits 0"
+eq "$(printf '%s\n' "$OUT" | sort | tr '\n' ' ')" \
+  "$FIX/parts.test.sh[one] $FIX/parts.test.sh[three] $FIX/parts.test.sh[two] $FIX/pass.test.sh " \
+  "a file with parts is listed once per part, a file without once"
+
+echo "── parts: a malformed declaration is a usage error ──"
+run "$FIX/badparts.test.sh"
+eq "$RC" 2 "a part name with characters outside [A-Za-z0-9_-] is refused"
+has "$OUT" "declares a malformed part name 'bad/name'" "…and named"
+run "$FIX/dupparts.test.sh"
+eq "$RC" 2 "a part declared twice is refused"
+has "$OUT" "declares part 'one' twice" "…and named"
 
 echo "── 8. --retry rejects a non-integer ──"
 run --retry abc "$FIX/pass.test.sh"

@@ -156,10 +156,10 @@ main. Never `--merge direct`. The pool already defaults
 ## Communication
 
 ```bash
-gc bd show <id>                       # re-read the bead / refresh the slice
-gc bd update <id> --notes "..."       # the first-reaction card
-gc session nudge <addr> "..."         # talk to another agent (ephemeral)
-gc runtime drain-ack                  # end this one-shot session
+gc bd show <id>                        # re-read the bead / refresh the slice
+gc bd update <id> --append-notes "..." # the first-reaction card
+gc session nudge <addr> "..."          # talk to another agent (ephemeral)
+gc runtime drain-ack                   # end this one-shot session
 ```
 
 Your mail budget is **0–1 messages**. Escalate a genuine blocker to the
