@@ -33,9 +33,11 @@ done
 
 # The blocks fall back to `gc rig list --json` when GC_RIG_ROOT is empty, so no
 # ambient city value may reach them: each run sets its own, and a stub gc heads
-# PATH so the live one is never asked. Git reads no user or system config, so
-# cwd versus -C is the only thing steering it.
-unset GC_RIG_ROOT GC_RIG GC_CITY GC_CITY_PATH GC_PACK_DIR 2>/dev/null || true
+# PATH so the live one is never asked. The review workspace goes under
+# REVIEW_WORKSPACE_DIR when that is set, so each review run names its own
+# TMPDIR instead. Git reads no user or system config, so cwd versus -C is the
+# only thing steering it.
+unset GC_RIG_ROOT GC_RIG GC_CITY GC_CITY_PATH GC_PACK_DIR REVIEW_WORKSPACE_DIR 2>/dev/null || true
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2>/dev/null || true
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -174,12 +176,16 @@ git init -q -b main "$C/cwd"; commit "$C/cwd" "control cwd" >/dev/null
 eq "$(registered "$C/cwd" "$C/wt-bare")" yes "control: the bare add registered in the cwd repo"
 eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reached the rig, whatever GC_RIG_ROOT says"
 
-# --- 3. mol-review: the throwaway review worktree. -----------------------------
-echo "── mol-review: review-worktree-add ──"
-block "$REVIEW_TOML" review-worktree-add "$TMP/review.sh"
-eq "$(bare_git "$TMP/review.sh")" "" "review: every git call in the block names its repo with -C"
-# The block's EXIT trap removes the worktree, so a probe appended to it records
-# what the worktree looked like while it existed.
+# --- 3. mol-review: the review's test worktree. --------------------------------
+# The worktree lives in the review's workspace, made by review-workspace.sh add
+# and removed by the verdict step's remove line.
+echo "── mol-review: review-workspace-add and review-workspace-remove ──"
+block "$REVIEW_TOML" review-workspace-add "$TMP/review.sh"
+# The pack-script locator's show-toplevel candidate is the block's one bare git
+# call. It picks where review-workspace.sh is read from, never the repository
+# the worktree is made in.
+eq "$(bare_git "$TMP/review.sh")" "rev-parse " "review: the only git call without -C is the pack-script locator's"
+block "$REVIEW_TOML" review-workspace-remove "$TMP/review-rm.sh"
 cat "$TMP/review.sh" - > "$TMP/review-probe.sh" <<'PROBE'
 printf '%s\n' "$REVIEW_WT" > "$PROBE/wt"
 pwd -P > "$PROBE/pwd"
@@ -188,15 +194,25 @@ git -C "$PROBE_RIG" worktree list --porcelain | sed -n 's/^worktree //p' > "$PRO
 git -C "$PROBE_CWD" worktree list --porcelain | sed -n 's/^worktree //p' > "$PROBE/cwd"
 PROBE
 
+# GC_PACK_DIR names this checkout, so the block runs the review-workspace.sh
+# under test.
 review_case() { # <mode>; sets RC, OID, D
   local d="$TMP/review-$1" rc=0
   mkdir -p "$d/probe" "$d/tmp"
   git init -q -b main "$d/rig"; OID=$(commit "$d/rig" "reviewed head ($1)")
-  git init -q -b main "$d/cwd"; commit "$d/cwd" "unrelated cwd repo ($1)" >/dev/null
+  # The cwd repo is a clone, so it holds the reviewed commit too: an add that
+  # follows cwd succeeds there instead of failing for want of the commit.
+  git clone -q "$d/rig" "$d/cwd"; commit "$d/cwd" "cwd repo moves on ($1)" >/dev/null
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" REVIEW_BEAD=rb REVIEWED_OID="$OID" \
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" REVIEW_BEAD=rb REVIEWED_OID="$OID" \
       PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$TMP/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
+}
+
+# review_remove: the verdict step's remove line, run from the same foreign cwd.
+review_remove() {
+  ( cd "$D/cwd" && TMPDIR="$D/tmp" REVIEW_BEAD=rb SC="$ROOT/assets/scripts/step-close.sh" \
+      bash "$TMP/review-rm.sh" ) >>"$D/out" 2>&1 || true
 }
 
 for mode in env roster; do
@@ -207,16 +223,17 @@ for mode in env roster; do
   eq "$(in_paths "$(cat "$D/probe/cwd" 2>/dev/null || true)" "$WT")" no  "review/$mode: the worktree is NOT registered in the cwd repo"
   eq "$(cat "$D/probe/head" 2>/dev/null || true)" "$OID" "review/$mode: the worktree is checked out at the reviewed OID"
   eq "$(cat "$D/probe/pwd" 2>/dev/null || true)" "$(realpath -m "${WT:-/nonexistent}")" "review/$mode: the block leaves the shell in the review worktree"
-  eq "$(registered "$D/rig" "$WT")" no "review/$mode: the EXIT trap unregisters the worktree from the rig"
-  if [ -n "$WT" ] && [ ! -e "$WT" ]; then ok "review/$mode: the EXIT trap removes the worktree directory"
-  else bad "review/$mode: the EXIT trap removes the worktree directory" "${WT:-<no worktree recorded>}"; fi
+  review_remove
+  eq "$(registered "$D/rig" "$WT")" no "review/$mode: the verdict step's remove unregisters the worktree from the rig"
+  if [ -n "$WT" ] && [ ! -e "$WT" ]; then ok "review/$mode: the verdict step's remove deletes the worktree directory"
+  else bad "review/$mode: the verdict step's remove deletes the worktree directory" "${WT:-<no worktree recorded>}"; fi
 done
 
 review_case nomatch
 [ "$RC" -ne 0 ] && ok "review/nomatch: an unresolvable rig fails closed" || bad "review/nomatch: an unresolvable rig fails closed"
 eq "$(wt_paths "$D/rig" | count)" 1 "review/nomatch: nothing registered in the rig repo"
 eq "$(wt_paths "$D/cwd" | count)" 1 "review/nomatch: nothing registered in the cwd repo"
-eq "$(ls -A "$D/tmp" | count)" 0 "review/nomatch: refused before creating the scratch directory"
+eq "$(ls -A "$D/tmp" | count)" 0 "review/nomatch: refused before creating the review workspace"
 
 # --- 4. mol-upstream-gc-sync: the read-only survey worktree. -------------------
 echo "── mol-upstream-gc-sync: upstream-sync-worktree-add ──"
