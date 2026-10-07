@@ -64,7 +64,9 @@ eq "$(grep -c "^$F1|blocks|tk-anc$" "$STUB_DEPS")" "1" "re-running must-fix adds
 # set-disposition deferred: a real objection becomes tracked later-work. The
 # finding CLOSES (no stay-open orphan that holds the human review hostage), a
 # claimable follow-up bead carries the work, and the follow-up — not the finding
-# — holds the discovered-from provenance.
+# — holds the discovered-from provenance, pointing at the finding. The stub keeps
+# one edge per pair the way bd does, so provenance on the follow-up/anchor pair
+# would take the gate's pair and the deferral would fail closed.
 # ---------------------------------------------------------------------------
 F3=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "docs/x.md" --message "stale reference to a retired script")
 "$SUT" set-disposition --finding "$F3" --anchor tk-anc --disposition deferred --reason "the rewrite it needs lands in the next PR"
@@ -72,8 +74,9 @@ eq "$(meta "$F3" 'finding.disposition')" "deferred" "disposition recorded as def
 eq "$(bstatus "$F3")" "closed" "a deferred finding closes — no stay-open orphan holding the review"
 F3FU=$(meta "$F3" 'finding.follow_up')
 if [ -n "$F3FU" ] && [ "$F3FU" != "<absent>" ]; then ok "deferred files a follow-up bead and records its id on the finding"; else bad "deferred did not record finding.follow_up"; fi
-has "$(deps)" "$F3FU|discovered-from|tk-anc" "the follow-up — not the finding — carries the discovered-from provenance"
-hasnt "$(deps)" "$F3|discovered-from|tk-anc" "the closed finding holds no provenance edge of its own"
+has "$(deps)" "$F3FU|discovered-from|$F3" "the follow-up — not the finding — carries the discovered-from provenance, pointing at the finding"
+hasnt "$(deps)" "$F3|discovered-from|" "the closed finding holds no provenance edge of its own"
+hasnt "$(deps)" "$F3FU|discovered-from|tk-anc" "no provenance edge on the follow-up/anchor pair — that pair is the gate's"
 hasnt "$(deps)" "$F3|blocks|tk-anc" "deferred writes no blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F3 " "merge.sh's probe does NOT see the deferred finding"
 has "$(meta "$F3" 'finding.reply')" "$F3FU" "the follow-up id is stamped as the reply the raiser's thread receives"
@@ -110,7 +113,7 @@ eq "$(bstatus "$F5")" "closed" "the reclassified finding closes"
 hasnt "$(deps)" "$F5|blocks|tk-anc" "must-fix -> deferred retracts the blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F5 " "merge.sh's probe no longer sees the reclassified finding"
 F5FU=$(meta "$F5" 'finding.follow_up')
-has "$(deps)" "$F5FU|discovered-from|tk-anc" "the reclassification files a follow-up carrying the provenance"
+has "$(deps)" "$F5FU|discovered-from|$F5" "the reclassification files a follow-up carrying the provenance"
 has "$(deps)" "tk-anc|blocks|$F5FU" "the reclassified deferral's follow-up is gated behind the anchor"
 eq "$(meta "$F5FU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "the reclassified deferral's follow-up is armed to the fix pool"
 
