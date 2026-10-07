@@ -37,10 +37,12 @@ import (
 
 // Bead is one row of `gc bd show --json`, decoded far enough for the fields the
 // cadence reads. Metadata values keep their JSON types so Meta can reproduce
-// jq's tostring.
+// jq's tostring. Status is a pointer because jq's `.status // "open"` tells a
+// null or absent status from an empty string, so the decode has to keep that
+// distinction too.
 type Bead struct {
 	ID       string         `json:"id"`
-	Status   string         `json:"status"`
+	Status   *string        `json:"status"`
 	Assignee any            `json:"assignee"`
 	Notes    any            `json:"notes"`
 	Metadata map[string]any `json:"metadata"`
@@ -99,7 +101,17 @@ func (b *Bead) AssigneeString() string { return jqString(b.Assignee) }
 func (b *Bead) NotesString() string { return jqString(b.Notes) }
 
 // StatusLower returns `.status // "" | tostring | ascii_downcase`.
-func (b *Bead) StatusLower() string { return strings.ToLower(b.Status) }
+func (b *Bead) StatusLower() string { return b.StatusLowerOr("") }
+
+// StatusLowerOr returns `(.status // def) | ascii_downcase`. def stands in only
+// for a null or absent status; an empty-string status stays empty, which is
+// what jq's `//` does with it.
+func (b *Bead) StatusLowerOr(def string) string {
+	if b.Status == nil {
+		return strings.ToLower(def)
+	}
+	return strings.ToLower(*b.Status)
+}
 
 // daemonTimeout bounds one supervisor-API read. A loopback read from a pooled
 // connection answers in well under this even under load; the bound only caps a
@@ -192,21 +204,56 @@ func (c *Client) ShowDirect(id string) *Bead { return c.showViaExec(id) }
 // when none does, at rc=0 either way, so a non-array payload is a miss and not
 // a parse bug.
 func (c *Client) showViaExec(id string) *Bead {
-	cmd := exec.Command(c.bin, "bd", "show", id, "--json")
-	out, err := cmd.Output()
+	rows, ok := c.array(false, "bd", "show", id, "--json")
+	if !ok || len(rows) == 0 {
+		return nil
+	}
+	return &rows[0]
+}
+
+// array runs `gc <args>` and decodes the JSON array it prints. ok is false when
+// stdout does not open with a JSON array: undecodable, empty, an object, or a
+// bare null.
+//
+// strict is bd-lib.sh's bd_list contract, the `jq -e 'type == "array"'` test
+// the scripts gate their list and dependency reads on. It refuses a non-zero
+// exit whatever was printed beside it, because a store error mid-query (a dolt
+// timeout) can print an empty or partial array and still exit 1. It refuses
+// anything but whitespace after the array, because jq fails the whole stream
+// on `[]garbage`: a caller that read the array ahead of the garbage would act
+// on a view cut short. A second whole value fails too. jq -e passes `[] []`,
+// but `gc bd list` prints one array, and picking one of two would be a guess.
+//
+// Without strict, neither the status nor what follows the array is consulted.
+// That is how the scripts read `gc bd show`: `jq -c '.[0] // empty'`, its exit
+// unread, prints the first array's row before it reaches what follows.
+func (c *Client) array(strict bool, args ...string) ([]Bead, bool) {
+	out, err := exec.Command(c.bin, args...).Output()
 	if err != nil {
 		var ee *exec.ExitError
-		if !errors.As(err, &ee) {
-			return nil
+		if strict || !errors.As(err, &ee) {
+			return nil, false
 		}
 	}
 	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
 	dec.UseNumber()
-	var rows []Bead
-	if err := dec.Decode(&rows); err != nil || len(rows) == 0 {
-		return nil
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil || len(raw) == 0 || raw[0] != '[' {
+		return nil, false
 	}
-	return &rows[0]
+	if strict {
+		var rest json.RawMessage
+		if err := dec.Decode(&rest); err != io.EOF {
+			return nil, false
+		}
+	}
+	rdec := json.NewDecoder(bytes.NewReader(raw))
+	rdec.UseNumber()
+	var rows []Bead
+	if err := rdec.Decode(&rows); err != nil {
+		return nil, false
+	}
+	return rows, true
 }
 
 // showViaDaemon reads one bead over the supervisor API, returning the bead on a
@@ -262,29 +309,21 @@ func gcDebug() bool {
 	}
 }
 
-// List runs `gc bd list <args>` and decodes the JSON array it prints. ok is
-// false when the output does not decode as an array — the fail-closed signal
-// the scripts read from `jq -e 'type == "array"'`, so a caller refuses to act
-// on a miss rather than reading it as an empty result. Show's exit-status and
-// preface handling applies unchanged: the status is not consulted, and the
-// rig-preface line rides stderr, so stdout is the payload whatever gc warned
-// about. An empty selection is a well-formed `[]` — rows nil, ok true.
+// List runs `gc bd list <args>` and decodes the JSON array it prints, under the
+// strict contract of bd-lib.sh's bd_list: ok is false on a non-zero exit, on
+// output that is not an array, or on anything but whitespace after the array,
+// so a caller refuses to act rather than reading a failed or partial read as an
+// empty result. The rig-preface line rides stderr, so stdout is the payload. An
+// empty selection is a well-formed `[]` at exit 0 — rows nil, ok true.
 func (c *Client) List(args ...string) (rows []Bead, ok bool) {
-	full := append([]string{"bd", "list"}, args...)
-	cmd := exec.Command(c.bin, full...)
-	out, err := cmd.Output()
-	if err != nil {
-		var ee *exec.ExitError
-		if !errors.As(err, &ee) {
-			return nil, false
-		}
-	}
-	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
-	dec.UseNumber()
-	if err := dec.Decode(&rows); err != nil {
-		return nil, false
-	}
-	return rows, true
+	return c.array(true, append([]string{"bd", "list"}, args...)...)
+}
+
+// DepList runs `gc bd dep list <id> <args>` and decodes the JSON array of
+// dependency rows it prints, under List's strict contract: a caller holds on a
+// failed or unreadable probe rather than reading it as "no dependencies".
+func (c *Client) DepList(id string, args ...string) (rows []Bead, ok bool) {
+	return c.array(true, append([]string{"bd", "dep", "list", id}, args...)...)
 }
 
 // Update runs one `gc bd update`, returning its combined output. Callers pass
