@@ -416,6 +416,8 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   # Live-visit subjects: every subject a live visit covers by its shared identity
   # (tracks edge, gc.continuation_group fallback — the stamp alone has landed
   # empty on a live visit, su-ab9je). visit_identity_subjects is visit-identity.sh.
+  # A ready bead converses when it is one of them, or when its gc.root_bead_id
+  # is: a sitting about a workflow root covers the steps of that workflow.
   ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | select(holder_live)
@@ -448,6 +450,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
          elif (($demanded | index($b.id)) != null) then "held-by-design"
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
+         elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
          elif (($convgroups | index($b.id)) != null) then "conversing"
          elif (((.metadata.merge_result // "") == "pull_request")
                and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
