@@ -414,13 +414,13 @@ out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the markerless body is not rewritten"
 eq "$(body 230)" "$LEGACY_Z" "…and is left byte-identical"
 
-echo "# a pre_open_gate anchor's summary is arm 6's to refresh on adoption, not this arm's"
-store "[$(printf '{"id":"PG","status":"open","title":"anchor PG","description":"","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pre_open_gate","branch":"polecat/PG","pr_number":"250","merged_target":"main","check_set":"correctness","pr_summary":"NEW: a summary arm 6 will publish on adoption."}}')]"
+echo "# a pre_open_gate anchor's summary is arm 3's to refresh on adoption, not this arm's"
+store "[$(printf '{"id":"PG","status":"open","title":"anchor PG","description":"","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pre_open_gate","branch":"polecat/PG","pr_number":"250","merged_target":"main","check_set":"correctness","pr_summary":"NEW: a summary arm 3 will publish on adoption."}}')]"
 STALE_PG=$(opened_region PG polecat/PG 'correctness' 'OLD PG summary.' 'ffff6666')
 pr 250 OPEN polecat/PG "$STALE_PG" 9999888800000000
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the pre_open_gate anchor's summary is left for arm 6"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the pre_open_gate anchor's summary is left for arm 3"
 eq "$(body 250)" "$STALE_PG" "…and the body is byte-identical"
 
 echo "# a refresh whose edit fails is reported and retried, the body untouched"
@@ -432,6 +432,27 @@ out=$(STUB_PR_EDIT_RC=1 "$SUT" 2>&1)
 has "$out" "PR#240 body edit failed" "the failed edit is reported"
 hasnt "$out" "summary region refreshed" "…and no refresh is counted"
 eq "$(body 240)" "$before_v" "the body never changed"
+
+echo "# pacing: --deadline stops the walk after one PR and --cursor resumes after it"
+# Three single-bead anchors, enumerated out of id order. A deadline of epoch 1
+# has always passed, so a pass reads exactly one PR.
+store "[$(anchor S3 polecat/S3 33), $(anchor S1 polecat/S1 31), $(anchor S2 polecat/S2 32)]"
+pr 31 OPEN polecat/S1 "$OPENER_BODY"; pr 32 OPEN polecat/S2 "$OPENER_BODY"; pr 33 OPEN polecat/S3 "$OPENER_BODY"
+SCUR="$TMP/stack.cursor"; rm -f "$SCUR"
+views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$SCUR" 2>&1); rc=$?
+eq "$rc" 0 "a paced pass exits 0"
+eq "$(views)" "31" "a passed deadline reads the lowest id's PR and no other"
+has "$out" "visited 1 PRs before the deadline; the next pass resumes at S2" "…and names where the next pass resumes"
+eq "$(cat "$SCUR" 2>/dev/null)" "S1" "the cursor records the anchor finished"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$SCUR" 2>&1)
+eq "$(views)" "32" "the next pass resumes after the cursor"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(views)" "33,31,32" "with no pacing args every PR is read, in the enumerated order"
+has "$out" "visited 3 of 3 PRs" "…and the walk reports all three"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
