@@ -82,11 +82,11 @@ case "${1:-}" in
             list)
                 want=0; for a in "$@"; do [ "$a" = "--include-gates" ] && want=1; done
                 di="${DEMAND_FOR-g}"
-                if [ -n "$di" ] && [ "$want" = 1 ]; then
-                    jq -nc --arg i "$di" '[{id:"d-x", metadata:{"gc.demand_for":$i}}]'
-                else
-                    printf '[]\n'
-                fi
+                # LIST_ORDINARY adds an open bead that is no demand at all (no
+                # gc.demand_for), the row every live store is full of.
+                jq -nc --arg i "$di" --arg w "$want" --arg o "${LIST_ORDINARY-}" '
+                    (if $i != "" and $w == "1" then [{id:"d-x", metadata:{"gc.demand_for":$i}}] else [] end)
+                    + (if $o != "" then [{id:"t-ordinary", metadata:{}}] else [] end)'
                 exit 0 ;;
             close) exit "${CLOSE_RC:-0}" ;;
             *) exit 2 ;;
@@ -145,6 +145,14 @@ run DEMAND_FOR=
 is   "no open demand on the subject at all is BEGAN=no" "$(began)" "no"
 run DEMAND_FOR=item-x
 is   "an open demand on a bead that is neither the group nor the visit is BEGAN=no" "$(began)" "no"
+# A visit whose group did not resolve (an empty stamp and no tracks edge) leaves
+# $GROUP empty. An open bead that names no gc.demand_for is not a demand on
+# anything, so it must not read as one; matched against the empty group it did,
+# and a claim that never began read RECHECK forever.
+run CLAIM_GROUP= DEMAND_FOR= LIST_ORDINARY=1
+is   "with no group, an ordinary open bead is not a demand: BEGAN=no" "$(began)" "no"
+run CLAIM_GROUP= DEMAND_FOR=v-x LIST_ORDINARY=1
+is   "…while a demand gating the visit still reads BEGAN=recheck" "$(began)" "recheck"
 
 echo "── an anchored hold files its demand on the VISIT: still BEGAN=recheck ──"
 # A PR-anchor conversation files its demand on the visit, not the subject. A hold

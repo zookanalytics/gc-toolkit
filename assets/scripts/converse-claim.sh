@@ -261,8 +261,11 @@ if [ "$REASON" = "existing_assignment" ]; then
         # the demand on the visit it just closed.
         # --include-gates: a demand can be a human gate (issue_type=gate), which
         # `bd list` hides by default; without it an open gate-demand reads as absent.
+        # A bead with no gc.demand_for gates nothing, so it never matches: with an
+        # empty $GROUP (a visit whose group did not resolve) the bare comparison
+        # matched every ordinary open bead, and BEGAN could never read NO.
         HD_LIST=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 2>/dev/null | scrub)
-        if printf '%s' "$HD_LIST" | jq -e --arg i "$GROUP" --arg v "$BEAD" 'type == "array" and any(.[]?; (.metadata["gc.demand_for"] // "") as $d | $d == $i or $d == $v)' >/dev/null 2>&1; then
+        if printf '%s' "$HD_LIST" | jq -e --arg i "$GROUP" --arg v "$BEAD" 'type == "array" and any(.[]?; (.metadata["gc.demand_for"] // "") as $d | $d != "" and ($d == $i or $d == $v))' >/dev/null 2>&1; then
             BEGAN=recheck
         elif printf '%s' "$HD_LIST" | jq -e 'type == "array"' >/dev/null 2>&1; then
             BEGAN=no
