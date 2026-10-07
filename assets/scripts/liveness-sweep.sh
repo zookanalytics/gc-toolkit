@@ -728,15 +728,25 @@ sweep_visit() {
     # Re-file guard: an agenda a sitting already closed out `dispositioned` is
     # not news. The test is the id SET; a cut-short or unreadable prior files.
     # Fail-open on a non-zero read even when it printed a matching array.
+    #
+    # Resolve the prior visit's subject by the shared visit identity
+    # (visit_covers: the tracks edge, else the gc.continuation_group stamp), the
+    # same union the live-visit guard above uses — never the stamp alone. A visit
+    # whose stamp landed empty still carries the tracks edge, so a stamp-keyed
+    # server query cannot see it and re-files an agenda already settled. The
+    # listing narrows to visits by task_kind (a field independent of the stamp)
+    # and applies visit_covers client-side, because the edge is not a
+    # metadata-field the server can match on.
     local new_key prior_rc prior refile=""
     new_key=$(printf '%s' "$NEW" | jq -r '[.[].id] | sort | join(",")')
     prior_rc=0
-    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; else gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
+    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field task_kind=visit --limit=0 --json; else gc bd list --status=closed --metadata-field task_kind=visit --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
     if [ "$prior_rc" -eq 0 ]; then
-        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" '
+        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" --arg s "$SWEEP_SUBJECT" "$VISIT_IDENTITY_JQ"'
             if type == "array" then
               [ .[]
                 | select(((.metadata // {}).task_kind // "") == "visit")
+                | select(visit_covers($s))
                 | select((((.metadata // {})["gc.outcome"] // "") | tostring) == "dispositioned")
                 | select(((((.metadata // {})["sweep.new_ids"] // "") | tostring)
                           | split(",") | map(select(length > 0)) | sort | join(",")) == $key)

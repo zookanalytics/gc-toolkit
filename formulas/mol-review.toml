@@ -172,10 +172,17 @@ review rather than to any one shell: `add` returns the same worktree each time
 it runs, so a later block gets it back by running these lines again.
 ```bash
 # >>> review-workspace-add
+# The worktree is made in the rig's repository, named by path, so the
+# session's cwd cannot pick the repo. Without --repo, add uses the current
+# directory's repository, and an empty --repo does the same, so an
+# unresolvable rig fails closed.
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID") || exit 1
+REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
 # <<< review-workspace-add
 # run the suites the diff touches; record real pass/fail counts

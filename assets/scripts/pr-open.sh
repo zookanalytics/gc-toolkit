@@ -70,6 +70,10 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 # self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
 # on an integration-targeted checkpoint, the PR-list counterpart to the body banner.
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
+# The single writer of the city's PR posts. The verdict replay and the
+# superseded notice go through it so they carry the city's mark, which is what
+# keeps pr-facts.sh from reading them back as feedback.
+PR_POST="$SCRIPTS_DIR/pr-post.sh"
 # The managed `## Summary` region (markers, composer and splice helpers) and the
 # title composer (cc_title), shared with pr-stack.sh so an opened PR and a
 # post-open refresh never diverge.
@@ -153,10 +157,10 @@ certify_row() { # <id> <row-json> <branch> <target> [<want-num>]
 
 # The branch's PR among the certified rows: 0=adoptable (OPEN/MERGED in CERT_*),
 # 1=none, 2=refuse (unreadable/collision), 3=dead only (DEAD_* set).
-DEAD_NUM=""; DEAD_URL=""; DEAD_HEAD=""
+DEAD_NUM=""; DEAD_HEAD=""
 find_pr() { # <id> <branch> <target>
   local id="$1" br="$2" tgt="$3" json rc row disp best_rank=99 bn="" bu="" bs="" bh="" bd="" ba=""
-  DEAD_NUM=""; DEAD_URL=""; DEAD_HEAD=""
+  DEAD_NUM=""; DEAD_HEAD=""
   json=$(gh pr list --head "$br" --state all --repo "$ORIGIN_REPO_Q" \
     --json number,url,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,isDraft,author \
     --limit 100 2>/dev/null); rc=$?
@@ -178,7 +182,7 @@ find_pr() { # <id> <branch> <target>
         # mergedAt promotes CLOSED to merged (GitHub's REST shape for a landing).
         if [ -n "$CERT_MERGED_AT" ] && [ "$CERT_MERGED_AT" != "null" ]; then disp=1; else
           if [ -z "$DEAD_NUM" ] || [ "$CERT_NUM" -gt "$DEAD_NUM" ]; then
-            DEAD_NUM="$CERT_NUM"; DEAD_URL="$CERT_URL"; DEAD_HEAD="$CERT_HEAD_OID"
+            DEAD_NUM="$CERT_NUM"; DEAD_HEAD="$CERT_HEAD_OID"
           fi
           continue
         fi ;;
@@ -417,7 +421,7 @@ while IFS= read -r tagged; do
   if [ -z "$id" ] || [ -z "$branch" ]; then skipped=$((skipped + 1)); continue; fi
   pace_visit "$group" "$id"; case $? in 1) continue ;; 2) break ;; esac
 
-  SUP_NUM=""; SUP_URL=""; SUP_HEAD=""
+  SUP_NUM=""; SUP_HEAD=""
   find_pr "$id" "$branch" "$target"
   case $? in
     0)
@@ -476,7 +480,7 @@ while IFS= read -r tagged; do
       fi
       continue ;;
     2) skipped=$((skipped + 1)); continue ;;
-    3) SUP_NUM="$DEAD_NUM"; SUP_URL="$DEAD_URL"; SUP_HEAD="$DEAD_HEAD" ;;  # dead only: create path
+    3) SUP_NUM="$DEAD_NUM"; SUP_HEAD="$DEAD_HEAD" ;;  # dead only: create path
     *) : ;;  # none: create path
   esac
 
@@ -651,13 +655,13 @@ GATES
   [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
     | jq -r '.[0].notes // ""' 2>/dev/null)
   if [ -n "$VERDICT" ]; then
-    gh pr comment "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
+    "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "$(printf 'Pre-open signoff (comment-only — not an approval):\n\n%s' "$VERDICT")" >/dev/null 2>&1 || true
   else
-    gh pr comment "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
+    "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
   fi
-  [ -n "$SUP_NUM" ] && gh pr comment "$SUP_NUM" --repo "$ORIGIN_REPO_Q" \
+  [ -n "$SUP_NUM" ] && "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$SUP_NUM" \
     --body "Superseded by #$PR_NUMBER: branch \`$branch\` was re-implemented and re-gated at \`${head_oid:0:8}\`." >/dev/null 2>&1 || true
 
   if flip "$id" "$CERT_URL" "$CERT_NUM" "$target" "$OPENED_DRAFT"; then
