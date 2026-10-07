@@ -21,8 +21,9 @@
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
 # operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
 # since rebasing is one horn of what a demand asks;
-# dismissal of our OWN superseded CHANGES_REQUESTED (never a
-# human's; signoff_dismissed read back FIRST; skipped under native auto-merge).
+# dismissal of our OWN superseded CHANGES_REQUESTED (the city's own by
+# gc_city_own, never a review that is feedback; signoff_dismissed read back
+# FIRST; skipped under native auto-merge).
 # No arm here re-reviews a moved head: a lane state is a state of the lane, and
 # gate-ensure dispatches on the lane, not on the commit under it. A merged record never carries an
 # empty merged_sha — an unreadable mergeCommit records
@@ -37,17 +38,22 @@
 # Unanswered review feedback routes to something — a fix-pool rework child
 # carrying the review bodies and inline comments verbatim, or a visit when a
 # human already holds the anchor — with the watermarks advancing only once that
-# routing reads back. This runs even while the anchor still conflicts: the rework
+# routing reads back. Feedback is decided by provenance, not by author: every
+# review, inline comment and conversation comment that is not the city's own post
+# (pr-post.sh's gc_city_own: marked by pr-post.sh, or under the city's login
+# before the anchor's provenance cutover, pr_provenance_since) is feedback,
+# whoever posted it, so a model review run under the city's own account routes
+# like a person's. This runs even while the anchor still conflicts: the rework
 # child is prepare_mode=merge, so it brings the branch current as it answers, and
 # the CONFLICTING arm above stands down when feedback is owed rather than filing a
 # redundant merge-in child. It routes under posture `commented` and equally under a
 # human `changes_requested`, which holds the merge but answers nothing; a
 # dismissed review is in neither state, so a dismissal takes it and the inline
-# comments under it out of the batch. A review posted under our OWN login leaves
-# unresolved finding threads that arm never counts, so the posture pass also
-# folds an unengaged self-login thread into `commented` — the merge-hold has to
-# be recorded before merge.sh runs — and the full pass files the one visit it
-# stands for.
+# comments under it out of the batch. An unmarked review posted under our own
+# login before the cutover is read as the city's own, so its unresolved finding
+# threads are never counted by that arm. The posture pass folds such an unengaged
+# thread into `commented` — the merge-hold has to be recorded before merge.sh
+# runs — and the full pass files the one visit it stands for.
 # A required check that has terminally FAILED, on a PR every arm above waved
 # through (no conflict, feedback answered, no unresolved-thread block), files ONE
 # rework child per head the same way — dedup keyed on anchor_bead, so an
@@ -149,6 +155,16 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # task_kind=finding bead through it, so the validation pass it opens has a finding
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The single writer of the city's PR posts, and the owner of the mark that tells
+# them from feedback. Every reply and comment this script posts goes through it,
+# and every read that separates feedback from the city's own output asks its
+# definition (gc_city_own), so the writer and the readers cannot drift apart. A
+# rework child names this absolute path to its fixer: the polecat works in its
+# own rig's checkout, where a pack-relative path names nothing.
+PR_POST="$SCRIPTS_DIR/pr-post.sh"
+[ -x "$PR_POST" ] || { echo "$PROG: the PR posting helper is missing ($PR_POST); cannot tell the city's own posts from feedback" >&2; exit 1; }
+CITY_OWN_DEF=$("$PR_POST" own-def) && [ -n "$CITY_OWN_DEF" ] \
+  || { echo "$PROG: the PR posting helper did not print its provenance definition; cannot tell the city's own posts from feedback" >&2; exit 1; }
 
 FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""
 while [ $# -gt 0 ]; do
@@ -366,12 +382,14 @@ gh_graphql() { # <query> [gh -f/-F args...]; non-zero = "could not tell"
 # projection says which way a longer thread's cut errs. A comment's id is read as
 # fullDatabaseId, a BigInt GitHub serializes as a string: databaseId is a 32-bit
 # Int GitHub has deprecated for that reason, and review-comment ids already pass
-# 2^31.
+# 2^31. Each comment also carries its creation instant and its review's
+# submission, the facts gc_city_own dates a post by.
 REVIEW_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
-      nodes{isResolved comments(first:100){nodes{fullDatabaseId author{login} body}}}}}}}'
+      nodes{isResolved comments(first:100){nodes{fullDatabaseId author{login} body createdAt
+        pullRequestReview{submittedAt}}}}}}}}'
 RT_NUM=""; RT_NODES=""
 # Loads <pr-number>'s threads into RT_NODES, one JSON array of thread nodes, and
 # returns 0; a second call for the same PR reuses them. Returns non-zero with
@@ -577,18 +595,18 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
   # a busy PR's comment list clears it. `input` reads them back in printed order.
   { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
   jq -nr --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" \
-         --arg self "$SELF_LOGIN" '
+         --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
     def clip($n): if (length) > $n then (.[0:$n] + "\n\n_(truncated — the rest is on the PR)_") else . end;
     def body: ((.body // "") | tostring);
     (input) as $revs | (input) as $cmts | (input) as $icmts |
-    ([ $revs[] | select(((.user.login // "") | tostring) != $self)
+    ([ $revs[] | select(gc_city_own($self; $since) | not)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
               | select((body | gsub("[[:space:]]"; "")) != "")
               | select(((.id // 0) | tonumber) > $rmark) ] | sort_by(.id)) as $R
-  | ([ $cmts[] | select(((.user.login // "") | tostring) != $self)
+  | ([ $cmts[] | select(gc_city_own($self; $since) | not)
               | select(((.id // 0) | tonumber) > $cmark) ] | sort_by(.id)) as $C
-  | ([ $icmts[] | select(((.user.login // "") | tostring) != $self)
+  | ([ $icmts[] | select(gc_city_own($self; $since) | not)
               | select(((.id // 0) | tonumber) > $imark) ] | sort_by(.id)) as $I
   | ((if ($R | length) > 0 then ["## Review bodies"]
         + [ $R[] | "### \(.user.login // "?") — \(.state // "?") (review \(.id))\n\n\(body | clip(4000))" ]
@@ -622,18 +640,19 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
   # all of its findings clear. A Conversation comment belongs to no review, so it
   # carries none and holds no review's dismissal.
   { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
-  jq -nc --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" --arg self "$SELF_LOGIN" '
+  jq -nc --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" \
+         --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
     def body: ((.body // "") | tostring);
     def has_body: ((body | gsub("[[:space:]]"; "")) != "");
     (input) as $revs | (input) as $cmts | (input) as $icmts |
-    ([ $revs[] | select(((.user.login // "") | tostring) != $self)
+    ([ $revs[] | select(gc_city_own($self; $since) | not)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $rmark)
               | { login: ((.user.login // "?") | tostring), locus: "PR review", message: body,
                   comment_id: ((.id // 0) | tostring), review_id: ((.id // 0) | tostring) } ])
-  + ([ $cmts[] | select(((.user.login // "") | tostring) != $self)
+  + ([ $cmts[] | select(gc_city_own($self; $since) | not)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $cmark)
               | { login: ((.user.login // "?") | tostring),
@@ -641,32 +660,34 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
                           + (if ((.line // .original_line) != null) then ":" + ((.line // .original_line) | tostring) else "" end)),
                   message: body, comment_id: ((.id // 0) | tostring),
                   review_id: ((.pull_request_review_id // "") | tostring) } ])
-  + ([ $icmts[] | select(((.user.login // "") | tostring) != $self)
+  + ([ $icmts[] | select(gc_city_own($self; $since) | not)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $imark)
               | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
                   comment_id: ((.id // 0) | tostring), review_id: "" } ])' 2>/dev/null
 }
-# The ids in <rows-json> written by a login other than ours, as a JSON array. The
-# comment and Conversation spaces count feedback by this one rule, so the read
-# that decides whether to ask the threads, the marks that record what they
-# answered, and the count that routes cannot disagree about whose comment is
-# whose.
+# The ids in <rows-json> that are feedback, as a JSON array: every row that is
+# not the city's own post (gc_city_own), whoever wrote it. The comment and
+# Conversation spaces count feedback by this one rule, so the read that decides
+# whether to ask the threads, the marks that record what they answered, and the
+# count that routes cannot disagree about which comment is feedback.
 foreign_ids() { # <rows-json>
-  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" '
-    [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ]' 2>/dev/null
+  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+    [ .[] | select(gc_city_own($self; $since) | not) | (.id // 0) ]' 2>/dev/null
 }
 # The ids of the reviews in <reviews-json> whose body counts as feedback, as a
-# JSON array: written by a login other than ours, COMMENTED or CHANGES_REQUESTED,
-# and carrying a body. A review with an empty body carries only its inline
-# comments, which the comment space already sees; counting it would leave a
-# posture no comment id can ever answer. CHANGES_REQUESTED counts beside
-# COMMENTED: an operator uses it to mean "change this", and it is the feedback the
-# loop most has to answer. A dismissed review is in neither state, so a dismissal
-# takes its ids out of the batch.
+# JSON array: not the city's own post (gc_city_own), COMMENTED or
+# CHANGES_REQUESTED, and carrying a body. An unmarked review under our own login
+# after the provenance cutover is a model or operator review run on the city's
+# account, and is feedback like any other. A review with an empty body carries
+# only its inline comments, which the comment space already sees; counting it
+# would leave a posture no comment id can ever answer. CHANGES_REQUESTED counts
+# beside COMMENTED: an operator uses it to mean "change this", and it is the
+# feedback the loop most has to answer. A dismissed review is in neither state,
+# so a dismissal takes its ids out of the batch.
 counted_review_ids() { # <reviews-json>
-  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" '
-    [ .[] | select(((.user.login // "") | tostring) != $self)
+  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+    [ .[] | select(gc_city_own($self; $since) | not)
       | (((.state // "") | tostring)) as $st
       | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
       | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
@@ -740,6 +761,11 @@ drop_ids() { # <rows-json> <ids-json>
 # comments are live feedback, and a PR green everywhere else would merge over
 # them. A comment naming no review, or naming one the review list does not
 # carry, is standalone and stays.
+# Each kept comment is stamped with its review's submission instant as
+# gc_review_submitted_at, the instant gc_city_own dates an inline comment by: a
+# comment drafted in a pending review is published when the review is submitted,
+# so a review drafted before the provenance cutover and submitted after it reads
+# as feedback whole, never its body as feedback and its comments as the city's.
 live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
   { printf '%s\n' "$1"; printf '%s\n' "$2"; } | \
   jq -nc '
@@ -747,9 +773,15 @@ live_comments() { # <reviews-json> <comments-json> — comments no dismissal ret
     ([ $revs[]
        | select(((.state // "") | tostring) == "DISMISSED")
        | ((.id // 0) | tostring) ]) as $retired
+  | ([ $revs[]
+       | select(((.submitted_at // "") | tostring) != "")
+       | { key: ((.id // 0) | tostring), value: ((.submitted_at) | tostring) } ]
+     | from_entries) as $submitted
   | [ $cmts[]
       | (((.pull_request_review_id // "") | tostring)) as $parent
-      | select(($retired | index($parent)) == null) ]' 2>/dev/null
+      | select(($retired | index($parent)) == null)
+      | if ($submitted[$parent] // "") != ""
+        then . + { gc_review_submitted_at: $submitted[$parent] } else . end ]' 2>/dev/null
 }
 # A batch names the reviews it answers, the way a signoff-sourced child names
 # its review bead. An empty-bodied CHANGES_REQUESTED is named here even though
@@ -757,9 +789,9 @@ live_comments() { # <reviews-json> <comments-json> — comments no dismissal ret
 # the merge, and its inline comments are what the child has to answer.
 feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
   printf '%s\n' "$1" | \
-  jq -nr --argjson rmark "$2" --arg self "$SELF_LOGIN" '
+  jq -nr --argjson rmark "$2" --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
     (input) as $revs |
-    [ $revs[] | select(((.user.login // "") | tostring) != $self)
+    [ $revs[] | select(gc_city_own($self; $since) | not)
               | select(((.id // 0) | tonumber) > $rmark)
               | select((((.state // "") | tostring) == "CHANGES_REQUESTED")
                        or ((((.state // "") | tostring) == "COMMENTED")
@@ -769,35 +801,37 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # <<< unanswered-feedback-body
 
 # >>> unengaged-threads-body
-# The gap the login filter above leaves open. arm 7 counts only comments
-# authored by a login other than ours (unanswered-feedback-body), so a review
-# posted UNDER our own login — an outside review agent, an operator-run review, a
-# reviewer using the automation's credential — sets no `unanswered` and routes
-# nowhere, and the check stays green across it (lane-state reads the finding and
-# review-outcome beads, never a thread), so nothing re-reviews it. This reads the
-# review THREADS instead of the comment authors. A thread counts as an unengaged
-# finding when it is unresolved, carries a comment that is not one of our own
-# write-back replies, and holds no write-back reply of ours: a thread we replied
-# into is arm 7's or the write-back's to finish, and a resolved one is done.
+# The gap the provenance cutover leaves open. arm 7 reads an unmarked post under
+# our own login from before the anchor's cutover as the city's own
+# (unanswered-feedback-body), so a review posted that way — an outside review
+# agent, an operator-run review, a reviewer using the automation's credential —
+# sets no `unanswered` and routes nowhere, and the check stays green across it
+# (lane-state reads the finding and review-outcome beads, never a thread), so
+# nothing re-reviews it. This reads the review THREADS instead. A thread counts
+# as an unengaged finding when it is unresolved, carries a comment with no city
+# mark, and holds no marked post of the city's: a thread the city replied into,
+# whether through the write-back or a pr-post.sh reply from a fixer or a
+# sitting, is arm 7's or the write-back's to finish, a thread of marked city
+# posts holds no finding, and a resolved one is done.
 # The thread read caps a thread at its first 100 comments, so a thread longer
-# than that whose only write-back reply sits past the cap reads as unengaged — a
+# than that whose only marked reply sits past the cap reads as unengaged — a
 # dismissable visit, never a dropped finding.
 unengaged_thread_count() { # count over RT_NODES on stdout; non-zero = could not tell
-  printf '%s' "$RT_NODES" | jq --arg marker "$WB_MARKER" '
+  printf '%s' "$RT_NODES" | jq "$CITY_OWN_DEF"'
     [ .[]
       | (.comments.nodes // []) as $cs
       | select((.isResolved // false) == false)
-      | select([ $cs[] | select(((.body // "") | contains($marker)) | not) ] | length > 0)
-      | select([ $cs[] | select((.body // "") | contains($marker)) ] | length == 0)
+      | select([ $cs[] | select(gc_city_marked | not) ] | length > 0)
+      | select([ $cs[] | select(gc_city_marked) ] | length == 0)
     ] | length' 2>/dev/null
 }
-# Does an unengaged self-login thread hold this PR's merge right now? merge.sh
+# Does an unengaged thread hold this PR's merge right now? merge.sh
 # reads posture off the bead and never reads threads, so this is decided in the
 # pre-merge posture pass and folded into `commented`; the visit it warrants is
 # the full pass's. Answers in three, because a read that will not run is not
 # proof of zero unengaged threads — the caller keeps the posture uncurrent on the
 # third so the merge holds for the pass rather than reading a stale one:
-#   0  an unengaged self-login thread holds the merge (caller folds into `commented`)
+#   0  an unengaged thread holds the merge (caller folds into `commented`)
 #   1  the reads ran and none holds
 #   2  a read would not run — the in-flight ledger or the thread API did not answer
 # On the FIRST pass that reads the threads it sets UT_COUNT so the full pass files
@@ -807,13 +841,12 @@ UT_COUNT=""
 unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
   local id="$1" num="$2" head="$3" row="$4" cmts="$5" sf g m grn=1 stamp inflight utc
   [ -n "$head" ] && [ -n "$num" ] && [ -n "$SELF_LOGIN" ] && [ -n "$cmts" ] || return 1
-  # Cheap pre-gate off the comments already fetched: the gap is a review under OUR
-  # OWN login (arm 7 counts only other logins), so a self-login comment that is
-  # not one of our write-back replies is one it filtered and left unrouted. Absent
-  # any, no thread here is a finding we own the miss on.
-  sf=$(printf '%s' "$cmts" | jq --arg self "$SELF_LOGIN" --arg marker "$WB_MARKER" \
-    '[ .[] | select(((.user.login // "") | tostring) == $self)
-           | select(((.body // "") | contains($marker)) | not) ] | length' 2>/dev/null)
+  # Cheap pre-gate off the comments already fetched: the gap is an unmarked
+  # comment under OUR OWN login that arm 7 read as the city's own, which only a
+  # post from before the cutover can be (or any such post, while no cutover is
+  # known). Absent any, no thread here is a finding we own the miss on.
+  sf=$(printf '%s' "$cmts" | jq --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+    [ .[] | select(gc_city_own($self; $since)) | select(gc_city_marked | not) ] | length' 2>/dev/null)
   case "$sf" in ''|*[!0-9]*) sf=0 ;; esac
   [ "$sf" -gt 0 ] || return 1
   # Only a green check hides findings: a red lane is already re-reviewing. The one
@@ -867,31 +900,33 @@ UTGATES
 # below). A comment answered by any other path, such as a sitting that replies
 # in-thread and resolves the thread, never moves the watermark, so it reads
 # unanswered on every pass and files a visit carrying pr_number that holds the
-# merge. A resolved review thread with a reply of ours in it is the answered
-# signal, whoever replied and whoever resolved.
+# merge. A resolved review thread holding a reply of ours is the answered signal,
+# whichever path posted the reply and whoever resolved the thread. A reply of
+# ours is a post that is the city's own (gc_city_own): marked by pr-post.sh, or
+# under our login from before the provenance cutover. An unmarked post under our
+# login after it is feedback, an operator's or a model's, and answers nothing.
 # A thread is answered through the last reply of ours in it, and only once it is
 # resolved. A bare reply is not enough: unengaged_holds counts exactly the
 # unresolved threads a reply of ours left open, so reading a reply here would only
 # move the hold from one arm to the other. A comment after our last reply stays
 # outstanding. A reply does not reopen a resolved thread, and GitHub records no
 # resolution time to place that comment before or after the resolve; the
-# write-back likewise reads a human reply after its own as a live conversation.
+# write-back likewise reads a post after its own as a live conversation.
 # A thread resolved with no reply of ours answers nothing here, so a hand
 # resolution alone still routes. Only inline comments sit on a thread; a review
 # body and a Conversation comment carry none and stay on the mark.
 # The ids of the inline comments RT_NODES shows answered, as a JSON array of
 # numbers on stdout, comparable with the REST rows' `id`: in each resolved thread,
-# every comment up to and including the last one $SELF_LOGIN wrote. The thread
-# read's 100-comment cut can hide only a later reply of ours, so it answers less,
-# never more. Non-zero without output on a projection that does not yield one, and
-# the caller then counts the batch unfiltered rather than dropping an objection —
-# the direction live_comments fails in too.
+# every comment up to and including the last reply of ours. The thread read's
+# 100-comment cut can hide only a later reply of ours, so it answers less, never
+# more. Non-zero without output on a projection that does not yield one, and the
+# caller then counts the batch unfiltered rather than dropping an objection — the
+# direction live_comments fails in too.
 answered_comment_ids() {
-  printf '%s' "$RT_NODES" | jq -c --arg self "$SELF_LOGIN" '
-    [ .[] | select($self != "") | select((.isResolved // false) == true)
+  printf '%s' "$RT_NODES" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+    [ .[] | select((.isResolved // false) == true)
       | (.comments.nodes // []) as $cs
-      | ([ $cs | to_entries[]
-           | select(((.value.author.login // "") | tostring) == $self) | .key ] | max) as $last
+      | ([ $cs | to_entries[] | select(.value | gc_city_own($self; $since)) | .key ] | max) as $last
       | select($last != null)
       | $cs[0:($last + 1)][] | (.fullDatabaseId // empty) | tonumber ]
     | unique' 2>/dev/null
@@ -945,6 +980,9 @@ fi
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
 postured=0; answered=0; unpostured=0; reaped=0
+# The anchor's provenance cutover, set per anchor below and read by every
+# gc_city_own call the anchor's arms make.
+PSINCE=""
 pace_start "$CURSOR" "$DEADLINE"
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
@@ -1176,6 +1214,31 @@ CHILDREN_EOF
   fi
   [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
 
+  # --- provenance cutover: when this PR's city posts started carrying the mark --
+  # Every city post is marked by pr-post.sh, and anything unmarked is feedback.
+  # The PR's older posts carry no mark, because they predate the marking, so a
+  # post under our own login from before this instant stays the city's own
+  # (gc_city_own). Stamped once, the first time any arm reads the open PR, drafts
+  # included, so a PR opened later records an instant before anyone could post on
+  # it unmarked. An unrecorded stamp leaves PSINCE empty, and gc_city_cutover
+  # reads a malformed one as empty too; either way every post under our login
+  # reads as the city's own for the pass: the routing this arm had before
+  # marking, never a burst of the city's own notices as feedback. The stamp is
+  # passed on as found, so the shape test lives in the definition alone, and a
+  # malformed one is named here for a person to fix.
+  PSINCE=$(printf '%s' "$row" | jq -r '(.metadata.pr_provenance_since // "") | tostring')
+  if [ -z "$PSINCE" ]; then
+    pnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+         --set "pr_provenance_since=$pnow" >/dev/null; then
+      PSINCE="$pnow"
+    else
+      echo "$PROG: $id — PR#$num provenance cutover did not record; every post under our login reads as the city's own this pass (retry next pass)" >&2
+    fi
+  elif [ -z "$(jq -rn --arg s "$PSINCE" "$CITY_OWN_DEF"'gc_city_cutover($s)' 2>/dev/null)" ]; then
+    echo "$PROG: $id — PR#$num pr_provenance_since '$PSINCE' is not a UTC instant; every post under our login reads as the city's own" >&2
+  fi
+
   # --- status label: project the human-attention axis onto the PR list ----------
   # Above the draft-skip on purpose: the label projects the city's workflow state,
   # which a draft-early PR (specs/tk-6bji7k.1's future half) needs as much as an
@@ -1209,9 +1272,10 @@ CHILDREN_EOF
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id — PR#$num live head unresolved; posture not recorded (a posture pins to a head or says nothing)" >&2
   elif [ -z "$SELF_LOGIN" ]; then
-    # Our own comments are indistinguishable from a human's without the acting
-    # login, and a weaker posture written here would clear a standing
-    # `commented` that is holding the merge. Record nothing; hold what stands.
+    # Without the acting login no post reads as the city's own (gc_city_own
+    # keys on it), so every notice the city ever posted would count as feedback,
+    # and a weaker posture written here would clear a standing `commented` that
+    # is holding the merge. Record nothing; hold what stands.
     echo "$PROG: $id — PR#$num posture not recorded: the acting login is unresolved" >&2
   else
     revs_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100") || revs_raw=""
@@ -1298,7 +1362,7 @@ CHILDREN_EOF
         fi
       fi
       # An issue comment carries no review state and no inline path; every one
-      # under a login other than ours is feedback the loop has to answer, the
+      # that is not the city's own post is feedback the loop has to answer, the
       # same test the inline space uses. Its ids are a separate range, so it
       # earns its own watermark rather than sharing max_c's.
       max_i=$(max_foreign_id "$icmts_raw")
@@ -1312,9 +1376,10 @@ CHILDREN_EOF
       [ "$max_r" -ge "$rwm" ] || max_r="$rwm"
       [ "$max_i" -ge "$iwm" ] || max_i="$iwm"
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
-      # A review posted under OUR OWN login leaves unresolved finding threads arm 7
-      # never counts — it reads other logins — so `unanswered` stays 0 while the
-      # check stays green, and the posture would read review_required/none. merge.sh
+      # An unmarked review posted under OUR OWN login before the cutover leaves
+      # unresolved finding threads arm 7 never counts — it reads them as the city's
+      # own — so `unanswered` stays 0 while the check stays green, and the posture
+      # would read review_required/none. merge.sh
       # reads posture off the bead and never reads threads, and the full pass that
       # would file the visit runs after merge, so the hold has to be recorded HERE,
       # in the pre-merge pass. Fold a confirmed hold into `commented`; a read that
@@ -1805,8 +1870,11 @@ REAP_EOF
 
 $live_url — head $head_oid${CSRC:+, review $CSRC}
 
-Answer every item below: a fix, or a reply on the PR saying why not. One that
-asks for a decision you cannot make is an escalation, never a silent close.
+Answer every item below: a fix, or a reply on the PR saying why not. Post a
+reply through $PR_POST (\`reply\` into an inline thread, \`comment\` on the
+conversation): it marks the reply as the city's own, and a reply posted any
+other way reads as new feedback on the PR. One that asks for a decision you
+cannot make is an escalation, never a silent close.
 
 $CBODY"
       if ! ckids=$(bd_list --status="$ALL_STATUSES" --title-contains "$CTITLE"); then
@@ -1843,7 +1911,7 @@ $CBODY"
           --set-metadata anchor_bead="$id" \
           --set-metadata branch="$fix_branch" \
           --set-metadata target="$base" \
-          --set-metadata rejection_reason="Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+          --set-metadata rejection_reason="Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not, posted through $PR_POST so it is not read back as new feedback — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
           ${CSRCSET[@]+"${CSRCSET[@]}"} \
           --set-metadata prepare_mode="$prepare_mode" \
           --set-metadata merge_strategy=mr \
@@ -2249,9 +2317,11 @@ $CBODY"
 
   # --- dismiss our OWN superseded CHANGES_REQUESTED when the check is green -------
   # Only when every declared check reads green but GitHub is still red on our own
-  # block, left at a commit other than the live head. Never a human's review;
-  # skipped when native auto-merge is armed (the dismissal would hand GitHub the
-  # landing).
+  # block, left at a commit other than the live head. Our own is a review
+  # gc_city_own reads as the city's: one pr-post.sh marked, or one under our login
+  # from before the provenance cutover. An unmarked review under our login after
+  # it is feedback, the same as a human's, and is never dismissed here. Skipped
+  # when native auto-merge is armed (the dismissal would hand GitHub the landing).
   all_green=1
   # The resolver's exit status is safety-critical here: a crash prints nothing, and
   # an empty check list would leave all_green=1 and dismiss the city's OWN standing
@@ -2278,8 +2348,9 @@ GATES
     fi
     reviews=$(gh_api_origin --paginate "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100" \
       --jq '.[]' 2>/dev/null) || reviews=""
-    stale_rid=$(printf '%s' "$reviews" | jq -sr --arg self "$SELF_LOGIN" --arg head "$head_oid" '
-      [ .[] | select((.user.login // "") == $self)
+    stale_rid=$(printf '%s' "$reviews" | jq -sr --arg self "$SELF_LOGIN" --arg since "$PSINCE" \
+      --arg head "$head_oid" "$CITY_OWN_DEF"'
+      [ .[] | select(gc_city_own($self; $since))
         | select(.state == "CHANGES_REQUESTED")
         | select((.commit_id // "") != $head) | (.id // empty) ] | .[0] // empty' 2>/dev/null)
     if [ -n "$stale_rid" ]; then
@@ -2316,7 +2387,7 @@ GATES
   if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
     UTKEY="pr-unengaged-threads.$num.$head_oid"
     escalate "$id" "$UTKEY" \
-      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login (an outside review agent, or an operator-run review), so the comment-routing arm never counted them and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
+      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover (an outside review agent, or an operator-run review), so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
     UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
     if [ -z "$UTVID" ]; then
       echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
@@ -2601,6 +2672,9 @@ fi
 # connection here is read to exhaustion. `gh --paginate` follows exactly one
 # cursor, so the reviews and the threads are separate reads rather than one
 # nested query, and neither carries a second cursor for it to choose between.
+# Every node carries its author, body and creation instant, and a thread comment
+# its review's submission: the facts gc_city_own reads to tell the city's own
+# post from feedback.
 #
 # Those reads cost at least four GitHub calls an anchor, so the sweep is paced
 # like the walk above (pace-lib.sh): the same deadline, a rotation on a cursor
@@ -2612,7 +2686,7 @@ WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
     pullRequest(number:$num){
       reviews(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
-        nodes{id databaseId state body author{login}
+        nodes{id databaseId state body author{login} submittedAt createdAt
           reactionGroups{content viewerHasReacted}}}}}}'
 # The Conversation tab is a third top-level connection, the same single-cursor
 # shape as the reviews read. Its comments carry no thread to resolve, so the
@@ -2623,7 +2697,7 @@ WB_ISSUE_COMMENTS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor
     pullRequest(number:$num){
       comments(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
-        nodes{id databaseId author{login}
+        nodes{id databaseId author{login} body createdAt
           reactionGroups{content viewerHasReacted}}}}}}'
 # A thread's own comments stay nested: one read covers every thread short enough
 # to fit, which is nearly all of them. Truncation is read off the COUNT rather
@@ -2636,13 +2710,15 @@ WB_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
       reviewThreads(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
         nodes{id isResolved viewerCanResolve
-          comments(first:100){nodes{id databaseId author{login} body
+          comments(first:100){nodes{id databaseId author{login} body createdAt
+            pullRequestReview{submittedAt}
             reactionGroups{content viewerHasReacted}}}}}}}}'
 WB_THREAD_COMMENTS_QUERY='query($id:ID!,$endCursor:String){
   node(id:$id){... on PullRequestReviewThread{
     comments(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
-      nodes{id databaseId author{login} body
+      nodes{id databaseId author{login} body createdAt
+        pullRequestReview{submittedAt}
         reactionGroups{content viewerHasReacted}}}}}}'
 # The nested `first:` above, named. A thread that comes back holding this many
 # comments is one the top-up has to re-read; change either without the other and
@@ -2681,6 +2757,11 @@ while IFS= read -r wrow; do
   case "$wcwm" in ''|*[!0-9]*) wcwm=0 ;; esac
   case "$wrwm" in ''|*[!0-9]*) wrwm=0 ;; esac
   case "$wiwm" in ''|*[!0-9]*) wiwm=0 ;; esac
+  # The same provenance cutover the routing arm read: what it routed as feedback
+  # is what this sweep acknowledges and answers. Unrecorded or malformed reads
+  # every post under our login as the city's own, as it does there; the shape
+  # test is gc_city_cutover's, so the stamp is passed on as found.
+  wsince=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_provenance_since // "") | tostring')
 
   # The watermark is cumulative and pr_comment_disposition holds one batch at a
   # time, so a thread an earlier batch left unresolved still sits at or below the
@@ -2866,13 +2947,14 @@ WB_LONG_THREADS
   # landed: one reply, naming each, over a thread with nothing left outstanding.
   # A thread already carrying our reply marker stays in scope whatever its ids:
   # we claimed it, and a resolve that failed behind a reply still has to be
-  # retried. A human who wrote after that marker makes the thread live, which is
-  # the reason reported for leaving it open.
+  # retried. Anyone who wrote after that marker makes the thread live, which is
+  # the reason reported for leaving it open. Foreign is the routing arm's own
+  # test: a post that is not the city's own (gc_city_own), whoever wrote it.
   wplan=$(printf '%s' "$wview" | jq -r \
-    --arg self "$SELF_LOGIN" --arg reaction "$WB_REACTION" --arg marker "$WB_MARKER" \
-    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" --argjson recs "$wbrecs" '
+    --arg self "$SELF_LOGIN" --arg since "$wsince" --arg reaction "$WB_REACTION" --arg marker "$WB_MARKER" \
+    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" --argjson recs "$wbrecs" "$CITY_OWN_DEF"'
     def reacted($rg): [ ($rg // [])[] | select(.content == $reaction and .viewerHasReacted) ] | length > 0;
-    def foreign: (.author.login // "") != $self;
+    def foreign: gc_city_own($self; $since) | not;
     ( [ .reviews[]
         | select(foreign)
         # the states max_r watermarks (COMMENTED + CHANGES_REQUESTED): a body-only
@@ -2914,7 +2996,7 @@ WB_LONG_THREADS
         | (if $mine == null then 1 else 0 end) as $needreply
         | (if $mine == null then 0
            else [ $cs | to_entries[] | select(.key > $mine)
-                  | select((.value.author.login // "") != $self) ] | length
+                  | select(.value | foreign) ] | length
            end) as $after
         | ([ 0, ($recs[] | .hi) ] | max) as $mark
         | (if $after > 0 then 0
@@ -2993,8 +3075,7 @@ WB_REACTIONS
       # once over the thread, the marker on its own line.
       wbody="${a4:-Addressed on this PR (no bead recorded).}
 $WB_MARKER"
-      if gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
-           -f t="$a1" -f b="$wbody" >/dev/null; then
+      if "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$a1" --body "$wbody" >/dev/null 2>&1; then
         replied=$((replied + 1))
       else
         echo "$PROG: $wid — PR#$wnum could not reply on thread $a1; NOT resolving it (retry next pass)" >&2
@@ -3059,7 +3140,7 @@ $WB_MARKER"
       wdtid=$(printf '%s' "$wview" | jq -r --arg c "$wdcid" '
         [ .threads[] | select((.comments.nodes // []) | any(((.databaseId // 0) | tostring) == $c)) | .id ] | .[0] // empty' 2>/dev/null)
       if [ -z "$wdtid" ]; then
-        if gh pr comment "$wnum" --repo "$ORIGIN_REPO_Q" --body "$wdbody" >/dev/null 2>&1; then
+        if "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$wnum" --body "$wdbody" >/dev/null 2>&1; then
           gc bd update "$wdfid" --set-metadata finding.reply_posted=1 >/dev/null 2>&1 || true
           replied=$((replied + 1))
         else
@@ -3076,8 +3157,7 @@ $WB_MARKER"
         wdreplied=1
       fi
       if [ "$wdreplied" = 0 ]; then
-        if gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
-             -f t="$wdtid" -f b="$wdbody" >/dev/null; then
+        if "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$wdtid" --body "$wdbody" >/dev/null 2>&1; then
           replied=$((replied + 1)); wdreplied=1
         else
           echo "$PROG: $wid — PR#$wnum could not reply the decline for $wdfid on thread $wdtid; retry next pass" >&2
@@ -3165,18 +3245,34 @@ WB_DECLINES
         wrrj=$(printf '%s' "$wrr" | base64 -d 2>/dev/null) || continue
         wrid=$(printf '%s' "$wrrj" | jq -r '.rid // empty')
         [ -n "$wrid" ] || continue
-        # The live review this id names. Only a human CHANGES_REQUESTED is this
-        # arm's to clear: our own superseded block is the reconcile arm's, above;
-        # an already-DISMISSED or otherwise non-blocking review needs nothing, and
-        # its DISMISSED state is the idempotency — a repeat pass finds nothing to do.
+        # The live review this id names. Only a feedback CHANGES_REQUESTED is this
+        # arm's to clear: our own superseded block (gc_city_own) is the reconcile
+        # arm's, above; an already-DISMISSED or otherwise non-blocking review needs
+        # nothing, and its DISMISSED state is the idempotency — a repeat pass finds
+        # nothing to do.
         wrstate=$(printf '%s' "$wview" | jq -r --arg r "$wrid" \
           '[ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0].state // empty' 2>/dev/null)
         wrlogin=$(printf '%s' "$wview" | jq -r --arg r "$wrid" \
           '[ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0].author.login // empty' 2>/dev/null)
+        wrown=$(printf '%s' "$wview" | jq -r --arg r "$wrid" --arg self "$SELF_LOGIN" --arg since "$wsince" "$CITY_OWN_DEF"'
+          [ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0] // {} | gc_city_own($self; $since)' 2>/dev/null)
         [ "$wrstate" = "CHANGES_REQUESTED" ] || continue
-        [ -n "$wrlogin" ] && [ "$wrlogin" != "$SELF_LOGIN" ] || continue
+        [ -n "$wrlogin" ] && [ "$wrown" = "false" ] || continue
+        # A review under our own login that is feedback (a model review run on the
+        # city's account, unmarked, after the cutover) has no reviewer to re-queue:
+        # the account it would re-request is the one making the request, and
+        # GitHub refuses a re-request of the PR's author. That review is dismissed
+        # without one, so a re-request that can never land does not hold its
+        # dismissal on every pass.
+        wrrequeue=1
+        [ "$wrlogin" = "$SELF_LOGIN" ] && wrrequeue=0
         wrlines=$(printf '%s' "$wrrj" | jq -r '.lines[]?' 2>/dev/null)
-        wrmsg="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed and a fresh review is requested.
+        if [ "$wrrequeue" = 1 ]; then
+          wrhead="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed and a fresh review is requested."
+        else
+          wrhead="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed. It was posted under the city's own account, so no fresh review is requested from it."
+        fi
+        wrmsg="$wrhead
 
 $wrlines
 
@@ -3185,7 +3281,7 @@ Dismissal does not mark approval; the merge still gates on an explicit approving
         # dismissal with it: both are in scope, and a dismissal alone would drop
         # the reviewer instead of re-queuing them. Re-requesting a past reviewer is
         # allowed, so the retry after a failed dismiss repeats it harmlessly.
-        if ! gh_api_origin -X POST "repos/$ORIGIN_REPO/pulls/$wnum/requested_reviewers" \
+        if [ "$wrrequeue" = 1 ] && ! gh_api_origin -X POST "repos/$ORIGIN_REPO/pulls/$wnum/requested_reviewers" \
              -f "reviewers[]=$wrlogin" >/dev/null 2>&1; then
           echo "$PROG: $wid — PR#$wnum could not re-request $wrlogin for review $wrid; NOT dismissing (retry next pass)" >&2
           continue
@@ -3193,9 +3289,15 @@ Dismissal does not mark approval; the merge still gates on an explicit approving
         if gh_api_origin -X PUT "repos/$ORIGIN_REPO/pulls/$wnum/reviews/$wrid/dismissals" \
              -f message="$wrmsg" >/dev/null 2>&1; then
           dismissed_n=$((dismissed_n + 1))
-          echo "$PROG: $wid — PR#$wnum dismissed human review $wrid and re-requested $wrlogin (its findings all cleared)"
-        else
+          if [ "$wrrequeue" = 1 ]; then
+            echo "$PROG: $wid — PR#$wnum dismissed human review $wrid and re-requested $wrlogin (its findings all cleared)"
+          else
+            echo "$PROG: $wid — PR#$wnum dismissed review $wrid, posted under our own login, with no re-request (its findings all cleared)"
+          fi
+        elif [ "$wrrequeue" = 1 ]; then
           echo "$PROG: $wid — PR#$wnum re-requested $wrlogin but could not dismiss review $wrid; retry next pass" >&2
+        else
+          echo "$PROG: $wid — PR#$wnum could not dismiss review $wrid; retry next pass" >&2
         fi
       done <<WB_REVIEW_CLEARS
 $wrev_ready
