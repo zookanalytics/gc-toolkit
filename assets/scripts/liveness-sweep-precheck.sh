@@ -259,8 +259,12 @@ if [ "$READS_OK" -eq 1 ]; then
 fi
 
 # The local survivor set — every exclusion here is one liveness-sweep.sh also
-# makes. Every `// ""` is load-bearing (most beads carry no metadata key at
-# all); an empty hold is a CLEARED hold, not a hold. Class 2(i)(a) is a
+# makes. Class 0 drops the per-sling machine convoys and order-tracking wisps a
+# sling mints: machinery, not work, decided from issue_type, title and
+# gc.synthetic alone. The issue_type guard is load-bearing — a bare title-prefix
+# test would hide a real bead whose own title names a convoy. Every `// ""` is
+# load-bearing (most beads carry no metadata key at all); an empty hold is a
+# CLEARED hold, not a hold. Class 2(i)(a) is a
 # REVERSE index: the child holds the parent-child edge. `gc.takeaway` is not
 # an exclusion, for the reason the sweep's classify block gives; $demanded is
 # the sweep's arm of the same name, and it has to stay in step with it or a
@@ -291,6 +295,14 @@ JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
     SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
+      def machine_convoy:
+        (.issue_type // "") == "convoy"
+        and ((((.title // "") | startswith("sling-"))
+              or ((.title // "") | startswith("input convoy for"))
+              or ((.metadata["gc.synthetic"] // "") == "true")));
+      def order_wisp:
+        ((.id // "") | contains("-wisp-"))
+        and ((.title // "") | startswith("order:"));
       # holder_live mirrors liveness-sweep.sh so this stays a SUPERSET of its
       # census, but fails CLOSED on an unreadable session list ($livenessknown
       # false -> not live -> subject not excluded -> the pass runs). A claim
@@ -315,6 +327,9 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
       | ([ ($alive[0] // [])[]
            | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
       | [ ($ready[0] // [])[]
+          # class 0: per-sling machine convoys and order-tracking wisps are
+          # machinery, not work — the exclusion classify makes first.
+          | select((machine_convoy or order_wisp) | not)
           | select((.metadata["gc.routed_to"] // "") == "")
           | select(((.metadata.task_kind // "") != "visit") or (holder_live | not))
           | select((.metadata.task_kind // "") != "triage-subject")
