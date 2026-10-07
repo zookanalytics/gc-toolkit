@@ -74,8 +74,9 @@ PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 # superseded notice go through it so they carry the city's mark, which is what
 # keeps pr-facts.sh from reading them back as feedback.
 PR_POST="$SCRIPTS_DIR/pr-post.sh"
-# The managed `## Summary` region: markers, composer and splice helpers, shared
-# with pr-stack.sh so an opened body and a post-open refresh never diverge.
+# The managed `## Summary` region (markers, composer and splice helpers) and the
+# title composer (cc_title), shared with pr-stack.sh so an opened PR and a
+# post-open refresh never diverge.
 # shellcheck source=pr-summary-region.sh
 . "${GC_PR_SUMMARY_LIB:-$SCRIPTS_DIR/pr-summary-region.sh}" \
   || { echo "$PROG: cannot source pr-summary-region.sh beside this script" >&2; exit 1; }
@@ -114,31 +115,6 @@ is_set() {
   case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac
 }
 is_held() { is_set "${1:-}"; }
-
-# A conventional-commit PR-title check (which product repos run on every PR)
-# requires the title to open with a type token: `type:` or `type(scope):`.
-# Bead titles carry none, so one is derived from the bead's issue_type. A
-# title that already opens with a recognized conventional type is left
-# untouched, so a bead a human already titled `fix(x): …` is not
-# double-prefixed. The derived types are ordinary conventional types every
-# such check accepts; the recognized set is wider so any hand-written prefix
-# survives.
-CONVENTIONAL_TYPES='build|chore|docs|feat|fix|ops|perf|refactor|revert|security|style|test'
-cc_type_for() { # <issue_type> — the conventional-commit type for a bead kind
-  case "${1:-}" in
-    bug)          printf 'fix' ;;
-    feature|feat) printf 'feat' ;;
-    docs)         printf 'docs' ;;
-    *)            printf 'chore' ;;
-  esac
-}
-cc_title() { # <title> <issue_type> — <title>, guaranteed to open with a type
-  if printf '%s' "$1" | grep -Eq "^(${CONVENTIONAL_TYPES})(\([^)]+\))?!?: "; then
-    printf '%s' "$1"
-  else
-    printf '%s: %s' "$(cc_type_for "$2")" "$1"
-  fi
-}
 
 # Certify one PR row as this anchor's: right repo url, right head branch, OUR
 # head repository (fork gap), not cross-repo, right base. 0=ours, 1=not ours,

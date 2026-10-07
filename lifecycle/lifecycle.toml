@@ -656,8 +656,9 @@ keys = [
   # files a finding unvalidated and the validator rules it; every ruling ends the
   # finding closed or converts it to a visit. must-fix wires finding --blocks
   # anchor, the hold merge.sh's blocker probe reads, until the fix unit lands.
-  # deferred files a claimable follow-up bead (its provenance edge --discovered-from
-  # the anchor) and closes the finding; declined closes it with the reason, no edge.
+  # deferred files a claimable follow-up bead (gated behind the anchor, its
+  # provenance edge --discovered-from the finding) and closes the finding; declined
+  # closes it with the reason, no edge.
   # needs-you files a visit for the operator and leaves the finding OPEN — an open
   # finding holds its human review changes-requested until they rule the visit.
   "finding.disposition",
@@ -682,7 +683,8 @@ keys = [
   "finding.reply_posted",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection, the deferral
-  # reason, and a --discovered-from edge to the anchor for provenance.
+  # reason, and a --discovered-from edge to the finding for provenance; the anchor
+  # --blocks it until the merge.
   "finding.follow_up",
   # The visit a needs-you finding files for the operator, set by finding.sh as the
   # ruling runs. The finding stays open and its visit id is posted to the raiser's
