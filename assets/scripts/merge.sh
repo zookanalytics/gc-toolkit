@@ -54,6 +54,17 @@ PROG="merge"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+
+# THE SHELL BELOW IS THE FALLBACK. `gctk merge` (services/gctk) is the ported
+# implementation and answers whenever the build order has published a binary;
+# this script runs when it has not — a fresh city, a build that failed, a rig
+# checkout ahead of the deployed binary. Both must stay correct while the
+# fallback stands, so merge.test.sh runs its whole body against both.
+# gctk-resolve.sh decides which one answers.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+gctk_resolve merge "$@"
+
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The composable "may this anchor be finalized?" precondition set. An open visit
 # tracking the anchor holds its merge — subject-scoped via the anchor's incoming
@@ -606,8 +617,12 @@ while IFS= read -r tagged; do
     echo "$PROG: PR#$num referencing-bead read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   }
-  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null | scrub)
-  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null | scrub)
+  # A probe that exited non-zero is unreadable whatever it printed — bd_list's
+  # contract for the list reads, since a failed read can print an empty array.
+  children=$(gc bd dep list "$id" --direction=up -t parent-child --json 2>/dev/null) || children=""
+  blockers=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null) || blockers=""
+  children=$(printf '%s' "$children" | scrub)
+  blockers=$(printf '%s' "$blockers" | scrub)
   if ! printf '%s' "$children" | jq -e 'type == "array"' >/dev/null 2>&1 \
      || ! printf '%s' "$blockers" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "$PROG: PR#$num dependency probe unreadable; merge held (anchor $id)"

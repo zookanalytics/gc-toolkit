@@ -82,11 +82,13 @@ mk_sut_dir() { # <dir> <file>...
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
   # bd-lib.sh (the shared bead-store reads) and pace-lib.sh (the cadence arms'
-  # visit order and time budget) are libraries SUTs source by sibling path; copy
-  # them beside the SUT so that source resolves in the private dir. They sit
-  # beside this harness, so they are found whatever the SUT's own directory is.
+  # visit order and time budget) are libraries SUTs source by sibling path, and
+  # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
+  # the same way; copy them beside the SUT so those sources resolve in the
+  # private dir. They sit beside this harness, so they are found whatever the
+  # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   return 0
@@ -191,6 +193,20 @@ case "$verb" in
     if [ -n "${STUB_LIST_FAIL_ON:-}" ]; then
       case "$*" in *"$STUB_LIST_FAIL_ON"*) echo "gc: simulated list failure" >&2; exit 1 ;; esac
     fi
+    # STUB_LIST_PARTIAL="<text>": a list whose arguments contain <text> prints
+    # `[]` and exits 1 — a store error mid-query that still printed an array.
+    if [ -n "${STUB_LIST_PARTIAL:-}" ]; then
+      case " $* " in
+        *"$STUB_LIST_PARTIAL"*) echo '[]'; echo "gc: simulated mid-query store error" >&2; exit 1 ;;
+      esac
+    fi
+    # STUB_LIST_TRAILING="<text>": a list whose arguments contain <text> prints
+    # its answer, then a line that is not JSON, and exits 0 — a stream with
+    # unreadable bytes after the array.
+    ltrail=""
+    if [ -n "${STUB_LIST_TRAILING:-}" ]; then
+      case " $* " in *"$STUB_LIST_TRAILING"*) ltrail=1 ;; esac
+    fi
     statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -222,6 +238,7 @@ case "$verb" in
         '[ .[] | select((((.metadata // {})[$k]) // "" | tostring) == $v) ]')
     done
     printf '%s\n' "$out"
+    [ -z "$ltrail" ] || echo 'gc: simulated trailing output'
     ;;
   update)
     id="${1:-}"; shift || true
@@ -337,6 +354,11 @@ case "$verb" in
     case "${1:-}" in
       list)
         [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
+        # STUB_DEP_PARTIAL: the probe prints `[]` and exits 1, a failed read
+        # that still printed an array.
+        [ -n "${STUB_DEP_PARTIAL:-}" ] && { echo '[]'; echo "gc bd dep: simulated store error" >&2; exit 1; }
+        # STUB_DEP_TRAILING: the probe prints its answer, then a line that is
+        # not JSON, and exits 0 — unreadable bytes after the array.
         id="${2:-}"; shift 2 || true
         dir=""; dtyp=""
         while [ $# -gt 0 ]; do
@@ -359,7 +381,8 @@ case "$verb" in
             else                  { if (b == id) print a }   # legacy: who names me
           }' "$D")
         jq -c --arg ids "$ids" '($ids | split("\n")) as $want
-          | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S"
+          | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S" || exit $?
+        [ -z "${STUB_DEP_TRAILING:-}" ] || echo 'gc bd dep: simulated trailing output'
         ;;
       add)
         a="${2:-}"; b="${3:-}"; ty="parent-child"; shift 3 || true
@@ -593,6 +616,9 @@ case "$sub" in
           jq -c '{data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
                 nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+          # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
+          # hands back when a later page came back garbled.
+          [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"
           exit 0 ;;
         *PullRequestReviewThread*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1

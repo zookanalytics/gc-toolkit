@@ -27,9 +27,10 @@ compiled package keeps them from diverging.
 | Subcommand | Replaces | State |
 |---|---|---|
 | `lifecycle` | `assets/scripts/lifecycle.sh` | ported; the script remains as the fallback |
+| `merge` | `assets/scripts/merge.sh` | ported; the script remains as the fallback |
 | `pr-status` | `pr-status-label.sh`'s `derive_value` | ported; no fallback — the label is left unchanged when the binary is absent or stale |
 
-Still shell: `gate-ensure`, `pr-open`, `merge`, `pr-facts`, `convoy-graduate`,
+Still shell: `gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
 `signoff`. The spec's port order is `lifecycle` first (everything else calls
 it), then `merge`, then the rest — one subcommand per PR.
 
@@ -57,17 +58,19 @@ against each implementation, and why the port needs no test suite of its own.
 ## The fallback, and when it goes away
 
 Until a cadence subcommand's binary is deployed, its script answers.
-`lifecycle.sh` resolves the binary explicitly — `$GCTK_BIN`, else the
-`.gc/services/gctk/bin/gctk` under `$GC_CITY_PATH`, `$GC_CITY` or
-`$GC_CITY_ROOT`, else the `city_path` that `gc service list --json` reports —
-and `exec`s it when one is there. `GCTK_BIN=none` forces the shell
-implementation. That precedence is the one the rest of the pack reads, and
-`GC_CITY_PATH` leads it because that is the variable a supervisor puts in an
-agent session. The listing is what the cadence itself needs: the order runner
-that execs `refinery-reconcile.sh` carries no city variable at all, so an
-env-only chain would leave every order-driven transition on the fallback while
-the board reported the binary current. `doctor/check-cadence-live` resolves by
-the same env chain, for the same reason.
+`lifecycle.sh` and `merge.sh` hand the call to `assets/scripts/gctk-resolve.sh`
+(`gctk_resolve <subcommand> "$@"`), which resolves the binary explicitly —
+`$GCTK_BIN`, else the `.gc/services/gctk/bin/gctk` under `$GC_CITY_PATH`,
+`$GC_CITY` or `$GC_CITY_ROOT`, else the `city_path` that
+`gc service list --json` reports — and `exec`s it when one is there.
+`GCTK_BIN=none` forces the shell implementation. That precedence is the one
+the rest of the pack reads, and `GC_CITY_PATH` leads it because that is the
+variable a supervisor puts in an agent session. The listing is what the
+cadence itself needs: the order runner that execs `refinery-reconcile.sh`
+carries no city variable at all, so an env-only chain would leave every
+order-driven transition on the fallback while the board reported the binary
+current. `doctor/check-cadence-live` resolves by the same env chain, for the
+same reason.
 
 Resolution is never a walk up from the script's own path. The hermetic suites
 run from a tree that lives inside a live city, and a filesystem hunt would find
@@ -113,7 +116,7 @@ good binary serving the cadence. That is slower iteration in exchange for no
 accidental live surgery on merge logic, and two things make the lag visible:
 `doctor/check-cadence-live` compares `gctk version` against the checkout's
 services/gctk subtree, and the board's PACK rows carry the same comparison
-where the operator already looks. lifecycle.sh makes the same comparison
+where the operator already looks. gctk-resolve.sh makes the same comparison
 before it execs a city-resolved binary, and a checkout whose services/gctk is
 at another revision — a rig ahead of the lag, a branch that changed the port —
 takes the shell fallback, which is the writer that matches its callers.
@@ -145,6 +148,8 @@ scripts is the contract; improving on them silently is how a port diverges.
 ```bash
 cd services/gctk && go test ./...          # the units
 bash assets/scripts/lifecycle.test.sh      # the acceptance bar, both arms
+bash assets/scripts/merge.test.sh          # the acceptance bar, both arms
+bash assets/scripts/gctk-resolve.test.sh   # which implementation answers
 ```
 
 The shell suite builds the binary itself and fails if it cannot: a run that
