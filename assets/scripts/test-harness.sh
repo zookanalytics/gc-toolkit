@@ -531,6 +531,16 @@ case "$sub" in
         return 1
       }
       case "$gqquery" in
+        *pullRequests\(states:OPEN*)
+          # merge.sh's visit-order read: every open PR, served as one page from
+          # open_prs.json (a list of PR nodes). No fixture is an empty list, in
+          # which every anchor's PR has left the open list.
+          [ -z "${STUB_OPEN_PRS_FAIL:-}" ] || exit 1
+          of="$G/open_prs.json"
+          if [ -s "$of" ]; then nodes=$(cat "$of"); else nodes='[]'; fi
+          printf '%s' "$nodes" | jq -c '{data: {repository: {pullRequests: {
+              pageInfo: {hasNextPage: false, endCursor: null}, nodes: .}}}}' || exit 1
+          exit 0 ;;
         *addReaction*)
           [ "${STUB_REACT_RC:-0}" = "0" ] || exit "${STUB_REACT_RC:-0}"
           sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')

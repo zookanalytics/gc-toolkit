@@ -36,10 +36,11 @@
 # failing is bounded rather than retried forever: record-failure-cap.sh counts
 # the failures on the anchor and escalates past the cap, so a cause no later
 # pass can clear reaches a person instead of one stderr line per pass.
-# Visit order: anchors whose PR can land this pass (CLEAN or UNSTABLE, or
-# APPROVED with its merge state not yet computed) or has left the open list are
-# visited first and never paced; --deadline and --cursor pace the rest through a
-# rotation (pace-lib.sh).
+# Visit order: anchors whose PR has left the open list, or could land this pass
+# by everything read without a per-PR call (draft flag, anchor-local holds,
+# approval, the merge state the posture arm recorded), are visited first and
+# never paced; --deadline and --cursor pace the rest through a rotation
+# (pace-lib.sh).
 # Caller: refinery-reconcile.sh, with BEADS_ACTOR projected to the refinery
 # identity.
 set -u
@@ -239,6 +240,34 @@ REPO_Q_DEF='
     | .[0] | if . == null then "?" else (.h + "/" + .o) end;
 '
 
+# The three anchor-local holds the merge validates first, as jq: an operator's
+# merge_hold, review comments nothing has answered (the posture pr-facts.sh
+# records), and a check_set never normalized. Shared by the visit order and the
+# terminal re-read, so the two read each hold the same way.
+ANCHOR_HOLDS_DEF='
+  def hold_set: ((. // "") | tostring) as $v
+    | (["", "false", "False", "FALSE", "0", "null"] | index($v)) == null;
+  def comments_unanswered: ((. // "") | tostring) | startswith("commented@");
+  def no_check_set: ((. // "") | tostring | gsub("[[:space:],]"; "")) == "";
+'
+
+# The approval rule over a list of reviews in the REST shape: each account
+# other than the city takes its latest APPROVED or CHANGES_REQUESTED review. A
+# dismissed review is in neither state, so it drops out before the latest is
+# taken: a dismissed approval does not count, and a dismissed CHANGES_REQUESTED
+# does not hide its author's older approval. An approval stands across later
+# pushes until it is dismissed, so it counts at whatever commit it was given.
+# Yields {veto, approver}, each the first such login or empty. Shared by the
+# approval gate and the visit order, so the two never disagree on approval.
+REVIEW_VERDICT_DEF='
+  def review_verdict($self):
+    ([ .[] | select((.user.login // "") != $self)
+       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED") ]
+     | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
+    | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
+        approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") };
+'
+
 # The first declared lane that does not DERIVE green, through lane-state.sh.
 # Prints that lane; empty stdout with a zero exit means every declared lane is
 # green. A non-zero exit is a lane the store would not read, which the caller
@@ -306,32 +335,62 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 # --- visit order: what can land this pass first, the rest in rotation ---------
 # This arm's cost grows with the PR set, and the pass that runs it has a budget,
 # so a deadline or a kill can stop it part-way. What it must never defer is a
-# landing. An anchor whose PR GitHub reports CLEAN or UNSTABLE (the only states
-# the merge below proceeds on), or APPROVED with its merge state not yet
-# computed (GitHub recomputes every PR's after a squash moves the base), or
-# whose PR is no longer open (merged, which owes the record, or closed), is
-# visited first, and the deadline never stops that group. The rest cannot merge
-# this pass (BLOCKED, BEHIND, DIRTY, or unapproved), so a visit there refreshes
-# a verdict and nothing lands; they are visited in id order after the cursor,
-# wrapping (pace-lib.sh), until the deadline. One `gh pr list` answers every
-# PR's state. When it cannot be read, every anchor joins the first group and
-# the pass is not paced at all.
+# landing. So every anchor is visited first, and the deadline never stops that
+# group, unless something read without a per-PR call already rules its merge
+# out this pass:
+#   - its PR is a draft, or the acting login is unresolved (the approval gate
+#     then holds every PR);
+#   - one of the three anchor-local holds stands (ANCHOR_HOLDS_DEF);
+#   - the approval rule (REVIEW_VERDICT_DEF), applied to each account's latest
+#     APPROVED or CHANGES_REQUESTED review, finds a veto or no approval;
+#   - the merge state pr-facts.sh recorded at the PR's live head, in the
+#     posture arm that runs right before this one, is one the merge below never
+#     proceeds on: anything but CLEAN, UNSTABLE, or UNKNOWN, the state GitHub
+#     reports until it has computed one.
+# Those anchors are visited in id order after the cursor, wrapping
+# (pace-lib.sh), until the deadline: a visit there refreshes a verdict and
+# nothing lands. An anchor whose PR has left the open list (merged, which owes
+# the record, or closed) is visited first. A PR whose state moves after these
+# reads keeps the group they gave it until the next pass reads it again.
+# One paginated GraphQL read answers every open PR's draft flag, head and
+# latest reviews. It asks for no merge state, because GitHub computes that per
+# PR on request, and asked for a hundred PRs at once it times out. When the read
+# fails, every anchor joins the first group and the pass is not paced at all.
+OPEN_PRS_QUERY='query($owner:String!,$repo:String!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequests(states:OPEN,first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{number isDraft headRefOid
+        latestOpinionatedReviews(first:100){nodes{state submittedAt databaseId author{login}}}}}}}'
 landing_rows=$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
 rest_rows=""
-OPEN_STATES=$(gh pr list --repo "$ORIGIN_REPO_Q" --state open --limit 1000 \
-  --json number,mergeStateStatus,reviewDecision 2>/dev/null | scrub)
-if printf '%s' "$OPEN_STATES" | jq -e 'type == "array"' >/dev/null 2>&1 \
-   && split_rows=$(printf '%s' "$ANCHORS" | jq -r --argjson open "$OPEN_STATES" '
+open_raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$OPEN_PRS_QUERY" \
+  -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" 2>/dev/null) || open_raw=""
+if OPEN_PRS=$(printf '%s' "$open_raw" | scrub | jq -sc '
+       [ .[] | .data.repository.pullRequests ] as $pages
+       | if ($pages | length) == 0 or ([ $pages[] | select(. == null) ] | length) > 0
+         then error("no pullRequests in response") else [ $pages[].nodes[]? ] end' 2>/dev/null) \
+   && split_rows=$(printf '%s' "$ANCHORS" | jq -r --argjson open "$OPEN_PRS" --arg self "$SELF_LOGIN" \
+        "$ANCHOR_HOLDS_DEF$REVIEW_VERDICT_DEF"'
         ($open | map({key: (.number | tostring), value: .}) | from_entries) as $pr
-        | .[] | ((.metadata.pr_number // "") | tostring) as $n
-        | ($pr[$n].mergeStateStatus // "") as $ms
-        | (if ($pr | has($n) | not) or $ms == "CLEAN" or $ms == "UNSTABLE"
-              or (($ms == "UNKNOWN" or $ms == "") and $pr[$n].reviewDecision == "APPROVED")
-           then "landing" else "rest" end) + "\t" + tojson' 2>/dev/null); then
+        | .[] | (.metadata // {}) as $m
+        | (($m.pr_number // "") | tostring) as $n
+        | (($m.pr_merge_state // "") | tostring | split("@")) as $ms
+        | (if ($pr | has($n) | not) then "landing"
+           elif $self == "" or ($pr[$n].isDraft // false) then "rest"
+           elif ($m.merge_hold | hold_set) or ($m.pr_posture | comments_unanswered)
+                or ($m.check_set | no_check_set) then "rest"
+           elif ([ $pr[$n].latestOpinionatedReviews.nodes[]?
+                   | { user: { login: (.author.login // "") }, state,
+                       submitted_at: (.submittedAt // ""), id: (.databaseId // 0) } ]
+                 | review_verdict($self) | .veto != "" or .approver == "") then "rest"
+           elif ($ms[1] // "") != "" and $ms[1] == ($pr[$n].headRefOid // "")
+                and (["CLEAN", "UNSTABLE", "UNKNOWN"] | index($ms[0])) == null then "rest"
+           else "landing" end) + "\t" + tojson' 2>/dev/null); then
   landing_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "landing" { print $2 }')
   rest_rows=$(printf '%s\n' "$split_rows" | awk -F'\t' '$1 == "rest" { print $2 }' | pace_order "$CURSOR")
 else
-  echo "$PROG: WARN open-PR states unreadable; every anchor is visited this pass, unpaced" >&2
+  echo "$PROG: WARN open-PR list unreadable; every anchor is visited this pass, unpaced" >&2
 fi
 landing_n=$(printf '%s' "$landing_rows" | awk 'NF { n++ } END { print n + 0 }')
 rest_n=$(printf '%s' "$rest_rows" | awk 'NF { n++ } END { print n + 0 }')
@@ -634,17 +693,10 @@ while IFS= read -r tagged; do
     echo "$PROG: PR#$num reviews history read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
-  # Each non-self reviewer's latest APPROVED or CHANGES_REQUESTED review, taken
-  # after every DISMISSED review is dropped: a dismissed approval does not count,
-  # and a dismissed CHANGES_REQUESTED does not hide its author's older approval.
-  # An approval stands across later pushes until someone dismisses it, so it
-  # counts at whatever commit it was given.
-  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" '
-    ([ .[] | select((.user.login // "") != $self)
-       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED") ]
-     | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
-    | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
-        approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") }' 2>/dev/null)
+  # The approval rule (REVIEW_VERDICT_DEF): each non-self reviewer's latest
+  # APPROVED or CHANGES_REQUESTED review, dismissed reviews dropped first.
+  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" "$REVIEW_VERDICT_DEF"'
+    review_verdict($self)' 2>/dev/null)
   if [ -z "$rstate" ]; then
     echo "$PROG: PR#$num reviews history unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -858,25 +910,23 @@ $sa_out" >/dev/null 2>&1 || true
     held=$((held + 1)); continue
   fi
   freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" '
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" "$ANCHOR_HOLDS_DEF"'
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
     | ((($m.pr_number // "") | tostring)) as $pn
-    | ((($m.merge_hold // "") | tostring)) as $h
     | ((($m.merged_target // "") | tostring)) as $t
     | ((($m.pr_url // "") | tostring | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p))) as $pu
     | ((($m.branch // "") | tostring)) as $br
-    | ((($m.check_set // "") | tostring)) as $fcs
     | if $st != "open" then "status is now \($st)"
       elif $mr != "pull_request" then "merge_result is now \($mr)"
       elif $pn != $num then "anchor now claims PR#\($pn)"
-      elif (["","false","0","null","False","FALSE"] | index($h)) == null then "merge_hold was set after validation"
-      elif ((($m.pr_posture // "") | tostring) | startswith("commented@")) then "review comments went unanswered after validation"
+      elif ($m.merge_hold | hold_set) then "merge_hold was set after validation"
+      elif ($m.pr_posture | comments_unanswered) then "review comments went unanswered after validation"
       elif ($t != "" and $t != $base) then "retargeted after validation (merged_target=\($t))"
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"
-      elif ($fcs | gsub("[[:space:],]"; "")) == "" then "check_set emptied after validation"
+      elif ($m.check_set | no_check_set) then "check_set emptied after validation"
       else "OK" end' 2>/dev/null); frc=$?
   # The lane term the marker read used to carry, now derived: no declared lane
   # may have left green between validation and the merge. A lane's backing bead

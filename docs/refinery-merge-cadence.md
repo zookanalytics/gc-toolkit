@@ -74,19 +74,26 @@ the cadence — the arms run whether or not any refinery session is awake.
    one early.
 
    Its own cost grows with the PR set too, so it visits in an order that never
-   defers a landing. One `gh pr list` reads every open PR's
-   `mergeStateStatus` and `reviewDecision`. An anchor whose PR is `CLEAN` or
-   `UNSTABLE` (the only states the merge proceeds on), or `APPROVED` with its
-   merge state not yet computed (GitHub recomputes every PR's after a squash
-   moves the base), or whose PR has left the open list (merged, which owes the
-   record below, or closed), is visited first, and no budget stops that group.
-   The rest cannot merge this pass (`BLOCKED`, `BEHIND`, `DIRTY`, or
-   unapproved), so a visit there refreshes a verdict and lands nothing. They
-   are visited in id order starting after the last one a pass finished
-   (`merge.cursor` in the pass state dir), wrapping, until merge's share of the
-   pass budget runs out, so every one is reached within a bounded number of
-   passes. When the list cannot be read, every anchor joins the first group and
-   the arm is not paced.
+   defers a landing. One paginated GraphQL read lists every open PR with its
+   draft flag, its head, and each account's latest `APPROVED` or
+   `CHANGES_REQUESTED` review. It asks for no merge state: GitHub computes that
+   per PR on request, and asked for about a hundred PRs at once it times out.
+   Every anchor is visited first, and no budget stops that group, unless
+   something read without a per-PR call already rules its merge out this pass:
+   its PR is a draft; `merge_hold` is set, `pr_posture` reads `commented`, or
+   `check_set` is empty; the approval rule the merge applies finds no approval
+   or a standing `CHANGES_REQUESTED` in those reviews (GitHub's
+   `reviewDecision` is not read, because it stays empty on a base that
+   requires no approving review); or the merge state the posture arm recorded
+   at the PR's live head is one the merge never proceeds on, anything but
+   `CLEAN`, `UNSTABLE`, or `UNKNOWN`. Those anchors are visited in id order
+   starting after the last one a pass finished (`merge.cursor` in the pass
+   state dir), wrapping, until merge's share of the pass budget runs out, so
+   every one is reached within a bounded number of passes, and a visit there
+   refreshes a verdict and lands nothing. An anchor whose PR has left the open
+   list (merged, which owes the record below, or closed) is visited first. When
+   the list cannot be read, every anchor joins the first group and the arm is
+   not paced.
 
    Per anchor: pinned `gh pr view`, identity gates
    (same repo, not a fork), re-read the anchor and check it still gates this
