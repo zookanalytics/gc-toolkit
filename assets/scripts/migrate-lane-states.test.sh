@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/migrate-lane-states.sh.
 # Covers: dry-run reports and writes nothing; green@/fixable@ rewrite to bare
-# lane states (including a multi-gate check_set); a park clears the legacy
+# lane states (including a multi-check check_set); a park clears the legacy
 # marker and any blocked_reason and writes plain merge_hold=true (never the
 # retired signoff_cap, and its visit never advertises the retired signoff.sh
 # reset verb), with
@@ -79,9 +79,9 @@ anchor() { # id merge_result check_set extra-metadata-json-fragment(starts with 
     "$1" "$1" "$2" "$3" "${4:-}"
 }
 
-# Fixture: two verdicts that survive as lane states (one under a multi-gate
+# Fixture: two verdicts that survive as lane states (one under a multi-check
 # check_set, proving the comma-split match), one park, and one legacy marker
-# on a gate the anchor's check_set does not declare.
+# on a check the anchor's check_set does not declare.
 rows_json="$(anchor G1 pull_request correctness ',"check.correctness":"green@1111111111111111111111111111111111111111"'),\
 $(anchor G2 pull_request "correctness,lint" ',"check.lint":"green@2222222222222222222222222222222222222222"'),\
 $(anchor F1 pull_request correctness ',"check.correctness":"fixable@3333333333333333333333333333333333333333"'),\
@@ -95,10 +95,10 @@ out=$("$SUT" --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 0 "dry-run exits 0 (nothing here needs an operator yet)"
 has "$out" "DRY-RUN" "dry-run announces itself"
 has "$out" 'would rewrite check.correctness="green@1111111111111111111111111111111111111111" -> green' "G1 dry-run line"
-has "$out" 'would rewrite check.lint="green@2222222222222222222222222222222222222222" -> green' "G2 (multi-gate check_set) dry-run line"
+has "$out" 'would rewrite check.lint="green@2222222222222222222222222222222222222222" -> green' "G2 (multi-check check_set) dry-run line"
 has "$out" 'would rewrite check.correctness="fixable@3333333333333333333333333333333333333333" -> fixing' "F1 dry-run line"
 has "$out" 'would file visit [gate-park-migrated], then clear check.correctness="exception@4444444444444444444444444444444444444444" and any blocked_reason, and set merge_hold=true' "P1 dry-run park line"
-has "$out" 'check.other="exception@5555555555555555555555555555555555555555" names a gate outside check_set' "U1 reported as an undeclared marker"
+has "$out" 'check.other="exception@5555555555555555555555555555555555555555" names a check outside check_set' "U1 reported as an undeclared marker"
 cmp -s "$STUB_STORE" "$TMP/store.before"; eq "$?" 0 "dry-run left the store byte-identical"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "dry-run issued zero bd updates"
 eq "$(wc -l < "$STUB_ESCALATE_LOG" | tr -d ' ')" "0" "dry-run filed no visits"
@@ -112,7 +112,7 @@ export GC_RIG="some-other-rig"   # what a gc-helm shell or agent session exports
 out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 0 "apply run exits 0"
 eq "$(meta G1 check.correctness)" "green" "G1 rewritten to green"
-eq "$(meta G2 check.lint)" "green" "G2 (multi-gate check_set) rewritten to green"
+eq "$(meta G2 check.lint)" "green" "G2 (multi-check check_set) rewritten to green"
 eq "$(meta F1 check.correctness)" "fixing" "F1 rewritten to fixing"
 eq "$(meta P1 check.correctness)" "<absent>" "P1 legacy marker cleared"
 eq "$(meta P1 merge_hold)" "true" "P1 parked under plain merge_hold=true"

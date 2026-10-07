@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Tests for scratch-reap.sh against a synthetic scratch root. Real filesystem,
-# no stubs: every property here is a question about what survives on disk.
+# Tests for scratch-reap.sh against a synthetic scratch root. Real filesystem
+# and real processes. gc is a stand-in, because its session list is the one
+# reading a test cannot take from the host, and du and ps are wrapped only to
+# inject a fault: every property here is a question about what survives on
+# disk.
 #
 # Covers the horizon and its boundary (a tree past it goes whole, a tree inside
 # it is untouched); the age reading, which takes the NEWEST entry in a tree so
@@ -14,11 +17,22 @@
 # naming the files of the tier that ran; --dry-run; and the root rails, which
 # are what keep a recursive delete off any directory that is not a scratch
 # root.
+#
+# The ended rule is exercised the same way: a tree inside the horizon goes once
+# nothing can own it, and each of its holds is shown holding and then, with the
+# hold gone, letting the same tree go — a session id on a running process's
+# command line, a process standing in the project directory or below it since
+# before the tree was written, an open gc session keyed by the id, and the quiet
+# window. A gc or ps that cannot be read judges nothing, and only the trees
+# Claude Code writes are judged at all.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-scratch-reap-test.XXXXXX")"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
+# The reaper resolves its root before it reports a path, so the fixture is
+# spelled the same way whatever symlink TMPDIR goes through.
+TMP="$(cd "$TMP" && pwd -P)"
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"   # assertions only; harness_init would stub out the shell tools
 PASS=0; FAIL=0
@@ -31,12 +45,36 @@ HOUR=3600
 export SCRATCH_REAP_ROOT="$ROOT"
 export SCRATCH_REAP_INACTIVE_AFTER=$((24 * HOUR))
 
+# gc stand-in. The registry names one city, the session list is STUB_SESSIONS,
+# STUB_FAIL=cities|sessions fails that call, and every call is logged so a test
+# can see whether the list was read at all. Without it a pass inside a city
+# would read the live one.
+STUB_CITY="$TMP/city"; mkdir -p "$STUB_CITY"
+STUB_LOG="$TMP/gc-calls"
+cat > "$TMP/gc" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_LOG"
+none='{"sessions":[]}'
+case "$1" in
+    cities)  [ "${STUB_FAIL:-}" = cities ] && exit 1
+             printf '{"cities":[{"name":"stub","path":"%s"}]}\n' "$STUB_CITY" ;;
+    session) [ "${STUB_FAIL:-}" = sessions ] && exit 1
+             printf '%s\n' "${STUB_SESSIONS:-$none}" ;;
+    *)       exit 2 ;;
+esac
+STUB
+chmod +x "$TMP/gc"
+export SCRATCH_REAP_GC="$TMP/gc" STUB_CITY STUB_LOG
+
 # A session tree: <slug>/<id>/scratchpad/f, aged to <hours> old throughout.
 mk_session() { # <slug> <id> <hours-old> [file-bytes]
-    local d="$ROOT/$1/$2" ts=$((NOW - $3 * HOUR)) bytes="${4:-4096}"
+    mk_session_at "$1" "$2" $((NOW - $3 * HOUR)) "${4:-4096}"
+}
+mk_session_at() { # <slug> <id> <epoch> [file-bytes]
+    local d="$ROOT/$1/$2" bytes="${4:-4096}"
     mkdir -p "$d/scratchpad"
     head -c "$bytes" /dev/zero > "$d/scratchpad/f"
-    find "$d" -depth -exec touch -h -d "@$ts" {} +
+    find "$d" -depth -exec touch -h -d "@$3" {} +
 }
 exists() { [ -e "$1" ]; }
 
@@ -219,6 +257,210 @@ run > /dev/null
 if [ -L "$ROOT/stale-link" ]; then bad "a stale loose symlink is unlinked"; else ok "a stale loose symlink is unlinked"; fi
 eq "$(stat -c %a "$GUARDED/f")" 400 "the target of a stray symlink keeps its mode"
 if exists "$GUARDED/f"; then ok "the target of a stray symlink survives"; else bad "the target of a stray symlink survives"; fi
+
+# --- targeted --session mode -----------------------------------------------
+# A caller retiring a named session reaps exactly that tree at once, found by
+# its id-named directory. The horizon is not consulted, so a tree well inside
+# it still goes, while its neighbours — same slug and other slugs — are whole.
+reset_root
+mk_session slug-s target 1
+mk_session slug-s neighbour 1
+mk_session slug-t elsewhere 1
+OUT="$(run --session target)"
+if exists "$ROOT/slug-s/target"; then bad "--session removes the named tree though it is inside the horizon"; else ok "--session removes the named tree though it is inside the horizon"; fi
+if exists "$ROOT/slug-s/neighbour/scratchpad/f"; then ok "--session leaves a same-slug neighbour untouched"; else bad "--session leaves a same-slug neighbour untouched"; fi
+if exists "$ROOT/slug-t/elsewhere/scratchpad/f"; then ok "--session leaves another slug untouched"; else bad "--session leaves another slug untouched"; fi
+has "$OUT" "reaped session target" "--session names the session it took"
+
+# The whole point of the mode: it overrides the running-process hold. The full
+# pass holds a session whose id is carried by a live process; --session is the
+# retiring session naming itself, and takes its tree anyway.
+reset_root
+mk_session slug-u live-xyz 1
+env CLAUDE_CODE_SESSION_ID=live-xyz sleep 25 &
+SLEEPER=$!
+run --session live-xyz > /dev/null
+kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
+if exists "$ROOT/slug-u/live-xyz"; then bad "--session reaps a session even while its process is live"; else ok "--session reaps a session even while its process is live"; fi
+
+# --session with no id is a usage error, not a reap of everything.
+OUT="$(run --session)"; RC=$?
+eq "$RC" 2 "--session with no id is refused"
+has "$OUT" "needs an id" "the no-id refusal says so"
+
+# A session with no tree is nothing to do, not an error, and touches nothing.
+reset_root
+mk_session slug-s keeper 1
+OUT="$(run --session absent)"; RC=$?
+eq "$RC" 0 "--session on an absent tree exits 0"
+has "$OUT" "nothing to reap" "--session on an absent tree says so"
+if exists "$ROOT/slug-s/keeper/scratchpad/f"; then ok "--session on an absent tree leaves the others whole"; else bad "--session on an absent tree leaves the others whole"; fi
+
+# The id names a directory for a recursive delete, so it must be a bare id: a
+# value carrying a path separator is refused before anything is touched.
+reset_root
+mk_session slug-s keeper 1
+OUT="$(run --session ../slug-s)"; RC=$?
+eq "$RC" 2 "--session refuses an id with a path separator"
+if exists "$ROOT/slug-s/keeper/scratchpad/f"; then ok "the refused --session deleted nothing"; else bad "the refused --session deleted nothing"; fi
+has "$OUT" "must match" "the refusal says why"
+
+# --dry-run plans the targeted reap and deletes nothing.
+reset_root
+mk_session slug-s target 1
+OUT="$(run --session target --dry-run)"
+if exists "$ROOT/slug-s/target/scratchpad/f"; then ok "--session --dry-run deletes nothing"; else bad "--session --dry-run deletes nothing"; fi
+has "$OUT" "DRY RUN" "--session --dry-run reports the plan"
+
+# A slug directory emptied of its last session by a targeted reap is pruned;
+# one that still holds a session is kept.
+reset_root
+mk_session slug-lone only 1
+mk_session slug-pair one 1
+mk_session slug-pair two 1
+run --session only > /dev/null
+if exists "$ROOT/slug-lone"; then bad "--session prunes a slug dir emptied of its last session"; else ok "--session prunes a slug dir emptied of its last session"; fi
+run --session one > /dev/null
+if exists "$ROOT/slug-pair/two/scratchpad/f"; then ok "--session keeps a slug dir that still holds a session"; else bad "--session keeps a slug dir that still holds a session"; fi
+
+# The targeted mode inherits the root rails: a root not named claude-<uid> is
+# refused before any delete, --session included.
+reset_root
+mk_session slug-s target 1
+NOT_SCRATCH2="$TMP/not-scratch2"; mkdir -p "$NOT_SCRATCH2/slug/target"; : > "$NOT_SCRATCH2/slug/target/keep"
+OUT="$(SCRATCH_REAP_ROOT="$NOT_SCRATCH2" run --session target)"; RC=$?
+eq "$RC" 2 "--session refuses a root not named claude-<uid>"
+if exists "$NOT_SCRATCH2/slug/target/keep"; then ok "the refused --session root is untouched"; else bad "the refused --session root is untouched"; fi
+has "$OUT" "refusing to reap" "the --session root refusal says so"
+
+# --- ended sessions ----------------------------------------------------------
+# Session ids are UUIDs unique to this run: the pass reads every command line
+# on the host, so a fixed id would be held by a concurrent run of this file.
+SEED=$(( ($$ * 32768 + RANDOM) % 4294967296 ))
+uuid() { printf '%08x-0000-4000-8000-%012x' "$SEED" "$1"; }
+# The project name Claude Code gives a directory: its physical path with every
+# character outside [A-Za-z0-9] replaced by '-'.
+project() { (cd "$1" && pwd -P) | sed 's/[^A-Za-z0-9]/-/g'; }
+mkdir -p "$TMP/idle" "$TMP/occ" "$TMP/occ-below/sub"
+IDLE="$(project "$TMP/idle")"            # no process stands in it
+OCC="$(project "$TMP/occ")"
+OCC_BELOW="$(project "$TMP/occ-below")"
+
+# A tree an hour quiet, inside the horizon, with nothing that could own it goes;
+# a tree written just now, inside the quiet window, does not.
+reset_root; : > "$STUB_LOG"
+mk_session "$IDLE" "$(uuid 1)" 1
+mk_session "$IDLE" "$(uuid 2)" 0
+OUT="$(run)"
+if exists "$ROOT/$IDLE/$(uuid 1)"; then bad "an ended session's tree goes inside the horizon"; else ok "an ended session's tree goes inside the horizon"; fi
+if exists "$ROOT/$IDLE/$(uuid 2)/scratchpad/f"; then ok "a tree inside the quiet window is held"; else bad "a tree inside the quiet window is held"; fi
+has "$OUT" "and 1 of ended sessions" "the summary counts the ended trees apart"
+has "$(cat "$STUB_LOG")" "session list --state all --json --city $STUB_CITY" "the open sessions are read from every registered city"
+
+# A UUID on a running process's command line holds the tree: gc starts every
+# agent as claude --session-id <id>, so this is an agent between turns. With
+# the process gone the same tree goes.
+# The trailing `true` keeps bash from exec-ing sleep in its own place, which
+# would drop the id from the command line; the child goes first so no orphan
+# outlives the test.
+reset_root
+mk_session "$IDLE" "$(uuid 3)" 1
+bash -c 'sleep 30; true' holder --session-id "$(uuid 3)" > /dev/null 2>&1 &
+HOLDER=$!
+run > /dev/null
+if exists "$ROOT/$IDLE/$(uuid 3)/scratchpad/f"; then ok "a session id on a command line holds its tree"; else bad "a session id on a command line holds its tree"; fi
+pkill -P "$HOLDER" 2>/dev/null; kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+run > /dev/null
+if exists "$ROOT/$IDLE/$(uuid 3)"; then bad "once that process is gone the tree goes"; else ok "once that process is gone the tree goes"; fi
+
+# CLAUDE_CODE_SESSION_ID holds a UUID-named tree from the ended rule as well.
+reset_root
+mk_session "$IDLE" "$(uuid 4)" 1
+env CLAUDE_CODE_SESSION_ID="$(uuid 4)" sleep 25 > /dev/null 2>&1 &
+SLEEPER=$!
+run > /dev/null
+kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
+if exists "$ROOT/$IDLE/$(uuid 4)/scratchpad/f"; then ok "a running child's session id holds its tree from the ended rule"; else bad "a running child's session id holds its tree from the ended rule"; fi
+
+# A process standing in the project directory, or below it, holds every tree
+# written after it started: a /clear or an interactive session names nothing on
+# a command line. A tree written before it started goes. The quiet window is one
+# second so the held tree is past it; the start is read to the second, so the
+# held tree is written a second after it and the run waits two more.
+reset_root
+( cd "$TMP/occ" && exec sleep 30 ) > /dev/null 2>&1 &
+OCCUPANT=$!
+( cd "$TMP/occ-below/sub" && exec sleep 30 ) > /dev/null 2>&1 &
+OCCUPANT_BELOW=$!
+T0="$(date +%s)"
+mk_session_at "$OCC" "$(uuid 5)" $((T0 - HOUR))
+mk_session_at "$OCC" "$(uuid 6)" $((T0 + 1))
+mk_session_at "$OCC_BELOW" "$(uuid 7)" $((T0 + 1))
+while [ "$(date +%s)" -lt $((T0 + 4)) ]; do sleep 1; done
+SCRATCH_REAP_ENDED_AFTER=1 run > /dev/null
+if exists "$ROOT/$OCC/$(uuid 5)"; then bad "a tree written before the process in its directory started goes"; else ok "a tree written before the process in its directory started goes"; fi
+if exists "$ROOT/$OCC/$(uuid 6)/scratchpad/f"; then ok "a process standing in the project directory holds a tree written after it started"; else bad "a process standing in the project directory holds a tree written after it started"; fi
+if exists "$ROOT/$OCC_BELOW/$(uuid 7)/scratchpad/f"; then ok "a process standing below the project directory holds it too"; else bad "a process standing below the project directory holds it too"; fi
+kill "$OCCUPANT" "$OCCUPANT_BELOW" 2>/dev/null; wait "$OCCUPANT" "$OCCUPANT_BELOW" 2>/dev/null
+SCRATCH_REAP_ENDED_AFTER=1 run > /dev/null
+if exists "$ROOT/$OCC/$(uuid 6)"; then bad "with nothing standing there the same tree goes"; else ok "with nothing standing there the same tree goes"; fi
+if exists "$ROOT/$OCC_BELOW/$(uuid 7)"; then bad "with nothing standing below the same tree goes"; else ok "with nothing standing below the same tree goes"; fi
+
+# An open gc session keyed by the id holds the tree: a sleeping session that
+# wakes by --resume reuses it. A closed session's key holds nothing.
+reset_root
+mk_session "$IDLE" "$(uuid 8)" 1
+STUB_SESSIONS='{"sessions":[{"session_key":"'"$(uuid 8)"'","state":"asleep","closed":false}]}' run > /dev/null
+if exists "$ROOT/$IDLE/$(uuid 8)/scratchpad/f"; then ok "an open gc session holds the tree its key names"; else bad "an open gc session holds the tree its key names"; fi
+STUB_SESSIONS='{"sessions":[{"session_key":"'"$(uuid 8)"'","state":"closed","closed":true}]}' run > /dev/null
+if exists "$ROOT/$IDLE/$(uuid 8)"; then bad "a closed gc session's key holds nothing"; else ok "a closed gc session's key holds nothing"; fi
+
+# gc's list is the only record of a sleeping session, so a list that cannot be
+# read in full judges nothing, and says why.
+for failure in "STUB_FAIL=cities" "STUB_FAIL=sessions" "STUB_SESSIONS=not-json" "SCRATCH_REAP_GC=$TMP/no-such-gc"; do
+    reset_root
+    mk_session "$IDLE" "$(uuid 9)" 1
+    OUT="$(env "$failure" bash "$SUT" 2>&1)"
+    if exists "$ROOT/$IDLE/$(uuid 9)/scratchpad/f"; then ok "$failure: nothing is judged ended"; else bad "$failure: nothing is judged ended"; fi
+    has "$OUT" "ended sessions not judged" "$failure: the summary says the rule did not run"
+done
+
+# A ps that cannot be read leaves every process undated, so nothing is judged.
+reset_root
+mk_session "$IDLE" "$(uuid 10)" 1
+NOPS="$TMP/nops"; mkdir -p "$NOPS"; printf '#!/bin/sh\nexit 1\n' > "$NOPS/ps"; chmod +x "$NOPS/ps"
+OUT="$(PATH="$NOPS:$PATH" run)"
+if exists "$ROOT/$IDLE/$(uuid 10)/scratchpad/f"; then ok "an unreadable ps judges nothing ended"; else bad "an unreadable ps judges nothing ended"; fi
+has "$OUT" "process start times could not be read" "an unreadable ps is named as the reason"
+
+# Only trees Claude Code writes are judged, and gc is not asked when there is
+# nothing to judge: a non-UUID tree, a UUID under a name not drawn from a path,
+# and a name over 200 characters, whose hash this pass cannot recompute.
+reset_root; : > "$STUB_LOG"
+LONG="-$(printf 'a%.0s' $(seq 1 205))-1x2y3z"
+mk_session bash-edit-diff 1234-5678-abcdef 1
+mk_session slug-x "$(uuid 11)" 1
+mk_session "$IDLE" not-a-session-id 1
+mk_session "$LONG" "$(uuid 12)" 1
+run > /dev/null
+if exists "$ROOT/bash-edit-diff/1234-5678-abcdef/scratchpad/f"; then ok "a non-UUID tree is not judged"; else bad "a non-UUID tree is not judged"; fi
+if exists "$ROOT/slug-x/$(uuid 11)/scratchpad/f"; then ok "a tree under a name not drawn from a path is not judged"; else bad "a tree under a name not drawn from a path is not judged"; fi
+if exists "$ROOT/$IDLE/not-a-session-id/scratchpad/f"; then ok "a non-UUID id under a project name is not judged"; else bad "a non-UUID id under a project name is not judged"; fi
+if exists "$ROOT/$LONG/$(uuid 12)/scratchpad/f"; then ok "a project name over 200 characters is not judged"; else bad "a project name over 200 characters is not judged"; fi
+if [ -s "$STUB_LOG" ]; then bad "gc is not asked when nothing is judged"; else ok "gc is not asked when nothing is judged"; fi
+
+# --dry-run plans the ended trees and deletes nothing; a real run names a large
+# file it took from one.
+reset_root
+mk_session "$IDLE" "$(uuid 13)" 1 $((9 * 1024 * 1024))
+OUT="$(run --dry-run)"
+if exists "$ROOT/$IDLE/$(uuid 13)/scratchpad/f"; then ok "--dry-run deletes no ended tree"; else bad "--dry-run deletes no ended tree"; fi
+has "$OUT" "would remove 1 trees of ended sessions" "--dry-run reports the ended plan"
+OUT="$(run)"
+has "$OUT" "reaped 9 MiB  $ROOT/$IDLE/$(uuid 13)/scratchpad/f" "a large file in an ended tree is named in the report"
+
+OUT="$(SCRATCH_REAP_ENDED_AFTER=soon run)"; RC=$?
+eq "$RC" 2 "a non-numeric quiet window is refused"
 
 echo
 echo "scratch-reap.test.sh: $PASS passed, $FAIL failed"

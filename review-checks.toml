@@ -1,29 +1,57 @@
 # The check index: the checks this repo makes available to review. Mechanical
-# facts only — each check's name, a pointer to the method that governs it, and
-# one line of purpose. When a check applies is a judgment its method states in
-# prose, which triage reads; it is not a field here.
+# facts only — each check's name, a pointer to the method that governs it, one
+# line of purpose, and the phase it gates. When a check applies to a given diff
+# is a judgment its method states in prose, which triage reads; it is not a
+# field here.
+#
+# A check's `phase` is the stage transition by which it must read green, fixed
+# by what the check consumes. The four phases are ordered
+# `pre-open < open-as-draft < ready-for-review < merge`: a check that reads only
+# the diff is `pre-open`; one that needs the deployed preview is `open-as-draft`.
 #
 # Read from the commit under review (git show <oid>:review-checks.toml), so a
 # branch is judged against the index it carries. assets/scripts/review-checks.sh
-# is the one parser. correctness and triage are the forced baseline; triage may
-# widen check_set to add any check declared here and may not invent one.
+# is the one parser and the one resolver of that grammar. correctness and triage
+# are the forced baseline; triage may widen check_set to add any check declared
+# here and may not invent one. `approval` is not a check here: it is a universal
+# merge rule (merge.sh) requiring a standing non-city APPROVED review.
+#
+# The naming convention for this file, the per-check method extensions
+# (docs/review-<check>.md), and the reference docs a check reads is
+# docs/review-config.md.
+#
+# Adding a check. Declare it here as a [checks.<name>] row whose `method` points
+# at the skill that carries its full generic method. Give it a dispatch arm in
+# assets/scripts/review-dispatch-body.sh: a short summary and a pointer to that
+# skill, plus the boundary lines that keep it in its lane (what belongs to
+# `correctness`, what to `demo`). The shared specialist stance — enforce through
+# findings, never edit, leave another check's concern to that check — is emitted
+# once by the dispatch body ahead of every specialist arm, so neither the arm nor
+# the skill restates it. A rig tunes a check for its own repo with
+# docs/review-<check>.md, which the dispatch body appends from the reviewed
+# commit; the pack skill stays rig-agnostic.
 
 [checks.correctness]
 method = "formulas/mol-review.toml"
 purpose = "Is the change correct and safe as merged?"
+phase = "pre-open"
 
 [checks.triage]
 method = "skills/review-triage/SKILL.md"
 purpose = "Which specialist checks does this diff warrant?"
+phase = "pre-open"
 
 [checks.demo]
 method = "skills/gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
 purpose = "Was the operator-watched surface recorded doing the thing?"
+phase = "open-as-draft"
 
 [checks.arch]
 method = "skills/review-arch/SKILL.md"
 purpose = "Does the change fit the architecture, and is any architecture change justified and documented in the same PR?"
+phase = "pre-open"
 
 [checks.pm]
 method = "skills/review-pm/SKILL.md"
 purpose = "Does the change solve the right user problem, and present it so the operator can judge?"
+phase = "pre-open"

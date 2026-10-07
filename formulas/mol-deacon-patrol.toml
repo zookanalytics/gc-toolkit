@@ -29,15 +29,15 @@ formula = "mol-deacon-patrol"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix, including trailing dot when bound."
-default = ""
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol files a warrant routed to the dog, and an empty prefix renders a bare dog address that no agent holds."
+default = "gc-toolkit."
 
 [vars.event_timeout]
 description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep). Ceiling 600: the harness caps one call at 600s."
 default = "600"
 
 [vars.doctor_interval]
-description = "Length of the per-interval doctor-sweep window, in seconds. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep opens at most one window per interval. A window normally holds one start; a run that ends failed or exceeded earns one retry inside it (capped by GC_DOCTOR_SWEEP_MAX_ATTEMPTS, default 2), so on the failure path the sweep can run twice in one interval, while a completed run arms no retry. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still opens one window per hour."
+description = "Length of the per-interval doctor-sweep window, in seconds. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep opens at most one window per interval. A window normally holds one start; a run that ends failed or exceeded earns one retry inside it (capped by GC_DOCTOR_SWEEP_MAX_ATTEMPTS, default 2), so on the failure path the sweep can run twice in one interval, while a completed run arms no retry. It also bounds a result's age: a sweep that finished more than one interval before the patrol collects it is reported stale and filed nowhere. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still opens one window per hour."
 default = "3600"
 
 [[steps]]
@@ -177,11 +177,29 @@ else
         elif [ "$m_t" -gt 0 ] && [ -z "$scan_out" ]; then
             scan_fail="find listed no files though $db/manifest is readable"
         fi
-        while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            t=$(mtime_of "$f")
-            if [ "$t" -gt "$newest_t" ]; then newest_t="$t"; newest="${f##*/}"; fi
-        done <<< "$scan_out"
+        # Buffer the scan through a CHECKED temp file, never a `<<<` here-string:
+        # bash backs a here-string with a temp it creates silently, so under disk
+        # pressure the redirect fails, the loop runs zero times, `newest` keeps
+        # its seeded manifest, and a chunk newer than the manifest reads OK
+        # unseen. A buffer whose creation and write are both checked turns that
+        # blackout into a scan_fail the arms below report.
+        scan_buf=""
+        if [ -z "$scan_fail" ]; then
+            scan_buf=$(mktemp "${TMPDIR:-/tmp}/gctk-deacon-backup-scan.XXXXXX" 2>/dev/null) || scan_buf=""
+            if [ -z "$scan_buf" ]; then
+                scan_fail="could not create a temp file to buffer the directory scan for $db (disk pressure?)"
+            elif ! printf '%s' "$scan_out" | awk 'NF { print }' > "$scan_buf"; then
+                scan_fail="could not buffer the directory scan for $db - temp file unwritable (disk pressure?)"
+            fi
+        fi
+        if [ -z "$scan_fail" ]; then
+            while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                t=$(mtime_of "$f")
+                if [ "$t" -gt "$newest_t" ]; then newest_t="$t"; newest="${f##*/}"; fi
+            done < "$scan_buf"
+        fi
+        [ -z "$scan_buf" ] || rm -f "$scan_buf"
         since=$(( NOW - newest_t ))
         age_h=$(( (NOW - m_t) / 3600 ))
         if [ -n "$scan_fail" ]; then
@@ -304,14 +322,26 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 ```
 `STATE` is the first line's value, and it says what this cycle owes:
 
-- `idle`, `started`, `running` or `deferred`: there is no payload to read. Say
-  which one and close the step. A `started` sweep is collected a cycle or two
-  later. A `deferred` one did not start because the pre-spawn `gc dolt health`
-  gate found the data plane unreachable or overloaded — a sweep queries every
-  store's Dolt, so it stands down rather than amplify a degradation. The
-  dolt-health step above already filed any finding for that, so this files
-  nothing of its own and resumes on a later cycle once the data plane recovers.
+- `idle`, `started`, `running`, `deferred` or `throttled`: there is no payload
+  to read. Say which one and close the step. A `started` sweep is collected a
+  cycle or two later. A `deferred` one did not start because the pre-spawn `gc
+  dolt health` gate found the data plane unreachable or overloaded — a sweep
+  queries every store's Dolt, so it stands down rather than amplify a
+  degradation. A `throttled` one did not start because a sweep had already
+  started within the inter-sweep cadence floor; that floor holds the hourly
+  cadence across sessions even when one session's state directory cannot see
+  another's start, so it is the one-per-interval ceiling doing its job, not a
+  fault. The dolt-health step above already filed any finding for a degradation,
+  so this files nothing of its own and resumes on a later cycle.
+- `stale`: there is no payload to read either. A sweep finished, but more than
+  one `doctor_interval` before this cycle reached it, so what it found is an
+  old observation, not the city's state now. The runner discarded the run
+  without handing its payload on, and the next cycle is due to start a fresh
+  sweep in its place. `finished_at=` says when it finished and `age=` how many
+  seconds ago. Say so, file nothing for it, and close the step.
 - `complete`: the payload is the file named by `payload=`. Filter it below.
+  `finished_at=` is the second the sweep finished and `age=` is how many
+  seconds ago that was, never more than one `doctor_interval`.
 - `failed`, `exceeded` or `blocked`: a FAILED scan. File it as a finding with
   the recipe below — `--key doctor-sweep-failed`, the whole `state=` block as
   the message. `failed` and `exceeded` carry `elapsed=`, and `exceeded` names

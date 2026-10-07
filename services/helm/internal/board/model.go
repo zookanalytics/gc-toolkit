@@ -126,6 +126,15 @@ type Anchor struct {
 	TakeawayAt string `json:"takeaway_at,omitempty"`
 	TakeawayBy string `json:"takeaway_by,omitempty"`
 
+	// Notes carries the bead's notes field so a recommendation row can spend the
+	// first-reaction card (Understanding / Found / Proposal / Decision needed)
+	// the disposition wrote there. The takeaway is one frozen line; the card is
+	// the reasoning and the options behind it, which is what an operator needs to
+	// Accept or redirect. It reaches the wire only as Tile.Recommendation, and
+	// only on an acceptable row — computeTile reads it beside the accept
+	// affordance.
+	Notes string `json:"notes,omitempty"`
+
 	// WaitingOn is the ids this bead depends on by a `blocks` edge, and
 	// WaitingOnClosed the subset of those the source found already closed.
 	//
@@ -249,7 +258,10 @@ type Tile struct {
 	Open    int `json:"open"`
 	// InProgress is the RAW status count — honestly 0 for a slung bead, whose
 	// work never leaves status=open. InProgressLive is the count that answers
-	// "is anything actually moving", under both mechanisms.
+	// "is anything actually moving": a child the city is working (claimed by a
+	// live owner, or covered by a live workflow) PLUS a live workflow over the
+	// anchor's OWN bead — the common sling shape, where the work bead is the
+	// anchor and its molecule stands over it rather than under a child.
 	InProgress int `json:"in_progress"`
 	Assigned   int `json:"assigned"`
 
@@ -258,8 +270,9 @@ type Tile struct {
 	DeadOwner      bool `json:"dead_owner"`
 
 	// InFlight is the part of InProgressLive attributable to a live graph.v2
-	// workflow rather than to a claimed child, surfaced so the join can be
-	// audited without re-deriving it.
+	// workflow rather than to a claimed child — a child the workflow carries, or
+	// the anchor's own bead when a workflow stands over it — surfaced so the join
+	// can be audited without re-deriving it. Equal to len(InFlightHeads).
 	InFlight      int      `json:"in_flight"`
 	InFlightHeads []string `json:"in_flight_heads"`
 
@@ -373,12 +386,13 @@ type Tile struct {
 	// change shape when the watermarks land.
 	PRConversation string `json:"pr_conversation"`
 
-	// PRApproval is whether GitHub is withholding the merge for a human review:
-	// required, met, not_required, or unknown. Read from the recorded posture,
-	// which is GitHub's own requirement rather than the city's gate set — a
-	// repository can require a review that check_set never declared, and keyed
-	// on the gate set a green pull request nobody has approved reads as settled
-	// and nobody's move.
+	// PRApproval is whether this pull request still owes an external approval
+	// before it can merge: required, met, or unknown. Approval is a universal
+	// merge rule (merge.sh holds every open PR until a non-city APPROVED review
+	// stands, and one given at any commit stands until dismissed), so only
+	// `approved` is met and every other posture owes one — the field is the
+	// city's rule, not GitHub's protection set, so a PR on an integration/* base
+	// or in a rule-less repo still reads `required`.
 	//
 	// A separate field rather than a fourth machine value, because a PR can
 	// need an approval while the cadence is still progressing, and folding the
@@ -488,6 +502,14 @@ type Tile struct {
 	// Empty on a terminal (closed) row, where the live vocabulary has no answer,
 	// the same not-applicable empty PRPhase leaves off a non-merge row.
 	Phase string `json:"phase"`
+
+	// Recommendation is the first-reaction card from the subject bead's notes —
+	// the Proposal and Decision-needed sections an operator weighs to Accept or
+	// redirect — carried verbatim so the decision point shows WHY, not only the
+	// one-line takeaway that reaches Needs. Null-when-absent like the takeaway
+	// triple, and non-null exactly on an acceptable row (see computeTile): the
+	// accept affordance and the reasoning behind it ride the wire together.
+	Recommendation *string `json:"recommendation"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —
@@ -611,10 +633,17 @@ func (s Sitting) Headline() string {
 type Facts struct {
 	// Visits holds the ids of anchors an open visit bead names.
 	Visits map[string]bool
-	// Inflight maps a WORK-BEAD id — an anchor's CHILD, not the anchor — to the
-	// session names of the live graph.v2 workflows standing over it. The gather
-	// resolves each live workflow root through its input convoy to that
-	// convoy's single tracked member, and that member is the key.
+	// Inflight maps a work-bead id to the session names of the live graph.v2
+	// workflows standing over it. The gather resolves each live workflow root
+	// through its input convoy, and the key is that convoy's single tracked
+	// member. The gather does not know which beads are anchors, so a key is
+	// whatever bead the sling tracked. The board looks up three kinds of id:
+	// an anchor's child ([rollUp]), a review or rework bead blocking a merge
+	// anchor ([liveReviewOrRework]), and the anchor's own bead
+	// ([Facts.anchorInFlight]). The anchor's own bead is the key when the anchor
+	// is itself the slung work bead and its molecule stands over it rather than
+	// under a child. [Facts.wfLive] re-checks each session's liveness at derive
+	// time.
 	Inflight map[string][]string
 	// OwnerState maps a session name AND its alias to that session's state, so
 	// a child's assignee can be resolved whichever form it was written in.

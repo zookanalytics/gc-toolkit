@@ -8,9 +8,10 @@
 #
 #   (DIRECT)    --no-react files the visit NOW, through gc-helm.sh open —
 #               the script must never hand-roll a gate-visit block of its own.
-#   (SINGLE)    the react path files NO visit: mol-first-reaction's
-#               advance-and-drain step files it, and a second one would split
-#               the conversation into two sittings of the same subject.
+#   (SINGLE)    the react path files NO visit: a reaction that puts the
+#               subject to the operator files a human gate, gate-visit-sweep
+#               files that gate's visit, and a second one would split the
+#               conversation into two sittings of the same subject.
 #   (SHED)      the whole reason the fallback exists. `gc sling` is
 #               fire-and-forget and returns 0 whether or not anything will
 #               ever pick the bead up, so an unguarded react path leaves the
@@ -286,6 +287,22 @@ has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls t
 has "$OUT" "visit filed" "(REACTED) the summary reports a filed visit"
 has "$ERR" "already carries a first reaction" "(REACTED) the reason names the no-op skip"
 hasnt "$ERR" "sling FAILED" "(REACTED) it is NOT reported as a sling failure"
+unset FAKE_HELM_REACT_RC
+
+# --- (DRIVEN) a subject a live workflow drives files the visit directly -------
+# react returns its other no-op code (6) when a live workflow already drives the
+# subject: the guard slung nothing because a reaction never races work in
+# flight, so no reaction will file the visit either. The visit body the converse
+# session reads must name that cause, not the already-reacted one and not a
+# sling failure.
+FAKE_HELM_REACT_RC=6 run yes "a topic on a subject a polecat is building"
+eq "$RC" "0" "(DRIVEN) exits 0 — the visit is filed"
+has "$CALLS" "helm react tk-newsub" "(DRIVEN) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(DRIVEN) a driven subject falls through to filing the visit"
+has "$CALLS" "a live workflow already drives the subject" "(DRIVEN) the visit body names the live workflow"
+has "$ERR" "a live workflow already drives subject tk-newsub" "(DRIVEN) the reason names the no-op skip"
+hasnt "$ERR" "already carries a first reaction" "(DRIVEN) it is NOT reported as an already-reacted subject"
+hasnt "$ERR" "sling FAILED" "(DRIVEN) it is NOT reported as a sling failure"
 unset FAKE_HELM_REACT_RC
 
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing

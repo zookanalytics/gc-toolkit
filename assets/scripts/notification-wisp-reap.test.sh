@@ -11,7 +11,10 @@
 # from a fixture of open city-store wisps, `bd show <gate>` from a per-gate
 # fixture (absent => the not-found error object, with the non-zero exit, that bd
 # really returns when nothing resolves), `rig list` from a city_path env, and
-# records every `bd close` to $CALLS.
+# records every `bd close` to $CALLS. core mails these notices assigned to
+# "human" (fixture field), and the store refuses a close by any other actor
+# without --force, so the stub models that guard: a human-assigned notice is
+# recorded as closed only when the call passes --force.
 # Covered:
 #   (RESOLVED) a gate notice whose gate reads closed is closed
 #   (GONE)     a gate notice whose gate no longer resolves is closed
@@ -29,6 +32,9 @@
 #   (UNREADABLE-GATE) a gate read that is not JSON is skipped, never closed
 #   (OTHERERR) a gate read that fails with a non not-found error is skipped
 #   (CLOSEFAIL) a notice that will not close is reported and left for next pass
+#   (HUMANGUARD) each pass forces its close past the store's human-assignee guard
+#   (DISKFULL-GATE) a failed mktemp for the gate enumeration aborts (exit 1), no summary
+#   (DISKFULL-ESC)  a failed mktemp for the escalation enumeration aborts, no summary
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,6 +81,16 @@ case "$1 ${2:-}" in
   "bd close")
     id="$3"
     case " ${CLOSE_FAILS:-} " in *" $id "*) exit 1 ;; esac
+    # The store refuses a close by an actor other than the bead's assignee.
+    # These notices are mailed assigned to "human" and this sweep never runs as
+    # human, so a human-assigned notice closes only when the call passes --force.
+    assignee="$(jq -r --arg i "$id" '.[] | select(.id==$i) | .assignee // ""' "$WISPS_FILE" 2>/dev/null)"
+    if [ "$assignee" = "human" ]; then
+      case " $* " in
+        *" --force "*) ;;
+        *) echo "cannot close $id: assignee is \"human\", actor is \"gc-toolkit.mechanik\"; reclaim or use --force to override" >&2; exit 1 ;;
+      esac
+    fi
     echo "$*" >> "$CALLS"; exit 0 ;;
   *) echo "gc stub: unhandled: $*" >&2; exit 3 ;;
 esac
@@ -85,18 +101,18 @@ chmod +x "$TMP/bin/gc"
 # The open infra beads in the city store, one array as `bd list` returns.
 cat > "$WISPS_FILE" <<'JSON'
 [
-  {"id":"lx-n-open",           "issue_type":"message","status":"open","title":"Human gate awaiting you: tk-gopen"},
-  {"id":"lx-n-closed",         "issue_type":"message","status":"open","title":"Human gate awaiting you: tk-gclosed"},
-  {"id":"lx-n-gone",           "issue_type":"message","status":"open","title":"Human gate awaiting you: tk-ggone"},
-  {"id":"lx-n-nongate",        "issue_type":"message","status":"open","title":"Human gate awaiting you: tk-task"},
-  {"id":"lx-n-badid",          "issue_type":"message","status":"open","title":"Human gate awaiting you: garbage here"},
-  {"id":"lx-n-foreign-open",   "issue_type":"message","status":"open","title":"Human gate awaiting you: gc-gopen"},
-  {"id":"lx-n-foreign-closed", "issue_type":"message","status":"open","title":"Human gate awaiting you: sl-gclosed"},
-  {"id":"lx-esc-1",            "issue_type":"message","status":"open","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-20T00:00:00Z"},
-  {"id":"lx-esc-2",            "issue_type":"message","status":"open","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-25T00:00:00Z"},
-  {"id":"lx-esc-3",            "issue_type":"message","status":"open","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-29T00:00:00Z"},
-  {"id":"lx-esc-solo",         "issue_type":"message","status":"open","title":"ESCALATION: Different condition [LOW]","created_at":"2026-09-28T00:00:00Z"},
-  {"id":"lx-boot",             "issue_type":"message","status":"open","title":"BOOT_HEALTH: deacon cold"}
+  {"id":"lx-n-open",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-gopen"},
+  {"id":"lx-n-closed",         "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-gclosed"},
+  {"id":"lx-n-gone",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-ggone"},
+  {"id":"lx-n-nongate",        "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-task"},
+  {"id":"lx-n-badid",          "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: garbage here"},
+  {"id":"lx-n-foreign-open",   "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: gc-gopen"},
+  {"id":"lx-n-foreign-closed", "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: sl-gclosed"},
+  {"id":"lx-esc-1",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-20T00:00:00Z"},
+  {"id":"lx-esc-2",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-25T00:00:00Z"},
+  {"id":"lx-esc-3",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-29T00:00:00Z"},
+  {"id":"lx-esc-solo",         "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Different condition [LOW]","created_at":"2026-09-28T00:00:00Z"},
+  {"id":"lx-boot",             "issue_type":"message","status":"open","assignee":"human","title":"BOOT_HEALTH: deacon cold"}
 ]
 JSON
 
@@ -134,6 +150,13 @@ hasnt "$CALLED" "bd close lx-esc-3" "ESC: the NEWEST escalation copy is kept"
 has "$CALLED" "superseded by lx-esc-3" "ESC: reason names the surviving newest copy"
 hasnt "$CALLED" "bd close lx-esc-solo" "ESCSOLO: a lone escalation headline is kept"
 hasnt "$CALLED" "bd close lx-boot" "SCOPE: a non-gate/non-escalation message is untouched"
+
+# The notices core mails are assigned to "human"; the stub refuses this sweep's
+# close without --force (see the gc stub). A close recorded above already proves
+# --force was passed, but assert it on each pass's close site so a drop of either
+# --force is caught here, at that site.
+has "$(grep '^bd close lx-n-gone ' "$CALLS")" " --force" "HUMANGUARD: pass 1 forces the stale gate-notice close past the human-assignee guard"
+has "$(grep '^bd close lx-esc-1 ' "$CALLS")" " --force" "HUMANGUARD: pass 2 forces the duplicate-escalation close past the human-assignee guard"
 
 # --- DRY RUN ------------------------------------------------------------------
 : > "$CALLS"
@@ -181,6 +204,43 @@ has "$(cat "$TMP/err")" "could not close stale gate notice lx-n-closed" "CLOSEFA
 has "$CALLED" "bd close lx-n-gone" "CLOSEFAIL: a failed close does not stop the pass"
 has "$OUT" "closed 2 stale gate notices" "CLOSEFAIL: the failed close is not counted closed"
 has "$OUT" "skipped 3" "CLOSEFAIL: the failed close is counted skipped"
+
+# --- DISK PRESSURE (fail closed) ----------------------------------------------
+# Each pass enumerates through a checked `mktemp`; under a full disk that mktemp
+# fails and the pass must abort loud, never fall through to an all-clear summary
+# (the defect: a `<<<` here-string's temp file failed silently and ran the loop
+# zero times). A mktemp shim first on PATH stands in for the full disk. It is
+# captured against the real mktemp so the calls it does not fail still return a
+# file, and it fails the MKTEMP_FAIL_ON-th call so either pass can be singled
+# out: call 1 is the gate enumeration, call 2 the escalation enumeration.
+REAL_MKTEMP="$(command -v mktemp)"
+mkdir -p "$TMP/diskfull-bin"
+cat > "$TMP/diskfull-bin/mktemp" <<'MKTEMP'
+#!/usr/bin/env bash
+n=$(( $(cat "$MKTEMP_CTR" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$MKTEMP_CTR"
+if [ "$n" = "${MKTEMP_FAIL_ON:-0}" ]; then echo "mktemp: Disk quota exceeded" >&2; exit 1; fi
+exec "$REAL_MKTEMP" "$@"
+MKTEMP
+chmod +x "$TMP/diskfull-bin/mktemp"
+MKTEMP_CTR="$TMP/mktemp.ctr"
+
+# Pass 1's enumeration cannot get a temp file: the pass aborts non-zero, prints
+# no summary (no forged empty-queue all-clear), closes nothing, and says why.
+: > "$MKTEMP_CTR"
+OUT="$(run PATH="$TMP/diskfull-bin:$PATH" MKTEMP_CTR="$MKTEMP_CTR" REAL_MKTEMP="$REAL_MKTEMP" MKTEMP_FAIL_ON=1)"; RC=$?
+eq "$RC" "1" "DISKFULL-GATE: aborts with exit 1"
+eq "$OUT" "" "DISKFULL-GATE: prints no summary"
+eq "$(cat "$CALLS")" "" "DISKFULL-GATE: closes nothing"
+has "$(cat "$TMP/err")" "could not create a temp file to enumerate gate notices" "DISKFULL-GATE: the blackout is announced on stderr"
+
+# Pass 2's enumeration cannot get a temp file (the gate pass got one): the pass
+# still aborts non-zero with no summary, so a disk-pressure blackout on EITHER
+# loop can never read as an empty queue.
+: > "$MKTEMP_CTR"
+OUT="$(run PATH="$TMP/diskfull-bin:$PATH" MKTEMP_CTR="$MKTEMP_CTR" REAL_MKTEMP="$REAL_MKTEMP" MKTEMP_FAIL_ON=2)"; RC=$?
+eq "$RC" "1" "DISKFULL-ESC: aborts with exit 1"
+eq "$OUT" "" "DISKFULL-ESC: prints no summary"
+has "$(cat "$TMP/err")" "could not create a temp file to enumerate escalation notices" "DISKFULL-ESC: the blackout is announced on stderr"
 
 echo "notification-wisp-reap.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

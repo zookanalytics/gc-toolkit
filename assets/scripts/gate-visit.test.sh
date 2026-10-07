@@ -156,8 +156,11 @@ check_file() {
         fi
         # ...and the read-back must REPAIR, not refuse: this block files the
         # one visit for its scope, so exiting on a lost stamp trades a quiet
-        # degradation for an outage of the same surface.
-        printf '%s' "$block" | grep -qF -- '--set-metadata "gc.continuation_group=' \
+        # degradation for an outage of the same surface. The re-stamp grep is
+        # scoped to the read-back arm (GROUP_GOT onward): the block's initial
+        # stamp carries the same '--set-metadata "gc.continuation_group="', so a
+        # block-wide grep stays green with the read-back's re-stamp deleted.
+        printf '%s' "$block" | sed -n '/GROUP_GOT=/,$p' | grep -qF -- '--set-metadata "gc.continuation_group=' \
             && printf '%s' "$block" | grep -qE 'warning: gc\.continuation_group .* — repairing"' \
             && ok "$name: the read-back repairs and warns" \
             || bad "$name: the read-back repairs and warns" 'the read-back must re-stamp the group and warn, never exit'
@@ -271,7 +274,7 @@ echo "── consumer census ──"
 if [ "$FORMULA_CONSUMERS" -ge 3 ]; then
     ok "the known formula consumers carry marked copies ($FORMULA_CONSUMERS found)"
 else
-    bad "the known formula consumers carry marked copies" "expected >=3 (mol-visit, mol-first-reaction, mol-feedback-distiller); found $FORMULA_CONSUMERS"
+    bad "the known formula consumers carry marked copies" "expected >=3 (mol-visit, mol-feedback-distiller, mol-validate-close); found $FORMULA_CONSUMERS"
 fi
 if [ "$SCRIPT_CONSUMERS" -ge 1 ]; then
     ok "the script surface carries marked copies ($SCRIPT_CONSUMERS found)"

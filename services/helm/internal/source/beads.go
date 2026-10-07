@@ -591,6 +591,17 @@ func doneSince(now time.Time) (time.Time, bool) {
 // is non-nil only on the closed pass, where it both bounds the query and marks
 // the anchors it produces as DONE.
 func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, status beads.Status, closedAfter *time.Time) {
+	// The closed pass feeds only the DONE band, and a lite SELECT (one that drops
+	// the six heavy TEXT columns — description, design, acceptance_criteria,
+	// notes, payload, waiters) carries everything a closed anchor needs. rankScore
+	// orders a SevDone row by recency and discards its weight, so the cross-rig
+	// ref scan that weight feeds cannot move a closed row, and no other reader of a
+	// closed anchor reads a heavy column. The live pass stays full because
+	// crossRigRefs reads an open anchor's description. Labels and metadata are not
+	// heavy columns, so convoy ownership and every tile's metadata hydrate either
+	// way.
+	lite := closedAfter != nil
+
 	// Phase 1 — collect every anchor for this rig+status, typed then
 	// metadata-keyed, WITHOUT reading any edges. Typed kinds are appended first
 	// because BuildBoard's id-dedup keeps the first kind a bead is gathered
@@ -599,7 +610,7 @@ func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st bead
 	var pending []pendingAnchor
 	for _, kind := range typedAnchorKinds {
 		it := beads.IssueType(kind)
-		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &status, ClosedAfter: closedAfter})
+		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &status, ClosedAfter: closedAfter, Lite: lite})
 		if err != nil {
 			g.note(true, []string{kind + "s@" + r.name + ": " + err.Error()})
 			continue
@@ -623,7 +634,7 @@ func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st bead
 			pending = append(pending, pendingAnchor{anchor: anchor, kind: kind})
 		}
 	}
-	pending = append(pending, s.collectMetadataAnchors(ctx, g, st, r, status, closedAfter)...)
+	pending = append(pending, s.collectMetadataAnchors(ctx, g, st, r, status, closedAfter, lite)...)
 	pending = append(pending, s.collectReviewReworkAnchors(ctx, g, st, r, closedAfter)...)
 
 	// Phase 2 — resolve every anchor's edges in a fixed number of batched reads,
@@ -779,7 +790,9 @@ func (s *BeadsSource) hydrate(ctx context.Context, st beadStore, ids map[string]
 	for id := range ids {
 		list = append(list, id)
 	}
-	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IDs: list})
+	// Lite: a hydrated far end becomes a board.Child or board.Blocker, and
+	// neither carries a heavy TEXT column, so the edge hydration never needs one.
+	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IDs: list, Lite: true})
 	if err != nil {
 		return nil, err
 	}
@@ -878,7 +891,7 @@ func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issu
 // from a parent to its own descendant, so the canonical converse shape — file
 // the routed work as a CHILD of the subject — can never express its wait as a
 // waiting edge (tk-2cyxo).
-func (s *BeadsSource) collectMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, status beads.Status, closedAfter *time.Time) []pendingAnchor {
+func (s *BeadsSource) collectMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, status beads.Status, closedAfter *time.Time, lite bool) []pendingAnchor {
 	excluded := make([]beads.IssueType, 0, len(typedAnchorKinds))
 	for _, kind := range typedAnchorKinds {
 		excluded = append(excluded, beads.IssueType(kind))
@@ -889,6 +902,9 @@ func (s *BeadsSource) collectMetadataAnchors(ctx context.Context, g *gatherState
 			Status:       &status,
 			ClosedAfter:  closedAfter,
 			ExcludeTypes: excluded,
+			// The closed pass reads lite, matching the typed kinds above — see
+			// the rationale in gatherAnchors.
+			Lite: lite,
 			// The board answers for durable city state. A type-keyed query
 			// never reaches the ephemeral wisp side by accident; a query keyed
 			// on a `gc.` metadata field would, because wisps — heartbeats,
@@ -997,6 +1013,9 @@ func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
 		Takeaway:   md["gc.takeaway"],
 		TakeawayAt: md["gc.takeaway_at"],
 		TakeawayBy: md["gc.takeaway_by"],
+		// The first-reaction card the disposition wrote; spent as the tile's
+		// recommendation on an acceptable row.
+		Notes: iss.Notes,
 	}
 }
 

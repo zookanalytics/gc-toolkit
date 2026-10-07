@@ -94,7 +94,7 @@ while IFS=$'\t' read -r rid anchor branch; do
 
   gc bd update "$rid" \
     --set-metadata gc.outcome=moot \
-    --append-notes "$PROG: closed with no verdict. Anchor $anchor is closed (merge_result=${AMR:-unrecorded}) and origin has no branch $branch, so neither approve nor request-changes could bind to a commit. No gate marker was written and no rework child was filed." \
+    --append-notes "$PROG: closed with no verdict. Anchor $anchor is closed (merge_result=${AMR:-unrecorded}) and origin has no branch $branch, so neither approve nor request-changes could bind to a commit. No check marker was written and no rework child was filed." \
     --status=closed </dev/null >/dev/null 2>&1 || true
 
   if ! RROW=$(bd_show "$rid"); then

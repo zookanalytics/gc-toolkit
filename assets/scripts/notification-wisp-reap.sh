@@ -32,7 +32,8 @@
 #   notification-wisp-reap.sh --dry-run  report the plan, close nothing
 #   notification-wisp-reap.sh --db PATH  city store to sweep (default: the
 #                                        city_path from `gc rig list`)
-# Exit: 0 reaped or nothing to do · 1 the city store was unreadable · 2 usage
+# Exit: 0 reaped or nothing to do · 1 the city store or an enumeration could not
+#       be read · 2 usage
 # Caller: the notification-wisp-reap cooldown order.
 set -uo pipefail
 
@@ -74,6 +75,17 @@ closed_gate=0; kept_gate=0; skipped_gate=0
 closed_esc=0
 detail=""
 
+# Both passes feed the single summary below, so each must read its whole
+# enumeration or abort. A `<<<` here-string is backed by a $TMPDIR temp file;
+# when that file cannot be created (a full disk) the redirection fails without
+# `set -e` catching it, the loop runs zero times, and the all-zero summary is
+# indistinguishable from a healthy empty queue. Each pass instead writes its
+# enumeration to a checked temp file and reads it with `< FILE`, which keeps the
+# loop in this shell so its counters survive, then asserts it processed every
+# enumerated row before the summary prints.
+GATE_FILE=""; ESC_FILE=""
+trap 'rm -f "$GATE_FILE" "$ESC_FILE" 2>/dev/null' EXIT
+
 # ---- Pass 1: stale gate notices ---------------------------------------------
 # A "Human gate awaiting you: <gate>" notice names its gate by id in the title.
 # The notice is stale once that gate is no longer open — resolved, closed, or
@@ -84,10 +96,25 @@ gate_candidates="$(printf '%s' "$wisps_json" | jq -r '
     | select((.issue_type // "") == "message")
     | select((.title // "") | startswith("Human gate awaiting you: "))
     | [ .id, ((.title) | sub("^Human gate awaiting you: "; "")) ]
-    | @tsv')"
+    | @tsv')"; gate_rc=$?
+if [ "$gate_rc" -ne 0 ]; then
+    echo "$PROG: could not enumerate gate notices (jq exit $gate_rc) — a failed read is not an empty queue; reaping nothing" >&2
+    exit 1
+fi
+GATE_FILE="$(mktemp "${TMPDIR:-/tmp}/gctk-notification-wisp-reap.XXXXXX" 2>/dev/null)" || {
+    echo "$PROG: could not create a temp file to enumerate gate notices — reaping nothing (retries next pass)" >&2
+    exit 1
+}
+printf '%s\n' "$gate_candidates" > "$GATE_FILE" || {
+    echo "$PROG: could not write the gate-notice enumeration — reaping nothing (retries next pass)" >&2
+    exit 1
+}
+gate_expected="$(grep -c . "$GATE_FILE" 2>/dev/null || true)"; case "$gate_expected" in ''|*[!0-9]*) gate_expected=0 ;; esac
+gate_processed=0
 
 while IFS=$'\t' read -r notice_id gate_id; do
     [ -n "$notice_id" ] || continue
+    gate_processed=$((gate_processed + 1))
 
     # A title tail that is not a bead id is not a gate reference we can resolve.
     if ! [[ "$gate_id" =~ ^[a-z]+-[a-z0-9]+$ ]]; then
@@ -132,11 +159,14 @@ while IFS=$'\t' read -r notice_id gate_id; do
         verdict=resolved
     fi
 
-    # verdict is gone|resolved -> the notice is stale. A close that FAILS is
-    # reported and counted skipped; it must not read as reaped.
+    # verdict is gone|resolved -> the notice is stale. core mails these notices
+    # assigned to "human" for the operator's board, so the close must --force
+    # past the store's assignee guard; this pass only ever forces a notice it
+    # has proved stale. A close that FAILS is reported and counted skipped; it
+    # must not read as reaped.
     if [ "$DRY_RUN" -eq 1 ]; then
         closed_gate=$((closed_gate + 1))
-    elif "$GC" bd close "$notice_id" --db "$CITY_DB" --reason "human gate $gate_id $verdict; stale notification wisp retired (notification-wisp-reap)" >/dev/null 2>&1; then
+    elif "$GC" bd close "$notice_id" --db "$CITY_DB" --force --reason "human gate $gate_id $verdict; stale notification wisp retired (notification-wisp-reap)" >/dev/null 2>&1; then
         closed_gate=$((closed_gate + 1))
     else
         skipped_gate=$((skipped_gate + 1))
@@ -145,7 +175,11 @@ while IFS=$'\t' read -r notice_id gate_id; do
     fi
     detail="${detail}  gate-notice ${notice_id} -> ${verdict} (gate ${gate_id})
 "
-done <<< "$gate_candidates"
+done < "$GATE_FILE"
+[ "$gate_processed" -eq "$gate_expected" ] || {
+    echo "$PROG: read the gate-notice enumeration short ($gate_processed of $gate_expected) — reaping nothing (retries next pass)" >&2
+    exit 1
+}
 
 # ---- Pass 2: duplicate escalation notices -----------------------------------
 # core files a fresh "ESCALATION: <headline>" copy each cycle instead of
@@ -159,13 +193,30 @@ esc_close="$(printf '%s' "$wisps_json" | jq -r '
     | ($g | last) as $keep
     | $g[0:-1][]
     | [ .id, $keep.id ]
-    | @tsv')"
+    | @tsv')"; esc_rc=$?
+if [ "$esc_rc" -ne 0 ]; then
+    echo "$PROG: could not enumerate escalation notices (jq exit $esc_rc) — a failed read is not an empty queue; reaping nothing" >&2
+    exit 1
+fi
+ESC_FILE="$(mktemp "${TMPDIR:-/tmp}/gctk-notification-wisp-reap.XXXXXX" 2>/dev/null)" || {
+    echo "$PROG: could not create a temp file to enumerate escalation notices — reaping nothing (retries next pass)" >&2
+    exit 1
+}
+printf '%s\n' "$esc_close" > "$ESC_FILE" || {
+    echo "$PROG: could not write the escalation enumeration — reaping nothing (retries next pass)" >&2
+    exit 1
+}
+esc_expected="$(grep -c . "$ESC_FILE" 2>/dev/null || true)"; case "$esc_expected" in ''|*[!0-9]*) esc_expected=0 ;; esac
+esc_processed=0
 
 while IFS=$'\t' read -r dup_id keep_id; do
     [ -n "$dup_id" ] || continue
+    esc_processed=$((esc_processed + 1))
+    # These copies are assigned to "human" for the operator's board, so --force
+    # past the store's assignee guard; only a proven duplicate is closed here.
     if [ "$DRY_RUN" -eq 1 ]; then
         closed_esc=$((closed_esc + 1))
-    elif "$GC" bd close "$dup_id" --db "$CITY_DB" --reason "duplicate escalation notice; superseded by $keep_id (same situation); collapsed by notification-wisp-reap" >/dev/null 2>&1; then
+    elif "$GC" bd close "$dup_id" --db "$CITY_DB" --force --reason "duplicate escalation notice; superseded by $keep_id (same situation); collapsed by notification-wisp-reap" >/dev/null 2>&1; then
         closed_esc=$((closed_esc + 1))
     else
         echo "$PROG: could not close duplicate escalation notice $dup_id (keep $keep_id) — left for the next pass" >&2
@@ -173,7 +224,11 @@ while IFS=$'\t' read -r dup_id keep_id; do
     fi
     detail="${detail}  escalation ${dup_id} -> duplicate of ${keep_id}
 "
-done <<< "$esc_close"
+done < "$ESC_FILE"
+[ "$esc_processed" -eq "$esc_expected" ] || {
+    echo "$PROG: read the escalation enumeration short ($esc_processed of $esc_expected) — reaping nothing (retries next pass)" >&2
+    exit 1
+}
 
 # Distinct escalation headlines that retain one open notice (from the pre-close
 # snapshot: each surviving headline keeps exactly one).
