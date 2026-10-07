@@ -73,7 +73,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -290,7 +290,22 @@ out=$(run)
 eq "$(bstatus F2b)" "closed" "the anchor is disposed"
 eq "$(bstatus V22)" "closed" "the stale visit is retired"
 eq "$(meta V22 'gc.outcome')" "moot" "…closed moot — the question it asked is answered"
+has "$(meta V22 'gc.outcome_reason')" "F2b disposed (not-needed -> tk-vis)" "…with a reason, which the board shows as the sitting's headline"
 has "$out" "retired stale visit V22" "the retirement is reported"
+
+# The sitting that recorded the disposition can still hold the visit. bd's close
+# verb refuses a bead assigned to another actor, and pr-facts holds no visit, so
+# the retire passes --force. STUB_ENFORCE_CLOSE_OWNER makes the stub refuse a
+# plain close the way bd does, so this case fails if the --force is dropped.
+echo "# a pre-recorded disposition retires the rework-or-close visit a sitting still holds"
+store "[$(anchor F2n 39 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-vn"'), {\"id\":\"VN\",\"status\":\"in_progress\",\"assignee\":\"lx-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"pr-abandoned.39\",\"gc.continuation_group\":\"F2n\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+printf '%s' "$(prview 39 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_39.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_ENFORCE_CLOSE_OWNER=1 run)
+eq "$(bstatus VN)" "closed" "the held visit is retired over the sitting's claim"
+eq "$(meta VN 'gc.outcome')" "moot" "…closed moot"
+has "$(meta VN 'gc.outcome_reason')" "F2n disposed (not-needed -> tk-vn)" "…with its reason"
+eq "$(bstatus F2n)" "closed" "the anchor is disposed in the same pass"
 
 echo "# a disposition bead-rehome refused (human needed) -> distinct escalation, anchor left open"
 store "[$(anchor F2c 23 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-c"')]"
@@ -1027,12 +1042,31 @@ eq "$rc" 0 "the pass still exits 0"
 has "$out" "no gating anchors" "the sweep ran ahead of the no-anchors early-exit"
 eq "$(bstatus AV1)" "closed" "a visit whose PR merged (anchor closed) is retired"
 eq "$(meta AV1 'gc.outcome')" "moot" "…closed moot — the premise it asked about is dead"
+has "$(meta AV1 'gc.outcome_reason')" "a required approving review is state" "…with a reason, which the board shows as the sitting's headline"
 has "$out" "retired stale merge-blocked-approval visit AV1" "the retirement is reported"
 eq "$(bstatus AV2)" "closed" "a visit for a still-open PR is retired too — a required approving review is state, not a visit"
+eq "$(meta AV2 'gc.outcome')" "moot" "…closed moot"
+has "$(meta AV2 'gc.outcome_reason')" "Subject MO1 is open" "…with a reason naming its own subject's state"
 eq "$(bstatus AV3)" "open" "a visit whose subject is unreadable this pass is left, never retired on a read that did not land"
+eq "$(meta AV3 'gc.outcome')" "<absent>" "…and nothing is stamped on it"
 has "$out" "subject MX1 unreadable" "…and the fail-closed skip is reported"
 eq "$(bstatus ATV)" "open" "a genuine unresolved-thread visit (different key) is untouched by the approval sweep"
 eq "$(cat "$STUB_ESC_LOG")" "" "the sweep files nothing — it only retires"
+
+# pr-facts holds none of the visits it retires, so this retire passes --force as
+# well: an open visit still assigned to a sitting closes like an unassigned one.
+# STUB_ENFORCE_CLOSE_OWNER makes the stub refuse a plain close the way bd does.
+# A close that does not land leaves its visit open and reported, and the sweep
+# goes on to the next visit.
+echo "# the approval retire closes an assigned visit, and a refused close leaves it for the next pass"
+store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, {\"id\":\"AV4\",\"status\":\"open\",\"assignee\":\"lx-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV5\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV6\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+out=$(STUB_ENFORCE_CLOSE_OWNER=1 STUB_CLOSE_FAIL="AV5" run); rc=$?
+eq "$rc" 0 "a refused retire does not fail the pass"
+eq "$(bstatus AV4)" "closed" "an approval visit still assigned to a sitting is retired over the claim"
+has "$(meta AV4 'gc.outcome_reason')" "Subject MC2 is closed" "…with its reason"
+eq "$(bstatus AV5)" "open" "a visit whose close is refused stays open for the next pass"
+has "$out" "could not retire stale merge-blocked-approval visit AV5" "…and the refusal is reported"
+eq "$(bstatus AV6)" "closed" "…while the sweep goes on to retire the next visit"
 
 echo "# dismissal of our OWN superseded CHANGES_REQUESTED"
 store "[$(anchor D1 20)]"
