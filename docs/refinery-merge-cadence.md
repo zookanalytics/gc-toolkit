@@ -359,31 +359,42 @@ the cadence — the arms run whether or not any refinery session is awake.
    The batch is watermarked only once that pass records the shape the validator
    reads — `anchor_bead`, `check_name=human`, `reviewed_oid` — and its `blocks`
    edge holds.
-   A write-back sweep then answers the operator in the PR itself. On an anchor
-   carrying `pr_comment_disposition`, every comment at or below the recorded
-   watermark gets an EYES reaction, and once the bead that disposition names
-   closes, each thread holding one of the comments that bead answers gets one
-   reply naming the commit and is resolved behind that reply. The watermark is
-   cumulative and a disposition holds one batch at a time, so `pr_comment_batch`
-   carries the history it cannot: one `<disposition>|<floor>|<mark>` record per
-   batch, oldest first, written in the same transition that advances the
-   disposition. A thread belongs to every record whose range holds one of its
-   comments and whose disposition names a bead, and it is answered only once all
-   of them have landed, by one reply naming each. A record is dropped once its
-   batch has nothing left owing. The reactions are written first and bounded per
-   pass; when the cap or a failed write leaves one owing, that pass replies to
-   and resolves nothing, so no thread is answered over a comment still awaiting
-   its acknowledgement. A thread a human answered after the city's own is left
-   open, and so is one holding a comment above the mark: no batch covers that
+   A write-back sweep then answers the operator in the PR itself, marking each
+   routed comment as looked at, awaiting a person, or resolved. On an anchor
+   carrying `pr_comment_disposition`, every comment at or below its space's
+   watermark gets an EYES reaction. The watermarks are cumulative and a
+   disposition holds one batch at a time, so each id space keeps a ledger of the
+   batches routed under it: `pr_comment_batch` for inline comments,
+   `pr_review_batch` for review bodies, and `pr_issue_comment_batch` for
+   Conversation comments. A ledger holds one `<disposition>|<floor>|<mark>`
+   record per batch, oldest first, written in the same transition that advances
+   the disposition, and a comment's batch names the bead that answers it. While
+   that bead is a visit still open, the comment gets an answer that leads with a
+   question mark and names the visit. A rework child closes when it lands, and
+   a visit when the person closes it. Once the comment's bead has closed, and
+   its own finding has closed if it has one, the comment is resolved: an answer
+   leading with a check mark says what resolved it, and the comment trades its
+   EYES reaction for THUMBS_UP. A finding ruled needs-you keeps its comment
+   awaiting a person, and a declined or deferred finding resolves its comment;
+   in both cases the finding's own owed reply is the answer, and it carries the
+   same glyph. An inline comment is answered in its thread. The thread is
+   answered once every routed comment in it is resolved, by one reply naming
+   each bead, and is resolved behind that reply. A review body or a Conversation
+   comment has no thread, so a Conversation comment of the city's links to the
+   comments one bead answers and carries their answer. A record is dropped once
+   every comment it covers carries its final mark. The reactions are written
+   first and bounded per pass; when the cap or a failed write leaves one owing,
+   that pass posts no answer, so no comment is answered before it is
+   acknowledged. A thread a human answered after the city's own is left open,
+   and so is one holding a comment above the mark: no batch covers that
    comment, so nothing has answered it, and resolving would put the thread past
-   every later pass. A `visit:` disposition earns the reaction but never a
-   reply, because no commit answered it. Idempotence is read back off GitHub,
-   so a repeat pass writes nothing and a failed write is retried by the next
-   one. The per-anchor walk runs in a rotation under the arm's share of the
-   pass budget. The write-back sweep reads GitHub only for the anchors carrying
-   a disposition, at least four calls each, so it runs under the same deadline
-   in a rotation of its own (`pr-facts.cursor.writeback`), with one anchor
-   visited even on a pass whose walk spent the deadline.
+   every later pass. Idempotence is read back off GitHub, so a repeat pass
+   writes nothing and a failed write is retried by the next one. The per-anchor
+   walk runs in a rotation under the arm's share of the pass budget. The
+   write-back sweep reads GitHub only for the anchors carrying a disposition, at
+   least four calls each, so it runs under the same deadline in a rotation of its
+   own (`pr-facts.cursor.writeback`), with one anchor visited even on a pass
+   whose walk spent the deadline.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
