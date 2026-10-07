@@ -17,11 +17,11 @@ func TestScrubDeletesEveryC0Byte(t *testing.T) {
 	}
 }
 
-// The scrubbers are interchangeable or they are not: lifecycle.sh execs this
-// binary when one is available and falls back to shell when it is not, so a
-// payload one accepts and the other rejects is a difference the caller cannot
-// see. A raw TAB, LF, or CR inside a string is invalid JSON, and both must strip it.
-func TestScrubAcceptsWhatTheShellFallbackAccepts(t *testing.T) {
+// The scrubbers are interchangeable or they are not: a subcommand ported from a
+// script must read every payload the script's `tr -d '\000-\037'` scrub let
+// through, or the port refuses a bead its script read. A raw TAB, LF, or CR
+// inside a string is invalid JSON, and both must strip it.
+func TestScrubAcceptsWhatTheShellScrubAccepts(t *testing.T) {
 	for _, tc := range []struct{ name, raw string }{
 		{"raw tab in a JSON string", `[{"id":"b-1","notes":"col\tcol","metadata":{}}]`},
 		{"raw LF in a JSON string", `[{"id":"b-1","notes":"line\nline","metadata":{}}]`},
@@ -113,11 +113,10 @@ func TestMetaOnNilBeadIsEmpty(t *testing.T) {
 	}
 }
 
-// The shell fallback reads `gc bd show ... | scrub | jq '.[0] // empty'` with
-// no pipefail: a payload printed beside a non-zero exit is a bead there. Show
-// must agree, or a read-back whose `gc` also warned reports a landed
-// transition as UNVERIFIED (exit 2) from one implementation and as a
-// transition from the other.
+// The scripts read `gc bd show ... | scrub | jq '.[0] // empty'` with no
+// pipefail: a payload printed beside a non-zero exit is a bead there. Show must
+// agree, or a read-back whose `gc` also warned reports as UNVERIFIED (exit 2) a
+// transition the script it replaces reported as landed.
 func TestShowReadsThePayloadWhateverGcExitsWith(t *testing.T) {
 	bin := t.TempDir()
 	stub := "#!/bin/sh\necho '[{\"id\":\"b-1\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\"}}]'\nexit 1\n"
@@ -127,7 +126,7 @@ func TestShowReadsThePayloadWhateverGcExitsWith(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	b := New().Show("b-1")
 	if b == nil {
-		t.Fatal("Show = nil for a payload printed beside exit 1; the shell fallback would have read it")
+		t.Fatal("Show = nil for a payload printed beside exit 1; the scripts' read would have read it")
 	}
 	if got := b.Meta("merge_result"); got != "pull_request" {
 		t.Errorf("merge_result = %q, want pull_request", got)

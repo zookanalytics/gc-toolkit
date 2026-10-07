@@ -136,6 +136,13 @@ RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 # abandoning + filing a rework-or-close visit; it stamps gc.superseded_by, the
 # explicit terminal state doctor/check-closed-implies-landed accepts.
 REHOME="$SCRIPTS_DIR/bead-rehome.sh"
+# The guarded visit close. Both visit retires below go through it, so a retired
+# visit carries gc.outcome and gc.outcome_reason, the board's outcome and headline
+# for a sitting that left no takeaway, and both stamps read back before the close.
+# pr-facts holds none of the visits it retires, and bd's close verb refuses a bead
+# assigned to another actor, so both pass --force. visit-close.sh still tries the
+# plain close first, so an unassigned visit closes without the override.
+VISIT_CLOSE="$SCRIPTS_DIR/visit-close.sh"
 # The dispatch note a validation-pass bead carries, naming mol-validate as its
 # method. The human-feedback arm opens such a pass below; a validator that
 # claims the bead reads this note to know the pass is a mol-validate pour.
@@ -515,7 +522,9 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
   # refinery a rework of no PR, which it resolves to merge_strategy=direct and a
   # push straight to the target branch — the same partial-write wedge one field
   # over. merge_strategy is always minted "mr"; the PR keys must read back the
-  # values this child was minted with.
+  # values this child was minted with. pr_number is compared as a string: the
+  # create payload stores it as one, and a --set-metadata re-stamp stores it as
+  # a number.
   gc bd show "$1" --json 2>/dev/null | scrub | jq -r \
     --arg ab "$2" --arg br "$3" --arg tg "$4" --arg rr "$5" --arg pm "$6" --arg ep "$7" --arg pn "$8" '
     (.[0].metadata // {}) as $m
@@ -524,7 +533,7 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
        and ($m.rejection_reason // "") == $rr and ($m.prepare_mode // "") == $pm
        and ($m.merge_strategy // "") == "mr"
        and ($m.existing_pr // "") == $ep and ($m.pr_url // "") == $ep
-       and ($m.pr_number // "") == $pn) | tostring' 2>/dev/null
+       and (($m.pr_number // "") | tostring) == $pn) | tostring' 2>/dev/null
 }
 
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
@@ -783,8 +792,8 @@ if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
           continue
         fi
       fi
-      if gc bd update "$avid" --status=closed --set-metadata gc.outcome=moot \
-           --append-notes "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence files no merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null 2>&1; then
+      if "$VISIT_CLOSE" --visit "$avid" --outcome moot --force \
+           --reason "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence files no merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null; then
         echo "$PROG: retired stale merge-blocked-approval visit $avid (subject ${avsubj:-<none>} ${avstate:-none-recorded})"
       else
         echo "$PROG: could not retire stale merge-blocked-approval visit $avid; leaving it for the operator" >&2
@@ -973,8 +982,8 @@ CHILDREN_EOF
         # does not land this pass.
         vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
         if [ -n "$vid" ]; then
-          if gc bd update "$vid" --status=closed --set-metadata gc.outcome=moot \
-               --append-notes "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null 2>&1; then
+          if "$VISIT_CLOSE" --visit "$vid" --outcome moot --force \
+               --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null; then
             echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
           else
             echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2

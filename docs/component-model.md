@@ -405,7 +405,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
 | `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
-| `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
+| `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions that have ended, and of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/build-scratch-reap.sh` | patrol | Removes build and test scratch (Go toolchain trees, gc.test per-run trees, templated tool temp) that a killed or crashed run left behind, gated on no live holder and — for pid-named trees — a dead pid, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
 | `assets/scripts/notification-wisp-reap.sh` | patrol | Closes a city-store "Human gate awaiting you" notice once its gate is no longer open, and collapses duplicate "ESCALATION" copies to one open notice — the notification wisps core mails and never retires. |
