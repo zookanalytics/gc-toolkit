@@ -45,7 +45,7 @@ covers that dimension.
 | [`mechanik`](agents/mechanik.md) | 28,668 | 7,167 |
 | [`polecat`](agents/polecat.md) | 27,091 | 6,772 |
 | [`polecat-codex`](agents/polecat-codex.md) | 27,121 | 6,780 |
-| [`proactive`](agents/proactive.md) | 12,009 | 3,002 |
+| [`proactive`](agents/proactive.md) | 12,013 | 3,003 |
 | [`refinery`](agents/refinery.md) | 10,950 | 2,737 |
 | [`witness`](agents/witness.md) | 15,605 | 3,901 |
 
