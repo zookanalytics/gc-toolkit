@@ -858,3 +858,20 @@ case "$*" in
 esac
 STUB
 }
+
+# Whether this run executes the named part of a suite that declares parts with
+# a `# run-tests-parts:` header (tools/run-tests.sh). The suite wraps each group
+# of sections in `if part <name>; then ... fi`. Run directly, with
+# RUN_TESTS_PART unset, every part runs. Under run-tests.sh only the run's own
+# part does, and a group under a name the header does not declare fails every
+# run, because no run would ever execute its sections.
+part() { # <name>
+  [ -n "${RUN_TESTS_PART:-}" ] || return 0
+  if [ -n "${RUN_TESTS_PARTS:-}" ]; then
+    case " $RUN_TESTS_PARTS " in
+      *" $1 "*) ;;
+      *) bad "part '$1' is not declared in this suite's run-tests-parts header"; return 1 ;;
+    esac
+  fi
+  [ "$RUN_TESTS_PART" = "$1" ]
+}

@@ -198,5 +198,24 @@ eq "$(stored_json arr)"    '"[1]"'   "a JSON array is stored as its raw text"
 eq "$(stored_json obj)"    '"{}"'    "a JSON object is stored as its raw text"
 eq "$(stored_json empty)"  '""'      "an empty value is stored as the empty string"
 
+# part: tools/run-tests.sh runs a suite with parts once per part, exporting the
+# run's part and every declared one. Each probe runs in a subshell, so the
+# failure an undeclared name records is read back from its output rather than
+# counted against this suite.
+out=$(unset RUN_TESTS_PART RUN_TESTS_PARTS; part alpha; echo "alpha=$?"; part beta; echo "beta=$?")
+has "$out" "alpha=0" "part: run directly, every part runs"
+has "$out" "beta=0" "…the second part too"
+out=$(export RUN_TESTS_PART=beta RUN_TESTS_PARTS="alpha beta"; base=$FAIL
+      part alpha; echo "alpha=$?"; part beta; echo "beta=$? declared-fails=$((FAIL - base))"
+      part gamma; echo "gamma=$? undeclared-fails=$((FAIL - base))")
+has "$out" "alpha=1" "part: under run-tests a run skips every other part"
+has "$out" "beta=0 declared-fails=0" "…executes its own, and records no failure for a declared name"
+has "$out" "gamma=1 undeclared-fails=1" "…while a group under a name the header never declared fails the run"
+has "$out" "part 'gamma' is not declared" "…naming that group"
+out=$(export RUN_TESTS_PART=beta; unset RUN_TESTS_PARTS; base=$FAIL
+      part gamma; echo "gamma=$? fails=$((FAIL - base))"; part beta; echo "beta=$?")
+has "$out" "gamma=1 fails=0" "part: one part picked by hand, with no declared list, skips the others without failing"
+has "$out" "beta=0" "…and runs the part it names"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
