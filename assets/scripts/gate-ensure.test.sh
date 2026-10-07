@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/gate-ensure.sh — arm 1 of the merge cadence.
-# Covers: default check_set stamping (and the rc=3 hold when the stamp does not
-# persist or the enumeration is unreadable); the `none` opt-out; the DERIVED lane
+# Hermetic test for assets/scripts/gate-ensure.sh — arm 6 of the merge cadence.
+# Covers: default check_set stamping (and rc=3 when the stamp does not persist or
+# the enumeration is unreadable); the `none` opt-out; the DERIVED lane
 # state (green settles when a closed approve review backs the lane, through the
 # real lane-state.sh — a stale check.<g> marker settles nothing, and a backed
 # lane stays settled at a head no verdict ever named); QUIESCENCE (no review is
@@ -43,6 +43,8 @@ trap 'rm -rf "$TMP"' EXIT
 # A hermetic suite must not read the caller's city: an ambient GC_RIG changes
 # the gc sling argv these assertions match on.
 unset GC_RIG 2>/dev/null || true
+# gate-ensure records its verdicts through lifecycle.sh, which execs gctk.
+harness_build_gctk
 harness_init
 
 # Private scripts dir: the SUT, lifecycle.sh, and the REAL graph-derivation
@@ -215,13 +217,13 @@ eq "$rc" 0 "the forced-baseline pass exits 0"
 eq "$(meta A1b check_set)" "correctness,triage" "empty check_set is stamped with the forced baseline correctness,triage"
 has "$out" "2 reviews dispatched" "both the correctness and triage lanes are dispatched"
 
-echo "# stamp that does not persist holds the merge (rc=3)"
+echo "# a stamp that does not persist exits rc=3"
 store "[$(anchor A2 pull_request "" "" polecat/a2)]"
 out=$(STUB_DROP_KEYS="A2:check_set" run); rc=$?
 eq "$rc" 3 "an ungated visible anchor exits rc=3"
 has "$out" "UNSAFE" "the unsafe hold is named"
 
-echo "# unreadable enumeration holds the merge (rc=3)"
+echo "# an unreadable enumeration exits rc=3"
 out=$(STUB_LIST_FAIL=1 run); rc=$?
 eq "$rc" 3 "an unreadable gating enumeration exits rc=3"
 
@@ -1330,6 +1332,96 @@ if [ "$uncached" -gt 1 ] && [ "$cached" -lt "$uncached" ]; then
 else
   bad "the cache did not reduce the arm's anchor_bead reads (uncached=$uncached cached=$cached)"
 fi
+
+echo "# --deadline stops the pass after one anchor; --cursor resumes after it, in id order, wrapping"
+# Each anchor carries no check_set, so a visit leaves a trace (the default is
+# stamped) and stops there: no review pool, so nothing is dispatched. The ids
+# are enumerated out of id order to prove the pass orders them itself. A
+# deadline of epoch 1 has always passed, so every pass visits exactly the one
+# anchor a pass always visits.
+store "[$(anchor R30 pre_open_gate "" "" polecat/r30),
+        $(anchor R10 pull_request "" "" polecat/r10),
+        $(anchor R20 pre_open_gate "" "" polecat/r20)]"
+CUR="$TMP/gate.cursor"; rm -f "$CUR"
+pace() { "$SUT" --default correctness --fix-pool "$FIXP" --cursor "$CUR" "$@" 2>&1; }
+out=$(pace --deadline 1); rc=$?
+eq "$rc" 0 "a pass its deadline stopped exits 0"
+has "$out" "visited 1 of 3 gating anchors before the deadline; the next pass resumes at R20" "a passed deadline still visits one anchor, then names where the next pass resumes"
+eq "$(meta R10 check_set)" "correctness" "with no cursor the pass starts at the lowest id"
+eq "$(meta R20 check_set)" "<absent>" "…and the deadline kept it from starting the next anchor"
+eq "$(cat "$CUR" 2>/dev/null)" "R10" "the cursor records the anchor the pass finished"
+out=$(pace --deadline 1)
+eq "$(meta R20 check_set)" "correctness" "the next pass resumes after the cursor"
+eq "$(meta R30 check_set)" "<absent>" "…and visits one anchor again"
+has "$out" "the next pass resumes at R30" "…naming the next one"
+out=$(pace --deadline 1)
+eq "$(meta R30 check_set)" "correctness" "the third pass reaches the last anchor, so three passes cover all three"
+has "$out" "the next pass resumes at R10" "past the highest id the rotation wraps to the lowest"
+eq "$(cat "$CUR" 2>/dev/null)" "R30" "the cursor follows the rotation"
+out=$(pace --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "visited 3 of 3 gating anchors" "a deadline that has not passed lets the pass visit every anchor"
+hasnt "$out" "resumes at" "…and names no resume point"
+eq "$(cat "$CUR" 2>/dev/null)" "R30" "a full rotation from R10 ends on the anchor before it, so the next one starts at R10 again"
+
+echo "# a cursor naming an anchor no longer gating resumes at the next id after it"
+store "[$(anchor S10 pre_open_gate "" "" polecat/s10), $(anchor S30 pre_open_gate "" "" polecat/s30)]"
+printf 'S20\n' > "$CUR"
+out=$(pace --deadline 1)
+eq "$(meta S30 check_set)" "correctness" "the pass starts at the first id after the cursor"
+eq "$(meta S10 check_set)" "<absent>" "…not at the top of the list"
+
+echo "# a disposed anchor the pass skips for free does not spend its one visit past the deadline"
+# V10 is disposed, so the pass passes it without a read. It leads the rotation
+# and the deadline has passed, so the visit the pass is owed goes to V20.
+store "[$(anchor V10 pull_request correctness "" polecat/v10 ',"gc.pr_close_disposition_kind":"not-needed"'),
+        $(anchor V20 pre_open_gate "" "" polecat/v20)]"
+rm -f "$CUR"
+out=$(pace --deadline 1)
+eq "$(meta V20 check_set)" "correctness" "the visit goes to the first anchor that costs a read"
+has "$out" "visited 1 of 2 gating anchors" "…counted once"
+
+echo "# no --deadline visits every anchor; an unwritable cursor warns and the pass still runs"
+store "[$(anchor T1 pre_open_gate "" "" polecat/t1), $(anchor T2 pull_request "" "" polecat/t2)]"
+out=$("$SUT" --default correctness --fix-pool "$FIXP" --cursor "$TMP/no-such-dir/gate.cursor" 2>&1); rc=$?
+eq "$rc" 0 "an unwritable cursor does not fail the pass"
+has "$out" "visited 2 of 2 gating anchors" "with no deadline every anchor is visited"
+has "$out" "cannot record progress" "the unwritable cursor is reported"
+eq "$(printf '%s\n' "$out" | grep -c 'cannot record progress')" 1 "…once per pass, not once per anchor"
+eq "$(meta T1 check_set),$(meta T2 check_set)" "correctness,correctness" "…and both anchors were visited"
+store "[$(anchor U1 pre_open_gate "" "" polecat/u1), $(anchor U2 pull_request "" "" polecat/u2)]"
+out=$("$SUT" --default correctness --fix-pool "$FIXP" --deadline soon 2>&1)
+has "$out" "is not epoch seconds" "a malformed deadline is reported"
+has "$out" "visited 2 of 2 gating anchors" "…and the pass runs unbounded rather than visiting nothing"
+
+echo "# the cursor is written as each anchor finishes, so a pass killed mid-anchor resumes at it"
+# A private scripts dir whose finding.sh blocks while K2 is in hand, so the pass
+# can be killed inside its second anchor; every other call answers "none".
+KSD="$TMP/kill-scripts"
+mk_sut_dir "$KSD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/review-checks.sh"
+cp "$SD/review-dispatch-body.sh" "$SD/escalate.sh" "$KSD/"
+export KILL_STARTED="$TMP/kill-started" KILL_RELEASE="$TMP/kill-release"
+cat > "$KSD/finding.sh" <<'FS'
+#!/usr/bin/env bash
+case "$*" in
+  *"--anchor K2"*) : > "${KILL_STARTED:?}"; i=0
+    while [ ! -f "${KILL_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done ;;
+esac
+exit 1
+FS
+chmod +x "$KSD/finding.sh"
+store "[$(anchor K1 pre_open_gate correctness "" polecat/k1), $(anchor K2 pre_open_gate correctness "" polecat/k2)]"
+rm -f "$CUR" "$KILL_STARTED" "$KILL_RELEASE"
+"$KSD/gate-ensure.sh" --default correctness --fix-pool "$FIXP" --cursor "$CUR" >/dev/null 2>&1 &
+kp=$!
+i=0; while [ ! -f "$KILL_STARTED" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+if [ -f "$KILL_STARTED" ]; then
+  kill -9 "$kp" 2>/dev/null; wait "$kp" 2>/dev/null
+  eq "$(cat "$CUR" 2>/dev/null)" "K1" "a pass killed inside K2 left the cursor at K1, so the next pass resumes at K2"
+else
+  bad "the pass never reached K2 (fixture wedged)"
+  kill -9 "$kp" 2>/dev/null; wait "$kp" 2>/dev/null
+fi
+: > "$KILL_RELEASE"
 
 echo "# a resolver that dies mid-run dispatches nothing (never reads empty as 'no gates')"
 # gate-ensure captures the resolver's exit status: a crash prints nothing, and an

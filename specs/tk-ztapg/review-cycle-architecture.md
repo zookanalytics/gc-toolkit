@@ -315,6 +315,16 @@ blocked become unblocked, and `gate-ensure.sh`, which already owns lane state
 and computes quiescence, closes each finding whose blockers have all closed.
 The lane leaves `fixing` when no must-fix finding on this lane is open.
 
+A fix unit closes when its addressing action completes, and the finding
+resolves off that one signal regardless of the form the fix takes. A code fix
+completes by landing: merge-push closes the fix unit when its commit reaches
+the branch. A PR artifact completes by delivery: `demo-deliver.sh` closes the
+fix unit on a successful attach, so a delivered demo is a landed fix unit the
+same way a merged commit is. An artifact lands no commit. The fix unit
+therefore carries the delivery's durable evidence, the attached comment's URL,
+and the write-back cites that artifact in place of a head commit, so a resolved
+thread never claims a commit the fix did not make.
+
 Today's rework child is already a fix unit in this shape. `signoff.sh` writes
 it a `blocks` edge onto the anchor and routes it to the fix-target pool, while
 the `pr_number` and `existing_pr` it also stamps name which PR to resume rather
