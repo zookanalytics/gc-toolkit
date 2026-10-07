@@ -3,22 +3,21 @@
 #
 # Sourced (never executed) by every script that must agree on visit coverage:
 # gc-helm.sh (open, dismiss, engage), converse-fold.sh and converse-claim.sh
-# (sitting membership), and the sweeps (gate-visit-sweep.sh, liveness-sweep.sh,
-# liveness-sweep-precheck.sh). One definition, no copies.
+# (sitting membership), converse-hold.sh and converse-signoff.sh (the subject a
+# hold or sign-off writes to when none is passed), and the sweeps
+# (gate-visit-sweep.sh, liveness-sweep.sh, liveness-sweep-precheck.sh). One
+# definition, no copies.
 #
 # Coverage is a visit's DIRECT graph-native identity to its subject: the outgoing
 # `tracks` edge, with the `gc.continuation_group` stamp as the recovery fallback
 # the gate-visit block writes beside it (formulas/mol-visit.toml). It is bounded
 # to that one edge — a visit covers the bead it tracks, never that bead's blocker
-# tree or descendants.
+# tree or descendants. Widening coverage to another relationship means adding a
+# graph edge, not another metadata key.
 #
 # The tracks edge renders under two key spellings by read verb: `gc bd show`
 # gives {dependency_type, id}; `gc bd list` gives {type, depends_on_id}. The defs
 # accept both, so one predicate serves every caller regardless of its source.
-#
-# stall_root is not part of this identity: no script writes it, and the ruling
-# (tk-fhlqce, converse tk-s9hkev) keeps it advisory. The sweeps read it for a
-# separate liveness question (workflow-root membership), never for coverage.
 #
 # Usage follows the in-variable jq convention (bead-context.sh $ADV): prepend the
 # defs to a jq program that runs against one visit bead object, e.g.
