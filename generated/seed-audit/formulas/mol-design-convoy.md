@@ -15,21 +15,24 @@ its own step bead through assets/scripts/step-close.sh — resolved by
 (gc.root_bead_id, gc.step_ref), never a GC_*BEAD_ID env var, which after a
 hook-claim names a different step.
 
-design_gated (var, default true) chooses the shape. Gated: the design child
-carries the approval lane (check_set=codex,approval), so merge.sh holds its
-checkpoint PR until an operator approves, and the implementation is armed behind
-that closure — two operator gates (the checkpoint PR, then graduation).
-All-in-one (design_gated=false): design and implementation dispatch together and
-are reviewed once at graduation — one gate.
+Every PR this convoy produces, the design child's checkpoint PR included, merges
+only with a standing APPROVED review from an account other than the city's,
+which counts until it is dismissed: merge.sh enforces that as a universal rule,
+so no check_set token arms it. design_gated (var, default
+true) chooses when implementation starts. Gated: the implementation child is
+armed behind the design child's closure, so the operator's approval of the
+design's PR is what releases it. All-in-one (design_gated=false): design and
+implementation dispatch together, and the graduation PR is where the operator
+first reviews them as one unit.
 
 
 Variables:
-  {{design_gated}}: true (default): the design child carries the approval lane, so merge.sh holds its checkpoint PR for an operator APPROVED review and the implementation child is armed behind the design's closure — two operator gates. false: design and implementation dispatch together and land on the integration branch in parallel, reviewed once at graduation — one gate. The operator overrides per initiative at Accept with --var design_gated=false. (default=true)
+  {{design_gated}}: true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator overrides per initiative at Accept with --var design_gated=false. (default=true)
 
 Steps (6):
   ├── mol-design-convoy.load-context: Read the initiative and resolve the convoy shape
   ├── mol-design-convoy.seed-convoy: Create the owned convoy and cut its integration branch [needs: mol-design-convoy.load-context]
-  ├── mol-design-convoy.arm-design: File the design child and arm gate 1 [needs: mol-design-convoy.seed-convoy]
+  ├── mol-design-convoy.arm-design: File the design child and dispatch it [needs: mol-design-convoy.seed-convoy]
   ├── mol-design-convoy.arm-implementation: File the implementation child and arm it behind the design [needs: mol-design-convoy.arm-design]
   ├── mol-design-convoy.drain: Close the step chain and drain [needs: mol-design-convoy.arm-implementation]
   └── mol-design-convoy.workflow-finalize: Finalize workflow [needs: mol-design-convoy.drain]

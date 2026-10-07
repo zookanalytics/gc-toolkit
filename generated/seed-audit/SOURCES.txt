@@ -14,7 +14,7 @@ agents/converse/PROVENANCE.md
 agents/converse/agent.toml
 09b47a4ec2eb7117ff67f585751f98a95b48c192e422bcbaa86ed64b56627ca7
 agents/converse/prompt.template.md
-144c31cbec2c78fb9581c632175d9f883df91cc4487fba924dac9ea3b2f65689
+3b6319e0c55f66dc380afa7a75d80f8eb2118e9096e0337429f470b505e00a1f
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
@@ -34,7 +34,7 @@ agents/mechanik/PROVENANCE.md
 agents/mechanik/agent.toml
 dfc288929ab8afc50b01275a7b7a9b1a2f00804043fbdab010cb7f841bb54901
 agents/mechanik/prompt.template.md
-14e64e3b232b18b330cc47dc67653f68762d700d1881c178f8b525f9cd72a6d0
+1cbc4eb4974f4eef3b87c0908a48ec02d14512ab67ab889329c9d9624d628e16
 agents/polecat-codex/agent.toml
 232a9b3bd2c4322bfcfcf3b562608354a4b0049c6bde2d0d635a256ba4bf9933
 agents/polecat-codex/prompt.template.md
@@ -62,7 +62,7 @@ e716c2305c3d5ae4cd5239cb46675cc179660842c1d34ad84532395f1e4c79dc
 formulas/mol-deacon-patrol.toml
 0a7c1b6ab7d6a7c80951dbda9de1c65311492f48ef4964622c33f29342e6c174
 formulas/mol-design-convoy.toml
-ff0a242ddd331a3b1239e1e992f68dd6a3c983259b9da27a7528922706c05557
+694421c8a19367645c462ee83f9ef2e44bde389d3be9b3e34471270dcae334fa
 formulas/mol-dog-shutdown-dance.toml
 ef06872c2ec83927dd1854e979d338bba988d53c1285798e47d48ff07639a9b6
 formulas/mol-feedback-distiller.toml
@@ -74,7 +74,7 @@ formulas/mol-first-reaction.toml
 formulas/mol-polecat-work.toml
 ffe3736b3b00d83047ccde25e7c5486208826c1b4ec30002dfebec63f2272030
 formulas/mol-refinery-patrol.toml
-0e19500fa3da0648e55d463c6485b70f81ec540e8b40cff312c52c3a0b00edc1
+61132339ae1b8a0e6523c1d5edaf8c9fc0f508627c3fb77ed4f859a48bf1edf6
 formulas/mol-review-quorum-signoff.toml
 5754a2a98abc5ef77e05093a9f223311d287afd986dc7983d7623f217c3e8ba8
 formulas/mol-review.toml
@@ -117,6 +117,8 @@ template-fragments/canonical-self-rename.template.md
 ec1b86f6decc993dee9f71167f67eadf4c262bfa72c22c06d800aec57d88f6f6
 template-fragments/context-discipline.template.md
 4b3b624d0be9ee631f60a8853dedd430801e66f5bb79324ae236f2d52889f6fe
+template-fragments/design-convoy-routing.template.md
+dfcfa1a342b47f3d7e657ad50c16df95debe77193872c7078e1535d07ed307fb
 template-fragments/file-feedback-observations.template.md
 2d7eb174c3372448239b65356dee4f1d101e17e7b28ed51bbcc136aecca0f8e6
 template-fragments/file-work-records.template.md

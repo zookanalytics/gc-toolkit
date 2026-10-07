@@ -87,8 +87,8 @@ until its work merges, so `closed` always means landed.
 You run city-scoped, so `gc bd` and `gc convoy` resolve to the city store
 unless you name a rig. A dispatch bead left there is invisible to the rig's
 polecat pool, which reads only the rig store — it maroons, claimable by no
-one. Name the rig on every dispatch create with `--rig <rig>`: the same
-`<rig>` you sling to.
+one. Name the rig with `--rig <rig>` on every dispatch create and on every
+link between dispatch beads: the same `<rig>` you sling to.
 
 A **shared input artifact** (a decisions doc, a spec several polecats need
 before any produce mergeable work) is never committed directly to the default
@@ -104,24 +104,36 @@ that artifact on it; without it the branch starts equal to the default.
 
 ```bash
 # Create the convoy, cut + push its integration branch, seed the artifact onto
-# it. --json emits {convoy_id, branch}. You run city-scoped, so name the rig.
-# convoy-seed.sh scopes the convoy to GC_RIG, the same rig you sling to.
-CONVOY=$(GC_RIG=<rig> assets/scripts/convoy-seed.sh --name "<initiative>" \
-    --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
+# it. --json emits {convoy_id, branch}. You run city-scoped, so name the rig
+# twice: GC_RIG scopes the convoy to the rig you sling to, and --rig-root binds
+# the cut and push to that rig's checkout and its origin. Your home is not a
+# checkout of the rig, and without --rig-root the script falls back to
+# GC_RIG_ROOT and then to the repository your working directory sits in.
+RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
+[ -d "$RIG_ROOT" ] || { echo "no checkout found for rig <rig>; not seeding" >&2; exit 1; }
+CONVOY=$(GC_RIG=<rig> "{{ .ConfigDir }}/assets/scripts/convoy-seed.sh" --rig-root "$RIG_ROOT" \
+    --name "<initiative>" --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
-# File child work beads in the rig's store under the convoy and sling normally.
+# File child work beads in the rig's store under the convoy, read the link back,
+# and sling normally. The link and its read-back name the rig too: a dep add
+# that crosses stores prints success and exits 0 with no edge to read back, and
+# a child slung unlinked opens its PR against the default branch.
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
-gc bd dep add "$WORK" "$CONVOY" --type=parent-child
+gc bd --rig <rig> dep add "$WORK" "$CONVOY" --type=parent-child
+LINKED=$(gc bd --rig <rig> dep list "$WORK" --direction=down -t parent-child --json | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY" '[.[]? | select(.id == $c)] | length')
+[ "${LINKED:-0}" -ge 1 ] || { echo "$WORK reads no parent-child edge to $CONVOY; not slinging" >&2; exit 1; }
 gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # inherits metadata.target via convoy walk
 ```
 
-A **design-first initiative** — executable work that needs a design settled
-before or beside the build — rides `mol-design-convoy` instead of a bare seed:
-it runs the same branch cut, then files the design child and, under the
-design-gated default, arms implementation behind the design's approval, so
-design and implementation graduate as one reviewed unit. Recommend it from a
-converse sitting, or sling it directly on the initiative with
-`--on mol-design-convoy --var issue=<initiative>` (`docs/design-convoy.md`).
+A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
+and "Choosing a design-convoy" below is the test for one. The molecule runs the
+same branch cut from a pool session, then files the design child and, under the
+design-gated default, arms implementation behind the design's approval. Sling it
+on an initiative bead in the rig's store:
+
+```bash
+gc sling <rig>/{{ .BindingPrefix }}polecat <initiative> --on mol-design-convoy --var issue=<initiative>
+```
 
 Children inherit `metadata.target = integration/<convoy-id>` via the
 convoy-ancestor walk in `gc sling`: polecats branch from the integration
@@ -140,6 +152,8 @@ points one dispatch at any ref; explicit `--var` wins over the auto-compute.
 branch by itself, with no convoy above it. Catching this shape is a dispatch
 judgment here, not a downstream gate, so seed the artifact on the convoy's
 integration branch as above.
+
+{{ template "design-convoy-routing" . }}
 
 ## Scope-miss recovery: amend the open PR
 

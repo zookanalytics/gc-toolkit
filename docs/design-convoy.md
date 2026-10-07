@@ -1,6 +1,6 @@
 ---
 name: Design-convoy pattern
-description: The executable owned-convoy pattern converse reaches by recommendation. mol-design-convoy stands up an owned integration convoy, cuts its branch, files a design child, and arms implementation behind the design's approval, so design and implementation graduate to the default branch as one reviewed unit. Covers the molecule, the seed script, the two operator gates, the design-gated default, and the when-to-recommend rubric.
+description: The executable owned-convoy pattern converse reaches by recommendation. mol-design-convoy stands up an owned integration convoy, cuts its branch, files a design child, and arms implementation behind the design's approval, so design and implementation graduate to the default branch as one reviewed unit. Covers the molecule, the seed script, the two operator gates under the universal approval rule, and the design-gated default. The when-to-recommend rubric ships in the converse and mechanik prompts.
 ---
 
 # Design-convoy pattern
@@ -40,18 +40,23 @@ code and needs no worktree of its own. Its steps:
 |---|---|
 | `load-context` | Read the subject and its recommendation card for the design topic and intended implementation. Resolve `design_gated` (var, default `true`). |
 | `seed-convoy` | Run `convoy-seed.sh`: create the owned convoy, set `target = integration/<convoy-id>`, cut and push the branch. Record the convoy id on the subject. |
-| `arm-design` | File the design child, link it parent-child to the convoy, and sling `mol-polecat-work`. For `design_gated=true`, stamp the child's `check_set` with the approval lane (`codex,approval`) to arm the checkpoint gate. |
-| `arm-implementation` | File one implementation child that builds the initiative per the approved design. `design_gated=true`: a `blocks` edge from the design child plus a `deferred-dispatch.sh arm`, so the design's closure dispatches it. `design_gated=false`: sling it now, in parallel. |
+| `arm-design` | File the design child, link it parent-child to the convoy, read the link back, and sling `mol-polecat-work`. |
+| `arm-implementation` | File one implementation child that builds the initiative per the design. `design_gated=true`: a `blocks` edge from the design child plus a `deferred-dispatch.sh arm`, so the design's closure dispatches it. `design_gated=false`: sling it now, in parallel. Each edge is read back before anything dispatches. |
 | `drain` | Close the step chain and drain. |
 
 Every step re-derives the subject from the input convoy in its own shell and
 records its result on the subject (`gc.design_convoy_id`, `gc.design_child`,
 `gc.impl_child`, and the `*_armed` markers), so a crashed run resumes without
-creating a second convoy, child, or workflow.
+creating a second convoy, child, or workflow. An arm stamps its `*_armed` marker
+only after every setup write it made has landed and read back. A link or
+`blocks` edge that does not read back fails the step with the marker unstamped,
+so the resume re-runs that arm rather than skipping it. The read-back decides,
+not the add's exit status, because a resumed add can meet an edge the failed
+pass already wrote.
 
 The implementation is one child, not a fan-out: the design defines the
-breakdown, so the child carries "split into multiple beads if the approved
-design calls for it" and splits itself when it runs. Enumerating pieces here
+breakdown, so the child carries "split into multiple beads if the design
+calls for it" and splits itself when it runs. Enumerating pieces here
 would guess at a breakdown the design has not settled yet.
 
 ### convoy-seed.sh — the branch cut
@@ -63,7 +68,10 @@ the rig root fast-forwarded to the default branch and directory-imported packs
 build from its working tree, so a branch checkout or commit there would park the
 deploy off the default branch. The script cuts from the resolved default branch
 (`origin/HEAD`), and is idempotent: a supplied `--convoy` id skips creation and
-an existing origin branch skips the cut.
+an existing origin branch skips the cut. Its git operations bind to the rig
+root named by `--rig-root`, else `GC_RIG_ROOT`, else the checkout it runs in,
+so a caller outside the rig checkout, such as city-scoped mechanik, passes
+`--rig-root`.
 
 A shared input artifact (a decisions doc several polecats need) is seeded with
 `--artifact`, which starts the branch ahead of the default. A design-convoy
@@ -72,45 +80,58 @@ the first commit.
 
 ## The two operator gates
 
-Design-gated work has two gates; all-in-one has one.
+Every PR a design-convoy produces merges only with a standing APPROVED review
+from an account other than the city's. The approval counts at whatever commit
+it was given and stands across later pushes until someone dismisses it, so a
+push to an approved PR does not wait for a second approval. A standing
+CHANGES_REQUESTED from any other account vetoes the merge. `merge.sh` enforces
+this as a universal merge rule: it is armed for every PR and named by no
+`check_set` token (`assets/scripts/merge.sh`), and GitHub branch protection is
+an extra layer, not the authority. The design child's checkpoint PR, each
+child's PR onto the integration branch, and the graduation PR all pass through
+it. The pattern's two gates are the two approvals that decide what moves next.
 
-**Gate 1, the checkpoint PR** (design-gated only). The design child's doc lands
-on the integration branch and the refinery opens a PR onto that branch. The
-approval lane in the child's `check_set` makes `merge.sh` hold that PR until an
-operator's APPROVED review stands at its live head (`assets/scripts/merge.sh`).
-The design child cannot close, and the deferred implementation cannot dispatch,
-until the operator approves. Two mechanics carry the arm to the merge:
+The rule is the default branch's `merge.sh`, the copy the refinery runs from
+its deployed pack, and it gates PRs onto an integration branch as well. An
+integration branch's own copy of `merge.sh` can predate the rule. The refinery
+never runs that copy, and a convoy that changes no `merge.sh` leaves the default
+branch's version in place when it graduates.
 
-- The refinery preserves an `approval`-bearing `check_set` already on the anchor
-  at merge-push, rather than overwriting it with its bare var default
-  (`formulas/mol-refinery-patrol.toml`, the `check-set-prefer-approval-arm`
-  block). Without this the arm is erased before the checkpoint PR opens.
-- `pr-open.sh` drops `approval` from the pre-open lane checks, because an
-  external review cannot exist before the PR does. The stamp binds only at
-  merge, so the checkpoint PR still opens for the operator to read.
+**Gate 1, the design checkpoint** (design-gated only). The design child's doc
+lands on the integration branch through a checkpoint PR onto that branch, and
+the universal rule holds that PR until the operator approves it. The
+implementation child is held behind the design child by a `blocks` edge, and a
+deferred dispatch sends it to the pool when the design child closes. The design
+child closes only when its checkpoint PR merges, so the operator's approval of
+the design is what releases implementation.
 
 **Gate 2, graduation.** Once every convoy member is closed and the ledger
 records at least one landing on the integration branch, `convoy-graduate.sh`
 rewrites the convoy into an mr work bead (`branch = integration/<id>`,
 `target = default`), and the refinery opens the graduation PR from the
-integration branch to the default branch. The operator reviews the whole unit,
-design and implementation together, before the default branch moves.
+integration branch to the default branch. The same universal rule holds that PR
+until an operator's approval stands on it, so the operator reviews the whole
+unit, design and implementation together, before the default branch moves.
 
 ## Design-gated versus all-in-one
 
 `design_gated` is a var, default `true`, settled per initiative at the
-recommend-to-Accept point or overridden with `--var design_gated=false`.
+recommend-to-Accept point or overridden with `--var design_gated=false`. It is
+read case-insensitively: `false`, `0`, `no`, or `off` selects all-in-one, and
+`true`, `1`, `yes`, or `on` selects design-gated. An empty or unrecognized value
+also selects design-gated, with a warning, so a typo never drops the design gate.
 
-- **Design-gated** (`true`): the design child carries the approval lane, so the
-  checkpoint holds implementation behind the operator's approval. Use it when
-  the design decision genuinely gates the implementation shape, the blast radius
-  is high, or the design is uncertain. The cost is the design round-trip before
-  implementation starts.
+- **Design-gated** (`true`): implementation waits behind gate 1, so it starts
+  only after the operator approves the design. Use it when the design decision
+  genuinely gates the implementation shape, the blast radius is high, or the
+  design is uncertain. The cost is the design round-trip before implementation
+  starts.
 - **All-in-one** (`false`): design and implementation dispatch together and land
-  on the integration branch in parallel, reviewed once at graduation. Use it
-  when the shape is already agreed and the design doc is mostly a record, or the
-  implementation is small enough to redo cheaply. The cost is implementation
-  built on a design the operator may later change.
+  on the integration branch in parallel. Each child's PR still needs the
+  operator's approval to land, but implementation does not wait for the
+  design's. Use it when the shape is already agreed and the design doc is mostly
+  a record, or the implementation is small enough to redo cheaply. The cost is
+  implementation built on a design the operator may later change.
 
 The default is design-gated because a design doc is cheaper to change than built
 implementation.
@@ -130,17 +151,10 @@ convoy** whose one tracked member is the subject, which the formula reads as
 unit. The input convoy drains with the molecule; the owned convoy lives on and
 graduates.
 
-## When to recommend
+## When to reach for it
 
-| Follow-up | Route | Why |
-|---|---|---|
-| Executable work that needs a design settled before or beside the build, large or high-blast-radius enough that one holistic review beats scattered PRs | Recommend `mol-design-convoy` | Design and implementation land as one reviewed unit; the design gate catches a wrong shape before it is built |
-| A single, well-understood change that is its own review unit | A work formula on the default one-child convoy | No design phase; one PR to the default branch |
-| A human judgment, decision, or question with nothing to build | `mol-visit` | The operator decides; nothing to dispatch |
-
-The distinguishing questions, in order:
-
-1. Is there executable work at all? No: bare visit.
-2. Does it need a design settled before or beside the implementation, and is it
-   large or high-blast-radius enough that one holistic review beats scattered
-   PRs? Yes: design-convoy. No: plain work bead.
+The rubric that chooses a design-convoy over a plain work bead or a bare visit is
+routing guidance for the roles that route work, so it ships in their prompts.
+`template-fragments/design-convoy-routing.template.md` holds it, and the
+converse and mechanik prompts include it, each beside its own verb: converse
+recommends the formula, and mechanik slings it.

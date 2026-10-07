@@ -33,16 +33,16 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse`](agents/converse.md) | 33,481 | 8,370 |
-| [`converse-codex`](agents/converse-codex.md) | 33,481 | 8,370 |
-| [`converse-fable`](agents/converse-fable.md) | 33,481 | 8,370 |
-| [`converse-opus`](agents/converse-opus.md) | 33,481 | 8,370 |
+| [`converse`](agents/converse.md) | 34,019 | 8,504 |
+| [`converse-codex`](agents/converse-codex.md) | 34,019 | 8,504 |
+| [`converse-fable`](agents/converse-fable.md) | 34,019 | 8,504 |
+| [`converse-opus`](agents/converse-opus.md) | 34,019 | 8,504 |
 | [`deacon`](agents/deacon.md) | 13,017 | 3,254 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
 | [`keeper`](agents/keeper.md) | 23,053 | 5,763 |
-| [`mechanik`](agents/mechanik.md) | 28,491 | 7,122 |
+| [`mechanik`](agents/mechanik.md) | 30,561 | 7,640 |
 | [`polecat`](agents/polecat.md) | 24,963 | 6,240 |
 | [`polecat-codex`](agents/polecat-codex.md) | 24,993 | 6,248 |
 | [`proactive`](agents/proactive.md) | 11,079 | 2,769 |
@@ -60,7 +60,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,104 | 776 |
-| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 2,691 | 672 |
+| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 3,240 | 810 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,247 | 811 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
