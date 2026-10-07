@@ -36,14 +36,15 @@ rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
 the other, and either stamp reads back clean, so a hand-written address is
 right only by luck.
 
-Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
-topology-root-skip, liveness-map-guard, liveness-lookup, warrant-file,
-husk-guard, owning-store-guard, recovery-stamp-gate, crash-loop-window,
-patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
-their tests; keep markers, keep them backslash-free.
+Marked blocks (bug-dispatch, candidate-pipeline, host-bead-skip,
+downstream-court-skip, topology-root-skip, liveness-map-guard,
+liveness-lookup, warrant-file, husk-guard, owning-store-guard,
+recovery-stamp-gate, crash-loop-window, patrol-wisp-pour,
+refinery-stuck-escalate) are extracted and executed by their tests; keep
+markers, keep them backslash-free.
 
 Variables:
-  {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery, polecat, and dog routing addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds. (default=gc-toolkit.)
   {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured. (default=600)
 
 Steps (4):

@@ -15,7 +15,8 @@
 #   the dismiss verb: both halves of the operator's explicit clear
 #   the rig-enumeration helper leaving no trap installed on its caller
 #   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
-#     own no-op code (5), distinct from a dispatch (0) and a real failure (4)
+#     own no-op code (5), distinct from a dispatch (0) and a real failure (4),
+#     and a live-workflow sling skip (exit 4) re-raised as react's code (6)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -2870,8 +2871,8 @@ grep -q 'cap is 140' <<< "$DERR" \
 printf '[]\n' > "$D_LIST"
 
 # ── demand --topic: one open demand per (gated bead, topic) ───────────────────
-# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
-# files a demand on it. Keyed on the gated bead alone, the second refreshes the
+# Under a standing scope two sittings share one bucket subject and each files a
+# demand on it. Keyed on the gated bead alone, the second refreshes the
 # first's gate in place and overwrites the operator question it holds. --topic
 # scopes the demand to the sitting (its escalation_key), so each keeps its own.
 
@@ -2951,6 +2952,33 @@ unset D_CREATE_MODE
 printf 'tk-dem1\n' > "$D_NEXTID"
 printf '[]\n' > "$D_LIST"
 
+# (TOPICBESIDE) a producer with a question of its own files under its own topic
+# beside whatever demands the bead already carries, the way the first reaction's
+# ruling and recommend exits do (first-reaction-dispose.sh, topic
+# first-reaction). A topic-scoped lookup matches neither a bare demand nor a
+# sibling topic's, so the call files its own gate and refreshes neither. The same
+# call with no topic matches on the bead alone: it stops on a bead carrying two
+# demands, and beside a lone sibling it refreshes that sibling's gate in place.
+printf '[{"id":"tk-demBare","status":"open","metadata":{"gc.demand_for":"tk-kid"}},{"id":"tk-demK","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-b"}}]\n' > "$D_LIST"
+printf 'tk-demFR\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recommend retiring the PR" --by proactive --topic first-reaction
+eq "$DRC" "0" "(TOPICBESIDE) a topic-scoped demand succeeds beside a bare and a sibling-topic demand"
+grep -qE -- '--await-id=gc-demand:tk-kid:first-reaction( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICBESIDE) …filing a gate of its own" \
+  || bad "(TOPICBESIDE) no gate was filed under its own topic: $(d_gate)"
+grep -qE '^bd update tk-dem(Bare|K) ' <<< "$(d_update)" \
+  && bad "(TOPICBESIDE) a demand the bead already carried was refreshed: $(d_update)" \
+  || ok "(TOPICBESIDE) …and refreshing neither demand the bead already carried"
+demand_run tk-kid "operator: recommend retiring the PR" --by proactive
+eq "$DRC" "4" "(TOPICBESIDE) the same call with no topic stops on a bead carrying two demands"
+printf '[{"id":"tk-demK","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-b"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: recommend retiring the PR" --by proactive
+grep -q '^bd update tk-demK ' <<< "$(d_update)" \
+  && ok "(TOPICBESIDE) …and beside a lone sibling it refreshes that sibling's gate in place" \
+  || bad "(TOPICBESIDE) the no-topic call did not refresh the lone sibling: $(d_update)"
+printf 'tk-dem1\n' > "$D_NEXTID"
+printf '[]\n' > "$D_LIST"
+
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
 # A trap is process-global: one installed inside a helper and left there
 # rewrites how every later line of the caller answers a signal, and outlives
@@ -3021,11 +3049,24 @@ grep -q "failed" "$TMP/rerr" \
 rrc=0; FAKE_SLING_RC=0 sh "$SCRIPT" react tk-react1 >/dev/null 2>&1 || rrc=$?
 eq "$rrc" "0" "(REACT) a dispatched sling (exit 0) exits 0"
 
-rrc=0; FAKE_SLING_RC=4 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr2" || rrc=$?
-eq "$rrc" "4" "(REACT) a real sling failure (exit 4) stays a failure (exit 4)"
+rrc=0; FAKE_SLING_RC=1 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr2" || rrc=$?
+eq "$rrc" "4" "(REACT) a real sling failure (exit 1) is react's failure (exit 4)"
 grep -q "failed" "$TMP/rerr2" \
   && ok "(REACT) …and is reported as a failure" \
   || bad "(REACT) react failure message missing: $(cat "$TMP/rerr2")"
+
+# The sling's live-workflow guard exits RC_LIVE_WORKFLOW (4) when a live workflow
+# already drives the bead: also a no-op that dispatched nothing, with a different
+# cause. react re-raises it as its own code (6) so the intake caller names that
+# cause, never the already-reacted one or a failure.
+rrc=0; FAKE_SLING_RC=4 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr3" || rrc=$?
+eq "$rrc" "6" "(REACT) a live-workflow skip (sling exit 4) becomes react exit 6"
+grep -q "a live workflow already drives tk-react1" "$TMP/rerr3" \
+  && ok "(REACT) …and names the no-op cause" \
+  || bad "(REACT) react live-workflow message missing: $(cat "$TMP/rerr3")"
+grep -q "already carries a first reaction\|failed" "$TMP/rerr3" \
+  && bad "(REACT) a live-workflow skip must not read as already reacted or as a failure" \
+  || ok "(REACT) …and is neither an already-reacted skip nor a failure"
 unset GC_PROACTIVE_TOOL FAKE_SLING_RC
 
 echo ""

@@ -296,15 +296,17 @@ data plane never blocks an intake.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
 `mol-first-reaction` at the new subject. That formula triages the subject and
-takes one of its five dispositions; it files a visit from its `advance-and-drain`
-step on the two that put the subject to the operator, a ruling or a recommend. A
+takes one of its five dispositions. On the two that put the subject to the
+operator, a ruling or a recommend, its `advance-and-drain` step files a human
+gate on the subject, and `gate-visit-sweep` files the visit that resolves it on
+its next pass (see "How a sitting ends" below). A
 ruling is Discuss-only: the reaction judges the capture a genuine fork, an
 irreversible or destructive action, or a policy call, and the operator arrives at
 a framed conversation with a first-reaction card already written. A recommend
 adds an action the operator can Accept: the reaction names the move and the
 execution mol, and the visit offers Accept beside Discuss. When the reaction
 judges the action clear and reversible, it routes the capture, holds it, or hands
-it to a validating closer, and files no visit. The script
+it to a validating closer, and puts nothing to the operator. The script
 files nothing on the reaction path; a second visit would split one conversation
 into two sittings of the same subject.
 
@@ -541,6 +543,22 @@ no visit — the work is theirs to perform and close, and converse's discharge
 skips assigned demands on purpose — and neither does a gate whose gated bead
 is no longer open, which the sweep names on stderr until it is resolved by
 hand.
+
+The proactive first reaction is the gate's producer for a bead it cannot carry
+forward on its own. Its ruling and recommend exits (`first-reaction-dispose.sh`)
+file the gate through `gc-helm.sh demand` under the topic `first-reaction`, with
+the reaction's takeaway as the question, and hold the subject on it. The topic
+keeps the gate the reaction's own: a re-run refreshes it, and a demand a sitting
+already holds on the subject keeps its question. The sweep's next pass files the
+visit, so a subject can wait up to one cooldown, two minutes, on a gate with no
+visit. A sitting resolves the gate when the operator rules, through converse's
+discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
+resolves every open, unassigned demand on the subject, the reaction's gate among
+them, after it dispatches the recommended mol and before it dismisses the
+subject's visits. Dismissing the visit without an answer does not close it past
+the gate: `dismiss` exits 5 until the gate is resolved on a ruling or left open,
+and leaving it open clears `gc.gate_visit`, so the sweep offers a second visit
+(see *How a held sitting ends*).
 
 ### A conversation does not freeze its subject; a merge hold is an opt-in
 
