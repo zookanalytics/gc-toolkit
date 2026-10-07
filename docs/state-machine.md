@@ -275,10 +275,16 @@ refuses an unmarked one an agent types ([gh-origin-guard.md](gh-origin-guard.md)
 batch, and advances the watermark, which stops the batch being re-read once its
 comments are answered and the posture stops being `commented`.
 
-A standing `CHANGES_REQUESTED` that is the city's own post raises no batch, so
-a codex veto is not operator feedback. Any other is, on the same terms as any
-other feedback — it routes to a rework child or a visit and opens a validation
-pass.
+The city posts no `CHANGES_REQUESTED`: `signoff.sh` records both of its
+verdicts as COMMENT reviews, and `pr-post.sh` has no change-request verb. A
+codex veto is therefore a marked COMMENT review, the city's own, and raises no
+batch; `signoff.sh`'s rework loop answers it. A `CHANGES_REQUESTED` under the
+city's login from before the cutover is the city's own the same way. Every
+other `CHANGES_REQUESTED` is feedback, including a model review run under the
+city's account after the cutover, and it routes on the same terms as any other
+feedback, to a rework child or a visit, and opens a validation pass. GitHub
+refuses a change request from a PR's author, so on a PR the city opened only
+another login can leave one.
 
 The validator rules each finding in that batch, and every ruling ends the
 finding closed or converts it to a visit: a `must-fix` holds the merge until its
@@ -414,9 +420,9 @@ one does. The veto holds the merge; it answers nothing, and the objections
 under it are exactly the feedback that most needs routing. A human's
 `CHANGES_REQUESTED` body therefore joins the review id space beside a
 COMMENTED one, and the inline comments underneath join the comment space. The
-city's own veto raises no batch, because every space counts only ids that are
-not the city's own post (see [Operator feedback](#operator-feedback)) —
-`signoff.sh`'s rework loop owns those, and reaches them through the review bead
+city's own verdicts raise no batch, because every space counts only ids that
+are not the city's own post (see [Operator feedback](#operator-feedback)) —
+`signoff.sh`'s rework loop owns them, and reaches them through the review bead
 rather than through this arm. A review that is later
 dismissed leaves both `COMMENTED` and `CHANGES_REQUESTED`, so the same read
 that would have counted it drops it. The comment space asks a narrower question
