@@ -171,12 +171,13 @@ Neither is built. Today the operator records the contract on the epic, and
 
 ## Direction: Features and Epic Checkpoints
 
-This model is the direction and is not built. The pack today records the ruling
-and holds an epic's close until it is ruled close
-([epic-stewardship.md](epic-stewardship.md)). Nothing prompts an evaluation when
-work lands, so one happens when the operator calls a sitting on the epic. The
-follow-on epic *Epic Checkpoints & Features* builds the rest, and runs the first
-checkpoints by hand before any machinery grows around them.
+This model is the direction and is not built. Today the operator records each
+ruling on the epic, and the pack checks that an epic closes only on the close
+ruling with its outcome ([epic-stewardship.md](epic-stewardship.md)). Nothing
+prompts an evaluation when work lands, so one happens when the operator calls a
+sitting on the epic. The follow-on epic *Epic Checkpoints & Features* builds the
+rest, and runs the first checkpoints by hand before any machinery grows around
+them.
 
 **Epic, Feature, Story.** An epic is delivered through Features, and a Feature
 through Stories. A Feature is a bounded delivery window in SAFe's sense: a group
