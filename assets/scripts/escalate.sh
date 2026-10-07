@@ -33,9 +33,9 @@
 # route the subject selects the store instead: when its id prefix names one,
 # every read and write is pinned by path to that store, the city's included,
 # wherever the caller sits. An
-# ephemeral --subject (a patrol wisp) is redirected onto this store's standing
-# triage subject, because the sitting that works the visit writes its outcome
-# and takeaway to the subject.
+# ephemeral --subject (a patrol wisp, or a subject proven to name no bead) is
+# redirected onto this store's standing triage subject, because the sitting
+# that works the visit writes its outcome and takeaway to the subject.
 # A CLOSED visit answers too: a situation a sitting closed `moot` or `benign`
 # is not re-filed for GC_ESCALATE_VERDICT_WINDOW seconds (default 86400, 0
 # disables), and each suppressed repeat is tallied on that visit.
@@ -70,11 +70,13 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              id prefix names, whatever GC_RIG says; only a subject whose store
              cannot be derived falls back to the GC_RIG store.
              A durable bead also narrows the dedup to that bead; an ephemeral
-             one (a patrol wisp) cannot, so there the key alone is the
-             identity, and the visit is filed on the standing triage subject
-             (task_kind=triage-subject, triage.scope=ephemeral-subject-findings)
-             instead — a wisp burns before a sitting can record anything to it.
-             The wisp rides the visit as escalation_raised_by
+             one (a patrol wisp, or a subject proven to name no bead) cannot,
+             so there the key alone is the identity, and the visit is filed on
+             the standing triage subject (task_kind=triage-subject,
+             triage.scope=ephemeral-subject-findings) instead — a wisp burns
+             before a sitting can record anything to it, and a non-bead has
+             nothing to record to. The subject rides the visit as
+             escalation_raised_by
   --key      names the SITUATION, not the wording: one open visit per key,
              narrowed to the subject when the subject is durable.
              [A-Za-z0-9._-] only (required). To keep two situations apart
@@ -142,6 +144,62 @@ if [ -z "${GC_RIG:-}" ] && [ -n "$POOL_ARG" ] && [ "$POOL_RIG" != "$POOL_ARG" ];
   warn "GC_RIG unset; adopting rig '$POOL_RIG' from --pool so the visit lands in the store that pool reads"
 fi
 
+# >>> subject-class
+# Whether --subject is a durable bead decides the dedup identity below and, on
+# the board route, whether a store can be derived from the subject at all.
+# Resolved once here, so every path agrees:
+#   durable   — escalation-rig.sh (bead-store.sh) resolves exactly one rig: a
+#               real bead id whose store is known.
+#   ephemeral — a *-wisp-* id (its prefix resolves, but the wisp is burned and
+#               re-poured every cycle, so it names no durable subject), OR a
+#               subject bead-store proves is no placeable bead at all
+#               (escalation-rig exit 1: no <prefix>-<id> shape, or a prefix the
+#               readable rig set does not carry). A bare literal fallback with no
+#               bead-id shape lands here. Both get key-alone dedup on the
+#               standing triage subject below: a tracks edge to a non-bead fails,
+#               and a sitting's outcome written to one has nowhere to land.
+#   unproven  — escalation-rig exit 3, or any code but 0 and 1: no store could
+#               be asked (the store helper could not run, the rig set was
+#               unreadable, or a prefix two rigs carry). The subject may be a
+#               real bead, so it is NOT bucketed as ephemeral; the board-route
+#               block refuses it when GC_RIG is unset.
+# The *-wisp-* glob overrides escalation-rig's answer because a wisp's own prefix
+# (lx-, tk-) does resolve to a rig, so resolvability alone would miscall it
+# durable. The rig a wisp resolves to is kept, so the board route files it in the
+# store its prefix names, as it does a durable subject.
+ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
+subj_rig_why=""
+# esc_rig [--db] <subject> leaves escalation-rig.sh's answer in ESC_OUT, its exit
+# code in ESC_RC, and its stderr appended to subj_rig_why. bash runs no command
+# whose redirection it cannot open and reports exit 1, which here would read as
+# the proven no-bead answer. So the stderr file is made first, and without one
+# only the reason is dropped, never the answer.
+esc_rig() {
+  local rig_err why
+  ESC_OUT=""
+  if [ ! -x "$ESC_RIG_SH" ]; then
+    ESC_RC=3; subj_rig_why="cannot execute $ESC_RIG_SH"
+    return 0
+  fi
+  rig_err=$(mktemp "${TMPDIR:-/tmp}/escalate-rig.XXXXXX" 2>/dev/null) || rig_err=/dev/null
+  ESC_OUT=$("$ESC_RIG_SH" "$@" 2>"$rig_err"); ESC_RC=$?
+  if [ "$rig_err" != /dev/null ]; then
+    why=$(tr '\n' ' ' < "$rig_err" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+    rm -f "$rig_err" 2>/dev/null || true
+    if [ -n "$why" ]; then subj_rig_why="${subj_rig_why:+$subj_rig_why; }$why"; fi
+  fi
+  return 0
+}
+esc_rig "$SUBJECT"; SUBJECT_RIG="$ESC_OUT"
+case "$ESC_RC" in
+  0) SUBJECT_CLASS=durable ;;
+  1) SUBJECT_CLASS=ephemeral; SUBJECT_RIG="" ;;
+  *) SUBJECT_CLASS=unproven; SUBJECT_RIG="" ;;
+esac
+case "$SUBJECT" in *-wisp-*) SUBJECT_CLASS=ephemeral ;; esac
+SUBJECT_IS_EPHEMERAL=0; [ "$SUBJECT_CLASS" = ephemeral ] && SUBJECT_IS_EPHEMERAL=1
+# <<< subject-class
+
 # The default route is `human` (the retired converse pool's replacement; set in
 # the gate-visit block below): the visit parks on the helm board, which is not a
 # pool name that selects a store. The visit belongs in its subject's own store.
@@ -166,36 +224,34 @@ fi
 # pool-route.sh, which judges an already-open visit's route against the rig
 # whose store it was read from. A caller's GC_RIG naming another rig is
 # overridden with a warning rather than refused, since the pin files the visit
-# in the subject's store whatever GC_RIG says. A subject whose store cannot be
-# derived (an ephemeral id with no rig prefix) is filed unpinned under the
-# caller's GC_RIG as before, since there is nothing to disprove it with, and is
-# refused when GC_RIG is unset.
+# in the subject's store whatever GC_RIG says.
+#
+# A subject with no store to pin is handled by the class resolved above. An
+# ephemeral one (a subject proven to name no bead, or a wisp whose prefix names
+# no addressable store) is left to the triage redirect below, which files on the
+# standing subject in the ambient store. Refusing it here would drop it whenever
+# GC_RIG is unset, the silent mute the empty-identity escalation itself exists
+# to report. A durable or unproven one may be a real bead, so it is filed
+# unpinned under the caller's GC_RIG, since there is nothing to disprove that
+# pin with, and is refused when GC_RIG is unset.
 STORE_DB=""
 if [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; then
-  ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
-  subj_rig=""; subj_db=""
-  if [ -x "$ESC_RIG_SH" ]; then
-    # The rig names the store for pool-route.sh and the path selects it for
-    # `gc bd`; without both, the store is unproven.
-    if ! { subj_rig=$("$ESC_RIG_SH" "$SUBJECT" 2>"${TMPDIR:-/tmp}/escalate-rig.$$") \
-           && subj_db=$("$ESC_RIG_SH" --db "$SUBJECT" 2>>"${TMPDIR:-/tmp}/escalate-rig.$$") \
-           && [ -n "$subj_rig" ] && [ -n "$subj_db" ]; }; then
-      subj_rig=""; subj_db=""
-    fi
-    subj_rig_why=$(tr '\n' ' ' < "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
-    rm -f "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null || true
-  else
-    subj_rig_why="cannot execute $ESC_RIG_SH"
+  # The rig names the store for pool-route.sh and the path selects it for
+  # `gc bd`; without both, the store is unproven.
+  subj_db=""
+  if [ -n "$SUBJECT_RIG" ]; then
+    esc_rig --db "$SUBJECT"
+    [ "$ESC_RC" = 0 ] && subj_db="$ESC_OUT"
   fi
   if [ -n "$subj_db" ]; then
     STORE_DB="$subj_db"
     if [ -z "${GC_RIG:-}" ]; then
-      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$subj_rig' from subject '$SUBJECT' and filing in its store ($STORE_DB), not the caller's ambient store"
-    elif [ "$GC_RIG" != "$subj_rig" ]; then
-      warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$subj_rig'; on the board route the visit belongs in the subject's own store, so it is filed there ($STORE_DB), not in the '$GC_RIG' store"
+      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$SUBJECT_RIG' from subject '$SUBJECT' and filing in its store ($STORE_DB), not the caller's ambient store"
+    elif [ "$GC_RIG" != "$SUBJECT_RIG" ]; then
+      warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$SUBJECT_RIG'; on the board route the visit belongs in the subject's own store, so it is filed there ($STORE_DB), not in the '$GC_RIG' store"
     fi
-    export GC_RIG="$subj_rig"
-  elif [ -z "${GC_RIG:-}" ]; then
+    export GC_RIG="$SUBJECT_RIG"
+  elif [ "$SUBJECT_CLASS" != ephemeral ] && [ -z "${GC_RIG:-}" ]; then
     warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would be severed from its subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
     exit 1
   fi
@@ -217,21 +273,28 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # tracks exactly one divergence and clears only on a clean sync, which does not
 # generalize to every visit).
 #
-# Only an OPEN visit is retracted. A visit a human already claimed (in_progress)
-# is theirs to close: the recheck-premise skill folds mootness in at their prep,
-# and an unattended caller must not close a conversation out from under them.
-# The close routes through visit-close.sh, the one guarded close — it folds the
-# reading onto the subject's notes, stamps gc.outcome=moot and gc.outcome_reason
-# (so the board reads a decision, not a dropped need), and closes the visit. No
-# matching open visit is success: retract is idempotent, so a second pass, or a
-# subject that never raised one, exits 0 having changed nothing. The lookup reads
-# the subject's own store, pinned by STORE_DB in the board-route block above
-# exactly as the filing path is; visit-close.sh addresses the visit and the
-# subject by id, and an id resolves to the store that holds it.
+# Only a visit nobody is engaged in is retracted: an OPEN one with no assignee
+# and no bound session (gc.session_name), the helm board's engagement test. A
+# visit a human already claimed (in_progress), or one engage has bound by
+# assignee before the claim, is theirs to close: the recheck-premise skill folds
+# mootness in at their prep, and an unattended caller must not close a
+# conversation out from under them. Every unengaged visit for the situation is
+# retracted, twins included: the filing dedup files a second visit when its
+# listing is unreadable, and the premise this caller judged gone is gone for
+# both. The close routes through visit-close.sh, the one guarded close — it
+# folds the reading onto the subject's notes, stamps gc.outcome=moot and
+# gc.outcome_reason (so the board reads a decision, not a dropped need), and
+# closes the visit. No matching open visit is success: retract is idempotent,
+# so a second pass, or a subject that never raised one, exits 0 having changed
+# nothing. The lookup reads the subject's own store, pinned by STORE_DB in the
+# board-route block above exactly as the filing path is; visit-close.sh
+# addresses the visit and the subject by id, and an id resolves to the store
+# that holds it.
 if [ "$RETRACT" = 1 ]; then
-  case "$SUBJECT" in
-    *-wisp-*) warn "--retract needs a durable subject; an ephemeral wisp's visits hang on the standing triage bucket keyed by --key alone, so there is no one subject-scoped visit to retract"; exit 2 ;;
-  esac
+  if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
+    warn "--retract needs a durable subject; '$SUBJECT' is ephemeral (a patrol wisp, or a subject proven to name no bead), and its visits hang on the standing triage bucket keyed by --key alone, so there is no one subject-scoped visit to retract"
+    exit 2
+  fi
   VISIT_CLOSE="${GC_ESCALATE_VISIT_CLOSE_TOOL:-$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/visit-close.sh}"
   [ -x "$VISIT_CLOSE" ] || { warn "visit-close.sh not found or not executable ($VISIT_CLOSE); cannot retract the visit as moot"; exit 1; }
   # Read the open visits for this subject+key. An unreadable read is not proof no
@@ -249,21 +312,35 @@ if [ "$RETRACT" = 1 ]; then
   fi
   # The same open-visit identity the filing dedup matches on, re-checked field by
   # field because a listing that silently ignored a filter would match the wrong
-  # bead.
-  RETRACT_VISIT=$(printf '%s' "$RETRACT_LISTING" \
+  # bead. Each row carries who is engaged in it, empty for nobody: its assignee,
+  # else its bound session.
+  RETRACT_ROWS=$(printf '%s' "$RETRACT_LISTING" \
     | jq -r --arg k "$KEY" --arg s "$SUBJECT" \
-        '.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id' \
-    | head -n 1)
-  if [ -z "$RETRACT_VISIT" ]; then
+        '.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s)
+             | ((.assignee // "") | tostring) as $who
+             | ((.metadata["gc.session_name"] // "") | tostring) as $sess
+             | [.id, (if $who != "" then $who elif $sess != "" then "session " + $sess else "" end)] | @tsv')
+  if [ -z "$RETRACT_ROWS" ]; then
     echo "escalate: no open visit for $SUBJECT [$KEY] to retract — nothing to do"
     exit 0
   fi
-  if "$VISIT_CLOSE" --visit "$RETRACT_VISIT" --subject "$SUBJECT" --outcome moot --reason "$MESSAGE"; then
-    echo "escalate: retracted visit $RETRACT_VISIT on $SUBJECT [$KEY] as moot"
-    exit 0
-  fi
-  warn "visit-close.sh did not close $RETRACT_VISIT; it stays open for a human"
-  exit 1
+  RETRACT_RC=0
+  while IFS=$'\t' read -r RETRACT_VISIT RETRACT_ENGAGED; do
+    [ -n "$RETRACT_VISIT" ] || continue
+    if [ -n "$RETRACT_ENGAGED" ]; then
+      echo "escalate: visit $RETRACT_VISIT on $SUBJECT [$KEY] is engaged ($RETRACT_ENGAGED); left for its holder to close"
+      continue
+    fi
+    if "$VISIT_CLOSE" --visit "$RETRACT_VISIT" --subject "$SUBJECT" --outcome moot --reason "$MESSAGE" </dev/null; then
+      echo "escalate: retracted visit $RETRACT_VISIT on $SUBJECT [$KEY] as moot"
+    else
+      warn "visit-close.sh did not close $RETRACT_VISIT; it stays open for a human"
+      RETRACT_RC=1
+    fi
+  done <<RETRACT_EOF
+$RETRACT_ROWS
+RETRACT_EOF
+  exit "$RETRACT_RC"
 fi
 # <<< retract-moot
 
@@ -324,10 +401,8 @@ POOL_NAME="${POOL_ARG:-human}"
 #
 # An unreadable listing files anyway — a duplicate visit is a bounded nuisance,
 # a silent mute is the failure this replaces.
-case "$SUBJECT" in
-  *-wisp-*) SUBJECT_IS_EPHEMERAL=1 ;;
-  *)        SUBJECT_IS_EPHEMERAL=0 ;;
-esac
+# SUBJECT_IS_EPHEMERAL was resolved in the subject-class block above (a wisp, or
+# a subject proven to name no placeable bead).
 if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
   DEDUP_SCOPE="[$KEY]"
   OPEN_ROW=$(bd_json list ${STORE_DB:+--db "$STORE_DB"} --status=open,in_progress --metadata-field "escalation_key=$KEY" --limit=20 \

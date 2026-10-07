@@ -184,15 +184,18 @@ normalize_headline() {
 }
 
 # visit_headline <raw> — the board headline for a visit title, whitespace
-# collapsed and capped at TAKEAWAY_MAX codepoints. normalize_headline REJECTS
-# over its cap because a demand/takeaway headline IS the deliverable and only
-# the author knows which clause to keep; a visit carries its full reason in the
-# body, so here the over-cap tail is TRUNCATED with an ellipsis instead. That
-# keeps "visit: <id> — <tail>" under bd's title cap without dropping the reason.
+# collapsed and capped at TAKEAWAY_MAX codepoints and at 400 bytes.
+# normalize_headline REJECTS over its cap because a demand/takeaway headline IS
+# the deliverable and only the author knows which clause to keep; a visit
+# carries its full reason in the body, so here the over-cap tail is TRUNCATED
+# with an ellipsis instead. bd caps a title at 500 BYTES, and a codepoint cap
+# alone overruns it once the tail is in 4-byte characters, so the byte cap is
+# what keeps "visit: <id> — <tail>" under bd's cap without dropping the reason.
 visit_headline() {
     printf '%s' "$1" | jq -Rsr --argjson n "$TAKEAWAY_MAX" \
         '((gsub("\\s+"; " ")) | sub("^ "; "") | sub(" $"; "")) as $h
-         | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end' \
+         | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end
+         | until(utf8bytelength <= 400; (.[:-2] | sub("\\s+$"; "")) + "…")' \
         2>/dev/null || printf '%s' "$1" | cut -c1-"$TAKEAWAY_MAX"
 }
 
@@ -1513,7 +1516,7 @@ cmd_demand() {
         demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
         if [ -z "$demand" ]; then
             demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="$(demand_await_id "$gated" "$topic")" --title "$text" --reason "$body" --json 2>/dev/null \
-                | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+                | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
             if [ -z "$demand" ] || [ "$demand" = null ]; then
                 candidate=$(demand_lookup "$gated" "$topic") \
                     || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: $(demand_await_id "$gated" "$topic")." >&2; exit 4; }

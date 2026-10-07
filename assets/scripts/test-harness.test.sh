@@ -226,6 +226,15 @@ eq "$(stored_json arr)"    '"[1]"'   "a JSON array is stored as its raw text"
 eq "$(stored_json obj)"    '"{}"'    "a JSON object is stored as its raw text"
 eq "$(stored_json empty)"  '""'      "an empty value is stored as the empty string"
 
+# The gc bd update stub replaces a description the way real bd does, under
+# either spelling of the flag, and leaves the rest of the bead as it was.
+store '[{"id":"tk-desc","status":"open","assignee":"","title":"d","description":"first","notes":"n","metadata":{"k":"v"}}]'
+gc bd update tk-desc --description "second, with a space" >/dev/null
+eq "$(jq -r '.[0].description' "$STUB_STORE")" "second, with a space" "update --description replaces the description"
+gc bd update tk-desc -d third >/dev/null
+eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
+eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
+
 # part: tools/run-tests.sh runs a suite with parts once per part, exporting the
 # run's part and every declared one. Each probe runs in a subshell, so the
 # failure an undeclared name records is read back from its output rather than
