@@ -480,14 +480,12 @@ scan_precision_filter() {
 # scan_drop_inflight — from a candidate array on stdin, drop each bead that
 # already has a live workflow: a non-closed workflow root names an input convoy
 # that tracks it. A pour moves the bead's route to gc.execution_routed_to, so
-# the "not routed" clause above cannot see one. gc sling refuses a second
-# workflow on such a bead, but only after minting the new pour's input convoy,
-# which it closes again in a separate write, so a sling the order deadline
-# kills between the two leaves that convoy open with nothing naming it. A
-# refused sling spends none of SLING_CAP either, so offering these beads spends
-# the sweep's time on refusals before it reaches the beads below them. Both
-# reads are taken once per sweep. A read that fails drops nothing, which leaves
-# the sling's own refusal as the guard.
+# the "not routed" clause above cannot see one. sling_live_workflow_guard
+# refuses to sling such a bead, and a refusal spends none of SLING_CAP, so a
+# page that offers these beads holds fewer beads a sweep can sling, and the
+# sweep spends its time on the guard's reads before it reaches the beads below
+# them. Both reads here are taken once per sweep. A read that fails drops
+# nothing, which leaves the sling guard to refuse them.
 scan_drop_inflight() {
     local cands roots convoys inflight kept dropped db
     cands="$(cat)"
@@ -514,7 +512,7 @@ scan_drop_inflight() {
         'map(select(.id as $i | ($skip | index($i)) == null))')"
     dropped=$(( $(printf '%s' "$cands" | jq 'length') - $(printf '%s' "$kept" | jq 'length') ))
     if [ "$dropped" -gt 0 ]; then
-        log "$PROG: scan: $dropped candidate(s) already have a live workflow; not offered (gc sling would refuse them)"
+        log "$PROG: scan: $dropped candidate(s) already have a live workflow; not offered (the sling guard would refuse them)"
     fi
     printf '%s' "$kept"
 }

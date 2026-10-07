@@ -148,10 +148,10 @@ hasnt "$OUT" "would sling" "(SLING-FAILCLOSED) …nothing dispatched"
 
 # --- a bead a live workflow already drives is not offered -----------------
 # roots.json and convoys.json stand in for the two reads scan_drop_inflight
-# takes. tk-live is tracked by a convoy that a live workflow root names, so gc
-# sling would refuse it. tk-done's convoy is named only by a closed root (its
-# workflow ended), tk-orphan's convoy by no root at all, and tk-fresh has no
-# convoy. Only tk-live leaves the page. tk-live is the oldest, so it ranks first,
+# takes. tk-live is tracked by a convoy that a live workflow root names, so the
+# sling guard would refuse it. tk-done's convoy is named only by a closed root
+# (its workflow ended), tk-orphan's convoy by no root at all, and tk-fresh has
+# no convoy. Only tk-live leaves the page. tk-live is the oldest, so it ranks first,
 # and with a cap of one the slot shows which bead the sweep spends it on.
 cat > "$TMP/scan.json" <<'JSON'
 [
@@ -196,7 +196,7 @@ has "$OUT" "would sling mol-first-reaction at tk-done" "(INFLIGHT-SLING) …the 
 echo "# an unreadable workflow read drops nothing"
 printf 'not json' > "$TMP/roots.json"
 IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
-has "$IDS" "tk-live" "(INFLIGHT-FAILOPEN) with the roots unreadable, the bead stays a candidate (gc sling's own check still refuses it)"
+has "$IDS" "tk-live" "(INFLIGHT-FAILOPEN) with the roots unreadable, the bead stays a candidate (the sling guard still refuses it)"
 
 # --- deliverable: the store-ownership arm -----------------------------------
 # A rig-scope pool only claims beads in its own store, so `deliverable <target>

@@ -16,9 +16,10 @@ fix a probe before the mint or a dedup after it?
 titles it `input convoy for <bead>` and sets `gc.synthetic=true`, and the
 workflow root names it in `gc.input_convoy_id`. Nothing looks for an existing
 convoy first, and nothing needs to. The convoy is the pour's own input handle.
-The one-live-workflow check (`sourceworkflow.ListLiveInputConvoyRootsForItem`)
-is what refuses a second live workflow on the same bead. So N slings of a bead
-mint N convoys, and the real question is why they stay open.
+The relaunch check (`checkLegacySourceWorkflowConflict` in
+`internal/sling/sling_core.go`) is what refuses a second live workflow of the
+same formula on the same bead. So N slings of a bead mint N convoys, and the
+real question is why they stay open.
 
 ## Census
 
@@ -63,24 +64,30 @@ proactive pool, or whose polecat workflow was running, stayed a candidate. On
 2026-10-04, 24 of the scan's 192 candidates were in that state. The scan ranks
 the oldest first, and ten of them filled the top of its 20-row page.
 
-`gc sling` refuses each of them ("source bead X already has live
-workflow(s)"). It mints the new pour's convoy before refusing, then closes it
-again in a separate write. A refused sling spends none of the sweep's cap, so
-a sweep walked the in-flight beads one refused sling at a time, and on most
-runs the deadline killed it before it got past them. The order logged 51
-deadline failures on gc-toolkit in the 24 hours to 2026-10-04T21:40Z, and 37
-on gascity in 48 hours. The killed sling was usually between the mint and the
-close. For 32 of the 40 never-named
-convoys minted on gc-toolkit on Oct 3 and 4, a deadline failure of that order
-followed the mint within 90s, and its last-slung bead was the convoy's tracked
-bead. The candidates below the in-flight ones went unreached in those sweeps.
+`gc sling` refused the beads whose live workflow was a queued first reaction
+("source bead X already has live workflow(s)"). Its relaunch check matches a
+live root of the same formula only, so a bead whose live workflow was a
+mol-polecat-work was not refused, and a reaction was poured beside it. The
+refusal comes after the mint: `prepareGraphV2FormulaInvocation` mints the new
+pour's convoy before the check runs, and the refused sling closes it again in a
+separate write. A refused sling spends none of the sweep's cap, so a sweep
+walked the in-flight beads one refused sling at a time, and on most runs the
+deadline killed it before it got past them. The order logged 51 deadline
+failures on gc-toolkit in the 24 hours to 2026-10-04T21:40Z, and 37 on gascity
+in 48 hours. The killed sling was usually between the mint and the close. For
+32 of the 40 never-named convoys minted on gc-toolkit on Oct 3 and 4, a
+deadline failure of that order followed the mint within 90s, and its
+last-slung bead was the convoy's tracked bead. The candidates below the
+in-flight ones went unreached in those sweeps.
 
 ## Why neither a probe nor a cadence sweep
 
-A probe before the mint stops neither producer. Producer 1's convoys come from
-pours that run, one convoy each. Producer 2's come from slings the
-one-live-workflow check already refuses, and they leak through the kill
-between the mint and the cleanup close.
+A probe for an existing convoy before the mint stops neither producer.
+Producer 1's convoys come from pours that run, one convoy each. Producer 2's
+come from slings the one-live-workflow check already refuses, and they leak
+through the kill between the mint and the cleanup close. Moving that check
+ahead of the mint would close the window; a probe for an existing convoy
+would not.
 
 A reap on a cadence would be the only thing that ever closes the convoys of
 producer 1, whose cause is a missing close at the workflow's end. The operator
@@ -93,20 +100,29 @@ shape. It backs up an event-driven closer with the same predicate.
 
 - **The scan stops offering in-flight beads.** `scan_drop_inflight` in
   `tools/gc-proactive.sh` drops a candidate when a non-closed workflow root
-  names a convoy that tracks it, the reverse walk gascity's check uses. That
-  removes the pack's source of producer 2, and the sweep's time goes to beads
-  with no workflow.
-- **A hand-run backfill.** `assets/scripts/input-convoy-reap.sh` applies the
+  names a convoy that tracks it, the reverse walk gascity's check uses, so the
+  sweep's page and time go to beads with no workflow. tk-qm9ynri (PR #1125)
+  landed `sling_live_workflow_guard` in the same file while this branch was in
+  review. That guard refuses the sling itself, before `gc sling` runs, which
+  removes the pack's source of producer 2 on its own. tk-eui2sgp folds the two
+  into one definition.
+- **A one-time backfill, not shipped.** A hand-run script applied the
   live-namer gate approved on tk-vc5my. A convoy is dead when no non-closed
   bead names it as `gc.input_convoy_id`, and a 60-minute grace window protects
-  a sling between the mint and the pour. It ran once per store. No order
-  schedules it.
+  a sling between the mint and the pour. It ran once per store. The operator's
+  review of PR #1045 asked what structural issue a reaper would be covering.
+  The answer is the two producers above, and each has a fix at its source:
+  the scan change and the sling guard in the pack, and gc-4by8wa in gascity,
+  which closes a convoy where its workflow ends. So the script was dropped
+  from the branch before merge. The PR's commit history keeps it, as
+  `assets/scripts/input-convoy-reap.sh` at 5285301f.
 - **Upstream.** gc-4by8wa asks gascity to close the convoy when its root
   closes, in the controller's bead-close autoclose, and to give `gc convoy
-  check` the same predicate as the backstop. The comment on gc-zh5fp records
-  the producer 2 mechanism: a sling killed after the mint still leaks
-  wherever it is killed, so minting only once the pour commits closes that
-  window.
+  check` the same predicate as the backstop. On 2026-10-07 it is open at P2,
+  routed to the gascity polecat pool and queued behind the operator's new-work
+  pause. The comment on gc-zh5fp records the producer 2 mechanism: a sling
+  killed after the mint still leaks wherever it is killed, so minting only
+  once the pour commits closes that window.
 
 tk-vc5my, the older backlog bead for this reap, is held behind tk-pxeqkz with
 `duplicate_of` and closes with it. The backfill covers its backlog half, and
@@ -126,15 +142,17 @@ finished workflow's convoy to stay open.
   the liveness sweep classifies a wrapper as machine residue.
   `dead-molecule-dispose.sh` reads tracks edges, which a closed convoy keeps.
   `tools/gc-polecat-metrics.sh` reads convoys of every status.
-- `gate-ensure.sh`'s `tracked_roots` treats an open tracking convoy as live
-  reach, so a stranded review whose finished pour left its convoy open read as
-  in flight. Its comment says a dead pour must not suppress the stranded
-  re-sling, and closing the dead convoy restores that. When the backfill ran,
-  one review bead was tracked by a dead convoy, and it was blocked.
+- `gate-ensure.sh`'s `tracked_roots` reads the roots of open tracking convoys
+  only, on the premise that a finished pour's convoy is closed. Its comment
+  says a dead pour must not suppress the stranded re-sling. A stranded review
+  whose finished pour left its convoy open therefore finds that pour, judges
+  it spent, and is escalated as wedged instead of re-slung. Closing the dead
+  convoy restores the re-sling. When the backfill ran, one review bead was
+  tracked by a dead convoy, and it was blocked. On 2026-10-07 none was.
 
 ## Backfill result
 
-`input-convoy-reap.sh --apply --db <rig>/.beads` ran once per store on
+The script ran with `--apply --db <rig>/.beads` once per store on
 2026-10-04, between 21:58Z and 22:26Z. Before each apply on gc-toolkit,
 gascity and signal-loom, the dry run's dead set matched an independent join
 exactly.
@@ -153,11 +171,36 @@ run right after the passes found 3 more dead convoys on gc-toolkit and 1 on
 gascity. Each had aged past the grace window, or seen its workflow finish,
 while the passes ran. Two of the gc-toolkit ones were never named, and they
 track tk-hud9fr and tk-mw5029, beads the unpatched scan was still re-slinging.
-That is producer 2, which runs until the scan fix merges.
+That is producer 2. The scan kept feeding it until the new-work pause stopped
+the scan, and the sling guard keeps it from refiring once the scan resumes.
 
 ## Cost of waiting on gc-4by8wa
 
 Producer 1 keeps minting at the rate workflows end before their beads: about
 five an hour on gc-toolkit on 2026-10-04. Until gc-4by8wa lands, those
-convoys stay open until their bead closes, when convoy-check takes them. A
-hand re-run of the reap clears them through the same gate.
+convoys stay open until their bead closes, when convoy-check takes them.
+
+A dry run of the same gate at 2026-10-07T13:40Z, about 63 hours after the
+backfill, counted:
+
+| Store | Dead | Workflow finished | Never named | Live |
+|---|---|---|---|---|
+| gc-toolkit | 111 | 97 | 14 | 14 |
+| gascity | 7 | 7 | 0 | 43 |
+
+On gc-toolkit the 111 sit on 98 open beads, 13 of which carry two or more.
+None is a review bead, so the gate-ensure case above touches nothing today.
+The net regrowth on gc-toolkit, under two an hour, is lower than the rate
+measured on 2026-10-04. Over the same window the operator's new-work pause
+has held the proactive scan off since its run at 2026-10-05T17:29:55Z.
+Thirteen of the 14 never-named convoys were minted before that run ended, one
+of them nine seconds before its 300s deadline. The fourteenth was minted at
+2026-10-06T00:51Z, after the scan stopped, so a sling outside the pack's scan
+can still leak one. That is the window gc-zh5fp's comment describes, and
+gc-4by8wa's backstop would close such a convoy once it ages past a grace
+window.
+
+What waiting costs is clutter. These convoys show up as a bead's second or
+third "input convoy for" wrapper, which is the symptom tk-pxeqkz was filed
+on. Of the readers checked above, the only behavior they change is
+gate-ensure's stranded-review re-sling.
