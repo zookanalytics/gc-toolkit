@@ -3070,8 +3070,21 @@ WB_DECLINES
           [ .reviews[]? | select(((.databaseId // "") | tostring) == $r) ] | .[0] // {} | gc_city_own($self; $since)' 2>/dev/null)
         [ "$wrstate" = "CHANGES_REQUESTED" ] || continue
         [ -n "$wrlogin" ] && [ "$wrown" = "false" ] || continue
+        # A review under our own login that is feedback (a model review run on the
+        # city's account, unmarked, after the cutover) has no reviewer to re-queue:
+        # the account it would re-request is the one making the request, and
+        # GitHub refuses a re-request of the PR's author. That review is dismissed
+        # without one, so a re-request that can never land does not hold its
+        # dismissal on every pass.
+        wrrequeue=1
+        [ "$wrlogin" = "$SELF_LOGIN" ] && wrrequeue=0
         wrlines=$(printf '%s' "$wrrj" | jq -r '.lines[]?' 2>/dev/null)
-        wrmsg="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed and a fresh review is requested.
+        if [ "$wrrequeue" = 1 ]; then
+          wrhead="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed and a fresh review is requested."
+        else
+          wrhead="Every comment from this review has been addressed on PR #$wnum, so its changes-requested block is dismissed. It was posted under the city's own account, so no fresh review is requested from it."
+        fi
+        wrmsg="$wrhead
 
 $wrlines
 
@@ -3080,7 +3093,7 @@ Dismissal does not mark approval; the merge still gates on an explicit approving
         # dismissal with it: both are in scope, and a dismissal alone would drop
         # the reviewer instead of re-queuing them. Re-requesting a past reviewer is
         # allowed, so the retry after a failed dismiss repeats it harmlessly.
-        if ! gh_api_origin -X POST "repos/$ORIGIN_REPO/pulls/$wnum/requested_reviewers" \
+        if [ "$wrrequeue" = 1 ] && ! gh_api_origin -X POST "repos/$ORIGIN_REPO/pulls/$wnum/requested_reviewers" \
              -f "reviewers[]=$wrlogin" >/dev/null 2>&1; then
           echo "$PROG: $wid — PR#$wnum could not re-request $wrlogin for review $wrid; NOT dismissing (retry next pass)" >&2
           continue
@@ -3088,9 +3101,15 @@ Dismissal does not mark approval; the merge still gates on an explicit approving
         if gh_api_origin -X PUT "repos/$ORIGIN_REPO/pulls/$wnum/reviews/$wrid/dismissals" \
              -f message="$wrmsg" >/dev/null 2>&1; then
           dismissed_n=$((dismissed_n + 1))
-          echo "$PROG: $wid — PR#$wnum dismissed human review $wrid and re-requested $wrlogin (its findings all cleared)"
-        else
+          if [ "$wrrequeue" = 1 ]; then
+            echo "$PROG: $wid — PR#$wnum dismissed human review $wrid and re-requested $wrlogin (its findings all cleared)"
+          else
+            echo "$PROG: $wid — PR#$wnum dismissed review $wrid, posted under our own login, with no re-request (its findings all cleared)"
+          fi
+        elif [ "$wrrequeue" = 1 ]; then
           echo "$PROG: $wid — PR#$wnum re-requested $wrlogin but could not dismiss review $wrid; retry next pass" >&2
+        else
+          echo "$PROG: $wid — PR#$wnum could not dismiss review $wrid; retry next pass" >&2
         fi
       done <<WB_REVIEW_CLEARS
 $wrev_ready

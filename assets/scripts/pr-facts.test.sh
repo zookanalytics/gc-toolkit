@@ -3351,6 +3351,22 @@ out=$(STUB_REREQUEST_RC=1 run)
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/143/requested_reviewers" "the re-request is attempted"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and a re-request that fails holds the dismissal"
 
+echo "# a review under our own login that is feedback is dismissed with no re-request"
+# A model review run on the city's account after the cutover is feedback, so its
+# findings route and clear like a person's. Its author is the acting login, and
+# GitHub refuses a re-request of the PR's author, so the refused re-request here
+# would hold the dismissal on every pass if the arm made it.
+store "[$(anchor HR9 149 "$(wb_meta rework:HRC9)"',"pr_provenance_since":"2026-10-07T00:00:00Z"'), $(child HRC9 closed), $(rfind HF11 HR9 564 must-fix)]"
+printf '%s' "$(prview 149 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_149.json"
+threads 149 '{"reviews":[{"id":"R564","databaseId":564,"state":"CHANGES_REQUESTED","author":{"login":"gc-city-bot"},"body":"model review: fix the race","submittedAt":"2026-10-07T03:00:00Z"}],"threads":[]}'
+: > "$STUB_GH_LOG"
+out=$(STUB_REREQUEST_RC=1 run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/149/reviews/564/dismissals" "the city-account review is dismissed once its findings clear"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…with no re-request of our own login"
+has "$(cat "$STUB_GH_LOG")" "no fresh review is requested" "…and the dismiss message says none is requested"
+has "$out" "dismissed review 564, posted under our own login, with no re-request" "the pass reports the dismissal without a re-request"
+hasnt "$out" "could not re-request" "…and never reports a refused re-request"
+
 # ---- a declined finding's owed reply gates its review's dismissal ---------------
 # A declined human finding closes when the validator stamps its answer
 # (finding.reply), which is before the reply/resolve arm has delivered that answer
