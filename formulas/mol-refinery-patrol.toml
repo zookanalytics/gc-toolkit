@@ -258,8 +258,9 @@ PREPARE_FAILED=
 echo "bringing '$BRANCH' current with origin/$TARGET by MERGE (no rebase, no force-push)"
 # A conflict confined to generated/seed-audit has one resolution, a render from
 # the merged inputs, so regen-merge.sh finishes that merge here instead of it
-# being repooled. It refuses every other conflict, and the abort runs then.
-REGEN=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+# being repooled. It refuses every other conflict, and the abort runs then. The
+# script is looked up in the rig resolved above, so cwd never chooses it either.
+REGEN=""; for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/regen-merge.sh" ] && { REGEN="$c/assets/scripts/regen-merge.sh"; break; }
 done
 if ! git -C "$PREP_WT" merge --no-edit "origin/$TARGET"; then
