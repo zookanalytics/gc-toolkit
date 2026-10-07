@@ -252,11 +252,25 @@ PREPARE_FAILED=
 # branch shape takes this force-push-free path; the push step ships a fast-forward
 # because the merge keeps origin/$BRANCH an ancestor of the prepared head.
 echo "bringing '$BRANCH' current with origin/$TARGET by MERGE (no rebase, no force-push)"
-git -C "$PREP_WT" merge --no-edit "origin/$TARGET" || { git -C "$PREP_WT" merge --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
+# A conflict confined to generated/seed-audit has one resolution, a render from
+# the merged inputs, so regen-merge.sh finishes that merge here instead of it
+# being repooled. It refuses every other conflict, and the abort runs then.
+REGEN=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/regen-merge.sh" ] && { REGEN="$c/assets/scripts/regen-merge.sh"; break; }
+done
+if ! git -C "$PREP_WT" merge --no-edit "origin/$TARGET"; then
+  if [ -z "$REGEN" ] || ! "$REGEN" resolve --dir "$PREP_WT"; then
+    git -C "$PREP_WT" merge --abort >/dev/null 2>&1 || true
+    PREPARE_FAILED=1
+  fi
+fi
 # <<< shared-branch-merge-mode
 ```
 
-`$PREPARE_FAILED` empty: close this step, proceed to run-tests.
+`$PREPARE_FAILED` empty: close this step, proceed to run-tests. When every
+conflict was inside generated/seed-audit, regen-merge.sh has already committed
+the merge with that tree rendered from the merged inputs, so it goes on exactly
+as a clean merge does.
 
 `$PREPARE_FAILED` set (conflicts): the abort already ran, so the tree is
 clean. Retire the workflow, reopen the source, and repool with rejection

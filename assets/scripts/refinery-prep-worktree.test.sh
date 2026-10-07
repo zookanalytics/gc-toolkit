@@ -158,6 +158,85 @@ git -C "$PWS" cat-file -e HEAD:h 2>/dev/null && git -C "$PWS" cat-file -e HEAD:g
   || bad "pre-stranded root: prepared head carries the feature and the advanced base"
 eq "$(head_of "$S/rig")" "temp" "pre-stranded root: rig root left exactly as found (un-stranding is reconcile's job, not the refinery's)"
 
+# --- 7. A conflict confined to generated/seed-audit is finished by a render. ----
+# The base moved a render input the branch also moved, at another line: the
+# input merges cleanly and the manifest record both sides rewrote conflicts.
+# The block reaches the real regen-merge.sh the way the refinery does on a rig
+# that is not the pack, through GC_CITY_PATH/rigs/gc-toolkit, and the merged
+# tree's own renderer is a stub that writes the tree as a pure function of
+# inputs/. A hand-written conflict on another branch still fails the prepare,
+# and so does the generated one when no resolver is reachable.
+CITY="$TMP/city"; mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/regen-merge.sh" "$CITY/rigs/gc-toolkit/assets/scripts/regen-merge.sh"
+chmod +x "$CITY/rigs/gc-toolkit/assets/scripts/regen-merge.sh"
+build_regen_repo() {
+  local d="$1"
+  rm -rf "$d"; mkdir -p "$d"
+  git init -q --bare "$d/origin.git"
+  git init -q "$d/seed"; (
+    cd "$d/seed"; git config user.email t@t; git config user.name t
+    mkdir -p inputs assets/scripts
+    cat > assets/scripts/render-seed-audit.sh <<'RENDER'
+#!/usr/bin/env bash
+set -eu
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+OUT="$ROOT/generated/seed-audit"
+rm -rf "$OUT"; mkdir -p "$OUT"
+for f in "$ROOT"/inputs/*.txt; do
+  printf 'inputs/%s\n%s\n' "$(basename "$f")" "$(cksum < "$f" | cut -d' ' -f1)" >> "$OUT/SOURCES.txt"
+done
+RENDER
+    chmod +x assets/scripts/render-seed-audit.sh
+    printf 'b1\nb2\nb3\nb4\nb5\nb6\n' > inputs/b.txt
+    printf 'n1\nn2\nn3\n' > notes.txt
+    bash assets/scripts/render-seed-audit.sh; git add -A; git commit -qm base
+    git remote add origin ../origin.git; git push -q origin HEAD:main
+    git checkout -qb polecat/gen
+    sed -i 's/^b1$/b1 by the branch/' inputs/b.txt
+    bash assets/scripts/render-seed-audit.sh; git add -A; git commit -qm gen; git push -q origin polecat/gen
+    git checkout -qb polecat/hand main
+    sed -i 's/^n2$/n2 by the branch/' notes.txt; git commit -qam hand; git push -q origin polecat/hand
+    git checkout -q main
+    sed -i 's/^b6$/b6 by main/' inputs/b.txt; sed -i 's/^n2$/n2 by main/' notes.txt
+    bash assets/scripts/render-seed-audit.sh; git add -A; git commit -qm "main moves b and notes"
+    git push -q origin HEAD:main
+  ) >/dev/null 2>&1
+  git clone -q "$d/origin.git" "$d/rig"
+  ( cd "$d/rig"; git config user.email r@r; git config user.name r; git checkout -q -B main origin/main )
+}
+# The block with its verdict appended, since PREPARE_FAILED is what the step
+# after it reads.
+{ cat "$TMP/merge.sh"; printf '\necho "PREPARE_FAILED=[$PREPARE_FAILED]"\n'; } > "$TMP/merge-verdict.sh"
+run_verdict() { # <rig> <city-path or ""> — prints the block's verdict line
+  ( cd "$1" && GC_RIG_ROOT="$1" GC_CITY_PATH="$2" WORK=wb TARGET_BRANCH_DEFAULT=main bash "$TMP/merge-verdict.sh" ) 2>/dev/null \
+    | grep '^PREPARE_FAILED='
+}
+
+G="$TMP/regen"; build_regen_repo "$G"
+export FAKE_META='[{"metadata":{"branch":"polecat/gen","target":"main"}}]'
+eq "$(run_verdict "$G/rig" "$CITY")" "PREPARE_FAILED=[]" "generated-only conflict: the prepare succeeds instead of repooling"
+PWG="$(prep_of "$G/rig")"
+git -C "$PWG" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && bad "generated-only conflict: merge committed (none left in progress)" || ok "generated-only conflict: merge committed (none left in progress)"
+eq "$(git -C "$PWG" rev-parse HEAD^1)" "$(git -C "$G/rig" rev-parse origin/polecat/gen)" "generated-only conflict: the merge's first parent is the branch"
+eq "$(git -C "$PWG" rev-parse HEAD^2)" "$(git -C "$G/rig" rev-parse origin/main)" "generated-only conflict: …and its second is the target"
+( cd "$PWG" && bash assets/scripts/render-seed-audit.sh >/dev/null 2>&1 )
+eq "$(git -C "$PWG" status --porcelain | wc -l | tr -d ' ')" "0" "generated-only conflict: the prepared head carries a render of the merged inputs"
+eq "$(head_of "$G/rig")" "main" "generated-only conflict: rig root stays on main"
+( cd "$G/rig" && GC_RIG_ROOT="$G/rig" BRANCH=polecat/gen bash "$TMP/push.sh" ) >/dev/null 2>&1 \
+  && ok "generated-only conflict: push block exits 0" || bad "generated-only conflict: push block exits 0"
+eq "$(git -C "$G/rig" rev-parse origin/polecat/gen)" "$(git -C "$PWG" rev-parse HEAD)" "generated-only conflict: origin/branch fast-forwards to the resolved merge"
+
+export FAKE_META='[{"metadata":{"branch":"polecat/hand","target":"main"}}]'
+eq "$(run_verdict "$G/rig" "$CITY")" "PREPARE_FAILED=[1]" "hand-written conflict: the prepare still fails, for the repool"
+PWG="$(prep_of "$G/rig")"
+git -C "$PWG" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && bad "hand-written conflict: the abort ran (no merge left in progress)" || ok "hand-written conflict: the abort ran (no merge left in progress)"
+eq "$(git -C "$PWG" rev-parse HEAD)" "$(git -C "$G/rig" rev-parse origin/polecat/hand)" "hand-written conflict: nothing was committed over the branch"
+
+G2="$TMP/regen-noresolver"; build_regen_repo "$G2"
+export FAKE_META='[{"metadata":{"branch":"polecat/gen","target":"main"}}]'
+eq "$(run_verdict "$G2/rig" "")" "PREPARE_FAILED=[1]" "no resolver reachable: a generated-only conflict fails the prepare as before"
+git -C "$(prep_of "$G2/rig")" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && bad "no resolver reachable: the abort ran" || ok "no resolver reachable: the abort ran"
+
 echo "-----"
 echo "refinery-prep-worktree: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
