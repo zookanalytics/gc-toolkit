@@ -287,9 +287,17 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request)  { s.handleActuateVerb(w, r, "accept") }
-func (s *Server) handleEngage(w http.ResponseWriter, r *http.Request)  { s.handleActuateVerb(w, r, "engage") }
-func (s *Server) handleDismiss(w http.ResponseWriter, r *http.Request) { s.handleActuateVerb(w, r, "dismiss") }
+func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
+	s.handleActuateVerb(w, r, "accept")
+}
+
+func (s *Server) handleEngage(w http.ResponseWriter, r *http.Request) {
+	s.handleActuateVerb(w, r, "engage")
+}
+
+func (s *Server) handleDismiss(w http.ResponseWriter, r *http.Request) {
+	s.handleActuateVerb(w, r, "dismiss")
+}
 
 // handleActuateVerb serves accept, engage and dismiss: the shared write
 // middleware, then the flat [actuateResponse]. Unlike open, what these three

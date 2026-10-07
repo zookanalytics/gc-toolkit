@@ -478,14 +478,22 @@ git checkout -B "$BRANCH" "origin/{{base_branch}}"
 gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH"
 ```
 
-**Record the resolved worktree.** `self-review` and `submit-and-exit` read
-`work_dir` from this bead to locate the checkout. Three paths reach here: a
-fresh create, a reuse of a recorded worktree, and a rework child that adopts
-the anchor's already-checked-out worktree. Stamp the directory you are in now,
-so every path records it. Re-stamping the same path is a no-op.
+**Record the resolved worktree and work branch.** `self-review` and
+`submit-and-exit` read `work_dir` from this bead to locate the checkout. Three
+paths reach here: a fresh create, a reuse of a recorded worktree, and a rework
+child that adopts the anchor's already-checked-out worktree. Stamp the directory
+you are in now, so every path records it; re-stamping the same path is a no-op.
+`gc.work_branch` is recorded here too: the claim stamps it from the pool
+worktree's base checkout, not the branch the work lands on, and the close gate
+checks `gc.work_commit` is reachable on it. Every path is already on the real
+branch here, so record that.
 ```bash
 # >>> workspace-setup-record-worktree
-gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$(pwd)"
+RECORD=(--set-metadata work_dir="$(pwd)")
+WORK_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+# A detached HEAD has no branch to record; skip it rather than blank the key.
+[ -n "$WORK_BRANCH" ] && [ "$WORK_BRANCH" != "HEAD" ] && RECORD+=(--set-metadata gc.work_branch="$WORK_BRANCH")
+gc bd update "$WORK_BEAD_ID" "${RECORD[@]}"
 # <<< workspace-setup-record-worktree
 ```
 
