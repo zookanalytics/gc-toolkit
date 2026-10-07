@@ -33,6 +33,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # membership), kept per the tk-fhlqce ruling, not part of this identity.
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
+# The one definition of the standing kinds, shared with liveness-recheck.sh, the
+# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
+# classify block splices in.
+# shellcheck source=standing-kinds.sh
+. "$HERE/standing-kinds.sh" || { echo "$PROG: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -303,10 +308,55 @@ fi
 # $demanded is the one non-edge read, and it exists for one case: gc-helm.sh
 # warns on stderr when a demand's `blocks` edge does not land, and nothing
 # repairs it, so that bead reads ready while a person owes an answer on it.
+# The pre-open gate set per pre_open_gate anchor, from the ONE resolver — the same
+# review-checks.sh --resolve pr-open.sh and merge.sh ask — so an undeclared or
+# legacy token (codex) gates pre-open here exactly as it does there, instead of
+# this sweep re-deriving the phase filter and dropping it (which classed a green
+# legacy-token anchor as un-gated and flagged it). The census counts only the
+# gates that must be green BEFORE the PR opens, so an open-as-draft check (demo),
+# which runs against the open PR, never holds a pre_open_gate anchor as not-yet-
+# gated. Built once per pass as a {anchor-id: [gates]} map, read by
+# pre_open_all_green below. If the resolver script is absent (have_resolver=0) the
+# jq falls back to the pre-phase none/off/approval drop. Either way a gate keeps
+# the case of its check_set token, deduped case-insensitively: gate-ensure
+# dispatches that token as the check_name and signoff stamps `check.<token>`, so
+# the census reads the marker under the same key every other reader does.
+_LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
+# rig's own review-checks.toml beside the pack) so a hermetic test can point it at
+# a fixture, or at a missing file for the no-index fallback (every non-sentinel
+# token gates). Passed as --file when readable; otherwise the resolver resolves it
+# itself (the inherited env override, then the working tree).
+_LS_IDX="${GC_REVIEW_CHECKS_INDEX-$_LS_DIR/../../review-checks.toml}"
+PREOPEN_GATES_MAP="{}"; HAVE_RESOLVER=0
+if [ -x "$_LS_DIR/review-checks.sh" ]; then
+  HAVE_RESOLVER=1
+  _ls_idx_arg=()
+  [ -r "$_LS_IDX" ] && _ls_idx_arg=(--file "$_LS_IDX")
+  PREOPEN_GATES_MAP=$(
+    jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
+           | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
+    | while IFS=$'\t' read -r _aid _acs; do
+        [ -n "$_aid" ] || continue
+        _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
+             ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null) || continue
+        printf '%s\n' "$_g" | jq -R . | jq -sc --arg id "$_aid" \
+          'map(select(length > 0)) | {($id): .}'
+      done \
+    | jq -sc 'add // {}' 2>/dev/null)
+  [ -n "$PREOPEN_GATES_MAP" ] || PREOPEN_GATES_MAP="{}"
+fi
+
 # >>> classify
+# PREOPEN_GATES_MAP and HAVE_RESOLVER are set above for the whole-sweep run;
+# default them here as well, since the precheck test extracts this marked block
+# and sources it on its own under `set -u`.
+[ -n "${HAVE_RESOLVER:-}" ] || HAVE_RESOLVER=0
+[ -n "${PREOPEN_GATES_MAP:-}" ] || PREOPEN_GATES_MAP="{}"
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
       --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" \
+      --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
@@ -317,7 +367,8 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   def pr_age:
     (try (((.updated // "") | tostring) | fromdateiso8601) catch null)
     | if . == null then null else (($nowepoch - .) / 86400 | floor) end;
-  def standing_kinds: ["triage-subject", "feedback-pattern"];
+  # standing_kinds, from standing-kinds.sh:
+  '"$STANDING_KINDS_JQ"'
   # A workflow root, a scope latch and a step-spec sidecar carry a route and no
   # executable body. The route names the run, it is not an offer. Both readers
   # that serve or count pool work refuse them on gc.kind: the hook at
@@ -332,7 +383,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     (.issue_type // "") == "convoy"
     and ((((.title // "") | startswith("sling-"))
           or ((.title // "") | startswith("input convoy for"))
-          or ((.metadata["gc.synthetic"] // "") == "true")));
+          or (((.metadata["gc.synthetic"] // "") | tostring) == "true")));
   # The tracking bead of an order is a wisp: issue_type task, no metadata
   # until it closes, and no edges, so its id and its title are the only
   # durable structural signals it carries. Both are machine-minted and
@@ -344,9 +395,12 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     and ((.title // "") | startswith("order:"));
   def pre_open_all_green:
     (.metadata // {}) as $m
-    | (($m.check_set // "")
-        | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
-        | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
+    | (if $have_resolver == "1" then ($preopen_gates[(.id // "")] // [])
+       else (($m.check_set // "")
+             | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
+             | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))
+             | reduce .[] as $t ([]; if any(.[]; ascii_downcase == ($t | ascii_downcase)) then . else . + [$t] end))
+       end) as $gates
     | ($gates | length) > 0
       and all($gates[]; ($m["check." + .] // "") == "green");
   # A visit holder is live — or it has none, or liveness is unreadable. A claim
