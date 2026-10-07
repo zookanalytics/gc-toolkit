@@ -613,8 +613,14 @@ review's result set.
   dies after claim, a rework child filed with its dependency edge reversed —
   stop the PR moving rather than spin the dispatcher, so `liveness-sweep.sh`'s
   stale-gate pass catches them, not a count on the check.
-- **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one merge-in rework
-  child while none is in flight. A live child on the branch — dispatched or
+- **External rework** (`pr-facts.sh`): a CONFLICTING PR that is approved — a
+  standing APPROVED review from an account other than the city's and no
+  standing CHANGES_REQUESTED, the rule merge.sh lands on
+  (`assets/scripts/review-verdict.sh`) — gets one merge-in rework child while
+  none is in flight. An unapproved one records its posture and gets nothing: a
+  bring-current costs a polecat round and a CI run and goes stale whenever main
+  moves, and a PR nobody approved cannot land however current its branch is.
+  A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
   closed child does not, so a branch still CONFLICTING with nothing in flight is
   re-dispatched, on every head it conflicts at rather than only the PR's first
