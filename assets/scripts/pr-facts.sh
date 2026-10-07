@@ -647,6 +647,17 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
               | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
                   comment_id: ((.id // 0) | tostring), review_id: "" } ])' 2>/dev/null
 }
+# The highest id among <rows-json> written by a login other than ours, or 0. The
+# comment and Conversation spaces count feedback by this one rule, so the read
+# that decides whether to ask the threads and the count that routes cannot
+# disagree about whose comment is whose.
+max_foreign_id() { # <rows-json>
+  local n
+  n=$(printf '%s' "$1" | jq -r --arg self "$SELF_LOGIN" '
+    [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
 # out of the batch leaves the comments under it routing. A dismissal is the only
@@ -1164,9 +1175,7 @@ CHILDREN_EOF
       # answer leaves the batch unfiltered: an unreadable read never drops an
       # objection. cmts_live stays whole for unengaged_holds, which reads it below.
       cmts_open="$cmts_live"
-      raw_max_c=$(printf '%s' "$cmts_live" | jq -r --arg self "$SELF_LOGIN" '
-        [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
-      case "$raw_max_c" in ''|*[!0-9]*) raw_max_c=0 ;; esac
+      raw_max_c=$(max_foreign_id "$cmts_live")
       if [ "$raw_max_c" -gt "$cwm" ]; then
         if review_threads_load "$num" && ans_ids=$(answered_comment_ids); then
           cmts_filtered=$(printf '%s' "$cmts_live" | jq -c --argjson ans "$ans_ids" '
@@ -1192,17 +1201,13 @@ CHILDREN_EOF
           | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
           | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
           | (.id // 0) ] | max // 0' 2>/dev/null)
-      max_c=$(printf '%s' "$cmts_open" | jq -r --arg self "$SELF_LOGIN" '
-        [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
+      max_c=$(max_foreign_id "$cmts_open")
       # An issue comment carries no review state and no inline path; every one
       # under a login other than ours is feedback the loop has to answer, the
       # same test the inline space uses. Its ids are a separate range, so it
       # earns its own watermark rather than sharing max_c's.
-      max_i=$(printf '%s' "$icmts_raw" | jq -r --arg self "$SELF_LOGIN" '
-        [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
+      max_i=$(max_foreign_id "$icmts_raw")
       case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
-      case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
-      case "$max_i" in ''|*[!0-9]*) max_i=0 ;; esac
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # A review posted under OUR OWN login leaves unresolved finding threads arm 7
       # never counts — it reads other logins — so `unanswered` stays 0 while the
