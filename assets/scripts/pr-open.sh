@@ -162,10 +162,10 @@ certify_row() { # <id> <row-json> <branch> <target> [<want-num>]
 
 # The branch's PR among the certified rows: 0=adoptable (OPEN/MERGED in CERT_*),
 # 1=none, 2=refuse (unreadable/collision), 3=dead only (DEAD_* set).
-DEAD_NUM=""; DEAD_URL=""; DEAD_HEAD=""
+DEAD_NUM=""; DEAD_HEAD=""
 find_pr() { # <id> <branch> <target>
   local id="$1" br="$2" tgt="$3" json rc row disp best_rank=99 bn="" bu="" bs="" bh="" bd="" ba=""
-  DEAD_NUM=""; DEAD_URL=""; DEAD_HEAD=""
+  DEAD_NUM=""; DEAD_HEAD=""
   json=$(gh pr list --head "$br" --state all --repo "$ORIGIN_REPO_Q" \
     --json number,url,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,isDraft,author \
     --limit 100 2>/dev/null); rc=$?
@@ -187,7 +187,7 @@ find_pr() { # <id> <branch> <target>
         # mergedAt promotes CLOSED to merged (GitHub's REST shape for a landing).
         if [ -n "$CERT_MERGED_AT" ] && [ "$CERT_MERGED_AT" != "null" ]; then disp=1; else
           if [ -z "$DEAD_NUM" ] || [ "$CERT_NUM" -gt "$DEAD_NUM" ]; then
-            DEAD_NUM="$CERT_NUM"; DEAD_URL="$CERT_URL"; DEAD_HEAD="$CERT_HEAD_OID"
+            DEAD_NUM="$CERT_NUM"; DEAD_HEAD="$CERT_HEAD_OID"
           fi
           continue
         fi ;;
@@ -387,7 +387,7 @@ while IFS= read -r row; do
   [ -n "$target" ] || target="main"
   if [ -z "$id" ] || [ -z "$branch" ]; then skipped=$((skipped + 1)); continue; fi
 
-  SUP_NUM=""; SUP_URL=""; SUP_HEAD=""
+  SUP_NUM=""; SUP_HEAD=""
   find_pr "$id" "$branch" "$target"
   case $? in
     0)
@@ -446,7 +446,7 @@ while IFS= read -r row; do
       fi
       continue ;;
     2) skipped=$((skipped + 1)); continue ;;
-    3) SUP_NUM="$DEAD_NUM"; SUP_URL="$DEAD_URL"; SUP_HEAD="$DEAD_HEAD" ;;  # dead only: create path
+    3) SUP_NUM="$DEAD_NUM"; SUP_HEAD="$DEAD_HEAD" ;;  # dead only: create path
     *) : ;;  # none: create path
   esac
 

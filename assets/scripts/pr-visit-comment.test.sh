@@ -157,7 +157,6 @@ echo "# a subject with no PR does nothing"
 printf '[]' >"$STATE"
 rc=$(run c5 "" "" -- engage --visit tk-vis3 --subject tk-sub --reason "no pr here")
 ok "no-PR engage exits 0" "[ '$rc' = 0 ]"
-GH5="$(cat "$TMPD/gh.c5.log")"
 ok "no gh call was made for a PR-less subject" "[ ! -s '$TMPD/gh.c5.log' ]"
 
 echo "# a PR that lives outside our origin is refused"

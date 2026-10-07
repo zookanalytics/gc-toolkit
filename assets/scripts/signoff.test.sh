@@ -319,8 +319,7 @@ OID_HEAD=$(oid head); OID_OVR1=$(oid ovr1); OID_PIN=$(oid pin)
 OID_OVR2=$(oid ovr2); OID_MOVED=$(oid moved); OID_NEWHEAD=$(oid newhead)
 OID_OLD=$(oid old)
 OID_DEAD=$(oid dead); OID_LIVE=$(oid live); OID_BASE=$(oid base)
-OID_PRELIVE=$(oid prelive); OID_LIVEPIN=$(oid livepin)
-OID_SHORT=$(printf '%s' "$OID_DEAD" | cut -c1-9)
+OID_LIVEPIN=$(oid livepin)
 export STUB_LSREMOTE="$OID_HEAD" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
 : > "$STUB_GH_ALL"
 unset GC_RIG 2>/dev/null || true
