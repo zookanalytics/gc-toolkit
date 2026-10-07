@@ -12,7 +12,9 @@
 # Scanned: *.sh, and the fenced code of *.toml and *.md — ``` fences and
 # `# >>> name`…`# <<< name` marker blocks, which agents and extraction tests run
 # verbatim. specs/ and generated/ are records, not recipes. Three findings:
-#   1. `gh pr comment`, `gh pr review` or `gh issue comment` in command position;
+#   1. `gh pr comment`, `gh pr review` or `gh issue comment` in command position,
+#      and a `gh pr` or `gh issue` close or reopen given `--comment`, which posts
+#      that comment;
 #   2. `gh api`, or a gh_api* wrapper, writing to a comment or review endpoint:
 #      a write method or a body field, on a path under issues/…/comments,
 #      pulls/…/comments or pulls/…/reviews. A dismissal, a reaction or a reviewer
@@ -45,6 +47,9 @@ ASSIGNS='([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*'
 SEP='(^|[;&|(){}]|\$\(|`)[[:space:]]*'"$ASSIGNS"
 WRAP='(^|[^[:alnum:]_./-])(then|do|else|elif|if|while|until|run_bounded|command|exec|env|nohup|xargs|time|!)[[:space:]]+'"$ASSIGNS"
 GH_POST='gh[[:space:]]+(pr[[:space:]]+(comment|review)|issue[[:space:]]+comment)([[:space:]]|;|\)|$)'
+# A close or reopen posts only when handed a comment, so the option has to sit
+# in the same command, before any separator.
+GH_STATE_POST='gh[[:space:]]+(pr|issue)[[:space:]]+(close|reopen)[[:space:]]([^;&|()`]*[[:space:]])?(-c|--comment)([[:space:]=]|$)'
 GH_API='(gh[[:space:]]+api|gh_api[[:alnum:]_]*)([[:space:]]|$)'
 # A comment, reply or review endpoint, and the three that post no body.
 POST_PATH='(issues|pulls)/([^[:space:]/"'"'"']+/)?comments([^[:alnum:]_]|$)|pulls/[^[:space:]/"'"'"']+/reviews([^[:alnum:]_]|$)'
@@ -213,6 +218,14 @@ judge() {
         [[ "$code" =~ gh[[:space:]]+(pr[[:space:]]+(comment|review)|issue[[:space:]]+comment) ]] \
             && verb="$(printf '%s' "${BASH_REMATCH[1]}" | tr -s '[:space:]' ' ')"
         echo "$f:$no: posts with \`gh $verb\` outside pr-post.sh — the post $WHY; $FIX"
+        found=1
+        return 0
+    fi
+    if [[ "$code" =~ $SEP$GH_STATE_POST ]] || [[ "$code" =~ $WRAP$GH_STATE_POST ]]; then
+        local sverb="pr close"
+        [[ "$code" =~ gh[[:space:]]+(pr|issue)[[:space:]]+(close|reopen) ]] \
+            && sverb="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+        echo "$f:$no: posts a comment with \`gh $sverb --comment\` outside pr-post.sh — the post $WHY; $FIX"
         found=1
         return 0
     fi

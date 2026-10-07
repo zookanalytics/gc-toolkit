@@ -884,6 +884,26 @@ has "$OUT" "pp-prompt.md:6:" 'the ``` fenced post is reported'
 has "$OUT" "pp-prompt.md:9:" "the marker-fenced post is reported"
 hasnt "$OUT" "pp-prompt.md:3:" "an inline code span in prose is not"
 
+# A close or reopen handed a comment posts that comment.
+plantpp "$TMP/pp-close.sh" <<'FIX'
+#!/usr/bin/env bash
+@GH@ pr close "$N" --repo "$Q" --comment "$CMT" >/dev/null 2>&1
+if @GH@ pr reopen 5 -c "back again"; then :; fi
+@GH@ issue close 3 --comment="done"
+[ -n "$P" ] && @GH@ pr close "$P" --repo "$Q" \
+  --comment "Superseded" || true
+FIX
+runpp "$TMP/pp-close.sh"
+eq "$RC" 1 "a close or reopen that carries a comment is a finding"
+for n in 2 3 4 5; do
+    has "$OUT" "pp-close.sh:$n:" "line $n is reported"
+done
+hasnt "$OUT" "pp-close.sh:6:" "a continued close is judged with the line it opens on"
+eq "$(printf '%s\n' "$OUT" | grep -c 'pp-close.sh:')" 4 "one finding per commented close"
+has "$OUT" 'pp-close.sh:2: posts a comment with `gh pr close --comment`' "the finding names the gh verb"
+has "$OUT" 'pp-close.sh:3: posts a comment with `gh pr reopen --comment`' "…a reopen included"
+has "$OUT" 'pp-close.sh:4: posts a comment with `gh issue close --comment`' "…and the issue pair"
+
 echo "── pr-post-bypass: what is not ──"
 
 # Reads, writes that post no body, strings, comments, here-doc prose, a stub
@@ -909,9 +929,12 @@ hasnt "$(cat "$LOG")" "@MUT@" "never replied twice"
 gh_api_origin() { @GH@ api --hostname "$H" "$@"; }
 @GH@ pr view 12 --json comments
 @GH@ pr checkout 12
+@GH@ pr close "$N" --repo "$Q" >/dev/null 2>&1
+@GH@ pr close 5 --delete-branch && bash -c 'echo closed'
+@GH@ pr reopen 5 --repo "$Q"
 FIX
 runpp "$TMP/pp-clean.sh"
-eq "$RC" 0 "reads, dismissals, reactions, strings, comments, here-doc prose and stubs are clean"
+eq "$RC" 0 "reads, dismissals, reactions, strings, comments, here-doc prose, stubs and uncommented closes are clean"
 [ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
 
 # The helper is the one place the raw calls belong, and the detector skips its

@@ -36,6 +36,9 @@
 set -uo pipefail
 
 PROG="pr-dispose"
+# The single writer of the city's PR posts: the closing comment goes through it
+# so it carries the city's mark and is never read back as feedback.
+PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -218,7 +221,11 @@ PR_STATE=$(printf '%s' "$PR_JSON" | jq -r '.state // ""')
 if [ "$PR_STATE" = "OPEN" ]; then
   CMT="Closing as $KIND: disposition recorded on anchor $ANCHOR (successor $SUCCESSOR). The refinery disposes the anchor from this close; no rework-or-close decision is owed."
   [ -n "$NOTE" ] && CMT="$CMT $NOTE"
-  if gh pr close "$PRNUM" --repo "$PR_REPO_Q" --comment "$CMT" >/dev/null 2>&1; then
+  # The comment is posted first and gates the close, so the PR never closes
+  # without the reason it was closed for.
+  "$PR_POST" comment --repo "$PR_REPO_Q" --pr "$PRNUM" --body "$CMT" >/dev/null 2>&1 \
+    || die "the marker is recorded but the closing comment could not be posted on PR#$PRNUM, so the PR was NOT closed and is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+  if gh pr close "$PRNUM" --repo "$PR_REPO_Q" >/dev/null 2>&1; then
     echo "$PROG: closed PR#$PRNUM as $KIND; pr-facts auto-disposes $ANCHOR on its next pass"
   else
     die "the marker is recorded but 'gh pr close $PRNUM' failed and the PR is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1

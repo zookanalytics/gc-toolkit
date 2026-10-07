@@ -3,9 +3,10 @@
 # records a deliberate PR-close disposition on the open anchor and closes the
 # PR, so pr-facts.sh consummates the terminal close through bead-rehome.sh.
 # Covers: the marker stamped and read back on an OPEN pull_request anchor;
-# --no-close-pr stamping only; the PR closed through gh when the anchor is open;
-# gh view and close pinned to the anchor's own pr_url repo, never the checkout
-# origin; a --pr that contradicts the pr_url refused; the live PR identity
+# --no-close-pr stamping only; the PR closed through gh when the anchor is open,
+# after a closing comment posted through pr-post.sh with the city's mark, which
+# gates the close; gh view, comment and close pinned to the anchor's own pr_url
+# repo, never the checkout origin; a --pr that contradicts the pr_url refused; the live PR identity
 # certified against the anchor before closing; idempotent no-op on an
 # already-disposed anchor; refusal on an anchor past the pull_request state
 # (named bead-rehome as the direct verb); refusal on an anchor with no parseable
@@ -13,8 +14,8 @@
 # not land — including the successor store, which a dropped write, or a stale
 # value an omitted store fails to clear, both catch; the successor store carried
 # through when given and cleared when omitted; the close-mode failures that
-# record the marker but exit non-zero (gh missing, an unreadable or failed gh
-# close); dry-run writing nothing; and the usage refusals (bad kind, missing
+# record the marker but exit non-zero (gh missing, an unreadable state, a
+# failed closing comment or gh close); dry-run writing nothing; and the usage refusals (bad kind, missing
 # args).
 set -uo pipefail
 
@@ -33,8 +34,8 @@ SUT="$SD/pr-dispose.sh"
 # --repo it derives from the anchor's pr_url. The harness gh stub cats a whole
 # fixture and has no `close`, so override it with a minimal one that serves a
 # canned state (per PR, default OPEN) and a url built from the pinned --repo, and
-# logs the close, honouring the refusal knobs. Written after harness_init so it
-# wins on PATH.
+# logs the closing comment and the close, honouring the refusal knobs. Written
+# after harness_init so it wins on PATH.
 cat > "$BIN/gh" <<'GH'
 #!/usr/bin/env bash
 set -u
@@ -57,6 +58,7 @@ case "$v" in
          # anchor. STUB_PR_URL forces a mismatch to exercise that refusal.
          url="${STUB_PR_URL:-https://$repo/pull/$num}"
          printf '{"state":"%s","url":"%s"}\n' "$st" "$url" ;;
+  comment) exit "${STUB_PR_COMMENT_RC:-0}" ;;
   close) exit "${STUB_PR_CLOSE_RC:-0}" ;;
   *)     echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
 esac
@@ -92,6 +94,13 @@ eq "$rc" 0 "exits 0"
 eq "$(meta A2 'gc.pr_close_disposition_kind')" "re-homed" "kind stamped"
 has "$(cat "$STUB_GH_LOG")" "pr close 71" "gh pr close was called for the PR"
 has "$out" "closed PR#71" "reports the close"
+has "$(cat "$STUB_GH_LOG")" "pr comment 71 --repo github.com/zook/gc-toolkit --body Closing as re-homed: disposition recorded on anchor A2 (successor S2)." \
+  "the closing comment is posted on the PR"
+has "$(cat "$STUB_GH_LOG")" "ruled out" "…carrying the note"
+has "$(cat "$STUB_GH_LOG")" "<!-- gc:city -->" "…and the city's mark, so pr-facts never reads it back as feedback"
+eq "$(grep -E '^pr (comment|close) ' "$STUB_GH_LOG" | cut -d' ' -f2 | tr '\n' ' ')" "comment close " \
+  "the comment is posted before the close"
+hasnt "$(grep '^pr close ' "$STUB_GH_LOG")" "--comment" "the close posts no comment of its own"
 
 echo "# a recorded --successor-store is carried onto the marker"
 store "[$(anchor A3 72), $(succ S3)]"
@@ -188,6 +197,16 @@ eq "$(meta A11 'gc.pr_close_disposition_kind')" "duplicate" "the marker is recor
 has "$(cat "$STUB_GH_LOG")" "pr close 79" "the close was attempted"
 has "$out" "still OPEN" "reports the PR is still open and needs closing"
 
+echo "# a closing comment that cannot be posted leaves the PR open, an error"
+store "[$(anchor A12 81), $(succ S12)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_COMMENT_RC=1 "$SUT" --anchor A12 --successor S12 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "exits non-zero — the PR was not closed"
+eq "$(meta A12 'gc.pr_close_disposition_kind')" "duplicate" "the marker is recorded"
+has "$(cat "$STUB_GH_LOG")" "pr comment 81" "the comment was attempted"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed without its closing comment"
+has "$out" "still OPEN" "reports the PR is still open and needs closing"
+
 echo "# gh calls follow the anchor's pr_url repo, NOT the checkout origin"
 # The reviewed bug: #NUM was aimed at the checkout's origin, so an anchor read
 # cross-rig could close a same-numbered PR in the wrong repository. Here the
@@ -198,6 +217,7 @@ store "[$(anchor A23 93 '' 'https://github.com/other/proj/pull/93'), $(succ S23)
 out=$(STUB_ORIGIN_URL="https://github.com/zook/gc-toolkit" "$SUT" --anchor A23 --successor S23 --kind duplicate 2>&1); rc=$?
 eq "$rc" 0 "closes against the pr_url's repo"
 has "$(cat "$STUB_GH_LOG")" "pr view 93 --repo github.com/other/proj" "reads the PR in the anchor's own repo"
+has "$(cat "$STUB_GH_LOG")" "pr comment 93 --repo github.com/other/proj" "comments on the PR in the anchor's own repo"
 has "$(cat "$STUB_GH_LOG")" "pr close 93 --repo github.com/other/proj" "closes the PR in the anchor's own repo"
 hasnt "$(cat "$STUB_GH_LOG")" "github.com/zook/gc-toolkit" "never aims a gh call at the checkout origin repo"
 
@@ -228,7 +248,7 @@ store "[$(anchor A24 94), $(succ S24)]"
 # stubs plus the real coreutils the SUT and the gc stub need, and no gh.
 NOGH="$TMP/nogh"; mkdir -p "$NOGH"
 for s in gc git; do ln -sf "$BIN/$s" "$NOGH/$s"; done
-for t in bash env jq tr awk cat cp mv rm mktemp sed grep; do
+for t in bash env jq tr awk cat cp mv rm mktemp sed grep dirname; do
   p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$NOGH/$t"
 done
 out=$(PATH="$NOGH" "$SUT" --anchor A24 --successor S24 --kind duplicate 2>&1); rc=$?

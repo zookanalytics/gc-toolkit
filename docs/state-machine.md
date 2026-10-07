@@ -257,9 +257,9 @@ review, inline comment, and conversation comment that is not the city's own
 post is feedback, whoever wrote it. The city's own post is one that
 `assets/scripts/pr-post.sh` marked, which is every post the pack makes —
 `signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
-replies, the visit reminder, a demo delivery. A model review the operator runs
-under the city's GitHub account is unmarked, so it is feedback like a person's.
-Rework hand-backs post nothing.
+replies, the visit reminder, a demo delivery, `pr-dispose.sh`'s closing
+comment. A model review the operator runs under the city's GitHub account is
+unmarked, so it is feedback like a person's. Rework hand-backs post nothing.
 
 A PR's posts from before the city marked anything carry no mark. Each anchor
 records the instant `pr-facts.sh` first read its open PR
