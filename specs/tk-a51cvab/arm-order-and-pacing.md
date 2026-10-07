@@ -179,6 +179,14 @@ branch:
 - **The `--deadline` check was copied into six scripts.** `pace_start` makes it
   for every walk.
 
+#1008 landed while this round was in progress. Since then merge.sh hands its
+arguments to `gctk merge`, the Go port, whenever a current binary is deployed,
+and keeps its shell body as the fallback. The Go port reads no arguments, so
+on that path the merge arm would run unpaced and in enumeration order.
+tk-eku5dvv tracks bringing this branch current and porting the pacing and the
+visit order into the Go path. It blocks the anchor, so #1077 cannot land
+without the port.
+
 ## Considered and not done
 
 - **Bounding the posture arm.** It is the one arm left ahead of merge whose
