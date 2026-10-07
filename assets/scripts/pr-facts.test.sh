@@ -587,6 +587,9 @@ printf '%s' "$(prview 125 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_125.json"
 out=$(run)
 eq "$(bstatus F2t)" "closed" "the anchor closes with twin visits of the arm's own situation open"
 hasnt "$out" "held by open visit VT" "…neither twin holds it"
+eq "$(bstatus VT1)" "closed" "…and once it lands the first twin is retracted"
+eq "$(bstatus VT2)" "closed" "…and the second as well"
+has "$out" "retracted its own pr-dispose-failed visit VT2" "…each one reported"
 
 echo "# a standing obstruction keeps its one visit; the pass after it clears closes the anchor"
 : > "$STUB_DEPS"
@@ -620,6 +623,62 @@ eq "$(bstatus F2q)" "open" "the anchor is left OPEN"
 has "$out" "held by open visit VR" "…held by the visit the arm does not own"
 eq "$(bstatus VQ)" "open" "the arm's own visit stays open: the close it asks for has not landed"
 eq "$(bstatus VR)" "open" "…and the other visit is untouched"
+
+echo "# a retract that does not land after the close is retried by the next full pass"
+# The closed anchor leaves the enumeration, so the arm never reaches it again.
+# The sweep ahead of the anchor loop reads the open visit, finds its subject
+# closed with the disposition pointer recorded, and retracts it.
+: > "$STUB_DEPS"
+store "[$(anchor F2r 126 ',"gc.pr_close_disposition_kind":"re-homed","gc.pr_close_disposition_successor":"tk-r"'), $(dvisit VF F2r pr-dispose-failed.126)]"
+printf 'VF|tracks|F2r\n' > "$STUB_DEPS"
+printf '%s' "$(prview 126 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_126.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_RETRACT_FAIL=1 run)
+eq "$(bstatus F2r)" "closed" "the anchor closes"
+eq "$(bstatus VF)" "open" "…but the retract did not land, so its visit is still open"
+has "$out" "visit VF is still open; a full pass retracts it" "…and the pass says a full pass retries it"
+out=$(run_posture)
+eq "$(bstatus VF)" "open" "a posture-only pass leaves it"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus VF)" "closed" "the next full pass retracts it"
+eq "$(meta VF 'gc.outcome')" "moot" "…as moot"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject F2r --key pr-dispose-failed.126" "…through the same retract verb"
+has "$out" "retracted its own pr-dispose-failed visit VF" "…and reports it"
+
+echo "# the sweep retracts only a visit whose subject closed with its pointer, and nobody engaged"
+# A subject closed with no gc.superseded_by has no disposition on record, a
+# visit someone is engaged in is theirs to conclude, and a subject that does
+# not read this pass is left for the next.
+: > "$STUB_DEPS"
+store "[$(anchor F2u 128 '' | jq -c '.status = "closed"'), $(dvisit VU F2u pr-dispose-failed.128), $(anchor F2v 129 ',"gc.superseded_by":"tk-v"' | jq -c '.status = "closed"'), $(dvisit VV F2v pr-dispose-failed.129 open lx-sitting), $(dvisit VG GHOST pr-dispose-failed.130)]"
+printf 'VU|tracks|F2u\nVV|tracks|F2v\n' > "$STUB_DEPS"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus VU)" "open" "a visit whose subject closed with no disposition pointer is left"
+eq "$(bstatus VV)" "open" "a visit someone is engaged in is left"
+eq "$(bstatus VG)" "open" "a visit whose subject does not read is left"
+has "$out" "subject GHOST unreadable this pass" "…and the unreadable subject is reported"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…and none of them is retracted"
+
+echo "# the sweep's retract runs through the real escalate.sh and visit-close.sh"
+# Every other case drives escalate.sh's contract through the stub above. This
+# one runs the real verb against a subject already closed, the shape the sweep
+# meets: escalate.sh reads the open visits for the situation, and visit-close.sh
+# folds the reading onto the subject, stamps the outcome, and closes the visit.
+# GC_RIG names the store, since no rig set is served here to derive it from.
+SD2="$TMP/scripts-real-escalate"
+mk_sut_dir "$SD2" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/escalate.sh"
+cp "$SD/bead-rehome.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh" "$SD2/"
+: > "$STUB_DEPS"
+store "[$(anchor F2w 127 ',"gc.superseded_by":"tk-w"' | jq -c '.status = "closed"'), $(dvisit VW F2w pr-dispose-failed.127)]"
+printf 'VW|tracks|F2w\n' > "$STUB_DEPS"
+out=$(GC_RIG=gc-toolkit "$SD2/pr-facts.sh" --fix-pool "$FIX" --review-pool "$REV" 2>&1)
+eq "$(bstatus VW)" "closed" "the real retract closes the visit on the closed anchor"
+eq "$(meta VW 'gc.outcome')" "moot" "…moot, stamped by visit-close.sh"
+has "$(meta VW 'gc.outcome_reason')" "PR#127's pre-recorded disposition is consummated" "…with the sweep's reading as its reason"
+has "$(notes F2w)" "visit VW closed moot" "…and the reading folded onto the closed subject's notes"
+has "$out" "retracted its own pr-dispose-failed visit VW" "the retraction is reported"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"

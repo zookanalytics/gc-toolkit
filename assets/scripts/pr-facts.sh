@@ -453,6 +453,36 @@ visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this si
           | select(((.metadata.escalation_key // "") | tostring) == $k)
           | .id ] | .[0] // empty' 2>/dev/null
 }
+# retract_dispose_visits <anchor> <num> <reading> — conclude the disposition
+# arm's refused-close report once the close it asked for has landed. Every visit
+# filed under pr-dispose-failed.<num> for the anchor is retracted moot through
+# escalate.sh's retract verb, which leaves one a person is engaged in to them.
+# Each visit is read back and reported. A visit still open and unengaged is
+# retried by the next full pass's sweep below.
+retract_dispose_visits() {
+  local a="$1" key="pr-dispose-failed.$2" reading="$3" vids v row st who
+  vids=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$key" \
+           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub \
+         | jq -r --arg k "$key" --arg s "$a" '.[]
+             | select(((.metadata.escalation_key // "") | tostring) == $k)
+             | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s) | .id' 2>/dev/null) || vids=""
+  [ -n "$vids" ] || return 0
+  [ -x "$ESCALATE" ] && "$ESCALATE" --retract --subject "$a" --key "$key" --message "$reading" >/dev/null 2>&1 </dev/null
+  for v in $vids; do
+    row=$(gc bd show "$v" --json 2>/dev/null | scrub)
+    st=$(printf '%s' "$row" | jq -r '.[0].status // ""' 2>/dev/null)
+    who=$(printf '%s' "$row" | jq -r '.[0] | ((.assignee // "") | tostring) as $w
+      | ((.metadata["gc.session_name"] // "") | tostring) as $n
+      | if $w != "" then $w elif $n != "" then "session " + $n else "" end' 2>/dev/null)
+    if [ "$st" = "closed" ]; then
+      echo "$PROG: $a — retracted its own pr-dispose-failed visit $v as moot (the close landed)"
+    elif [ "$st" = "in_progress" ] || [ -n "$who" ]; then
+      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is engaged (${who:-$st}); it is theirs to conclude" >&2
+    else
+      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is still ${st:-unreadable}; a full pass retracts it while it is open and unengaged" >&2
+    fi
+  done
+}
 mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
   # Atomic birth for a rework child: every identity key lands together, or the
   # child is not left behind to be misread. A child stamped with only some of its
@@ -832,6 +862,45 @@ AV_EOF
   fi
 fi
 
+# --- retract the disposition arm's refused-close reports whose close landed ------
+# The disposition arm files a pr-dispose-failed.<num> visit when bead-rehome
+# refuses an anchor's close, and retracts it once a later pass's close lands. A
+# retract that does not land then is not retried by the arm, because the closed
+# anchor leaves the enumeration. So every full pass also reads the open visits
+# filed under that key family and retracts each whose subject now reads closed
+# with its disposition pointer (gc.superseded_by) recorded: the close the visit
+# asked for has landed. A subject closed without the pointer is left alone, since
+# its disposition is not on record. A visit someone is engaged in is theirs to
+# conclude, and a subject that does not read this pass leaves its visit for the
+# next. Like the sweep above, this runs before the no-anchors early-exit.
+if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+  if df_visits=$(bd_list --status=open --has-metadata-key=escalation_key); then
+    while IFS="$(printf '\t')" read -r dfsubj dfnum; do
+      [ -n "${dfsubj:-}" ] || continue
+      dfrow=$(gc bd show "$dfsubj" --json 2>/dev/null | scrub)
+      dfst=$(printf '%s' "$dfrow" | jq -r '.[0].status // empty' 2>/dev/null)
+      if [ -z "$dfst" ]; then
+        echo "$PROG: pr-dispose-failed.$dfnum — subject $dfsubj unreadable this pass; its visit is left for the next" >&2
+        continue
+      fi
+      dfsucc=$(printf '%s' "$dfrow" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null)
+      [ "$dfst" = "closed" ] && [ -n "$dfsucc" ] || continue
+      retract_dispose_visits "$dfsubj" "$dfnum" \
+        "PR#$dfnum's pre-recorded disposition is consummated: $dfsubj closed (-> $dfsucc) once the obstruction this visit reported cleared."
+    done <<DF_EOF
+$(printf '%s' "$df_visits" | jq -r '[ .[]? | select((.metadata.task_kind // "") == "visit")
+    | ((.metadata.escalation_key // "") | tostring) as $k
+    | select($k | test("^pr-dispose-failed\\.[0-9]+$"))
+    | ((.metadata["gc.continuation_group"] // "") | tostring) as $g
+    | select($g | test("^[A-Za-z0-9._-]+$"))
+    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+    | [$g, ($k | ltrimstr("pr-dispose-failed."))] ] | unique | .[] | @tsv' 2>/dev/null)
+DF_EOF
+  else
+    echo "$PROG: pr-dispose-failed visit sweep skipped — could not list visits (retry next pass)" >&2
+  fi
+fi
+
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
@@ -1027,7 +1096,6 @@ CHILDREN_EOF
         # person has engaged still holds the close and is theirs to conclude. A
         # refused close leaves the visit open, so a standing obstruction keeps
         # its one visit and nothing is re-filed.
-        own_vid=$(visit_for "$id" "pr-dispose-failed.$num") || own_vid=""
         EXCEPT_ARG=(--except-key "pr-dispose-failed.$num")
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
@@ -1039,16 +1107,8 @@ CHILDREN_EOF
         if [ "$rrc" -eq 0 ]; then
           disposed_n=$((disposed_n + 1))
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
-          if [ -n "$own_vid" ]; then
-            [ -x "$ESCALATE" ] && "$ESCALATE" --retract --subject "$id" --key "pr-dispose-failed.$num" \
-              --message "PR#$num's pre-recorded disposition is consummated: $id closed ($disp_kind -> $disp_succ) once the obstruction this visit reported cleared." >/dev/null 2>&1
-            own_st=$(gc bd show "$own_vid" --json 2>/dev/null | scrub | jq -r '.[0].status // ""' 2>/dev/null)
-            if [ "$own_st" = "closed" ]; then
-              echo "$PROG: $id — retracted its own pr-dispose-failed visit $own_vid as moot (the close landed)"
-            else
-              echo "$PROG: $id — closed, but its own pr-dispose-failed visit $own_vid is still ${own_st:-unreadable}; conclude it moot by hand" >&2
-            fi
-          fi
+          retract_dispose_visits "$id" "$num" \
+            "PR#$num's pre-recorded disposition is consummated: $id closed ($disp_kind -> $disp_succ) once the obstruction this visit reported cleared."
           continue
         elif [ "$rrc" -eq 4 ]; then
           # Pointer would not stick — transient. Keep merge_result=pull_request
