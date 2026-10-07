@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pr-stack — arm 12 of the merge cadence: keep an open PR's body current with the
-# anchor, in both managed regions.
+# pr-stack — arm 12 of the merge cadence: keep an open PR current with its anchor,
+# in both managed body regions and in its title.
 # A PR body is composed once, by pr-open.sh, out of one anchor. Then two things
 # drift it. Commits keep arriving on the branch — a fold, a rework or rebase
 # hand-back, a stacked bead whose own PR lands into it — and none of them touch the
@@ -14,13 +14,24 @@
 # re-renders the `gc:branch-beads` section, and lands both in one body edit.
 #
 # The summary refresh acts only on a well-formed `gc:pr-summary` marker pair whose
-# published region is behind the anchor: either its summary text lags the current
-# `pr_summary`, or its handoff bullet still names a pre-rework head. A PR merely
+# published region is behind the anchor: its summary text lags the current
+# `pr_summary`, its handoff bullet still names a pre-rework head, or that bullet
+# says the PR opened green, a CI result the static body cannot know. A PR merely
 # opened, whose summary matches and whose region already names the current head, is a
 # no-op, and a legacy markerless or malformed body is left for pr-open's adoption
 # path to establish rather than rewritten here. Its handoff bullet is composed in
 # `refresh` mode — the reworked head has not re-signed-off, so it names the head and
 # points to the PR checks rather than repeating pr-open's pre-open sign-off claim.
+# The title drifts the same way. pr-open.sh writes it once, at create, from the
+# anchor's title, and the squash commit takes its subject from it, so a PR whose
+# anchor a rework retitled would otherwise merge under the superseded name. For a
+# pull_request anchor this arm composes the title exactly as the create does
+# (cc_title's conventional-commit type, the anchor's title, then the bead id) and
+# edits the PR when its words differ. Whitespace alone is never a difference, so a
+# title stored with other spacing is not rewritten every pass. The anchor owns the
+# title: a title edited on the PR alone is composed back from the anchor on the
+# next pass, so a retitle is made on the anchor. The title is an edit of its own,
+# so one that fails never holds back a body refresh, nor the other way round.
 # For each open anchor (a bead carrying merge_result) that records a pr_number:
 # read the branch's bead ledger, three code-written facts unioned —
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
@@ -34,8 +45,8 @@
 # only commits the branch actually carries. A row whose own branch is some
 # other one got here by a merge, so it names that
 # branch: a separate work item riding the PR reads differently from a fix to
-# it. The title is never touched: it names the anchor, and the body is where a
-# reviewer reads scope.
+# it. A stacked bead never renames the PR: the title names the anchor, and the
+# body is where a reviewer reads scope.
 # One bead is the ordinary case and says nothing pr-open.sh has not already
 # written, so nothing is published under it.
 # Read-modify-write, pinned to origin and certified by number before any write
@@ -101,8 +112,9 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
-# The managed `## Summary` region: markers, composer and splice helpers, shared
-# with pr-open.sh so an opened body and a post-open refresh never diverge.
+# The managed `## Summary` region (markers, composer and splice helpers) and the
+# title composer (cc_title), shared with pr-open.sh so an opened PR and a
+# post-open refresh never diverge.
 # shellcheck source=pr-summary-region.sh
 . "${GC_PR_SUMMARY_LIB:-$_bd_lib_dir/pr-summary-region.sh}" || { echo "cannot source pr-summary-region.sh beside this script" >&2; exit 1; }
 
@@ -213,15 +225,18 @@ append_section() { # <body-file> <section-file> <out-file>
 
 # Bring the gc:pr-summary region current with the anchor. 0 = the region was behind
 # and <out-file> now carries it refreshed; 1 = no change (no summary to publish, no
-# well-formed region, or the region already carries this summary at this head). The
-# region is behind when its summary text lags the anchor OR its handoff bullet names
-# a head other than the current one — a rework that moves the head without touching
-# the summary still restamps the "at <head>" claim. Only a well-formed marker pair
-# (prs_marker_state 0) is rewritten in place: a legacy markerless or malformed body
-# is pr-open's adoption path to establish, not this arm's to reshape. The region is
-# recomposed in `refresh` mode — the reworked head has not re-signed-off, so the
-# handoff bullet names the head and defers the check state to the PR rather than
-# repeating the pre-open sign-off claim.
+# well-formed region, or the region already carries this summary at this head and
+# states no CI result). The region is behind when its summary text lags the anchor,
+# when its handoff bullet names a head other than the current one (a rework that
+# moves the head without touching the summary still restamps the "at <head>"
+# claim), or when that bullet says the PR opened green, a CI result the static body
+# cannot know. Only a well-formed marker pair (prs_marker_state 0) is rewritten in
+# place: a legacy markerless or malformed body is pr-open's adoption path to
+# establish, not this arm's to reshape. The region is recomposed in `refresh` mode,
+# whose handoff bullet names the head and defers the check state to the PR rather
+# than repeating the pre-open sign-off claim. A reworked head has not
+# re-signed-off, and this arm reads no lane state that would show an unmoved one
+# did.
 refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
   local summary want cur desc checkset branch target phased SECTION
@@ -230,9 +245,12 @@ refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   prs_marker_state "$bin" || return 1
   want=$(strip_summary_heading "$summary")
   cur=$(prs_region_summary "$bin")
-  # Current only when the summary matches AND the region already names this head:
-  # a head-only rework leaves the summary current but the handoff bullet stale.
-  if [ "$cur" = "$want" ] && prs_region_names_head "$bin" "$head_oid"; then
+  # Current only when the summary matches, the region already names this head, and
+  # its handoff bullet does not say the PR opened green: a head-only rework leaves
+  # the summary current but the handoff bullet stale, and a bullet stating a CI
+  # result is stale at any head.
+  if [ "$cur" = "$want" ] && prs_region_names_head "$bin" "$head_oid" \
+     && ! prs_region_says_opened_green "$bin"; then
     return 1
   fi
   desc=$(printf '%s' "$row" | jq -r '.description // empty' 2>/dev/null)
@@ -253,6 +271,24 @@ refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   return 0
 }
 
+# A title compared by its words: whitespace runs collapse to one space and the ends
+# are trimmed, so two titles that differ only in spacing compare equal.
+title_words() { # <title>
+  printf '%s' "$1" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'
+}
+
+# The title the PR should carry: the anchor's own, composed exactly as pr-open.sh
+# composes it at create (cc_title, then the bead id), in title_words form, which is
+# also the form a retitle writes. Prints nothing for an anchor row with no title: a
+# bare type and id names nothing, so the PR's title is left as it stands.
+want_title() { # <anchor-row-json> <id>
+  local t k
+  t=$(printf '%s' "$1" | jq -r '.title // empty' 2>/dev/null)
+  [ -n "$(title_words "$t")" ] || return 0
+  k=$(printf '%s' "$1" | jq -r '.issue_type // empty' 2>/dev/null)
+  title_words "$(cc_title "$t" "$k") ($2)"
+}
+
 # --- enumerate ------------------------------------------------------------------
 # Anchors, not every bead that records a PR: pr-facts.sh stamps pr_number on
 # rework and review children too, and a child is a contributor to the ledger,
@@ -263,7 +299,7 @@ ANCHORS=$(bd_list --status=open --has-metadata-key merge_result) || {
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no open anchors"; exit 0; }
 
-edited=0; current=0; single=0; skipped=0; refreshed=0
+edited=0; current=0; single=0; skipped=0; refreshed=0; retitled=0
 SEEN=""; prs=0
 # Per-anchor scratch (rendered section, current body, spliced body) lives under
 # one trapped directory, so a signal or timeout mid-iteration takes the whole
@@ -285,11 +321,12 @@ while IFS=$'\t' read -r id branch num; do
   # </dev/null on every call in this loop: it is fed by a heredoc, and a child
   # inheriting its stdin would consume the anchor rows behind it.
   PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
-    --json number,state,headRefName,headRefOid,body </dev/null 2>/dev/null)
+    --json number,state,headRefName,headRefOid,body,title </dev/null 2>/dev/null)
   got_num=$(printf '%s' "$PR_JSON" | jq -r '(.number // "") | tostring' 2>/dev/null)
   got_head=$(printf '%s' "$PR_JSON" | jq -r '.headRefName // ""' 2>/dev/null)
   got_state=$(printf '%s' "$PR_JSON" | jq -r '.state // ""' 2>/dev/null)
   got_oid=$(printf '%s' "$PR_JSON" | jq -r '(.headRefOid // "") | tostring' 2>/dev/null)
+  got_title=$(printf '%s' "$PR_JSON" | jq -r '(.title // "") | tostring' 2>/dev/null)
   if [ -z "$got_num" ] || [ -z "$got_head" ] || [ -z "$got_state" ]; then
     echo "$PROG: $id PR#$num unreadable (num='$got_num' head='$got_head' state='$got_state'); nothing edited" >&2
     skipped=$((skipped + 1)); continue
@@ -355,9 +392,19 @@ while IFS=$'\t' read -r id branch num; do
     esac
   fi
 
-  # One edit carries whatever moved. When nothing moved, the outcome is accounted
-  # per the sections: a section already current is "current", a lone bead is
-  # "single-bead", an unreadable or malformed section is "skipped".
+  # (c) the title — a pull_request anchor's, scoped as (a) is: pr-open writes it
+  # only at create, so a retitled anchor reaches the PR here or nowhere. A title
+  # that read back empty is unreadable, and nothing is written over it.
+  did_title=0; pr_title=""
+  if [ "$anchor_mr" = "pull_request" ]; then
+    live_title=$(title_words "$got_title")
+    pr_title=$(want_title "$anchor_row" "$id")
+    if [ -n "$live_title" ] && [ -n "$pr_title" ] && [ "$live_title" != "$pr_title" ]; then did_title=1; fi
+  fi
+
+  # One body edit carries whatever moved in the body. When nothing moved there, the
+  # outcome is accounted per the sections: a section already current is "current",
+  # a lone bead is "single-bead", an unreadable or malformed section is "skipped".
   if [ "$did_summary" = 1 ] || [ "$did_beads" = 1 ]; then
     if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$CUR" </dev/null >/dev/null 2>&1; then
       if [ "$did_beads" = 1 ]; then edited=$((edited + 1)); echo "$PROG: $id PR#$num body now names $beads_n beads on '$branch'"; fi
@@ -373,6 +420,16 @@ while IFS=$'\t' read -r id branch num; do
       *)      current=$((current + 1)) ;;
     esac
   fi
+  # The title's own edit: a title edit that fails costs the body nothing, and a
+  # body edit that failed above does not hold the title back.
+  if [ "$did_title" = 1 ]; then
+    if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --title "$pr_title" </dev/null >/dev/null 2>&1; then
+      retitled=$((retitled + 1)); echo "$PROG: $id PR#$num title now composed from the anchor: $pr_title"
+    else
+      echo "$PROG: $id PR#$num title edit failed; retried next pass" >&2
+      skipped=$((skipped + 1))
+    fi
+  fi
   rm -f "$SECTION" "$CUR" "$NEW"
 done <<ANCHORS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR" | jq -r '
@@ -387,5 +444,5 @@ if [ -n "$PACE_RESUME_AT" ]; then
 else
   echo "$PROG: visited $PACE_VISITED of $prs PRs"
 fi
-echo "$PROG: $edited edited, $refreshed summary-refreshed, $current already current, $single single-bead, $skipped skipped"
+echo "$PROG: $edited edited, $refreshed summary-refreshed, $retitled retitled, $current already current, $single single-bead, $skipped skipped"
 exit 0
