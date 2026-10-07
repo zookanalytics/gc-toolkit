@@ -21,6 +21,9 @@
 # 5 react no-op: the subject already carries a first reaction, so nothing was
 # slung (a first reaction happens once) — distinct from 4 so an intake caller
 # files its own visit instead of reading a skip as a dispatched reaction.
+# 6 react no-op: a live workflow already drives the subject, so nothing was
+# slung (a first reaction never races work in flight) — distinct from 5 so the
+# intake caller names the cause in the visit it files.
 
 set -eu
 
@@ -45,7 +48,7 @@ Usage:
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
-  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue) and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
+  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
 The board is `helm-svc board` (services/helm). This script carries only the
@@ -1908,10 +1911,12 @@ cmd_react() {
     [ -n "$nudge" ] && set -- "$@" --nudge
     [ -n "$dry" ] && set -- "$@" --dry-run
     # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its first-reaction
-    # guard skipped an already-reacted bead: a no-op, not a failure, and NO
-    # reaction was dispatched. Re-raise that as exit 5 so an intake caller
-    # (gc-visit-open) files its own visit instead of waiting for a reaction that
-    # never ran; any other non-zero is a real failure.
+    # guard skipped an already-reacted bead, and 4 (RC_LIVE_WORKFLOW) when its
+    # live-workflow guard skipped a bead a live workflow already drives. Each is
+    # a no-op, not a failure, and NO reaction was dispatched. Re-raise them as
+    # exit 5 and exit 6 so an intake caller (gc-visit-open) files its own visit,
+    # naming the cause, instead of waiting for a reaction that never ran; any
+    # other non-zero is a real failure.
     if "$tool" "$@"; then
         :
     else
@@ -1919,6 +1924,10 @@ cmd_react() {
         if [ "$sling_rc" -eq 3 ]; then
             echo "$PROG: react: $bead already carries a first reaction — nothing slung (a first reaction happens once). Clear the reaction marker to re-react, or file the visit directly." >&2
             exit 5
+        fi
+        if [ "$sling_rc" -eq 4 ]; then
+            echo "$PROG: react: a live workflow already drives $bead — nothing slung (a first reaction never races work in flight). React once that workflow's root closes, or file the visit directly." >&2
+            exit 6
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
         exit 4
@@ -2330,12 +2339,72 @@ accept_mark_dispatched() {
     [ -z "$_amd_live" ] && [ "$_amd_mark" = "$_amd_formula" ]
 }
 
+# accept_open_demands <subject> — the open, unassigned demands on the subject,
+# one id per line: what a person still owes on it. A first reaction's recommend
+# exit puts its recommendation to the operator as one such human gate. An
+# assigned demand is a task a named person performs, not a question Accept
+# answers, so it is left alone (converse-signoff.sh's discharge reads the same
+# pair). --include-gates because `bd list` hides gates; the status set is the
+# demand readers', so a gate an operator deferred or pinned is found too. Returns
+# non-zero on a listing it cannot read, since an unread store is not proof that
+# nothing is owed.
+accept_open_demands() {
+    _aod_raw=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+        --include-gates --has-metadata-key gc.demand_for --json --limit=0 2>/dev/null) || return 1
+    printf '%s' "$_aod_raw" | scrub | jq -r --arg s "$1" '
+        if type != "array" then error("not an array") else
+          .[] | objects
+          | select(((.metadata // {})["gc.demand_for"] // "") == $s)
+          | select(((.assignee // "") | tostring) == "")
+          | (.id // empty)
+        end' 2>/dev/null
+}
+
+# accept_resolve_demands <subject> <reason> — resolve each open, unassigned
+# demand on the subject with the operator's answer. A demand filed before
+# demands were gates (issue_type=decision) is refused by `gate resolve` ("is not
+# a gate issue"), so it is closed on the same terms, as converse-signoff.sh
+# does. A resolve can report success without the gate closing, so the demands
+# are listed again after: returns 0 only when none is left open, and leaves the
+# survivors, or "unreadable", in ACCEPT_DEMANDS_LEFT for the caller's message.
+ACCEPT_DEMANDS_LEFT=""
+accept_resolve_demands() {
+    _ard_subj="$1"; _ard_why="$2"; ACCEPT_DEMANDS_LEFT=""
+    if ! _ard_ids=$(accept_open_demands "$_ard_subj"); then
+        ACCEPT_DEMANDS_LEFT="unreadable"; return 1
+    fi
+    [ -n "$_ard_ids" ] || return 0
+    for _ard_d in $_ard_ids; do
+        gc bd gate resolve "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
+            || gc bd close "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
+            || true
+    done
+    if ! _ard_left=$(accept_open_demands "$_ard_subj"); then
+        ACCEPT_DEMANDS_LEFT="unreadable"; return 1
+    fi
+    ACCEPT_DEMANDS_LEFT=$(printf '%s' "$_ard_left" | tr '\n' ' ' | sed 's/ *$//')
+    [ -z "$ACCEPT_DEMANDS_LEFT" ]
+}
+
+# accept_demand_refused <subject> <formula> — the refusal when the subject's
+# demand did not resolve after a landed dispatch. Nothing is dismissed, so a
+# re-run of accept resumes at the resolve without dispatching again.
+accept_demand_refused() {
+    if [ "$ACCEPT_DEMANDS_LEFT" = "unreadable" ]; then
+        echo "$PROG: accept: dispatched $2 at $1, but could not read its demands to resolve the human gate that put it to the operator, so accept stops before dismissing anything. Re-run accept once the store answers; it resumes here without dispatching again." >&2
+    else
+        echo "$PROG: accept: dispatched $2 at $1, but its human gate $ACCEPT_DEMANDS_LEFT is still open, so the dispatched work stays blocked on it and accept stops before dismissing anything. Resolve the gate (gc bd gate resolve <id> --reason \"accepted\"), or re-run accept, which resumes here without dispatching again." >&2
+    fi
+    exit 4
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
 # Accept a recommendation straight off the board: dispatch the subject's
-# gc.recommended_formula at the subject and dismiss its visit, in one procedural
-# order with no sitting. It is the low-friction actuation of a ruling the human
-# has made (Accept/Discuss flow); the board renders the affordance on a subject
-# whose visit is un-engaged, and this verb performs it.
+# gc.recommended_formula at the subject, resolve the human gate that put it to
+# the operator, and dismiss its visit, in one procedural order with no sitting.
+# It is the low-friction actuation of a ruling the human has made
+# (Accept/Discuss flow); the board renders the affordance on a subject whose
+# visit is un-engaged, and this verb performs it.
 # Discuss (engage) stays the path for a recommendation the operator wants to
 # weigh instead.
 #
@@ -2462,6 +2531,10 @@ cmd_accept() {
             engaged) echo "$PROG: accept: $bead has an engaged visit — $UNENGAGED_WHY. The board offers Accept only on an un-engaged visit; take it up in the sitting (Discuss) or dismiss it there. Nothing dispatched." >&2 ;;
             absent)
                 if [ "$resume" = 1 ]; then
+                    # The visit is gone, but its gate is the one write that may
+                    # still be owed, so it is resolved before calling this done.
+                    accept_resolve_demands "$bead" "${accept_reason:-accepted: dispatched $formula}" \
+                        || accept_demand_refused "$bead" "$formula"
                     echo "$PROG: accept: $bead was already dispatched ($formula) and its visit already dismissed — nothing left to do."
                     exit 0
                 fi
@@ -2491,6 +2564,18 @@ cmd_accept() {
         echo "$PROG: accept: dispatched $formula at $bead, but could not withdraw gc.recommended_formula (it still reads live). NOT dismissing: a later visit could re-offer Accept and dispatch $formula again. Clear gc.recommended_formula on $bead by hand, then dismiss its visit." >&2
         exit 4
     fi
+
+    # The recommendation reached the operator as a human gate on the subject,
+    # and Accept is the operator's answer to it, so the gate is resolved here.
+    # Left open, it would hold the dispatched work out of `bd ready` with no
+    # sitting ever offered for it: the dismiss below closes the gate's visit, and
+    # gate-visit-sweep does not re-offer a gate it has stamped. A subject held on
+    # its visit alone carries no demand, and this resolves nothing. The board
+    # suppresses a closed demand's unanswered question, so no answer is stamped
+    # back onto the gate. A gate that will not resolve refuses the dismiss, and a
+    # re-run resumes here, after the dispatch the marker above records.
+    accept_resolve_demands "$bead" "${accept_reason:-accepted: dispatched $formula}" \
+        || accept_demand_refused "$bead" "$formula"
 
     # The recommendation is dispatched, so the operator's decision is made: dismiss
     # the visit, reusing the listing subject_unengaged already read so cmd_dismiss
