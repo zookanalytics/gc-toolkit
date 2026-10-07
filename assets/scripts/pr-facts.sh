@@ -357,27 +357,51 @@ gh_graphql() { # <query> [gh -f/-F args...]; non-zero = "could not tell"
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   printf '%s' "$raw" | scrub
 }
-# Count of unresolved review threads on <pr-number>, echoed as a non-negative
-# integer. Returns non-zero without output when the connection could not be
-# read — an unreadable connection is never zero, and the BLOCKED arm below must
-# not escalate a guessed cause. Paginated to exhaustion: a count read from a
-# truncated connection decides wrongly.
-BLOCKED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+# >>> review-threads-read
+# Every review thread on a PR, read once per anchor visit and shared by the
+# readers that ask about threads: the BLOCKED arm's unresolved count, the
+# unengaged-thread count and the answered-comment read are jq projections over
+# the same nodes. Paginated to exhaustion: a projection over a truncated
+# connection decides wrongly. A thread carries its first 100 comments, and each
+# projection says which way a longer thread's cut errs. A comment's id is read as
+# fullDatabaseId, a BigInt GitHub serializes as a string: databaseId is a 32-bit
+# Int GitHub has deprecated for that reason, and review-comment ids already pass
+# 2^31.
+REVIEW_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
-      pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}'
-unresolved_threads() { # <pr-number>
-  local raw n
-  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$BLOCKED_THREADS_QUERY" \
+      pageInfo{hasNextPage endCursor}
+      nodes{isResolved comments(first:100){nodes{fullDatabaseId author{login} body}}}}}}}'
+RT_NUM=""; RT_NODES=""
+# Loads <pr-number>'s threads into RT_NODES, one JSON array of thread nodes, and
+# returns 0; a second call for the same PR reuses them. Returns non-zero with
+# RT_NODES empty when the connection could not be read, and an unreadable read is
+# never an empty one. Call it in the current shell, never inside $(...), or the
+# read does not outlive the call.
+review_threads_load() { # <pr-number>
+  [ -n "$RT_NUM" ] && [ "$RT_NUM" = "${1:-}" ] && return 0
+  local raw nodes
+  RT_NUM=""; RT_NODES=""
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$REVIEW_THREADS_QUERY" \
     -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$1" 2>/dev/null) || return 1
   [ -n "$raw" ] || return 1
-  n=$(printf '%s' "$raw" | scrub | jq -s '
+  nodes=$(printf '%s' "$raw" | scrub | jq -sc '
     ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
     | if ($rt | length) == 0 then error("no reviewThreads in response")
-      else [ $rt[].nodes[]? | select((.isResolved // false) == false) ] | length end' 2>/dev/null) || return 1
+      else [ $rt[].nodes[]? ] end' 2>/dev/null) || return 1
+  [ -n "$nodes" ] || return 1
+  RT_NUM="$1"; RT_NODES="$nodes"
+}
+# Count of unresolved review threads in RT_NODES, as a non-negative integer. The
+# comment cut does not touch it. Non-zero without output on a projection that
+# does not yield one, and the BLOCKED arm below must not escalate a guessed cause.
+unresolved_threads() {
+  local n
+  n=$(printf '%s' "$RT_NODES" | jq '[ .[] | select((.isResolved // false) == false) ] | length' 2>/dev/null) || return 1
   case "$n" in ''|*[!0-9]*) return 1 ;; esac
   printf '%s' "$n"
 }
+# <<< review-threads-read
 # Branch-protection facts for <branch>, read from its active rules: whether an
 # unresolved review thread blocks a merge (required_review_thread_resolution)
 # and how many approving reviews are required. Sets PROT_STATE=known|unknown;
@@ -670,21 +694,12 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # finding when it is unresolved, carries a comment that is not one of our own
 # write-back replies, and holds no write-back reply of ours: a thread we replied
 # into is arm 7's or the write-back's to finish, and a resolved one is done.
-# `comments(first:100)` caps a thread at a page, so a thread longer than that
-# whose only write-back reply sits past the cap reads as unengaged — a
+# The thread read caps a thread at its first 100 comments, so a thread longer
+# than that whose only write-back reply sits past the cap reads as unengaged — a
 # dismissable visit, never a dropped finding.
-UNENGAGED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
-  repository(owner:$owner,name:$repo){pullRequest(number:$num){
-    reviewThreads(first:100,after:$endCursor){
-      pageInfo{hasNextPage endCursor}
-      nodes{isResolved comments(first:100){nodes{body}}}}}}}'
-unengaged_thread_count() { # <pr-number> — count on stdout; non-zero = could not tell
-  local num="$1" raw
-  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$UNENGAGED_THREADS_QUERY" \
-    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$num" 2>/dev/null) || return 1
-  [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | scrub | jq -s --arg marker "$WB_MARKER" '
-    [ .[].data.repository.pullRequest.reviewThreads.nodes[]?
+unengaged_thread_count() { # count over RT_NODES on stdout; non-zero = could not tell
+  printf '%s' "$RT_NODES" | jq --arg marker "$WB_MARKER" '
+    [ .[]
       | (.comments.nodes // []) as $cs
       | select((.isResolved // false) == false)
       | select([ $cs[] | select(((.body // "") | contains($marker)) | not) ] | length > 0)
@@ -752,7 +767,8 @@ UTGATES
   [ "$(printf '%s' "$inflight" | jq 'length' 2>/dev/null)" = 0 ] || return 1
   # A thread read that did not answer, or answered with no usable count, is the
   # gap this function exists to close: return 2 so the caller holds, never 1.
-  utc=$(unengaged_thread_count "$num") || return 2
+  review_threads_load "$num" || return 2
+  utc=$(unengaged_thread_count) || return 2
   case "$utc" in ''|*[!0-9]*) return 2 ;; esac
   [ "$utc" -gt 0 ] || return 1
   UT_COUNT="$utc"
@@ -772,31 +788,16 @@ UTGATES
 # exactly the UNRESOLVED threads a reply of ours left open, so reading a reply here
 # would only move the hold from this arm to that one. Only inline comments sit on a
 # thread; a review body and a Conversation comment carry none and stay on the mark.
-ANSWERED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
-  repository(owner:$owner,name:$repo){pullRequest(number:$num){
-    reviewThreads(first:100,after:$endCursor){
-      pageInfo{hasNextPage endCursor}
-      nodes{isResolved comments(first:100){nodes{fullDatabaseId}}}}}}}'
-# The ids of the inline comments that sit on a resolved thread, as a JSON array of
-# numbers on stdout, comparable with the REST rows' `id`. The id is read as
-# fullDatabaseId, a BigInt GitHub serializes as a string: databaseId is a 32-bit
-# Int GitHub has deprecated for that reason, and review-comment ids already pass
-# 2^31. Non-zero without output when the thread connection could not be read, so
-# a failed read leaves the batch counted unfiltered rather than dropping an
-# objection — the direction live_comments fails in too.
-answered_comment_ids() { # <pr-number>
-  local num="$1" raw
-  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$ANSWERED_THREADS_QUERY" \
-    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$num" 2>/dev/null) || return 1
-  [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | scrub | jq -sc '
-    ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
-    | if ($rt | length) == 0 then error("no reviewThreads in response")
-      else [ $rt[].nodes[]?
-             | select((.isResolved // false) == true)
-             | (.comments.nodes // [])[] | (.fullDatabaseId // empty) | tonumber ]
-           | unique
-      end' 2>/dev/null || return 1
+# The ids of the inline comments that sit on a resolved thread in RT_NODES, as a
+# JSON array of numbers on stdout, comparable with the REST rows' `id`. Non-zero
+# without output on a projection that does not yield one, and the caller then
+# counts the batch unfiltered rather than dropping an objection — the direction
+# live_comments fails in too.
+answered_comment_ids() {
+  printf '%s' "$RT_NODES" | jq -c '
+    [ .[] | select((.isResolved // false) == true)
+      | (.comments.nodes // [])[] | (.fullDatabaseId // empty) | tonumber ]
+    | unique' 2>/dev/null
 }
 # <<< answered-threads-body
 
@@ -855,6 +856,7 @@ while IFS= read -r row; do
   [ -n "$id" ] || continue
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
   pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
+  RT_NUM=""; RT_NODES=""
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // ""')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   prurl=$(printf '%s' "$row" | jq -r '.metadata.pr_url // ""')
@@ -1154,7 +1156,7 @@ CHILDREN_EOF
         [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
       case "$raw_max_c" in ''|*[!0-9]*) raw_max_c=0 ;; esac
       if [ "$raw_max_c" -gt "$cwm" ]; then
-        if ans_ids=$(answered_comment_ids "$num"); then
+        if review_threads_load "$num" && ans_ids=$(answered_comment_ids); then
           cmts_filtered=$(printf '%s' "$cmts_live" | jq -c --argjson ans "$ans_ids" '
             [ .[] | select(.id as $i | ($ans | index($i)) == null) ]' 2>/dev/null)
           if [ -n "$cmts_filtered" ]; then
@@ -2106,7 +2108,7 @@ $CBODY"
     review_gates_for "$base"
     bcause="unnameable"; bthreads=0
     if [ "$PROT_STATE" = "known" ] && [ "$PROT_THREAD_REQ" = "true" ]; then
-      if bthreads=$(unresolved_threads "$num"); then
+      if review_threads_load "$num" && bthreads=$(unresolved_threads); then
         [ "$bthreads" -gt 0 ] && bcause="threads"
       else
         bthreads=0   # unreadable — name no cause on a guess

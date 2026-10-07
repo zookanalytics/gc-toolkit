@@ -1259,6 +1259,21 @@ out=$(run)
 eq "$(meta_pinned AE4 pr_posture)" "review_required@sha-173" "the answered comment past 2^31 is dropped: not commented"
 hasnt "$out" "routed to rework" "…and it routes nothing"
 
+echo "# one thread read serves every reader on an anchor visit"
+# The answered-comment read drops the human comment, which leaves the city's own
+# unmarked reply for the unengaged-thread count to ask about. Both read this PR's
+# threads in one posture pass, and the second reuses the first's nodes rather
+# than reading the connection again.
+store "[$(anchor AE5 174)]"
+printf '%s' "$(prview 174 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_174.json"
+echo '[]' > "$GH_DIR/reviews_174.json"
+printf '[{"id":5401,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1},{"id":5402,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.sh","line":1,"in_reply_to_id":5401}]' > "$GH_DIR/comments_174.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-174","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-174a","databaseId":5401,"fullDatabaseId":"5401","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-174b","databaseId":5402,"fullDatabaseId":"5402","author":{"login":"gc-city-bot"},"body":"fixed","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_174.json"
+: > "$STUB_GH_LOG"
+out=$(run_posture)
+eq "$(meta_pinned AE5 pr_posture)" "review_required@sha-174" "the answered comment and the resolved thread hold nothing"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "1" "…and the two readers took one thread read between them"
+
 echo "# a feedback batch past the OS per-argument limit still renders"
 # tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
 # per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as
