@@ -28,6 +28,9 @@
 set -u
 
 PROG=pr-visit-comment
+# The single writer of the city's PR posts: the reminder is posted and edited
+# through it so every shape of it carries the city's mark.
+PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -190,14 +193,14 @@ if [ "$MODE" = close ]; then
 fi
 
 if [ -n "$COMMENT_ID" ]; then
-  if gh api --method PATCH "repos/$ORIGIN_REPO/issues/comments/$COMMENT_ID" --hostname "$ORIGIN_HOST" -f body="$BODY" >/dev/null 2>&1; then
+  if "$PR_POST" edit --repo "$ORIGIN_REPO_Q" --comment "$COMMENT_ID" --body "$BODY" >/dev/null 2>&1; then
     echo "$PROG: updated visit comment on PR#$PR ($MODE)"
   else
     echo "$PROG: could not update visit comment $COMMENT_ID on PR#$PR" >&2
   fi
 else
   # No comment yet. engage creates one; close already returned above.
-  if gh pr comment "$PR" --repo "$ORIGIN_REPO_Q" --body "$BODY" >/dev/null 2>&1; then
+  if "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR" --body "$BODY" >/dev/null 2>&1; then
     echo "$PROG: posted visit comment on PR#$PR"
   else
     echo "$PROG: could not post visit comment on PR#$PR" >&2

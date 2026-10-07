@@ -109,9 +109,9 @@ echo "── the hold stamps the takeaway BEFORE waiting (the stamp files the de
 # step 2. Under wake_mode=resume the thread replays across a restart, so the
 # stamp does not rest on surviving a kill; a fresh respawn or a failed resume is
 # the one case that comes back without the thread, and there the durable trace
-# is what a reader finds instead. The takeaway on the item, the demand gate and
+# is what a reader finds instead. The takeaway on the subject, the demand gate and
 # the gc.hold_demand read-back ship as converse-hold.sh (run against stubs in
-# converse-hold.test.sh, which also pins the stamp to the item and the writer
+# converse-hold.test.sh, which also pins the stamp to the subject and the writer
 # search); here the prompt is pinned to CALL it before it waits.
 have "the hold runs converse-hold.sh before it waits" 'converse-hold.sh' "$SK_HOLD"
 have "the hold skill keeps the stamp-before-wait invariant" 'Stamp BEFORE you wait' "$SK_HOLD"
@@ -1327,7 +1327,7 @@ lacks "…nor teaches the broken idiom as deliberate" \
       'Unquoted on purpose' "$REPO/assets/scripts/converse-signoff.sh" \
       "the comment blessed the word-splitting idiom, so the next editor restores it"
 have "the routing rule tells converse to wire the wait" '--waiting-on <work-bead>' "$SK_SETTLE"
-# The takeaway is read back on the ITEM. The verification the block already
+# The takeaway is read back on the SUBJECT. The verification the block already
 # shipped checks `gc.outcome` on the VISIT, which is a different bead: a sitting
 # whose takeaway died still passed it and closed clean — the "unstamped closed
 # visit" this same step warns against, one bead over (tk-2cy79, recurrence 2).
@@ -1419,8 +1419,8 @@ lacks "…and never authorizes a prose-only wait in its place" \
 
 have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
-have "…and re-states the wait on the ITEM when it does not (cut-short consolidation)" \
-     '"$HELM" demand "$ITEM" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
+have "…and re-states the wait on the SUBJECT when it does not (cut-short consolidation)" \
+     '"$HELM" demand "$SUBJECT" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
 have "the prompt states the sibling rule for everything a sitting files" \
      'SIBLING of the subject, never a' "$PROMPT"
 
@@ -1577,8 +1577,8 @@ fi
 # The step-7 sign-off/discharge bash ships as assets/scripts/converse-signoff.sh
 # (§C1 above still exercises the takeaway-writer RESOLUTION inside the prompt's
 # fenced block; here the whole discharge is RUN). These assertions drive the
-# script against stubs: the takeaway lands on the item with the WAIT disposition,
-# the demand discharges one of two ways keyed to --ruled, and a held item is
+# script against stubs: the takeaway lands on the subject with the WAIT disposition,
+# the demand discharges one of two ways keyed to --ruled, and a held subject is
 # released only when the sitting ruled. The writers are searched for on the
 # candidate roots, never assumed.
 echo "── step 7 discharge ships and runs as converse-signoff.sh ──"
@@ -1599,20 +1599,22 @@ cat >"$SOBIN/gc" <<'STUB'
 case "${2:-}" in
     show)
         case "${3:-}" in
-            v-x) jq -nc --arg sr "${SO_STALL-item-x}" --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
+            v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
+                    --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
                     '[{id:"v-x",metadata:(({"task_kind":"visit"}
-                        +(if $sr=="" then {} else {"stall_root":$sr} end)
                         +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
-                        +(if $tp=="" then {} else {"escalation_key":$tp} end)))}]' ;;
+                        +(if $tp=="" then {} else {"escalation_key":$tp} end)
+                        +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)))}
+                      +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
             *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
                  else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
         esac ;;
     list)
-        # The demand list the discharge filters client-side: an item/anchor demand
+        # The demand list the discharge filters client-side: a subject/anchor demand
         # (SO_DEMAND, default on — the explicit merge-hold case) and/or a demand on
         # the visit (SO_VISIT_DEMAND, default off — the conversation-wait case).
         # SO_DEMAND_LIST replaces both with a literal list, for the cases where
-        # sibling sittings hold topic-keyed demands on one shared item.
+        # sibling sittings hold topic-keyed demands on one shared subject.
         if [ -n "${SO_DEMAND_LIST:-}" ]; then printf '%s\n' "$SO_DEMAND_LIST"
         else
             items=""
@@ -1652,7 +1654,7 @@ chmod +x "$SOPACK/assets/scripts/lifecycle.sh"
 
 # run_so [VAR=val ...] — run converse-signoff.sh with the flags in SOARGS from a
 # non-git cwd; trailing VAR=val pairs override the base env (env: last wins), so
-# a case dials SO_STALL / SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
+# a case dials SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
 # GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs.
 SOARGS=()
 SO_OUT=""; SO_RC=0
@@ -1664,28 +1666,28 @@ run_so() {
     SO_RC=$?
 }
 
-echo "── --ruled yes: record on the item, resolve the gate, release a held item ──"
-SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+echo "── --ruled yes: record on the subject, resolve the gate, release a held subject ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
 run_so
 eq "$SO_RC" "0" "the discharge exits 0 on a clean ruling"
-have "the takeaway lands on the item with the outcome and --no-wait" \
+have "the takeaway lands on the subject with the outcome and --no-wait" \
      'helm[RIG] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
 have "a ruled sitting resolves the demand gate" 'bd gate resolve d-x --reason approved' "$SOGC"
 have "…and stamps the ruling onto the demand's board sentence through the takeaway verb, whose --no-wait marks it settled" \
      'helm[RIG] takeaway d-x approved --by converse --no-wait' "$SOLOG"
 if grep -q 'gc.takeaway_settled' "$SOGC"; then bad "…and never hand-stamps the settled mark" "gc.takeaway_settled reached a direct bd update; the verb's --no-wait is its only writer"; else ok "…and never hand-stamps the settled mark, so the verb stays its only writer"; fi
-have "…and releases the held item back to the pool it named" \
+have "…and releases the held subject back to the pool it named" \
      'lc transition item-x --to unanchored --route gc-toolkit/gc-toolkit.polecat' "$SOLOG"
 
-echo "── --ruled no: re-state the demand, leave the item held ──"
-SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+echo "── --ruled no: re-state the demand, leave the subject held ──"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
 run_so
 eq "$SO_RC" "0" "the cut-short discharge exits 0"
-have "an unruled sitting re-states the demand on the item" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+have "an unruled sitting re-states the demand on the subject" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
 if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled sitting" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled sitting"; fi
 if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unruled sitting" "found a release on --ruled no"; else ok "…and releases nothing on an unruled sitting"; fi
 
-# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
+# Under a standing scope two sittings share one bucket subject and each
 # holds its own topic-keyed demand on it. The discharge must resolve the exact
 # demand THIS sitting filed — the one converse-hold stamped as gc.hold_demand on
 # the visit — so a ruling on finding-b cannot resolve or re-state finding-a's
@@ -1693,7 +1695,7 @@ if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unr
 # first-match would resolve dA.
 echo "── --ruled yes discharges THIS sitting's demand, not a sibling topic's ──"
 TWO_DEMANDS='[{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-a","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-a"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-b","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-b"}}]'
-SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
 run_so SO_HOLD_DEMAND=dB SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
 eq "$SO_RC" "0" "the topic-scoped discharge exits 0"
 have "the ruling resolves the demand gc.hold_demand names" 'bd gate resolve dB --reason approved' "$SOGC"
@@ -1712,35 +1714,35 @@ echo "── the conversation wait gates the VISIT: a ruling resolves the visit 
 # Default Phase A shape: converse-hold files the conversation demand on the visit,
 # not the anchor, so the PR is never frozen by the conversation. The discharge
 # finds and resolves it off the visit exactly as it does an anchor demand.
-SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
 run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
 eq "$SO_RC" "0" "the discharge exits 0 on a conversation-wait ruling"
 have "a ruled sitting resolves the demand gating the VISIT" 'bd gate resolve d-v --reason approved' "$SOGC"
 have "…and stamps the ruling onto the visit demand's board sentence" 'helm[RIG] takeaway d-v approved --by converse --no-wait' "$SOLOG"
 
-echo "── a cut-short conversation wait is MOVED off the closing visit onto the item ──"
+echo "── a cut-short conversation wait is MOVED off the closing visit onto the subject ──"
 # The visit is about to close, so a demand left on it orphans — gate-visit-sweep
 # names it on stderr forever and no return trip re-offers it. The cut-short
-# discharge closes the visit demand and re-states the wait on the ITEM, where the
+# discharge closes the visit demand and re-states the wait on the SUBJECT, where the
 # liveness sweep re-offers the next sitting and the merge holds until it is answered.
-SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
 run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
 have "the visit demand is closed so it does not orphan on the closing visit" 'gate resolve d-v' "$SOGC"
 have "…its board question is settled as moved" \
      'helm[RIG] takeaway d-v cut short; wait moved to item-x --by converse --no-wait' "$SOLOG"
-have "…and the wait is re-stated on the ITEM, not the visit" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+have "…and the wait is re-stated on the SUBJECT, not the visit" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
 if grep -q 'demand v-x' "$SOLOG"; then bad "…and no longer re-states on the closing visit" "found 'demand v-x' on a cut-short"; else ok "…and no longer re-states on the closing visit"; fi
 
-echo "── cut-short with BOTH a visit wait and a merge hold: both consolidate on the item ──"
-SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+echo "── cut-short with BOTH a visit wait and a merge hold: both consolidate on the subject ──"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
 run_so SO_DEMAND=1 SO_VISIT_DEMAND=1
 have "the visit demand is closed" 'gate resolve d-v' "$SOGC"
-have "…and the wait is re-stated on the item (refreshing the merge hold)" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+have "…and the wait is re-stated on the subject (refreshing the merge hold)" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
 
 echo "── a conversation wait AND an explicit merge hold: both demands discharge ──"
 # A sitting that both waits on the operator (visit demand) and pauses the merge
 # (anchor demand) discharges each on the ruling.
-SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
 run_so SO_DEMAND=1 SO_VISIT_DEMAND=1 STUB_STATE=pull_request
 have "the conversation (visit) demand resolves" 'bd gate resolve d-v --reason approved' "$SOGC"
 have "the merge-hold (anchor) demand resolves too" 'bd gate resolve d-x --reason approved' "$SOGC"
@@ -1752,7 +1754,7 @@ have "the merge-hold (anchor) demand resolves too" 'bd gate resolve d-x --reason
 # merge stays paused until that sibling is answered too.
 echo "── a ruling discharges THIS sitting's merge hold on a shared anchor, not a sibling's ──"
 SIBLING_HOLDS='[{"id":"d-v","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:v-x:finding-b","metadata":{"gc.demand_for":"v-x","gc.demand_topic":"finding-b"}},{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-a","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-a"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-b","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-b"}}]'
-SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
 run_so SO_HOLD_DEMAND=d-v SO_TOPIC=finding-b SO_DEMAND_LIST="$SIBLING_HOLDS" STUB_STATE=pull_request
 have "the conversation (visit) demand resolves" 'bd gate resolve d-v --reason approved' "$SOGC"
 have "…this sitting's merge hold on the anchor resolves" 'bd gate resolve dB --reason approved' "$SOGC"
@@ -1760,54 +1762,78 @@ lacks "…and a sibling sitting's merge hold stays shut" 'gate resolve dA' "$SOG
       "gate resolve reached dA — the ruling released a merge another sitting still holds"
 
 # Re-stated with no topic, the moved wait would match any demand on the shared
-# item and refresh a sibling sitting's gate in place, overwriting its question.
-echo "── a cut-short moves the wait onto the item under THIS sitting's topic ──"
-SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+# subject and refresh a sibling sitting's gate in place, overwriting its question.
+echo "── a cut-short moves the wait onto the subject under THIS sitting's topic ──"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
 run_so SO_HOLD_DEMAND=d-v SO_TOPIC=finding-b SO_DEMAND_LIST="$SIBLING_HOLDS"
 have "the visit demand is closed" 'gate resolve d-v' "$SOGC"
-have "…and the wait is re-stated on the item under the sitting's topic" \
+have "…and the wait is re-stated on the subject under the sitting's topic" \
      'helm[RIG] demand item-x still need X --by converse --topic finding-b' "$SOLOG"
 lacks "…and a sibling's demand is left alone" 'gate resolve dA' "$SOGC" \
       "the cut-short resolved dA, a sibling sitting's demand"
 
-echo "── the item is the stall_root, and falls back to the subject ──"
-SOARGS=(--visit v-x --subject sub --outcome "x — y" --ruled no --still-owed z)
-run_so SO_STALL=item-q
-have "a named stall_root is the item the takeaway targets" 'takeaway item-q' "$SOLOG"
-run_so SO_STALL=
-have "an absent stall_root falls back to the subject" 'takeaway sub' "$SOLOG"
+echo "── the takeaway lands on the subject it is handed ──"
+SOARGS=(--visit v-x --subject item-q --outcome "x — y" --ruled no --still-owed z)
+run_so
+have "the takeaway targets the subject it is handed" 'takeaway item-q' "$SOLOG"
+lacks "…and no other bead" 'takeaway item-x' "$SOLOG" \
+      "the takeaway reached item-x, a bead this sitting was not handed"
+
+# The sign-off writes to the subject. Step 1 passes it, and the visit records it
+# twice, as its tracks edge and as its gc.continuation_group stamp, so an absent
+# --subject is recovered from the visit the way converse-fold.sh recovers it.
+# With neither, the cut-short discharge would close the visit's demand and then
+# re-state the wait on an empty bead id, dropping the operator's question; it
+# refuses before any write instead.
+echo "── an absent --subject is recovered from the visit, and refused when the visit names none ──"
+SOARGS=(--visit v-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_TRACKS=item-t
+eq "$SO_RC" "0" "a sign-off with no --subject runs when the visit tracks its subject"
+have "…the takeaway lands on the tracked subject" 'helm[RIG] takeaway item-t cut-short — need input --by converse' "$SOLOG"
+have "…and the moved wait is re-stated on it" 'helm[RIG] demand item-t still need X --by converse' "$SOLOG"
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_GROUP=item-g
+have "with no tracks edge, the gc.continuation_group stamp names the subject" \
+     'helm[RIG] demand item-g still need X --by converse' "$SOLOG"
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1
+eq "$SO_RC" "2" "a visit that names no subject is refused (exit 2)"
+case "$SO_OUT" in *"no subject"*) ok "…and the refusal says why" ;;
+                  *) bad "…and the refusal says why" "got: $SO_OUT" ;; esac
+lacks "…before the visit's demand is closed, so the operator's question survives" 'gate resolve d-v' "$SOGC" \
+      "the sign-off closed the visit demand with no subject to re-state it on"
+lacks "…and before any takeaway or demand is written" 'helm[' "$SOLOG" \
+      "a write reached gc-helm.sh with no subject"
 
 echo "── the WAIT disposition passes through as repeated flags ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z --waiting-on tk-a --waiting-on tk-b)
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z --waiting-on tk-a --waiting-on tk-b)
 run_so
 have "each routed wait rides as its own --waiting-on" \
      'takeaway item-x o — p --by converse --waiting-on tk-a --waiting-on tk-b' "$SOLOG"
 
-echo "── the takeaway read-back is loud when the item carries none ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+echo "── the takeaway read-back is loud when the subject carries none ──"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
 run_so SO_TAKEAWAY=0
 case "$SO_OUT" in *"NO TAKEAWAY ON"*) ok "a takeaway that did not land is called out" ;;
                   *) bad "a takeaway that did not land is called out" "got: $SO_OUT" ;; esac
 
-echo "── a ruling releases only a HELD item ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled yes --ruling r --route human)
+echo "── a ruling releases only a HELD subject ──"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r --route human)
 run_so STUB_STATE=unanchored
-if grep -q 'lc transition' "$SOLOG"; then bad "an item not held is not transitioned" "found a transition on an unanchored item"; else ok "an item not held is not transitioned"; fi
+if grep -q 'lc transition' "$SOLOG"; then bad "a subject not held is not transitioned" "found a transition on an unanchored subject"; else ok "a subject not held is not transitioned"; fi
 
 echo "── gate resolve falls back to close for a pre-gate demand ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled yes --ruling "the ruling" --route human)
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling "the ruling" --route human)
 run_so SO_GATE_RC=1
 have "a demand that refuses gate resolve is closed on the same terms" 'bd close d-x --reason the ruling' "$SOGC"
 
-echo "── no demand on the item: nothing to discharge ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+echo "── no demand on the subject: nothing to discharge ──"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
 run_so SO_DEMAND=0
 if grep -qE 'demand|gate resolve' "$SOLOG" "$SOGC" 2>/dev/null; then
     bad "no demand present means no discharge" "found a discharge with no demand present"
 else ok "no demand present means no discharge"; fi
 
 echo "── the writer is searched for; none on any root is LOUD ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
 run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$TMPD/no-such-city"
 case "$SO_OUT" in *"NO TAKEAWAY WRITER"*) ok "no writer on any candidate root is LOUD" ;;
                   *) bad "no writer on any candidate root is LOUD" "got: $SO_OUT" ;; esac

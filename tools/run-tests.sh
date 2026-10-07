@@ -11,11 +11,11 @@
 # Usage:
 #   run-tests.sh [-j N] [-t SECS] [--retry N|--no-retry] [--list] [-q] [PATH ...]
 #
-#   -j, --jobs N       concurrent files (default: $TEST_JOBS or nproc)
-#   -t, --timeout SECS per-file wall limit, 0 disables (default: $TEST_TIMEOUT or 900)
-#       --retry N      serial re-runs for a file that failed in parallel
+#   -j, --jobs N       concurrent runs (default: $TEST_JOBS or nproc)
+#   -t, --timeout SECS per-run wall limit, 0 disables (default: $TEST_TIMEOUT or 900)
+#       --retry N      serial re-runs for a run that failed in parallel
 #                      (default: $TEST_RETRY or 1); --no-retry sets 0
-#       --list         print the files that would run, one per line, and exit
+#       --list         print what would run, one run per line, and exit
 #   -q, --quiet        print only the summary and the failures
 #
 # With no PATH it runs every tracked *.test.sh. With PATHs it runs the affected
@@ -46,6 +46,18 @@
 # only the full run covers it. `run-tests.sh $(git diff --name-only
 # origin/main...HEAD)` runs the subset of a branch's change, and an empty
 # subset is a clean pass rather than a failure.
+#
+# A file runs once, unless its opening comment block declares named parts:
+#
+#   # run-tests-parts: <part> [<part> ...]
+#
+# Such a file runs once per part, and each run has its own timeout, its own
+# report line (FILE[PART]) and its own serial re-run, so a file whose sections
+# together outlast one timeout stays one file. Each run gets
+# RUN_TESTS_PART=<part> and RUN_TESTS_PARTS=<every declared part> in its
+# environment, and the file executes only that part's sections (part() in
+# assets/scripts/test-harness.sh). Run directly, with RUN_TESTS_PART unset, the
+# file runs every part in order.
 #
 # Each file runs in its own process group with its output captured to a file,
 # never a pipe. A file that leaves a background child behind (pr-facts.test.sh
@@ -282,16 +294,55 @@ fi
 
 # Front-load likely-slow files. The slowest file bounds the wall time, so it
 # must start in the first wave; bigger source is a coarse but free proxy for a
-# slower file when no timing record exists.
-if [ "${#TESTS[@]}" -gt "$JOBS" ]; then
+# slower file when no timing record exists. Files are sorted even when they fit
+# in one wave, because a file with parts can fill a wave on its own.
+if [ "${#TESTS[@]}" -gt 1 ]; then
   mapfile -t TESTS < <(
     for t in "${TESTS[@]}"; do printf '%s\t%s\n' "$(wc -c <"$t" 2>/dev/null || echo 0)" "$t"; done \
       | sort -rn | cut -f2-
   )
 fi
 
+# The parts a file declares in its opening comment block (see the header), or
+# nothing. The block ends at the first line that is neither a comment nor blank,
+# so a heredoc further down that writes a fixture with its own declaration is
+# not read as this file's.
+parts_of() {
+  awk '/^#/ { if (sub(/^# run-tests-parts:[[:space:]]*/, "")) { print; exit } next }
+       /^[[:space:]]*$/ { next }
+       { exit }' "$1"
+}
+
+# One run per file, or one per declared part. Each run carries its file and
+# its part ("" for a file without parts); everything below indexes runs.
+declare -a RUN_FILE=() RUN_PART=()
+declare -A DECLARED=()
+for t in "${TESTS[@]}"; do
+  read -ra names <<<"$(parts_of "$t")"
+  if [ "${#names[@]}" -eq 0 ]; then
+    RUN_FILE+=("$t"); RUN_PART+=(""); continue
+  fi
+  declare -A named=()
+  for p in "${names[@]}"; do
+    case "$p" in
+      *[!A-Za-z0-9_-]*) echo "run-tests: ${t#"$ROOT"/} declares a malformed part name '$p'" >&2; exit 2 ;;
+    esac
+    [ -z "${named[$p]:-}" ] || { echo "run-tests: ${t#"$ROOT"/} declares part '$p' twice" >&2; exit 2; }
+    named[$p]=1
+    RUN_FILE+=("$t"); RUN_PART+=("$p")
+  done
+  unset named
+  DECLARED[$t]="${names[*]}"
+done
+
+label() { # <run-index> -> the file's path from the repo root, with [part] for a part
+  local rel="${RUN_FILE[$1]#"$ROOT"/}"
+  [ -z "${RUN_PART[$1]}" ] || rel="${rel}[${RUN_PART[$1]}]"
+  printf '%s' "$rel"
+}
+
 if [ "$LIST_ONLY" -eq 1 ]; then
-  for t in "${TESTS[@]}"; do echo "${t#"$ROOT"/}"; done
+  for i in "${!RUN_FILE[@]}"; do label "$i"; echo; done
   exit 0
 fi
 
@@ -314,10 +365,16 @@ export "GIT_CONFIG_KEY_$cfg_n=commit.gpgsign" "GIT_CONFIG_VALUE_$cfg_n=false" \
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$LOGDIR"' EXIT
 
-total="${#TESTS[@]}"
+total="${#RUN_FILE[@]}"
 [ "$JOBS" -gt "$total" ] && JOBS="$total"
 START="$SECONDS"
-[ "$QUIET" -eq 0 ] && printf 'run-tests: %d files, %d parallel, timeout %ss\n' "$total" "$JOBS" "$TIMEOUT"
+if [ "$QUIET" -eq 0 ]; then
+  if [ "$total" -eq "${#TESTS[@]}" ]; then
+    printf 'run-tests: %d files, %d parallel, timeout %ss\n' "$total" "$JOBS" "$TIMEOUT"
+  else
+    printf 'run-tests: %d files as %d runs, %d parallel, timeout %ss\n' "${#TESTS[@]}" "$total" "$JOBS" "$TIMEOUT"
+  fi
+fi
 
 # Monitor mode places each background job in its own process group, so
 # `kill -- -<leader-pid>` reaps a job's whole tree — including any child it
@@ -329,13 +386,29 @@ PASS=0; FAIL=0
 declare -a FAILED=()
 done_n=0; next=0; inflight=0
 
+# Start one run in the background, under the timeout, its output to its log. A
+# part's run is told which part it is and which parts its file declares; a run
+# of a whole file gets neither, whatever the caller exported.
+spawn() { # <run-index>
+  local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
+  (
+    cd "$ROOT" || exit 2
+    if [ -n "$part" ]; then
+      export RUN_TESTS_PART="$part" RUN_TESTS_PARTS="${DECLARED[$t]}"
+    else
+      unset RUN_TESTS_PART RUN_TESTS_PARTS
+    fi
+    if [ "$TIMEOUT" -gt 0 ]; then
+      exec timeout -k 5 -s TERM "$TIMEOUT" bash "$t"
+    else
+      exec bash "$t"
+    fi
+  ) >"$log" 2>&1 &
+}
+
 launch() {
-  local idx="$1" t="${TESTS[$1]}" log="$LOGDIR/$1.log" pid
-  if [ "$TIMEOUT" -gt 0 ]; then
-    ( cd "$ROOT" && exec timeout -k 5 -s TERM "$TIMEOUT" bash "$t" ) >"$log" 2>&1 &
-  else
-    ( cd "$ROOT" && exec bash "$t" ) >"$log" 2>&1 &
-  fi
+  local idx="$1" pid
+  spawn "$idx"
   pid=$!
   PID_IDX[$pid]="$idx"; PID_START[$pid]="$SECONDS"
 }
@@ -345,7 +418,7 @@ finish() {
   idx="${PID_IDX[$pid]}"
   kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
   dur=$(( SECONDS - PID_START[$pid] ))
-  rel="${TESTS[$idx]#"$ROOT"/}"
+  rel="$(label "$idx")"
   if [ "$rc" -eq 0 ]; then
     PASS=$((PASS + 1)); status="PASS"
   else
@@ -358,17 +431,12 @@ finish() {
   unset 'PID_IDX[$pid]' 'PID_START[$pid]'
 }
 
-# Re-run one file serially (no sibling jobs), reusing the same timeout and
+# Re-run one run serially (no sibling jobs), reusing the same timeout and
 # process-group reap as the parallel path. Used after the parallel wave to tell
 # a parallel-contention false failure from a real one.
 rerun_serial() {
   local idx="$1" pid rc
-  local t="${TESTS[$idx]}" log="$LOGDIR/$idx.log"
-  if [ "$TIMEOUT" -gt 0 ]; then
-    ( cd "$ROOT" && exec timeout -k 5 -s TERM "$TIMEOUT" bash "$t" ) >"$log" 2>&1 &
-  else
-    ( cd "$ROOT" && exec bash "$t" ) >"$log" 2>&1 &
-  fi
+  spawn "$idx"
   pid=$!
   wait "$pid"; rc=$?
   kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
@@ -404,7 +472,7 @@ if [ "$RETRY" -gt 0 ] && [ "${#FAILED[@]}" -gt 0 ]; then
   [ "$QUIET" -eq 0 ] && printf '\nrun-tests: %d failed under -j%s; re-running serially to rule out parallel contention\n' "${#FAILED[@]}" "$JOBS"
   declare -a STILL_FAILED=()
   for idx in "${FAILED[@]}"; do
-    rel="${TESTS[$idx]#"$ROOT"/}"
+    rel="$(label "$idx")"
     attempt=0; rc=1
     while [ "$attempt" -lt "$RETRY" ]; do
       attempt=$((attempt + 1))
@@ -427,7 +495,7 @@ fi
 if [ "$FAIL" -gt 0 ]; then
   printf '\n===== %d failed =====\n' "$FAIL"
   for idx in "${FAILED[@]}"; do
-    rel="${TESTS[$idx]#"$ROOT"/}"
+    rel="$(label "$idx")"
     log="$LOGDIR/$idx.log"
     printf '\n----- %s -----\n' "$rel"
     lines=$(wc -l <"$log" 2>/dev/null || echo 0)
