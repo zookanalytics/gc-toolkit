@@ -16,12 +16,19 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
 
-// `gctk merge` is the port of assets/scripts/merge.sh: arm 4 of the merge
+// `gctk merge` is the port of assets/scripts/merge.sh: arm 2 of the merge
 // cadence, THE single writer of merged truth. The CLI is contract-preserving —
-// it takes no flags, emits the same stdout grammar, and exits 0 except when
-// the check resolver is missing, the gating anchors cannot be enumerated, or a
-// record half failed after a merge (exit 1) — because refinery-reconcile.sh
-// invokes it as an opaque command and must not notice which language answers.
+// it takes the same two pacing flags (--deadline <epoch-secs>, --cursor
+// <file>), emits the same stdout grammar, and exits 0 except when the check
+// resolver is missing, the gating anchors cannot be enumerated, or a record
+// half failed after a merge (exit 1) — because refinery-reconcile.sh invokes it
+// as an opaque command and must not notice which language answers.
+//
+// Visit order: anchors whose PR has left the open list, or could land this pass
+// by everything read without a per-PR call (draft flag, anchor-local holds,
+// approval, the merge state the posture arm recorded), are visited first and
+// never paced; --deadline and --cursor pace the rest through a rotation
+// (pace.go).
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
 // same writer the shell reached through lifecycle.sh. Every other seam is a
@@ -47,6 +54,17 @@ const threadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:St
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}`
 
+// The visit order's one read: every open PR's draft flag, head and each
+// account's latest review, paginated. It asks for no merge state, because
+// GitHub computes that per PR on request, and asked for a hundred PRs at once
+// it times out.
+const openPRsQuery = `query($owner:String!,$repo:String!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequests(states:OPEN,first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{number isDraft headRefOid
+        latestOpinionatedReviews(first:100){nodes{state submittedAt databaseId author{login}}}}}}}`
+
 var (
 	// url_repo_q: host/owner/repo from a .../pull/<digit> url, case preserved.
 	reURLRepoQ = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://([^/]+)/([^/]+/[^/]+)/pull/[0-9]`)
@@ -56,8 +74,9 @@ var (
 	rePullSeg = regexp.MustCompile(`/pull/[0-9]+`)
 )
 
-// Merge runs the one pass. It takes no arguments, matching the script.
+// Merge runs the one pass, paced by the --deadline and --cursor in args.
 func Merge(args []string, stdout, stderr io.Writer) int {
+	deadline, cursor := mergePaceArgs(args)
 	scriptsDir := os.Getenv("GCTK_SCRIPTS_DIR")
 	if p := helperDirProblem(scriptsDir); p != "" {
 		fmt.Fprintf(stderr, "%s: %s; NOTHING is merged this pass\n", mergeProg, p)
@@ -80,6 +99,8 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 		stderr:     stderr,
 		client:     gcbd.New(),
 		scriptsDir: scriptsDir,
+		deadline:   deadline,
+		cursor:     cursor,
 	}
 	m.repoRoot = strings.TrimSpace(runOut("git", "rev-parse", "--show-toplevel"))
 	if rc, done := m.resolveOrigin(); done {
@@ -96,6 +117,28 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 	return m.run()
 }
 
+// mergePaceArgs reads the pacing flags the way merge.sh's loop does: --deadline
+// and --cursor each take the argument after them, and any other argument is
+// passed over.
+func mergePaceArgs(args []string) (deadline, cursor string) {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--deadline", "--cursor":
+			v := ""
+			if i+1 < len(args) {
+				v = args[i+1]
+			}
+			if args[i] == "--deadline" {
+				deadline = v
+			} else {
+				cursor = v
+			}
+			i++
+		}
+	}
+	return deadline, cursor
+}
+
 type merger struct {
 	stdout, stderr io.Writer
 	client         *gcbd.Client
@@ -106,6 +149,9 @@ type merger struct {
 	repoRoot       string
 	scriptsDir     string
 	anchors        []gcbd.Bead
+	// deadline and cursor pace the anchors the visit order does not put first.
+	deadline string
+	cursor   string
 
 	merged       int
 	recovered    int
@@ -156,8 +202,23 @@ func (m *merger) run() int {
 		return 0
 	}
 	m.anchors = anchors
-	for i := range anchors {
-		m.handle(&anchors[i])
+	first, rest := m.visitOrder(anchors)
+	p := newPacer(m.cursor, m.deadline, m.stderr)
+	for _, row := range first {
+		m.visit(row, nil)
+	}
+	for _, row := range rest {
+		if !m.visit(row, p) {
+			break
+		}
+	}
+	p.end()
+	if p.resumeAt != "" {
+		fmt.Fprintf(m.stdout, "%s: visited %d landing-first and %d of %d other anchors before the deadline; the next pass resumes at %s\n",
+			mergeProg, len(first), p.visited, len(rest), p.resumeAt)
+	} else {
+		fmt.Fprintf(m.stdout, "%s: visited %d landing-first and %d of %d other anchors\n",
+			mergeProg, len(first), p.visited, len(rest))
 	}
 	fmt.Fprintf(m.stdout, "%s: %d merged, %d recovered, %d held, %d skipped, %d record-failed\n",
 		mergeProg, m.merged, m.recovered, m.held, m.skipped, m.recordFailed)
@@ -167,18 +228,147 @@ func (m *merger) run() int {
 	return 0
 }
 
-// handle is one anchor through the pass. It returns nothing; every outcome is a
-// counter bump and a log line, exactly as the script's loop body.
+// --- visit order: what can land this pass first, the rest in rotation ---------
+// This arm's cost grows with the PR set, and the pass that runs it has a budget,
+// so a deadline or a kill can stop it part-way. What it must never defer is a
+// landing. So every anchor is visited first, and the deadline never stops that
+// group, unless something read without a per-PR call already rules its merge
+// out this pass:
+//   - its PR is a draft, or the acting login is unresolved (the approval gate
+//     then holds every PR);
+//   - the anchor carries merge_hold, review comments nothing has answered, or
+//     no normalized check_set;
+//   - the approval rule (reviewVerdict), applied to each account's latest
+//     APPROVED or CHANGES_REQUESTED review, finds a veto or no approval;
+//   - the merge state pr-facts.sh recorded at the PR's live head, in the
+//     posture arm that runs right before this one, is one the merge never
+//     proceeds on: anything but CLEAN, UNSTABLE, or UNKNOWN, the state GitHub
+//     reports until it has computed one.
+// Those anchors are visited in id order after the cursor, wrapping (pace.go),
+// until the deadline: a visit there refreshes a verdict and nothing lands. An
+// anchor whose PR has left the open list (merged, which owes the record, or
+// closed) is visited first. A PR whose state moves after these reads keeps the
+// group they gave it until the next pass reads it again. When the open-PR read
+// fails, every anchor joins the first group and the pass is not paced at all.
+
+// visitOrder splits the anchors into the group visited first, in enumeration
+// order, and the paced rest, in the order the cursor gives them.
+func (m *merger) visitOrder(anchors []gcbd.Bead) (first, rest []*gcbd.Bead) {
+	open, ok := m.openPRs()
+	if !ok {
+		fmt.Fprintf(m.stderr, "%s: WARN open-PR list unreadable; every anchor is visited this pass, unpaced\n", mergeProg)
+		for i := range anchors {
+			first = append(first, &anchors[i])
+		}
+		return first, nil
+	}
+	for i := range anchors {
+		if m.landsFirst(&anchors[i], open) {
+			first = append(first, &anchors[i])
+		} else {
+			rest = append(rest, &anchors[i])
+		}
+	}
+	return first, paceOrder(rest, m.cursor)
+}
+
+// landsFirst reports whether an anchor is visited first: its PR has left the
+// open list, or nothing read without a per-PR call rules its merge out.
+func (m *merger) landsFirst(a *gcbd.Bead, open map[string]*openPR) bool {
+	pr, ok := open[a.Meta("pr_number")]
+	if !ok {
+		return true
+	}
+	if m.selfLogin == "" || pr.IsDraft {
+		return false
+	}
+	if isHeld(a.Meta("merge_hold")) || strings.HasPrefix(a.Meta("pr_posture"), "commented@") ||
+		stripSpacesCommas(a.Meta("check_set")) == "" {
+		return false
+	}
+	if v := reviewVerdict(pr.reviews(), m.selfLogin); v.veto != "" || v.approver == "" {
+		return false
+	}
+	// pr_merge_state is <state>@<head>, and a state recorded at an older head
+	// says nothing about this one.
+	if ms := strings.Split(a.Meta("pr_merge_state"), "@"); len(ms) > 1 && ms[1] != "" && ms[1] == pr.HeadRefOid {
+		switch ms[0] {
+		case "CLEAN", "UNSTABLE", "UNKNOWN":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// openPRs reads every open PR, keyed by number. ok=false is a read that failed
+// or did not decode whole: `jq -s` slurps the paginated stream or nothing, and
+// a page with no pullRequests answers nothing.
+func (m *merger) openPRs() (map[string]*openPR, bool) {
+	raw, rc := m.gh("api", "graphql", "--hostname", m.originHost, "--paginate",
+		"-f", "query="+openPRsQuery,
+		"-f", "owner="+originOwner(m.originRepo),
+		"-f", "repo="+originName(m.originRepo))
+	if rc != 0 {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
+	dec.UseNumber()
+	open := map[string]*openPR{}
+	pages := 0
+	for {
+		var page struct {
+			Data struct {
+				Repository struct {
+					PullRequests *struct {
+						Nodes []openPR `json:"nodes"`
+					} `json:"pullRequests"`
+				} `json:"repository"`
+			} `json:"data"`
+		}
+		if err := dec.Decode(&page); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, false
+		}
+		prs := page.Data.Repository.PullRequests
+		if prs == nil {
+			return nil, false
+		}
+		pages++
+		for i := range prs.Nodes {
+			open[prs.Nodes[i].Number.String()] = &prs.Nodes[i]
+		}
+	}
+	return open, pages > 0
+}
+
+// visit takes one anchor through the pass. The two tests on the row alone come
+// first, so the one visit a walk past its deadline is guaranteed never goes to
+// an anchor the pass skips for free. p is nil for an anchor visited first,
+// which is never paced. visit reports false when the deadline stopped the walk.
+func (m *merger) visit(row *gcbd.Bead, p *pacer) bool {
+	if row.ID == "" {
+		return true
+	}
+	if !allDigits(row.Meta("pr_number")) {
+		m.skipped++
+		return true
+	}
+	if p != nil && !p.visit(row.ID) {
+		return false
+	}
+	m.handle(row)
+	return true
+}
+
+// handle is one anchor through the pass, past the free skips. It returns
+// nothing; every outcome is a counter bump and a log line, exactly as the
+// script's loop body.
 func (m *merger) handle(row *gcbd.Bead) {
 	id := row.ID
 	num := row.Meta("pr_number")
-	if id == "" {
-		return
-	}
-	if !allDigits(num) {
-		m.skipped++
-		return
-	}
 
 	// --- pinned PR read --------------------------------------------------------
 	prRaw := firstOut(m.gh("pr", "view", num, "--repo", m.originRepoQ, "--json",
@@ -1229,15 +1419,10 @@ type reviewSummary struct {
 	approver string
 }
 
-// reviewState reproduces the review-grouping jq: each non-self reviewer's latest
-// APPROVED or CHANGES_REQUESTED review decides veto and approver, taken after
-// every DISMISSED review is dropped, so a dismissed approval does not count and
-// a dismissed CHANGES_REQUESTED does not hide its author's older approval. An
-// approval stands across later pushes until someone dismisses it, so the commit
-// a review was given at is not read. ok=false is an unreadable history:
-// `jq -cs` slurps the whole stream or nothing, so one row that will not decode
-// makes all of it unreadable, because the veto or the only approval may be that
-// row or follow it.
+// reviewState applies the approval rule (reviewVerdict) to a PR's REST reviews
+// history. ok=false is an unreadable history: `jq -cs` slurps the whole stream
+// or nothing, so one row that will not decode makes all of it unreadable,
+// because the veto or the only approval may be that row or follow it.
 func reviewState(raw []byte, self string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
@@ -1266,7 +1451,18 @@ func reviewState(raw []byte, self string) (reviewSummary, bool) {
 			IDNum:       numberToInt64(obj.ID),
 		})
 	}
+	return reviewVerdict(all, self), true
+}
 
+// reviewVerdict is the approval rule, which the approval gate and the visit
+// order share so the two never disagree on approval. Each reviewer other than
+// self takes its latest APPROVED or CHANGES_REQUESTED review, and that review
+// decides veto and approver. Every DISMISSED review is dropped before the
+// latest is taken, so a dismissed approval does not count and a dismissed
+// CHANGES_REQUESTED does not hide its author's older approval. An approval
+// stands across later pushes until someone dismisses it, so the commit a review
+// was given at is not read.
+func reviewVerdict(all []reviewRow, self string) reviewSummary {
 	var summary reviewSummary
 	// Group the non-self APPROVED and CHANGES_REQUESTED reviews by login and keep
 	// the latest per reviewer by (submitted_at, id). A DISMISSED row is dropped
@@ -1302,7 +1498,39 @@ func reviewState(raw []byte, self string) (reviewSummary, bool) {
 			summary.approver = l
 		}
 	}
-	return summary, true
+	return summary
+}
+
+// openPR is one node of the open-PR read.
+type openPR struct {
+	Number                   json.Number `json:"number"`
+	IsDraft                  bool        `json:"isDraft"`
+	HeadRefOid               string      `json:"headRefOid"`
+	LatestOpinionatedReviews struct {
+		Nodes []struct {
+			State       string      `json:"state"`
+			SubmittedAt string      `json:"submittedAt"`
+			DatabaseID  json.Number `json:"databaseId"`
+			Author      struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		} `json:"nodes"`
+	} `json:"latestOpinionatedReviews"`
+}
+
+// reviews is each account's latest review on the PR, in the rows the approval
+// rule reads.
+func (pr *openPR) reviews() []reviewRow {
+	out := make([]reviewRow, 0, len(pr.LatestOpinionatedReviews.Nodes))
+	for _, n := range pr.LatestOpinionatedReviews.Nodes {
+		out = append(out, reviewRow{
+			Login:       n.Author.Login,
+			State:       n.State,
+			SubmittedAt: n.SubmittedAt,
+			IDNum:       numberToInt64(n.DatabaseID),
+		})
+	}
+	return out
 }
 
 func numberToInt64(n json.Number) int64 {

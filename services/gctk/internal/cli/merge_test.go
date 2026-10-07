@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -173,5 +174,154 @@ func TestAnchorRowReadsTheStoreNotTheSupervisorCache(t *testing.T) {
 	b, ok := m.anchorRow("H1")
 	if !ok || b.Meta("merge_hold") != "true" {
 		t.Fatalf("anchorRow = (%+v, %v); want the stored row, merge_hold=true, not the supervisor's cached row", b, ok)
+	}
+}
+
+// merge.sh's loop: --deadline and --cursor each take the argument after them,
+// even one that looks like a flag, and anything else is passed over. A flag
+// that ends the arguments reads as empty.
+func TestMergePaceArgsReadsTheFlagsAsMergeShDoes(t *testing.T) {
+	for _, tc := range []struct {
+		args             []string
+		deadline, cursor string
+	}{
+		{nil, "", ""},
+		{[]string{"--cursor", "/s/merge.cursor", "--deadline", "1791339999"}, "1791339999", "/s/merge.cursor"},
+		{[]string{"stray", "--deadline", "5", "--other"}, "5", ""},
+		{[]string{"--deadline", "--cursor", "c"}, "--cursor", ""},
+		{[]string{"--cursor", "c", "--deadline"}, "", "c"},
+	} {
+		d, c := mergePaceArgs(tc.args)
+		if d != tc.deadline || c != tc.cursor {
+			t.Errorf("mergePaceArgs(%q) = (%q, %q), want (%q, %q)", tc.args, d, c, tc.deadline, tc.cursor)
+		}
+	}
+}
+
+// The visit order puts an anchor first unless what it read without a per-PR
+// call already rules out its merge this pass. A PR that has left the open list
+// goes first, for its record.
+func TestLandsFirstHoldsBackOnlyWhatCannotLandThisPass(t *testing.T) {
+	approved := `{"state":"APPROVED","submittedAt":"2026-08-20T01:00:00Z","databaseId":1,"author":{"login":"human1"}}`
+	var nodes []openPR
+	if err := json.Unmarshal([]byte(`[
+	  {"number":1,"isDraft":false,"headRefOid":"h1","latestOpinionatedReviews":{"nodes":[`+approved+`]}},
+	  {"number":2,"isDraft":true,"headRefOid":"h2","latestOpinionatedReviews":{"nodes":[`+approved+`]}},
+	  {"number":3,"isDraft":false,"headRefOid":"h3","latestOpinionatedReviews":{"nodes":[]}},
+	  {"number":4,"isDraft":false,"headRefOid":"h4","latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-08-20T01:00:00Z","databaseId":1,"author":{"login":"bot"}}]}},
+	  {"number":5,"isDraft":false,"headRefOid":"h5","latestOpinionatedReviews":{"nodes":[`+approved+`,{"state":"CHANGES_REQUESTED","submittedAt":"2026-08-21T01:00:00Z","databaseId":2,"author":{"login":"human2"}}]}},
+	  {"number":6,"isDraft":false,"headRefOid":"h6","latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-08-20T01:00:00Z","databaseId":1,"author":null}]}}
+	]`), &nodes); err != nil {
+		t.Fatal(err)
+	}
+	open := map[string]*openPR{}
+	for i := range nodes {
+		open[nodes[i].Number.String()] = &nodes[i]
+	}
+	for _, tc := range []struct {
+		name  string
+		meta  string // metadata members after pr_number
+		num   string
+		self  string
+		first bool
+	}{
+		{"approved, nothing held", `,"check_set":"correctness"`, `"1"`, "bot", true},
+		{"pr_number stored as a number", `,"check_set":"correctness"`, `1`, "bot", true},
+		{"left the open list", `,"check_set":"correctness"`, `"9"`, "bot", true},
+		{"left the open list, no acting login", `,"check_set":"correctness"`, `"9"`, "", true},
+		{"no acting login", `,"check_set":"correctness"`, `"1"`, "", false},
+		{"draft", `,"check_set":"correctness"`, `"2"`, "bot", false},
+		{"merge_hold set", `,"check_set":"correctness","merge_hold":"true"`, `"1"`, "bot", false},
+		{"merge_hold false", `,"check_set":"correctness","merge_hold":false`, `"1"`, "bot", true},
+		{"merge_hold 0", `,"check_set":"correctness","merge_hold":"0"`, `"1"`, "bot", true},
+		{"comments unanswered", `,"check_set":"correctness","pr_posture":"commented@h1@2026-10-06T00:00:00Z"`, `"1"`, "bot", false},
+		{"another posture", `,"check_set":"correctness","pr_posture":"review_required@h1@2026-10-06T00:00:00Z"`, `"1"`, "bot", true},
+		{"no check_set", `,"check_set":" , "`, `"1"`, "bot", false},
+		{"no approval", `,"check_set":"correctness"`, `"3"`, "bot", false},
+		{"only the acting login approved", `,"check_set":"correctness"`, `"4"`, "bot", false},
+		{"a later veto", `,"check_set":"correctness"`, `"5"`, "bot", false},
+		{"approved only by an account with no login", `,"check_set":"correctness"`, `"6"`, "bot", false},
+		{"DIRTY at the live head", `,"check_set":"correctness","pr_merge_state":"DIRTY@h1"`, `"1"`, "bot", false},
+		{"BLOCKED at the live head", `,"check_set":"correctness","pr_merge_state":"BLOCKED@h1"`, `"1"`, "bot", false},
+		{"BEHIND at the live head", `,"check_set":"correctness","pr_merge_state":"BEHIND@h1"`, `"1"`, "bot", false},
+		{"DIRTY at an older head", `,"check_set":"correctness","pr_merge_state":"DIRTY@h0"`, `"1"`, "bot", true},
+		{"DIRTY with no head", `,"check_set":"correctness","pr_merge_state":"DIRTY"`, `"1"`, "bot", true},
+		{"CLEAN at the live head", `,"check_set":"correctness","pr_merge_state":"CLEAN@h1"`, `"1"`, "bot", true},
+		{"UNSTABLE at the live head", `,"check_set":"correctness","pr_merge_state":"UNSTABLE@h1"`, `"1"`, "bot", true},
+		{"UNKNOWN at the live head", `,"check_set":"correctness","pr_merge_state":"UNKNOWN@h1"`, `"1"`, "bot", true},
+	} {
+		a := beadRows(t, `[{"id":"A1","metadata":{"pr_number":`+tc.num+tc.meta+`}}]`)[0]
+		m := &merger{selfLogin: tc.self}
+		if got := m.landsFirst(a, open); got != tc.first {
+			t.Errorf("%s: landsFirst = %v, want %v", tc.name, got, tc.first)
+		}
+	}
+}
+
+// stubGH puts a `gh` on PATH that records its arguments and answers with the
+// payload and exit status given.
+func stubGH(t *testing.T, payload string, rc int) (argsFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "payload")
+	if err := os.WriteFile(pf, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	argsFile = filepath.Join(dir, "args")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' \"$*\" > '%s'\ncat '%s'\nexit %d\n", argsFile, pf, rc)
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsFile
+}
+
+// The open-PR read is one paginated GraphQL call, and `jq -s` reads its stream
+// whole or not at all: a failed call, an empty answer, a page that does not
+// decode, or a page with no pullRequests leaves the pass unpaced, never paced
+// on the PRs that did decode.
+func TestOpenPRsReadsTheWholeStreamOrNothing(t *testing.T) {
+	page := func(more bool, nodes string) string {
+		return `{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":` + strconv.FormatBool(more) +
+			`,"endCursor":"c"},"nodes":[` + nodes + `]}}}}`
+	}
+	p1 := page(true, `{"number":61,"isDraft":false,"headRefOid":"sha-61","latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-08-20T01:00:00Z","databaseId":1,"author":{"login":"human1"}}]}}`)
+	p2 := page(false, `{"number":62,"isDraft":true,"headRefOid":"sha-62","latestOpinionatedReviews":{"nodes":[]}}`)
+	m := &merger{originHost: "github.com", originRepo: "zook/gc-toolkit"}
+
+	args := stubGH(t, p1+"\n"+p2+"\n", 0)
+	open, ok := m.openPRs()
+	if !ok || len(open) != 2 || open["61"] == nil || open["62"] == nil || !open["62"].IsDraft {
+		t.Fatalf("two good pages: (%v, ok=%v); want PRs 61 and 62, 62 a draft", open, ok)
+	}
+	if v := reviewVerdict(open["61"].reviews(), "bot"); v.approver != "human1" || v.veto != "" {
+		t.Errorf("PR 61 verdict = %+v, want approver human1 and no veto", v)
+	}
+	want := "api graphql --hostname github.com --paginate -f query=" + openPRsQuery + " -f owner=zook -f repo=gc-toolkit"
+	if got := readFile(t, args); got != want {
+		t.Errorf("gh args =\n%s\nwant\n%s", got, want)
+	}
+
+	stubGH(t, page(false, ""), 0)
+	if open, ok := m.openPRs(); !ok || len(open) != 0 {
+		t.Errorf("an empty open list: (%v, ok=%v); want readable and empty", open, ok)
+	}
+
+	for _, tc := range []struct {
+		name, payload string
+		rc            int
+	}{
+		{"a failed call", p1, 1},
+		{"no answer", "", 0},
+		{"a page cut short", p1 + "\n" + p2[:40], 0},
+		{"bytes that are not JSON after a good page", p1 + "\ngarbage", 0},
+		{"a page with no pullRequests", p1 + "\n" + `{"data":{"repository":{"pullRequests":null}}}`, 0},
+		{"a GraphQL error", `{"data":null,"errors":[{"message":"timeout"}]}`, 0},
+		{"a node that does not decode", page(false, `{"number":63,"isDraft":"yes"}`), 0},
+	} {
+		stubGH(t, tc.payload, tc.rc)
+		if open, ok := m.openPRs(); ok {
+			t.Errorf("%s: (%v, ok=true); want unreadable", tc.name, open)
+		}
 	}
 }
