@@ -104,20 +104,27 @@ gate-ensure, pr-facts, then the sweeps and pr-stack.
   every pass, and a pass stays short, so merge comes round again sooner.
   Without the cursor, a stopped walk that restarted at the same anchor would
   starve the tail of its list.
-- **merge visits landable PRs first and never paces them.** The live sample
-  showed merge's own cost (about 24s per PR) would otherwise keep pr-open
-  behind it and cut merge off at the same PR every pass. One `gh pr list` (4s
-  for 30 PRs) reads every open PR's `mergeStateStatus` and `reviewDecision`.
-  CLEAN or UNSTABLE PRs, approved PRs whose merge state GitHub has not yet
-  computed, and PRs that left the open list (they owe a record) are never
-  paced. The rest only refresh a verdict, so they rotate.
-- **pr-open visits the anchors gate-ensure last marked settled first**, then
-  the rest, with one of each visited every pass. An anchor it opens leaves its
-  set, so a pass the budget stops still opened what it reached. Each group
-  rotates on its own cursor. A settled anchor pr-open holds stays settled: at
+- **merge visits the PRs that could land first and never paces them.** The
+  live sample showed merge's own cost (about 24s per PR) would otherwise keep
+  pr-open behind it and cut merge off at the same PR every pass. One paginated
+  GraphQL read (about 2s for 106 open PRs) lists each open PR's draft flag,
+  head, and every account's latest APPROVED or CHANGES_REQUESTED review. A PR
+  is paced only when that read, its anchor row, or the merge state the posture
+  arm recorded at its live head this pass rules its merge out: a draft,
+  `merge_hold`, an unanswered-comment posture, an empty `check_set`, a veto or
+  no approval under merge.sh's own approval rule, or a recorded state other
+  than CLEAN, UNSTABLE or UNKNOWN. PRs that left the open list (they owe a
+  record) are never paced either. The rest only refresh a verdict, so they
+  rotate.
+- **pr-open visits first the anchors gate-ensure last marked settled whose
+  rows carry no hold pr-open applies** (`merge_hold`, `rebase_hold`, an empty
+  `check_set`), then the rest, with one of each visited every pass. An anchor
+  it opens leaves its set, so a pass the budget stops still opened what it
+  reached. gate-ensure settles a green anchor whatever holds it: at
   2026-10-05T17:00Z two of the four settled pre-open anchors carried an
-  operator's `merge_hold`. In a fixed order such anchors would lead every pass,
-  and the settled anchors behind them would never be reached.
+  operator's `merge_hold`. Each group rotates on its own cursor, because a
+  first-group anchor pr-open still holds (a PR a human closed at this head) would
+  otherwise lead every pass while the anchors behind it were never reached.
 - **pass.log carries each arm's start time, its elapsed seconds and rc, the
   pass's total, and how much of its set each paced arm covered.** A slowdown
   is then visible as a duration and a set size before it stops landing.
@@ -136,6 +143,41 @@ Two measurements were added to the bead after this work began.
   2026-10-04T22:33Z). Every walking arm now shares the pass budget, so pr-facts
   and the arms behind it run on every pass, however slow the arms ahead of
   them are.
+
+## Code review round (2026-10-06)
+
+A code review of the PR at 8baf31ed raised seven findings. Each one changed the
+branch:
+
+- **merge's landing group keyed an uncomputed merge state on `reviewDecision`**,
+  which GitHub leaves empty on a base that requires no approving review. The
+  group now reads approval from the reviews themselves, under the rule the
+  merge applies (one jq definition, `REVIEW_VERDICT_DEF`, serves both). The
+  `gh pr list` that read the merge state also failed: at 106 open PRs on
+  2026-10-06 it returned HTTP 502 after about 11s on every try, because GitHub
+  computes each PR's merge state on request, so the arm ran unpaced. 30 PRs
+  took 5.5s. The read now asks for no merge state and takes about 2s, and the
+  merge state comes from the posture arm's per-PR record instead.
+- **The landing group held PRs merge always refuses** (an operator's hold, an
+  unanswered-comment posture, no approval). It now drops every PR that a
+  check readable without a per-PR call already holds. An UNSTABLE PR with a
+  red required check stays in it, because naming one takes the required-check
+  set and the PR's check rollup.
+- **pr-facts' write-back sweep ignored the deadline.** It now runs under the
+  walk's deadline on a cursor of its own (`<cursor>.writeback`).
+- **A walk past its deadline could spend its one guaranteed visit on an anchor
+  it then skipped for free.** Every arm now calls `pace_visit` after its free
+  skips, and pace-lib.sh says so.
+- **pr-open's first group admitted settled anchors pr-open holds.** It now
+  excludes the holds pr-open reads off the row. A lane short of green already
+  keeps an anchor out of it, because gate-ensure records such an anchor
+  `progressing`. A lane whose derivation could not be read is the exception:
+  it can still record `settled`, which tk-p19c3r0 tracks.
+- **The driver divided the budget by a hand-kept arm count.** `PACED_ARMS` now
+  lists the paced arms, each call takes its arm off the list, and a test checks
+  the calls against it.
+- **The `--deadline` check was copied into six scripts.** `pace_start` makes it
+  for every walk.
 
 ## Considered and not done
 
