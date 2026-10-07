@@ -69,7 +69,10 @@ A bead's kind is `metadata.task_kind`. Every reader that branches on kind
 reads that key and nothing else — `visit`, `review`, `triage-subject`,
 `observation` and the standing kinds are all resolved this way, in the
 liveness sweeps, the gate scripts, the doctor checks, and `helm`'s visit
-filter.
+filter. The standing kinds name a record that is open, unrouted and unassigned
+by design and never closes. Their one definition is
+`assets/scripts/standing-kinds.sh`, which a reader sources for the list and
+for the `is_standing_kind` test.
 
 A label naming the same word is **not** the kind. It is a listing narrowing:
 `gc bd list -l observation` is cheaper than reading every bead's metadata, and
@@ -155,14 +158,20 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I13** | Every started workflow root is still advancing or reachable: an in_progress `gc.kind=workflow` root whose owning session is gone and whose work has not landed does not sit behind an executable frontier that is unclaimable — unrouted AND unowned — which no pool can be offered and no orphan recovery reaches. | `doctor/check-root-advancing` (tk-d12vam): a graph.v2 molecule runs its continuation-group steps inline in one pool session, and those steps carry no owner and no route by construction, so a drain landing mid-molecule strands them past both recovery paths — the witness's orphan recovery keys on an assignee, and no route means no pool is offered them. Reported STRANDED (error) only when all four hold, each a distinct healthy shape it must not report: SILENT (root or any member, a close included, untouched past the bound — default 120m, `GC_DOCTOR_ROOT_STALL_MINUTES`); UNHELD (no live session behind the root's `gc.session_name` or any member's assignee, `gc.session_id` or `gc.session_name` — the affinity slot a restart reuses counts, so a live slot exempts); STARTED (at least one step has closed, so it moved then stopped, AND its input convoy is still open, since a convoy closes when its one work bead lands); UNCLAIMABLE (a non-empty executable frontier — the `bd ready` members minus the inert `workflow`/`scope`/`spec` topology kinds poured alongside steps — every member unassigned AND carrying neither `gc.routed_to` nor `gc.execution_routed_to`, so the execution route a recovery fix stamps reads as reachable). A non-empty `gc.takeaway` or `hold_reason` on the root or a member is a note. It is the root-level complement to I8 (closed roots) and I11 (claimed or routed steps), neither of which fires here. Fails toward silence: an unread roster declines the run, and an unread store, convoy or closed-step listing leaves that unit unjudged rather than flagged. |
 | **I14** | A closed epic was ruled: a closed `issue_type=epic` carries a non-empty `epic_ruling` (persevere/pivot/close), or an explicit disposition pointer (`gc.superseded_by`), never a silent last-unit auto-close ([epics.md](epics.md)). | `doctor/check-epic-closed-implies-ruled` (the after-the-fact backstop); `finalize-gate.sh` `clause_epic_ruling_recorded` also holds the close paths that run the gate, and `epic-steward.sh` files the ruling visit that asks for it. |
 
-Ten further checks guard structure that is not an anchor invariant:
+Eleven further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
 reaches the hook with its stdin intact, the hook's own measurement reads the
 context size a transcript carries, and no refinery's git-op defer guard has
-been latched past a bound), `doctor/check-wisp-cascade-intact` (every bead
+been latched past a bound), `doctor/check-cycle-recycle-hook` (the cycle-recycle
+Stop hook and its no-consent doctrine name the same roles: every agent carrying
+`overlay_dir = "overlays/cycle-recycle"` injects the `heartbeat-no-consent-ui`
+fragment and every agent injecting it carries the overlay, so no role recycles
+with nothing telling it not to prompt and none holds that doctrine while the hook
+never recycles it; static, reads `pack.toml` and the resolved agent prompts),
+`doctor/check-wisp-cascade-intact` (every bead
 store's schema enforces the wisp auxiliary cascade — the constraint both
 removes a deleted wisp's auxiliary rows on the bulk delete path and refuses a
 write naming a wisp that does not exist, so a store without it accumulates
@@ -201,7 +210,7 @@ open unassigned task/bug/defect there — unrouted or routed to a pool — is
 marooned by construction; the operator-queue decisions routed to human, daily
 digests, and doctor and tech-debt advisories that legitimately live there are
 exempt).
-An eleventh non-invariant check, `doctor/check-demo-toolchain`, reports readiness
+A twelfth non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, a Chromium
 build, ffmpeg, and `OPENAI_API_KEY` — is resolvable, warn-only, so a demo
 session learns before it captures whether the clip will narrate or degrade to a
@@ -345,8 +354,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
-| `assets/scripts/duplicate-sweep.sh` | merge | Arm 10: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
-| `assets/scripts/pr-stack.sh` | merge | Arm 11: keeps each open PR's body current with its anchor in both managed regions — the branch-beads section, and the `pr-summary` region a rework moved past. Writes only PR bodies. No merge authority. |
+| `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize; leaves reviews, human visits, and the anchor itself alone. No merge authority. |
+| `assets/scripts/duplicate-sweep.sh` | merge | Arm 11: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
+| `assets/scripts/pr-stack.sh` | merge | Arm 12: keeps each open PR's body current with its anchor in both managed regions — the branch-beads section, and the `pr-summary` region a rework moved past. Writes only PR bodies. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
 | `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of five dispositions: route the bead to a pool, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or file a visit for the operator's judgment. It sits in visit because its product is a bead the human no longer has to triage. |
@@ -384,12 +394,13 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/pin-keepalive.toml` | patrol | Condition-triggered, city-scoped: pins standing conversational named sessions (mechanik today) so config-drift restart keeps deferring on them. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
+| `orders/build-scratch-reap.toml` | patrol | Fires the build/test scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
 | `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
 | `orders/dolt-reclaim.toml` | patrol | Fires the Dolt reclaim pass daily, city-wide: runs `gc dolt compact --gc-only` on each store whose noms size is over the per-database line. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
-| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
+| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in, and reports a sweep that finished more than an interval before it was collected as stale, never as current findings. |
 | `assets/scripts/gc-deacon-ledger.sh` | patrol | The deacon's rolling incident ledger: one open `deacon-ledger` bead, one comment per non-routine action, rotated so it stays skimmable. Reconstructs a shift for an operator or a recycled deacon without a transcript. |
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
@@ -398,6 +409,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
+| `assets/scripts/build-scratch-reap.sh` | patrol | Removes build and test scratch (Go toolchain trees, gc.test per-run trees, templated tool temp) that a killed or crashed run left behind, gated on no live holder and — for pid-named trees — a dead pid, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
 | `assets/scripts/notification-wisp-reap.sh` | patrol | Closes a city-store "Human gate awaiting you" notice once its gate is no longer open, and collapses duplicate "ESCALATION" copies to one open notice — the notification wisps core mails and never retires. |
 | `assets/scripts/dolt-reclaim.sh` | patrol | Measures each managed Dolt store's noms size and runs `gc dolt compact --gc-only --only-db <db>` on the ones over the per-database line, so a store size-bloated below the flatten commit-threshold is reclaimed on a cadence. Never runs a bare flatten; defers while the data plane is degraded. |

@@ -50,7 +50,7 @@ has "$n" "closed with no verdict" "the reason is recorded on the bead"
 has "$n" "A1" "…naming the anchor"
 has "$n" "polecat/gone" "…and the branch that is gone"
 has "$n" "merge_result=merged" "…and how the anchor ended"
-eq "$(meta A1 check.codex)" "<absent>" "no gate marker was written on the anchor"
+eq "$(meta A1 check.codex)" "<absent>" "no check marker was written on the anchor"
 eq "$(bstatus A1)" "closed" "the anchor is untouched"
 
 echo "# a second pass re-sweeps nothing, with the loop still running"

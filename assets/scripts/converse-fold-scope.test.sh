@@ -376,17 +376,25 @@ have "the liveness sweep still folds on the stall_root key" \
 have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"
 # The takeaway target is the other half of the same defect: one field on a
-# shared bucket cannot hold N sittings, and the readers look at the item. The
-# stamp moved out of the prompt into the two scripts that write it — the hold
-# and the sign-off — so they are what carry the item-not-bucket contract now.
+# shared bucket cannot hold N sittings, and the readers look at a specific bead.
+# The stamp moved out of the prompt into the two scripts that write it. The hold
+# stamps the GATED bead — the visit for a PR anchor, so the hold marker sits
+# beside its demand edge (doctor/check-wait-is-an-edge), the item otherwise — and
+# the sign-off stamps the item. Both are a specific bead, never the shared
+# $SUBJECT bucket a sibling would clobber.
 HOLD_SUT="$REPO/assets/scripts/converse-hold.sh"
 SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
-n_item_stamp=$(cat "$HOLD_SUT" "$SIGNOFF_SUT" | grep -c 'takeaway "\$ITEM"')
-if [ "$n_item_stamp" -ge 2 ]; then
-    ok "both takeaway stamps target the item ($n_item_stamp)"
+if grep -q 'takeaway "\$GATED"' "$HOLD_SUT"; then
+    ok "the hold stamps the gated bead (visit or item), not the shared bucket"
 else
-    bad "both takeaway stamps target the item" \
-        "$n_item_stamp block(s) stamp \$ITEM — a stamp on the shared bucket is overwritten by the next sibling"
+    bad "the hold stamps the gated bead (visit or item), not the shared bucket" \
+        "converse-hold.sh no longer stamps takeaway \"\$GATED\" — a hold marker off its edge is unedged, and one on the bucket is clobbered by the next sibling"
+fi
+if grep -q 'takeaway "\$ITEM"' "$SIGNOFF_SUT"; then
+    ok "the sign-off stamps the item, not the shared bucket"
+else
+    bad "the sign-off stamps the item, not the shared bucket" \
+        "converse-signoff.sh no longer stamps takeaway \"\$ITEM\""
 fi
 if grep -q 'takeaway "\$SUBJECT"' "$HOLD_SUT" "$SIGNOFF_SUT"; then
     bad "no takeaway stamps the shared bucket" \

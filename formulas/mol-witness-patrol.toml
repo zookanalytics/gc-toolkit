@@ -3,8 +3,14 @@ Witness patrol loop — rig work-health RECOVERY only. Poured as a root-only
 wisp on startup (the agent prompt's startup reconcile adopts before it
 pours):
 
-  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
+  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}'
   gc bd update $WISP --assignee=$GC_AGENT
+
+The pour passes the binding prefix and nothing else, so the cycle wait is the
+formula's default as it stood when this wisp was poured. It is rendered here
+for the step that reads it:
+
+  event_timeout={{event_timeout}}
 
 Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
 pour the next iteration. Steps are not materialized; read each description
@@ -43,7 +49,7 @@ description = "Agent identity prefix, including trailing dot when bound."
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it."
+description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
 default = "600"
 
 [[steps]]
@@ -445,6 +451,23 @@ case "$IS_WORK_BEAD" in 1|0) ;; *) IS_WORK_BEAD=1 ;; esac
 # <<< salvage-scope-gate
 ```
 
+A source work bead that carries neither a worktree nor a branch never reached
+workspace-setup: its owner died before one was created. There is nothing to
+salvage and no branch to verify, so the salvage fall-through below would file a
+no-signal `witness-salvage-refused` and part 4 would read `unknown` off the
+empty branch and escalate `witness-branch-recovery-unknown` — a human branch
+recovery for a branch that never existed. Mark that case here so salvage and
+part 4 both skip it, and part 5 returns the bead to the pool the way it returns
+any source bead:
+```bash
+# >>> nothing-to-salvage-gate
+NOTHING_TO_SALVAGE=0
+if [ "$IS_WORK_BEAD" = "1" ] && [ -z "$WORKTREE" ] && [ -z "$BRANCH" ]; then
+  NOTHING_TO_SALVAGE=1
+fi
+# <<< nothing-to-salvage-gate
+```
+
 Before ANY salvage git write, assert work_dir is its OWN worktree root — a husk
 directory (worktree removed, dir survives) lets `cd` succeed while every git
 command resolves to the ENCLOSING repo, so `git add -A && git push` would
@@ -472,6 +495,8 @@ commits, while `unknown` must never be read as gone:
 ```bash
 if [ "$IS_WORK_BEAD" != "1" ]; then
   echo "not a work bead (a visit, a review, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
+elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then
+  echo "source work bead with no work_dir and no branch — never had a worktree; nothing to salvage, straight to disposal." >&2
 elif [ "$BRANCH_ON_ORIGIN" = "present" ]; then
   echo "branch already on origin — worktree disposable; skipping salvage." >&2
 elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" --owning-origin "$OWNING_ORIGIN_URL" --bead <bead>; then
@@ -491,8 +516,10 @@ When a work bead's worktree is a husk or gone and its branch is not on the ownin
 origin (or a guard refused), the work may be lost: file the refusal best-effort
 (`patrol-finding.sh --scope witness-findings --key witness-salvage-refused
 --about <bead> ...`) and fall through — recovery is load-bearing, the notice
-advisory. A visit, a review, or a graph.v2 step or root never reaches this
-branch; the scope gate has no worktree to lose for it and sent it to part 5.
+advisory. A source bead with neither a work_dir nor a branch is not that case:
+it never had a worktree, so the nothing-to-salvage arm skips it with no refusal
+to file. A visit, a review, or a graph.v2 step or root never reaches this branch
+either; the scope gate has no worktree to lose for it and sent it to part 5.
 
 **4. Verify before reset (work beads only).** A bead the scope gate marked
 not-a-work-bead has no branch to verify, so skip straight to part 5. For a work
@@ -503,15 +530,20 @@ read as unmerged; a branch it cannot freshly fetch (deleted upstream, network)
 is `unknown`, never a stale-ref discard:
 ```bash
 if [ "$IS_WORK_BEAD" = "1" ]; then
-  TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "main"')
-  BRANCH_MERGED=$("$BC" merged --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH" --target "$TARGET")
+  if [ "$NOTHING_TO_SALVAGE" = "1" ]; then
+    BRANCH_MERGED=skip   # never had a branch; nothing to verify, go to part 5
+  else
+    TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "main"')
+    BRANCH_MERGED=$("$BC" merged --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH" --target "$TARGET")
+  fi
 else
   BRANCH_MERGED=skip   # no branch by construction; nothing to verify, go to part 5
 fi
 ```
 `yes` — the work landed: escalate the observation, close the bead, clean the
 worktree. `no` — the work is unmerged: return it to the pool (step 5). `skip` —
-not a work bead, nothing to verify: go straight to part 5. `unknown` — no
+not a work bead, or a source bead that never had a worktree or branch (the
+nothing-to-salvage arm): nothing to verify, go straight to part 5. `unknown` — no
 context could answer authoritatively, so do NOT reset and do NOT report the work
 discardable; escalate (`--key witness-branch-recovery-unknown`) and leave the
 bead for a human.
@@ -789,6 +821,31 @@ else
     "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." || echo "check-refinery: escalate failed for $SID" >&2
   done
 fi
+# A handoff that has left the refinery queue is no longer sitting unprepared, so
+# its stuck-handoff escalation is premise-moot: retract the open visit through
+# escalate.sh --retract (which closes it moot via visit-close.sh, stamping
+# gc.outcome) rather than leaving it open for a bare close that records no
+# outcome. Gated on a queue that read AND parsed as an array ($STUCK_N set): an
+# unreadable or unparseable queue is not proof a handoff resolved, and an
+# empty-set fallback there would withdraw every live escalation. Only a visit
+# whose group is exactly the handoff bead id is retracted; a legacy group
+# carrying extra tokens (a malformed-subject filing) is left for repair.
+if [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
+  QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
+  [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
+  RESOLVED=$(gc bd list --status=open,in_progress --has-metadata-key=escalation_key --json --limit=0 2>/dev/null | tr -d '[:cntrl:]' | jq -r --argjson q "$QUEUE_IDS_JSON" 'if type == "array" then (.[] | select((.metadata.escalation_key // "") == "witness-refinery-queue") | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "") as $g | select($g | test("^[A-Za-z0-9._-]+$")) | select(($q | index($g)) == null) | $g) else empty end' 2>/dev/null)
+  if [ -n "$RESOLVED" ]; then
+    SCRIPTS=""
+    for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+    done
+    : "${SCRIPTS:?escalate.sh not found in the pack}"
+    printf '%s' "$RESOLVED" | while IFS= read -r RSUBJ || [ -n "$RSUBJ" ]; do
+      [ -n "$RSUBJ" ] || continue
+      "$SCRIPTS/escalate.sh" --retract --subject "$RSUBJ" --key witness-refinery-queue --message "Refinery handoff $RSUBJ has left the refinery queue (merged, closed, or reassigned); it is no longer sitting unprepared, so the stuck-handoff escalation is moot." || echo "check-refinery: retract failed for $RSUBJ" >&2
+    done
+  fi
+fi
 # <<< refinery-stuck-escalate
 ```
 One escalate.sh call per stuck bead: escalate.sh narrows its dedup to a durable
@@ -796,7 +853,12 @@ subject, so each stuck bead gets its own visit and a churning queue files none.
 A stuck bead reaches a human through a re-derived visit rather than a nudge whose
 count goes stale. A queue that will not parse even after the control-byte strip
 escalates once under its own key, so a blinded monitor is surfaced rather than
-silently trusted. Close this step and continue to next-iteration."""
+silently trusted. The counterpart retract closes the loop: when a readable queue
+no longer carries a handoff an open visit still escalates, the "sat unprepared"
+premise is gone, so the visit is retracted moot through escalate.sh --retract
+(guarded by visit-close.sh, which stamps gc.outcome) instead of lingering open
+for a bare close that records none. Close this step and continue to
+next-iteration."""
 
 [[steps]]
 id = "next-iteration"
@@ -812,8 +874,11 @@ title-scoped startup reconcile is the backstop, not the fix). Burning this
 wisp is folded in right after the assign so it precedes the wait: a session
 reset during that wait has already poured and assigned its successor and
 burned itself, so the next boot adopts the successor instead of orphaning this
-wisp. Forward every declared var — a --root-only pour materializes no
-defaults. Keep each gc command on ONE line (TOML eats a trailing backslash).
+wisp. Pass exactly the vars the startup pour passes, which is binding_prefix
+alone, and nothing else. An omitted var renders the formula's current default
+on the new wisp, while a passed one keeps the first wisp's value for as long
+as the chain runs, so a default changed on main would never reach it. Keep
+each gc command on ONE line (TOML eats a trailing backslash).
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
 current wisp has to work: a wisp is an EPHEMERAL molecule, which means
@@ -826,7 +891,7 @@ CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-witness-patrol")][0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
   exit 1
