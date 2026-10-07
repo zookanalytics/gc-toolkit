@@ -742,6 +742,17 @@ it closed, and `finalize-gate.sh` holds the anchor's own close while a visit is
 open. Clearing the machine side is what lets that close land once the human side
 is done.
 
+The consummation also retires, before the close, the visits `pr-facts.sh`
+filed on the anchor to hold the PR's merge until a person answered: rework or
+close, a moved base, feedback nothing routed, review threads nobody engaged,
+threads branch protection requires resolved, and red checks parked to a person.
+A PR closed with a recorded disposition has no merge left to hold, and what
+those visits raised stays on the PR. Each is closed `gc.outcome=moot`. One a
+person is engaged in keeps holding the close until they conclude it. The
+exception is the rework-or-close visit: the disposition answers its question,
+and the sitting that recorded the disposition may still hold it, so it is
+retired over the claim. Every other visit on the anchor still holds the close.
+
 When `bead-rehome.sh` refuses the close, the anchor stays open with its marker,
 and the arm files one visit under `pr-dispose-failed.<num>` naming the
 obstruction. Every later pass retries the close. That visit tracks the anchor,

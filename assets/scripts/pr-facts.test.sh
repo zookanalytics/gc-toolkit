@@ -722,6 +722,55 @@ has "$(meta VW 'gc.outcome_reason')" "PR#127's pre-recorded disposition is consu
 has "$(notes F2w)" "visit VW closed moot" "…and the reading folded onto the closed subject's notes"
 has "$out" "retracted its own pr-dispose-failed visit VW" "the retraction is reported"
 
+echo "# a pre-recorded disposition retires the PR's other merge-path visits before the close"
+# Each was filed to hold the PR's merge until a person answered it. The PR is
+# closed with its disposition recorded, so there is no merge left to hold, and
+# none of them may keep the anchor from closing.
+mpvisit() { # id subject key [status] [assignee]
+  printf '{"id":"%s","status":"%s","assignee":"%s","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
+    "$1" "${4:-open}" "${5:-}" "$3" "$2"
+}
+: > "$STUB_DEPS"
+store "[$(anchor F2z 133 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-z"'), $(mpvisit VC1 F2z pr-comments.133.5.7), $(mpvisit VU1 F2z pr-unengaged-threads.133.sha-133), $(mpvisit VB1 F2z merge-blocked-threads), $(mpvisit VT3 F2z pr-retargeted.133), $(mpvisit VN3 F2z pr-fix-noncode.133 deferred), $(mpvisit VK3 F2z pr-fix-capped.133)]"
+printf 'VC1|tracks|F2z\nVU1|tracks|F2z\nVB1|tracks|F2z\nVT3|tracks|F2z\nVN3|tracks|F2z\nVK3|tracks|F2z\n' > "$STUB_DEPS"
+printf '%s' "$(prview 133 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_133.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2z)" "closed" "the anchor closes in the same pass"
+for v in VC1 VU1 VB1 VT3 VN3 VK3; do
+  eq "$(bstatus "$v")" "closed" "merge-path visit $v is retired"
+done
+eq "$(meta VC1 'gc.outcome')" "moot" "…closed moot"
+has "$(meta VC1 'gc.outcome_reason')" "F2z disposed (folded -> tk-z)" "…naming the disposition"
+has "$(meta VC1 'gc.outcome_reason')" "the merge this visit held is gone" "…and why its question is moot"
+has "$out" "retired stale visit VC1 (pr-comments.133.5.7" "each retirement is reported with its key"
+eq "$(filings F2z pr-dispose-failed.133)" "0" "…and no dispose-failed visit is filed"
+
+echo "# an engaged merge-path visit keeps holding the close"
+# A person in that conversation concludes it. Only the rework-or-close visit is
+# retired over a claim, because the disposition answers its question.
+: > "$STUB_DEPS"
+store "[$(anchor F2za 134 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-za"'), $(mpvisit VCE F2za pr-comments.134.1.2 open lx-sitting)]"
+printf 'VCE|tracks|F2za\n' > "$STUB_DEPS"
+printf '%s' "$(prview 134 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_134.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus VCE)" "open" "the engaged feedback visit is left to its holder"
+eq "$(bstatus F2za)" "open" "…and it holds the anchor's close"
+has "$out" "VCE (pr-comments.134.1.2) is engaged (lx-sitting)" "…which the pass reports"
+has "$out" "held by open visit VCE" "…and names as the hold"
+
+echo "# a visit for another PR, or under a key this script does not file, is not retired"
+: > "$STUB_DEPS"
+store "[$(anchor F2zb 135 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-zb"'), $(mpvisit VO F2zb pr-comments.999.1.2), $(mpvisit VQ2 F2zb an-unrelated-question)]"
+printf 'VO|tracks|F2zb\nVQ2|tracks|F2zb\n' > "$STUB_DEPS"
+printf '%s' "$(prview 135 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_135.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus VO)" "open" "another PR's feedback visit is left"
+eq "$(bstatus VQ2)" "open" "a visit under another key is left"
+eq "$(bstatus F2zb)" "open" "…and they still hold the anchor's close"
+
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"
 printf '%s' "$(prview 12 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_12.json"

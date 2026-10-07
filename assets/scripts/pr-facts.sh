@@ -441,6 +441,19 @@ reconcile_status_label() { # <anchor> <pr-number>
     >/dev/null 2>&1 || true
   cur_labels=""
 }
+# The escalation keys this script files on an anchor to hold its PR's merge
+# until a person answers, for PR number $n: rework or close (pr-abandoned), a
+# moved base (pr-retargeted), feedback nothing routed (pr-comments), review
+# threads nobody engaged (pr-unengaged-threads), threads branch protection
+# requires resolved (merge-blocked-threads), and red checks parked to a person
+# (pr-fix-noncode, pr-fix-capped). A PR closed with a pre-recorded disposition
+# has no merge left to hold, so the disposition arm retires these visits. An arm
+# that files a new merge-holding visit adds its key here.
+MERGE_PATH_KEYS_JQ='
+  def merge_path_key($n):
+    test("^pr-(abandoned|retargeted|fix-noncode|fix-capped)\\." + $n + "$")
+    or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
+    or . == "merge-blocked-threads";'
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
   # Both stamps are re-checked here as well as queried: this id gets pr_number
   # written onto it, so a row that came back for another subject would stamp a
@@ -1106,21 +1119,54 @@ CHILDREN_EOF
             echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
           fi
         fi
-        # Retire any stale rework-or-close visit BEFORE the anchor's close, not
-        # after: an earlier pass may have filed it before the disposition marker
-        # was set, and it tracks the anchor — so bead-rehome's finalize gate would
-        # otherwise hold the close on the very question this pre-recorded
-        # disposition already answers. The marker on the anchor, not the visit, is
-        # what drives a retry, so retiring it here is safe even if the close below
-        # does not land this pass.
-        vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
-        if [ -n "$vid" ]; then
-          if "$VISIT_CLOSE" --visit "$vid" --outcome moot --force \
-               --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null; then
-            echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
-          else
-            echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
-          fi
+        # Retire this script's merge-path visits on the anchor BEFORE its close,
+        # not after. Each was filed to hold PR#$num's merge until a person
+        # answered it (MERGE_PATH_KEYS_JQ), possibly before the disposition marker
+        # was set, and each tracks the anchor, so bead-rehome's finalize gate would
+        # otherwise hold the close on a merge that no longer exists. The marker on
+        # the anchor, not the visit, is what drives a retry, so retiring them here
+        # is safe even if the close below does not land this pass. What a visit
+        # raised stays on the PR. A visit someone is engaged in is theirs to
+        # conclude and keeps holding the close, with one exception: the
+        # rework-or-close visit, whose question the pre-recorded disposition
+        # itself answers. The sitting that recorded the disposition can still
+        # hold it, so that one is retired over the claim. This arm's own
+        # pr-dispose-failed visit asks whether this close lands, so it is not
+        # retired here: the retry below excepts it at the gate.
+        mp_rows=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "gc.continuation_group=$id" \
+                    --limit=0 --json 2>/dev/null | scrub)
+        if printf '%s' "$mp_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+          while IFS=$'\t' read -r mpvid mpkey mpheld; do
+            [ -n "$mpvid" ] || continue
+            mpforce=()
+            if [ "$mpkey" = "pr-abandoned.$num" ]; then
+              mpforce=(--force)
+              mpwhy="the rework-or-close decision is made."
+            elif [ -n "$mpheld" ]; then
+              echo "$PROG: $id — visit $mpvid ($mpkey) is engaged ($mpheld); it holds the close until its holder concludes it" >&2
+              continue
+            else
+              mpwhy="PR#$num is closed, so the merge this visit held is gone; what it raised stays on the PR."
+            fi
+            if "$VISIT_CLOSE" --visit "$mpvid" --outcome moot ${mpforce[@]+"${mpforce[@]}"} \
+                 --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; $mpwhy" >/dev/null; then
+              echo "$PROG: $id — retired stale visit $mpvid ($mpkey; disposition was pre-recorded)"
+            else
+              echo "$PROG: $id — could not retire stale visit $mpvid; leaving it for the operator" >&2
+            fi
+          done <<MP_EOF
+$(printf '%s' "$mp_rows" | jq -r --arg s "$id" --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
+    .[] | select((.metadata.task_kind // "") == "visit")
+        | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+        | ((.metadata.escalation_key // "") | tostring) as $k
+        | select($k | merge_path_key($n))
+        | ((.assignee // "") | tostring) as $who
+        | ((.metadata["gc.session_name"] // "") | tostring) as $sess
+        | [.id, $k, (if $who != "" then $who elif $sess != "" then "session " + $sess
+                     elif (.status // "") == "in_progress" then "claimed" else "" end)] | @tsv' 2>/dev/null)
+MP_EOF
+        else
+          echo "$PROG: $id — could not list the visits on the anchor; any merge-path visit is left for the operator" >&2
         fi
         # This arm's own escalation from an earlier refused close tracks the
         # anchor too, and it asks for exactly this retry: "clear the obstruction
