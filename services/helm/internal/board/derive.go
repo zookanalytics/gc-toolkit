@@ -1145,12 +1145,12 @@ func prMachine(a Anchor, blockers []Blocker) string {
 
 // prApproval answers one question: does this pull request still owe an external
 // approval before it can merge? Approval is a UNIVERSAL merge rule — merge.sh
-// holds every open pull request until it carries a latest APPROVED review at the
-// live head from an account other than the city's — so the only satisfied state
-// is an approval GitHub reflects; every other posture still owes one. It reads
-// the posture pr-facts.sh records off the review decision it already fetches, and
-// the mapping is TOTAL over the posture's value set, because a partial one leaves
-// the rest to be invented.
+// holds every open pull request until it carries a latest APPROVED review from
+// an account other than the city's, given at any commit and not since dismissed
+// — so the only satisfied state is an approval GitHub reflects; every other
+// posture still owes one. It reads the posture pr-facts.sh records off the review
+// decision it already fetches, and the mapping is TOTAL over the posture's value
+// set, because a partial one leaves the rest to be invented.
 //
 //	approved                                             -> met
 //	review_required, changes_requested, commented, none  -> required

@@ -38,11 +38,12 @@ hand-written address is right only by luck. A query by a hand-written address
 fails just as quietly: listing beads by an address no agent holds returns a
 valid empty array, which reads as an empty queue.
 
-Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
-topology-root-skip, liveness-map-guard, liveness-lookup, warrant-file,
-husk-guard, owning-store-guard, recovery-stamp-gate, crash-loop-window,
-patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
-their tests; keep markers, keep them backslash-free.
+Marked blocks (bug-dispatch, candidate-pipeline, host-bead-skip,
+downstream-court-skip, topology-root-skip, liveness-map-guard,
+liveness-lookup, warrant-file, husk-guard, owning-store-guard,
+recovery-stamp-gate, crash-loop-window, patrol-wisp-pour,
+refinery-stuck-escalate) are extracted and executed by their tests; keep
+markers, keep them backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)

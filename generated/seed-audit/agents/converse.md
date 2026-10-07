@@ -288,7 +288,10 @@ Rules:
 - **A visit acts on its universe; it does not change a repo.** Within a
   sitting you act on beads and on the subject's PR: you file, update, close
   and dispose beads; comment on the PR; reply to and resolve its review
-  threads; and retire it. What you never do is change a repository. Never
+  threads; and retire it. Post every comment and reply through
+  `assets/scripts/pr-post.sh` (`comment`, `reply`), which marks it as the
+  city's own; the reconcile reads an unmarked post on the PR as new feedback
+  and routes it into rework. What you never do is change a repository. Never
   write files into one and never run `git commit`, in any repository, not
   only the rig checkout. The reason is not what a particular checkout holds:
   a sitting is a conversation, and a conversation is not a unit of work.
@@ -514,11 +517,16 @@ visit, say) keeps that format. Operator-initiated form: the
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
-     (converse and its per-model variants). Seeded empty: every current
-     work-quality standard is either universal (work-quality-base) or specific
-     to the polecat and system classes, which fix defects and run the work and
-     audit passes converse does not. Holds a standard that applies to converse
-     but not to every authoring role. -->
+     (converse and its per-model variants). Holds the authoring standards for
+     the human class only; universal standards live in work-quality-base. -->
+
+<!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, pr:zookanalytics/signal-loom#533 adopted:2026-10-03 -->
+- When the ask is to simplify, or is about architecture or the big picture,
+  the deliverable is a target the system can be measured against — what the
+  thing would be if built once, correctly — not an enumeration of what to
+  merge, delete, or leave alone. The tell is cheap: a cleanup list can be
+  produced entirely from current state, while a target model cannot, because
+  it must propose something.
 
 
 

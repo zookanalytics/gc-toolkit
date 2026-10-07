@@ -1,7 +1,8 @@
 # lifecycle.toml — the declared state space of the anchor lifecycle.
 # The anchor state is `status` x `merge_result`. This file is the single source
-# of truth: assets/scripts/lifecycle.sh embeds the same table as shell constants
-# (marked block `lifecycle-state-table`) and lifecycle.test.sh fails on drift.
+# of truth: gctk lifecycle, which assets/scripts/lifecycle.sh execs, carries the
+# executable copy (services/gctk/internal/lifecycle), and lifecycle.test.sh fails
+# on drift.
 # Every metadata key the pack writes is enumerated in [metadata]; a key not
 # listed here is not pack state (docs/component-model.md §2-§3).
 
@@ -191,12 +192,15 @@ check_set_sentinel = "none"
 # here as the declaration the state-space invariant (I2/I6) describes.
 marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # Approval is a UNIVERSAL merge rule, not a check_set member: merge.sh requires
-# every PR to carry a latest APPROVED review at the live head by an account other
-# than the city's, with a standing CHANGES_REQUESTED from any other account a
-# veto. No check.approval marker and no check_set token arm or opt out of it;
-# GitHub branch protection is an extra layer, not the authority. Declaration only,
-# like the rest of this section (the rule lives in merge.sh).
-approval_rule = "universal-nonself-head"
+# every PR to carry a latest APPROVED review by an account other than the city's,
+# standing across later pushes until it is dismissed, with a standing
+# CHANGES_REQUESTED from any other account a veto. A dismissed review is dropped
+# before each reviewer's latest is taken, so it neither approves nor vetoes, and
+# it does not hide its author's older approval. No check.approval marker and no
+# check_set token arm or opt out of it; GitHub branch protection is an extra
+# layer, not the authority. Declaration only, like the rest of this section (the
+# rule lives in merge.sh).
+approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
 # I1 holds that a hold is a `blocks` edge to a live bead in the same store, so
@@ -285,6 +289,14 @@ merge_state_key = "pr_merge_state"
 comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 issue_comment_watermark_key = "pr_issue_comment_watermark"
+# What the watermarks count is feedback: every review, inline comment and
+# conversation comment that is not the city's own post, whoever wrote it. The
+# city's own post carries the mark pr-post.sh appends, or is an unmarked post
+# under the city's login from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ),
+# when its posts did not yet carry one. pr-facts.sh stamps it the first time it
+# reads the open PR; absent or malformed, every post under the city's login is
+# the city's own.
+provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
 # the merge until it closes — the child through a blocks edge, the visit through
@@ -400,7 +412,7 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
-  "pr_summary", "merge_record_failures", "fold_target",
+  "pr_summary", "merge_record_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
@@ -513,6 +525,15 @@ keys = [
 #   count that bead in the branch's PR-body ledger as work already on the branch.
 #   No pack script writes it. Absent means nothing was folded. Never cleared. A
 #   branch name.
+# artifact_url — the delivered artifact a rework fix unit lands instead of a
+#   commit, the sibling of merged_sha for a unit that lands no commit.
+#   demo-deliver.sh writes it on the fix unit (task_kind=rework) when it attaches
+#   a demo to the PR and closes the unit in the same write, recording the attached
+#   comment's URL as the delivery evidence. pr-facts.sh's write-back reads it to
+#   cite that URL when it resolves the finding's thread, rather than a head commit
+#   the artifact never made. Absent means the fix unit lands a commit, cited at the
+#   PR head as usual. Never cleared — it is the closed unit's durable evidence. A
+#   comment URL.
 # opened_as_draft — the head oid a PR was opened (or adopted) as a draft at,
 #   because its check_set names an `open-as-draft` check that gates the
 #   draft->ready flip. pr-open.sh writes it on the pull_request transition: on a
@@ -636,8 +657,9 @@ keys = [
   # files a finding unvalidated and the validator rules it; every ruling ends the
   # finding closed or converts it to a visit. must-fix wires finding --blocks
   # anchor, the hold merge.sh's blocker probe reads, until the fix unit lands.
-  # deferred files a claimable follow-up bead (its provenance edge --discovered-from
-  # the anchor) and closes the finding; declined closes it with the reason, no edge.
+  # deferred files a claimable follow-up bead (gated behind the anchor, its
+  # provenance edge --discovered-from the finding) and closes the finding; declined
+  # closes it with the reason, no edge.
   # needs-you files a visit for the operator and leaves the finding OPEN — an open
   # finding holds its human review changes-requested until they rule the visit.
   "finding.disposition",
@@ -662,7 +684,8 @@ keys = [
   "finding.reply_posted",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection, the deferral
-  # reason, and a --discovered-from edge to the anchor for provenance.
+  # reason, and a --discovered-from edge to the finding for provenance; the anchor
+  # --blocks it until the merge.
   "finding.follow_up",
   # The visit a needs-you finding files for the operator, set by finding.sh as the
   # ruling runs. The finding stays open and its visit id is posted to the raiser's
@@ -696,6 +719,9 @@ keys = [
   # only when a later head still carries the threads, so the same head never
   # re-files.
   "pr_unengaged_threads",
+  # The provenance cutover, mechanics in [posture] above. Written once per
+  # anchor; signoff.sh reads it for the same test.
+  "pr_provenance_since",
 ]
 
 [metadata.pr_round_trip]
@@ -758,18 +784,20 @@ keys = [
 #   first-reaction-dispose.sh, tools/gc-proactive.sh and mol-first-reaction.toml
 #   read to refuse a SECOND dispose, which would re-release a bead a worker now
 #   holds. Absent means the reaction has not landed. Never cleared.
-# gc.first_reaction — the disposition chosen, `actionable | blocked | ruling`,
-#   written by first-reaction-dispose.sh BEFORE the act. Its presence proves the
-#   reaction was ATTEMPTED, not that it landed: a record present with no
-#   gc.proactive_reaction=1 is a part-way failure, and the run RESUMES rather
-#   than refusing. The completion proof is gc.proactive_reaction, not this key.
-#   Read by that script's own guard, tools/gc-proactive.sh and
+# gc.first_reaction — the disposition chosen, `actionable | recommend | blocked |
+#   close | ruling`, written by first-reaction-dispose.sh BEFORE the act. Its
+#   presence proves the reaction was ATTEMPTED, not that it landed: a record
+#   present with no gc.proactive_reaction=1 is a part-way failure, and the run
+#   RESUMES rather than refusing. The completion proof is gc.proactive_reaction,
+#   not this key. Read by that script's own guard, tools/gc-proactive.sh and
 #   mol-first-reaction.toml. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route or waiting-ids or visit it
-#   named, and the timestamp. _target and _at are read only to compose the
-#   "already landed" message; _reason has no reader and is the one collapse
-#   candidate this surface still carries. Never cleared. _at is RFC-3339 UTC.
+#   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
+#   visit it named, and the timestamp. A ruling or recommend that files its own
+#   gate stamps _target in a second write, once the gate exists. _target and _at
+#   are read only to compose the "already landed" message; _reason has no reader
+#   and is the one collapse candidate this surface still carries. Never cleared.
+#   _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an
@@ -874,13 +902,14 @@ keys = [
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key is the dedup identity — one open bead per key, narrowed to
+# it). finding.key is the dedup identity — one live bead per key, narrowed to
 # finding.about when the finding names a subject bead. finding.scope is which
 # patrol filed it; finding.digest is the message hash that tells a recurrence
 # with changed text from an identical one. finding.occurrences counts the
 # recurrences and finding.first_seen/finding.last_seen bracket them.
-# finding.recurrence_of names the earlier CLOSED finding a reappearance repeats,
-# so a fix that did not hold is visible.
+# finding.recurrence_of names the earlier finding a reappearance repeats: a
+# closed one, or one held at blocked with nothing open left to wait on. Either
+# way a fix that did not hold is visible.
 keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",
