@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # pr-summary-region.sh — compose the managed `## Summary` region of a PR body and
-# splice it into a published body. Shared by the writer that opens a PR
-# (pr-open.sh, the create and pre_open_gate-adoption paths) and the arm that keeps
-# an already-open PR's body current with a reworked anchor summary (pr-stack.sh).
-# Sourced, never executed.
+# splice it into a published body, and compose the PR's title. Shared by the
+# writer that opens a PR (pr-open.sh, the create and pre_open_gate-adoption paths)
+# and the arm that keeps an already-open PR's body and title current with a
+# reworked anchor (pr-stack.sh). Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way bd-lib.sh is:
 #   # shellcheck source=pr-summary-region.sh
@@ -267,4 +267,36 @@ prs_establish_region() { # <body-file> <section-file> <out-file>
     state == "tail" { print }
     END { exit (opened && state != "to_handoff") ? 0 : 1 }
   ' "$1" > "$3"
+}
+
+# The PR title opens with a conventional-commit type, then carries the anchor's
+# own title; each writer appends the bead id. pr-open.sh composes it at create
+# and pr-stack.sh keeps an open PR's title equal to it, so both read the type
+# from here and a title the create wrote is one the refresh already agrees with.
+# A conventional-commit PR-title check (which product repos run on every PR)
+# requires the title to open with a type token: `type:` or `type(scope):`.
+# Bead titles carry none, so one is derived from the bead's issue_type. A
+# title that already opens with a recognized conventional type is left
+# untouched, so a bead a human already titled `fix(x): …` is not
+# double-prefixed. The derived types are ordinary conventional types every
+# such check accepts; the recognized set is wider so any hand-written prefix
+# survives. The prefix test is a regex match on the title itself rather than a
+# pipe into `grep -q`, for the pipefail reason prs_region_names_head gives, and
+# it reads only the title's opening, where the type has to be.
+CONVENTIONAL_TYPES='build|chore|docs|feat|fix|ops|perf|refactor|revert|security|style|test'
+cc_type_for() { # <issue_type> — the conventional-commit type for a bead kind
+  case "${1:-}" in
+    bug)          printf 'fix' ;;
+    feature|feat) printf 'feat' ;;
+    docs)         printf 'docs' ;;
+    *)            printf 'chore' ;;
+  esac
+}
+cc_title() { # <title> <issue_type> — <title>, guaranteed to open with a type
+  local re='^('"$CONVENTIONAL_TYPES"')(\([^)]+\))?!?: '
+  if [[ ${1:-} =~ $re ]]; then
+    printf '%s' "$1"
+  else
+    printf '%s: %s' "$(cc_type_for "$2")" "$1"
+  fi
 }

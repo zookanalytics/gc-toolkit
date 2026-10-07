@@ -32,9 +32,9 @@
 #   must-fix   finding --blocks anchor    holds the merge and the close until the
 #                                         fix unit answering it lands; then closed
 #   deferred   closed; a follow-up bead   the objection is not fixed in this PR — the
-#              --discovered-from anchor,  follow-up carries the later work and is armed
+#              gated behind the anchor,   follow-up carries the later work and is armed
 #              armed to its fix pool,     to dispatch to the fix pool once the anchor
-#              gated behind the anchor    merges; the finding closes holding nothing
+#              --discovered-from finding  merges; the finding closes holding nothing
 #   declined   closed, no edge            not an objection: closed with the reason
 #   needs-you  stays open, no edge        only the operator can judge it — a visit
 #                                         carries the decision and the open finding
@@ -47,8 +47,9 @@
 # declined finding closes, so the human review it belongs to auto-dismisses once
 # every finding clears (pr-facts.sh); a needs-you finding stays open, which is
 # what holds that review until the operator rules its visit. The discovered-from
-# edge records provenance on the follow-up — a dispatchable bead — never on a finding
-# left open holding nothing.
+# edge is the follow-up's own — a dispatchable bead — and points at the finding it
+# carries forward. bd keeps one edge per (issue, depends_on) pair, and the
+# follow-up/anchor pair is the gate's.
 #
 # The route never lives on a finding. A finding states an objection; the bead
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
@@ -66,15 +67,18 @@
 #   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT] [--fix-pool POOL]
 #   finding.sh wire-fix-unit --fix-unit FU --anchor A --findings F1,F2,...
 #   finding.sh open-must-fix --anchor A [--lane L]
-#   finding.sh close-unvalidated --anchor A --lane L [--reason R]
+#   finding.sh close-unvalidated --anchor A --lane L | --lanes L1,L2,... [--reason R]
+#   finding.sh shed-orphaned [--reason R]
 #   finding.sh close-answered --anchor A [--reason R]
 #
-# Callers: signoff.sh (upsert on request-changes, close-unvalidated on
-# approve), the validator through set-disposition — which hangs the fix unit's
-# edge onto a finding only as it rules that finding must-fix, so the fix unit
-# blocks only the findings it must answer — and gate-ensure (open-must-fix
-# computes quiescence; close-answered releases it once a fix unit lands). Exit
-# 0 on success; a read verb exits 1 when its predicate is false, 2 when the
+# Callers: signoff.sh (upsert on request-changes), the validator through
+# set-disposition — which hangs the fix unit's edge onto a finding only as it
+# rules that finding must-fix, so the fix unit blocks only the findings it must
+# answer — and gate-ensure, the sole owner of stage-3 resolution (open-must-fix
+# computes quiescence; close-answered releases it once a fix unit lands;
+# close-unvalidated resolves a green lane's still-unvalidated findings as moot;
+# shed-orphaned resolves them when the anchor closes before a pass revisits it).
+# Exit 0 on success; a read verb exits 1 when its predicate is false, 2 when the
 # store would not read.
 set -uo pipefail
 
@@ -101,7 +105,8 @@ usage:
   finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you [--reason <r>] [--reply <text>] [--fix-pool <pool>]
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
-  finding.sh close-unvalidated --anchor <id> --lane <lane> [--reason <r>]
+  finding.sh close-unvalidated --anchor <id> --lane <lane> | --lanes <l,l,...> [--reason <r>]
+  finding.sh shed-orphaned [--reason <r>]
   finding.sh close-answered --anchor <id> [--reason <r>]
 USAGE
 }
@@ -349,12 +354,11 @@ cmd_set_disposition() {
       ;;
     deferred)
       # A real objection not fixed in this PR: it becomes tracked later-work. File a
-      # follow-up bead carrying the objection and the deferral reason, hang its
-      # provenance onto the anchor (discovered-from, now on a dispatchable bead rather
-      # than an orphan finding), record the follow-up id as the reply the raiser's
-      # thread receives, and CLOSE the finding. The close is what lets the human
-      # review auto-dismiss once every finding clears; a deferral holds neither the
-      # merge nor the review.
+      # follow-up bead carrying the objection and the deferral reason, gate it behind
+      # the anchor, hang its discovered-from provenance onto the finding, record the
+      # follow-up id as the reply the raiser's thread receives, and CLOSE the finding.
+      # The close is what lets the human review auto-dismiss once every finding
+      # clears; a deferral holds neither the merge nor the review.
       #
       # The follow-up must be a DISPATCHABLE unit, not a bare open task: pool workers
       # consume only routed or armed work, so a plain `gc bd create` leaves the
@@ -396,8 +400,6 @@ cmd_set_disposition() {
       followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
       [ -n "$followup" ] \
         || { warn "could not file a follow-up bead for deferred finding $finding; NOT closing (a deferral with no tracked later-work is the orphan this retires)"; exit 2; }
-      gc bd dep add "$followup" "$anchor" --type discovered-from >/dev/null 2>&1 \
-        || warn "could not wire follow-up $followup --discovered-from $anchor (provenance only)"
       # Make the follow-up wait for the merge, then dispatch itself: the anchor
       # --blocks the follow-up, so bd holds it unready until the anchor closes on
       # merge-push, and deferred-dispatch's reconcile slings it to the fix pool
@@ -406,10 +408,17 @@ cmd_set_disposition() {
       # the arm does not land, and read the arm back off the bead — an un-gated or
       # un-armed follow-up is the unclaimable orphan again, and the finding is about
       # to close off the validator's unvalidated set where nothing re-attempts it.
+      #
+      # bd keeps one dependency per (issue, depends_on) pair and refuses a second
+      # type on a pair already taken, so the follow-up/anchor pair carries the gate
+      # and nothing else. The provenance edge points at the finding, and it is wired
+      # after the gate, so a provenance write can never cost the gate.
       gc bd dep "$anchor" --blocks "$followup" >/dev/null 2>&1 \
         || { warn "deferred $finding: could not wire anchor $anchor --blocks follow-up $followup; NOT closing"; exit 2; }
       edge_exists "$anchor" "$followup" \
         || { warn "deferred $finding: anchor $anchor does not block follow-up $followup after wiring; NOT closing"; exit 2; }
+      gc bd dep add "$followup" "$finding" --type discovered-from >/dev/null 2>&1 \
+        || warn "could not wire follow-up $followup --discovered-from $finding (provenance only)"
       "$dispatcher" arm "$followup" --target "$fixpool" --sling-arg --on --sling-arg mol-polecat-work \
         --reason "deferred from the review of anchor $anchor (finding $finding); dispatch once the anchor merges" >/dev/null 2>&1 \
         || { warn "deferred $finding: could not arm follow-up $followup to '$fixpool'; NOT closing"; exit 2; }
@@ -564,32 +573,89 @@ cmd_open_must_fix() {
 }
 
 cmd_close_unvalidated() {
-  local anchor="" lane="" reason=""
+  local anchor="" lanes="" reason=""
   while [ $# -gt 0 ]; do case "$1" in
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
-    --lane) lane="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --lane)   lanes="${lanes:+$lanes,}${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --lanes)  lanes="${lanes:+$lanes,}${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
-  [ -n "$anchor" ] && [ -n "$lane" ] || { warn "close-unvalidated needs --anchor and --lane"; exit 1; }
+  [ -n "$anchor" ] && [ -n "$lanes" ] || { warn "close-unvalidated needs --anchor and --lane/--lanes"; exit 1; }
   # A lane found clean answers its own still-unruled findings: close the
   # unvalidated ones the lane raised. A validated finding (must-fix, deferred,
   # declined) belongs to the validator and is left alone; a finding a fix unit
-  # still blocks refuses to close and is left for that unit's landing.
-  local rows ids id note
+  # still blocks refuses to close and is left for that unit's landing. Lanes are
+  # passed and resolved together: gate-ensure hands every green lane of the
+  # anchor at once, so a settled board reads the finding set once per pass, not
+  # once per green lane.
+  local rows pairs id flane note
   rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
-  ids=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
-    [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+  # A failed filter is NOT a clean lane. The jq exit status rides pipefail (set
+  # above), so a parse error or a non-string disposition returns 2 here rather
+  # than the empty list the early return below would read as nothing to resolve.
+  # Each row carries its own lane into the note so a batched call keyed on many
+  # lanes still records which lane cleared each finding.
+  pairs=$(printf '%s' "$rows" | jq -r --arg lanes "$lanes" '
+    ($lanes | split(",") | map(select(. != ""))) as $ls
+    | .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.disposition"] // "") | tostring) == "unvalidated")
-          | select(((.metadata["finding.lane"] // "") | tostring) == $lane) ]
-    | .[].id' 2>/dev/null)
-  note="resolved: lane $lane found clean"
-  [ -n "$reason" ] && note="$note — $reason"
-  for id in $ids; do
+          | ((.metadata["finding.lane"] // "") | tostring) as $l
+          | select($ls | index($l))
+          | "\(.id) \($l)"') \
+    || { warn "could not filter unvalidated findings on $anchor (lanes: $lanes)"; return 2; }
+  # Nothing to resolve: return before the cache invalidation below, exactly as
+  # close-answered does. gate-ensure runs this every pass for each green anchor,
+  # so a clean board is the common case; clearing the per-pass cache when no
+  # finding closed would reopen the read window the cache exists to collapse.
+  [ -n "$pairs" ] || return 0
+  printf '%s\n' "$pairs" | while IFS=' ' read -r id flane; do
+    [ -n "$id" ] || continue
+    note="resolved: lane $flane found clean"
+    [ -n "$reason" ] && note="$note — $reason"
     gc bd update "$id" --status=closed --append-notes "$note" >/dev/null 2>&1 || true
   done
   # Closed findings leave the LIVE set; drop the per-pass bd_list cache so a
   # same-pass re-read does not still see them. No-op outside a reconcile pass.
+  bd_cache_clear
+}
+
+# An anchor that leaves the open set — merged, disposed, closed by hand — can no
+# longer be revisited by gate-ensure (which reads open anchors only), so a lane's
+# still-unvalidated findings would sit open forever. They are moot the moment the
+# anchor closes: no validator will ever run on closed work. This sheds them, the
+# close-transition counterpart to the green-lane moot close above. It keys on the
+# anchor being gone, NOT on any approve signal, so it rebuilds no re-approval
+# proxy: a human GitHub approval does not close a finding here either — the anchor
+# leaving the open set does.
+cmd_shed_orphaned() {
+  local reason=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    *) warn "unknown arg '$1'"; usage; exit 1 ;;
+  esac; done
+  local rows pairs anchor fid note astatus
+  # Live unvalidated findings across every anchor — --status scopes out closed
+  # ones, so a finding already shed is not re-read. The set is small in steady
+  # state: a finding is transient, ruled or moot-closed.
+  rows=$(bd_list --metadata-field "finding.disposition=unvalidated" --status="$LIVE_STATUSES") || { warn "could not read unvalidated findings"; return 2; }
+  pairs=$(printf '%s' "$rows" | jq -r '
+    .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+        | ((.metadata.anchor_bead // "") | tostring) as $a
+        | select($a != "")
+        | "\(.id) \($a)"') \
+    || { warn "could not filter unvalidated findings"; return 2; }
+  [ -n "$pairs" ] || return 0
+  printf '%s\n' "$pairs" | while IFS=' ' read -r fid anchor; do
+    [ -n "$fid" ] && [ -n "$anchor" ] || continue
+    # Shed only when the anchor is gone. An unreadable anchor row is left for the
+    # next pass rather than closing the finding on an absence (fail closed).
+    astatus=$(bd_json show "$anchor" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null) || continue
+    [ "$astatus" = closed ] || continue
+    note="resolved: anchor $anchor closed before this finding was validated — moot (no validator runs on closed work)"
+    [ -n "$reason" ] && note="$note ($reason)"
+    gc bd update "$fid" --status=closed --append-notes "$note" >/dev/null 2>&1 || true
+  done
   bd_cache_clear
 }
 
@@ -620,7 +686,8 @@ cmd_close_answered() {
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.disposition"] // "") | tostring) == "must-fix") ]
-    | .[].id' 2>/dev/null)
+    | .[].id') \
+    || { warn "could not filter must-fix findings on $anchor"; return 2; }
   [ -n "$ids" ] || return 0
   note="resolved: fix unit landed — every blocker closed, so the objection's fix is on the branch"
   [ -n "$reason" ] && note="$note ($reason)"
@@ -670,6 +737,7 @@ case "$VERB" in
   wire-fix-unit)     cmd_wire_fix_unit "$@" ;;
   open-must-fix)     cmd_open_must_fix "$@" ;;
   close-unvalidated) cmd_close_unvalidated "$@" ;;
+  shed-orphaned)     cmd_shed_orphaned "$@" ;;
   close-answered)    cmd_close_answered "$@" ;;
   *) warn "unknown verb '$VERB'"; usage; exit 1 ;;
 esac
