@@ -346,10 +346,10 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
-| `assets/scripts/merge.sh` | merge | Arm 4: the single writer of merged truth. |
+| `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. |
 | `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 5: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
-| `assets/scripts/pr-open.sh` | merge | Arm 6: `pre_open_gate` to `pull_request`. |
+| `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
