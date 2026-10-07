@@ -217,17 +217,23 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # tracks exactly one divergence and clears only on a clean sync, which does not
 # generalize to every visit).
 #
-# Only an OPEN visit is retracted. A visit a human already claimed (in_progress)
-# is theirs to close: the recheck-premise skill folds mootness in at their prep,
-# and an unattended caller must not close a conversation out from under them.
-# The close routes through visit-close.sh, the one guarded close — it folds the
-# reading onto the subject's notes, stamps gc.outcome=moot and gc.outcome_reason
-# (so the board reads a decision, not a dropped need), and closes the visit. No
-# matching open visit is success: retract is idempotent, so a second pass, or a
-# subject that never raised one, exits 0 having changed nothing. The lookup reads
-# the subject's own store, pinned by STORE_DB in the board-route block above
-# exactly as the filing path is; visit-close.sh addresses the visit and the
-# subject by id, and an id resolves to the store that holds it.
+# Only a visit nobody is engaged in is retracted: an OPEN one with no assignee
+# and no bound session (gc.session_name), the helm board's engagement test. A
+# visit a human already claimed (in_progress), or one engage has bound by
+# assignee before the claim, is theirs to close: the recheck-premise skill folds
+# mootness in at their prep, and an unattended caller must not close a
+# conversation out from under them. Every unengaged visit for the situation is
+# retracted, twins included: the filing dedup files a second visit when its
+# listing is unreadable, and the premise this caller judged gone is gone for
+# both. The close routes through visit-close.sh, the one guarded close — it
+# folds the reading onto the subject's notes, stamps gc.outcome=moot and
+# gc.outcome_reason (so the board reads a decision, not a dropped need), and
+# closes the visit. No matching open visit is success: retract is idempotent,
+# so a second pass, or a subject that never raised one, exits 0 having changed
+# nothing. The lookup reads the subject's own store, pinned by STORE_DB in the
+# board-route block above exactly as the filing path is; visit-close.sh
+# addresses the visit and the subject by id, and an id resolves to the store
+# that holds it.
 if [ "$RETRACT" = 1 ]; then
   case "$SUBJECT" in
     *-wisp-*) warn "--retract needs a durable subject; an ephemeral wisp's visits hang on the standing triage bucket keyed by --key alone, so there is no one subject-scoped visit to retract"; exit 2 ;;
@@ -249,21 +255,35 @@ if [ "$RETRACT" = 1 ]; then
   fi
   # The same open-visit identity the filing dedup matches on, re-checked field by
   # field because a listing that silently ignored a filter would match the wrong
-  # bead.
-  RETRACT_VISIT=$(printf '%s' "$RETRACT_LISTING" \
+  # bead. Each row carries who is engaged in it, empty for nobody: its assignee,
+  # else its bound session.
+  RETRACT_ROWS=$(printf '%s' "$RETRACT_LISTING" \
     | jq -r --arg k "$KEY" --arg s "$SUBJECT" \
-        '.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id' \
-    | head -n 1)
-  if [ -z "$RETRACT_VISIT" ]; then
+        '.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s)
+             | ((.assignee // "") | tostring) as $who
+             | ((.metadata["gc.session_name"] // "") | tostring) as $sess
+             | [.id, (if $who != "" then $who elif $sess != "" then "session " + $sess else "" end)] | @tsv')
+  if [ -z "$RETRACT_ROWS" ]; then
     echo "escalate: no open visit for $SUBJECT [$KEY] to retract — nothing to do"
     exit 0
   fi
-  if "$VISIT_CLOSE" --visit "$RETRACT_VISIT" --subject "$SUBJECT" --outcome moot --reason "$MESSAGE"; then
-    echo "escalate: retracted visit $RETRACT_VISIT on $SUBJECT [$KEY] as moot"
-    exit 0
-  fi
-  warn "visit-close.sh did not close $RETRACT_VISIT; it stays open for a human"
-  exit 1
+  RETRACT_RC=0
+  while IFS=$'\t' read -r RETRACT_VISIT RETRACT_ENGAGED; do
+    [ -n "$RETRACT_VISIT" ] || continue
+    if [ -n "$RETRACT_ENGAGED" ]; then
+      echo "escalate: visit $RETRACT_VISIT on $SUBJECT [$KEY] is engaged ($RETRACT_ENGAGED); left for its holder to close"
+      continue
+    fi
+    if "$VISIT_CLOSE" --visit "$RETRACT_VISIT" --subject "$SUBJECT" --outcome moot --reason "$MESSAGE" </dev/null; then
+      echo "escalate: retracted visit $RETRACT_VISIT on $SUBJECT [$KEY] as moot"
+    else
+      warn "visit-close.sh did not close $RETRACT_VISIT; it stays open for a human"
+      RETRACT_RC=1
+    fi
+  done <<RETRACT_EOF
+$RETRACT_ROWS
+RETRACT_EOF
+  exit "$RETRACT_RC"
 fi
 # <<< retract-moot
 

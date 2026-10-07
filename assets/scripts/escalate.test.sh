@@ -147,8 +147,9 @@ chmod +x "$BIN/gc"
 
 # Fake visit-close.sh for the --retract path: record each call as
 # `<visit>|<subject>|<outcome>|<reason>` and, so the not-closed arm can be
-# exercised, exit non-zero when STUB_VISIT_CLOSE_FAIL is set — as the real
-# visit-close.sh exits non-zero when the close does not land. escalate.sh reaches
+# exercised, exit non-zero when STUB_VISIT_CLOSE_FAIL is set, or for the one
+# visit STUB_VISIT_CLOSE_FAIL_ID names — as the real visit-close.sh exits
+# non-zero when the close does not land. escalate.sh reaches
 # it through the GC_ESCALATE_VISIT_CLOSE_TOOL override, so the real one beside the
 # SUT is never touched.
 cat > "$BIN/visit-close.sh" <<'VC'
@@ -166,6 +167,7 @@ while [ $# -gt 0 ]; do
 done
 printf '%s|%s|%s|%s\n' "$visit" "$subject" "$outcome" "$reason" >> "${STUB_VISIT_CLOSE_LOG:?}"
 [ -n "${STUB_VISIT_CLOSE_FAIL:-}" ] && exit 4
+[ -n "${STUB_VISIT_CLOSE_FAIL_ID:-}" ] && [ "$visit" = "$STUB_VISIT_CLOSE_FAIL_ID" ] && exit 4
 exit 0
 VC
 chmod +x "$BIN/visit-close.sh"
@@ -198,7 +200,7 @@ STANDING='{"id":"sub-0","status":"open","assignee":"","title":"triage: escalatio
 reset() {
   printf '%s' "${1:-[]}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  : > "$STUB_VISIT_CLOSE_LOG"; unset STUB_VISIT_CLOSE_FAIL 2>/dev/null || true
+  : > "$STUB_VISIT_CLOSE_LOG"; unset STUB_VISIT_CLOSE_FAIL STUB_VISIT_CLOSE_FAIL_ID 2>/dev/null || true
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 field()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
@@ -996,6 +998,49 @@ reset '[{"id":"vis-7","status":"open","assignee":"","title":"visit: tk-sub — x
 out=$(STUB_VISIT_CLOSE_FAIL=1 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
 eq "$rc" 1 "retract exits 1 when visit-close.sh does not close the visit"
 has "$out" "did not close" "and says the visit stays open"
+
+# A visit for the situation, open, with whoever is engaged in it.
+rvisit() { # <id> [<assignee>] [<gc.session_name>]
+  printf '{"id":"%s","status":"open","assignee":"%s","title":"visit: tk-sub — x","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"reconcile-diverged-alpha","gc.continuation_group":"tk-sub","gc.routed_to":"human"%s}}' \
+    "$1" "${2:-}" "${3:+,\"gc.session_name\":\"$3\"}"
+}
+
+echo "# --retract closes every open visit of the situation, twins included"
+# The filing dedup files a second visit when its listing is unreadable. The
+# premise the caller judged gone is gone for both, so neither is left behind.
+reset "[$(rvisit vis-1), $(rvisit vis-2)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when it closes every twin"
+eq "$(vccount)" "2" "retract calls visit-close.sh once per twin"
+has "$out" "retracted visit vis-1 on tk-sub" "reports the first twin"
+has "$out" "retracted visit vis-2 on tk-sub" "reports the second twin"
+
+echo "# --retract leaves an open visit engage has bound, by assignee or by session"
+# Engage binds the visit while it is still open, before the sitting's claim
+# promotes it. The board reads that as engaged, and so does retract.
+reset "[$(rvisit vis-3 lx-sitting)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0 when the only match is bound by assignee"
+eq "$(vccount)" "0" "and does not close the bound visit"
+has "$out" "vis-3 on tk-sub [reconcile-diverged-alpha] is engaged (lx-sitting)" "and names who holds it"
+reset "[$(rvisit vis-4 "" s-lx-sitting)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$(vccount)" "0" "a visit bound by session is not closed either"
+has "$out" "is engaged (session s-lx-sitting)" "and the session is named"
+
+echo "# --retract closes the unengaged twin beside an engaged one"
+reset "[$(rvisit vis-5 lx-sitting), $(rvisit vis-6)]"
+out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 0 "retract exits 0"
+eq "$(vclog)" "vis-6|tk-sub|moot|m" "only the unengaged twin is closed"
+
+echo "# --retract tries every twin and reports a close that did not land"
+reset "[$(rvisit vis-7), $(rvisit vis-8)]"
+out=$(STUB_VISIT_CLOSE_FAIL_ID=vis-7 "$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
+eq "$rc" 1 "retract exits 1 when one twin did not close"
+eq "$(vccount)" "2" "and still tries the other"
+has "$out" "did not close vis-7" "names the visit that stays open"
+has "$out" "retracted visit vis-8 on tk-sub" "and reports the one that closed"
 
 echo "# the city store's own visits answer the dedup, the verdict window and --retract"
 # Each of these reads the store before it writes, and the ambient store holds
