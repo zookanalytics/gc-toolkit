@@ -83,11 +83,14 @@ mk_sut_dir() { # <dir> <file>...
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
   # bd-lib.sh is the shared bead-store read library many SUTs source by sibling
   # path, and gctk-resolve.sh is what every ported script (lifecycle.sh among
-  # them) sources the same way; copy both beside them so those sources resolve
-  # in the private dir. They sit beside this harness, so they are found whatever
-  # the SUT's own directory is.
+  # them) sources the same way. pr-post.sh is the single writer of the city's PR
+  # posts and the owner of the provenance definition every feedback reader asks,
+  # so a SUT that posts or reads feedback runs it by sibling path. Copy all three
+  # beside them so those calls resolve in the private dir; cp keeps pr-post.sh's
+  # executable bit. They sit beside this harness, so they are found whatever the
+  # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/gctk-resolve.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
 }

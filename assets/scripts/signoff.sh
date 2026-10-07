@@ -62,6 +62,9 @@ PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 # opens, so the validator polecat that claims it names the method. Same builder
 # pr-facts.sh uses for the human feedback batch's pass. Overridable for the test.
 VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
+# The single writer of the city's PR posts. A post-open verdict goes through it
+# so the review carries the city's provenance mark.
+PR_POST="$HERE/pr-post.sh"
 
 usage() {
   cat >&2 <<'U'
@@ -377,7 +380,7 @@ post_artifact() {
   if [ -n "$POST_OPEN" ]; then
     # COMMENT for both verdicts, NEVER --approve: approval is external/human,
     # and the merge is held by the recorded marker, not by a bot review.
-    gh pr review "$PR_NUMBER" --repo "$PR_REPO_Q" --comment --body-file "$BODY_FILE" >/dev/null 2>&1 \
+    "$PR_POST" review --repo "$PR_REPO_Q" --pr "$PR_NUMBER" --body-file "$BODY_FILE" >/dev/null 2>&1 \
       || warn "could not post the review comment on PR#$PR_NUMBER; the recorded marker still governs"
   else
     # Pre-open, the bead's notes are the only copy of the body. pr-open.sh

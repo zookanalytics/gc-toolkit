@@ -2018,6 +2018,7 @@ out=$(run)
 eq "$(reacted 41 NC-41)" "true" "the comment is acknowledged"
 has "$(treply 41 T-41)" "Addressed in sha-41" "the reply names the landing commit"
 has "$(treply 41 T-41)" "K2" "…and the bead that carried the work"
+has "$(treply 41 T-41)" "<!-- gc:city -->" "…carrying the city's mark, posted through pr-post.sh"
 eq "$(tresolved 41 T-41)" "true" "the thread is resolved behind the reply"
 has "$out" "1 threads replied, 1 threads resolved" "the pass reports both writes"
 

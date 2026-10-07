@@ -138,6 +138,9 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # task_kind=finding bead through it, so the validation pass it opens has a finding
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The single writer of the city's PR posts. Every reply and comment this
+# script posts goes through it, so each carries the city's provenance mark.
+PR_POST="$SCRIPTS_DIR/pr-post.sh"
 
 FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0
 while [ $# -gt 0 ]; do
@@ -2732,8 +2735,7 @@ WB_REACTIONS
     if [ "$a2" = "1" ]; then
       wbody="Addressed in $wshort on this PR (${a4:-no bead recorded}).
 $WB_MARKER"
-      if gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
-           -f t="$a1" -f b="$wbody" >/dev/null; then
+      if "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$a1" --body "$wbody" >/dev/null 2>&1; then
         replied=$((replied + 1))
       else
         echo "$PROG: $wid — PR#$wnum could not reply on thread $a1; NOT resolving it (retry next pass)" >&2
@@ -2798,7 +2800,7 @@ $WB_MARKER"
       wdtid=$(printf '%s' "$wview" | jq -r --arg c "$wdcid" '
         [ .threads[] | select((.comments.nodes // []) | any(((.databaseId // 0) | tostring) == $c)) | .id ] | .[0] // empty' 2>/dev/null)
       if [ -z "$wdtid" ]; then
-        if gh pr comment "$wnum" --repo "$ORIGIN_REPO_Q" --body "$wdbody" >/dev/null 2>&1; then
+        if "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$wnum" --body "$wdbody" >/dev/null 2>&1; then
           gc bd update "$wdfid" --set-metadata finding.reply_posted=1 >/dev/null 2>&1 || true
           replied=$((replied + 1))
         else
@@ -2815,8 +2817,7 @@ $WB_MARKER"
         wdreplied=1
       fi
       if [ "$wdreplied" = 0 ]; then
-        if gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
-             -f t="$wdtid" -f b="$wdbody" >/dev/null; then
+        if "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$wdtid" --body "$wdbody" >/dev/null 2>&1; then
           replied=$((replied + 1)); wdreplied=1
         else
           echo "$PROG: $wid — PR#$wnum could not reply the decline for $wdfid on thread $wdtid; retry next pass" >&2

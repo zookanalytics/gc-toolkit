@@ -34,6 +34,9 @@
 set -u
 
 PROG=demo-deliver
+# The single writer of the city's PR posts: the delivery comment goes through it
+# so it carries the city's mark and is never read back as feedback.
+PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
 
 usage() { sed -n '/^# Usage:/,/^# Exit:/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
@@ -139,7 +142,7 @@ case "$PR" in ''|*[!0-9]*) echo "$PROG: could not reduce the PR reference to a n
 # The player is appended after the body; a video takes no alt text, so the bare
 # path is attached. gh uploads to user-attachments and then posts the comment,
 # exiting non-zero if the upload or the post fails — the fail-closed signal.
-OUT=$(gh pr comment "$PR" --repo "$ORIGIN_REPO_Q" --body "$BODY" --attach "$FILE" 2>&1)
+OUT=$("$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR" --body "$BODY" --attach "$FILE" 2>&1)
 RC=$?
 if [ "$RC" -ne 0 ]; then
   echo "$PROG: 'gh pr comment --attach' failed (rc=$RC) for PR#$PR on $ORIGIN_REPO_Q:" >&2

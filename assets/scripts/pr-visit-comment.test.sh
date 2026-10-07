@@ -119,6 +119,7 @@ has "pr comment 41" "$GH1" "engage posts a new comment on PR 41"
 has "--repo github.com/acme/widgets" "$GH1" "the post is pinned to origin"
 BODY1="$(jq -r '.[0].body' "$STATE")"
 has "<!-- gc:visit:tk-vis1 -->" "$BODY1" "the comment carries the visit marker"
+has "<!-- gc:city -->" "$BODY1" "the comment carries the city's provenance mark (posted through pr-post.sh)"
 has "Visit tk-vis1 — open" "$BODY1" "the comment says the visit is open"
 has "Reason: why we are talking" "$BODY1" "the reason is shown"
 
@@ -142,6 +143,7 @@ has "Visit tk-vis1 — closed (settled)" "$BODY3" "the comment now says closed w
 has "Reason: why we are talking" "$BODY3" "the original reason is preserved on close"
 has "Summary: agreed to ship it" "$BODY3" "the summary is added"
 has "Actions Taken: routed tk-work1" "$BODY3" "the actions are added"
+has "<!-- gc:city -->" "$BODY3" "the edited comment keeps the city's provenance mark"
 ok "still exactly one comment after close" "[ \$(jq 'length' '$STATE') -eq 1 ]"
 
 echo "# close with no prior comment is a silent no-op (visit never engaged)"

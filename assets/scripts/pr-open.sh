@@ -55,6 +55,10 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 # self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
 # on an integration-targeted checkpoint, the PR-list counterpart to the body banner.
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
+# The single writer of the city's PR posts. The verdict replay and the
+# superseded notice go through it so they carry the city's mark, which is what
+# keeps pr-facts.sh from reading them back as feedback.
+PR_POST="$SCRIPTS_DIR/pr-post.sh"
 # The managed `## Summary` region: markers, composer and splice helpers, shared
 # with pr-stack.sh so an opened body and a post-open refresh never diverge.
 # shellcheck source=pr-summary-region.sh
@@ -621,13 +625,13 @@ GATES
   [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
     | jq -r '.[0].notes // ""' 2>/dev/null)
   if [ -n "$VERDICT" ]; then
-    gh pr comment "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
+    "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "$(printf 'Pre-open signoff (comment-only — not an approval):\n\n%s' "$VERDICT")" >/dev/null 2>&1 || true
   else
-    gh pr comment "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
+    "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
   fi
-  [ -n "$SUP_NUM" ] && gh pr comment "$SUP_NUM" --repo "$ORIGIN_REPO_Q" \
+  [ -n "$SUP_NUM" ] && "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$SUP_NUM" \
     --body "Superseded by #$PR_NUMBER: branch \`$branch\` was re-implemented and re-gated at \`${head_oid:0:8}\`." >/dev/null 2>&1 || true
 
   if flip "$id" "$CERT_URL" "$CERT_NUM" "$target" "$OPENED_DRAFT"; then
