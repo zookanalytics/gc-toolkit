@@ -2018,8 +2018,12 @@ eq "$(meta PV1 pr_comment_watermark)" "9701" "…its inline comment advances the
 eq "$(meta_pinned PV1 pr_posture)" "commented@sha-156" "…and the posture holds the merge as commented"
 PV1C=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "PV1") | .id ] | .[0] // ""' "$STUB_STORE")
 has "$(desc "$PV1C")" "Bound the re-read per pass." "the child carries the inline comment verbatim"
-has "$(desc "$PV1C")" "assets/scripts/pr-post.sh" "…and tells the fixer to reply through pr-post.sh"
-has "$(meta "$PV1C" rejection_reason)" "pr-post.sh" "…as its rejection_reason does"
+# The fixer works in its own rig's checkout, so the helper is named by the
+# absolute path pr-facts resolved, never a pack-relative one that names nothing
+# there.
+has "$(desc "$PV1C")" "reply through $SD/pr-post.sh" "…and tells the fixer to reply through pr-post.sh, by its resolved path"
+has "$(meta "$PV1C" rejection_reason)" "posted through $SD/pr-post.sh" "…as its rejection_reason does"
+hasnt "$(desc "$PV1C")" "through assets/scripts/pr-post.sh" "…never by a pack-relative path"
 eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "PV1")
            | select((.metadata["finding.source"] // "") == "human:gc-city-bot") ] | length' "$STUB_STORE")" "2" "…and each item is a finding sourced to the account it came from"
 eq "$(jq '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) ] | length' "$STUB_STORE")" "0" "…so the unengaged-thread backstop has nothing to file"

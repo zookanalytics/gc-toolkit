@@ -158,7 +158,9 @@ FINDING="$SCRIPTS_DIR/finding.sh"
 # The single writer of the city's PR posts, and the owner of the mark that tells
 # them from feedback. Every reply and comment this script posts goes through it,
 # and every read that separates feedback from the city's own output asks its
-# definition (gc_city_own), so the writer and the readers cannot drift apart.
+# definition (gc_city_own), so the writer and the readers cannot drift apart. A
+# rework child names this absolute path to its fixer: the polecat works in its
+# own rig's checkout, where a pack-relative path names nothing.
 PR_POST="$SCRIPTS_DIR/pr-post.sh"
 [ -x "$PR_POST" ] || { echo "$PROG: the PR posting helper is missing ($PR_POST); cannot tell the city's own posts from feedback" >&2; exit 1; }
 CITY_OWN_DEF=$("$PR_POST" own-def) && [ -n "$CITY_OWN_DEF" ] \
@@ -1683,10 +1685,10 @@ REAP_EOF
 $live_url — head $head_oid${CSRC:+, review $CSRC}
 
 Answer every item below: a fix, or a reply on the PR saying why not. Post a
-reply through assets/scripts/pr-post.sh (\`reply\` into an inline thread,
-\`comment\` on the conversation): it marks the reply as the city's own, and a
-reply posted any other way reads as new feedback on the PR. One that asks for a
-decision you cannot make is an escalation, never a silent close.
+reply through $PR_POST (\`reply\` into an inline thread, \`comment\` on the
+conversation): it marks the reply as the city's own, and a reply posted any
+other way reads as new feedback on the PR. One that asks for a decision you
+cannot make is an escalation, never a silent close.
 
 $CBODY"
       if ! ckids=$(bd_list --status="$ALL_STATUSES" --title-contains "$CTITLE"); then
@@ -1723,7 +1725,7 @@ $CBODY"
           --set-metadata anchor_bead="$id" \
           --set-metadata branch="$fix_branch" \
           --set-metadata target="$base" \
-          --set-metadata rejection_reason="Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not, posted through assets/scripts/pr-post.sh so it is not read back as new feedback — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+          --set-metadata rejection_reason="Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not, posted through $PR_POST so it is not read back as new feedback — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
           ${CSRCSET[@]+"${CSRCSET[@]}"} \
           --set-metadata prepare_mode="$prepare_mode" \
           --set-metadata merge_strategy=mr \
