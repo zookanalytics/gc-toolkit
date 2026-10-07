@@ -157,7 +157,14 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
   {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
-  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}}
+  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}},
+  {"id":"f-input-convoy","title":"input convoy for tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-sling-convoy","title":"sling-tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-synthetic-convoy","title":"a convoy a sling minted","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"f-titled-not-convoy","title":"input convoy for tk-yyyyy: why the walk never fires","issue_type":"bug","metadata":{}},
+  {"id":"o-wisp-aaaaa","title":"order: liveness-sweep (testrig)","issue_type":"task","metadata":{}},
+  {"id":"f-order-human","title":"order: tidy the convoy helpers","issue_type":"task","metadata":{}},
+  {"id":"n-wisp-bbbbb","title":"a wisp of some other kind","issue_type":"task","metadata":{}}
 ]
 JSON
 
@@ -258,6 +265,19 @@ hasnt ",$SURV," ",f-carried," "a bead already in the baseline is CARRIED, not ne
 hasnt ",$SURV," ",f-epic-open," "a parent with a non-closed child is excluded (class 2i-a)"
 hasnt ",$SURV," ",f-convoy," "a convoy tracking a live member is excluded (class 2i-b)"
 hasnt ",$SURV," ",f-spec," "a bead tracking a live root is excluded (class 2i-c)"
+# class 0: the per-sling machine convoys and order-tracking wisps a sling mints
+# are machinery, not work. The sweep drops them first; the precheck must too, or
+# every pass after any sling re-arms the very session it just ran to conclude
+# "nothing new".
+hasnt ",$SURV," ",f-input-convoy," "a convoy titled 'input convoy for ...' is excluded (class 0)"
+hasnt ",$SURV," ",f-sling-convoy," "a convoy titled 'sling-...' is excluded (class 0)"
+hasnt ",$SURV," ",f-synthetic-convoy," "a gc.synthetic convoy is excluded (class 0)"
+hasnt ",$SURV," ",o-wisp-aaaaa," "an order-tracking wisp is excluded (class 0)"
+# The guards that keep class 0 from hiding real work. issue_type is load-bearing
+# for the convoy arm; order_wisp requires BOTH the wisp id and the order: title.
+has ",$SURV," ",f-titled-not-convoy," "a non-convoy whose TITLE names a convoy survives — the issue_type guard"
+has ",$SURV," ",f-order-human," "a human bead titled 'order:' with no wisp id survives — order_wisp needs both"
+has ",$SURV," ",n-wisp-bbbbb," "a wisp that is not an order survives — order_wisp needs both"
 # The exclusions the precheck deliberately does NOT make. Each of these IS
 # dropped by the full classifier; the precheck reports them and runs the pass,
 # because the reads that decide them are non-local or non-monotone.

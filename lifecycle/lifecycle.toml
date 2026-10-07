@@ -289,6 +289,14 @@ merge_state_key = "pr_merge_state"
 comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 issue_comment_watermark_key = "pr_issue_comment_watermark"
+# What the watermarks count is feedback: every review, inline comment and
+# conversation comment that is not the city's own post, whoever wrote it. The
+# city's own post carries the mark pr-post.sh appends, or is an unmarked post
+# under the city's login from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ),
+# when its posts did not yet carry one. pr-facts.sh stamps it the first time it
+# reads the open PR; absent or malformed, every post under the city's login is
+# the city's own.
+provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
 # the merge until it closes — the child through a blocks edge, the visit through
@@ -711,6 +719,9 @@ keys = [
   # only when a later head still carries the threads, so the same head never
   # re-files.
   "pr_unengaged_threads",
+  # The provenance cutover, mechanics in [posture] above. Written once per
+  # anchor; signoff.sh reads it for the same test.
+  "pr_provenance_since",
 ]
 
 [metadata.pr_round_trip]
@@ -773,18 +784,20 @@ keys = [
 #   first-reaction-dispose.sh, tools/gc-proactive.sh and mol-first-reaction.toml
 #   read to refuse a SECOND dispose, which would re-release a bead a worker now
 #   holds. Absent means the reaction has not landed. Never cleared.
-# gc.first_reaction — the disposition chosen, `actionable | blocked | ruling`,
-#   written by first-reaction-dispose.sh BEFORE the act. Its presence proves the
-#   reaction was ATTEMPTED, not that it landed: a record present with no
-#   gc.proactive_reaction=1 is a part-way failure, and the run RESUMES rather
-#   than refusing. The completion proof is gc.proactive_reaction, not this key.
-#   Read by that script's own guard, tools/gc-proactive.sh and
+# gc.first_reaction — the disposition chosen, `actionable | recommend | blocked |
+#   close | ruling`, written by first-reaction-dispose.sh BEFORE the act. Its
+#   presence proves the reaction was ATTEMPTED, not that it landed: a record
+#   present with no gc.proactive_reaction=1 is a part-way failure, and the run
+#   RESUMES rather than refusing. The completion proof is gc.proactive_reaction,
+#   not this key. Read by that script's own guard, tools/gc-proactive.sh and
 #   mol-first-reaction.toml. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route or waiting-ids or visit it
-#   named, and the timestamp. _target and _at are read only to compose the
-#   "already landed" message; _reason has no reader and is the one collapse
-#   candidate this surface still carries. Never cleared. _at is RFC-3339 UTC.
+#   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
+#   visit it named, and the timestamp. A ruling or recommend that files its own
+#   gate stamps _target in a second write, once the gate exists. _target and _at
+#   are read only to compose the "already landed" message; _reason has no reader
+#   and is the one collapse candidate this surface still carries. Never cleared.
+#   _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an
@@ -889,13 +902,14 @@ keys = [
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key is the dedup identity — one open bead per key, narrowed to
+# it). finding.key is the dedup identity — one live bead per key, narrowed to
 # finding.about when the finding names a subject bead. finding.scope is which
 # patrol filed it; finding.digest is the message hash that tells a recurrence
 # with changed text from an identical one. finding.occurrences counts the
 # recurrences and finding.first_seen/finding.last_seen bracket them.
-# finding.recurrence_of names the earlier CLOSED finding a reappearance repeats,
-# so a fix that did not hold is visible.
+# finding.recurrence_of names the earlier finding a reappearance repeats: a
+# closed one, or one held at blocked with nothing open left to wait on. Either
+# way a fix that did not hold is visible.
 keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",
