@@ -173,10 +173,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    cursor of its own (`pr-open.cursor.first` and `pr-open.cursor` in the pass
    state dir), because a first-group anchor this arm still holds, such as one
    whose PR a human closed at this head, stays in the group, and in a fixed
-   order it would lead every pass while the anchors behind it waited. For each anchor whose
-   every `pre-open` check in `check_set` reads `green` (the one resolver names
-   that set — `none`/`off` and the universal `approval` rule dropped; an empty
-   set is held, never read as ungated): adopt an existing PR for the branch or
+   order it would lead every pass while the anchors behind it waited.
+   For each anchor whose every `pre-open` check in `check_set` reads `green`
+   (the one resolver names that set — `none`/`off` and the universal
+   `approval` rule dropped; an empty set is held, never read as ungated):
+   adopt an existing PR for the branch or
    `gh pr create` — as a draft when `check_set` names an `open-as-draft` check,
    so a preview can deploy before the change is surfaced, else ready — re-read
    the created PR by number, refuse a moved head, replay the verdict as a comment
