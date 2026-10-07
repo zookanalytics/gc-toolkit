@@ -665,12 +665,13 @@ echo "── the terminal step drains a re-offered LANDED reaction before any ex
 # instead of running one. Extract the
 # last step and assert the guard is there, keyed on the landed marker, and that its
 # drain precedes the first exit block (1a) — so a re-offer never reaches the
-# gate-visit create.
+# gate-visit create. assets/scripts/first-reaction-reacted-guard.test.sh runs the
+# guard against each stored form of the marker; this checks its place in the step.
 AD_STEP="$(awk '/^id = "advance-and-drain"/{f=1} f' "$FORMULA_TOML")"
 has "advance-and-drain guards on the landed reaction marker" "gc.proactive_reaction" "$AD_STEP"
 DRAINS="$(printf '%s\n' "$AD_STEP" | grep -c 'gc runtime drain-ack')"
-eq  "advance-and-drain has two drain paths (the reacted-guard and the terminal close)" "2" "$DRAINS"
-GUARD_DRAIN_LINE="$(printf '%s\n' "$AD_STEP" | grep -n 'gc runtime drain-ack' | head -1 | cut -d: -f1)"
+eq  "advance-and-drain has three drain paths (the reaction-owned stand-down, the reacted-guard, and the terminal close)" "3" "$DRAINS"
+GUARD_DRAIN_LINE="$(printf '%s\n' "$AD_STEP" | awk '/# >>> advance-and-drain-reacted-guard/{f=1} f && /gc runtime drain-ack/{print NR; exit}')"
 EXIT1A_LINE="$(printf '%s\n' "$AD_STEP" | grep -n '1a. ACTIONABLE' | head -1 | cut -d: -f1)"
 { [ -n "$GUARD_DRAIN_LINE" ] && [ -n "$EXIT1A_LINE" ] && [ "$GUARD_DRAIN_LINE" -lt "$EXIT1A_LINE" ]; } \
   && ok "the reacted-guard drains before the first exit block (no gate-visit on a re-offer)" \

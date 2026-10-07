@@ -12,6 +12,14 @@ SCRIPT="$HERE/liveness-sweep.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# The census phases its pre-open gates against review-checks.toml; the SUT runs
+# in place, so by default it would read the live pack's index and classify these
+# fixtures' synthetic lanes (codex, ci) as non-pre-open. Point the override at a
+# missing file so the census takes its pre-phase drop and these fixtures are
+# judged on their lane names alone, hermetically. The phase-aware path has its
+# own case at the end, with a controlled index.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
+
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
@@ -176,6 +184,7 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-inputconvoy","title":"input convoy for c-plain","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
   {"id":"c-slingconvoy","title":"sling-c-plain","issue_type":"convoy"},
   {"id":"c-synthconvoy","title":"a machine convoy under another name","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"c-synthconvoy-bool","title":"a machine convoy whose gc.synthetic reads back as a boolean","issue_type":"convoy","metadata":{"gc.synthetic":true}},
   {"id":"c-realconvoy","title":"an unowned floating convoy — the orphan to catch","issue_type":"convoy","metadata":{}},
   {"id":"c-titletalk","title":"input convoy for tk-x never closes","issue_type":"bug","metadata":{}},
   {"id":"c-slingtalk","title":"sling-created convoys are never reaped","issue_type":"bug","metadata":{}},
@@ -296,7 +305,7 @@ for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \
             c-demand-live c-demand-widen \
             c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
-            c-slingconvoy c-synthconvoy c-wisp-order c-husk-step-1 c-husk-step-2 \
+            c-slingconvoy c-synthconvoy c-synthconvoy-bool c-wisp-order c-husk-step-1 c-husk-step-2 \
             c-rootvisit-step c-parented c-trackslive; do
     case ",$EXPECT_SURVIVORS," in
         *",$drop,"*) bad "dropped $drop" "still in the survivor set" ;;
@@ -650,6 +659,30 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── the phase-aware census asks the resolver, with a controlled index ──"
+# A real index (not the missing-file fallback the rest of this file uses):
+# correctness reads the diff (pre-open), demo needs the preview (open-as-draft).
+# codex is declared NOWHERE — a legacy token the resolver defaults to pre-open,
+# the case the old re-implemented phase filter DROPPED, classing a green
+# legacy-token anchor as un-gated and flagging it.
+PH_IDX="$TMP/phase-index.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$PH_IDX"
+printf '%s\n' '[
+  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
+  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.correctness":"green"}},
+  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.demo":"green"}},
+  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}}
+]' > "$TMP/ph-ready.json"
+GC_REVIEW_CHECKS_INDEX="$PH_IDX" FAKE_READY="$TMP/ph-ready.json" run_sweep ABSENT
+eq "$RC" "0" "the phase-aware pass completes"
+# Only ph-preopen-ungreen is an unnamed wait: the legacy codex token gated pre-open
+# (resolver default, not dropped) and its green read as converged; the open-as-draft
+# demo did NOT hold the pre-open census; a genuinely ungreen pre-open lane still does.
+# The mixed-case lane reads its marker under the token's own case (check.Arch), the
+# key signoff stamps, so it reads green rather than flagged.
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
+   "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is
