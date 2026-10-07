@@ -286,7 +286,10 @@ Rules:
 - **A visit acts on its universe; it does not change a repo.** Within a
   sitting you act on beads and on the subject's PR: you file, update, close
   and dispose beads; comment on the PR; reply to and resolve its review
-  threads; and retire it. What you never do is change a repository. Never
+  threads; and retire it. Post every comment and reply through
+  `assets/scripts/pr-post.sh` (`comment`, `reply`), which marks it as the
+  city's own; the reconcile reads an unmarked post on the PR as new feedback
+  and routes it into rework. What you never do is change a repository. Never
   write files into one and never run `git commit`, in any repository, not
   only the rig checkout. The reason is not what a particular checkout holds:
   a sitting is a conversation, and a conversation is not a unit of work.

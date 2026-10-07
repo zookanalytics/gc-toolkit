@@ -33,10 +33,10 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse`](agents/converse.md) | 34,056 | 8,514 |
-| [`converse-codex`](agents/converse-codex.md) | 34,056 | 8,514 |
-| [`converse-fable`](agents/converse-fable.md) | 34,056 | 8,514 |
-| [`converse-opus`](agents/converse-opus.md) | 34,056 | 8,514 |
+| [`converse`](agents/converse.md) | 34,273 | 8,568 |
+| [`converse-codex`](agents/converse-codex.md) | 34,273 | 8,568 |
+| [`converse-fable`](agents/converse-fable.md) | 34,273 | 8,568 |
+| [`converse-opus`](agents/converse-opus.md) | 34,273 | 8,568 |
 | [`deacon`](agents/deacon.md) | 13,533 | 3,383 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
@@ -45,7 +45,7 @@ covers that dimension.
 | [`mechanik`](agents/mechanik.md) | 28,668 | 7,167 |
 | [`polecat`](agents/polecat.md) | 27,091 | 6,772 |
 | [`polecat-codex`](agents/polecat-codex.md) | 27,121 | 6,780 |
-| [`proactive`](agents/proactive.md) | 12,013 | 3,003 |
+| [`proactive`](agents/proactive.md) | 12,122 | 3,030 |
 | [`refinery`](agents/refinery.md) | 10,950 | 2,737 |
 | [`witness`](agents/witness.md) | 15,605 | 3,901 |
 
@@ -65,7 +65,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,285 | 571 |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,302 | 575 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
