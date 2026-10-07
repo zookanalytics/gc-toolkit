@@ -402,6 +402,26 @@ case "$verb" in
     # blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
     # depends_on=B). Queries honor --direction (down = follow the id's own
     # dependency rows; up = rows depending on the id) and -t/--type.
+    #
+    # Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
+    # type. Re-adding a pair with the type it already carries is a no-op that
+    # exits 0; asking for any other type is refused with exit 1 and writes
+    # nothing. The reversed pair is a different pair. Both writers below store
+    # through dep_put, so no write through the stub leaves two edges on one
+    # pair, a state bd refuses to create.
+    dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
+      local issue="$1" on="$3" have
+      [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
+      have=$(awk -F'|' -v i="$issue" -v d="$on" '
+        { if ($2 == "blocks") { ri=$3; rd=$1 } else { ri=$1; rd=$3 }
+          if (ri == i && rd == d) { print $2; exit } }' "$D")
+      if [ -z "$have" ]; then
+        printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$D"
+      elif [ "$have" != "$2" ]; then
+        echo "Error: dependency $issue -> $on already exists with type \"$have\" (requested \"$2\"); remove it first with 'bd dep remove' then re-add" >&2
+        return 1
+      fi
+    }
     case "${1:-}" in
       list)
         [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
@@ -447,9 +467,9 @@ case "$verb" in
         # ("A|blocks|B" = A blocks B), so a blocks add swaps its operands to match;
         # every other edge type keeps the source-first orientation.
         if [ "$ty" = "blocks" ]; then
-          printf '%s|%s|%s\n' "$b" "$ty" "$a" >> "$D"
+          dep_put "$b" "$ty" "$a" || exit 1
         else
-          printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D"
+          dep_put "$a" "$ty" "$b" || exit 1
         fi ;;
       remove|rm)
         # gc bd dep remove <issue> <depends-on>: drop the edge with that
@@ -467,7 +487,7 @@ case "$verb" in
         # STUB_DEP_FAIL="id id2" — refuse to attach an edge whose src is named,
         # modelling a dep write that reports failure so a fail-closed caller retries.
         case " ${STUB_DEP_FAIL:-} " in *" $src "*) echo "gc bd dep: simulated refusal for $src" >&2; exit 1 ;; esac
-        [ "${1:-}" = "--blocks" ] && printf '%s|%s|%s\n' "$src" "blocks" "${2:-}" >> "$D" ;;
+        [ "${1:-}" = "--blocks" ] && { dep_put "$src" blocks "${2:-}" || exit 1; } ;;
     esac
     ;;
   *) echo "gc bd stub: unsupported '$verb'" >&2; exit 2 ;;
