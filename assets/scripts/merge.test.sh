@@ -1158,18 +1158,23 @@ eq "$(pinned BK6)" "progressing@sha-99" "a conflicting branch with a pool-routed
 
 # GitHub computes mergeability lazily. A merge moves the base under every sibling,
 # and each sibling's first read after it answers UNKNOWN while the computation that
-# read started runs. pr_view_<n>.queue/ scripts the reads in order; the fixture is
-# the computed answer every later read gets.
+# read started runs. pr_view_<n>.queue/<fields>/ scripts the reads of one field
+# set in order; the fixture is the computed answer every later read gets.
 unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
-queue_answer() { # num seq answer: read <seq> gets <answer>
-  mkdir -p "$GH_DIR/pr_view_$1.queue"
-  printf '%s' "$3" > "$GH_DIR/pr_view_$1.queue/$2.json"
+# The pinned read's field set, from bd-lib.sh, where merge.sh takes it. The queue
+# is keyed by it, so a queued answer goes to the pinned read or a re-read of it
+# and never to a read of another field set.
+# shellcheck source=bd-lib.sh
+PR_FIELDS=$(. "$HERE/bd-lib.sh" && printf '%s' "$PR_FIELDS")
+queue_answer() { # num seq answer: read <seq> of the pinned field set gets <answer>
+  mkdir -p "$GH_DIR/pr_view_$1.queue/$PR_FIELDS"
+  printf '%s' "$3" > "$GH_DIR/pr_view_$1.queue/$PR_FIELDS/$2.json"
 }
 unknown_first() { # num
   queue_answer "$1" 01 "$(prview "$1" OPEN UNKNOWN)"
 }
 pinned_reads() { # num: reads of the pinned field set, re-reads included
-  grep -c "^pr view $1 --repo github.com/zook/gc-toolkit --json state,isDraft," "$STUB_GH_LOG" || true
+  grep -c "^pr view $1 --repo github.com/zook/gc-toolkit --json $PR_FIELDS\$" "$STUB_GH_LOG" || true
 }
 
 echo "# one pass lands every approved clean PR, though each sibling first reads UNKNOWN after a merge"

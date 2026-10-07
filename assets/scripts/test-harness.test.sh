@@ -75,5 +75,22 @@ hasnt " $(down_blockers tk-blk) " " tk-kd " "...not the reverse — the first op
 gc bd dep tk-blk --blocks tk-kd
 has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> lands the same orientation as the dep add form"
 
+# The gh pr view queue scripts the reads of one field set in order, ahead of the
+# fixture. A suite queues an UNKNOWN merge state, a failed read, then a computed
+# answer, and every step has to reach the read it was queued for: a read of
+# another field set must not take one, and an empty file must fail one read and
+# then be gone, or every later read fails on it.
+printf '{"n":"fixture"}' > "$GH_DIR/pr_view_7.json"
+Q="$GH_DIR/pr_view_7.queue/a,b"; mkdir -p "$Q"
+printf '{"n":"first"}' > "$Q/01.json"; : > "$Q/02.json"; printf '{"n":"third"}' > "$Q/03.json"
+view7() { gh pr view 7 --repo zook/gc-toolkit --json "$1" -q .n 2>/dev/null; }
+eq "$(view7 c)" "fixture" "pr view queue: a read of another field set gets the fixture"
+eq "$(view7 a,b)" "first" "pr view queue: a read of the queued field set takes the first file"
+out=$(view7 a,b); rc=$?
+eq "$rc:$out" "1:" "pr view queue: an empty file is a failed read"
+eq "$(view7 a,b)" "third" "pr view queue: …consumed, so the next read takes the file after it"
+eq "$(view7 a,b)" "fixture" "pr view queue: the fixture answers once the queue is empty"
+eq "$(find "$Q" -type f | wc -l | tr -d ' ')" "0" "pr view queue: every queued file was consumed"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
