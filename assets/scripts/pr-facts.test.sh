@@ -2080,6 +2080,23 @@ hasnt "$out" "feedback history unreadable" "…the lists read cleanly"
 hasnt "$out" "routed to rework" "…and the unmarked post under our login routes nothing"
 eq "$(meta PV5 pr_provenance_since)" "last tuesday" "…and the stamp is left for a person to read"
 
+echo "# provenance: a review drafted before the cutover and submitted after it is feedback whole"
+# An inline comment is drafted inside a pending review and published with it.
+# Dated by its own creation it would read as the city's while the review body
+# routed as feedback, and the child would carry the summary without the findings.
+store "[$(anchor PV7 169 "$CUT")]"
+printf '%s' "$(prview 169 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_169.json"
+printf '[{"id":9710,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Automated review: one finding below.","commit_id":"sha-169","submitted_at":"2026-10-07T00:10:00Z"}]' > "$GH_DIR/reviews_169.json"
+printf '[{"id":9711,"user":{"login":"gc-city-bot"},"body":"Guard the empty read.","path":"assets/scripts/merge.sh","line":7,"pull_request_review_id":9710,"created_at":"2026-10-06T23:50:00Z"}]' > "$GH_DIR/comments_169.json"
+echo '[]' > "$GH_DIR/issue_comments_169.json"
+out=$(run)
+has "$out" "routed to rework:" "the straddling review routes"
+eq "$(meta PV7 pr_review_watermark)" "9710" "…its body advances the review mark"
+eq "$(meta PV7 pr_comment_watermark)" "9711" "…and its inline comment, drafted before the cutover, advances the comment mark with it"
+PV7C=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "PV7") | .id ] | .[0] // ""' "$STUB_STORE")
+has "$(desc "$PV7C")" "Guard the empty read." "the child carries the inline finding, not only the summary"
+eq "$(jq '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) | select((.metadata.anchor_bead // "") == "PV7") ] | length' "$STUB_STORE")" "0" "…so the unengaged-thread backstop has nothing of it to file"
+
 echo "# …an unreadable review list still records the veto, and routes nothing"
 store "[$(anchor PA 55)]"
 printf '%s' "$(prview 55 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_55.json"
@@ -2602,6 +2619,18 @@ threads 166 "$(printf '%s' "$(one_thread 166)" | jq -c '.threads[0].comments.nod
   | .threads[0].comments.nodes[0].createdAt = "2026-10-07T01:00:00Z"')"
 out=$(run)
 eq "$(reacted 166 NC-166)" "true" "the routed model-review comment gets its EYES reaction"
+
+echo "# …and a comment drafted before the cutover in a review submitted after it is acknowledged too"
+# The write-back reads the same provenance the routing arm routed by: a thread
+# comment is dated by its review's submission, so the comment the child carries
+# is the comment the write-back acknowledges.
+store "[$(anchor W7C 174 "$(wb_meta rework:K7C)"',"pr_provenance_since":"2026-10-07T00:00:00Z"'), $(child K7C open)]"
+printf '%s' "$(prview 174 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_174.json"
+threads 174 "$(printf '%s' "$(one_thread 174)" | jq -c '.threads[0].comments.nodes[0].author.login = "gc-city-bot"
+  | .threads[0].comments.nodes[0].createdAt = "2026-10-06T23:50:00Z"
+  | .threads[0].comments.nodes[0].pullRequestReview = {submittedAt: "2026-10-07T00:10:00Z"}')"
+out=$(run)
+eq "$(reacted 174 NC-174)" "true" "the straddling review's comment gets its EYES reaction"
 
 echo "# a review body that produced the bead is acknowledged too"
 store "[$(anchor W8 47 "$(wb_rmeta rework:K8 55)"), $(child K8 open)]"

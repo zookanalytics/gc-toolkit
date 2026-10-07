@@ -177,6 +177,17 @@ eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"Addressed in abc.\n<!-- gc
   "the write-back reply marker counts as the city's mark"
 eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"<!-- gc:visit:tk-v -->\n### Visit","created_at":"2026-10-08T00:00:00Z"}')" true \
   "the visit-comment marker counts as the city's mark"
+# An inline comment is drafted inside a pending review and published with it, so
+# its instant is the review's submission: a review drafted before the cutover and
+# submitted after it is feedback whole, its inline comments included.
+eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"inline","created_at":"2026-10-06T23:00:00Z","gc_review_submitted_at":"2026-10-07T00:10:00Z"}')" false \
+  "a REST inline comment drafted before the cutover, its review submitted after, is feedback"
+eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"inline","created_at":"2026-10-06T23:00:00Z","gc_review_submitted_at":"2026-10-06T23:30:00Z"}')" true \
+  "a REST inline comment whose review was submitted before the cutover is ours"
+eq "$(own bot "$CUT" '{"author":{"login":"bot"},"body":"inline","createdAt":"2026-10-06T23:00:00Z","pullRequestReview":{"submittedAt":"2026-10-07T00:10:00Z"}}')" false \
+  "a GraphQL comment node is dated by its review's submittedAt"
+eq "$(own bot "$CUT" '{"author":{"login":"bot"},"body":"inline","createdAt":"2026-10-06T23:00:00Z","pullRequestReview":{"submittedAt":null}}')" true \
+  "a comment whose review carries no submission falls back to its own createdAt"
 # The cutover's shape is tested inside the definition, so a reader passes the
 # stamp as it found it and a malformed one fails open the same way everywhere.
 eq "$(own bot "2026-10-07" '{"user":{"login":"bot"},"body":"anything","created_at":"2026-10-09T00:00:00Z"}')" true \

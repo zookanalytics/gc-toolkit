@@ -646,6 +646,11 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
 # comments are live feedback, and a PR green everywhere else would merge over
 # them. A comment naming no review, or naming one the review list does not
 # carry, is standalone and stays.
+# Each kept comment is stamped with its review's submission instant as
+# gc_review_submitted_at, the instant gc_city_own dates an inline comment by: a
+# comment drafted in a pending review is published when the review is submitted,
+# so a review drafted before the provenance cutover and submitted after it reads
+# as feedback whole, never its body as feedback and its comments as the city's.
 live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
   { printf '%s\n' "$1"; printf '%s\n' "$2"; } | \
   jq -nc '
@@ -653,9 +658,15 @@ live_comments() { # <reviews-json> <comments-json> — comments no dismissal ret
     ([ $revs[]
        | select(((.state // "") | tostring) == "DISMISSED")
        | ((.id // 0) | tostring) ]) as $retired
+  | ([ $revs[]
+       | select(((.submitted_at // "") | tostring) != "")
+       | { key: ((.id // 0) | tostring), value: ((.submitted_at) | tostring) } ]
+     | from_entries) as $submitted
   | [ $cmts[]
       | (((.pull_request_review_id // "") | tostring)) as $parent
-      | select(($retired | index($parent)) == null) ]' 2>/dev/null
+      | select(($retired | index($parent)) == null)
+      | if ($submitted[$parent] // "") != ""
+        then . + { gc_review_submitted_at: $submitted[$parent] } else . end ]' 2>/dev/null
 }
 # A batch names the reviews it answers, the way a signoff-sourced child names
 # its review bead. An empty-bodied CHANGES_REQUESTED is named here even though
@@ -2472,8 +2483,9 @@ fi
 # connection here is read to exhaustion. `gh --paginate` follows exactly one
 # cursor, so the reviews and the threads are separate reads rather than one
 # nested query, and neither carries a second cursor for it to choose between.
-# Every node carries its author, body and creation instant: the facts
-# gc_city_own reads to tell the city's own post from feedback.
+# Every node carries its author, body and creation instant, and a thread comment
+# its review's submission: the facts gc_city_own reads to tell the city's own
+# post from feedback.
 #
 # Those reads cost at least four GitHub calls an anchor, so the sweep is paced
 # like the walk above (pace-lib.sh): the same deadline, a rotation on a cursor
@@ -2510,12 +2522,14 @@ WB_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
         pageInfo{hasNextPage endCursor}
         nodes{id isResolved viewerCanResolve
           comments(first:100){nodes{id databaseId author{login} body createdAt
+            pullRequestReview{submittedAt}
             reactionGroups{content viewerHasReacted}}}}}}}}'
 WB_THREAD_COMMENTS_QUERY='query($id:ID!,$endCursor:String){
   node(id:$id){... on PullRequestReviewThread{
     comments(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
       nodes{id databaseId author{login} body createdAt
+        pullRequestReview{submittedAt}
         reactionGroups{content viewerHasReacted}}}}}}'
 # The nested `first:` above, named. A thread that comes back holding this many
 # comments is one the top-up has to re-read; change either without the other and
