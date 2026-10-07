@@ -12,9 +12,11 @@
 # changed kept as that side committed it, the commit naming what it resolved,
 # no hook run; and every refusal leaving the stopped merge for the caller's abort
 # and committing nothing: a hand-written conflict, no renderer, an unstaged
-# change besides the conflicts (left in place), a failed render, a hung render,
-# a render that moves a path neither side changed or only one side changed, and
-# a render that writes outside its tree.
+# change or an untracked file besides the conflicts (left in place), a failed
+# render, a hung render, a render that moves a path neither side changed or only
+# one side changed, and a render that writes outside its tree, to a tracked file
+# or to a file it creates (removed, even where the abort writes back a path the
+# merge deleted).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,7 +26,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Host signing of commits and tags must not make this suite need a signing agent.
 export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
   GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
-unset STUB_RENDER_FAIL STUB_RENDER_DRIFT STUB_RENDER_OUTSIDE STUB_RENDER_SLEEP REGEN_MERGE_RENDER_TIMEOUT 2>/dev/null || true
+unset STUB_RENDER_FAIL STUB_RENDER_DRIFT STUB_RENDER_OUTSIDE STUB_RENDER_CREATE STUB_RENDER_SLEEP REGEN_MERGE_RENDER_TIMEOUT 2>/dev/null || true
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -61,6 +63,7 @@ for f in "$ROOT"/inputs/*.txt; do
 done
 [ -z "${STUB_RENDER_DRIFT:-}" ] || echo "a line neither side committed" >> "$OUT/$STUB_RENDER_DRIFT"
 [ -z "${STUB_RENDER_OUTSIDE:-}" ] || echo "stray" >> "$ROOT/notes.txt"
+[ -z "${STUB_RENDER_CREATE:-}" ] || echo "stray" > "$ROOT/$STUB_RENDER_CREATE"
 echo "wrote generated/seed-audit (stub)"
 RENDER
 chmod +x "$R/assets/scripts/render-seed-audit.sh"
@@ -96,6 +99,10 @@ sed -i 's/^b6$/b6 moved by main/' "$R/inputs/b.txt"
 sed -i 's/^n2$/n2 by main/' "$R/notes.txt"
 commit_on main "main moves b and notes"
 MAIN=$(git -C "$R" rev-parse HEAD)
+# main-gone also deletes notes.txt, so a merge into it drops a path the branch
+# still has, and the caller's abort has to write that path back.
+git -C "$R" checkout -q -b main-gone "$MAIN"
+git -C "$R" rm -q notes.txt; commit_on main-gone "main-gone deletes notes"
 git -C "$R" checkout -q --orphan unrelated
 git -C "$R" rm -rqf . >/dev/null; echo u > "$R/u.txt"; git -C "$R" add u.txt; git -C "$R" commit -qm unrelated
 git -C "$R" checkout -q -f main
@@ -128,13 +135,13 @@ out=$("$SUT" frobnicate 2>&1); rc=$?
 eq "$rc" 2 "an unknown subcommand is a usage error"
 eq "$(git -C "$R" rev-parse HEAD)" "$MAIN" "classifying moved no ref and checked nothing out"
 
-# A stopped merge of <branch> onto main's tip in a fresh detached worktree, the
-# state the refinery's prepare step hands resolve.
-stopped_merge() { # <branch> — prints the worktree
+# A stopped merge of <target> (main unless named) into <branch> in a fresh
+# detached worktree, the state the refinery's prepare step hands resolve.
+stopped_merge() { # <branch> [<target>] — prints the worktree
   local wt
   wt=$(mktemp -d "$TMP/wt.XXXXXX")
   git -C "$R" worktree add -q --detach "$wt" "$1" >/dev/null 2>&1
-  git -C "$wt" merge --no-edit main >/dev/null 2>&1 && echo "UNEXPECTED: $1 merged cleanly" >&2
+  git -C "$wt" merge --no-edit "${2:-main}" >/dev/null 2>&1 && echo "UNEXPECTED: $1 merged cleanly" >&2
   printf '%s' "$wt"
 }
 merging() { git -C "$1" rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1 && echo yes || echo no; }
@@ -203,6 +210,18 @@ has "$out" "inputs/a.txt" "…naming the changed path"
 has "$(cat "$W/inputs/a.txt")" "an edit nobody staged" "…and the change is left in place, not undone"
 refused "$W" "$FEAT" "unstaged change"
 
+# An untracked input is the same hazard: the renderer finds its inputs on disk,
+# so the render would count the file and the commit would leave it out. `git
+# diff` never lists it, and the removal after the render must never reach it.
+W=$(stopped_merge feat)
+printf 'd1\n' > "$W/inputs/d.txt"
+out=$("$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 1 "an untracked file besides the conflicts is refused"
+has "$out" "stay out of the commit: inputs/d.txt" "…naming the untracked path"
+[ -e "$W/generated/seed-audit/inputs/d.txt.md" ] && bad "…before any render" || ok "…before any render"
+eq "$(cat "$W/inputs/d.txt" 2>/dev/null)" "d1" "…and the file is left in place, not removed"
+refused "$W" "$FEAT" "untracked file"
+
 W=$(stopped_merge feat)
 out=$(STUB_RENDER_FAIL=1 "$SUT" resolve --dir "$W" 2>&1); rc=$?
 eq "$rc" 1 "a failed render is refused"
@@ -241,6 +260,26 @@ out=$(STUB_RENDER_OUTSIDE=1 "$SUT" resolve --dir "$W" 2>&1); rc=$?
 eq "$rc" 1 "a render that writes outside its tree is refused"
 has "$out" "changed files outside generated/seed-audit" "…as such"
 refused "$W" "$FEAT" "out-of-tree render"
+
+# A file the render creates is no unstaged change, so `git diff` passes it, and
+# the merge would be committed while the checks that run next read a file the
+# push leaves out.
+W=$(stopped_merge feat)
+out=$(STUB_RENDER_CREATE=untracked-side-effect.txt "$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 1 "a render that creates a file outside its tree is refused"
+has "$out" "created files outside generated/seed-audit: untracked-side-effect.txt" "…naming the file"
+[ -e "$W/untracked-side-effect.txt" ] && bad "…and the file is removed" || ok "…and the file is removed"
+refused "$W" "$FEAT" "created file"
+
+# Where the merge deleted a path the branch has, a file the render leaves there
+# stops the caller's abort, which writes that path back.
+W=$(stopped_merge feat main-gone)
+[ -e "$W/notes.txt" ] && bad "the fixture merge deleted notes.txt" || ok "the fixture merge deleted notes.txt"
+out=$(STUB_RENDER_CREATE=notes.txt "$SUT" resolve --dir "$W" 2>&1); rc=$?
+eq "$rc" 1 "a render that recreates a path the merge deleted is refused"
+has "$out" "created files outside generated/seed-audit: notes.txt" "…naming the path"
+refused "$W" "$FEAT" "recreated path"
+eq "$(cat "$W/notes.txt" 2>/dev/null)" "$(git -C "$R" show "$FEAT:notes.txt")" "…and the abort writes the branch's copy back"
 
 echo "# resolve with nothing to resolve"
 W="$TMP/wt-idle"; git -C "$R" worktree add -q --detach "$W" feat >/dev/null 2>&1
