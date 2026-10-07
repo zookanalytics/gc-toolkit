@@ -273,7 +273,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass budget, and per anchor requires both sides to resolve there and
    probes `git merge-tree --write-tree`; a conflict files the same merge-in
    rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
-   branch shape is brought current by merge, never rebase). An anchor pr-open
+   branch shape is brought current by merge, never rebase), and sends it where
+   arm 7 does. An anchor pr-open
    flipped this pass carries a PR, where `mergeable` answers the question and
    arm 7 owns the dispatch. Both arms probe
    children on `metadata.branch` and write the same `head <oid>` phrasing, so
@@ -325,7 +326,8 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 7. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
-   (→ `retargeted` + visit), CONFLICTING (one rework child per head), `BLOCKED`
+   (→ `retargeted` + visit), CONFLICTING (one rework child per head; see
+   below for where it goes), `BLOCKED`
    (→ a visit under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
    from the branch's own rules. A missing required approving review files no
@@ -384,6 +386,21 @@ the cadence — the arms run whether or not any refinery session is awake.
    a disposition, at least four calls each, so it runs under the same deadline
    in a rotation of its own (`pr-facts.cursor.writeback`), with one anchor
    visited even on a pass whose walk spent the deadline.
+
+   A merge-in child goes to the refinery when every conflict sits inside
+   `generated/seed-audit`, and to the fix pool otherwise. That tree is rendered
+   from the whole source tree and committed per branch, so when the base and a
+   branch both move render inputs, its manifest and index can conflict while
+   every input merges cleanly: each side rewrote the same hash or byte-count
+   line. The only resolution is a render of the merged inputs.
+   `regen-merge.sh classify` decides the shape from the base and the
+   head GitHub called CONFLICTING, fetched into `refs/gc-toolkit/pr-facts/*`,
+   reading the object store only. The refinery's prepare step then runs
+   `regen-merge.sh resolve`, which commits the merge with the tree rendered
+   again, so no polecat session is spent on it. Any answer short of
+   regenerable (a failed fetch, a head that moved, a classifier that cannot
+   tell) keeps the fix pool, which can bring any conflict current. Arm 5 makes
+   the same choice from the tips its pass fetch already holds.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

@@ -11,9 +11,11 @@
 # + escalate.sh visit; base moved -> retargeted +
 # escalate (check markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING with no feedback owed -> file ONE
-# merge-in rework child while none is in flight, to the fix pool that brings the
-# branch current by MERGE (no branch shape is
-# rebased or force-pushed), stamped prepare_mode=merge and counted as
+# merge-in rework child while none is in flight, which brings the branch
+# current by MERGE (no branch shape is rebased or force-pushed). The child goes
+# to the refinery when every conflict sits inside generated/seed-audit, whose
+# one resolution is the render its prepare step runs, and to the fix pool
+# otherwise. It is stamped prepare_mode=merge and counted as
 # dispatched only once that stamp AND the route itself read back (dedup: a LIVE
 # rework child on this branch, in flight or parked; a closed one is a finished
 # round and does not stand the dispatch down, so a still-dirty branch with
@@ -90,7 +92,9 @@
 # merge still gates on an explicit one.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
-# Args: --fix-pool <pool>; --posture-only (the cheap pre-merge arm: record
+# Args: --fix-pool <pool>; --refinery <agent> (where a merge-in child whose
+# every conflict is generated goes; absent, every merge-in child goes to the fix
+# pool); --posture-only (the cheap pre-merge arm: record
 # posture and stop); --route-comments-only (the early arm that routes
 # operator feedback and stops after it, skipping the write-back sweep and every
 # non-feedback arm, so a pass killed before the full arm has still picked the
@@ -149,11 +153,20 @@ VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # task_kind=finding bead through it, so the validation pass it opens has a finding
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
 FINDING="$SCRIPTS_DIR/finding.sh"
+# The conflict classifier. The CONFLICTING arm asks it whether a branch's every
+# conflict sits inside a generated tree, the shape the refinery finishes with a
+# render instead of a polecat finishing it by hand.
+REGEN_MERGE="$SCRIPTS_DIR/regen-merge.sh"
+# Where that arm parks the two tips it classifies. Its own namespace, so nothing
+# here can move a branch or a remote-tracking ref; merge.sh's seed-audit gate and
+# pre-open-rebase.sh use the same device.
+CONFLICT_REF="refs/gc-toolkit/pr-facts"
 
-FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""
+FIX_POOL=""; REFINERY=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool)            FIX_POOL="${2:-}"; shift 2 ;;
+    --refinery)            REFINERY="${2:-}"; shift 2 ;;
     --posture-only)        POSTURE_ONLY=1; shift ;;
     --route-comments-only) ROUTE_ONLY=1; shift ;;
     --deadline)            DEADLINE="${2:-}"; shift 2 ;;
@@ -507,6 +520,26 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
     || echo "$PROG: WARN could not attach rework $fix as a blocks-dep of $anchor" >&2
   printf '%s' "$fix"
   return 0
+}
+
+# Who brings a conflicting branch current. A conflict confined to
+# generated/seed-audit has one resolution, a render from the merged inputs, and
+# the refinery's prepare step performs it (regen-merge.sh resolve), so that child
+# goes to the refinery and no polecat spends a session on it. Every other
+# conflict needs a person's judgment and goes to the fix pool. The classifier
+# reads the two tips fetched into this arm's own namespace, and only when the
+# fetched head is the one GitHub called CONFLICTING. Anything short of a
+# regenerable verdict keeps the fix pool, which can bring any conflict current:
+# no refinery named, a failed fetch, a moved head, a classifier that cannot tell.
+merge_in_route() { # <base-branch> <head-branch> <head-oid>; prints the refinery or the fix pool
+  if [ -n "$REFINERY" ] && [ -n "$3" ] && [ -x "$REGEN_MERGE" ] \
+     && git fetch --quiet --no-tags origin "+refs/heads/$1:$CONFLICT_REF/base" "+refs/heads/$2:$CONFLICT_REF/head" 2>/dev/null \
+     && [ "$(git rev-parse --verify --quiet "$CONFLICT_REF/head" 2>/dev/null)" = "$3" ] \
+     && "$REGEN_MERGE" classify "$CONFLICT_REF/base" "$CONFLICT_REF/head" >/dev/null 2>&1; then
+    printf '%s' "$REFINERY"
+  else
+    printf '%s' "$FIX_POOL"
+  fi
 }
 
 mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number> — echoes "true" iff the full identity read back
@@ -1542,15 +1575,26 @@ REAP_EOF
         echo "$PROG: $id could not form the rework child for PR#$num; retry next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
-      gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
-      rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
-      if [ "$rgot" != "$FIX_POOL" ]; then
-        echo "$PROG: WARN rework $FIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2
+      route=$(merge_in_route "$base" "$fix_branch" "$head_oid")
+      route_note=""
+      if [ -n "$REFINERY" ] && [ "$route" = "$REFINERY" ]; then
+        # The refinery reads its queue by assignee, which is how a polecat's
+        # handoff reaches it too. No pool route: named-session work is not pool
+        # demand.
+        gc bd update "$FIX" --assignee="$REFINERY" >/dev/null 2>&1 || true
+        rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].assignee // empty')
+        route_note=" (every conflict is inside generated/seed-audit, which the refinery's prepare re-renders)"
+      else
+        gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+        rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+      fi
+      if [ "$rgot" != "$route" ]; then
+        echo "$PROG: WARN rework $FIX formed but not routed to $route; left unrouted, the stranded arm re-routes it next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
-      gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
+      gc session wake "$route" >/dev/null 2>&1 || true
       reworked=$((reworked + 1))
-      echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
+      echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $route$route_note"
       continue
     fi
   fi

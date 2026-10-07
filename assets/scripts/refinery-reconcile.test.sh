@@ -110,6 +110,8 @@ near "$(offset "$gate_line")" 140 "gate-ensure a third"
 near "$(offset "$full_facts")" 210 "pr-facts half"
 near "$(offset "$stack_line")" 420 "and pr-stack all that is left"
 has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--fix-pool myrig/gc-toolkit.polecat" "pre-open-rebase got the derived fix pool"
+has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--refinery myrig/gc-toolkit.refinery" \
+  "pre-open-rebase got the discovered refinery, where a child whose every conflict is generated goes"
 case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
   *"|myrig/gc-toolkit.refinery|"*) bad "pre-open-rebase must NOT inherit BEADS_ACTOR (it closes nothing)" ;;
   *) ok "pre-open-rebase ran without the BEADS_ACTOR projection" ;;
@@ -123,6 +125,10 @@ eq "$(printf '%s\n' "$facts_line" | wc -l | tr -d ' ')" 1 "the full pr-facts arm
 has "$facts_line" "--fix-pool myrig/gc-toolkit.polecat" "pr-facts got the derived fix pool"
 hasnt "$facts_line" "--review-pool" "…and no review pool: it dispatches no reviews"
 has "$facts_line" "|myrig/gc-toolkit.refinery|" "pr-facts ran as BEADS_ACTOR=<refinery>"
+has "$facts_line" "--refinery myrig/gc-toolkit.refinery" \
+  "pr-facts got the discovered refinery, where a merge-in child whose every conflict is generated goes"
+feedback_line=$(grep '^pr-facts.sh|--route-comments-only' "$ARM_LOG")
+hasnt "$feedback_line" "--refinery" "the feedback arm takes no refinery: it files no merge-in child"
 
 # merge.sh reads pr_posture off the bead and never asks GitHub, so a posture
 # written by the pass BEFORE it cannot see a comment that arrived since. The

@@ -41,14 +41,21 @@ chmod +x "$BIN/git"
 
 # --- fixture repository ---------------------------------------------------------
 # One base point. Four branches edit line 2 and then main edits it too, so each
-# conflicts; one branch touches a different file and still merges.
+# conflicts; one branch touches a different file and still merges. Two more edit
+# only a line of generated/seed-audit/SOURCES.txt that main also edits, which is
+# a conflict confined to the generated tree; one of them also deletes the
+# renderer, so its merged tree has nothing to render with. The renderer's
+# content is never run here: the classifier only asks whether it is present.
 SRC="$TMP/src"; WORK="$TMP/work"
 git init -q -b main "$SRC"
 (
   cd "$SRC" || exit 1
   git config user.email t@t; git config user.name t
   printf 'l1\nl2\nl3\n' > f.txt
-  git add f.txt; git commit -qm base
+  mkdir -p generated/seed-audit assets/scripts
+  printf 'inputs/a\nhash-a\ninputs/b\nhash-b\n' > generated/seed-audit/SOURCES.txt
+  echo '# renderer' > assets/scripts/render-seed-audit.sh
+  git add f.txt generated assets; git commit -qm base
   BASE=$(git rev-parse HEAD)
   for spec in "polecat/tk-c1:C1" "integration/conv:CONV" "polecat/tk-grad:GRAD" "polecat/tk-hold:HOLD"; do
     git checkout -q -b "${spec%%:*}" "$BASE"
@@ -57,17 +64,24 @@ git init -q -b main "$SRC"
   done
   git checkout -q -b polecat/tk-ok "$BASE"
   echo g > g.txt; git add g.txt; git commit -qm ok
+  git checkout -q -b polecat/tk-gen "$BASE"
+  printf 'inputs/a\nhash-a-branch\ninputs/b\nhash-b\n' > generated/seed-audit/SOURCES.txt
+  git commit -qam gen
+  git checkout -q -b polecat/tk-gen-norender polecat/tk-gen
+  git rm -q assets/scripts/render-seed-audit.sh; git commit -qm "gen without its renderer"
   git checkout -q main
   printf 'l1\nMAIN\nl3\n' > f.txt
+  printf 'inputs/a\nhash-a-main\ninputs/b\nhash-b\n' > generated/seed-audit/SOURCES.txt
   git commit -qam main-moves
 ) >/dev/null 2>&1
 git clone -q "$SRC" "$WORK"
 C1_HEAD=$(git -C "$SRC" rev-parse polecat/tk-c1)
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh"
+mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/regen-merge.sh"
 SUT="$SD/pre-open-rebase.sh"
 POOL="loomington/gc-toolkit.polecat"
+REF="loomington/gc-toolkit.refinery"
 
 run() { ( cd "$WORK" && "$SUT" "$@" 2>&1 ); }
 
@@ -230,6 +244,50 @@ has "$OUT" "did not record task_kind=rework/anchor_bead" "a role marker that wil
 eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than dispatched as an anchor-lookalike"
 hasnt "$OUT" "filed merge-mode rework" "so a child a metadata read cannot tell from its anchor is never counted as dispatched"
 export STUB_DROP_KEYS=""
+
+echo "# a conflict confined to generated/seed-audit goes to the refinery"
+# Its one resolution is a render of the merged inputs, which the refinery's
+# prepare step runs, so no polecat is spent on it.
+reset "$(pre AG polecat/tk-gen)"
+OUT=$(run --fix-pool "$POOL" --refinery "$REF")
+eq "$(newcount)" "1" "one child is filed, as for any conflict"
+K=$(newborn)
+eq "$(bassignee "$K")" "$REF" "the child is assigned to the refinery, which reads its queue by assignee"
+eq "$(meta "$K" "gc.routed_to")" "<absent>" "…and carries no pool route, so no polecat is offered it"
+eq "$(meta "$K" prepare_mode)" "merge" "it is still brought current by merge"
+eq "$(meta "$K" branch)" "polecat/tk-gen" "…on the anchor's branch"
+has "$(cat "$STUB_DEPS")" "$K|blocks|AG" "it blocks the anchor like any merge-in child"
+has "$OUT" "routed to $REF (every conflict is inside generated/seed-audit" "the arm says where it went and why"
+has "$(cat "$STUB_SESSION_LOG")" "wake $REF" "the refinery is woken"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "…and the fix pool is not"
+
+reset "$(pre AGH polecat/tk-c1)"
+OUT=$(run --fix-pool "$POOL" --refinery "$REF")
+K=$(newborn)
+eq "$(meta "$K" "gc.routed_to")" "$POOL" "a hand-written conflict still goes to the fix pool when a refinery is named"
+eq "$(bassignee "$K")" "" "…and is assigned to nobody"
+
+reset "$(pre AGR polecat/tk-gen-norender)"
+OUT=$(run --fix-pool "$POOL" --refinery "$REF")
+eq "$(meta "$(newborn)" "gc.routed_to")" "$POOL" "a generated-only conflict whose merged tree has no renderer goes to the fix pool"
+
+reset "$(pre AGN polecat/tk-gen)"
+OUT=$(run --fix-pool "$POOL")
+eq "$(meta "$(newborn)" "gc.routed_to")" "$POOL" "with no refinery named, every child goes to the fix pool"
+
+echo "# an assignment that did not persist leaves the child unrouted, and the next pass re-routes it"
+reset "$(pre AGD polecat/tk-gen)"
+export STUB_DROP_KEYS="new-2:assignee"
+OUT=$(run --fix-pool "$POOL" --refinery "$REF")
+has "$OUT" "did not record assignee=$REF" "a dropped assignment is caught by its own read-back"
+hasnt "$OUT" "filed merge-mode rework" "…and is not counted as dispatched"
+eq "$(bassignee new-2)" "" "the child is left unassigned"
+eq "$(meta new-2 "gc.routed_to")" "<absent>" "…and unrouted"
+export STUB_DROP_KEYS=""
+OUT=$(run --fix-pool "$POOL" --refinery "$REF")
+has "$OUT" "re-routing stranded rework new-2" "the next pass adopts the stranded child"
+eq "$(bassignee new-2)" "$REF" "…and assigns it to the refinery"
+eq "$(newcount)" "1" "…with no twin minted"
 
 echo "# what this arm does not enumerate"
 reset '{"id":"P1","status":"open","assignee":"","notes":"","title":"pr anchor","description":"d","metadata":{"merge_result":"pull_request","branch":"polecat/tk-c1","merged_target":"main","pr_number":"7"}}'

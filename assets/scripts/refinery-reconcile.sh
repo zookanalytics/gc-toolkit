@@ -387,12 +387,14 @@ pace_args pr-feedback
 # pr-open left where they were. An anchor pr-open flipped this pass carries a
 # PR, where `mergeable` answers the same question and pr-facts' CONFLICTING arm
 # owns the dispatch; both arms probe the same children on the branch, so
-# whichever sees a conflict first files and the other stands down. Its failure
+# whichever sees a conflict first files and the other stands down. Both send a
+# child whose every conflict is in generated/seed-audit to the refinery, whose
+# prepare step re-renders it, and every other child to the fix pool. Its failure
 # is not a merge hold — an anchor it could not observe is left exactly as this
 # cadence found it.
 pace_args pre-open-rebase
 run_pass "(5) pre-open-rebase" pre-open-rebase.sh \
-  --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" || FAILED="${FAILED}pre-open-rebase rc=$?; "
+  --fix-pool "$FIX_POOL" --refinery "$AGENT" "${PACE_ARGS[@]}" || FAILED="${FAILED}pre-open-rebase rc=$?; "
 
 # (6) gate-ensure: review dispatch. It visits every gating anchor, so it runs
 # under its share of the pass budget: past the deadline it starts no new anchor,
@@ -419,7 +421,7 @@ fi
 # arms ahead of it, so the arms behind it still get their turn.
 pace_args pr-facts
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
+  run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" --refinery "$AGENT" "${PACE_ARGS[@]}" ) \
   || FAILED="${FAILED}pr-facts rc=$?; "
 
 # (8) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the

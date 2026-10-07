@@ -13,14 +13,16 @@
 #
 # This arm asks git the question GitHub cannot yet be asked — does the recorded
 # branch still merge into its target — and on a conflict files ONE merge-in child
-# per branch to the fix pool, the same child pr-facts.sh's CONFLICTING arm files
-# for a PR anchor. ONE fetch per pass mirrors every branch into a private ref
+# per branch, the same child pr-facts.sh's CONFLICTING arm files for a PR
+# anchor. ONE fetch per pass mirrors every branch into a private ref
 # namespace; per anchor, both sides must resolve there before
 # `git merge-tree --write-tree` is asked anything.
 # CLEAN records nothing; CONFLICT files, adopts or re-routes one child that brings
 # the branch current by MERGE — no branch shape is rebased or force-pushed —
 # stamped prepare_mode=merge and counted as dispatched only once that stamp AND
-# the route read back.
+# the route read back. The child goes to the refinery when every conflict sits
+# inside generated/seed-audit, whose one resolution is the render the refinery's
+# prepare step runs, and to the fix pool otherwise.
 #
 # Same vetoes as pr-facts.sh: an operator merge_hold or rebase_hold on the
 # anchor, a rebase_hold on any bead naming the branch, and a live demand
@@ -33,7 +35,8 @@
 # arm sees the branch first files, and the other stands down — a live child on
 # the branch already owns the rewrite, and a second would race it.
 #
-# Args: --fix-pool <pool> [--deadline <epoch-secs>] [--cursor <file>]. The
+# Args: --fix-pool <pool> [--refinery <agent>] [--deadline <epoch-secs>]
+# [--cursor <file>]. Without --refinery every child goes to the fix pool. The
 # pacing pair walks the anchors in a rotation and starts none past the deadline
 # (pace-lib.sh), so the next pass resumes where this one stopped.
 # Exits: 0, including where nothing could be observed; 1 only when the anchor
@@ -50,10 +53,11 @@ PROG="pre-open-rebase"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-FIX_POOL=""; DEADLINE=""; CURSOR=""
+FIX_POOL=""; REFINERY=""; DEADLINE=""; CURSOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool) FIX_POOL="${2:-}"; shift 2 ;;
+    --refinery) REFINERY="${2:-}"; shift 2 ;;
     --deadline) DEADLINE="${2:-}"; shift 2 ;;
     --cursor)   CURSOR="${2:-}"; shift 2 ;;
     *) shift ;;
@@ -64,6 +68,9 @@ done
 # nothing here can move a branch or a remote-tracking ref; the same device
 # merge.sh uses for its seed-audit merge gate.
 GATE_REF="refs/gc-toolkit/pre-open-rebase"
+# The conflict classifier: whether a branch's every conflict sits inside a
+# generated tree, the shape the refinery finishes with a render.
+REGEN_MERGE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/regen-merge.sh"
 
 # The target an anchor that records none lands on, derived per rig from
 # origin/HEAD so a rig whose default branch is not `main` gets its own.
@@ -380,18 +387,40 @@ while IFS= read -r row; do
     echo "$PROG: WARN rework $FIX did not record task_kind=rework/anchor_bead=$id; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
+  # Who brings the branch current, the choice pr-facts.sh's merge_in_route makes
+  # for a PR anchor. A conflict confined to generated/seed-audit has one
+  # resolution, a render from the merged inputs, which the refinery's prepare
+  # step performs; every other conflict goes to the fix pool. The pass fetch
+  # already holds both tips the merge-tree probe above compared, so the
+  # classifier reads those, and anything short of a regenerable verdict keeps
+  # the fix pool.
+  route="$FIX_POOL"; route_note=""
+  if [ -n "$REFINERY" ] && [ -x "$REGEN_MERGE" ] \
+     && "$REGEN_MERGE" classify "$GATE_REF/heads/$target" "$GATE_REF/heads/$branch" >/dev/null 2>&1; then
+    route="$REFINERY"
+    route_note=" (every conflict is inside generated/seed-audit, which the refinery's prepare re-renders)"
+  fi
   # `gc bd update` returns 0 without having written (the claim guard is one such
   # path), so the exit code does not establish the route, and an unrouted child
-  # reported as dispatched is a rework nothing can reach.
-  gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
-  rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
-  if [ "$rgot" != "$FIX_POOL" ]; then
-    echo "$PROG: WARN rework $FIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2
+  # reported as dispatched is a rework nothing can reach. The refinery reads its
+  # queue by assignee, the way a polecat's handoff reaches it; a pool reads the
+  # route.
+  if [ "$route" = "$REFINERY" ]; then
+    gc bd update "$FIX" --assignee="$REFINERY" >/dev/null 2>&1 || true
+    rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].assignee // empty')
+    rkey="assignee"
+  else
+    gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+    rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+    rkey="gc.routed_to"
+  fi
+  if [ "$rgot" != "$route" ]; then
+    echo "$PROG: WARN rework $FIX did not record $rkey=$route; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
-  gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
+  gc session wake "$route" >/dev/null 2>&1 || true
   reworked=$((reworked + 1))
-  echo "$PROG: $id — '$branch' conflicts with '$target'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
+  echo "$PROG: $id — '$branch' conflicts with '$target'; filed $prepare_mode-mode rework $FIX routed to $route$route_note"
 done <<ANCHORS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR")
 ANCHORS_EOF

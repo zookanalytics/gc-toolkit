@@ -621,7 +621,10 @@ review's result set.
   (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
   branch current is routinely one horn of what such a demand asks, so a child
   filed under one answers the question by performing it. Closing the demand is
-  what releases the dispatch.
+  what releases the dispatch. A child whose every conflict sits inside
+  `generated/seed-audit` goes to the refinery rather than the fix pool, because
+  that tree's one resolution is a render of the merged inputs, which the
+  refinery's prepare step runs through `regen-merge.sh`.
 - **Disposal** (`review-sweep.sh`, cadence arm 9): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes

@@ -948,6 +948,85 @@ has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable str
 eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
+echo "# CONFLICTING whose every conflict is generated -> the merge-in child goes to the refinery"
+# Its one resolution is a render of the merged inputs, which the refinery's
+# prepare step runs (regen-merge.sh resolve), so no polecat is spent on it. The
+# classifier's own verdicts are pinned by regen-merge.test.sh; a stub answers
+# them here, and what is pinned is what the arm does with each answer.
+REF="rig/gc-toolkit.refinery"
+cat > "$SD/regen-merge.sh" <<'RM'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_REGEN_LOG:?}"
+exit "${STUB_REGEN_RC:-0}"
+RM
+chmod +x "$SD/regen-merge.sh"
+export STUB_REGEN_LOG="$TMP/regen.log"
+runr() { "$SUT" --fix-pool "$FIX" --refinery "$REF" --review-pool "$REV" 2>&1; }
+kid() { jq -r '[ .[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework") ][0].id // "<none>"' "$STUB_STORE"; }
+
+store "[$(anchor RG1 281)]"
+printf '%s' "$(prview 281 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_281.json"
+: > "$STUB_SESSION_LOG"; : > "$STUB_REGEN_LOG"
+out=$(STUB_FETCHED_HEAD="sha-281" STUB_REGEN_RC=0 runr)
+K=$(kid)
+eq "$(bassignee "$K")" "$REF" "a regenerable conflict's child is assigned to the refinery, which reads its queue by assignee"
+eq "$(meta "$K" 'gc.routed_to')" "<absent>" "…and carries no pool route, so no polecat is offered it"
+eq "$(meta "$K" existing_pr)" "https://github.com/zook/gc-toolkit/pull/281" "…while still reworking THIS PR, so the refinery's hand-back reuses it"
+eq "$(meta "$K" prepare_mode)" "merge" "…brought current by merge like every child"
+grep -qxF "$K|blocks|RG1" "$STUB_DEPS" && ok "…and blocking the anchor" || bad "…and blocking the anchor"
+has "$out" "routed to $REF (every conflict is inside generated/seed-audit" "the arm says where the child went and why"
+has "$(cat "$STUB_REGEN_LOG")" "classify refs/gc-toolkit/pr-facts/base refs/gc-toolkit/pr-facts/head" \
+  "the classifier is asked about the tips fetched into the arm's own namespace"
+has "$(cat "$STUB_SESSION_LOG")" "wake $REF" "the refinery is woken"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not"
+
+store "[$(anchor RG2 282)]"
+printf '%s' "$(prview 282 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_282.json"
+out=$(STUB_FETCHED_HEAD="sha-282" STUB_REGEN_RC=1 runr)
+K=$(kid)
+eq "$(meta "$K" 'gc.routed_to')" "$FIX" "a conflict the classifier finds outside the generated tree goes to the fix pool"
+eq "$(bassignee "$K")" "" "…assigned to nobody"
+
+store "[$(anchor RG3 283)]"
+printf '%s' "$(prview 283 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_283.json"
+out=$(STUB_FETCHED_HEAD="sha-283" STUB_REGEN_RC=2 runr)
+eq "$(meta "$(kid)" 'gc.routed_to')" "$FIX" "a classifier that cannot tell keeps the fix pool"
+
+store "[$(anchor RG4 284)]"
+printf '%s' "$(prview 284 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_284.json"
+: > "$STUB_REGEN_LOG"
+out=$(STUB_FETCHED_HEAD="sha-moved" STUB_REGEN_RC=0 runr)
+eq "$(meta "$(kid)" 'gc.routed_to')" "$FIX" "a head that moved since GitHub called it CONFLICTING keeps the fix pool"
+eq "$(wc -c < "$STUB_REGEN_LOG" | tr -d ' ')" "0" "…and the classifier is never asked about a head nobody judged"
+
+store "[$(anchor RG5 285)]"
+printf '%s' "$(prview 285 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_285.json"
+out=$(STUB_FETCH_RC=1 STUB_FETCHED_HEAD="sha-285" STUB_REGEN_RC=0 runr)
+eq "$(meta "$(kid)" 'gc.routed_to')" "$FIX" "a failed fetch keeps the fix pool"
+eq "$(wc -c < "$STUB_REGEN_LOG" | tr -d ' ')" "0" "…without asking the classifier"
+
+store "[$(anchor RG6 286)]"
+printf '%s' "$(prview 286 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_286.json"
+out=$(STUB_FETCHED_HEAD="sha-286" STUB_REGEN_RC=0 run)
+eq "$(meta "$(kid)" 'gc.routed_to')" "$FIX" "with no refinery named, every merge-in child goes to the fix pool"
+eq "$(wc -c < "$STUB_REGEN_LOG" | tr -d ' ')" "0" "…without asking the classifier"
+
+echo "# …an assignment that does not persist leaves the child undispatched, and the next pass re-routes it"
+store "[$(anchor RG7 287)]"
+printf '%s' "$(prview 287 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_287.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:assignee" STUB_FETCHED_HEAD="sha-287" STUB_REGEN_RC=0 runr)
+has "$out" "formed but not routed to $REF; left unrouted" "the dropped assignment is caught by its read-back"
+hasnt "$out" "filed merge-mode rework" "…and the child is not reported as dispatched"
+eq "$(bassignee new-2)" "" "…left unassigned"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…and unrouted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake" "…and nobody is woken"
+out=$(STUB_FETCHED_HEAD="sha-287" STUB_REGEN_RC=0 runr)
+has "$out" "re-routing stranded rework new-2" "the next pass adopts the stranded child"
+eq "$(bassignee new-2)" "$REF" "…and assigns it to the refinery"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
+rm -f "$SD/regen-merge.sh"
+
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
 printf '%s' "$(prview 24 MERGED CLEAN MERGEABLE)" | jq -c 'del(.mergeCommit)' > "$GH_DIR/pr_view_24.json"
