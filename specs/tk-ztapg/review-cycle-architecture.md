@@ -371,6 +371,41 @@ validator's prompt would be neither.
 The value of that variable is deliberately out of scope. Build the surface,
 leave the tuning.
 
+### Stage-3 resolution: one owner, no proxy
+
+Ruling a finding's disposition is the validator's act; resolving a finding —
+closing it once it has been addressed — is `gate-ensure.sh`'s. It is the single
+owner of stage-3 resolution, resolving every finding that reached stage 1 from one
+normalized signal, the same way regardless of the item's form, through three
+derivations:
+
+- **Addressed.** A finding whose fix unit has closed resolves. The resolver reads
+  the fix unit's closed status without caring how it closed, so every addressing
+  form that closes the fix unit (see *The fix unit*) resolves its finding
+  identically.
+- **Moot.** A still-unvalidated finding on a lane that re-reviewed clean resolves
+  as moot. The signal is LOCAL backing — a non-superseded approve review bead for
+  the lane, read with `lane-state.sh green --no-remote` — never the operator's
+  GitHub approval. A human approval settles a lane for the merge, but it is the
+  human's reaction to the work, not the addressing of a finding, so the moot
+  derivation excludes the GitHub-approval fallback (see below).
+- **Orphaned on close.** A still-unvalidated finding whose anchor has left the open
+  set — merged, disposed, closed by hand — resolves as moot. `gate-ensure.sh` reads
+  open anchors only, so once the anchor closes no pass revisits it, the finding can
+  no longer be validated (no validator runs on closed work), and it would otherwise
+  sit open forever. The signal is the anchor being gone, swept once per pass across
+  every open unvalidated finding, never any approve.
+
+No finding resolves on a proxy for the addressing action. A re-approval is the
+human's reaction to a fix, not the fix itself, so it resolves no finding; the
+operator's GitHub approval is a review the lane reads for green at merge, never a
+per-finding resolution signal — which is why the moot derivation keys on local
+backing and excludes the GitHub-approval fallback. The orphaned-on-close derivation
+is no exception: it keys on the anchor's lifecycle ending, a fact independent of any
+approval. All three derivations live in `gate-ensure.sh`, the reader that computes
+lane state and quiescence, so the one component that holds the re-gate is the one
+that releases it and the two cannot disagree.
+
 ## Quiescence
 
 **No full review is dispatched while anything is acting on the anchor.**

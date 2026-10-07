@@ -75,7 +75,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    pass — an anchor whose checks are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
 
-2. **pr-facts.sh --posture-only** — the posture record, and nothing else.
+2. **pr-facts.sh --posture-only** — the posture record.
    `merge.sh` answers "is a human waiting on this?" off the bead and never asks
    GitHub, so the value it reads has to be written in the same pass. This arm
    writes `pr_posture` and `pr_merge_state` at the live head for every open
@@ -88,7 +88,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    validate against a fact from an earlier tick, so the driver holds arm 4 for
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
-   other anchor's too.
+   other anchor's too. Where this arm changes an anchor's posture value, it also
+   re-derives that PR's `status:` label, so an approval moves the label in the
+   pass that records it
+   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
 
 3. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
    early, before merge. Arm 7 runs after merge and near the pass tail, so a pass
@@ -98,7 +101,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    anchor's feedback and dispatches the same rework child or visit and opens the
    same validation pass arm 7 would, then stops — no write-back sweep, no
    external-fact reconciliation, none of the arms that belong after merge, so it
-   is cheap and finishes on the early tick. Arm 7 still runs the routing
+   is cheap and finishes on the early tick. A batch it routes is live work on the
+   anchor, which the `status:` label reads, so it re-derives that PR's label as it
+   routes. Arm 7 still runs the routing
    idempotently (a landed batch's watermark and `pr_comment_disposition` make the
    re-run a no-op) and still owns the write-back and the terminal-state records.
    Its rc is reported but holds nothing: routing is not the posture interlock, and
@@ -125,6 +130,29 @@ the cadence — the arms run whether or not any refinery session is awake.
    is the finalize gate: an open visit tracking the anchor holds its merge
    (`docs/finalize-gate.md`), re-asserted in the terminal re-read because a visit
    filed mid-pass does not move the head.
+
+   GitHub computes a PR's mergeability lazily. The first read after the PR's
+   base moves answers `UNKNOWN` and starts the computation, which finishes in a
+   few seconds, and a PR nobody reads stays `UNKNOWN`. Every merge this arm makes
+   moves the base under each later candidate on that base, so their pinned reads
+   answer `UNKNOWN`. The arm reads such a PR again before deciding it. A PR's
+   first re-read goes out immediately, and each later one waits
+   `MERGE_STATE_REREAD_SECS` (default 5). A re-read that answers a computed state
+   decides its PR. One that answers `UNKNOWN` again spends one of the pass's
+   `MERGE_STATE_REREADS` (default 3), and once they are spent every later
+   `UNKNOWN` holds on its pinned read. With the defaults, a computation stalled
+   across the repository costs a pass three reads and ten seconds of waiting,
+   however many candidates it holds. The computed state is judged exactly as a
+   pinned one is, so `BEHIND` and `DIRTY` keep their handling. A re-read may
+   differ from the pinned read only in `mergeStateStatus`, `mergeable` and
+   `reviewDecision`. Any other difference means the PR changed under the gates
+   that passed it, so the merge holds and the log names each field that changed.
+   A re-read that fails holds the merge for the pass, as a failed pinned read
+   does, and records nothing. A state still `UNKNOWN` when the re-reads are spent
+   holds for the pass and records `settled`. The re-read belongs to the CLEAN
+   check, the last in the validation order above, so only a candidate every
+   earlier check cleared pays for it. Every read comes after the latest merge of
+   the pass, because the arm merges only at the end of an anchor's turn.
 
    Landing and recording are two writes, and a pass killed between them leaves
    an anchor saying `pull_request` over a PR already on the target branch.
@@ -199,12 +227,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    opened PR is never mergeable on the same tick, and deferring it past merge
    costs a PR its open-pass landing only in the ungated lane-only case and never
    starves merge. For each anchor whose
-   every marker-bearing check in `check_set` reads `green` (the same
-   predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
+   every `pre-open` check in `check_set` reads `green` (the one resolver names
+   that set — `none`/`off` and the universal `approval` rule dropped; an empty
    set is held, never read as ungated): adopt an existing PR for the branch or
-   `gh pr create` non-draft, re-read the created PR by number, refuse a moved
-   head, replay the verdict as a comment (never an approval), then one
-   `lifecycle.sh` transition carrying `pr_url`/`pr_number`/`merged_target`.
+   `gh pr create` — as a draft when `check_set` names an `open-as-draft` check,
+   so a preview can deploy before the change is surfaced, else ready — re-read
+   the created PR by number, refuse a moved head, replay the verdict as a comment
+   (never an approval), then one `lifecycle.sh` transition carrying
+   `pr_url`/`pr_number`/`merged_target`. A later pass flips a draft to ready once
+   its `open-as-draft` checks are green. Each anchor's head comes from one fetch
+   of origin's branches per pass, with the API answering when that fetch could
+   not and confirming the head before any create, so an anchor parked on a red
+   lane costs no API read for its head. Its gates are resolved once at that
+   head, and the one answer feeds the gate, the draft decision and the body; a
+   resolver that is missing or fails holds the anchor. An adopted draft is the
+   refinery's to flip only when the city opened it as a draft and nobody has
+   re-drafted it since. Any other draft is adopted without that claim and stays
+   with whoever parked it.
    The body's `## Summary` is the polecat's `pr_summary`, written at handoff
    by the only actor that has read the diff; the anchor's description is
    dispatch text, demoted to a collapsed section and standing in as the
