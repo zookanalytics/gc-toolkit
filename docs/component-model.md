@@ -346,6 +346,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
+| `assets/scripts/pace-lib.sh` | merge | The visit order and time budget of a cadence arm that walks the gating set: visit in id order after the anchor the last pass finished, wrapping, and start no new anchor past the arm's deadline. The paced arms source it, and `gctk merge` carries the same rotation. |
 | `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. |
 | `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 5: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
