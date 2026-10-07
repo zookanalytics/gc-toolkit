@@ -2800,6 +2800,19 @@ printf '%s\n' '{"reviews":[],"threads":[{"id":"T-62","isResolved":false,"viewerC
 out=$(run)
 hasnt "$out" "unengaged review-thread finding" "a thread carrying our own reply is left to the write-back"
 
+echo "# …and so is a thread a fixer or a sitting answered through pr-post.sh"
+# A pr-post.sh reply carries the city's mark and not the write-back's marker. It
+# is the reply the rework work order asks for, so it engages the thread the same
+# way a write-back reply does.
+store "[$(anchor UT7 168 "$UTCUT")]"
+printf '%s' "$(prview 168 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_168.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"},{"id":101,"user":{"login":"gc-city-bot"},"body":"Fixed on the branch; it reaches this PR with its push.\n\n<!-- gc:city -->","pull_request_review_id":null,"created_at":"2026-10-07T12:00:00Z"}]' > "$GH_DIR/comments_168.json"
+echo '[]' > "$GH_DIR/reviews_168.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-168","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-168","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]},{"id":"NC-168b","databaseId":101,"author":{"login":"gc-city-bot"},"body":"Fixed on the branch; it reaches this PR with its push.\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_168.json"
+out=$(run)
+hasnt "$out" "unengaged review-thread finding" "a thread holding a pr-post.sh reply is engaged"
+eq "$(meta UT7 pr_unengaged_threads)" "<absent>" "…and no head watermark is written"
+
 echo "# a live child already on the anchor owns the follow-up — no second signal, no thread read"
 store "[$(anchor UT4 63 "$UTCUT"), {\"id\":\"rw-63\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Address review comments on PR#63\",\"metadata\":{\"anchor_bead\":\"UT4\"}}]"
 printf '%s' "$(prview 63 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_63.json"

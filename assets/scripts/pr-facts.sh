@@ -694,12 +694,13 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # (lane-state reads the finding and review-outcome beads, never a thread), so
 # nothing re-reviews it. This reads the review THREADS instead. A thread counts
 # as an unengaged finding when it is unresolved, carries a comment with no city
-# mark, and holds no write-back reply of ours: a thread we replied into is arm
-# 7's or the write-back's to finish, a thread of marked city posts holds no
-# finding, and a resolved one is done.
+# mark, and holds no marked post of the city's: a thread the city replied into,
+# whether through the write-back or a pr-post.sh reply from a fixer or a
+# sitting, is arm 7's or the write-back's to finish, a thread of marked city
+# posts holds no finding, and a resolved one is done.
 # `comments(first:100)` caps a thread at a page, so a thread longer than that
-# whose only write-back reply sits past the cap reads as unengaged — a
-# dismissable visit, never a dropped finding.
+# whose only marked reply sits past the cap reads as unengaged — a dismissable
+# visit, never a dropped finding.
 UNENGAGED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
@@ -710,12 +711,12 @@ unengaged_thread_count() { # <pr-number> — count on stdout; non-zero = could n
   raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$UNENGAGED_THREADS_QUERY" \
     -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$num" 2>/dev/null) || return 1
   [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | scrub | jq -s --arg marker "$WB_MARKER" "$CITY_OWN_DEF"'
+  printf '%s' "$raw" | scrub | jq -s "$CITY_OWN_DEF"'
     [ .[].data.repository.pullRequest.reviewThreads.nodes[]?
       | (.comments.nodes // []) as $cs
       | select((.isResolved // false) == false)
       | select([ $cs[] | select(gc_city_marked | not) ] | length > 0)
-      | select([ $cs[] | select((.body // "") | contains($marker)) ] | length == 0)
+      | select([ $cs[] | select(gc_city_marked) ] | length == 0)
     ] | length' 2>/dev/null
 }
 # Does an unengaged thread hold this PR's merge right now? merge.sh
