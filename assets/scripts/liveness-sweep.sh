@@ -28,9 +28,7 @@ set -uo pipefail
 PROG="liveness-sweep"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The one definition of what subject a visit covers, shared with gc-helm.sh,
-# converse-fold.sh and gate-visit-sweep.sh. Exposes $VISIT_IDENTITY_JQ. The
-# stall_root reads below are a SEPARATE liveness question (workflow-root
-# membership), kept per the tk-fhlqce ruling, not part of this identity.
+# converse-fold.sh and gate-visit-sweep.sh. Exposes $VISIT_IDENTITY_JQ.
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
 # The one definition of the standing kinds, shared with liveness-recheck.sh, the
@@ -418,18 +416,12 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   # Live-visit subjects: every subject a live visit covers by its shared identity
   # (tracks edge, gc.continuation_group fallback — the stamp alone has landed
   # empty on a live visit, su-ab9je). visit_identity_subjects is visit-identity.sh.
+  # A ready bead converses when it is one of them, or when its gc.root_bead_id
+  # is: a sitting about a workflow root covers the steps of that workflow.
   ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | select(holder_live)
      | visit_identity_subjects[] ]) as $convgroups
-  # stall_root visits: a SEPARATE liveness question from coverage — a stalled
-  # sitting parked on a workflow ROOT keeps the ready steps under that root off
-  # the unnamed agenda (consumed at the gc.root_bead_id arm below). Nothing
-  # writes stall_root today, so this set is inert; it is kept per the tk-fhlqce
-  # ruling until an edge is proven to cover the same stalled-workflow visits.
-  | ([ ($live[0] // [])[]
-     | select((.metadata.task_kind // "") == "visit")
-     | (.metadata.stall_root // empty) | select(. != "") ]) as $rootvisits
   | ([ ($openprs // [])[] | (.url // "") | pr_key ] | map(select(. != ""))) as $openkeys
   # $prages carries the age of every open PR (-1 = GitHub named no usable
   # timestamp) so the escalation body can state it. $stalekeys is the subset
@@ -458,7 +450,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
          elif (($demanded | index($b.id)) != null) then "held-by-design"
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
-         elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($rootvisits | index($r)) != null)) then "conversing"
+         elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
          elif (($convgroups | index($b.id)) != null) then "conversing"
          elif (((.metadata.merge_result // "") == "pull_request")
                and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
