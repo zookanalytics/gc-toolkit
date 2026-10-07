@@ -434,10 +434,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 2 merged or arm 7 recorded on this pass is
    disposable on the same tick.
-12. **pr-stack.sh** — keeps an open PR's body current with its anchor in both
-   managed regions. No merge authority, and the only arm that writes no bead. A
-   body is composed once, by arm 3, out of one anchor; then two things drift it,
-   and this arm lands both fixes in one body edit.
+12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
+   body regions and in its title. No merge authority, and the only arm that
+   writes no bead. A body is composed once, by arm 3, out of one anchor; then two
+   things drift it, and this arm lands both fixes in one body edit.
 
    It walks the open PRs in a rotation under its share of the pass budget.
 
@@ -462,8 +462,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    reworked head has not re-signed-off, so the handoff bullet names the head and
    defers to the PR's checks rather than repeating arm 3's pre-open sign-off line.
 
-   The title is left alone: it names the anchor, and the body is where a reviewer
-   reads scope. Idempotence for each region is its rendered content compared
+   The title: arm 3 writes it once, at create, composed from the anchor's title
+   (a conventional-commit type, the title, then the bead id), and the squash
+   merge takes its commit subject from it. A rework that retitles the anchor
+   would otherwise merge under the superseded name. For a `pull_request` anchor
+   this arm composes the title the same way and edits the PR when its words
+   differ; whitespace alone is never a difference. The anchor owns the title, so
+   a retitle is made on the anchor: a title edited on the PR alone is composed
+   back on the next pass. A stacked bead never renames the PR, because the title
+   names the anchor and the body is where a reviewer reads scope. The title is an
+   edit of its own, so one that fails never holds back a body refresh.
+
+   Idempotence for each region is its rendered content compared
    against what the body carries, never the whole body, and the body is read
    `\r`-stripped: GitHub stores a body it re-wrapped with CRLF, and a marker
    line carrying a trailing CR would match nothing and append a second section
