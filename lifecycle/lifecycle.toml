@@ -1044,6 +1044,10 @@ keys = [
 #   by hookClaimIdentityPatch at claim time). duplicate-sweep.sh reads gc.work_dir
 #   and gc.work_commit — with the pack-written bare work_dir defined in
 #   merge_identity — as proof a run produced work before disposing a duplicate.
+#   mol-polecat-work's workspace-setup also writes gc.work_branch, with the branch
+#   the work lands on, since the claim stamps the pool worktree's base checkout.
+#   The runtime's work-record close gate reads it: a `shipped` close needs
+#   gc.work_commit reachable on gc.work_branch (warn-only by default).
 #   No pack script reads gc.work_branch, and the runtime's detached-handoff
 #   orphan sweep reads the bare branch defined in merge_identity, not this key.
 #   Absent means no such product was recorded. A path, a sha, a branch.
