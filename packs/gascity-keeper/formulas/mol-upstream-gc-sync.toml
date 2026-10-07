@@ -91,7 +91,7 @@ gc bd update {{issue}} \
     --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
     --set-metadata gc.takeaway_settled= \
-    --notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
+    --append-notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
 gc runtime drain-ack
 exit 1
 ```
@@ -145,7 +145,7 @@ if [ ! -x "$SCRIPT" ]; then
         --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
         --set-metadata gc.takeaway_settled= \
-        --notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
+        --append-notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
     gc runtime drain-ack
     exit 1
 fi
@@ -183,7 +183,7 @@ else
         --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
         --set-metadata gc.takeaway_settled= \
-        --notes "$(cat <<EOF
+        --append-notes "$(cat <<EOF
 Sync script failed.
 
 Stderr:
@@ -213,7 +213,7 @@ copy, then close.
 filesystem access needed):
 ```bash
 REPORT_FILE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.report_file')
-gc bd update {{issue}} --notes "$(cat "$REPORT_FILE")"
+gc bd update {{issue}} --append-notes "$(cat "$REPORT_FILE")"
 ```
 
 **2. Optionally mail the report:**
