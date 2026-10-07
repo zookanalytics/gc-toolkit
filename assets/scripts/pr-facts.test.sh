@@ -84,9 +84,10 @@ mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
-# --retract is the counterpart: it closes the OPEN visit for the situation as
-# moot, leaves a claimed (in_progress) one to its holder, and is a no-op success
-# when no open visit matches.
+# --retract is the counterpart: it closes every OPEN visit for the situation
+# that nobody is engaged in as moot, leaves an engaged one (claimed, or bound by
+# assignee or session) to its holder, and is a no-op success when none matches.
+# STUB_RETRACT_FAIL makes a retract fail having closed nothing.
 cat > "$SD/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
@@ -103,14 +104,19 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$subj" ] && [ -n "$key" ] || exit 2
 if [ "$retract" = 1 ]; then
+  [ -z "${STUB_RETRACT_FAIL:-}" ] || exit 1
   open=$(jq -r --arg s "$subj" --arg k "$key" '
-    [ .[] | select((.status // "open") == "open")
+    .[] | select((.status // "open") == "open")
       | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
-      | select(((.metadata.escalation_key // "") | tostring) == $k) | .id ] | .[0] // empty' "${STUB_STORE:?}")
-  [ -n "$open" ] || exit 0
-  gc bd update "$open" --status=closed --set-metadata gc.outcome=moot \
-    --set-metadata "gc.outcome_reason=$msg" >/dev/null || exit 1
-  exit 0
+      | select(((.metadata.escalation_key // "") | tostring) == $k)
+      | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+      | .id' "${STUB_STORE:?}")
+  rrc=0
+  for v in $open; do
+    gc bd update "$v" --status=closed --set-metadata gc.outcome=moot \
+      --set-metadata "gc.outcome_reason=$msg" >/dev/null || rrc=1
+  done
+  exit "$rrc"
 fi
 have=$(jq -r --arg s "$subj" --arg k "$key" '
   [ .[] | select((.status // "open") != "closed")
