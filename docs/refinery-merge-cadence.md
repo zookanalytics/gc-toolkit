@@ -399,8 +399,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    any other locus becomes a Conversation comment. Once the finding closes, the
    comment is answered with how it closed: the head that carries the fix and
    the fix units that landed it, or the deferral's follow-up. The thread is then
-   resolved unless a human has written in it since, and a Conversation comment
-   is edited to carry the answer. A finding that closed before it was posted,
+   resolved unless a post that is not the city's own has come after it, and a
+   Conversation comment is edited to carry the answer. A finding that closed before it was posted,
    as a pre-open round's findings have, is posted with its answer already in
    place. A human finding is never posted, because it already sits in its
    raiser's own thread and is answered there. One store-wide read of the
@@ -408,9 +408,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    record each write, so an anchor whose findings are settled costs no GitHub
    call; at most `WB_FINDING_CAP` posts and answers go out per pass. A posted
    finding holds nothing, since a `must-fix` holds the merge through its own
-   `blocks` edge. The `<!-- gc-finding:` marker its comments carry keeps the
-   unengaged-thread and BLOCKED readers from taking the city's own thread for a
-   review to route or a block to escalate.
+   `blocks` edge. Its comments go through `pr-post.sh`, so they carry the city's
+   mark and no feedback reader routes them or reads their thread as unengaged.
+   Each also carries a `<!-- gc-finding:<id> -->` marker, which is how a later
+   pass finds the finding's comment, and the BLOCKED escalation does not count a
+   thread that holds only the city's finding comments.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

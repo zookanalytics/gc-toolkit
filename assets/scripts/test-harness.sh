@@ -562,7 +562,40 @@ case "$sub" in
         f="$G/pr_list_$(san "$br").json"
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
-      comment) exit 0 ;;
+      comment)
+        # A Conversation comment, the post pr-post.sh's comment verb makes. On a
+        # PR with a threads fixture it MUTATES what the next reads serve: the
+        # comment joins .issue_comments there and issue_comments_<n>.json under
+        # STUB_SELF_LOGIN, and its URL is printed the way gh prints it, so a
+        # caller reading the new comment's id back gets one. Its databaseId is
+        # 9000 plus the fixture's comment count, clear of the ids the suites
+        # pick. On a PR with no threads fixture nothing reads the post back.
+        # STUB_ICOMMENT_RC fails the post; STUB_ICOMMENT_QUIET makes it land and
+        # print nothing, so the caller cannot read the new id back.
+        n="${1:-}"; shift || true
+        [ "${STUB_ICOMMENT_RC:-0}" = "0" ] || exit "${STUB_ICOMMENT_RC:-0}"
+        b=""; rq=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --body) shift; b="${1:-}" ;;
+            --repo) shift; rq="${1:-}" ;;
+          esac
+          shift || true
+        done
+        f="$G/threads_$n.json"
+        [ -s "$f" ] || exit 0
+        db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
+        t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+        jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" '
+          .issue_comments = ((.issue_comments // []) + [{ id: "FI-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }])
+        ' "$f" > "$t" && mv "$t" "$f"
+        r="$G/issue_comments_$n.json"
+        [ -s "$r" ] || echo '[]' > "$r"
+        jq -c --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" \
+          '. + [{ id: $db, user: {login: $self}, body: $b }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        printf 'ICOMMENT %s\n' "$n" >> "${STUB_GH_LOG:?}"
+        [ -n "${STUB_ICOMMENT_QUIET:-}" ] || echo "https://${rq:-github.com/zook/gc-toolkit}/pull/$n#issuecomment-$db"
+        exit 0 ;;
       ready)   exit "${STUB_PR_READY_RC:-0}" ;;
       edit)
         # The edit MUTATES the fixture the next `pr view` serves, so a second
@@ -632,7 +665,8 @@ case "$sub" in
         --hostname) shift ;;
         --jq) shift; jqexpr="${1:-}" ;;
         --paginate) : ;;
-        -X) method="${2:-}"; shift ;;
+        -X|--method) method="${2:-}"; shift ;;
+        --method=*) method="${1#--method=}" ;;
         -f|-F)
           kv="${2:-}"; shift
           k="${kv%%=*}"; v="${kv#*=}"
@@ -759,47 +793,34 @@ case "$sub" in
         *) echo "gh graphql stub: unsupported query" >&2; exit 2 ;;
       esac
     fi
-    # The REST comment writes, over the same PR fixtures the reads serve. A
-    # file-level review comment opens a thread in threads_<n>.json and joins the
-    # comments_<n>.json list; a Conversation comment joins .issue_comments and
-    # issue_comments_<n>.json; an edit rewrites one in place in both. Each write
-    # MUTATES what the next read serves, so a pass that posted twice shows two
-    # comments rather than looking idempotent. A new comment's databaseId is
-    # 9000 plus the fixture's comment count, clear of the ids the suites pick.
+    # The REST comment writes, over the same PR fixtures the reads serve: a
+    # review comment on a whole file (pr-post.sh file-comment) opens a thread in
+    # threads_<n>.json and joins the comments_<n>.json list, and an edit
+    # (pr-post.sh edit) rewrites a Conversation comment in place in both. The
+    # Conversation comment itself is `gh pr comment`, above. Each write MUTATES
+    # what the next read serves, so a pass that posted twice shows two comments
+    # rather than looking idempotent. A new comment's databaseId is 9000 plus
+    # the fixture's comment count, clear of the ids the suites pick.
     case "${method:-GET}:$path" in
-      POST:*/pulls/*/comments|POST:*/issues/*/comments)
-        case "$path" in
-          */pulls/*) kind="file"; n="${path##*/pulls/}"; [ "${STUB_FCOMMENT_RC:-0}" = "0" ] || exit "${STUB_FCOMMENT_RC:-0}" ;;
-          *) kind="issue"; n="${path##*/issues/}"; [ "${STUB_ICOMMENT_RC:-0}" = "0" ] || exit "${STUB_ICOMMENT_RC:-0}" ;;
-        esac
-        n="${n%%/*}"
+      POST:*/pulls/*/comments)
+        [ "${STUB_FCOMMENT_RC:-0}" = "0" ] || exit "${STUB_FCOMMENT_RC:-0}"
+        n="${path##*/pulls/}"; n="${n%%/*}"
         f="$G/threads_$n.json"
         [ -s "$f" ] || echo '{"reviews":[],"threads":[],"issue_comments":[]}' > "$f"
         b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
         p=$(printf '%s' "$gqvars" | jq -r '.path // ""')
         db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
         t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
-        if [ "$kind" = file ]; then
-          jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" '
-            .threads = ((.threads // []) + [{ id: "FT-\($n)-\($db)", isResolved: false, viewerCanResolve: true, path: $p,
-              comments: { nodes: [{ id: "FC-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }] } }])
-          ' "$f" > "$t" && mv "$t" "$f"
-          r="$G/comments_$n.json"
-          [ -s "$r" ] || echo '[]' > "$r"
-          jq -c --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" \
-            '. + [{ id: $db, user: {login: $self}, body: $b, path: $p, pull_request_review_id: null }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
-          printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$(printf '%s' "$gqvars" | jq -r '.subject_type // ""')" \
-            "$(printf '%s' "$gqvars" | jq -r '.commit_id // ""')" >> "${STUB_GH_LOG:?}"
-        else
-          jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" '
-            .issue_comments = ((.issue_comments // []) + [{ id: "FI-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }])
-          ' "$f" > "$t" && mv "$t" "$f"
-          r="$G/issue_comments_$n.json"
-          [ -s "$r" ] || echo '[]' > "$r"
-          jq -c --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" \
-            '. + [{ id: $db, user: {login: $self}, body: $b }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
-          printf 'ICOMMENT %s\n' "$n" >> "${STUB_GH_LOG:?}"
-        fi
+        jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" '
+          .threads = ((.threads // []) + [{ id: "FT-\($n)-\($db)", isResolved: false, viewerCanResolve: true, path: $p,
+            comments: { nodes: [{ id: "FC-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }] } }])
+        ' "$f" > "$t" && mv "$t" "$f"
+        r="$G/comments_$n.json"
+        [ -s "$r" ] || echo '[]' > "$r"
+        jq -c --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" \
+          '. + [{ id: $db, user: {login: $self}, body: $b, path: $p, pull_request_review_id: null }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$(printf '%s' "$gqvars" | jq -r '.subject_type // ""')" \
+          "$(printf '%s' "$gqvars" | jq -r '.commit_id // ""')" >> "${STUB_GH_LOG:?}"
         out="{\"id\":$db}"
         if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
         exit 0 ;;

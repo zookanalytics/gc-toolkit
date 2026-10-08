@@ -99,11 +99,13 @@
 # comment when the finding's locus begins with a file the diff touches, a
 # Conversation comment otherwise. Once the finding closes, the comment is
 # answered with how it closed, the commit carrying the fix or the deferral's
-# follow-up, and its thread is resolved unless a human has written in it since.
+# follow-up, and its thread is resolved unless a post that is not the city's own
+# has come after it.
 # A human finding already sits in its raiser's own thread and is answered there,
 # so it is never posted again. A posted finding holds nothing: a must-fix holds
-# the merge through its own blocks edge, and the readers that treat a thread as
-# a finding or a merge block skip the comments carrying the finding marker.
+# the merge through its own blocks edge. Its comments go through pr-post.sh and
+# carry the city's mark, so no feedback reader takes one for feedback, and the
+# BLOCKED arm does not count a thread holding only the city's finding comments.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
 # Args: --fix-pool <pool>; --posture-only (the cheap pre-merge arm: record
@@ -367,11 +369,12 @@ WB_REACTION="EYES"
 WB_MARKER="<!-- gc-writeback -->"
 # A ruled machine finding the city posts to the PR carries
 # `<!-- gc-finding:<id> -->`, and the answer it posts once the finding closes
-# carries `<!-- gc-finding:<id>:answered -->`. The shared prefix is how the
-# unengaged-thread and BLOCKED readers tell a comment the city posted for a
-# finding it tracks, and answers itself, from a review posted under the city's
-# login. Neither carries WB_MARKER, so the reply-and-resolve plan never reads a
-# finding's thread as one the city already answered.
+# carries `<!-- gc-finding:<id>:answered -->`. A later pass finds the finding's
+# comment by it, and the BLOCKED arm reads the shared prefix to tell a thread the
+# write-back resolves itself from one a person has to. Both posts also carry the
+# city's mark, which pr-post.sh appends. Neither carries WB_MARKER, so the
+# reply-and-resolve plan never reads a finding's thread as one the city already
+# answered.
 WB_FINDING_MARKER="<!-- gc-finding:"
 # A first activation over every open PR would otherwise post each one's backlog
 # of ruled findings in a single pass, at the tail of a pass the arms after it
@@ -3606,12 +3609,13 @@ WB_REVIEW_CLEARS
   # its answer in place, so nothing on the PR shows it still holding the merge.
   # One that closes after it was posted is answered by a reply in its thread, or,
   # since a Conversation comment has no thread, by an edit that puts the answer
-  # in place. An answered thread is resolved unless a human has written in it
-  # since, which leaves that conversation theirs to end. The markers are read
-  # back before any write, so a post whose stamp did not land is recorded rather
-  # than repeated, and a thread opened this pass is resolved by the next one,
-  # which can read it back. A posted finding whose comment is gone from the PR
-  # has nothing left to answer. Only a pass that read the threads cleanly acts.
+  # in place. An answered thread is resolved unless a post that is not the
+  # city's own has come after it, which leaves that conversation to whoever
+  # wrote it. The markers are read back before any write, so a post whose stamp
+  # did not land is recorded rather than repeated, and a thread opened this pass
+  # is resolved by the next one, which can read it back. A posted finding whose
+  # comment is gone from the PR has nothing left to answer. Only a pass that read
+  # the threads cleanly acts.
   if [ -n "$wfown" ] && [ "$wplan_ok" = 1 ] && [ -n "$whead" ]; then
     wffiles=""; wffiles_rc=""
     while IFS= read -r wfrow; do
@@ -3621,10 +3625,12 @@ WB_REVIEW_CLEARS
       wfact=$(printf '%s' "$wfj" | jq -r '.act // empty' 2>/dev/null)
       [ -n "$wfid" ] && [ -n "$wfact" ] || continue
       # Where the finding already sits: the city's own comment carrying its
-      # marker, in a review thread or the Conversation.
-      wfat=$(printf '%s' "$wview" | jq -c --arg self "$SELF_LOGIN" \
-          --arg m "$WB_FINDING_MARKER$wfid -->" --arg am "$WB_FINDING_MARKER$wfid:answered -->" '
-        def mine($k): ((.author.login // "") == $self) and ((.body // "") | contains($k));
+      # marker, in a review thread or the Conversation. A post after it that is
+      # not the city's own is someone writing in the thread, whoever wrote it,
+      # the same test the plan above reads a thread's later replies by.
+      wfat=$(printf '%s' "$wview" | jq -c --arg self "$SELF_LOGIN" --arg since "$wsince" \
+          --arg m "$WB_FINDING_MARKER$wfid -->" --arg am "$WB_FINDING_MARKER$wfid:answered -->" "$CITY_OWN_DEF"'
+        def mine($k): gc_city_own($self; $since) and ((.body // "") | contains($k));
         ( [ .threads[] | . as $t | ($t.comments.nodes // []) as $cs
             | ([ $cs | to_entries[] | select(.value | mine($m)) | .key ] | first) as $at
             | select($at != null)
@@ -3632,7 +3638,7 @@ WB_REVIEW_CLEARS
                 resolved: ($t.isResolved // false), canres: ($t.viewerCanResolve // false),
                 answered: any($cs[]; mine($am)),
                 after: ([ $cs | to_entries[] | select(.key > $at)
-                          | select((.value.author.login // "") != $self) ] | length) } ]
+                          | select(.value | gc_city_own($self; $since) | not) ] | length) } ]
         + [ .issue_comments[] | select(mine($m))
             | { kind: "issue", db: ((.databaseId // 0) | tostring), answered: mine($am) } ] )
         | .[0] // { kind: "" }' 2>/dev/null) || wfat=""
@@ -3683,22 +3689,31 @@ WB_REVIEW_CLEARS
           wfbody=$(printf '%s' "$wfj" | jq -r --arg mk "$WB_FINDING_MARKER" --arg ans "$wfans" "$WB_FINDING_BODY" 2>/dev/null)
           [ -n "$wfbody" ] || continue
           wfwrites=$((wfwrites + 1))
+          # Through pr-post.sh, like every city post: its mark is what keeps the
+          # finding's own comment from reading back as feedback. The new comment's
+          # id comes back in gh's output, the created comment for a file and the
+          # comment's URL for the Conversation.
           if [ -n "$wfpath" ]; then
             wfwhere="on $wfpath"
-            wfnew=$(gh_api_origin -X POST "repos/$ORIGIN_REPO/pulls/$wnum/comments" -f body="$wfbody" \
-              -f commit_id="$whead" -f path="$wfpath" -f subject_type=file --jq '.id' 2>/dev/null)
+            wfout=$("$PR_POST" file-comment --repo "$ORIGIN_REPO_Q" --pr "$wnum" --commit "$whead" \
+              --path "$wfpath" --body "$wfbody" 2>/dev/null); wfrc=$?
+            wfnew=$(printf '%s' "$wfout" | jq -r '.id // empty' 2>/dev/null)
           else
             wfwhere="to the Conversation"
-            wfnew=$(gh_api_origin -X POST "repos/$ORIGIN_REPO/issues/$wnum/comments" -f body="$wfbody" \
-              --jq '.id' 2>/dev/null)
+            wfout=$("$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$wnum" --body "$wfbody" 2>/dev/null); wfrc=$?
+            wfnew=$(printf '%s\n' "$wfout" | grep -Eo '#issuecomment-[0-9]+' | tail -1 | tr -cd '0-9')
           fi
-          case "$wfnew" in
-            ''|*[!0-9]*)
-              echo "$PROG: $wid — PR#$wnum could not post finding $wfid $wfwhere; retry next pass" >&2
-              continue ;;
-          esac
+          if [ "$wfrc" != 0 ]; then
+            echo "$PROG: $wid — PR#$wnum could not post finding $wfid $wfwhere; retry next pass" >&2
+            continue
+          fi
           fposted=$((fposted + 1))
           echo "$PROG: $wid — PR#$wnum posted finding $wfid $wfwhere"
+          case "$wfnew" in
+            ''|*[!0-9]*)
+              echo "$PROG: $wid — PR#$wnum finding $wfid posted, but its comment id did not read back; the next pass records it off its marker" >&2
+              continue ;;
+          esac
           # A Conversation comment posted with its answer in place owes nothing
           # more; a thread still owes its resolve.
           if [ -n "$wfans" ] && [ -z "$wfpath" ]; then
@@ -3724,9 +3739,8 @@ WB_REVIEW_CLEARS
             wftid=$(printf '%s' "$wfat" | jq -r '.thread // ""')
             if [ -n "$wfans" ]; then
               wfwrites=$((wfwrites + 1))
-              if ! gh_graphql 'mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
-                   -f t="$wftid" -f b="$wfans
-$WB_FINDING_MARKER$wfid:answered -->" >/dev/null; then
+              if ! "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$wftid" --body "$wfans
+$WB_FINDING_MARKER$wfid:answered -->" >/dev/null 2>&1; then
                 echo "$PROG: $wid — PR#$wnum could not answer finding $wfid on thread $wftid; NOT resolving it (retry next pass)" >&2
                 continue
               fi
@@ -3748,7 +3762,7 @@ $WB_FINDING_MARKER$wfid:answered -->" >/dev/null; then
             wfbody=$(printf '%s' "$wfj" | jq -r --arg mk "$WB_FINDING_MARKER" --arg ans "$wfans" "$WB_FINDING_BODY" 2>/dev/null)
             [ -n "$wfbody" ] || continue
             wfwrites=$((wfwrites + 1))
-            if ! gh_api_origin -X PATCH "repos/$ORIGIN_REPO/issues/comments/$wfdb" -f body="$wfbody" >/dev/null 2>&1; then
+            if ! "$PR_POST" edit --repo "$ORIGIN_REPO_Q" --comment "$wfdb" --body "$wfbody" >/dev/null 2>&1; then
               echo "$PROG: $wid — PR#$wnum could not answer finding $wfid on its Conversation comment; retry next pass" >&2
               continue
             fi

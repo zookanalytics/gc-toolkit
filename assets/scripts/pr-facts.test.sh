@@ -1342,20 +1342,23 @@ out=$(run)
 eq "$(cat "$STUB_ESC_LOG")" "" "an operator merge_hold leaves the BLOCKED escalation unsent"
 
 echo "# BLOCKED on a thread holding only the city's finding comments escalates nothing; one a human wrote in still does"
-# The write-back posts a ruled finding as a review thread and resolves it once
-# the finding closes, so while only the city has written in it, it asks nothing
-# of a person. BF2's thread holds the same finding comment and a human reply.
-store "[$(anchor BF1 207), $(anchor BF2 208)]"
-printf '%s' "$(prview 207 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_207.json"
-printf '%s' "$(prview 208 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_208.json"
-bfc='{"id":"FC-b","databaseId":9200,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled must-fix** (FB)\n<!-- gc-finding:FB -->","reactionGroups":[]}'
+# The write-back posts a ruled finding as a review thread, through pr-post.sh and
+# so carrying the city's mark, and resolves it once the finding closes. While only
+# the city has written in it, it asks nothing of a person. BF2's thread holds the
+# same finding comment and a human reply. BF3's one comment carries the finding
+# marker but is not the city's own post, so it is a thread like any other.
+store "[$(anchor BF1 207), $(anchor BF2 208), $(anchor BF3 210)]"
+for n in 207 208 210; do printf '%s' "$(prview "$n" OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+bfc='{"id":"FC-b","databaseId":9200,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled must-fix** (FB)\n<!-- gc-finding:FB -->\n\n<!-- gc:city -->","reactionGroups":[]}'
 printf '{"threads":[{"id":"FT-207","isResolved":false,"comments":{"nodes":[%s]}}]}' "$bfc" > "$GH_DIR/threads_207.json"
 printf '{"threads":[{"id":"FT-208","isResolved":false,"comments":{"nodes":[%s,{"id":"NC-208","databaseId":300,"author":{"login":"johnzook"},"body":"why not fix it here?","reactionGroups":[]}]}}]}' "$bfc" > "$GH_DIR/threads_208.json"
+printf '{"threads":[{"id":"FT-210","isResolved":false,"comments":{"nodes":[{"id":"NC-210","databaseId":301,"author":{"login":"johnzook"},"body":"see <!-- gc-finding:FB --> above","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_210.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
 hasnt "$(cat "$STUB_ESC_LOG")" "--subject BF1 --key merge-blocked-threads" "a thread only the city's finding comments are in is not escalated: the write-back resolves it"
 has "$(cat "$STUB_ESC_LOG")" "--subject BF2 --key merge-blocked-threads" "…but one a human wrote in counts like any thread"
+has "$(cat "$STUB_ESC_LOG")" "--subject BF3 --key merge-blocked-threads" "…and so does one whose marker text is not the city's own post"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# the merge-blocked-approval visit category is retired: every open one is swept, even with no live anchors"
@@ -3056,6 +3059,7 @@ has "$(tbodies "$T1")" "The merge waits for this to be fixed on the branch." "�
 has "$(tbodies "$T1")" "The parser accepts names it does not own; tighten it" "…and the objection in the reviewer's words"
 hasnt "$(tbodies "$T1")" "Raised by machine" "…without the bead's own provenance line"
 hasnt "$(tbodies "$T1")" "<!-- gc-writeback -->" "…and with no write-back marker the reply plan would claim its thread by"
+has "$(tbodies "$T1")" "<!-- gc:city -->" "…carrying the city's mark, posted through pr-post.sh"
 eq "$(printf '%s' "$T1" | jq -r '.isResolved')" "false" "its thread stays open while the finding is"
 eq "$(meta FM1 finding.pr_comment)" "$(printf '%s' "$T1" | jq -r '.comments.nodes[0].databaseId')" "the finding records the comment it was posted as"
 T2=$(fthread 200 FM2)
@@ -3067,6 +3071,7 @@ IC3=$(fissue 200 FM3)
 has "$IC3" "ruled deferred" "a deferred finding is posted as deferred"
 has "$IC3" "**Outcome:** Deferred — tracked as follow-up tk-fu3" "…with its follow-up as the outcome"
 has "$IC3" 'Locus: `PR #200 body / Summary`' "…and its locus named, since no file in the diff holds it"
+has "$IC3" "<!-- gc:city -->" "…and the city's mark, as every Conversation post carries"
 eq "$(meta FM3 finding.pr_answered)" "1" "a Conversation comment posted with its outcome owes nothing more"
 has "$(fissue 200 FM4)" "The merge waits for this to be fixed on the branch." "an open finding posted to the Conversation says what it holds"
 
@@ -3088,17 +3093,25 @@ has "$out" "has a reply after finding FM6; answered, left unresolved" "…which 
 T1=$(fthread 200 FM1)
 has "$(tbodies "$T1")" "Addressed in sha-200 on this PR (FU1)." "the reply names the head carrying the fix and the fix unit that landed it"
 has "$(tbodies "$T1")" "<!-- gc-finding:FM1:answered -->" "…marked as the finding's answer"
+eq "$(tbodies "$T1" | grep -c -F '<!-- gc:city -->')" "2" "…and the reply carries the city's mark like the post it answers"
 eq "$(printf '%s' "$T1" | jq -r '.isResolved')" "true" "…and the thread is resolved behind it"
 T2=$(fthread 200 FM2)
 eq "$(printf '%s' "$T2" | jq -r '.isResolved')" "true" "the thread posted with its outcome is resolved"
 eq "$(printf '%s' "$T2" | jq -r '.comments.nodes | length')" "1" "…with no reply, its answer already in place"
 IC4=$(fissue 200 FM4)
 has "$IC4" "**Outcome:** Addressed in sha-200 on this PR (FU4)." "the Conversation comment is edited to carry the answer"
+eq "$(printf '%s\n' "$IC4" | grep -c -F '<!-- gc:city -->')" "1" "…keeping the city's mark, once"
 hasnt "$IC4" "The merge waits" "…in place of what the ruling held"
 eq "$(jq '[ .issue_comments[] | select((.body // "") | contains("gc-finding:FM4")) ] | length' "$GH_DIR/threads_200.json")" "1" "…without a second comment"
 eq "$(meta FM1 finding.pr_answered)$(meta FM2 finding.pr_answered)$(meta FM4 finding.pr_answered)" "111" "each is recorded answered"
 has "$out" "3 findings answered" "the pass reports the three answers"
 hasnt "$since" "FCOMMENT" "nothing is posted twice"
+# This pass's walk read back every comment the first pass posted. The city's mark
+# is what keeps them out of the feedback batch: unmarked, a post under our login
+# after the cutover is feedback, and the city would route its own findings back to
+# itself as rework.
+hasnt "$out" "MF — PR#200 review comments routed" "the posted findings are not read back as feedback"
+eq "$(meta MF pr_comment_disposition)" "<absent>" "…so no batch is routed for them"
 
 echo "# …after which a pass writes nothing and reads nothing from GitHub for them"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
@@ -3143,6 +3156,39 @@ has "$out" "1 finding post(s) or answer(s) wait for the next pass (cap 10 per pa
 out=$(run)
 has "$out" "1 findings posted" "the next pass posts the rest"
 eq "$(jq '[ .issue_comments[] | select((.body // "") | contains("<!-- gc-finding:CF")) ] | length' "$GH_DIR/threads_209.json")" "11" "…each exactly once"
+
+echo "# a post whose new comment id does not come back is recorded off its marker by the next pass"
+store "[$(anchor MQ 211), $(mfind QF1 MQ must-fix open 'anchor MQ / note')]"
+printf '%s' "$(prview 211 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_211.json"
+threads 211 '{"reviews":[],"threads":[],"issue_comments":[]}'
+out=$(STUB_ICOMMENT_QUIET=1 run)
+has "$out" "finding QF1 posted, but its comment id did not read back" "a post whose id does not come back says so"
+eq "$(meta QF1 finding.pr_comment)" "<absent>" "…and records no id it cannot name"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(meta QF1 finding.pr_comment)" "$(jq -r '[ .issue_comments[] | select((.body // "") | contains("<!-- gc-finding:QF1 -->")) | .databaseId ] | first' "$GH_DIR/threads_211.json")" "the next pass records the comment off its marker"
+hasnt "$(gh_since "$mark")" "ICOMMENT" "…and posts nothing again"
+
+echo "# an unmarked post under our login in a finding's thread is someone writing there"
+# After the cutover such a post is a model or operator review run on the city's
+# account, feedback like a person's, so the finding's answer leaves the thread
+# open for it the way it does for a human reply.
+store "[$(anchor MR 212 "$UTCUT"), $(mfind RF1 MR must-fix open 'assets/scripts/x.sh: parse_name'), $(child RU1 open)]"
+printf 'RU1|blocks|RF1\n' >> "$STUB_DEPS"
+printf '%s' "$(prview 212 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_212.json"
+threads 212 '{"reviews":[],"threads":[],"issue_comments":[]}'
+printf '[{"filename":"assets/scripts/x.sh","status":"modified"}]' > "$GH_DIR/files_212.json"
+out=$(run)
+has "$out" "MR — PR#212 posted finding RF1 on assets/scripts/x.sh" "the finding is posted on its file"
+jq -c '.threads = [ .threads[] | if any(.comments.nodes[]?; (.body // "") | contains("<!-- gc-finding:RF1 -->"))
+    then .comments.nodes += [{id: "NC-212-m", databaseId: 302, author: {login: "gc-city-bot"}, body: "model review: the fix misses the empty name", createdAt: "2099-01-01T00:00:00Z", reactionGroups: []}]
+    else . end ]' "$GH_DIR/threads_212.json" > "$TMP/t212.json" && mv "$TMP/t212.json" "$GH_DIR/threads_212.json"
+bmut RF1 '.status = "closed"'; bmut RU1 '.status = "closed"'
+out=$(run)
+TR=$(fthread 212 RF1)
+has "$(tbodies "$TR")" "Addressed in sha-212 on this PR (RU1)." "the closed finding is answered in its thread"
+eq "$(printf '%s' "$TR" | jq -r '.isResolved')" "false" "…and the thread is left open over the unmarked post"
+has "$out" "has a reply after finding RF1; answered, left unresolved" "…which the pass says"
 
 echo "# a re-raise re-blocks: a re-review after a decline re-opens the human validation pass"
 # Declining closes the finding, so a still-standing objection re-adopts as a
@@ -3527,28 +3573,29 @@ eq "$(meta UT7 pr_unengaged_threads)" "<absent>" "…and no head watermark is wr
 
 echo "# a thread the city opened to post a ruled finding is no unengaged review finding"
 # A finding fixed before its PR opened is posted with its thread open until the
-# next pass resolves it, and nothing else need be live on the anchor then. UF1's
-# only self-login comment is that finding's, so the cheap pre-gate settles it
-# without reading a thread. UF2 also carries a self-login note in a resolved
-# thread, which does send the pass to the threads, so there the count has to
-# skip the finding's thread.
-store "[$(anchor UF1 205), $(anchor UF2 206)]"
+# next pass resolves it, and nothing else need be live on the anchor then. The
+# finding's comment carries the city's mark, as every post through pr-post.sh
+# does. UF1's only comment under our login is that finding's, so the cheap
+# pre-gate settles it without reading a thread. UF2 also carries an unmarked note
+# from before the cutover in a resolved thread, which does send the pass to the
+# threads, so there the count has to pass over the finding's thread.
+store "[$(anchor UF1 205 "$UTCUT"), $(anchor UF2 206 "$UTCUT")]"
 for n in 205 206; do
   printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_$n.json"
   echo '[]' > "$GH_DIR/reviews_$n.json"
 done
-ufc='{"id":"FC-u","databaseId":9100,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled must-fix** (FZ)\n<!-- gc-finding:FZ -->\n<!-- gc-finding:FZ:answered -->","reactionGroups":[]}'
-printf '%s\n' '[{"id":9100,"user":{"login":"gc-city-bot"},"body":"<!-- gc-finding:FZ -->","pull_request_review_id":null}]' > "$GH_DIR/comments_205.json"
+ufc='{"id":"FC-u","databaseId":9100,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled must-fix** (FZ)\n<!-- gc-finding:FZ -->\n<!-- gc-finding:FZ:answered -->\n\n<!-- gc:city -->","createdAt":"2026-10-08T12:00:00Z","reactionGroups":[]}'
+printf '%s\n' '[{"id":9100,"user":{"login":"gc-city-bot"},"body":"<!-- gc-finding:FZ -->\n\n<!-- gc:city -->","pull_request_review_id":null,"created_at":"2026-10-08T12:00:00Z"}]' > "$GH_DIR/comments_205.json"
 printf '{"reviews":[],"threads":[{"id":"FT-205","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[%s]}}]}\n' "$ufc" > "$GH_DIR/threads_205.json"
-printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"an old review note","pull_request_review_id":null},{"id":9100,"user":{"login":"gc-city-bot"},"body":"<!-- gc-finding:FZ -->","pull_request_review_id":null}]' > "$GH_DIR/comments_206.json"
-printf '{"reviews":[],"threads":[{"id":"T-206","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-206","databaseId":100,"author":{"login":"gc-city-bot"},"body":"an old review note","reactionGroups":[]}]}},{"id":"FT-206","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[%s]}}]}\n' "$ufc" > "$GH_DIR/threads_206.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"an old review note","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"},{"id":9100,"user":{"login":"gc-city-bot"},"body":"<!-- gc-finding:FZ -->\n\n<!-- gc:city -->","pull_request_review_id":null,"created_at":"2026-10-08T12:00:00Z"}]' > "$GH_DIR/comments_206.json"
+printf '{"reviews":[],"threads":[{"id":"T-206","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-206","databaseId":100,"author":{"login":"gc-city-bot"},"body":"an old review note","createdAt":"2026-10-06T12:00:00Z","reactionGroups":[]}]}},{"id":"FT-206","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[%s]}}]}\n' "$ufc" > "$GH_DIR/threads_206.json"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run_posture)
 since=$(gh_since "$mark")
 eq "$(meta_pinned UF1 pr_posture)" "review_required@sha-205" "a finding's open thread does not fold the posture into commented"
-eq "$(meta_pinned UF2 pr_posture)" "review_required@sha-206" "…nor beside a self-login note the pass reads the threads for"
+eq "$(meta_pinned UF2 pr_posture)" "review_required@sha-206" "…nor beside an unmarked note the pass reads the threads for"
 hasnt "$since" "num=205" "a finding comment alone sends the pass to no thread read"
-has "$since" "num=206" "…while a self-login note of another kind does"
+has "$since" "num=206" "…while an unmarked note from before the cutover does"
 
 echo "# a live child already on the anchor owns the follow-up — no second signal, no thread read"
 store "[$(anchor UT4 63 "$UTCUT"), {\"id\":\"rw-63\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Address review comments on PR#63\",\"metadata\":{\"anchor_bead\":\"UT4\"}}]"
