@@ -161,8 +161,10 @@ Settle it in this sitting, then resolve the gate: gc bd gate resolve $gate_id"
         if out=$("$HELM" open "$gated" --reason "$reason" --body "$body" 2>&1); then
             # `open` names the visit either way: "visit <id> filed on" for a
             # fresh one, "visit <id> is already open for" when one stands.
+            # The alternation needs -E: in a basic regex `\|` is a GNU
+            # extension, and BSD sed reads it as a literal bar.
             visit=$(printf '%s\n' "$out" \
-                | sed -n 's/^.*: visit \([^ ]*\) \(filed on\|is already open for\) .*$/\1/p' | head -n 1)
+                | sed -n -E 's/^.*: visit ([^ ]*) (filed on|is already open for) .*$/\1/p' | head -n 1)
             FILED=$((FILED + 1))
         else
             echo "$PROG: FAILED to file a visit on $gated for gate $gate_id (will retry next sweep)" >&2

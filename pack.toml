@@ -1,10 +1,13 @@
 # gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, converse, mechanik, polecat-codex, proactive, dog). There is
-# no gastown import and there are no cross-pack prompt patches: each agent's
+# witness, deacon, mechanik, polecat-codex, proactive, dog, demo, and the
+# converse-opus, converse-fable and converse-codex sittings). There is no
+# gastown import and there are no cross-pack prompt patches: each agent's
 # prompt.template.md is purpose-written and injects shared doctrine from
-# template-fragments/ directly.
+# template-fragments/ directly. The converse sittings share one prompt in
+# agents/_converse/, a directory the loader skips because its name starts
+# with `_`.
 #
 # "No imports" scopes to PACK imports: this file declares no [imports.*] and
 # no [rigs.imports.*]. Formula inheritance is a separate mechanism and is
@@ -24,7 +27,8 @@
 # overlay's settings.json rather than a second stanza. Every claude-provider
 # agent must end up with the guard: assets/scripts/gh-origin-guard-wiring.test.sh
 # enumerates agents/ and fails when one is left uncovered. The codex agents (dog,
-# polecat-codex) never read .claude/settings.json and are uncovered by design.
+# polecat-codex, converse-codex) never read .claude/settings.json and are
+# uncovered by design.
 #
 # cycle-recycle and work-context self-gate by role and are safe no-ops
 # elsewhere; the gh guard applies to every role, so it does not.
@@ -71,10 +75,6 @@ overlay_dir = "overlays/cycle-recycle"
 # listed here carry no hook of their own; for the rest the same hook rides their
 # overlay.
 [[patches.agent]]
-name = "converse"
-overlay_dir = "overlays/gh-origin-guard"
-
-[[patches.agent]]
 name = "converse-fable"
 overlay_dir = "overlays/gh-origin-guard"
 
@@ -94,8 +94,9 @@ overlay_dir = "overlays/gh-origin-guard"
 name = "demo"
 overlay_dir = "overlays/gh-origin-guard"
 
-# Named singletons. The pool templates (polecat, polecat-codex, converse,
-# proactive) need no stanza — instance expansion is their lifecycle.
+# Named singletons. The pool templates (polecat, polecat-codex, proactive) need
+# no stanza, since instance expansion is their lifecycle, and neither do the
+# converse sittings, which `gc-helm engage` opens as manual sessions.
 [[named_session]]
 template = "mechanik"
 scope = "city"

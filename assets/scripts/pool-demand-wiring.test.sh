@@ -92,18 +92,31 @@ for TOML in "${TOMLS[@]}"; do
     || bad "$NAME: scale_check is not valid sh"
 done
 
-# converse's visits are filed in both the city store and the rig store, and its
-# work_dir carries no .beads, so the claim resolves its store by walk-up. A
-# custom work_query would pin that to one store and hide the other half.
-CONVERSE="$ROOT/agents/converse/agent.toml"
-if [ -s "$CONVERSE" ]; then
-  if [ -z "$(block "$CONVERSE" work_query)" ]; then
-    ok "converse: no work_query, so the claim keeps the store set its visits arrive in"
-  else
-    bad "converse: a custom work_query pins the claim to one store; converse-routed visits are filed in both"
-  fi
+# A converse sitting is never demand-served. `gc-helm engage` spawns it as a
+# manual session bound to one visit, and the sitting adopts that visit through
+# `gc hook --claim`. min_active_sessions = 0 keeps the controller from starting a
+# sitting with no visit behind it, and a scale_check would hand the template a
+# demand count to spawn sittings from. A custom work_query is the other way to
+# break it: every claim candidate, the visit engage assigned included, comes from
+# the work query's output (gascity tryHookClaim), so a query that does not return
+# that visit leaves the sitting nothing to adopt.
+SITTINGS=("$ROOT"/agents/converse-*/agent.toml)
+if [ -s "${SITTINGS[0]}" ]; then
+  for SITTING in "${SITTINGS[@]}"; do
+    NAME=$(basename "$(dirname "$SITTING")")
+    MIN=$(sed -n 's/^min_active_sessions *= *\([0-9]*\).*/\1/p' "$SITTING")
+    [ "$MIN" = "0" ] \
+      && ok "$NAME: min_active_sessions = 0, so nothing starts a sitting but engage" \
+      || bad "$NAME: min_active_sessions must be 0 (got '${MIN:-unset}'); a sitting is opened by gc-helm engage, never kept running"
+    [ -z "$(block "$SITTING" scale_check)" ] \
+      && ok "$NAME: no scale_check, so no demand count spawns a sitting" \
+      || bad "$NAME: a scale_check gives the controller demand to spawn sittings from"
+    [ -z "$(block "$SITTING" work_query)" ] \
+      && ok "$NAME: no work_query, so the claim returns the visit engage assigned" \
+      || bad "$NAME: a custom work_query replaces the claim query a sitting adopts its visit through"
+  done
 else
-  bad "missing $CONVERSE"
+  bad "no converse-<model> sitting template under $ROOT/agents"
 fi
 
 echo

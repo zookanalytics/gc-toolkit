@@ -163,12 +163,21 @@ M
     ;;
   demo)
     cat <<'M'
-`skills/gc-demo-script/SKILL.md` then `skills/demo-capture/SKILL.md`. One method
-in two steps: the first reads the anchor and the diff and writes a
-`demo:capture`-format script, the second drives the browser from that script and
-records the narrated video. Judge what the recording proves, not what the diff
-claims. If no demo can be recorded, that is a finding against the change, not a
-reason to approve it.
+`skills/review-demo/SKILL.md`. The visual review: decide whether this change
+needs a visual to be understood, then deliver the cheapest one that conveys it.
+Need comes first. Triage added this check because the diff touches a surface a
+person sees; confirm that seeing the change explains it better than reading the
+diff. When it does not, approve with a one-line note and attach nothing. When it
+does, pick the modality: a visual the repo already carries, a screenshot of one
+rendered state, or a narrated video of a flow. Deliver it to the PR inline and
+uncommitted with `demo-deliver.sh`, and judge what it shows, not what the diff
+claims. A fitting visual the city cannot produce here is a note in an approve,
+never a block. The one verdict call records the decision:
+
+    signoff.sh --review-bead <this bead> --verdict approve|request-changes --visual none|repo-artifact|screenshot|video
+
+`none` records with `approve` only. Whether the change is the right thing to ship,
+and lets the operator decide, is `pm`'s.
 M
     ;;
   arch)
@@ -191,9 +200,9 @@ M
 right thing for the people the product serves — the outcome its anchor named,
 not a proxy — against the product goals (`docs/product-goals.md`, which names
 who they are), then whether the PR lets the operator decide. Push back when the
-diff does what its bead said but not what those people need. Grading a recording
-is `demo`'s; your only demo concern is a change the operator must watch to trust
-that the PR leaves unwatchable.
+diff does what its bead said but not what those people need. Whether the change
+needs a visual, and delivering it, is `demo`'s; your only visual concern is a
+change the operator must see to trust that the PR gives them nothing to look at.
 M
     ;;
   *)
