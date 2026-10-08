@@ -10,6 +10,8 @@
 # neither resolves. A control runs a bare add from the same cwd and proves cwd
 # steers it, so "landed in the rig, not cwd" is a real discrimination. No live
 # city, store, or network.
+#
+# run-tests-scope: tree
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
