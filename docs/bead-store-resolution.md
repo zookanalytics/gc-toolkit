@@ -147,8 +147,11 @@ reference to a dozen live beads.
 - `escalate.sh` pins every read and write on its board route to its subject's
   store by path, through `escalation-rig.sh --db`, so a visit lands in the
   store its subject lives in, the city's included, wherever the caller sits. A
-  subject it cannot place falls back to the caller's `GC_RIG` store, and is
-  refused when `GC_RIG` is unset.
+  subject it cannot place falls back to the caller's `GC_RIG` store. Without
+  `GC_RIG`, what the lookup proved decides. A subject proven to name no bead,
+  or a wisp, is filed on the standing triage subject of the store the caller
+  sits in. A subject whose store could not be read may still be a real bead,
+  so it is refused.
 - `bead-rehome.sh` places both ends of a successor pointer, so
   `gc.superseded_by_store` names the store that actually holds the successor.
 - `mol-witness-patrol`'s cleanup step holds `git worktree remove` behind

@@ -4,12 +4,14 @@
 # lint-learned.test.sh; this suite is about what a detector does and does not
 # call a finding.
 #
+# run-tests-scope: tree
+#
 # It lives here rather than beside its subject because the runner executes
 # every executable in lint-learned.d/ as a detector, so a test file in that
 # directory would be run as one.
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
-# bd-helper-in-scope, bd-notes-replace, pr-post-bypass.
+# bd-helper-in-scope, bd-notes-replace, pr-post-bypass, id-read-unguarded.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -144,6 +146,116 @@ chmod +x "$TMP/shim/sed"
 OUT="$(PATH="$TMP/shim:$PATH" "$DET" "$TMP/clean.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed mask exits 2, not 0 and not 1"
 has "$OUT" "detector cannot scan it" "and says which file it could not scan"
+
+# ── id-read-unguarded ───────────────────────────────────────────────────
+#
+# Fixtures spell the alternative's `//` as @OR@: the runner scans every tracked
+# file, so the shape written literally here would be a finding against the test
+# that proves the finding.
+DET_ID="$HERE/lint-learned.d/id-read-unguarded.sh"
+[ -x "$DET_ID" ] || { echo "no detector at $DET_ID"; exit 1; }
+runid() { OUT="$("$DET_ID" "$@" 2>&1)"; RC=$?; }
+plantid() { sed 's#@OR@#//#g' > "$1"; }
+
+echo "── id-read-unguarded: what is a finding ──"
+
+# Silencing jq's stderr does not make the read correct: an array answer still
+# crashes at `.id` and reads as "no id" for a bead that was filed.
+plantid "$TMP/id-violations.sh" <<'FIX'
+#!/usr/bin/env bash
+id=$(gc bd create "t" -t task --json | jq -r '.id @OR@ .[0].id')
+id=$(gc bd create "t" -t task --json 2>/dev/null | jq -r '.id @OR@ .[0].id @OR@ empty' 2>/dev/null)
+id=$(gc bd update "$X" --json | jq -r '.[0].id @OR@ .id')
+id=$(printf '%s' "$J" | jq -r '.id@OR@.[0].id')
+  -d "body" --json | jq -r '.id @OR@ .[0].id')
+FIX
+runid "$TMP/id-violations.sh"
+eq "$RC" 1 "a file with an unguarded id read exits 1"
+for n in 2 3 4 5 6; do
+    has "$OUT" "id-violations.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 5 "nothing else is reported"
+has "$OUT" "id-read-unguarded" "the finding names the rule"
+has "$OUT" 'if type == "array" then (.[0].id // empty) else (.id // empty) end' "the finding names the guarded read"
+
+echo "── id-read-unguarded: what is not ──"
+
+plantid "$TMP/id-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+# jq -r '.id @OR@ .[0].id' is the shape the rule bans; a comment only states it
+id=$(gc bd create "t" -t task --json | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+first=$(printf '%s' "$LIST" | jq -r '.[0].id // empty')
+one=$(printf '%s' "$OBJ" | jq -r '.id // empty')
+other=$(printf '%s' "$J" | jq -r '.idx @OR@ .[0].idx')
+longer=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].identity')
+FIX
+runid "$TMP/id-clean.sh"
+eq "$RC" 0 "the guarded read, one-shape reads, a longer key and a comment are clean"
+eq "$OUT" "" "a clean file prints nothing"
+
+echo "── id-read-unguarded: fences run, prose quotes ──"
+
+plantid "$TMP/id-doc.md" <<'FIX'
+# A doc
+
+Never read an id as `jq -r '.id @OR@ .[0].id'`; this line is prose.
+
+```bash
+OBS=$(gc bd create "obs" --json | jq -r '.id @OR@ .[0].id')
+# jq -r '.id @OR@ .[0].id' in a comment inside the fence
+```
+
+~~~
+id=$(jq -r '.[0].id @OR@ .id' <<< "$J")
+~~~
+FIX
+runid "$TMP/id-doc.md"
+eq "$RC" 1 "an unguarded read inside a doc's fence is a finding"
+has "$OUT" "id-doc.md:6:" "a backtick fence is scanned"
+has "$OUT" "id-doc.md:11:" "a tilde fence is scanned"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "prose outside a fence, and a comment inside one, are not"
+
+plantid "$TMP/id-formula.toml" <<'FIX'
+[[steps]]
+id = "file"
+description = """
+Never write `.id @OR@ .[0].id` in a step.
+```bash
+BEAD=$(gc bd create "t" --json | jq -r '.id @OR@ .[0].id')
+```
+"""
+FIX
+runid "$TMP/id-formula.toml"
+eq "$RC" 1 "a formula step's fenced read is a finding"
+has "$OUT" "id-formula.toml:6:" "and it is the fenced line that is reported"
+hasnt "$OUT" "id-formula.toml:4:" "the step's prose is not"
+
+echo "── id-read-unguarded: scope ──"
+
+# The dated records quote the shape, renders duplicate their sources, and the
+# detectors state the shapes they hunt.
+mkdir -p "$TMP/specs/tk-x" "$TMP/generated" "$TMP/lint-learned.d"
+for p in specs/tk-x/notes.sh generated/render.sh lint-learned.d/other.sh; do
+    plantid "$TMP/$p" <<'FIX'
+id=$(jq -r '.id @OR@ .[0].id' <<< "$J")
+FIX
+done
+runid "$TMP/specs/tk-x/notes.sh" "$TMP/generated/render.sh" "$TMP/lint-learned.d/other.sh"
+eq "$RC" 0 "specs/, generated/ and lint-learned.d/ are skipped"
+plantid "$TMP/id-other.txt" <<'FIX'
+id=$(jq -r '.id @OR@ .[0].id' <<< "$J")
+FIX
+runid "$TMP/id-other.txt" "$TMP/no-such-file.sh"
+eq "$RC" 0 "a file outside *.sh, *.toml and *.md, and a path that is not a file, drop out"
+
+echo "── id-read-unguarded: a detector that cannot scan says so ──"
+
+mkdir -p "$TMP/shim-id"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$TMP/shim-id/grep"
+chmod +x "$TMP/shim-id/grep"
+OUT="$(PATH="$TMP/shim-id:$PATH" "$DET_ID" "$TMP/id-clean.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a scan that cannot read its files exits 2, not 0 and not 1"
+has "$OUT" "detector cannot scan" "and says so"
 
 # ── mktemp-untemplated ──────────────────────────────────────────────────
 #

@@ -373,7 +373,7 @@ META=$(jq -nc \
 
 set -- -t "$TYPE" --title "$TITLE" -d "$BODY" --metadata "$META"
 [ -n "$PRIORITY" ] && set -- "$@" --priority "$PRIORITY"
-BEAD=$(gc bd create "$@" --json 2>/dev/null | scrub | jq -r '.id // .[0].id // ""' 2>/dev/null)
+BEAD=$(gc bd create "$@" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 
 # `bd create --json` can answer with an empty id for a bead it did create, and
 # a blind retry would file the duplicate this script exists to prevent. The key

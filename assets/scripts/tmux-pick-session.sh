@@ -266,9 +266,12 @@ ACTIVE=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 # so the awk pre-pass joins fields 6+ back into the title.
 PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
-LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' | awk -F'|' \
-    -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" -v facts="$FACTS" '
+# PANES and FACTS are multi-line, so they reach awk through ENVIRON: BSD
+# awk (macOS) rejects a newline inside a -v value.
+LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' \
+    | PICK_PANES="$PANES" PICK_FACTS="$FACTS" awk -F'|' -v all="$ALL" -v active="$ACTIVE" '
 BEGIN {
+    panes = ENVIRON["PICK_PANES"]; facts = ENVIRON["PICK_FACTS"]
     n_panes = split(panes, P, "\n")
     for (i = 1; i <= n_panes; i++) {
         if (P[i] == "") continue

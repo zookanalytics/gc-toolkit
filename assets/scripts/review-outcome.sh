@@ -255,7 +255,7 @@ cmd_back_lane() {
       signoff_verdict: "approve", "gc.outcome": "recorded"}' 2>/dev/null)
   [ -n "$meta" ] || { warn "could not compose the approve outcome for lane $lane on $anchor"; exit 2; }
   id=$(gc bd create "$title" -t task -d "$desc" --metadata "$meta" --status=closed --notes "$note" --json 2>/dev/null \
-    | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 
   # Read back the shape lane-state.sh keys on: a bead that did not close, or lost
   # a metadata key, would leave the lane silently ungreen.

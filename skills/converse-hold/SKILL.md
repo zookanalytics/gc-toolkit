@@ -16,8 +16,8 @@ if VISIT="$VISIT" SUBJECT="$SUBJECT" \
      "$CONV/converse-hold.sh" "<the one decision or input needed, ≤140 chars>"; then
   : # the hold is real and stamped — post the framing below
 else
-  # NOT a hold yet: nothing re-asks the item. Do NOT post the framing.
-  # Raise the failure in the thread and do not describe the item as held.
+  # NOT a hold yet: nothing re-asks the subject. Do NOT post the framing.
+  # Raise the failure in the thread and do not describe the subject as held.
   exit 1
 fi
 ```
@@ -27,13 +27,14 @@ not a comment, and `converse-hold.sh` files it against the right bead for
 you. A conversation about a PR anchor gates the VISIT: the conversation
 cannot conclude until the operator answers, and the subject anchor keeps
 moving — a conversation does not freeze its subject's merge. Only a
-pre-PR (unanchored) item takes the demand on itself, because its `held`
+pre-PR (unanchored) subject takes the demand on itself, because its `held`
 marker needs that edge. A ruling files unassigned and routes to the
 operator's partition; pass `--assignee <who>` to the writer only when the
 demand is work a named person must perform, and that one is theirs to
 close, never yours. A resumed hold refreshes the demand this sitting
 filed rather than filing a second. The visit's `escalation_key` scopes the
-demand, so a sibling sitting with its own key on a shared item keeps its own.
+demand, so a sibling sitting with its own key on a shared subject keeps its
+own.
 
 **Stamp BEFORE you wait, not after.** The hold IS a demand: until the
 demand is filed nothing re-asks the question, so it lands before you hand
@@ -62,7 +63,7 @@ framing never claims a merge hold it did not take. Omit the flag and the PR
 keeps moving. Either way the step-7 sign-off discharges whichever demands you
 filed.
 
-**The takeaway is the sentence; `held` is the state.** Where `$ITEM`
+**The takeaway is the sentence; `held` is the state.** Where `$SUBJECT`
 already carries an anchor state the held transition is skipped, and
 refused if attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
 enumerate anchors by that state, and `held` drops it from all three. It
@@ -71,8 +72,8 @@ anchor, not this state.
 
 A framing that asks for no decision still files one. What the
 operator owes then is the close-out itself, and the demand is what
-brings the item back if the thread is lost before they take it. The
-gate is not about there being a question; it is about the item not
+brings the subject back if the thread is lost before they take it. The
+gate is not about there being a question; it is about the subject not
 moving until a person acts.
 
 **One sentence, ≤140 characters — the writer refuses a longer one.**

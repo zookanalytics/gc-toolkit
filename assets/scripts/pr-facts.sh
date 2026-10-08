@@ -373,27 +373,53 @@ gh_graphql() { # <query> [gh -f/-F args...]; non-zero = "could not tell"
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   printf '%s' "$raw" | scrub
 }
-# Count of unresolved review threads on <pr-number>, echoed as a non-negative
-# integer. Returns non-zero without output when the connection could not be
-# read — an unreadable connection is never zero, and the BLOCKED arm below must
-# not escalate a guessed cause. Paginated to exhaustion: a count read from a
-# truncated connection decides wrongly.
-BLOCKED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+# >>> review-threads-read
+# Every review thread on a PR, read once per anchor visit and shared by the
+# readers that ask about threads: the BLOCKED arm's unresolved count, the
+# unengaged-thread count and the answered-comment read are jq projections over
+# the same nodes. Paginated to exhaustion: a projection over a truncated
+# connection decides wrongly. A thread carries its first 100 comments, and each
+# projection says which way a longer thread's cut errs. A comment's id is read as
+# fullDatabaseId, a BigInt GitHub serializes as a string: databaseId is a 32-bit
+# Int GitHub has deprecated for that reason, and review-comment ids already pass
+# 2^31. Each comment also carries its creation instant and its review's
+# submission, the facts gc_city_own dates a post by.
+REVIEW_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
-      pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}'
-unresolved_threads() { # <pr-number>
-  local raw n
-  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$BLOCKED_THREADS_QUERY" \
+      pageInfo{hasNextPage endCursor}
+      nodes{isResolved comments(first:100){nodes{fullDatabaseId author{login} body createdAt
+        pullRequestReview{submittedAt}}}}}}}}'
+RT_NUM=""; RT_NODES=""
+# Loads <pr-number>'s threads into RT_NODES, one JSON array of thread nodes, and
+# returns 0; a second call for the same PR reuses them. Returns non-zero with
+# RT_NODES empty when the connection could not be read, and an unreadable read is
+# never an empty one. Call it in the current shell, never inside $(...), or the
+# read does not outlive the call.
+review_threads_load() { # <pr-number>
+  [ -n "$RT_NUM" ] && [ "$RT_NUM" = "${1:-}" ] && return 0
+  local raw nodes
+  RT_NUM=""; RT_NODES=""
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$REVIEW_THREADS_QUERY" \
     -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$1" 2>/dev/null) || return 1
   [ -n "$raw" ] || return 1
-  n=$(printf '%s' "$raw" | scrub | jq -s '
+  nodes=$(printf '%s' "$raw" | scrub | jq -sc '
     ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
     | if ($rt | length) == 0 then error("no reviewThreads in response")
-      else [ $rt[].nodes[]? | select((.isResolved // false) == false) ] | length end' 2>/dev/null) || return 1
+      else [ $rt[].nodes[]? ] end' 2>/dev/null) || return 1
+  [ -n "$nodes" ] || return 1
+  RT_NUM="$1"; RT_NODES="$nodes"
+}
+# Count of unresolved review threads in RT_NODES, as a non-negative integer. The
+# comment cut does not touch it. Non-zero without output on a projection that
+# does not yield one, and the BLOCKED arm below must not escalate a guessed cause.
+unresolved_threads() {
+  local n
+  n=$(printf '%s' "$RT_NODES" | jq '[ .[] | select((.isResolved // false) == false) ] | length' 2>/dev/null) || return 1
   case "$n" in ''|*[!0-9]*) return 1 ;; esac
   printf '%s' "$n"
 }
+# <<< review-threads-read
 # Branch-protection facts for <branch>, read from its active rules: whether an
 # unresolved review thread blocks a merge (required_review_thread_resolution)
 # and how many approving reviews are required. Sets PROT_STATE=known|unknown;
@@ -441,6 +467,19 @@ reconcile_status_label() { # <anchor> <pr-number>
     >/dev/null 2>&1 || true
   cur_labels=""
 }
+# The escalation keys this script files on an anchor to hold its PR's merge
+# until a person answers, for PR number $n: rework or close (pr-abandoned), a
+# moved base (pr-retargeted), feedback nothing routed (pr-comments), review
+# threads nobody engaged (pr-unengaged-threads), threads branch protection
+# requires resolved (merge-blocked-threads), and red checks parked to a person
+# (pr-fix-noncode, pr-fix-capped). A PR closed with a pre-recorded disposition
+# has no merge left to hold, so the disposition arm retires these visits. An arm
+# that files a new merge-holding visit adds its key here.
+MERGE_PATH_KEYS_JQ='
+  def merge_path_key($n):
+    test("^pr-(abandoned|retargeted|fix-noncode|fix-capped)\\." + $n + "$")
+    or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
+    or . == "merge-blocked-threads";'
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
   # Both stamps are re-checked here as well as queried: this id gets pr_number
   # written onto it, so a row that came back for another subject would stamp a
@@ -452,6 +491,72 @@ visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this si
     [ .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
           | select(((.metadata.escalation_key // "") | tostring) == $k)
           | .id ] | .[0] // empty' 2>/dev/null
+}
+# retract_dispose_visits <anchor> <num> <reading> — conclude the disposition
+# arm's refused-close report once the close it asked for has landed. Every visit
+# filed under pr-dispose-failed.<num> for the anchor is retracted moot through
+# escalate.sh's retract verb, which leaves one a person is engaged in to them.
+# Each visit is read back and reported. A visit still open and unengaged is
+# retried by the next full pass's sweep below.
+retract_dispose_visits() {
+  local a="$1" key="pr-dispose-failed.$2" reading="$3" vids v row st who
+  vids=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$key" \
+           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub \
+         | jq -r --arg k "$key" --arg s "$a" '.[]
+             | select(((.metadata.escalation_key // "") | tostring) == $k)
+             | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s) | .id' 2>/dev/null) || vids=""
+  [ -n "$vids" ] || return 0
+  [ -x "$ESCALATE" ] && "$ESCALATE" --retract --subject "$a" --key "$key" --message "$reading" >/dev/null 2>&1 </dev/null
+  for v in $vids; do
+    row=$(gc bd show "$v" --json 2>/dev/null | scrub)
+    st=$(printf '%s' "$row" | jq -r '.[0].status // ""' 2>/dev/null)
+    who=$(printf '%s' "$row" | jq -r '.[0] | ((.assignee // "") | tostring) as $w
+      | ((.metadata["gc.session_name"] // "") | tostring) as $n
+      | if $w != "" then $w elif $n != "" then "session " + $n else "" end' 2>/dev/null)
+    if [ "$st" = "closed" ]; then
+      echo "$PROG: $a — retracted its own pr-dispose-failed visit $v as moot (the close landed)"
+    elif [ "$st" = "in_progress" ] || [ -n "$who" ]; then
+      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is engaged (${who:-$st}); it is theirs to conclude" >&2
+    else
+      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is still ${st:-unreadable}; a full pass retracts it while it is open and unengaged" >&2
+    fi
+  done
+}
+# refresh_dispose_visits <anchor> <num> <message> <kids-note> — keep the
+# disposition arm's refused-close report current. escalate.sh files the visit
+# once and dedups every later refusal onto it, so a close refused for a new
+# reason would leave the visit naming an obstruction that has already cleared.
+# Each open visit under pr-dispose-failed.<num> for the anchor that nobody is
+# engaged in takes this pass's message as its description when that differs.
+# The note naming the parked children an earlier pass disposed is carried
+# forward: they are closed by now, so this pass names none, and the note is how
+# an operator who reverses the disposition knows what to restore.
+refresh_dispose_visits() {
+  local a="$1" key="pr-dispose-failed.$2" msg="$3" kids="$4" rows v old want
+  local kids_lead=" The branch's parked rework/rebase children ("
+  rows=$(gc bd list --status=open --metadata-field "escalation_key=$key" \
+           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    old=$(printf '%s' "$rows" | jq -r --arg v "$v" '.[] | select(.id == $v) | (.description // "")' 2>/dev/null)
+    want="$msg$kids"
+    if [ -z "$kids" ]; then
+      case "$old" in *"$kids_lead"*) want="$msg$kids_lead${old#*"$kids_lead"}" ;; esac
+    fi
+    [ "$old" = "$want" ] && continue
+    if gc bd update "$v" --description "$want" >/dev/null 2>&1; then
+      echo "$PROG: $a — refreshed its pr-dispose-failed visit $v with this pass's refusal"
+    else
+      echo "$PROG: $a — could not refresh its pr-dispose-failed visit $v; it still names an earlier refusal" >&2
+    fi
+  done <<REFRESH_EOF
+$(printf '%s' "$rows" | jq -r --arg k "$key" --arg s "$a" '.[]
+    | select(((.metadata.escalation_key // "") | tostring) == $k)
+    | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+    | .id' 2>/dev/null)
+REFRESH_EOF
 }
 mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
   # Atomic birth for a rework child: every identity key lands together, or the
@@ -483,7 +588,7 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
       --set-metadata merge_strategy=mr --set-metadata existing_pr="$prurl" \
       --set-metadata pr_url="$prurl" --set-metadata pr_number="$prnum" >/dev/null 2>&1 || true
   else
-    fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   fi
   [ -n "$fix" ] || return 1
   # The child now exists in the store (freshly created, or reuse-restamped); drop
@@ -640,6 +745,93 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
               | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
                   comment_id: ((.id // 0) | tostring), review_id: "" } ])' 2>/dev/null
 }
+# The ids in <rows-json> that are feedback, as a JSON array: every row that is
+# not the city's own post (gc_city_own), whoever wrote it. The comment and
+# Conversation spaces count feedback by this one rule, so the read that decides
+# whether to ask the threads, the marks that record what they answered, and the
+# count that routes cannot disagree about which comment is feedback.
+foreign_ids() { # <rows-json>
+  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+    [ .[] | select(gc_city_own($self; $since) | not) | (.id // 0) ]' 2>/dev/null
+}
+# The ids of the reviews in <reviews-json> whose body counts as feedback, as a
+# JSON array: not the city's own post (gc_city_own), COMMENTED or
+# CHANGES_REQUESTED, and carrying a body. An unmarked review under our own login
+# after the provenance cutover is a model or operator review run on the city's
+# account, and is feedback like any other. A review with an empty body carries
+# only its inline comments, which the comment space already sees; counting it
+# would leave a posture no comment id can ever answer. CHANGES_REQUESTED counts
+# beside COMMENTED: an operator uses it to mean "change this", and it is the
+# feedback the loop most has to answer. A dismissed review is in neither state,
+# so a dismissal takes its ids out of the batch.
+counted_review_ids() { # <reviews-json>
+  printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+    [ .[] | select(gc_city_own($self; $since) | not)
+      | (((.state // "") | tostring)) as $st
+      | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
+      | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
+      | (.id // 0) ]' 2>/dev/null
+}
+# The highest id in a one-line JSON id array on stdin, or 0. Read in the shell: it
+# runs on every anchor of every pass, and the array is the flat `[1,2,3]` the two
+# readers above print.
+max_id() {
+  local ids="" i n=0
+  IFS= read -r ids || true
+  ids=${ids#\[}; ids=${ids%\]}
+  local IFS=,
+  for i in $ids; do
+    case "$i" in ''|*[!0-9]*) continue ;; esac
+    [ "$i" -gt "$n" ] && n="$i"
+  done
+  printf '%s' "$n"
+}
+max_foreign_id() { foreign_ids "$1" | max_id; } # <rows-json>
+max_counted_review_id() { counted_review_ids "$1" | max_id; } # <reviews-json>
+# The ids in the JSON id array <ids-json> above <lo> and at or below <hi>.
+ids_within() { # <ids-json> <lo> <hi>
+  printf '%s' "$1" | jq -c --argjson lo "$2" --argjson hi "$3" \
+    '[ .[] | select(. > $lo and . <= $hi) ]' 2>/dev/null
+}
+# How far the review threads have answered past <mark>: walking the ids in
+# <ids-json> above the mark in order, the last one reached before the first id
+# not in <answered-json>, or <mark> itself when the first is not answered. The
+# feedback through that id is all answered, so a later pass whose newest feedback
+# sits at or below it has nothing for the threads to say.
+answered_through() { # <mark> <ids-json> <answered-json>
+  { printf '%s\n' "$2"; printf '%s\n' "$3"; } | jq -nr --argjson mark "$1" '
+    (input) as $ids | (input) as $ans
+    | (reduce $ans[] as $a ({}; .[$a | tostring] = true)) as $done
+    | reduce ([ $ids[] | select(. > $mark) ] | sort)[] as $i ({m: $mark, open: true};
+        if .open and $done[$i | tostring] == true then .m = $i else .open = false end)
+    | .m' 2>/dev/null
+}
+# The reviews whose bodies the review threads have answered, as a JSON array of
+# ids: each carries at least one inline comment, and every one of those is in
+# <answered-ids>. A review's body frames the inline comments it carries, so a
+# sitting that answered each of them in its thread has answered the review. Only
+# the thread read confirms a comment here. A comment the watermark already passed
+# is not taken as answered on the mark's word, so a review submitted late over
+# such comments still routes. A review with no inline comment has no thread to
+# answer it and is never listed. The lists go in on stdin, the way
+# feedback_body takes them.
+answered_review_ids() { # <reviews-json> <comments-json> <answered-ids-json>
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$3"; } | jq -nc '
+    (input) as $revs | (input) as $cmts | (input) as $ans
+    | (reduce $ans[] as $a ({}; .[$a | tostring] = true)) as $done
+    | (reduce $cmts[] as $c ({};
+        (($c.pull_request_review_id // "") | tostring) as $r
+        | if $r == "" then . else .[$r] += [ (($c.id // 0) | tostring) ] end)) as $by
+    | [ $revs[] | (.id // 0) as $id | ($by[$id | tostring] // []) as $mine
+        | select(($mine | length) > 0 and all($mine[]; $done[.] == true)) | $id ]' 2>/dev/null
+}
+# <rows-json> less every row whose id is in <ids-json>.
+drop_ids() { # <rows-json> <ids-json>
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; } | jq -nc '
+    (input) as $rows | (input) as $ids
+    | (reduce $ids[] as $i ({}; .[$i | tostring] = true)) as $gone
+    | [ $rows[] | select($gone[(.id // 0) | tostring] != true) ]' 2>/dev/null
+}
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
 # out of the batch leaves the comments under it routing. A dismissal is the only
@@ -700,21 +892,12 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # whether through the write-back or a pr-post.sh reply from a fixer or a
 # sitting, is arm 7's or the write-back's to finish, a thread of marked city
 # posts holds no finding, and a resolved one is done.
-# `comments(first:100)` caps a thread at a page, so a thread longer than that
-# whose only marked reply sits past the cap reads as unengaged — a dismissable
-# visit, never a dropped finding.
-UNENGAGED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
-  repository(owner:$owner,name:$repo){pullRequest(number:$num){
-    reviewThreads(first:100,after:$endCursor){
-      pageInfo{hasNextPage endCursor}
-      nodes{isResolved comments(first:100){nodes{body}}}}}}}'
-unengaged_thread_count() { # <pr-number> — count on stdout; non-zero = could not tell
-  local num="$1" raw
-  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$UNENGAGED_THREADS_QUERY" \
-    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$num" 2>/dev/null) || return 1
-  [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | scrub | jq -s "$CITY_OWN_DEF"'
-    [ .[].data.repository.pullRequest.reviewThreads.nodes[]?
+# The thread read caps a thread at its first 100 comments, so a thread longer
+# than that whose only marked reply sits past the cap reads as unengaged — a
+# dismissable visit, never a dropped finding.
+unengaged_thread_count() { # count over RT_NODES on stdout; non-zero = could not tell
+  printf '%s' "$RT_NODES" | jq "$CITY_OWN_DEF"'
+    [ .[]
       | (.comments.nodes // []) as $cs
       | select((.isResolved // false) == false)
       | select([ $cs[] | select(gc_city_marked | not) ] | length > 0)
@@ -781,13 +964,53 @@ UTGATES
   [ "$(printf '%s' "$inflight" | jq 'length' 2>/dev/null)" = 0 ] || return 1
   # A thread read that did not answer, or answered with no usable count, is the
   # gap this function exists to close: return 2 so the caller holds, never 1.
-  utc=$(unengaged_thread_count "$num") || return 2
+  review_threads_load "$num" || return 2
+  utc=$(unengaged_thread_count) || return 2
   case "$utc" in ''|*[!0-9]*) return 2 ;; esac
   [ "$utc" -gt 0 ] || return 1
   UT_COUNT="$utc"
   return 0
 }
 # <<< unengaged-threads-body
+
+# >>> answered-threads-body
+# The comment path reads "unanswered" off max_c exceeding the comment watermark,
+# and that watermark advances only when arm 7 routes (the lifecycle transition
+# below). A comment answered by any other path, such as a sitting that replies
+# in-thread and resolves the thread, never moves the watermark, so it reads
+# unanswered on every pass and files a visit carrying pr_number that holds the
+# merge. A resolved review thread holding a reply of ours is the answered signal,
+# whichever path posted the reply and whoever resolved the thread. A reply of
+# ours is a post that is the city's own (gc_city_own): marked by pr-post.sh, or
+# under our login from before the provenance cutover. An unmarked post under our
+# login after it is feedback, an operator's or a model's, and answers nothing.
+# A thread is answered through the last reply of ours in it, and only once it is
+# resolved. A bare reply is not enough: unengaged_holds counts exactly the
+# unresolved threads a reply of ours left open, so reading a reply here would only
+# move the hold from one arm to the other. A comment after our last reply stays
+# outstanding. A reply does not reopen a resolved thread, and GitHub records no
+# resolution time to place that comment before or after the resolve; the
+# write-back likewise reads a post after its own as a live conversation.
+# A thread resolved with no reply of ours answers nothing here, so a hand
+# resolution alone still routes. Only inline comments sit on a thread; a review
+# body and a Conversation comment carry none and stay on the mark.
+# The ids of the inline comments RT_NODES shows answered, as a JSON array of
+# numbers on stdout, comparable with the REST rows' `id`: in each resolved thread,
+# every comment up to and including the last reply of ours. The thread read's
+# 100-comment cut can hide only a later reply of ours, so it answers less, never
+# more. Non-zero without output on a projection that does not yield one, and the
+# caller then counts the batch unfiltered rather than dropping an objection — the
+# direction live_comments fails in too.
+answered_comment_ids() {
+  printf '%s' "$RT_NODES" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+    [ .[] | select((.isResolved // false) == true)
+      | (.comments.nodes // []) as $cs
+      | ([ $cs | to_entries[] | select(.value | gc_city_own($self; $since)) | .key ] | max) as $last
+      | select($last != null)
+      | $cs[0:($last + 1)][] | (.fullDatabaseId // empty) | tonumber ]
+    | unique' 2>/dev/null
+}
+# <<< answered-threads-body
 
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
@@ -832,6 +1055,45 @@ AV_EOF
   fi
 fi
 
+# --- retract the disposition arm's refused-close reports whose close landed ------
+# The disposition arm files a pr-dispose-failed.<num> visit when bead-rehome
+# refuses an anchor's close, and retracts it once a later pass's close lands. A
+# retract that does not land then is not retried by the arm, because the closed
+# anchor leaves the enumeration. So every full pass also reads the open visits
+# filed under that key family and retracts each whose subject now reads closed
+# with its disposition pointer (gc.superseded_by) recorded: the close the visit
+# asked for has landed. A subject closed without the pointer is left alone, since
+# its disposition is not on record. A visit someone is engaged in is theirs to
+# conclude, and a subject that does not read this pass leaves its visit for the
+# next. Like the sweep above, this runs before the no-anchors early-exit.
+if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+  if df_visits=$(bd_list --status=open --has-metadata-key=escalation_key); then
+    while IFS="$(printf '\t')" read -r dfsubj dfnum; do
+      [ -n "${dfsubj:-}" ] || continue
+      dfrow=$(gc bd show "$dfsubj" --json 2>/dev/null | scrub)
+      dfst=$(printf '%s' "$dfrow" | jq -r '.[0].status // empty' 2>/dev/null)
+      if [ -z "$dfst" ]; then
+        echo "$PROG: pr-dispose-failed.$dfnum — subject $dfsubj unreadable this pass; its visit is left for the next" >&2
+        continue
+      fi
+      dfsucc=$(printf '%s' "$dfrow" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null)
+      [ "$dfst" = "closed" ] && [ -n "$dfsucc" ] || continue
+      retract_dispose_visits "$dfsubj" "$dfnum" \
+        "PR#$dfnum's pre-recorded disposition is consummated: $dfsubj closed (-> $dfsucc) once the obstruction this visit reported cleared."
+    done <<DF_EOF
+$(printf '%s' "$df_visits" | jq -r '[ .[]? | select((.metadata.task_kind // "") == "visit")
+    | ((.metadata.escalation_key // "") | tostring) as $k
+    | select($k | test("^pr-dispose-failed\\.[0-9]+$"))
+    | ((.metadata["gc.continuation_group"] // "") | tostring) as $g
+    | select($g | test("^[A-Za-z0-9._-]+$"))
+    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+    | [$g, ($k | ltrimstr("pr-dispose-failed."))] ] | unique | .[] | @tsv' 2>/dev/null)
+DF_EOF
+  else
+    echo "$PROG: pr-dispose-failed visit sweep skipped — could not list visits (retry next pass)" >&2
+  fi
+fi
+
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
@@ -847,6 +1109,7 @@ while IFS= read -r row; do
   [ -n "$id" ] || continue
   case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
   pace_visit rest "$id"; case $? in 1) continue ;; 2) break ;; esac
+  RT_NUM=""; RT_NODES=""
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // ""')
   target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   prurl=$(printf '%s' "$row" | jq -r '.metadata.pr_url // ""')
@@ -1001,25 +1264,69 @@ CHILDREN_EOF
             echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
           fi
         fi
-        # Retire any stale rework-or-close visit BEFORE the anchor's close, not
-        # after: an earlier pass may have filed it before the disposition marker
-        # was set, and it tracks the anchor — so bead-rehome's finalize gate would
-        # otherwise hold the close on the very question this pre-recorded
-        # disposition already answers. The marker on the anchor, not the visit, is
-        # what drives a retry, so retiring it here is safe even if the close below
-        # does not land this pass.
-        vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
-        if [ -n "$vid" ]; then
-          if "$VISIT_CLOSE" --visit "$vid" --outcome moot --force \
-               --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null; then
-            echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
-          else
-            echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
-          fi
+        # Retire this script's merge-path visits on the anchor BEFORE its close,
+        # not after. Each was filed to hold PR#$num's merge until a person
+        # answered it (MERGE_PATH_KEYS_JQ), possibly before the disposition marker
+        # was set, and each tracks the anchor, so bead-rehome's finalize gate would
+        # otherwise hold the close on a merge that no longer exists. The marker on
+        # the anchor, not the visit, is what drives a retry, so retiring them here
+        # is safe even if the close below does not land this pass. What a visit
+        # raised stays on the PR. A visit someone is engaged in is theirs to
+        # conclude and keeps holding the close, with one exception: the
+        # rework-or-close visit, whose question the pre-recorded disposition
+        # itself answers. The sitting that recorded the disposition can still
+        # hold it, so that one is retired over the claim. This arm's own
+        # pr-dispose-failed visit asks whether this close lands, so it is not
+        # retired here: the retry below excepts it at the gate.
+        mp_rows=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "gc.continuation_group=$id" \
+                    --limit=0 --json 2>/dev/null | scrub)
+        if printf '%s' "$mp_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+          while IFS=$'\t' read -r mpvid mpkey mpheld; do
+            [ -n "$mpvid" ] || continue
+            mpforce=()
+            if [ "$mpkey" = "pr-abandoned.$num" ]; then
+              mpforce=(--force)
+              mpwhy="the rework-or-close decision is made."
+            elif [ -n "$mpheld" ]; then
+              echo "$PROG: $id — visit $mpvid ($mpkey) is engaged ($mpheld); it holds the close until its holder concludes it" >&2
+              continue
+            else
+              mpwhy="PR#$num is closed, so the merge this visit held is gone; what it raised stays on the PR."
+            fi
+            if "$VISIT_CLOSE" --visit "$mpvid" --outcome moot ${mpforce[@]+"${mpforce[@]}"} \
+                 --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; $mpwhy" >/dev/null; then
+              echo "$PROG: $id — retired stale visit $mpvid ($mpkey; disposition was pre-recorded)"
+            else
+              echo "$PROG: $id — could not retire stale visit $mpvid; leaving it for the operator" >&2
+            fi
+          done <<MP_EOF
+$(printf '%s' "$mp_rows" | jq -r --arg s "$id" --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
+    .[] | select((.metadata.task_kind // "") == "visit")
+        | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+        | ((.metadata.escalation_key // "") | tostring) as $k
+        | select($k | merge_path_key($n))
+        | ((.assignee // "") | tostring) as $who
+        | ((.metadata["gc.session_name"] // "") | tostring) as $sess
+        | [.id, $k, (if $who != "" then $who elif $sess != "" then "session " + $sess
+                     elif (.status // "") == "in_progress" then "claimed" else "" end)] | @tsv' 2>/dev/null)
+MP_EOF
+        else
+          echo "$PROG: $id — could not list the visits on the anchor; any merge-path visit is left for the operator" >&2
         fi
+        # This arm's own escalation from an earlier refused close tracks the
+        # anchor too, and it asks for exactly this retry: "clear the obstruction
+        # and the next refinery pass retries". If the finalize gate held the
+        # retry on it, the anchor could not close even after that obstruction
+        # cleared. So the retry names the arm's key to the gate, which excepts
+        # every visit filed under it for this anchor that nobody is engaged in,
+        # and those visits are retracted moot once the close lands. A visit a
+        # person has engaged still holds the close and is theirs to conclude. A
+        # refused close leaves the visit open, so a standing obstruction keeps
+        # its one visit and nothing is re-filed.
+        EXCEPT_ARG=(--except-key "pr-dispose-failed.$num")
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
-                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
+                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} ${EXCEPT_ARG[@]+"${EXCEPT_ARG[@]}"} \
                    --note "PR#$num closed $disp_kind (disposition pre-recorded before the close)" 2>&1); rrc=$?
         else
           rout="bead-rehome.sh is not executable at $REHOME"; rrc=127
@@ -1027,6 +1334,8 @@ CHILDREN_EOF
         if [ "$rrc" -eq 0 ]; then
           disposed_n=$((disposed_n + 1))
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
+          retract_dispose_visits "$id" "$num" \
+            "PR#$num's pre-recorded disposition is consummated: $id closed ($disp_kind -> $disp_succ) once the obstruction this visit reported cleared."
           continue
         elif [ "$rrc" -eq 4 ]; then
           # Pointer would not stick — transient. Keep merge_result=pull_request
@@ -1045,8 +1354,9 @@ CHILDREN_EOF
           printf '%s\n' "$rout" >&2
           kids_disposed_note=""
           [ -n "$disposed_kids" ] && kids_disposed_note=" The branch's parked rework/rebase children ($disposed_kids) were ALREADY disposed (closed not-needed -> $disp_succ) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
-          escalate "$id" "pr-dispose-failed.$num" \
-            "PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand.$kids_disposed_note"
+          dmsg="PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand."
+          escalate "$id" "pr-dispose-failed.$num" "$dmsg$kids_disposed_note"
+          refresh_dispose_visits "$id" "$num" "$dmsg" "$kids_disposed_note"
           skipped=$((skipped + 1)); continue
         fi
       fi ;;
@@ -1116,7 +1426,7 @@ CHILDREN_EOF
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
   posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
-  revs_raw=""; cmts_raw=""; cmts_live=""; icmts_raw=""
+  revs_raw=""; revs_open=""; cmts_raw=""; cmts_live=""; cmts_open=""; icmts_raw=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
@@ -1161,34 +1471,75 @@ CHILDREN_EOF
         echo "$PROG: $id — PR#$num could not filter retired reviews out of the comment list; counting it unfiltered" >&2
         cmts_live="$cmts_raw"
       fi
-      # A review with an empty body carries only its inline comments, which the
-      # comment read below already sees; counting it here would leave a posture
-      # no comment id can ever answer. CHANGES_REQUESTED counts beside
-      # COMMENTED: an operator uses it to mean "change this", and it is the
-      # feedback the loop most has to answer. A dismissed review is in neither
-      # state, so a dismissal takes its ids out of the batch.
-      # Every space counts only what is not the city's own post (gc_city_own):
-      # the mark pr-post.sh puts on everything the city posts, or our login on a
-      # post older than the provenance cutover. An unmarked review under our own
-      # login after it is a model or operator review run on the city's account,
-      # and is feedback like any other.
-      max_r=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
-        [ .[] | select(gc_city_own($self; $since) | not)
-          | (((.state // "") | tostring)) as $st
-          | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
-          | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
-          | (.id // 0) ] | max // 0' 2>/dev/null)
-      max_c=$(printf '%s' "$cmts_live" | jq -r --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
-        [ .[] | select(gc_city_own($self; $since) | not) | (.id // 0) ] | max // 0' 2>/dev/null)
+      # Drop the feedback the review threads have answered, so feedback answered
+      # off the watermark stops reading as unanswered and holding the merge: an
+      # inline comment its thread answered, and a review whose every inline
+      # comment was. Nothing routes answered feedback, so nothing moves a
+      # watermark past it, and the threads would be re-read on every pass until
+      # the PR merged. A read records how far the threads have answered past each
+      # watermark (cam, cwm's answered mark; ram, rwm's), and a pass whose newest
+      # feedback sits at or below both marks skips the read and drops what they
+      # cover. A read that cannot answer drops only what the marks cover: an
+      # unreadable read never drops an objection. A mark is a confirmation the way
+      # a watermark is a routing, so a thread unresolved after the mark passed its
+      # comment routes nothing until a new comment brings the read back, the same
+      # as an unresolve under the watermark, and a reply always carries a new id
+      # above the mark. cmts_live stays whole for unengaged_holds, which reads it
+      # below.
+      cmts_open="$cmts_live"; revs_open="$revs_raw"
+      c_ids=$(foreign_ids "$cmts_live"); r_ids=$(counted_review_ids "$revs_raw")
+      raw_max_c=$(printf '%s' "$c_ids" | max_id); raw_max_r=$(printf '%s' "$r_ids" | max_id)
+      max_c="$raw_max_c"; max_r="$raw_max_r"
+      if [ "$raw_max_c" -gt "$cwm" ] || [ "$raw_max_r" -gt "$rwm" ]; then
+        cam=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_answered // "") | tostring')
+        ram=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_answered // "") | tostring')
+        case "$cam" in ''|*[!0-9]*) cam=0 ;; esac
+        case "$ram" in ''|*[!0-9]*) ram=0 ;; esac
+        [ "$cam" -ge "$cwm" ] || cam="$cwm"
+        [ "$ram" -ge "$rwm" ] || ram="$rwm"
+        ans_c=$(ids_within "$c_ids" "$cwm" "$cam"); ans_r=$(ids_within "$r_ids" "$rwm" "$ram")
+        if [ "$raw_max_c" -gt "$cam" ] || [ "$raw_max_r" -gt "$ram" ]; then
+          if review_threads_load "$num" && read_c=$(answered_comment_ids) \
+             && read_r=$(answered_review_ids "$revs_raw" "$cmts_live" "$read_c"); then
+            ans_c="$read_c"; ans_r="$read_r"
+            cam_new=$(answered_through "$cwm" "$c_ids" "$ans_c")
+            ram_new=$(answered_through "$rwm" "$r_ids" "$ans_r")
+            case "$cam_new" in ''|*[!0-9]*) cam_new="$cam" ;; esac
+            case "$ram_new" in ''|*[!0-9]*) ram_new="$ram" ;; esac
+            marks=()
+            [ "$cam_new" = "$cam" ] || marks+=(--set "pr_comment_answered=$cam_new")
+            [ "$ram_new" = "$ram" ] || marks+=(--set "pr_review_answered=$ram_new")
+            if [ "${#marks[@]}" -gt 0 ] && ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                 "${marks[@]}" >/dev/null; then
+              echo "$PROG: $id — PR#$num answered marks did not record; the threads are read again next pass" >&2
+            fi
+          else
+            echo "$PROG: $id — PR#$num review-thread resolution unreadable; counting the feedback above the answered marks unfiltered" >&2
+          fi
+        fi
+        if c_kept=$(drop_ids "$cmts_live" "$ans_c") && [ -n "$c_kept" ] \
+           && r_kept=$(drop_ids "$revs_raw" "$ans_r") && [ -n "$r_kept" ]; then
+          cmts_open="$c_kept"; revs_open="$r_kept"
+          max_r=$(max_counted_review_id "$revs_open")
+          max_c=$(max_foreign_id "$cmts_open")
+        else
+          echo "$PROG: $id — PR#$num could not drop answered feedback; counting the batch unfiltered" >&2
+        fi
+      fi
       # An issue comment carries no review state and no inline path; every one
       # that is not the city's own post is feedback the loop has to answer, the
       # same test the inline space uses. Its ids are a separate range, so it
       # earns its own watermark rather than sharing max_c's.
-      max_i=$(printf '%s' "$icmts_raw" | jq -r --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
-        [ .[] | select(gc_city_own($self; $since) | not) | (.id // 0) ] | max // 0' 2>/dev/null)
-      case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
-      case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
-      case "$max_i" in ''|*[!0-9]*) max_i=0 ;; esac
+      max_i=$(max_foreign_id "$icmts_raw")
+      # The routing transition writes these three back as the watermarks, and a
+      # mark only rises. A count can fall below its mark: the threads drop the
+      # comments they answered, a dismissal retires a review and its comments, and
+      # a comment can be deleted. Written back, a fallen mark would re-route every
+      # comment under it that its thread later lost, and the next batch's floor
+      # would overlap the ranges already recorded in pr_comment_batch.
+      [ "$max_c" -ge "$cwm" ] || max_c="$cwm"
+      [ "$max_r" -ge "$rwm" ] || max_r="$rwm"
+      [ "$max_i" -ge "$iwm" ] || max_i="$iwm"
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # An unmarked review posted under OUR OWN login before the cutover leaves
       # unresolved finding threads arm 7 never counts — it reads them as the city's
@@ -1658,7 +2009,7 @@ REAP_EOF
     [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
     [ -n "$armed" ]         && why="the anchor is armed to re-dispatch when ready"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
-    CSRC=$(feedback_reviews "$revs_raw" "$rwm")
+    CSRC=$(feedback_reviews "$revs_open" "$rwm")
     DISP=""
     if [ "$choice" = "rework" ]; then
       # Same choice as the CONFLICTING arm's `stale-base-dispatch-mode`: the child
@@ -1678,7 +2029,7 @@ REAP_EOF
       # comment gets the wider key.
       CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c)"
       [ "$max_i" -gt 0 ] && CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c, issue $max_i)"
-      CBODY=$(feedback_body "$revs_raw" "$cmts_live" "$rwm" "$cwm" "$icmts_raw" "$iwm")
+      CBODY=$(feedback_body "$revs_open" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm")
       [ -n "$CBODY" ] || CBODY="Unanswered review feedback on PR#$num (through review $max_r, comment $max_c, issue $max_i). The bodies could not be rendered; read them at $live_url."
       CBODY="## Unanswered review feedback on PR#$num
 
@@ -2008,7 +2359,7 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num finding tool not found ($FINDING); NOT watermarking (the batch has no findings for the validator to rule)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    if ! frecs=$(feedback_findings "$revs_raw" "$cmts_live" "$rwm" "$cwm" "$icmts_raw" "$iwm") \
+    if ! frecs=$(feedback_findings "$revs_open" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm") \
        || ! printf '%s' "$frecs" | jq -e 'type == "array"' >/dev/null 2>&1; then
       echo "$PROG: WARN $id — PR#$num could not render the feedback findings; NOT watermarking (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
@@ -2110,7 +2461,7 @@ $CBODY"
     review_gates_for "$base"
     bcause="unnameable"; bthreads=0
     if [ "$PROT_STATE" = "known" ] && [ "$PROT_THREAD_REQ" = "true" ]; then
-      if bthreads=$(unresolved_threads "$num"); then
+      if review_threads_load "$num" && bthreads=$(unresolved_threads); then
         [ "$bthreads" -gt 0 ] && bcause="threads"
       else
         bthreads=0   # unreadable — name no cause on a guess
