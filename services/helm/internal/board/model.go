@@ -159,30 +159,42 @@ type Anchor struct {
 	// `asking`; the title, which is the demand's authored headline; and the
 	// creation instant, which is when an unanswered demand's turn began.
 	//
-	// It is the SAME read as WaitingOn, not a second one — [source.waitingEdges]
-	// produces both from one dependency query — so an anchor whose edges could
-	// not be read reports the empty set here and WaitingUnknown below, exactly
-	// as it does for the id slices.
+	// It is the SAME read as WaitingOn, not a second one —
+	// [source.waitingFromEdges] produces both from one dependency query — so an
+	// anchor whose edges could not be read reports the empty set here and
+	// WaitingUnknown below, exactly as it does for the id slices.
 	Blockers []Blocker `json:"blockers,omitempty"`
 
-	// WaitingUnknown says the source could not READ this anchor's edges at
-	// all: the per-anchor dependency query itself failed, so the empty
-	// WaitingOn above is an absence of knowledge rather than a proof that
-	// nothing is outstanding.
+	// WaitingUnknown says the source could not establish this anchor's waits,
+	// so the empty WaitingOn above is an absence of knowledge rather than a
+	// proof that nothing is outstanding.
 	//
-	// The two are not interchangeable, and only one consumer can tell them
-	// apart. An unresolved BLOCKER is already handled — it is absent from
+	// The beads source sets it when its dependency read fails, or when the
+	// hydration that resolves the blockers does. That read is one batched query
+	// per rig and status pass ([source.BeadsSource.attachEdges]), so a single
+	// failure marks every anchor of the pass whose kind reads waits
+	// ([source.needsWaitingEdges]). Epic and convoy are among those kinds: they
+	// read their `blocks` edges for the dependency-family grouping, so a failed
+	// read flags them too. The supervisor backend sets it on every
+	// metadata-keyed row it serves, because it cannot resolve a blocker's
+	// status ([source.SupervisorSource.metadataAnchorFor]).
+	//
+	// An unread wait set and an empty one are not interchangeable. A blocker
+	// that was read but has not closed is already handled — it is absent from
 	// WaitingOnClosed and so counts as outstanding, the quiet direction. An
 	// unreadable EDGE SET has no such fallback: it looks exactly like a row
 	// with no waits, which is the state [ruled] reads as "every recorded wait
-	// has landed". Without this flag a per-anchor Dolt timeout would satisfy
-	// that clause vacuously and stand an answered human-gated row down,
-	// telling the operator to close or extend a question whose routed work may
-	// still be open (tk-fhd705).
+	// has landed". Without this flag a Dolt timeout on that read would satisfy
+	// that clause vacuously and stand an answered human-gated row down, telling
+	// the operator to close or extend a question whose routed work may still
+	// be open.
 	//
-	// Only the kinds that spend the edges pay the read, so this stays false
-	// for an epic or a convoy: they never asked, so nothing about them is
-	// unknown.
+	// Only [ruled] and [ruledInFlight] read the flag, and both refuse a row
+	// that carries it, so the row falls through to the un-ruled arm. The family
+	// grouping reads WaitingOn and never this flag. So on an epic or a convoy
+	// the flag matters only when the row is routed to the operator. Both
+	// readers apply only to rows [humanGated] accepts, and for an epic or a
+	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 }
 
