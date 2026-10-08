@@ -392,7 +392,8 @@ needs = ["arm-implementation"]
 description = """
 The convoy is standing and its children are dispatched or armed. This molecule's
 work is done. It writes no card and holds nothing: the durable owned convoy lives
-on and graduates, the ephemeral input convoy drains with this molecule.
+on and graduates, and the input convoy was only this pour's handle on the
+subject.
 
 This is the terminal step, so close its own step bead (the earlier steps closed
 themselves in order) and drain. The control-dispatcher's `workflow-finalize`

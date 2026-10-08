@@ -145,10 +145,10 @@ subject visit; the board offers Accept while that key is non-empty; and
 --var issue=<subject>`, the same single-formula, single-subject shape
 `mol-first-reaction` rides.
 
-Two convoys share the word. Accept's sling creates an ephemeral **input
-convoy** whose one tracked member is the subject, which the formula reads as
-`{{convoy_id}}`. `seed-convoy` creates the durable **owned convoy** for the PR
-unit. The input convoy drains with the molecule; the owned convoy lives on and
+Two convoys share the word. Accept's sling creates an **input convoy** whose
+one tracked member is the subject, which the formula reads as `{{convoy_id}}`.
+`seed-convoy` creates the durable **owned convoy** for the PR unit. The input
+convoy is only this pour's handle on the subject. The owned convoy lives on and
 graduates.
 
 ## When to reach for it
