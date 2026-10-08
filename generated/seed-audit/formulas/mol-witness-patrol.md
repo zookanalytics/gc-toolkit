@@ -3,8 +3,14 @@ Description: Witness patrol loop — rig work-health RECOVERY only. Poured as a 
 wisp on startup (the agent prompt's startup reconcile adopts before it
 pours):
 
-  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
+  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}'
   gc bd update $WISP --assignee=$GC_AGENT
+
+The pour passes the binding prefix and nothing else, so the cycle wait is the
+formula's default as it stood when this wisp was poured. It is rendered here
+for the step that reads it:
+
+  event_timeout={{event_timeout}}
 
 Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
 pour the next iteration. Steps are not materialized; read each description
@@ -30,15 +36,16 @@ rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
 the other, and either stamp reads back clean, so a hand-written address is
 right only by luck.
 
-Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
-topology-root-skip, liveness-map-guard, liveness-lookup, warrant-file,
-husk-guard, owning-store-guard, recovery-stamp-gate, crash-loop-window,
-patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
-their tests; keep markers, keep them backslash-free.
+Marked blocks (bug-dispatch, candidate-pipeline, host-bead-skip,
+downstream-court-skip, topology-root-skip, liveness-map-guard,
+liveness-lookup, warrant-file, husk-guard, owning-store-guard,
+recovery-stamp-gate, crash-loop-window, patrol-wisp-pour,
+refinery-stuck-escalate) are extracted and executed by their tests; keep
+markers, keep them backslash-free.
 
 Variables:
-  {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
-  {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. (default=600)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery, polecat, and dog routing addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds. (default=gc-toolkit.)
+  {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured. (default=600)
 
 Steps (4):
   ├── mol-witness-patrol.check-inbox: Check mail

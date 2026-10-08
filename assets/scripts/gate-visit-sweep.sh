@@ -28,9 +28,9 @@
 #     names such a gate on stderr every pass until it is resolved by hand.
 #
 # A visit already standing for the gated bead — the sitting that filed the
-# demand mid-hold, matched by continuation_group, tracks edge OR stall_root
-# (the union liveness-sweep reads; `open` alone reads only the first two) —
-# is recorded on the gate as its visit without filing a second one. A gate whose
+# demand mid-hold, matched by the shared visit identity (visit-identity.sh: the
+# tracks edge, the gc.continuation_group stamp as fallback) — is recorded on
+# the gate as its visit without filing a second one. A gate whose
 # gated bead is ITSELF a visit (an anchored hold files the conversation demand on
 # the VISIT) is self-covering the same way: that visit is the sitting that
 # resolves the gate, so it is recorded as the gate's visit and no second one is
@@ -130,13 +130,10 @@ while IFS=$'\t' read -r gate_id gated title; do
     fi
 
     # A visit already standing for the gated bead. visit_covers is the shared
-    # identity test (tracks edge, gc.continuation_group fallback). The stall_root
-    # arm is retained as an advisory liveness read per the tk-fhlqce ruling:
-    # nothing writes stall_root today, so it is inert, and its removal (once the
-    # edge is proven to cover the same visits) is tracked as a follow-up.
+    # identity test (tracks edge, gc.continuation_group fallback).
     visit=$(printf '%s' "$LIVE_RAW" | jq -r --arg s "$gated" "$VISIT_IDENTITY_JQ"'
       [ .[] | select((.metadata.task_kind // "") == "visit")
-        | select(visit_covers($s) or ((.metadata.stall_root // "") == $s))
+        | select(visit_covers($s))
         | .id ] | first // empty' 2>/dev/null || true)
 
     # A gate whose gated bead is itself a visit is self-covering: an anchored hold
