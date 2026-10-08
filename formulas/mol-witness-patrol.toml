@@ -93,11 +93,13 @@ POOL=$("$SCRIPTS/resolve-route.sh" "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat
 if [ -z "$POOL" ]; then
   echo "no live polecat identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat'; a bug filed at a guessed address is offered to nobody, so escalate instead of filing." >&2
 else
-  BUG=$(gc bd create "$TITLE" -t bug -d "$BODY" --metadata "$(jq -nc --arg p "$POOL" '{"gc.routed_to":$p}')" --json | jq -r '.id // .[0].id')
+  BUG_JSON=$(gc bd create "$TITLE" -t bug -d "$BODY" --metadata "$(jq -nc --arg p "$POOL" '{"gc.routed_to":$p}')" --json)
+  BUG=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   if [ -n "$BUG" ] && [ "$BUG" != "null" ]; then
     echo "filed + routed bug $BUG to $POOL"
   else
-    echo "gc bd create reported no id; look for a bug already routed at $POOL before filing this again." >&2
+    CREATE_ERR=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+    echo "gc bd create reported no id${CREATE_ERR:+ ($CREATE_ERR)}; look for a bug already routed at $POOL before filing this again." >&2
   fi
 fi
 # <<< bug-dispatch

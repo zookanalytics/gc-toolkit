@@ -6,19 +6,16 @@
 # The bug: the check keyed two per-visit decisions off the SHARED
 # gc.continuation_group. That assumes one subject == one topic, which is
 # false for a standing scope (task_kind=triage-subject), where the group
-# is a bucket carrying one visit per distinct item — the root-scoped
-# stall-visit shape (one visit per workflow root, each stamped
-# stall_root=<root> under one subject), which liveness-sweep.sh's root
-# fold consumes.
+# is a bucket carrying one visit per distinct situation — escalate.sh files
+# each under the one subject, told apart only by its escalation_key.
 #
 # Two failures, both silent:
-#   1. LOSS — a sitting about workflow A folds into a live sitting about
-#      workflow B, because they share a bucket. A's decision is dropped
+#   1. LOSS — a sitting about situation A folds into a live sitting about
+#      situation B, because they share a bucket. A's decision is dropped
 #      and the fold reads as correct dedup.
 #   2. MUTUAL FOLD — both live sessions see each other, both fold, and
-#      the subject ends with ZERO sittings. Recorded live: su-331y
-#      (workflow su-ykfw) and su-s1if (workflow su-vc8n) under group
-#      su-vehr, the rule firing both ways.
+#      the subject ends with ZERO sittings. Recorded live: su-331y and
+#      su-s1if under group su-vehr, the rule firing both ways.
 #
 # Neither is a knowledge gap, so neither is fixable by telling the role
 # to be careful: an agent that follows the contract exactly still drops
@@ -34,7 +31,6 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
 PROMPT="$REPO/agents/converse/prompt.template.md"
-SWEEP="$REPO/assets/scripts/liveness-sweep.sh"
 FOLD_SUT="$REPO/assets/scripts/converse-fold.sh"
 CLAIMER="$REPO/assets/scripts/converse-claim.sh"
 
@@ -57,7 +53,7 @@ is() {
     if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "got '$2', want '$3'"; fi
 }
 
-for f in "$PROMPT" "$SWEEP" "$FOLD_SUT" "$CLAIMER"; do
+for f in "$PROMPT" "$FOLD_SUT" "$CLAIMER"; do
     [ -r "$f" ] || {
         printf 'converse-fold-scope: cannot read %s\n' "$f" >&2
         exit 1
@@ -121,23 +117,21 @@ esac
 STUB
 chmod +x "$BIN/gc"
 
-# visit <id> <group> <item> <assignee> — one row of the in_progress listing.
-# An empty <item> writes NO stall_root key at all: absent is the ordinary
-# subject-is-the-topic shape, and it must behave differently from a stall
-# visit rather than collapsing to the same branch.
-# A 5th argument writes the `tracks` edge a visit is filed with alongside its
+# visit <id> <group> <assignee> [tracks] [key] — one row of the in_progress
+# listing.
+# A 4th argument writes the `tracks` edge a visit is filed with alongside its
 # stamp — the visit's SECOND recording of its own subject, and the one that
 # has held where the stamp did not (su-ab9je); it is what the empty-group
 # cases below recover from.
-# A 6th writes escalation_key, the stamp escalate.sh gives every visit it
-# files. Those name no target, so the key is the only thing that tells two
-# situations under one bucket apart.
+# A 5th writes escalation_key, the stamp escalate.sh gives every visit it
+# files: under one bucket the key is the only thing that tells two situations
+# apart. An empty one writes NO key at all, the ordinary subject-is-the-topic
+# shape, which must behave differently from a keyed visit rather than
+# collapsing to the same branch.
 visit() {
-    jq -nc --arg id "$1" --arg g "$2" --arg i "$3" --arg a "$4" --arg t "${5:-}" \
-        --arg k "${6:-}" \
+    jq -nc --arg id "$1" --arg g "$2" --arg a "$3" --arg t "${4:-}" --arg k "${5:-}" \
         '{id:$id, assignee:$a,
           metadata:({"task_kind":"visit","gc.continuation_group":$g}
-                    + (if $i == "" then {} else {"stall_root":$i} end)
                     + (if $k == "" then {} else {"escalation_key":$k} end))}
          + (if $t == "" then {} else {dependencies:[{id:$t, dependency_type:"tracks"}]} end)'
 }
@@ -180,8 +174,8 @@ unreadable() {
     printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/list.json"
 }
 
-# run_block <visit-id> <subject-id> — prints SUBJECT=… / ITEM=… / TOPIC=… /
-# HOLDER=… as converse-fold.sh resolves them. Runs the script with the stub
+# run_block <visit-id> <subject-id> — prints SUBJECT=… / TOPIC=… / HOLDER=…
+# as converse-fold.sh resolves them. Runs the script with the stub
 # first on PATH and cwd outside any checkout.
 run_block() {
     (
@@ -206,17 +200,16 @@ legacy_holds() {
         | select((.metadata["gc.continuation_group"] // "") == $s)
         | select(.assignee != "")] | length' "$FIXDIR/list.json"
 }
-# legacy_holder <visit> <subject> — what the PRE-FIX block resolved, reproduced
-# exactly: no tracks-edge recovery, no empty-subject refusal. Present for the
-# same reason as legacy_holds — to prove each empty-group fixture below really
-# does reproduce the defect rather than being a shape the old rule handled.
+# legacy_holder <visit> <subject> — what the PRE-FIX block resolved on these
+# fixtures: the lowest-id held sibling stamped with the same group, with no
+# tracks-edge recovery, no empty-subject refusal and no escalation_key topic.
+# Present for the same reason as legacy_holds — to prove each fixture it runs
+# against really does reproduce the defect rather than being a shape the old
+# rule handled.
 legacy_holder() {
-    _lh_i=$(jq -r '.[0].metadata.stall_root // ""' "$FIXDIR/show-$1.json" 2>/dev/null)
-    [ -n "$_lh_i" ] || _lh_i="$2"
-    jq -r --arg s "$2" --arg i "$_lh_i" --arg v "$1" '
+    jq -r --arg s "$2" --arg v "$1" '
         [ .[] | select((.metadata.task_kind // "")=="visit")
           | select((.metadata["gc.continuation_group"] // "")==$s)
-          | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
           | select((.assignee // "")!="") | .id ]
         + [$v] | unique | .[0]' "$FIXDIR/list.json" 2>/dev/null
 }
@@ -228,20 +221,32 @@ else
     exit 1
 fi
 
-echo "── a bucket's siblings are about DIFFERENT items: neither folds ──"
-# The loss, in its live shape: one standing scope, two workflows, two
-# sessions. Reverse-ordered on purpose — the answer must come from the
-# ids, not from which row the listing happened to return first.
-fixture "$(visit v-two sub r-beta sess-2)" "$(visit v-one sub r-alpha sess-1)"
+echo "── a bucket's siblings are about DIFFERENT situations: neither folds ──"
+# The loss, in its live shape: one standing scope, two situations, two
+# sessions. escalate.sh files one visit per situation under the scope, so the
+# subject cannot tell them apart; escalation_key can, and it is a stamp the
+# filer already writes on each one. Reverse-ordered on purpose — the answer
+# must come from the ids, not from which row the listing happened to return
+# first.
+fixture "$(visit v-two sub sess-2 '' doctor-check-cadence-live)" \
+    "$(visit v-one sub sess-1 '' doctor-dolt-noms-size)"
 is "positive control: the old group-only rule saw a sibling for both" \
     "$(legacy_holds sub)" "2"
+is "positive control: the pre-fix block folded two distinct findings together" \
+    "$(legacy_holder v-two sub)" "v-one"
 out="$(run_block v-one sub)"
-is "the item is the visit's own target, not the bucket" "$(field "$out" ITEM)" "r-alpha"
+is "the subject stays the bucket, since a takeaway target has to be a bead" \
+    "$(field "$out" SUBJECT)" "sub"
+is "the topic is the visit's own key, not the bucket" \
+    "$(field "$out" TOPIC)" "key:doctor-dolt-noms-size"
 is "v-one holds its own sitting" "$(field "$out" HOLDER)" "v-one"
 is "v-two holds its own sitting" "$(holder v-two sub)" "v-two"
 
-echo "── two sittings on the SAME item: exactly one folds ──"
-fixture "$(visit v-two sub r-alpha sess-2)" "$(visit v-one sub r-alpha sess-1)"
+echo "── two sittings on the SAME situation: exactly one folds ──"
+# escalate.sh dedups a second visit on one key before it exists, and the fold
+# must still collapse the two if one ever does.
+fixture "$(visit v-two sub sess-2 '' doctor-dolt-noms-size)" \
+    "$(visit v-one sub sess-1 '' doctor-dolt-noms-size)"
 is "positive control: both would fold under an untied rule" "$(legacy_holds sub)" "2"
 h1="$(holder v-one sub)"
 h2="$(holder v-two sub)"
@@ -252,63 +257,32 @@ folds=0
 [ "$h2" = "v-two" ] || folds=$((folds + 1))
 is "exactly one of the two sittings folds (never both, never neither)" "$folds" "1"
 
-echo "── a subject with no per-visit target still dedups (legacy shape) ──"
+echo "── a subject with no escalation_key still dedups (ordinary shape) ──"
 # The ordinary case the original rule was written for: one subject, one
-# topic, two visits. Absent stall_root falls back to the subject, so both
-# are about the same item and the fold still fires — narrowing the scope
-# must not switch dedup off for the shape that always needed it.
-fixture "$(visit v-two sub '' sess-2)" "$(visit v-one sub '' sess-1)"
+# topic, two visits. With no key the topic is the subject, so both are about
+# the same thing and the fold still fires — narrowing the scope must not
+# switch dedup off for the shape that always needed it.
+fixture "$(visit v-two sub sess-2)" "$(visit v-one sub sess-1)"
 out="$(run_block v-two sub)"
-is "the item falls back to the subject when no target is named" "$(field "$out" ITEM)" "sub"
+is "the subject passes through" "$(field "$out" SUBJECT)" "sub"
+is "with no key the topic is the subject" "$(field "$out" TOPIC)" "sub"
 is "the higher id still folds into the lower" "$(field "$out" HOLDER)" "v-one"
 is "the lower id still holds" "$(holder v-one sub)" "v-one"
 
-echo "── one bucket, two escalation keys: neither folds ──"
-# escalate.sh files one visit per situation and names no target, so every
-# visit it files under a standing scope carries an absent stall_root and the
-# subject cannot tell them apart. escalation_key can, and it is a stamp the
-# filer already writes on each one.
-fixture "$(visit v-two sub '' sess-2 '' doctor-check-cadence-live)" \
-    "$(visit v-one sub '' sess-1 '' doctor-dolt-noms-size)"
-is "positive control: the old group-only rule saw a sibling for both" \
-    "$(legacy_holds sub)" "2"
-is "positive control: the pre-fix block folded two distinct findings together" \
-    "$(legacy_holder v-two sub)" "v-one"
-out="$(run_block v-two sub)"
-is "the item stays the SUBJECT — a takeaway target has to be a bead" \
-    "$(field "$out" ITEM)" "sub"
-is "v-two holds its own sitting" "$(field "$out" HOLDER)" "v-two"
-is "v-one holds its own sitting" "$(holder v-one sub)" "v-one"
-
-# The converse: one situation, two visits. escalate.sh dedups these before
-# the second exists, and the fold must still collapse them if one ever does.
-fixture "$(visit v-two sub '' sess-2 '' doctor-dolt-noms-size)" \
-    "$(visit v-one sub '' sess-1 '' doctor-dolt-noms-size)"
-is "two visits for the SAME key still fold to the lowest id" \
-    "$(holder v-two sub)" "v-one"
-
-# A named target outranks the key: stall_root is both the item and the topic,
-# so a stall visit's fold does not change because a key rode along.
-fixture "$(visit v-two sub r-alpha sess-2 '' key-beta)" \
-    "$(visit v-one sub r-alpha sess-1 '' key-alpha)"
-is "a shared stall_root folds even when the keys differ" \
-    "$(holder v-two sub)" "v-one"
-
-# The two namespaces never compare equal: a key spelled like a sibling's
-# stall_root is still a different topic.
-fixture "$(visit v-two sub '' sess-2 '' r-alpha)" \
-    "$(visit v-one sub r-alpha sess-1)"
-is "a key equal to a sibling's stall_root is not the same topic" \
+# The two namespaces never compare equal: a key spelled like the subject id is
+# still a different topic from a keyless sibling's, which is that subject.
+fixture "$(visit v-two sub sess-2 '' sub)" "$(visit v-one sub sess-1)"
+is "a key equal to the subject id is not the subject's topic" \
     "$(holder v-two sub)" "v-two"
 
 echo "── only live sittings of THIS group count ──"
-fixture "$(visit v-one sub r-alpha '')" "$(visit v-two sub r-alpha sess-2)"
+fixture "$(visit v-one sub '')" "$(visit v-two sub sess-2)"
 is "an unassigned sibling is not a holder, even with a lower id" \
     "$(holder v-two sub)" "v-two"
-fixture "$(visit v-one other r-alpha sess-1)" "$(visit v-two sub r-alpha sess-2)"
-is "a held visit of another group is not a holder, same item or not" \
+fixture "$(visit v-one other sess-1 '' key-a)" "$(visit v-two sub sess-2 '' key-a)"
+is "a held visit of another group is not a holder, same key or not" \
     "$(holder v-two sub)" "v-two"
-fixture "$(visit v-one sub r-alpha sess-1)"
+fixture "$(visit v-one sub sess-1)"
 is "a lone sitting holds" "$(holder v-one sub)" "v-one"
 
 echo "── one subject, sittings in TWO stores: they still fold to one ──"
@@ -318,8 +292,8 @@ echo "── one subject, sittings in TWO stores: they still fold to one ──"
 # was filed.
 rm -f "$FIXDIR"/*.json
 rigs r1 r2
-store r1 "$(visit v-one sub r-alpha sess-1)"
-store r2 "$(visit v-two sub r-alpha sess-2)"
+store r1 "$(visit v-one sub sess-1)"
+store r2 "$(visit v-two sub sess-2)"
 is "positive control: store r1 alone holds only v-one (a single-store scan could never fold it)" \
     "$(jq '[.[] | select(.assignee != "")] | length' "$FIXDIR/store-r1.json")" "1"
 is "positive control: store r2 alone holds only v-two" \
@@ -339,7 +313,7 @@ echo "── a store that does not read is skipped; the readable ones still dedu
 # the old single-store miss rather than failing the whole scan closed.
 rm -f "$FIXDIR"/*.json
 rigs r1 r2
-store r1 "$(visit v-one sub r-alpha sess-1)" "$(visit v-two sub r-alpha sess-2)"
+store r1 "$(visit v-one sub sess-1)" "$(visit v-two sub sess-2)"
 printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r2.json"
 is "the readable store still folds the higher id into the lower" "$(holder v-two sub)" "v-one"
 
@@ -349,8 +323,8 @@ echo "── a suspended store is not queried ──"
 # not fold a live sitting elsewhere.
 rm -f "$FIXDIR"/*.json
 rigs r1 r2:suspended
-store r1 "$(visit v-one sub r-alpha sess-1)"
-store r2 "$(visit v-zero sub r-alpha sess-0)"
+store r1 "$(visit v-one sub sess-1)"
+store r2 "$(visit v-zero sub sess-0)"
 is "a lower-id sitting in a suspended store is not a holder" "$(holder v-one sub)" "v-one"
 
 echo "── every store unreadable resolves no holder (hold, never fold) ──"
@@ -361,21 +335,20 @@ rm -f "$FIXDIR"/*.json
 rigs r1 r2
 printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r1.json"
 printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r2.json"
-printf '%s' "$(visit v-two sub r-alpha sess-2)" | jq -c '[.]' >"$FIXDIR/show-v-two.json"
+printf '%s' "$(visit v-two sub sess-2)" | jq -c '[.]' >"$FIXDIR/show-v-two.json"
 is "no store read resolves no holder" "$(holder v-two sub)" ""
 
 echo "── an EMPTY continuation group never folds across subjects ──"
 # tk-tu5g3. The claim reports the gc.continuation_group STAMP, and the stamp
 # lands empty on a minority of visits. With an empty $SUBJECT both filters
-# stop discriminating — every empty-group visit matches the first, and
-# stall_root is empty on those too so it falls back to $s and matches the
-# second — and the lowest-id tiebreak picks a winner across UNRELATED topics:
-# the zero-sittings outcome the tiebreak was added to prevent, by the other
-# door.
+# stop discriminating — every empty-group visit matches the first, and a
+# keyless topic falls back to $s and matches the second — and the lowest-id
+# tiebreak picks a winner across UNRELATED topics: the zero-sittings outcome
+# the tiebreak was added to prevent, by the other door.
 
 # The live shape: two in_progress visits, both stamped empty, about different
 # subjects. Neither may fold into the other.
-fixture "$(visit v-two '' '' sess-2)" "$(visit v-one '' '' sess-1)"
+fixture "$(visit v-two '' sess-2)" "$(visit v-one '' sess-1)"
 is "positive control: the pre-fix rule folded v-two into an unrelated v-one" \
     "$(legacy_holder v-two '')" "v-one"
 is "an unresolvable subject holds its own sitting (v-two)" "$(holder v-two '')" "v-two"
@@ -384,19 +357,19 @@ is "…and so does the other one (v-one)" "$(holder v-one '')" "v-one"
 # The recovery: the stamp is empty but the tracks edge carries the subject, so
 # the block resolves it and ordinary scoping applies again — same subject, so
 # the lowest id still holds and the higher still folds.
-fixture "$(visit v-two '' '' sess-2 sub)" "$(visit v-one sub '' sess-1)"
+fixture "$(visit v-two '' sess-2 sub)" "$(visit v-one sub sess-1)"
 is "an empty stamp is recovered from the tracks edge" "$(holder v-two '')" "v-one"
 
 # …and recovery must not fold ACROSS subjects: same empty stamp, edge naming a
 # different subject, so v-one is not v-two's holder.
-fixture "$(visit v-two '' '' sess-2 other)" "$(visit v-one sub '' sess-1)"
+fixture "$(visit v-two '' sess-2 other)" "$(visit v-one sub sess-1)"
 is "a recovered subject still scopes the fold" "$(holder v-two '')" "v-two"
 
 # The interlock, from the SIBLING side. Recovering only our own subject would
 # leave the candidate scan matching siblings by stamp alone — two live
 # sittings whose edges name the same subject would each see only themselves,
 # both read as holder, and both proceed.
-fixture "$(visit v-two '' '' sess-2 sub)" "$(visit v-one '' '' sess-1 sub)"
+fixture "$(visit v-two '' sess-2 sub)" "$(visit v-one '' sess-1 sub)"
 h1="$(holder v-one '')"
 h2="$(holder v-two '')"
 is "two empty-stamped siblings tracking the same subject: lowest id holds" "$h1" "v-one"
@@ -422,36 +395,35 @@ is "a live-list-shape (.type/.depends_on_id) tracks edge folds via the shared pr
 
 # The mirror: the scan must not over-match once it resolves candidates. Two
 # empty stamps whose EDGES name different subjects are different sittings.
-fixture "$(visit v-two '' '' sess-2 other)" "$(visit v-one '' '' sess-1 sub)"
+fixture "$(visit v-two '' sess-2 other)" "$(visit v-one '' sess-1 sub)"
 is "two empty-stamped siblings tracking DIFFERENT subjects do not fold (v-two)" \
     "$(holder v-two '')" "v-two"
 is "…nor the other way (v-one)" "$(holder v-one '')" "v-one"
 
 # Mixed recording: one sibling stamped, one recovered from its edge. They are
 # the same sitting and must see each other.
-fixture "$(visit v-two '' '' sess-2 sub)" "$(visit v-one sub '' sess-1)"
+fixture "$(visit v-two '' sess-2 sub)" "$(visit v-one sub sess-1)"
 is "an empty-stamped visit sees a properly stamped sibling" "$(holder v-two '')" "v-one"
-fixture "$(visit v-two sub '' sess-2)" "$(visit v-one '' '' sess-1 sub)"
+fixture "$(visit v-two sub sess-2)" "$(visit v-one '' sess-1 sub)"
 is "…and a properly stamped visit sees an empty-stamped sibling" "$(holder v-two sub)" "v-one"
 
 # A candidate with neither recording cannot be placed, so it is nobody's
 # holder — resolving candidates must not turn an unplaceable one into a match.
-fixture "$(visit v-two '' '' sess-2)" "$(visit v-one sub '' sess-1)"
+fixture "$(visit v-two '' sess-2)" "$(visit v-one sub sess-1)"
 is "an unresolvable SIBLING is not a holder for a known subject" "$(holder v-two sub)" "v-one"
-fixture "$(visit v-one '' '' sess-1)" "$(visit v-two sub '' sess-2)"
+fixture "$(visit v-one '' sess-1)" "$(visit v-two sub sess-2)"
 is "…and it does not match a subject it cannot be shown to share" "$(holder v-two sub)" "v-two"
 
-# The item still comes from the visit's own stall_root once the subject is
-# recovered — recovery must not flatten the per-visit target back to the
-# bucket.
-fixture "$(visit v-two '' r-beta sess-2 sub)" "$(visit v-one sub r-alpha sess-1)"
+# The key still scopes the fold once the subject is recovered — recovery must
+# not flatten two situations back into one bucket topic.
+fixture "$(visit v-two '' sess-2 sub key-beta)" "$(visit v-one sub sess-1 '' key-alpha)"
 out="$(run_block v-two '')"
-is "a recovered subject keeps the per-visit item" "$(field "$out" ITEM)" "r-beta"
-is "…and siblings about different items still do not fold" "$(field "$out" HOLDER)" "v-two"
+is "the subject is recovered from the tracks edge" "$(field "$out" SUBJECT)" "sub"
+is "…and siblings about different situations still do not fold" "$(field "$out" HOLDER)" "v-two"
 
 # Neither recording present: nothing can scope the fold, so it must not
 # happen.
-fixture "$(visit v-two '' '' sess-2)" "$(visit v-one '' '' sess-1)"
+fixture "$(visit v-two '' sess-2)" "$(visit v-one '' sess-1)"
 is "with no stamp and no edge the block refuses to fold at all" \
     "$(holder v-two '')" "v-two"
 have "the prompt holds when it is the holder (an unresolvable subject resolves so)" \
@@ -462,45 +434,32 @@ echo "── an unreadable listing never folds ──"
 # session holds anything, and folding on it loses a decision nobody can
 # tell was ever made — so the block must resolve EMPTY, which the prompt
 # reads as "hold".
-fixture "$(visit v-one sub r-alpha sess-1)"
+fixture "$(visit v-one sub sess-1)"
 unreadable
 is "a garbage listing resolves no holder" "$(holder v-one sub)" ""
 have "the prompt reads an empty holder as HOLD, not as fold" \
     'When it is EMPTY the' "$PROMPT"
 
 echo "── the contract the block is written against ──"
-# stall_root is the shared key. If the sweep's root fold renames it, this
-# test fails here rather than the fold quietly widening back to the bucket.
-have "the liveness sweep still folds on the stall_root key" \
-    '.metadata.stall_root // empty' "$SWEEP"
 have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"
-# The takeaway target is the other half of the same defect: one field on a
-# shared bucket cannot hold N sittings, and the readers look at a specific bead.
 # The stamp moved out of the prompt into the two scripts that write it. The hold
 # stamps the GATED bead — the visit for a PR anchor, so the hold marker sits
-# beside its demand edge (doctor/check-wait-is-an-edge), the item otherwise — and
-# the sign-off stamps the item. Both are a specific bead, never the shared
-# $SUBJECT bucket a sibling would clobber.
+# beside its demand edge (doctor/check-wait-is-an-edge), the subject otherwise —
+# and the sign-off stamps the subject.
 HOLD_SUT="$REPO/assets/scripts/converse-hold.sh"
 SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
 if grep -q 'takeaway "\$GATED"' "$HOLD_SUT"; then
-    ok "the hold stamps the gated bead (visit or item), not the shared bucket"
+    ok "the hold stamps the gated bead (visit or subject)"
 else
-    bad "the hold stamps the gated bead (visit or item), not the shared bucket" \
-        "converse-hold.sh no longer stamps takeaway \"\$GATED\" — a hold marker off its edge is unedged, and one on the bucket is clobbered by the next sibling"
+    bad "the hold stamps the gated bead (visit or subject)" \
+        "converse-hold.sh no longer stamps takeaway \"\$GATED\" — a hold marker off its edge is unedged"
 fi
-if grep -q 'takeaway "\$ITEM"' "$SIGNOFF_SUT"; then
-    ok "the sign-off stamps the item, not the shared bucket"
+if grep -q 'takeaway "\$SUBJECT"' "$SIGNOFF_SUT"; then
+    ok "the sign-off stamps the subject"
 else
-    bad "the sign-off stamps the item, not the shared bucket" \
-        "converse-signoff.sh no longer stamps takeaway \"\$ITEM\""
-fi
-if grep -q 'takeaway "\$SUBJECT"' "$HOLD_SUT" "$SIGNOFF_SUT"; then
-    bad "no takeaway stamps the shared bucket" \
-        "a takeaway on \$SUBJECT clobbers siblings and is invisible to the readers that look at the item"
-else
-    ok "no takeaway stamps the shared bucket"
+    bad "the sign-off stamps the subject" \
+        "converse-signoff.sh no longer stamps takeaway \"\$SUBJECT\""
 fi
 
 echo "── step 1 lifts the claim and the fold into one script call each ──"
@@ -527,7 +486,7 @@ echo "── eval-safety: a metacharacter subject reaches the caller as data ─
 # a command, `$(...)` would substitute. Single-quoting the emitted value neuters
 # both. Space-free by construction (see converse-claim.test.sh).
 INJ='g;INJECTED=$(whoami)'
-fixture "$(visit v-inj "$INJ" item-x '')"
+fixture "$(visit v-inj "$INJ" '')"
 out="$(run_block v-inj "$INJ")"
 is "fold passes a metacharacter subject through as one literal" "$(field "$out" SUBJECT)" "$INJ"
 INJECTED_SEEN="$(out="$out" bash -c '
@@ -553,17 +512,17 @@ esac
 # tells a real hold from a dead claim by a trace only a sitting past step 5
 # leaves: step 5 stamps the demand's id on the VISIT bead as gc.hold_demand
 # before it waits. The key is on the visit, so it is attributable — a sibling
-# sitting on the same item stamps the shared item's demand and takeaway, never
-# this visit's gc.hold_demand, so it cannot forge the trace.
+# sitting on the same subject stamps the shared subject's demand and takeaway,
+# never this visit's gc.hold_demand, so it cannot forge the trace.
 #
 # A missing key is not one answer but three, because absence is not proof a
 # sitting never began. A visit bead that will not read is UNKNOWN: it fails
-# closed to a hold, never a close. No key but an open demand still on the item
-# is a hold that predates the key, or a sibling's on the shared item: RECHECK
-# re-tests the premise and closes only a moot one, and re-stamping the key on a
-# live premise heals a legacy hold, while the item's demand never forges a
-# resume. Only a clean read with no key and no open item demand is a claim that
-# plainly never began, which routes to step 2's close.
+# closed to a hold, never a close. No key but an open demand still on the
+# subject is a hold that predates the key, or a sibling's on the shared subject:
+# RECHECK re-tests the premise and closes only a moot one, and re-stamping the
+# key on a live premise heals a legacy hold, while the subject's demand never
+# forges a resume. Only a clean read with no key and no open subject demand is a
+# claim that plainly never began, which routes to step 2's close.
 echo "── the hold-arm premise gate ships in converse-claim.sh ──"
 if [ -x "$CLAIMER" ]; then
     ok "converse-claim.sh is present and executable"
@@ -586,17 +545,16 @@ began() {
     ) | sed -n 's/^premise-gate: BEGAN=//p' | tail -1
 }
 # The gate reads one thing: gc.hold_demand on THIS visit's bead. hv_demand
-# builds a sibling demand on the shared item — the trace the OLD item-level gate
+# builds a sibling demand on the shared subject — the trace the OLD gate
 # keyed on — kept here to prove this gate ignores it.
 hv_reset() { rm -f "$FIXDIR"/*.json; printf '[]\n' >"$FIXDIR/list.json"; }
-hv_visit() { # id [hold_demand] [stall_root]
-    jq -nc --arg id "$1" --arg hd "${2:-}" --arg sr "${3:-}" \
+hv_visit() { # id [hold_demand]
+    jq -nc --arg id "$1" --arg hd "${2:-}" \
         '[{id:$id, metadata:(({"task_kind":"visit"})
-            + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
-            + (if $sr == "" then {} else {"stall_root":$sr} end))}]' \
+            + (if $hd == "" then {} else {"gc.hold_demand":$hd} end))}]' \
         >"$FIXDIR/show-$1.json"
 }
-hv_demand() { # demand-id item-id — a sibling open demand naming the item
+hv_demand() { # demand-id subject-id — a sibling open demand naming the subject
     jq -nc --arg id "$1" --arg i "$2" '[{id:$id, assignee:"", metadata:{"gc.demand_for":$i}}]' \
         >"$FIXDIR/list.json"
 }
@@ -613,19 +571,19 @@ hv_reset
 hv_visit v-held d-held
 is "gc.hold_demand resolves BEGAN=yes (re-open at step 4)" "$(began v-held sub)" "yes"
 
-echo "── no key but an open demand on the item: a legacy hold or a sibling's ──"
+echo "── no key but an open demand on the subject: a legacy hold or a sibling's ──"
 # A hold filed before this trace existed carries no gc.hold_demand on its visit,
-# only the demand on the item, and every hold the shipped prompt filed is that
-# shape; a sibling's hold on a shared item is too. Absent the key the two are
-# one shape, and the gate must not close on the missing key: it re-checks the
-# premise (recheck), which closes only a moot premise and re-opens a live one,
-# re-stamping the key so the next restart reads it clean. Keyed on the visit it
-# still cannot forge a resume: recheck re-checks the premise, it does not
-# re-open a sitting on the item's demand alone.
+# only the demand on the subject, and every hold the shipped prompt filed is
+# that shape; a sibling's hold on a shared subject is too. Absent the key the
+# two are one shape, and the gate must not close on the missing key: it
+# re-checks the premise (recheck), which closes only a moot premise and re-opens
+# a live one, re-stamping the key so the next restart reads it clean. Keyed on
+# the visit it still cannot forge a resume: recheck re-checks the premise, it
+# does not re-open a sitting on the subject's demand alone.
 hv_reset
-hv_visit v-legacy "" item-x   # no gc.hold_demand; the item still carries its demand
-hv_demand d-x item-x          # the open demand on the item (a legacy hold's, or a sibling's)
-is "no key + an open item demand resolves BEGAN=recheck (fail closed, not a close)" "$(began v-legacy sub)" "recheck"
+hv_visit v-legacy             # no gc.hold_demand; the subject still carries its demand
+hv_demand d-x sub             # the open demand on the subject (a legacy hold's, or a sibling's)
+is "no key + an open subject demand resolves BEGAN=recheck (fail closed, not a close)" "$(began v-legacy sub)" "recheck"
 
 echo "── the visit key stands even when its demand is no longer open ──"
 # A ruling can close the demand while the sitting still holds. The trace is the
@@ -652,7 +610,7 @@ have "an unreadable read holds rather than closes (BEGAN=unknown)" \
     'BEGAN=unknown' "$PROMPT"
 have "an unreadable read mails the witness rather than draining" \
     'hold the sitting and mail the' "$PROMPT"
-have "an open item demand without the key re-checks (BEGAN=recheck)" \
+have "an open subject demand without the key re-checks (BEGAN=recheck)" \
     'BEGAN=recheck' "$PROMPT"
 have "recheck closes only a moot premise, not on the demand" \
     'close here ONLY if the premise is moot' "$PROMPT"

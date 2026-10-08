@@ -41,9 +41,21 @@ description = """
 # (gc.routed_to=human, the board's exact gather predicate) and holds no session
 # until an operator engages it (gc-helm engage).
 POOL="human"
-VISIT=$(gc bd create -t task --title "visit: {{subject}} — {{visit}}" -d "{{visit}}" --json | jq -r '.id // .[0].id')
+# The title carries the visit text as a one-line headline: whitespace
+# collapsed, then cut to 140 characters (the board's headline cap) and to 400
+# bytes, because bd caps a title at 500 bytes. The body keeps the full text.
+VISIT_TEXT="{{visit}}"
+VISIT_TAIL=$(printf '%s' "$VISIT_TEXT" | jq -Rsr 'gsub("[[:space:]]+"; " ") | ltrimstr(" ") | rtrimstr(" ")
+  | if length > 140 then (.[:139] | rtrimstr(" ")) + "…" else . end
+  | until(utf8bytelength <= 400; (.[:-2] | rtrimstr(" ")) + "…")' 2>/dev/null)
+# bd create answers the new bead as an object or an array holding it, and a
+# refused create as a bare {"error": ...} object. Read the id type-guarded, so
+# a refusal yields no id instead of a jq crash, and report bd's own reason.
+VISIT_JSON=$(gc bd create -t task --title "visit: {{subject}} — $VISIT_TAIL" -d "$VISIT_TEXT" --json)
+VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-  || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
+  || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+       echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group={{subject}}" \
   --set-metadata "task_kind=visit"
