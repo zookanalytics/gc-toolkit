@@ -19,11 +19,33 @@
 #   -q, --quiet        print only the summary and the failures
 #
 # With no PATH it runs every tracked *.test.sh. With PATHs it runs the affected
-# subset: a *.test.sh runs directly, a script X.sh maps to its sibling
-# X.test.sh, a directory expands to the *.test.sh beneath it, and a path with no
-# sibling test is skipped. So `run-tests.sh $(git diff --name-only
-# origin/main...HEAD)` runs exactly the tests the change can reach, and an
-# empty subset is a clean pass rather than a failure.
+# subset, the tests a change to those paths can break:
+#
+#   - a *.test.sh runs itself, and a directory runs every *.test.sh beneath it;
+#   - a script X.sh runs its sibling X.test.sh;
+#   - a path runs every tracked *.test.sh that names it on a line that is not a
+#     comment. The name is the path's basename, or, while another tracked file
+#     ends in that, the basename with enough parent directories to tell them
+#     apart;
+#   - a path runs the sibling test of every tracked script that names it on a
+#     line that is not a comment, because that script may run it in place;
+#   - a tracked script that sources a path counts as changed along with it, so
+#     every rule here applies to it in turn, and a library reaches every suite
+#     of every script that sources it. A script sources a path when a `.` or
+#     `source` command, or a `# shellcheck source=` directive, names it;
+#   - every subset includes the tree-wide suites. A suite that scans the tree
+#     can be broken by a file it never names, so it says so in its opening
+#     comment block with the line
+#
+#       # run-tests-scope: tree
+#
+#     Any other scope is a usage error, in the full run as well.
+#
+# A test that reaches a file only through a path it builds at run time, or
+# through a chain of scripts that run one another, is outside the subset, and
+# only the full run covers it. `run-tests.sh $(git diff --name-only
+# origin/main...HEAD)` runs the subset of a branch's change, and an empty
+# subset is a clean pass rather than a failure.
 #
 # A file runs once, unless its opening comment block declares named parts:
 #
@@ -100,6 +122,105 @@ case "$TIMEOUT" in ''|*[!0-9]*) echo "run-tests: --timeout must be a non-negativ
 case "$RETRY" in ''|*[!0-9]*) echo "run-tests: --retry must be a non-negative integer (0 disables)" >&2; exit 2 ;; esac
 [ "$JOBS" -ge 1 ] || JOBS=1
 
+# The tracked suites whose opening comment block declares a scope (see the
+# header), one "<path>\t<scope>" line each. The block ends at the first line
+# that is neither a comment nor blank, so a fixture further down that writes a
+# declaration of its own is not read as the file's. A tracked suite missing
+# from the work tree is passed over: an awk that cannot open one file may stop
+# before reading the rest.
+scopes() {
+  local -a files=()
+  local t
+  while IFS= read -r -d '' t; do
+    [ -f "$ROOT/$t" ] && files+=("$t")
+  done < <(git -C "$ROOT" ls-files -z '*.test.sh')
+  [ "${#files[@]}" -gt 0 ] || return 0
+  ( cd "$ROOT" && awk '
+    FNR == 1 { body = 0 }
+    body { next }
+    /^#/ {
+      if (sub(/^#[[:space:]]*run-tests-scope:[[:space:]]*/, "")) {
+        sub(/[[:space:]]+$/, ""); print FILENAME "\t" $0; body = 1
+      }
+      next
+    }
+    /^[[:space:]]*$/ { next }
+    { body = 1 }' "${files[@]}" )
+}
+
+# A scope other than tree is refused, in the full run too, so a misspelled
+# declaration fails loudly instead of leaving its suite out of every subset.
+declare -a TREE_WIDE=()
+while IFS=$'\t' read -r rel scope; do
+  [ -n "$rel" ] || continue
+  [ "$scope" = tree ] || { echo "run-tests: $rel declares an unknown scope '$scope' (the one scope is 'tree')" >&2; exit 2; }
+  TREE_WIDE+=("$rel")
+done < <(scopes)
+
+# tidy <var> <path> — set var to the path without "./" segments, doubled
+# slashes or a trailing slash, so a file named two ways is matched and counted
+# as one, and no path ends in an empty name.
+tidy() {
+  local p="$2"
+  while [ "${p#./}" != "$p" ]; do p="${p#./}"; done
+  while [ "${p//\/.\//\/}" != "$p" ]; do p="${p//\/.\//\/}"; done
+  while [ "${p//\/\//\/}" != "$p" ]; do p="${p//\/\//\/}"; done
+  [ "$p" = / ] || p="${p%/}"
+  printf -v "$1" '%s' "$p"
+}
+
+# ERE alternation of the given names, each escaped to match literally.
+names_ere() { printf '%s\n' "$@" | sed 's/[][\.*^$+?(){}|]/\\&/g' | paste -sd'|' -; }
+
+# name_of <path> — what a test calls the file: its basename, widened by one
+# parent directory at a time while another tracked file still ends in it.
+name_of() {
+  local p="$1" name="${1##*/}" rest t clash
+  rest="${p%"$name"}"
+  while :; do
+    clash=0
+    while IFS= read -r t; do
+      { [ -z "$t" ] || [ "$t" = "$p" ]; } && continue
+      case "$t" in "$name"|*/"$name") clash=1; break ;; esac
+    done <<<"${BY_BASE["${p##*/}"]:-}"
+    { [ "$clash" -eq 1 ] && [ -n "${rest%/}" ]; } || break
+    rest="${rest%/}"; name="${rest##*/}/$name"; rest="${rest%"${rest##*/}"}"
+  done
+  printf '%s\n' "$name"
+}
+
+# sourcers_of <name>... — the tracked scripts, tests aside, that source one of
+# the named files: a `.` or `source` command naming it, or a `# shellcheck
+# source=` directive naming it. The command counts where a command starts, at
+# the head of a line or after `if`, `then`, `;`, `&&` and the like, so the word
+# "source" inside a message is not one. Only a script sources anything; in a
+# document, "source" is a word.
+sourcers_of() {
+  local re
+  re="$(names_ere "$@")"
+  {
+    git -C "$ROOT" grep -IE --no-color \
+      "(^[[:space:]]*|[;&|({][[:space:]]*|^[[:space:]]*(if|elif|then|else|do|while|until|!)[[:space:]]+)(\.|source)[[:space:]]+(.*[^A-Za-z0-9._-])?($re)(\$|[^A-Za-z0-9_-])" \
+      -- '*.sh' ':!*.test.sh' | grep -vE '^[^:]*:[[:space:]]*#' | cut -d: -f1
+    git -C "$ROOT" grep -lIE --no-color \
+      "^[[:space:]]*#[[:space:]]*shellcheck[[:space:]].*source=([^[:space:]]*/)?($re)([[:space:]]|\$)" \
+      -- '*.sh' ':!*.test.sh'
+  } | sort -u
+}
+
+# naming <pathspec>... -- <name>... — the tracked files the pathspecs select
+# that name one of the files on a line that is not a comment.
+naming() {
+  local -a spec=()
+  local re
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do spec+=("$1"); shift; done
+  shift
+  re="$(names_ere "$@")"
+  git -C "$ROOT" grep -IE --no-color \
+    "(^|[^A-Za-z0-9._-])($re)(\$|[^A-Za-z0-9_-])" -- "${spec[@]}" \
+    | grep -vE '^[^:]*:[[:space:]]*#' | cut -d: -f1 | sort -u
+}
+
 # Resolve the set of *.test.sh files to run.
 declare -a TESTS=()
 if [ "${#ARGS[@]}" -eq 0 ]; then
@@ -112,23 +233,63 @@ if [ "${#ARGS[@]}" -eq 0 ]; then
 else
   declare -A seen=()
   add() {
-    local f="$1"
+    local f
+    tidy f "$1"
     case "$f" in *.test.sh) ;; *) return 0 ;; esac
     [ -f "$f" ] || return 0
     [ -n "${seen[$f]:-}" ] && return 0
     seen[$f]=1; TESTS+=("$f")
   }
+  # The changed files, as paths from the root: every PATH that is not a
+  # directory, whether or not it still exists, since a deleted file breaks the
+  # tests that name it.
+  declare -a CHANGED=()
+  declare -A IN=()
   for a in "${ARGS[@]}"; do
+    tidy a "$a"
     case "$a" in /*) abs="$a" ;; *) abs="$ROOT/$a" ;; esac
     if [ -d "$abs" ]; then
       while IFS= read -r f; do add "$f"; done < <(find "$abs" -type f -name '*.test.sh')
     else
-      case "$abs" in
-        *.test.sh) add "$abs" ;;
-        *.sh)      add "${abs%.sh}.test.sh" ;;   # script -> its sibling test
-      esac
+      rel="${abs#"$ROOT"/}"
+      [ -n "${IN[$rel]:-}" ] || { IN[$rel]=1; CHANGED+=("$rel"); }
     fi
   done
+
+  declare -A BY_BASE=()
+  while IFS= read -r -d '' t; do
+    BY_BASE["${t##*/}"]+="$t"$'\n'
+  done < <(git -C "$ROOT" ls-files -z)
+
+  # Whatever sources a changed file is changed along with it, and so is
+  # whatever sources that.
+  declare -a NAMES=() frontier=("${CHANGED[@]}")
+  while [ "${#frontier[@]}" -gt 0 ]; do
+    declare -a names=()
+    for p in "${frontier[@]}"; do names+=("$(name_of "$p")"); done
+    NAMES+=("${names[@]}")
+    frontier=()
+    while IFS= read -r c; do
+      { [ -n "$c" ] && [ -z "${IN[$c]:-}" ]; } || continue
+      IN[$c]=1; CHANGED+=("$c"); frontier+=("$c")
+    done < <(sourcers_of "${names[@]}")
+  done
+
+  for p in "${CHANGED[@]}"; do
+    case "$p" in /*) abs="$p" ;; *) abs="$ROOT/$p" ;; esac
+    case "$abs" in
+      *.test.sh) add "$abs" ;;
+      *.sh)      add "${abs%.sh}.test.sh" ;;   # script -> its sibling test
+    esac
+  done
+  if [ "${#NAMES[@]}" -gt 0 ]; then
+    while IFS= read -r t; do add "$ROOT/$t"; done < <(naming '*.test.sh' -- "${NAMES[@]}")
+    # A script that names a changed file may run it in place, under its own suite.
+    while IFS= read -r s; do
+      add "$ROOT/${s%.sh}.test.sh"
+    done < <(naming '*.sh' ':!*.test.sh' -- "${NAMES[@]}")
+  fi
+  for t in "${TREE_WIDE[@]}"; do add "$ROOT/$t"; done
 fi
 
 # Front-load likely-slow files. The slowest file bounds the wall time, so it
