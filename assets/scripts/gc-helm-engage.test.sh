@@ -4,7 +4,8 @@
 # engage is the spawn-on-engagement entry point that replaces the retired
 # converse routed-pool: it spawns a manual converse-<model> sitting, binds the
 # picked visit to that session's runtime NAME (so the session's own
-# `gc hook --claim` adopts it with no pool routing), and attaches.
+# `gc hook --claim` adopts it with no pool routing), and attaches once the
+# reconciler has started it.
 #
 # Runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a stubbed `gc` on
 # PATH — no live city, Dolt, network, or sessions. Covered:
@@ -39,6 +40,14 @@
 #             loser sitting (a suspended one keeps its alias, so the re-run the
 #             message advertises would be refused at `session new`), and exits 4
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
+#   (START-*) the attach waits until the sitting's `gc session list` state reads
+#             active, because an attach that reaches a sitting the reconciler
+#             has not started launches it without its prompt. A sitting still
+#             unstarted at GC_HELM_ENGAGE_WAIT_TIMEOUT is left unattached, with
+#             the attach to run later; one that ends first exits 4 at once; a
+#             sitting not yet listed, or a listing that fails, is waited through.
+#             (NOATTACH-*) --no-attach does not wait, and (KICK-AFTER-START) a
+#             codex kick on the attach path follows the wait
 #   (BOUND-EXISTING) engaging a SUBJECT that binds a pre-existing visit names that
 #             visit's subject and offers --reason to open a fresh one instead; an
 #             explicit visit id and a freshly filed visit get no such hint
@@ -90,10 +99,29 @@ case "$1 ${2:-}" in
     # dead-sitting-reclaim case sets $LIVE_SITTINGS explicitly (space-separated
     # session names; empty = none live, so a bound owner reads as gone).
     # $SESSION_LIST_BROKEN makes the listing FAIL, so the probe fails closed.
+    #
+    # Once `session new` has spawned the sitting, each listing also carries that
+    # sitting's own row, which engage's start wait reads. Its state walks
+    # $START_STATES, one entry per listing, the last repeating: "active" (the
+    # default: the reconciler has started it), start-pending, creating, or a
+    # token. "gone" lists no row, the way a closed session reads from the store;
+    # "blank" lists an empty state, the way it reads from the supervisor; and
+    # "broken" fails the listing.
+    printf 'session list\n' >> "$CALLS"
     if [ -n "${SESSION_LIST_BROKEN:-}" ]; then echo "session list: data plane down" >&2; exit 1; fi
+    _st=""
+    if [ -s "$SPAWNED" ]; then
+      _n=$(( $(cat "$POLLS" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$POLLS"
+      set -- ${START_STATES:-active}
+      [ "$_n" -le $# ] || _n=$#
+      eval "_st=\${$_n}"
+      [ "$_st" = broken ] && { echo "session list: data plane down" >&2; exit 1; }
+    fi
     _live="${LIVE_SITTINGS-$VIS_OWNER}"
-    jq -n --arg live "$_live" \
-      '{sessions:[ $live | split(" ")[] | select(. != "") | {session_name:., name:., id:., state:"running", closed:false} ]}' ;;
+    jq -n --arg live "$_live" --arg st "$_st" --arg sid "$SID" --arg sn "$SNAME" \
+      '{sessions:([ $live | split(" ")[] | select(. != "") | {session_name:., name:., id:., state:"running", closed:false} ]
+                  + (if $st == "" or $st == "gone" then []
+                     else [{id:$sid, session_name:$sn, name:$sn, state:(if $st == "blank" then "" else $st end)}] end))}' ;;
   "agent list")
     # The import-resolved roster rig_carries_converse reads — capability comes
     # from here, NOT from a glob of $RIG_PATH's checkout. Default: gc-toolkit
@@ -161,6 +189,7 @@ case "$1 ${2:-}" in
       # sentinel "invalid session alias"; only the v- retry passes here.
       echo 'gc session new: invalid session alias: "gc-62297" conflicts with session ID syntax' >&2; jq -n '{ok:true}'
     else
+      printf '%s' "$SID" > "$SPAWNED"
       jq -n --arg id "$SID" --arg n "$SNAME" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:"tk-vis", template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
     fi ;;
   "session attach")
@@ -225,6 +254,7 @@ chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
 export CALLS="$TMP/calls" ASSIGNEE="$TMP/assignee" VIS_STATUS="$TMP/vstatus"
+export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
 unset GC_HELM_FIXTURE || true
 export TMPDIR="$TMP"
 
@@ -251,7 +281,7 @@ export RIG_PATH="$TMP/rig"
 # suite is launched from ([ -t 0 ] is false); the interactive path is driven by
 # run_engage_tty below.
 run_engage() {
-    : > "$CALLS"; : > "$ASSIGNEE"
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"
     set +e
     OUT="$(sh "$SCRIPT" engage "$@" </dev/null 2>"$TMP/err")"; RC=$?
     set -e
@@ -265,7 +295,7 @@ run_engage() {
 # order. The answer string is a printf %b format, so lines are '\n'-separated.
 run_engage_tty() {
     _ans="$1"; shift
-    : > "$CALLS"; : > "$ASSIGNEE"
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"
     set +e
     OUT="$(printf '%b' "$_ans" | GC_HELM_ASSUME_TTY=1 sh "$SCRIPT" engage "$@" 2>"$TMP/err")"; RC=$?
     set -e
@@ -337,7 +367,7 @@ echo "# engage supplies the subject's rig context so a bare template resolves"
 # runs) engage must point GC_DIR at the subject's rig or nothing spawns.
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
-: > "$CALLS"; : > "$ASSIGNEE"
+: > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"
 set +e
 OUT="$(cd "$TMP" && sh "$SCRIPT" engage tk-vis --no-attach 2>"$TMP/err")"; RC=$?
 set -e
@@ -653,6 +683,96 @@ if [ -n "$nudge_line" ] && [ -n "$attach_line" ] && [ "$nudge_line" -lt "$attach
 else
   bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
 fi
+
+echo "# the attach waits for the reconciler to start the sitting"
+# `gc session attach` on a sitting the reconciler has not launched yet launches it
+# itself, with no prompt, and the sitting idles until someone types into it. So
+# the attach path polls the sitting's state in `gc session list` and attaches
+# only once it reads active, never while it is start-pending or creating.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis
+eq "$(cat "$POLLS")" 1 "(START-ACTIVE) a sitting already started is read once"
+hasnt "$OUT" "waiting up to" "(START-ACTIVE) …and attached with no wait announced"
+
+START_STATES="start-pending creating active" run_engage tk-vis
+eq "$RC" 0 "(START-WAIT) an engage whose sitting starts on the third listing exits 0"
+eq "$(cat "$POLLS")" 3 "(START-WAIT) …reading the sitting until it reads active"
+last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+if [ -n "$last_poll" ] && [ -n "$attach_line" ] && [ "$last_poll" -lt "$attach_line" ]; then
+  ok "(START-WAIT) …and attaching only after the listing that reads it active"
+else
+  bad "(START-WAIT) expected the last listing (line ${last_poll:-none}) before the attach (line ${attach_line:-none})"
+fi
+has "$OUT" "waiting up to 120s for the reconciler to start gc-toolkit__converse-1" \
+    "(START-WAIT) …telling the operator what it waits on, and for how long"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=2 START_STATES="start-pending" run_engage tk-vis
+eq "$RC" 0 "(START-TIMEOUT) a sitting still unstarted at the bound exits 0: the visit is bound and the sitting may yet start"
+hasnt "$CALLED" "session attach" "(START-TIMEOUT) …and is NOT attached, since the attach would launch it without its prompt"
+polls=$(cat "$POLLS")
+if [ "${polls:-0}" -ge 2 ]; then
+  ok "(START-TIMEOUT) …after reading it more than once"
+else
+  bad "(START-TIMEOUT) expected at least 2 listings before giving up (got ${polls:-0})"
+fi
+has "$OUT" "the reconciler has not started gc-toolkit__converse-1 after 2s" "(START-TIMEOUT) …saying the reconciler has not started it"
+has "$OUT" "start-pending" "(START-TIMEOUT) …naming the state it last read"
+has "$OUT" "gc session attach gc-77" "(START-TIMEOUT) …and giving the attach to run once it is up"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_engage tk-vis
+eq "$RC" 4 "(START-CLOSED) a sitting listed and then gone from the list (closed, read from the store) exits 4"
+hasnt "$CALLED" "session attach" "(START-CLOSED) …without attaching"
+eq "$(cat "$POLLS")" 2 "(START-CLOSED) …at the first listing it is gone from, not at the bound"
+has "$OUT" "ended before the reconciler started it (its state in 'gc session list': gone)" "(START-CLOSED) …saying the sitting ended"
+has "$OUT" "gc bd update tk-vis --assignee" "(START-CLOSED) …and how to put its still-bound visit back on the board"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="blank" run_engage tk-vis
+eq "$RC" 4 "(START-BLANK) a sitting listed with an empty state (closed, read from the supervisor) exits 4"
+hasnt "$CALLED" "session attach" "(START-BLANK) …without attaching"
+eq "$(cat "$POLLS")" 1 "(START-BLANK) …at the first listing"
+has "$OUT" "state in 'gc session list': closed" "(START-BLANK) …naming it closed"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="failed-create" run_engage tk-vis
+eq "$RC" 4 "(START-FAILED) a sitting whose create failed exits 4"
+hasnt "$CALLED" "session attach" "(START-FAILED) …without attaching"
+has "$OUT" "state in 'gc session list': failed-create" "(START-FAILED) …naming the state"
+
+# A sitting not listed yet may only lag the supervisor's read cache, and a
+# listing that fails says nothing about the sitting, so neither ends the wait.
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="gone gone active" run_engage tk-vis
+eq "$RC" 0 "(START-UNLISTED) a sitting not yet listed is waited on, not read as closed"
+has "$CALLED" "session attach gc-77" "(START-UNLISTED) …and attached once it reads active"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="broken active" run_engage tk-vis
+eq "$RC" 0 "(START-UNREADABLE) a listing that fails is waited through"
+has "$CALLED" "session attach gc-77" "(START-UNREADABLE) …and the sitting attached once a listing reads it active"
+
+echo "# --no-attach has no attach to gate, so it does not wait"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_engage tk-vis --no-attach
+eq "$RC" 0 "(NOATTACH-NOWAIT) --no-attach on an unstarted sitting exits 0"
+polls=$(cat "$POLLS")
+eq "${polls:-0}" 0 "(NOATTACH-NOWAIT) …without reading the sitting's state"
+hasnt "$OUT" "waiting up to" "(NOATTACH-NOWAIT) …or announcing a wait"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_engage tk-vis --model codex --no-attach
+has "$CALLED" "session nudge gc-77" "(NOATTACH-KICK) a codex sitting on --no-attach is kicked without a start wait"
+
+echo "# for codex, the kick follows the start wait"
+START_STATES="start-pending active" run_engage tk-vis --model codex
+last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
+nudge_line=$(printf '%s\n' "$CALLED" | grep -n '^session nudge' | head -1 | cut -d: -f1 || true)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+if [ -n "$last_poll" ] && [ -n "$nudge_line" ] && [ -n "$attach_line" ] \
+   && [ "$last_poll" -lt "$nudge_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
+  ok "(KICK-AFTER-START) the codex kick reaches a started sitting and precedes the attach"
+else
+  bad "(KICK-AFTER-START) expected listing (${last_poll:-none}) < nudge (${nudge_line:-none}) < attach (${attach_line:-none})"
+fi
+GC_HELM_ENGAGE_WAIT_TIMEOUT=1 START_STATES="start-pending" run_engage tk-vis --model codex
+has "$CALLED" "session nudge gc-77" "(TIMEOUT-KICK) a codex sitting unstarted at the bound is still kicked, so it begins once it starts"
+hasnt "$CALLED" "session attach" "(TIMEOUT-KICK) …but not attached"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_engage tk-vis --model codex
+hasnt "$CALLED" "session nudge" "(CLOSED-NOKICK) a codex sitting that ended before it started is not kicked"
 
 echo "# a suspended subject rig is refused before anything spawns"
 # engage spawns a sitting the reconciler must sustain; on a suspended rig the

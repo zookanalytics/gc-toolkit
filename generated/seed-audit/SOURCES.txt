@@ -3,18 +3,16 @@
 # and compared against a fresh hashing of the same files by its --check-merge and
 # by doctor/check-seed-audit-current. The path line between two hashes is the
 # unchanged line git needs to merge two branches that moved different inputs.
-agents/converse-codex/agent.toml
-a1d9e20792a7fdf99c9d8ae392ef57d54d5062dc95bba46a01f8723ec0882226
-agents/converse-fable/agent.toml
-938ad22125da7613277131b891e163c347b812d84b11a46b8829f23e20a272fa
-agents/converse-opus/agent.toml
-ebef4902cffba8ae3c49fcce8f68c4abef7b8abe6c3082bd358bd665ae0648cd
-agents/converse/PROVENANCE.md
+agents/_converse/PROVENANCE.md
 1af991e9ca79182636678088a28f7cba74286989e6938f4e476f1bd914c2f07f
-agents/converse/agent.toml
-09b47a4ec2eb7117ff67f585751f98a95b48c192e422bcbaa86ed64b56627ca7
-agents/converse/prompt.template.md
-f46e154fa943ffd7caf1481a2012c00ad06f77e61714ef53ed08e63bc0824770
+agents/_converse/prompt.template.md
+20f2ecb2b4e2a85563c14865cf3ab20dab0552453d328cf82f1428a60e0b389e
+agents/converse-codex/agent.toml
+dae441330d0703750192ddfeb4a42e5a5bc71a2d9cb9a7af4c2cc8556e78408c
+agents/converse-fable/agent.toml
+8d122824989a84b2701eee005f97cf81423e838c540762eb1889219f51871a62
+agents/converse-opus/agent.toml
+5805b56aae7d00d2187d4bdf243e8cd27c902dc2c7ae6ad2e177df6b8dede4f3
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
@@ -58,13 +56,13 @@ agents/witness/agent.toml
 agents/witness/prompt.template.md
 6dc57aa4811ae551eff65cada2f74fa65eb68eba355e83d59473315b652691ce
 assets/scripts/render-seed-audit.sh
-0a280ba684713d4157afc5f6f7be1770f40a5674f92afac254fbab965e3692df
+1e807a24357b51b91ae12b518b64b4ff864ecb24fd1f510fcd6cb82acb285734
 formulas/mol-deacon-patrol.toml
 07d6f0db15dab10e9d25e5fcb6e403d5289291cd321e3ef08d6df671d4e136d3
 formulas/mol-dog-shutdown-dance.toml
 4f0781395c758f844b5833e8da83727d711230c35f9a61572332b2537fd19807
 formulas/mol-feedback-distiller.toml
-6139c868cd1b40293a728a6b129444c1acc4524dc47209bb37656482df3ccabd
+a8b13496407eb7d88eb8bb02e5104d878eebbc17e746fd5c2e130416ca10338d
 formulas/mol-feedback-miner.toml
 393f222951204105cba158692cd03be44802b65fc506e1267c0f0c2f250f2ccc
 formulas/mol-first-reaction.toml
@@ -74,9 +72,11 @@ formulas/mol-polecat-work.toml
 formulas/mol-refinery-patrol.toml
 9e39e5c9999dde4714235615b1e7ad96c11af70aa916288a79a7a9c8ef781b52
 formulas/mol-review-quorum-signoff.toml
-d30240dc85132271dc9e855d8951ed65276123f94defe176da35a641b41c1c18
+676c9a30f559480daebcadd857f6c94b0dfc9989015be76e6b470753b75ccbd7
 formulas/mol-review.toml
-87440c570c6992c2874697c7fd0281aaa72409025ee09d0c0e68479fc9a31b16
+38f74d6f2a069d69bf02e676b3d899a688a76779425019f3b4cce144ab805bf7
+formulas/mol-rig-demo.toml
+7b0d2e31477622b900151c69c299b71668830163c28fec19d6bbaa7884684711
 formulas/mol-validate-close.toml
 b0568e4af05fff39e5193e2b56aec6976e5288382cba68e01f5b9b1339719a51
 formulas/mol-validate.toml
@@ -84,9 +84,9 @@ formulas/mol-validate.toml
 formulas/mol-visit.toml
 0279f28992dc140d1ce95477287a0ee543c34660e5039de491bad5d4bb2ead84
 formulas/mol-witness-patrol.toml
-563219faf7d90430e4fe89a2feaa27f98613b085b8940f680d6402d3ced770cc
+0b312874e97b03ebb6b6666ba77ead336778e83b15bac41bd2d286a8295a0b50
 pack.toml
-ad01c07323f6c18840caa35b9bbd9141c7affb6a9e3544df81f020561c31376c
+3dbc4a505331607d7997aef0210cbdf4349ac52f219dadec9d0a690813072db4
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
 43a3d5c2b9275a95c607ac32f4361c592867e3ebb903500d44fe7febd78b1ed0
 packs/gascity-keeper/agents/keeper/agent.toml
@@ -110,7 +110,7 @@ packs/gascity-keeper/template-fragments/rebase-conventions.template.md
 packs/gascity-keeper/template-fragments/refinery-rebase-handling.template.md
 1559243ea2048c81230333589e308135191fb8136977a546ab78600539ce2f13
 packs/gascity-keeper/template-fragments/watch-dispatched-work.template.md
-a6333144bdeae8e504c1902803f8c778c2fb1f75bbbfbcb3ea43938cabdfa856
+93e2746d83ed21c987b57ffe2ed335f426c693587e35a86018b5ca99e842ad2b
 packs/gascity-keeper/template-fragments/work-quality-base.template.md
 94a12ec830210d88ee03f1f7bd8fe38fb4badafc21d1291ba6fe828feabcd81d
 packs/gascity-keeper/template-fragments/work-quality-system.template.md
@@ -144,11 +144,11 @@ bdecf75ec1e37c3a47c55f1cf186240e5f71d0d13abe0d6249e786f0997da517
 template-fragments/scratch-reclaim.template.md
 f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
-a6333144bdeae8e504c1902803f8c778c2fb1f75bbbfbcb3ea43938cabdfa856
+93e2746d83ed21c987b57ffe2ed335f426c693587e35a86018b5ca99e842ad2b
 template-fragments/work-quality-base.template.md
 94a12ec830210d88ee03f1f7bd8fe38fb4badafc21d1291ba6fe828feabcd81d
 template-fragments/work-quality-human.template.md
-5ccc71838d60d6b5a9ccf82a95e013da1c0503cb1749044cc45aa4ed859ec2c4
+3bb4fb3803006bcb16d387333a8358b584557a5444db61095fd477cd2ad6216d
 template-fragments/work-quality-polecats.template.md
 e4796dc6ac20c9733176e488f5df1f17c24258eb58a6c3e3cf9711ab359a619c
 template-fragments/work-quality-system.template.md

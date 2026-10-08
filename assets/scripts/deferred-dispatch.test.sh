@@ -637,24 +637,28 @@ unset STUB_BD_LOG
 # --- the ARG_MAX fix: a large armed set enumerates, never dies on argv --------
 # armed_rows used to hand the whole --ready snapshot to jq as a single --argjson
 # value. That snapshot carries one row per armed bead, and a single argv
-# argument past the kernel's per-argument size cap (128 KiB on Linux) aborts jq
-# with "argument list too long" — so once the armed backlog held a few dozen
-# full-body rows EVERY enumeration failed and nothing dispatched. The snapshots
-# now reach jq over stdin, which has no such cap. The fixture is sized so the
-# old argv pass provably dies (the positive control below), then the SUT must
-# still enumerate and dispatch the whole set. The stub ignores --brief, so it
-# feeds the SUT full-body rows — the payload the stdin path has to survive.
+# argument past the kernel's size cap aborts jq with "argument list too long" —
+# so once the armed backlog held a few dozen full-body rows EVERY enumeration
+# failed and nothing dispatched. The snapshots now reach jq over stdin, which
+# has no such cap. The fixture is sized so the old argv pass provably dies (the
+# positive control below), then the SUT must still enumerate and dispatch the
+# whole set. The stub ignores --brief, so it feeds the SUT full-body rows — the
+# payload the stdin path has to survive.
+#
+# Linux refuses any one argument past 128 KiB. macOS has no per-argument cap and
+# refuses only argv and the environment together past ARG_MAX, 1 MiB. Forty rows
+# of 32 KiB put the snapshot past both.
 echo "# a large armed set enumerates and dispatches (no argv size cap)"
 big_store="$(jq -nc '[ range(0;40)
   | {id:("big-\(.)"), status:"open", assignee:"",
      metadata:{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},
-     notes:("x" * 8000), _ready:true} ]')"
+     notes:("x" * 32768), _ready:true} ]')"
 store "$big_store"
 ready_payload="$(gc bd list --has-metadata-key gc.dispatch_when_ready --ready --json --limit 0)"
 if jq -n --argjson r "$ready_payload" '1' >/dev/null 2>&1; then
   bad "scale fixture too small: the --ready snapshot fits in one argv value, so it cannot exercise the cap"
 else
-  ok "scale fixture exceeds the kernel per-argument cap (the pre-fix --argjson pass dies here)"
+  ok "scale fixture exceeds the kernel's argv size cap (the pre-fix --argjson pass dies here)"
 fi
 out="$("$SUT" list 2>&1)"; rc=$?
 eq "$rc" 0 "list enumerates a large armed set without an argv failure"
@@ -860,7 +864,7 @@ TMPDIR="$SCRATCH" "$SUT" list                >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" list --json         >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile           >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile --dry-run >/dev/null 2>&1
-LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l)
+LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l | tr -d ' ')
 eq "$LEFT" "0" "no verb leaves a staging file behind in TMPDIR"
 
 echo

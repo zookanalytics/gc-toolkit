@@ -318,10 +318,13 @@ if [ "$MODE" = "install-hook" ]; then
     top="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repo: $ROOT"
     hookdir="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)/hooks"
     # Refuse to shadow hooks somebody already installed by hand: core.hooksPath
-    # replaces .git/hooks wholesale rather than layering on top of it.
+    # replaces .git/hooks wholesale rather than layering on top of it. A listing
+    # that fails refuses too, because a hook it could not see is a hook it could
+    # shadow. BSD find has no -printf, so basename names the files.
     existing=""
     if [ -d "$hookdir" ]; then
-        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -printf '%f\n' 2>/dev/null)"
+        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -exec basename {} \;)" \
+            || die "could not list $hookdir, so hand-installed hooks there cannot be ruled out"
     fi
     if [ -n "$existing" ]; then
         printf 'refusing to set core.hooksPath: %s already holds hand-installed hook(s):\n' "$hookdir" >&2
@@ -519,9 +522,9 @@ fi
 # fallback" rule below: claude, codex, gemini and control-dispatcher legitimately
 # ARE the builtin worker prompt, and banning it outright would fail them.
 PACK_AGENTS=""
-while IFS= read -r adir; do
-    PACK_AGENTS="${PACK_AGENTS} $(basename "$adir")"
-done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -printf '%h\n' 2>/dev/null | LC_ALL=C sort)
+while IFS= read -r atoml; do
+    PACK_AGENTS="${PACK_AGENTS} $(basename "$(dirname "$atoml")")"
+done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -print 2>/dev/null | LC_ALL=C sort)
 
 # ------------------------------------------------------------------ inventory
 #

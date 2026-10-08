@@ -29,8 +29,9 @@
 #
 # These run the REAL scripts — copied into a throwaway rig tree, because they
 # derive the Go module from their own path — with a stub toolchain on GC_GO_BIN,
-# a stub gc on GC_HELM_GC_BIN, and GC_HELM_GOTMP pointed at scratch under
-# $TMPDIR. No live city, no network, no real /var/tmp/gotmp. Covered:
+# a stub gc on GC_HELM_GC_BIN, stub uname and brew first on PATH, and
+# GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network, no
+# real /var/tmp/gotmp. Covered:
 #
 #   launcher (gc-helm-svc.sh)
 #   (EXEC)        an existing binary is exec'd, with its arguments
@@ -45,6 +46,11 @@
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
 #   (GOMOD)       a go.mod-only change still counts as newer
 #   (DEPMOD)      a change in a local replace-dep (services/gctk) forces a rebuild
+#   (ICU)         on macOS the build's cgo is pointed at Homebrew's keg-only icu4c
+#   (ICUKEEP)     CGO flags already set are kept, with the keg's appended
+#   (NOICU)       a prefix with no icu4c installed under it adds nothing, and says so
+#   (ICUOFF)      off macOS brew is never asked and CGO flags pass through
+#   (ICUTICK)     a tick with nothing to build never asks brew
 #
 #   readability — the second staleness axis
 #   (READABLE)    a current binary that can read the stores reports ok, builds nothing
@@ -172,39 +178,63 @@ hasnt()   { case "$1" in *"$2"*) bad "$3 (unexpectedly got: $1)" ;; *) ok "$3" ;
 [ -f "$BUILD" ] && ok "gc-helm-build.sh present" || bad "gc-helm-build.sh missing at $BUILD"
 
 # A pid the kernel cannot have handed out: allocation stops below pid_max, so
-# this one is dead by construction and no case can flake on pid reuse.
-DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 32768) + 7 ))
+# this one is dead by construction and no case can flake on pid reuse. Linux
+# reads pid_max from /proc; macOS has no /proc and never allocates a pid above
+# 99999 (XNU's PID_MAX).
+DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 99999) + 7 ))
 
 # A gc that is not there, so the service listing is unavailable.
 NO_SUCH_GC="$TMP/no-such-gc"
 
+# The host is a fixture too. The builder adds Homebrew's icu4c to cgo only on
+# macOS, so every case runs against a stub uname and a stub brew placed ahead of
+# the real ones on PATH, and sees the same host on any platform. STUB_HOST_OS
+# names the host (Linux when unset), STUB_ICU_PREFIX is what
+# `brew --prefix icu4c` prints (nothing when unset), and STUB_BREW_LOG records
+# every brew call.
+HOST_BIN="$TMP/host-bin"
+mkdir -p "$HOST_BIN"
+cat > "$HOST_BIN/uname" <<'STUB'
+#!/usr/bin/env bash
+echo "${STUB_HOST_OS:-Linux}"
+STUB
+cat > "$HOST_BIN/brew" <<'STUB'
+#!/usr/bin/env bash
+if [ -n "${STUB_BREW_LOG:-}" ]; then printf '%s\n' "$*" >> "$STUB_BREW_LOG"; fi
+if [ "$*" = "--prefix icu4c" ] && [ -n "${STUB_ICU_PREFIX:-}" ]; then
+    printf '%s\n' "$STUB_ICU_PREFIX"
+    exit 0
+fi
+exit 1
+STUB
+chmod +x "$HOST_BIN/uname" "$HOST_BIN/brew"
+export PATH="$HOST_BIN:$PATH"
+
 # Backdate an entry past a sweep threshold. The sweep stats the entry itself, so
 # fill it BEFORE calling this — writing inside afterwards refreshes the
-# directory mtime and un-ages it.
-age_days() { # <path> <days>
-    local when
-    when="$(date -u -d "$2 days ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"d +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
+# directory mtime and un-ages it. GNU and BSD touch both read a UTC ISO-8601
+# stamp as UTC, whatever the local time zone.
+age_secs() { # <path> <seconds>
+    touch -d "$(jq -nr --argjson t "$(( $(date -u +%s) - $2 ))" '$t | todate')" "$1"
 }
-age_mins() { # <path> <minutes>
-    local when
-    when="$(date -u -d "$2 minutes ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"M +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
-}
+age_days() { age_secs "$1" $(( $2 * 86400 )); }  # <path> <days>
+age_mins() { age_secs "$1" $(( $2 * 60 )); }     # <path> <minutes>
 
 # --- fixture ------------------------------------------------------------------
 CASE=0
 FAIL_BUILD=""
-fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
+fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     CASE=$((CASE + 1))
     # Reset per case so one case's skew cannot leak into the next. CITY empty
-    # means "no city to probe".
+    # means "no city to probe"; HOST_OS empty means the stub uname's Linux.
     CITY=""; PROBE_FAIL_BUILT=""; PROBE_FAIL_CACHED=""; BEADS_VERSION="v0.0.0-stub"
+    HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     STATE_CITY="$base/city"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
     GCBIN="$base/bin/gc"; GCLOG="$base/gc-calls"; SERVICES="$base/services.json"
+    BREWLOG="$base/brew-calls"
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin" "$STATE_CITY/.gc/services/helm"
     cp "$SVC" "$ROOT/assets/scripts/gc-helm-svc.sh"
@@ -219,10 +249,10 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     printf '{"city_path":"%s","services":[{"service_name":"helm","state_root":".gc/services/helm"}]}' \
         "$STATE_CITY" > "$SERVICES"
 
-    # Stub toolchain: records the scratch env it was handed, leaks a go-link dir
-    # into it the way a killed linker does, then fails or writes a stand-in
-    # binary. `go build -o` produces an executable; mktemp staged $BIN_TMP 0600,
-    # so the chmod is what keeps the -x check downstream honest.
+    # Stub toolchain: records the scratch and cgo env it was handed, leaks a
+    # go-link dir into it the way a killed linker does, then fails or writes a
+    # stand-in binary. `go build -o` produces an executable; mktemp staged
+    # $BIN_TMP 0600, so the chmod is what keeps the -x check downstream honest.
     cat > "$GOBIN" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -234,7 +264,8 @@ if [ "${1:-}" = "version" ] && [ "${2:-}" = "-m" ]; then
         "${STUB_BEADS_VERSION:-v0.0.0-stub}"
     exit 0
 fi
-printf 'TMPDIR=%s\nGOTMPDIR=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" > "$STUB_RECORD"
+printf 'TMPDIR=%s\nGOTMPDIR=%s\nCGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" \
+    "${CGO_CPPFLAGS:-}" "${CGO_LDFLAGS:-}" > "$STUB_RECORD"
 mkdir -p "$GOTMPDIR/go-link-stub"
 head -c 4096 /dev/zero > "$GOTMPDIR/go-link-stub/obj"
 if [ -n "${STUB_GO_FAIL:-}" ]; then
@@ -344,6 +375,9 @@ run_build() { # -> OUT ERR RC
            STUB_PROBE_FAIL_BUILT="${PROBE_FAIL_BUILT:-}" \
            STUB_PROBE_FAIL_CACHED="${PROBE_FAIL_CACHED:-}" \
            STUB_BEADS_VERSION="${BEADS_VERSION:-v0.0.0-stub}" \
+           STUB_HOST_OS="${HOST_OS:-}" STUB_ICU_PREFIX="${ICU_PREFIX:-}" \
+           STUB_BREW_LOG="$BREWLOG" \
+           CGO_CPPFLAGS="${CGO_CPPFLAGS_IN:-}" CGO_LDFLAGS="${CGO_LDFLAGS_IN:-}" \
            GC_HELM_CITY_PATH="${CITY:-}" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
            GC_HELM_GC_BIN="$GCBIN" \
@@ -365,6 +399,8 @@ run_svc() { # -> OUT ERR RC
 }
 
 run_dir_of() { sed -n 's/^GOTMPDIR=//p' "$RECORD"; }
+# CGO_CPPFLAGS or CGO_LDFLAGS, as the toolchain saw it.
+cgo_of() { sed -n "s/^$1=//p" "$RECORD"; }
 
 # ==============================================================================
 # LAUNCHER — gc-helm-svc.sh must exec and never build
@@ -390,7 +426,7 @@ run_svc --socket /run/helm.sock
 eq "$RC" 0 "(NOSTALE) a stale binary is still served"
 has "$OUT" "cached-binary ran:" "(NOSTALE) the stale binary is the one exec'd"
 absent "$RECORD" "(NOBUILD) the launcher does not build even when sources are newer"
-eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l)" "0" \
+eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" "0" \
    "(NOBUILD) the launcher creates no build scratch at all"
 
 # --- no binary at all ---------------------------------------------------------
@@ -446,7 +482,7 @@ case "$BUILT_TO" in
     "$STATE/bin/".helm-svc.build.*) ok "(ATOMIC) staging sits beside the binary, so the rename is atomic" ;;
     *) bad "(ATOMIC) staging was '$BUILT_TO', not a .helm-svc.build.* beside the binary" ;;
 esac
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) no staging file survives a successful build"
 
 # --- case: rebuilds when a source is newer ------------------------------------
@@ -495,6 +531,71 @@ touch "$ROOT/services/gctk/prstatus.go"
 run_build
 eq "$RC" 0 "(DEPMOD) exits 0"
 present "$RECORD" "(DEPMOD) a services/gctk source change forces a helm rebuild"
+
+# --- case: on macOS, cgo is pointed at Homebrew's keg-only icu4c --------------
+# helm-svc links ICU through Dolt's go-icu-regex. Homebrew installs icu4c
+# keg-only, on no default search path, and the order's environment carries no
+# CGO flags, so without this every macOS build stops at 'unicode/regex.h' and no
+# binary is ever published.
+fixture
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+run_build
+eq "$RC" 0 "(ICU) exits 0"
+eq "$(cgo_of CGO_CPPFLAGS)" "-I$ICU_PREFIX/include" "(ICU) cgo is handed the keg's headers"
+eq "$(cgo_of CGO_LDFLAGS)" "-L$ICU_PREFIX/lib" "(ICU) and its libraries"
+eq "$(cat "$BREWLOG" 2>/dev/null)" "--prefix icu4c" "(ICU) brew is asked for icu4c's prefix, once"
+has "$OUT" "icu4c at $ICU_PREFIX" "(ICU) the log names the icu4c the build used"
+
+# --- case: CGO flags already set are kept -------------------------------------
+fixture
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+CGO_CPPFLAGS_IN="-DFROM_ENV"
+CGO_LDFLAGS_IN="-L/from/env"
+run_build
+eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV -I$ICU_PREFIX/include" \
+   "(ICUKEEP) CGO_CPPFLAGS keeps its value, with the keg's headers after it"
+eq "$(cgo_of CGO_LDFLAGS)" "-L/from/env -L$ICU_PREFIX/lib" \
+   "(ICUKEEP) and CGO_LDFLAGS keeps its value, with the keg's libraries after it"
+
+# --- case: brew names a prefix, but icu4c is not installed under it -----------
+# brew prints a formula's prefix whether or not the formula is installed, so the
+# prefix alone proves nothing; an include/ under it is what does.
+fixture
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+run_build
+eq "$(cgo_of CGO_CPPFLAGS)" "" "(NOICU) no include path is added for a keg that is not there"
+eq "$(cgo_of CGO_LDFLAGS)" "" "(NOICU) nor a library path"
+has "$ERR" "brew install icu4c" "(NOICU) the log names the missing prerequisite"
+
+# --- case: off macOS nothing is added, and brew is never asked ----------------
+# The system libicu is on the default search path there, so a Homebrew icu4c on
+# the host must not displace it.
+fixture
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+CGO_CPPFLAGS_IN="-DFROM_ENV"
+run_build
+eq "$RC" 0 "(ICUOFF) exits 0"
+present "$RECORD" "(ICUOFF) setup: the build ran"
+eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV" "(ICUOFF) CGO_CPPFLAGS passes through untouched"
+eq "$(cgo_of CGO_LDFLAGS)" "" "(ICUOFF) and no library path is added"
+absent "$BREWLOG" "(ICUOFF) brew is never asked"
+
+# --- case: a tick with nothing to build never asks brew -----------------------
+fixture
+cache_binary                                        # newer than main.go -> current
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+run_build
+eq "$RC" 0 "(ICUTICK) exits 0"
+absent "$RECORD" "(ICUTICK) setup: the binary is current, so nothing builds"
+absent "$BREWLOG" "(ICUTICK) and brew is never asked"
 
 # ==============================================================================
 # READABILITY — the second staleness axis
@@ -627,7 +728,7 @@ has "$ERR" "BUILD FAILED" "(FAILKEEP) reports the failure"
 run_svc --socket /run/helm.sock
 has "$OUT" "cached-binary ran:" "(FAILKEEP) the previously-built binary is untouched and still serves"
 absent "$(run_dir_of)" "(FAILKEEP) the failed build's scratch does not survive"
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) the failed build's staging file does not survive either"
 
 # --- case: the 2,677 stranded staging files are reclaimed ---------------------
