@@ -42,6 +42,8 @@
 # test rather than a comment.
 #
 # Hermetic: reads the repo only; no gc, no city, no network.
+#
+# run-tests-scope: tree
 
 set -u
 
@@ -113,6 +115,14 @@ echo "── the hold stamps the takeaway BEFORE waiting (the stamp files the de
 # search); here the prompt is pinned to CALL it before it waits.
 have "the hold runs converse-hold.sh before it waits" 'converse-hold.sh' "$SK_HOLD"
 have "the hold skill keeps the stamp-before-wait invariant" 'Stamp BEFORE you wait' "$SK_HOLD"
+
+echo "── a stand-down ruling states its disposition ──"
+# gc-helm.sh takeaway refuses a --release park that names no disposition
+# unless an open blocker already holds the anchor, and writes nothing. A
+# stand-down ruling ends the wait, so the command the sitting copies carries
+# --no-wait.
+have "the stand-down example passes --no-wait" \
+     'takeaway <anchor> "<ruling>" --release --no-wait' "$SK_HOLD"
 
 # The cross-rig takeaway-writer resolution moved out of the prompt into
 # converse-hold.sh and converse-signoff.sh; it runs against stubs in
@@ -934,7 +944,7 @@ grep -q 'could not release .*tk-sib1' "$CTMP/err" \
 read_back() {
     env PATH="$CTMP/bin:$PATH" FAKE_SHOW="$CTMP/show.json" \
         FAKE_SHOW_DIR="$CTMP/show.d" gc bd show "$1" --json \
-        | sed -e 's/.*"status":"\([^"]*\)".*"assignee":\("\([^"]*\)"\|null\).*/\1|\3/'
+        | sed -E -e 's/.*"status":"([^"]*)".*"assignee":("([^"]*)"|null).*/\1|\3/'
 }
 eq "$(read_back tk-foreign)" "open|" \
    "(VACUUM-HELD-NAMED) fixture: the named turn did read back released"
