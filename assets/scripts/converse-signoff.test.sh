@@ -17,23 +17,23 @@
 # vanished. The work was recorded correctly and the operator was never
 # told. Two endings produce that same disappearance —
 #   1. deliberate close (step 6 → step 7 drains, the session goes), and
-#   2. an unattended kill. The per-model sittings run wake_mode=resume, so
-#      the respawn replays the thread; only the legacy fresh pool, or a
-#      failed resume, comes back without it.
+#   2. an unattended kill. The sittings run wake_mode=resume, so the respawn
+#      replays the thread; only a failed resume comes back without it.
 # Nothing pack-owned runs at kill time, so the contract has to hold the
 # line in two places, and BOTH are load-bearing:
 #   • the durable trace is stamped when the hold BEGINS, not only at
 #     close — it is the demand gate the board reads and work blocks on,
-#     and it is also what a fresh respawn or a failed resume finds; and
+#     and it is also what a failed resume finds; and
 #   • a deliberate close ends with a sign-off — a plain-language wrap-up
 #     of what the sitting settled — so the last line the operator sees is
 #     an ending rather than an unanswered question.
 #
-# Neither ending is a clock. `idle_timeout = "0"` keeps converse off the
-# idle ladder, so a held sitting ends when its visit closes. That
-# is a config value with no other guard, which is the shape that gets
-# tidied back to a plausible-looking "8h", so it is pinned here alongside
-# the operator lever that ends a sitting by hand (`gc-helm dismiss`).
+# Neither ending is a clock. `idle_timeout = "0"` on every converse-<model>
+# template keeps a sitting off the idle ladder, so a held sitting ends when
+# its visit closes. That is a config value with no other guard, which is the
+# shape that gets tidied back to a plausible-looking "8h", so it is pinned
+# here alongside the operator lever that ends a sitting by hand
+# (`gc-helm dismiss`).
 #
 # Each assertion below is one way the fix silently reverts. A prompt is
 # prose: a well-meaning edit that "tidies" the hold step can drop the
@@ -49,8 +49,12 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
-PROMPT="$REPO/agents/converse/prompt.template.md"
-ATOML="$REPO/agents/converse/agent.toml"
+PROMPT="$REPO/agents/_converse/prompt.template.md"
+# A sitting runs from one of the converse-<model> templates. They differ only in
+# provider and model, and converse-opus carries the per-field documentation the
+# others cite, so the config's prose is read there and its values on every one.
+ATOML="$REPO/agents/converse-opus/agent.toml"
+SITTINGS=("$REPO"/agents/converse-*/agent.toml)
 HELM="$REPO/assets/scripts/gc-helm.sh"
 ENGAGE="$REPO/docs/gascity-human-engagement.md"
 # Steps 2–8 are carried by on-demand skills; step 1 and the routing table stay
@@ -93,7 +97,7 @@ eq() {
     if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi
 }
 
-for f in "$PROMPT" "$ATOML" "$HELM" "$ENGAGE" \
+for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" \
     "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE" "$SK_CONTINUE"; do
     [ -r "$f" ] || {
         printf 'converse-signoff: cannot read %s\n' "$f" >&2
@@ -400,28 +404,32 @@ lacks "config header no longer equates a visit with a sitting" \
     'holds visits: bounded sittings' "$ATOML" \
     "the header states visit == sitting, which is the behaviour tk-mndjz removed"
 
-echo "── the idle reap is OFF for this role, and the operator's lever exists ──"
+echo "── the idle reap is OFF for every sitting template, and the operator's lever exists ──"
 # The layout rule on this surface: an operator reading a held thread must not
 # lose it to a clock. Idle is measured from terminal OUTPUT, so a reader
 # produces none, and 8h of attention reads as 8h of abandonment. A template
 # whose idle_timeout is <= 0 is never registered with the idle tracker, so the
 # ladder is never reached. This is a single config VALUE with nothing else
 # guarding it: an edit that puts a plausible-looking duration back removes the
-# rule and passes every other assertion in this file.
-IDLE_VAL="$(sed -n 's/^idle_timeout = "\(.*\)"$/\1/p' "$ATOML" | tr -d '\n')"
-case "$IDLE_VAL" in
-    0|0s|0m|0h)
-        ok "agent.toml keeps the idle reap disabled (idle_timeout=$IDLE_VAL)" ;;
-    "")
-        bad "agent.toml keeps the idle reap disabled" \
-            "no idle_timeout line at all; an absent value disables the reap too, but it takes the explanation with it — keep it explicit" ;;
-    *)
-        bad "agent.toml keeps the idle reap disabled" \
-            "idle_timeout is '$IDLE_VAL'; any positive value re-arms the clock that collects a thread the operator is reading" ;;
-esac
+# rule and passes every other assertion in this file. The idle tracker reads it
+# per template, so every template a sitting can run from is checked.
+for SITTING in "${SITTINGS[@]}"; do
+    NAME="$(basename "$(dirname "$SITTING")")"
+    IDLE_VAL="$(sed -n 's/^idle_timeout = "\(.*\)"$/\1/p' "$SITTING" | tr -d '\n')"
+    case "$IDLE_VAL" in
+        0|0s|0m|0h)
+            ok "$NAME keeps the idle reap disabled (idle_timeout=$IDLE_VAL)" ;;
+        "")
+            bad "$NAME keeps the idle reap disabled" \
+                "no idle_timeout line at all; an absent value disables the reap too, but it leaves nothing for a reader or this test to see — keep it explicit" ;;
+        *)
+            bad "$NAME keeps the idle reap disabled" \
+                "idle_timeout is '$IDLE_VAL'; any positive value re-arms the clock that collects a thread the operator is reading" ;;
+    esac
+done
 have "config explains what ends a sitting instead" 'gc-helm dismiss' "$ATOML"
-# With no idle clock and no release valve, a held visit nobody answers holds a
-# pool slot with nothing able to reclaim it. The verb IS that valve, so its
+# With no idle clock and no release valve, a held visit nobody answers keeps its
+# session running with nothing able to end it. The verb IS that valve, so its
 # absence is not a missing convenience.
 have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
 have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
@@ -500,29 +508,35 @@ lacks "no 'is one bounded sitting' definition anywhere in the doc" \
     'is one bounded sitting' "$ENGAGE" \
     "a visit is a request FOR one bounded sitting; the bare equation is the bug written as the model"
 
-echo "── the post-sitting drain is documented, not just the reap ──"
+echo "── the post-sitting ending is documented, not just the held one ──"
 # tk-tufrw: an operator lost an unsubmitted multi-paragraph reply. The
-# reap section above was written about a HELD sitting and reads as the
-# complete account of how the pane goes; it is not. Once a sitting ENDS
-# the session has no wake reason and is drained as `no-wake-reason`
-# within about a minute, and that drain kills the pane and its process
-# tree outright — nothing reads the composer, and nothing warns.
-# Every claim below is load-bearing for a reader deciding whether a
-# visible pane is safe to type into, and each one was absent (not wrong)
-# before the incident. Absence is exactly what made the window invisible.
-# The HEADING, not the phrase: the forward pointer added to the reap
+# held-sitting section above reads as the complete account of how the pane
+# goes; it is not. Once a sitting ENDS its manual session stays up until the
+# converse-reap order closes it, on the first pass that finds the visit closed
+# and the pane unattached, and that close kills the pane and its process tree
+# outright: nothing reads the composer, and nothing warns. Every claim below is
+# load-bearing for a reader deciding whether a visible pane is safe to type
+# into, so each is pinned inside that section rather than anywhere in the doc.
+# The HEADING, not the phrase: the forward pointer in the held-sitting
 # section quotes the section name, so a bare phrase match passes even
 # with the section itself deleted (caught by mutating this file).
 have "doc carries the post-sitting ending" '## How a pane dies when no sitting is live' "$ENGAGE"
-have "doc names the drain reason" 'no-wake-reason' "$ENGAGE"
-# The mechanism, pinned at both ends: the deferred signal the reconciler
-# actually sends (metadata, not a keystroke) and the call that actually
-# destroys the pane. A reader who trusts a visible pane needs to know
-# there is no interruption, no prompt and no read-out first — the pane
-# and everything composed in it goes in one step.
-have "doc names the deferred drain signal" 'GC_DRAIN_ACK=1' "$ENGAGE"
-have "doc names the destructor" 'KillSessionWithProcesses' "$ENGAGE"
-have "doc rules out the keystroke" 'no Ctrl-C keystroke injection into the pane' "$ENGAGE"
+POST_SEC="$TMPD/post-sitting-section.txt"
+awk '/^## How a pane dies when no sitting is live/ {f=1; next} f && /^## / {exit} f {print}' \
+    "$ENGAGE" >"$POST_SEC"
+# What ends a settled sitting is the pack's reap, not a runtime clock: the
+# awake set keeps a manual session, so the pool's no-wake-reason drain never
+# reaches one. A section that drops either half has a reader trusting a clock
+# that does not run, or missing the one that does.
+have "the section names the reap that ends a settled sitting" 'converse-reap' "$POST_SEC"
+have "the section names the reap's close" 'gc session close' "$POST_SEC"
+have "the section says what holds the pane up" 'manual origin' "$POST_SEC"
+have "the section says the pool drain does not reach a sitting" 'no-wake-reason' "$POST_SEC"
+# The mechanism, pinned at the call that destroys the pane. A reader who
+# trusts a visible pane needs to know there is no interruption, no prompt and
+# no read-out first — the pane and everything composed in it goes in one step.
+have "the section names the destructor" 'KillSessionWithProcesses' "$POST_SEC"
+have "the section rules out the keystroke" 'no Ctrl-C keystroke injection into the pane' "$POST_SEC"
 # Regression guard, not decoration. The first version of this section
 # said the drain's first act was `Provider.Interrupt` -> SendKeysRaw C-c
 # clearing the composer, and THIS suite pinned that string — so the false
@@ -531,21 +545,21 @@ have "doc rules out the keystroke" 'no Ctrl-C keystroke injection into the pane'
 # only interrupt wrapper and has no caller outside its own unit test;
 # nothing on this path types into the pane. Keep it that way.
 lacks "doc does not revive the keystroke mechanism" 'SendKeysRaw' "$ENGAGE" \
-    "the no-wake-reason drain signals through GC_DRAIN_ACK metadata and kills; it sends no keys"
-have "doc records the misleading stop wording" 'drain acknowledged by agent' "$ENGAGE"
-have "doc points at the upstream filing" 'gc-ze774' "$ENGAGE"
+    "the stop kills the pane's process tree through Provider.Stop; it sends no keys"
+# Attachment is the reap's only proxy for a reader, and with one tmux client
+# switched between sessions it covers only the pane on screen. A reader who
+# takes "the reap skips attached panes" as protection for a pane they switched
+# away from is the one who loses a draft.
+have "the section says attachment covers only the pane on screen" 'one tmux client' "$POST_SEC"
+have "the section points at the upstream filing" 'gc-ze774' "$POST_SEC"
 # The operator's ruling is a PROHIBITION, and it is the part most likely
 # to be softened by a later edit into "capture it on the way out" — which
 # is the option they explicitly overrode. Pin the ruling itself, not a
 # paraphrase of it.
-have "doc carries the hard-no ruling" 'should be a hard no' "$ENGAGE"
-# A live pane is not evidence the system knows anyone is there: the
-# session survives on the pool having ANY open visit, so a reader must
-# not infer protection from the pane still being up.
-have "doc says the pane is held by unrelated demand" 'demand-driven' "$ENGAGE"
-# A reader who finds the reap section first must not stop there: without
-# a forward pointer the held-sitting account silently doubles as "all the
-# ways the pane goes", which is the reading that left this window
+have "doc carries the hard-no ruling" 'should be a hard no' "$POST_SEC"
+# A reader who finds the held-sitting section first must not stop there:
+# without a forward pointer the held-sitting account silently doubles as "all
+# the ways the pane goes", which is the reading that left this window
 # unguarded in the first place.
 HELD_SEC="$(awk '/^## How a held sitting ends/ {f=1; next} f && /^## / {exit} f {print}' "$ENGAGE")"
 if printf '%s\n' "$HELD_SEC" | grep -qF 'How a pane dies when no sitting is live'; then
@@ -554,11 +568,11 @@ else
     bad "the held-sitting section points at the other ending" \
         "without the pointer, the held-sitting account reads as the complete one"
 fi
-# Both role-facing copies carry it too. The config is where someone goes
-# to tune idle_timeout, and the prompt is what the session reads at wake;
-# a correction that lands only in the central doc reaches neither.
-have "config names the second, shorter clock" 'no-wake-reason' "$ATOML"
-have "prompt names the second, shorter clock" 'no-wake-reason' "$PROMPT"
+# Both role-facing copies carry it too. converse-opus is where someone goes to
+# tune idle_timeout, and the prompt is what the session reads at wake; a
+# correction that lands only in the central doc reaches neither.
+have "config names the reap that ends a settled sitting" 'converse-reap' "$ATOML"
+have "prompt names the reap that ends a settled sitting" 'converse-reap' "$PROMPT"
 
 echo "── the writer the contract depends on still exists ──"
 have "gc-helm exposes the takeaway verb" 'cmd_takeaway()' "$HELM"
@@ -571,17 +585,17 @@ have "takeaway stamps gc.takeaway" 'gc.takeaway=$text' "$HELM"
 # THE CLAIM BOUNDARY — a turn is claimed WITHIN a continuation group (tk-msfmu)
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# THE BUG: `agent.toml` names `specs/tk-h9pq5/design-doc.md` as the design
-# authority, and it says the role "re-claims within the group and drains when
-# the group is dry". The shipped prompt said the opposite — "a claim is
-# authoritative even when it names a different subject than your last one" —
-# because `gc hook --claim` has no group filter, so the scoped re-claim was not
-# expressible with the tool the prompt calls its only source of work. On
-# 2026-08-22 an operator mid-conversation about the helm board UI had an
-# unrelated merge-skill visit prepped in the same thread.
+# THE BUG: the converse design authority, `specs/tk-h9pq5/design-doc.md`, says
+# the role "re-claims within the group and drains when the group is dry". The
+# shipped prompt said the opposite — "a claim is authoritative even when it
+# names a different subject than your last one" — because `gc hook --claim`
+# has no group filter, so the scoped re-claim was not expressible with the tool
+# the prompt calls its only source of work. On 2026-08-22 an operator
+# mid-conversation about the helm board UI had an unrelated merge-skill visit
+# prepped in the same thread.
 #
 # THE FIX: `assets/scripts/converse-claim.sh` claims, and puts a foreign turn
-# BACK in the pool before telling the session to drain. The release is the
+# BACK, unclaimed, before telling the session to drain. The release is the
 # load-bearing half — draining on a turn still assigned to a dying session is
 # worse than the bug, because the reconciler's reassign path refuses a held
 # visit by design.
@@ -621,11 +635,25 @@ sed -n 's/^nudge = "\(.*\)"$/\1/p' "$ATOML" | tr -d '\n' > "$NUDGE_VAL"
 # An absent key and a deliberately empty one are the same value to the engine
 # and different to a reader, so the field has to stay written out.
 if grep -qE '^nudge = ' "$ATOML"; then
-    ok "agent.toml states its nudge explicitly"
+    ok "converse-opus states its nudge explicitly"
 else
-    bad "agent.toml states its nudge explicitly" \
+    bad "converse-opus states its nudge explicitly" \
         "the key is gone; deleting it loses the record of why the field is empty"
 fi
+# The nudge is read per template, and the sitting templates differ only in
+# provider and model, so every one states the same nudge. Everything below reads
+# converse-opus's value, so a sibling that drifted from it would go unchecked.
+for SITTING in "${SITTINGS[@]}"; do
+    [ "$SITTING" -ef "$ATOML" ] && continue
+    NAME="$(basename "$(dirname "$SITTING")")"
+    if grep -qE '^nudge = ' "$SITTING" &&
+        [ "$(sed -n 's/^nudge = "\(.*\)"$/\1/p' "$SITTING" | tr -d '\n')" = "$(cat "$NUDGE_VAL")" ]; then
+        ok "$NAME states the same nudge as converse-opus"
+    else
+        bad "$NAME states the same nudge as converse-opus" \
+            "its nudge is missing or differs from converse-opus's, which is the only value the checks below read"
+    fi
+done
 if [ -s "$NUDGE_VAL" ]; then
     have "the wake nudge names the claimer, not the raw claim" 'converse-claim.sh' "$NUDGE_VAL"
     lacks "…and does not still tell the session to run the raw claim" \
