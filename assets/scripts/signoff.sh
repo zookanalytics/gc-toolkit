@@ -828,15 +828,16 @@ else
   TITLE="Rework branch $BRANCH: address pre-open signoff findings"
 fi
 # One review bead owns at most one rework child. This path is fully re-runnable:
-# close_review is its last write, and every exit-2 above it (work-order verify,
-# an unproven pour) leaves the review OPEN with a child already filed. A re-pool
-# re-enters here, so a create keyed to the same review mints a SECOND child for
-# one finding — one dispatches and lands, the other is a duplicate a human must
-# reap. Adopt the open child that already answers this review instead.
+# close_review is its last write, and every exit-2 above it (a create whose id
+# did not come back, work-order verify, an unproven pour) leaves the review OPEN
+# with a child already filed. A re-pool re-enters here, so a create keyed to the
+# same review mints a SECOND child for one finding — one dispatches and lands,
+# the other is a duplicate a human must reap. Adopt the open child that already
+# answers this review instead.
 #
 # Discover it by the source_review_bead it carries, not by the anchor's blocks
-# edge. The child is created and stamped (below) BEFORE its blocks edge is hung,
-# so a prior run that filed and stamped the child but exited before hanging the
+# edge. The child carries that key from its create (below), before its blocks
+# edge is hung, so a prior run that filed the child but exited before hanging the
 # edge leaves an orphan no anchor-edge walk can see, and the create arm mints a
 # second child. source_review_bead is the exact key: it is this review bead's own
 # id, unique to one review of one anchor, and the only bead type stamped with it
@@ -882,9 +883,23 @@ if [ -n "$FIX_BEAD" ]; then
   echo "signoff: adopting existing open rework child $FIX_BEAD for review $REVIEW_BEAD (a prior attempt filed it but never dispatched); filing no second child"
   [ -n "$(row_meta "$(bd_json show "$FIX_BEAD")" rejection_reason)" ] && REJECTION_REASON=""
 else
-  FIX_BEAD=$(gc bd create "$TITLE" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+  # The identity keys ride in the create itself. The dedup above finds a prior
+  # child by source_review_bead alone, so a child that exists without it is
+  # invisible to the retry, which files a second child beside it. A create
+  # followed by a separate stamp is two writes: a create whose id never comes
+  # back, or a run that ends before the work-order stamp below, leaves a child
+  # carrying no key any reader matches on. One write cannot: the child and its
+  # identity land together or not at all. The full work order is stamped and
+  # read back below, on a fresh child and an adopted one alike.
+  FIX_IDENTITY=$(jq -nc --arg a "$ANCHOR" --arg r "$REVIEW_BEAD" \
+    '{task_kind: "rework", anchor_bead: $a, source_review_bead: $r}' 2>/dev/null)
+  if [ -z "$FIX_IDENTITY" ]; then
+    warn "could not build the rework child's identity metadata; review left open for a retry"
+    exit 2
+  fi
+  FIX_BEAD=$(gc bd create "$TITLE" -t task --metadata "$FIX_IDENTITY" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
   if [ -z "$FIX_BEAD" ]; then
-    warn "could not create the rework child; review left open for a retry"
+    warn "the rework child create returned no id; review left open for a retry, which adopts the child by source_review_bead=$REVIEW_BEAD if the create landed"
     exit 2
   fi
 fi
