@@ -2819,7 +2819,7 @@ grep -q 'RIGS\[\[' <<< "$EOUT" \
 grep -q 'TRAPDELTA\[\]' <<< "$EOUT" \
   && ok "(ENUM) …and left the caller's trap table as it found it" \
   || bad "(ENUM) the helper changed the caller's traps (out: $EOUT)"
-eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l)" "0" \
+eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
    "(ENUM) …and removed its stderr capture"
 
 echo ""

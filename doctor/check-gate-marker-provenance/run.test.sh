@@ -174,7 +174,7 @@ anchors "$(anchor a-1e "$GATING,\"pr_number\":\"101\",\"check.correctness\":\"gr
 reviews "$(rbead r-1 closed a-1e approve recorded correctness "$OTHER")"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a verdict recorded at a commit the branch has moved past still backs the lane"
-eq "$(wc -l < "$GH_LOG")" "0" "…and it costs no GitHub call"
+eq "$(wc -l < "$GH_LOG" | tr -d ' ')" "0" "…and it costs no GitHub call"
 
 # --- A3. no evidence anywhere is an ERROR -----------------------------------------
 anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.correctness\":\"green\"")"
@@ -184,7 +184,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a green marker no review bead and no approval covers is an ERROR"
 has "$OUT" "a-1" "the unbacked anchor is named"
 has "$OUT" "nothing reviewed" "the finding says what is missing"
-eq "$(wc -l < "$GH_LOG")" "1" "RESOLVE B is consulted only for what A left over"
+eq "$(wc -l < "$GH_LOG" | tr -d ' ')" "1" "RESOLVE B is consulted only for what A left over"
 
 # --- A4. RESOLVE B: an APPROVED review on the PR clears the lane -------------------
 approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OID\"}]"
@@ -234,7 +234,7 @@ anchors "$(anchor a-6 "$GATING,\"check_set\":\"correctness,other\",\"pr_number\"
 reviews ""
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "two gates on one approved head both clear"
-eq "$(sort -u "$GH_LOG" | wc -l)" "1" "the PR review list is fetched once and reused"
+eq "$(sort -u "$GH_LOG" | wc -l | tr -d ' ')" "1" "the PR review list is fetched once and reused"
 
 # --- A8b. a PAGINATED review list is flattened before it is judged -----------------
 anchors "$(anchor a-6b "$GATING,\"pr_number\":\"103\",\"check.correctness\":\"green\"")"

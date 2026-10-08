@@ -390,7 +390,7 @@ run_svc --socket /run/helm.sock
 eq "$RC" 0 "(NOSTALE) a stale binary is still served"
 has "$OUT" "cached-binary ran:" "(NOSTALE) the stale binary is the one exec'd"
 absent "$RECORD" "(NOBUILD) the launcher does not build even when sources are newer"
-eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l)" "0" \
+eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" "0" \
    "(NOBUILD) the launcher creates no build scratch at all"
 
 # --- no binary at all ---------------------------------------------------------
@@ -446,7 +446,7 @@ case "$BUILT_TO" in
     "$STATE/bin/".helm-svc.build.*) ok "(ATOMIC) staging sits beside the binary, so the rename is atomic" ;;
     *) bad "(ATOMIC) staging was '$BUILT_TO', not a .helm-svc.build.* beside the binary" ;;
 esac
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) no staging file survives a successful build"
 
 # --- case: rebuilds when a source is newer ------------------------------------
@@ -627,7 +627,7 @@ has "$ERR" "BUILD FAILED" "(FAILKEEP) reports the failure"
 run_svc --socket /run/helm.sock
 has "$OUT" "cached-binary ran:" "(FAILKEEP) the previously-built binary is untouched and still serves"
 absent "$(run_dir_of)" "(FAILKEEP) the failed build's scratch does not survive"
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) the failed build's staging file does not survive either"
 
 # --- case: the 2,677 stranded staging files are reclaimed ---------------------
