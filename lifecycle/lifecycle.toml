@@ -118,7 +118,7 @@ writer = "formulas/mol-refinery-patrol.toml (no commits on branch; via lifecycle
 [[transition]]
 from = "unanchored"
 to = "held"
-writer = "agents/converse, sitting hold (via lifecycle.sh)"
+writer = "assets/scripts/converse-hold.sh, a converse sitting's hold (via lifecycle.sh)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -178,7 +178,7 @@ writer = "human"
 [[transition]]
 from = "held"
 to = "unanchored"
-writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
+writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.sh); or human"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
@@ -556,7 +556,7 @@ keys = [
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict",
+  "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict", "visual",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
@@ -582,8 +582,21 @@ keys = [
 #   writes `approve` on a back-lane outcome). lane-state.sh derives a lane green
 #   from a closed review carrying `approve` with a non-empty reviewed_oid and a
 #   non-superseded gc.outcome; doctor/check-gate-marker-provenance audits the
-#   same shape. Absent is a legacy review closed before the stamp existed, which
-#   still backs a lane only via gc.outcome=recorded. Never cleared; set once.
+#   same shape. A closed review with no signoff_verdict, such as a legacy review
+#   closed before the stamp existed, backs no lane locally. signoff.sh stamps
+#   gc.outcome=recorded on every close, approve and request-changes alike, so
+#   recorded names no verdict. A lane resting on such a close is green only on
+#   an APPROVED GitHub review (lane-state.sh github_approved). Never cleared;
+#   set once.
+# visual — the demo check's visual decision: `none` when the change needs no
+#   visual, else the modality that conveys it (`repo-artifact`, `screenshot` or
+#   `video`). Written by signoff.sh on a `demo` review bead in the same update as
+#   reviewed_oid, and read back before the verdict posts; signoff.sh refuses it
+#   on any other check. A record only: no gate reads it, and the posted verdict
+#   names it on a `Visual:` line. Absent means signoff.sh recorded no demo
+#   verdict on the bead: another check's review, a demo review closed without a
+#   verdict, a lane backing review-outcome.sh wrote, or a review closed before
+#   the stamp existed. Never cleared. One of those four values.
 # check_name — the lane a review or backing bead speaks for, defaulting to
 #   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
@@ -702,6 +715,63 @@ keys = [
   # author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
 ]
+
+[metadata.review_quorum]
+# The two-lane review quorum, formulas/mol-review-quorum-signoff.toml. Two lane
+# steps review one diff on different providers, and a synthesis step makes the
+# single signoff.sh call. gate-ensure.sh pours it in place of mol-review when
+# refinery-reconcile.sh's REFINERY_RECONCILE_REVIEW_FORMULA names it. Every key
+# here sits on a step bead of that molecule, never on the review bead or the
+# anchor. All but gc.output_json are the formula's step metadata, stamped on the
+# step when the molecule pours, beside the gc.run_target each step routes by
+# ([metadata.runtime_owned]). None is cleared.
+keys = [
+  "gc.output_json", "gc.review_quorum_lane",
+  "gc.provider", "gc.output_json_schema", "gc.review_quorum_role",
+]
+# gc.output_json — a lane's review-quorum.lane.v1 object, compact JSON stored as
+#   a string, written by the lane on its own step bead before it closes that
+#   step. The synthesis step reads it from both closed lane steps. A lane whose
+#   output is missing or unreadable is reduced coverage, not a pass: the
+#   synthesis says so in the verdict, and requests changes with a finding naming
+#   the gap when one lane is not enough for a confident verdict. The key is
+#   gascity's step-output key: the runtime copies it from an attempt to its
+#   logical bead and from a scope member to its scope body, and an on_complete
+#   fan-out reads it. The lane steps are plain steps, so the synthesis step is
+#   their only reader.
+# gc.review_quorum_lane — the lane id on each lane step (lane_one_id and
+#   lane_two_id, which refinery-reconcile.sh defaults to `codex` and `claude`).
+#   The synthesis step finds the two lane steps by it, scoped by gc.root_bead_id
+#   because lane ids repeat across pours.
+# gc.provider / gc.output_json_schema / gc.review_quorum_role — labels that
+#   neither the pack nor the gascity runtime reads: each lane step's provider
+#   var and the schema its output follows (`review-quorum.lane.v1`), and
+#   `synthesis` on the synthesis step. A lane routes by gc.run_target, not by
+#   gc.provider.
+
+[metadata.self_review]
+# The self-review check loop in formulas/mol-polecat-work.toml. Each iteration
+# runs the rig's declared checks in its own session and stamps the head it saw
+# pass. The loop's exit condition, assets/scripts/self-review-check.sh,
+# converges only when that stamp names the worktree's live HEAD on a clean tree.
+# All three keys sit on the work bead.
+keys = ["self_review_passed_sha", "aborted_at", "self_review_loop_attempts"]
+# self_review_passed_sha — the full commit sha an iteration verified, written by
+#   the self-review step once every declared check has passed on a clean tree.
+#   self-review-check.sh passes the loop only when it equals the worktree's
+#   HEAD. Absent means no iteration has passed yet, and the loop runs another.
+#   Never cleared: a later commit leaves it naming an older head, which the exit
+#   condition reads as not yet passed.
+# aborted_at — `self-review-exhausted`, stamped by self-review-check.sh on the
+#   budget's last failing attempt. The same update reopens the work bead, clears
+#   its route and session pins, reassigns it to the witness derived from its
+#   pool route, and appends the failure to its notes. self-review-check.sh is
+#   also its only reader: a bead already carrying it gets no second handback.
+#   Absent means no handback has run. Never cleared. The opt-in
+#   packs/gascity-keeper sub-pack stamps the same key with its own step names.
+# self_review_loop_attempts — the attempt number that exhausted the budget,
+#   written in the same handback. No pack path reads it back. Absent means no
+#   handback has run. Never cleared. An integer string.
 
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
@@ -901,6 +971,7 @@ keys = [
   "escalation.recurrences", "escalation.recurrence_last",
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
+  "gc.pr_visit_summary", "gc.pr_visit_actions",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -958,6 +1029,16 @@ keys = [
 #   escalate.sh), triage.last_seen the last pass a subject was seen (set to the
 #   time when present, cleared to empty when gone), and triage.hold a
 #   held-by-design marker ([holds] marker_keys).
+# gc.pr_visit_summary / gc.pr_visit_actions — the closing text of a visit's PR
+#   reminder, stamped on the VISIT by converse-signoff.sh before the visit
+#   closes, so the post-close writer can mark the reminder closed without
+#   re-deriving the sitting. The summary is the sitting's takeaway. The actions
+#   name the work it routed, then the ruling it reached or what is still owed.
+#   pr-visit-comment.sh `close` reads each one when its caller passes no
+#   --summary or --actions, as converse-settle's close step and
+#   converse-claim.sh's stranded-finish recovery do. Absent or empty leaves that
+#   line out of the closed reminder. Never cleared. Freeform text, rendered as
+#   one line.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
@@ -996,6 +1077,7 @@ keys = [
   "gc.dispatch_when_ready", "gc.dispatch_when_ready_args",
   "gc.dispatch_when_ready_armed_by", "gc.dispatch_when_ready_armed_at",
   "gc.dispatch_when_ready_reason", "gc.dispatch_when_ready_slung",
+  "gc.dispatch_when_ready_fail_count",
   "gc.deferred_routed_to", "gc.deferred_execution_routed_to",
   "gc.deferred_assignee",
 ]
@@ -1010,6 +1092,16 @@ keys = [
 # gc.dispatch_when_ready_slung — the reconcile idempotency marker: `slinging@<ts>`
 #   while an attempt is in flight, `slung@<ts>` once proven, so a reconcile pass
 #   does not sling twice. Cleared with the rest of the family.
+# gc.dispatch_when_ready_fail_count — the sling attempts reconcile has made on
+#   this arm, the budget that stops a sling which never finalizes from minting
+#   an input convoy every pass. reconcile bumps it in the write that stamps
+#   `slinging@`, so a failed sling and a death both leave it raised. At the cap
+#   (GC_MAX_DISPATCH_SLING_FAILURES, default 3) reconcile stops re-slinging,
+#   escalates the bead through escalate.sh and leaves it armed. `list` reports
+#   such an arm CAPPED, and doctor/check-armed-dispatch-owed skips it because
+#   the escalation already surfaced it. An integer string; absent or non-numeric
+#   reads as 0. Cleared with the rest of the family by disarm, which ends a
+#   proven dispatch. Clearing it by hand restarts a capped retry.
 # gc.deferred_routed_to / gc.deferred_execution_routed_to / gc.deferred_assignee —
 #   the deferred counterparts of gc.routed_to, gc.execution_routed_to and the
 #   assignee: the routing a fired dispatch restores. mol-polecat-work's bd-ready
@@ -1085,12 +1177,16 @@ keys = [
 #   and pin_awake (settable only by `gc session pin`) — are written by the
 #   runtime; the pack reads them and does not write them.
 # gc.run_target — a third route stamp beside gc.routed_to and
-#   gc.execution_routed_to, written only by the runtime: gascity's
+#   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work
 #   bead it finds otherwise unrouted, so the pool re-offers stranded work. No
 #   pack script writes or reads it; dead-molecule-dispose.sh clears it with the
 #   other ROUTE_KEYS when de-routing a dead molecule's members. Absent or empty
-#   means unrouted. A route value, per the ROUTE rule in the preamble.
+#   means unrouted. A route value, per the ROUTE rule in the preamble. A formula
+#   step can also declare it in its step metadata: gascity's sling routes a
+#   poured step by its assignee, else by this key, which is how
+#   mol-review-quorum-signoff sends each lane to its provider's pool
+#   ([metadata.review_quorum]).
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
 #   pour beside gc.kind=workflow. orphan-dispose.sh, dead-molecule-dispose.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a

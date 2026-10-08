@@ -4,6 +4,8 @@
 # lint-learned.test.sh; this suite is about what a detector does and does not
 # call a finding.
 #
+# run-tests-scope: tree
+#
 # It lives here rather than beside its subject because the runner executes
 # every executable in lint-learned.d/ as a detector, so a test file in that
 # directory would be run as one.

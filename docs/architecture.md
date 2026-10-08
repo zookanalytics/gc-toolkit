@@ -122,10 +122,11 @@ The human surface is subject / visit / takeaway on native primitives
 ([gascity-human-engagement.md](gascity-human-engagement.md) is the reference).
 
 - **A subject bead is the conversation.** Its id is the conversation's
-  identity; turns are small child beads routed to the converse role. Warm, the
-  next turn vacuums onto the live session through the continuation group;
-  cold, a fresh session reconstitutes from the record. The record is the
-  durable thing; sessions are disposable.
+  identity; turns are small child beads that park on the helm board
+  (`gc.routed_to=human`) until the operator engages one. Warm, the next turn
+  vacuums onto the live sitting through the continuation group; cold,
+  `gc-helm engage` spawns a fresh `converse-<model>` sitting that reconstitutes
+  from the record. The record is the durable thing; sessions are disposable.
 - **A visit is a filed turn** — `mol-visit` and `gc-visit-open.sh` are the
   canonical entry point. Two channels carry a signal, and which applies
   depends on who can answer it. Mail is the agent-to-agent pathway: a worker

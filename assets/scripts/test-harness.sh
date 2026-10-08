@@ -944,3 +944,24 @@ part() { # <name>
   fi
   [ "$RUN_TESTS_PART" = "$1" ]
 }
+
+# A Python whose standard library has tomllib (3.11 and newer), for a suite that
+# reads a formula or an order with it. A host's python3 can be older (macOS
+# ships 3.9) while a newer one sits on PATH under its versioned name, so the
+# search tries python3 and then each python3.N on PATH, newest first. It prints
+# the path of the first one that imports tomllib and returns 0. With none, it
+# prints what PATH does have and returns 1, and the suite skips the checks that
+# need tomllib with that text as the reason.
+tomllib_python() {
+  local name path ver found=""
+  for name in python3 $(compgen -c python3. 2>/dev/null | grep -xE 'python3\.[0-9]+' | sort -t. -k2,2nr -u); do
+    path="$(command -v "$name")" || continue
+    if "$path" -c 'import tomllib' >/dev/null 2>&1; then
+      printf '%s\n' "$path"; return 0
+    fi
+    ver="$("$path" -c 'import platform; print(platform.python_version())' 2>/dev/null)"
+    found="${found:+$found, }$path${ver:+ $ver}"
+  done
+  printf 'tomllib needs Python 3.11 or newer, and PATH has %s\n' "${found:-no python3}"
+  return 1
+}
