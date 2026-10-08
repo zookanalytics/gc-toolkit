@@ -106,10 +106,10 @@ ecount()   { entries "$1" | grep -c . ; }
 desc()     { jq -r --arg id "$1" '.[] | select(.id == $id) | .description' "$STUB_STORE"; }
 bstatus()  { jq -r --arg id "$1" '.[] | select(.id == $id) | .status' "$STUB_STORE"; }
 # Rewrite a bead's created_at to N days ago, for the age bound.
-age_days() { local d; d=$(date -u -d "@$(( $(date -u +%s) - $2 * 86400 ))" +%Y-%m-%dT%H:%M:%SZ)
+age_days() { local d; d=$(jq -nr --argjson t "$(( $(date -u +%s) - $2 * 86400 ))" '$t | todate')
              local t; t=$(mktemp "${STUB_STORE%/*}/.stub.XXXXXX"); jq -c --arg id "$1" --arg c "$d" 'map(if .id == $id then .created_at = $c else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
 # Plant a ledger entry at a chosen age, bypassing append.
-plant()    { local d; d=$(date -u -d "@$(( $(date -u +%s) - $2 ))" +%Y-%m-%dT%H:%M:%SZ)
+plant()    { local d; d=$(jq -nr --argjson t "$(( $(date -u +%s) - $2 ))" '$t | todate')
              local t; t=$(mktemp "${STUB_STORE%/*}/.stub.XXXXXX"); jq -c --arg id "$1" --arg x "$d $3" 'map(if .id == $id then .comments = ((.comments // []) + [{text: $x}]) else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
 
 echo "# find-or-create is idempotent"

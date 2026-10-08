@@ -59,6 +59,31 @@
 # PACE_FIRST_SKIPPED the `first` anchors the deadline left for the next pass,
 # and PACE_RESUME_AT names the rest anchor the deadline stopped at, if it did.
 #
+# Seen marks are what a walk saw of each anchor at its last visit, so an arm can
+# put first the anchors that changed since then. A mark is a one-line string
+# the arm builds from facts it reads without a per-anchor call, such as a PR's
+# head and review count; two marks that differ mean the anchor changed between
+# the visits.
+#   pace_seen_start <seen-file>   Load the marks the file holds, one
+#                                 "<id>\t<mark>\t<epoch>" line each, the last
+#                                 line for an id winning, and rewrite it without
+#                                 duplicates or marks older than
+#                                 PACE_SEEN_TTL_SECS (14 days). PACE_SEEN_FRESH
+#                                 is 1 when no mark loaded. An empty path loads
+#                                 nothing and records nothing.
+#   pace_seen_changed <id> <mark> True when the walk last saw <id> with another
+#                                 mark, or never saw it. A walk with no marks at
+#                                 all has no last visit to compare against, so
+#                                 nothing reads as changed and its caller seeds
+#                                 the marks with pace_seen_put instead.
+#   pace_seen_get <id>            The mark last recorded for <id>, if any.
+#   pace_seen_put <id> <mark>     Record <mark> for <id> now.
+# pace_visit's optional third argument is the mark to record for the anchor in
+# hand. It is recorded when the visit finishes, which is when the cursor
+# records the anchor, so a visit the deadline refused or a kill cut short
+# leaves the last mark standing. pace_seen_mark <mark> replaces it mid-visit,
+# for an arm that knows only at the end which mark the visit earned.
+#
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=pace-lib.sh
 #   . "$SCRIPTS_DIR/pace-lib.sh" || { echo "$PROG: cannot source pace-lib.sh" >&2; exit 1; }
@@ -110,6 +135,58 @@ pace_start() { # <cursor-file> <deadline-epoch-secs>
   PACE_FIRST_FINISHED=""
   PACE_RESUME_AT=""
   PACE_WARNED=0
+  PACE_SEEN_ID=""
+  PACE_SEEN_PENDING=""
+}
+
+declare -gA PACE_SEEN=()
+pace_seen_start() { # <seen-file>
+  local ttl now kept id mark _at
+  declare -gA PACE_SEEN=()
+  PACE_SEEN_FILE="${1:-}"
+  PACE_SEEN_FRESH=1
+  PACE_SEEN_WARNED=0
+  [ -n "$PACE_SEEN_FILE" ] && [ -r "$PACE_SEEN_FILE" ] || return 0
+  ttl="${PACE_SEEN_TTL_SECS:-1209600}"
+  case "$ttl" in ''|*[!0-9]*) ttl=1209600 ;; esac
+  printf -v now '%(%s)T' -1
+  kept=$(awk -F'\t' -v cut="$(( now - 10#$ttl ))" '
+    NF == 3 && $1 != "" && $2 != "" && $3 ~ /^[0-9]+$/ && $3 + 0 >= cut + 0 { m[$1] = $0 }
+    END { for (k in m) print m[k] }' "$PACE_SEEN_FILE" 2>/dev/null) || kept=""
+  while IFS=$'\t' read -r id mark _at; do
+    [ -n "$id" ] && [ -n "$mark" ] || continue
+    PACE_SEEN["$id"]="$mark"
+    PACE_SEEN_FRESH=0
+  done <<< "$kept"
+  { { [ -z "$kept" ] || printf '%s\n' "$kept"; } > "$PACE_SEEN_FILE.tmp" \
+      && mv -f "$PACE_SEEN_FILE.tmp" "$PACE_SEEN_FILE"; } 2>/dev/null
+  return 0
+}
+
+pace_seen_get() { # <id>
+  printf '%s' "${PACE_SEEN[${1:-}]-}"
+}
+
+pace_seen_changed() { # <id> <mark>
+  [ "${PACE_SEEN_FRESH:-1}" = 1 ] && return 1
+  [ "${PACE_SEEN[${1:-}]-}" != "${2:-}" ]
+}
+
+pace_seen_put() { # <id> <mark>
+  local m="${2:-}" now
+  [ -n "${PACE_SEEN_FILE:-}" ] && [ -n "${1:-}" ] && [ -n "$m" ] || return 0
+  m="${m//$'\t'/ }"; m="${m//$'\n'/ }"
+  PACE_SEEN["$1"]="$m"
+  printf -v now '%(%s)T' -1
+  { printf '%s\t%s\t%s\n' "$1" "$m" "$now" >> "$PACE_SEEN_FILE"; } 2>/dev/null && return 0
+  [ "${PACE_SEEN_WARNED:-0}" = 1 ] \
+    || echo "${PROG:-pace}: WARN cannot record seen marks in $PACE_SEEN_FILE; the next pass compares against the last marks it could write" >&2
+  PACE_SEEN_WARNED=1
+  return 0
+}
+
+pace_seen_mark() { # <mark>
+  PACE_SEEN_PENDING="${1:-}"
 }
 
 _pace_record() { # <cursor-file> <id>
@@ -131,13 +208,21 @@ _pace_flush() {
     _pace_record "$PACE_CURSOR" "$PACE_FINISHED"
     PACE_FINISHED=""
   fi
+  if [ -n "${PACE_SEEN_ID:-}" ]; then
+    pace_seen_put "$PACE_SEEN_ID" "${PACE_SEEN_PENDING:-}"
+    PACE_SEEN_ID=""
+    PACE_SEEN_PENDING=""
+  fi
   return 0
 }
 
-pace_visit() { # <first|rest|exempt> <anchor-id>
+pace_visit() { # <first|rest|exempt> <anchor-id> [<seen-mark>]
   _pace_flush
   case "$1" in
-    exempt) return 0 ;;
+    exempt)
+      PACE_SEEN_ID="$2"
+      PACE_SEEN_PENDING="${3:-}"
+      return 0 ;;
     first)
       if [ "$PACE_FIRST_VISITED" -gt 0 ] && pace_spent "$PACE_DEADLINE"; then
         PACE_FIRST_SKIPPED=$((PACE_FIRST_SKIPPED + 1))
@@ -154,6 +239,8 @@ pace_visit() { # <first|rest|exempt> <anchor-id>
       PACE_REST_VISITED=$((PACE_REST_VISITED + 1))
       PACE_FINISHED="$2" ;;
   esac
+  PACE_SEEN_ID="$2"
+  PACE_SEEN_PENDING="${3:-}"
   PACE_VISITED=$((PACE_VISITED + 1))
   return 0
 }

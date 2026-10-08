@@ -178,8 +178,10 @@ hasnt()   { case "$1" in *"$2"*) bad "$3 (unexpectedly got: $1)" ;; *) ok "$3" ;
 [ -f "$BUILD" ] && ok "gc-helm-build.sh present" || bad "gc-helm-build.sh missing at $BUILD"
 
 # A pid the kernel cannot have handed out: allocation stops below pid_max, so
-# this one is dead by construction and no case can flake on pid reuse.
-DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 32768) + 7 ))
+# this one is dead by construction and no case can flake on pid reuse. Linux
+# reads pid_max from /proc; macOS has no /proc and never allocates a pid above
+# 99999 (XNU's PID_MAX).
+DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 99999) + 7 ))
 
 # A gc that is not there, so the service listing is unavailable.
 NO_SUCH_GC="$TMP/no-such-gc"
@@ -210,17 +212,13 @@ export PATH="$HOST_BIN:$PATH"
 
 # Backdate an entry past a sweep threshold. The sweep stats the entry itself, so
 # fill it BEFORE calling this — writing inside afterwards refreshes the
-# directory mtime and un-ages it.
-age_days() { # <path> <days>
-    local when
-    when="$(date -u -d "$2 days ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"d +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
+# directory mtime and un-ages it. GNU and BSD touch both read a UTC ISO-8601
+# stamp as UTC, whatever the local time zone.
+age_secs() { # <path> <seconds>
+    touch -d "$(jq -nr --argjson t "$(( $(date -u +%s) - $2 ))" '$t | todate')" "$1"
 }
-age_mins() { # <path> <minutes>
-    local when
-    when="$(date -u -d "$2 minutes ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"M +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
-}
+age_days() { age_secs "$1" $(( $2 * 86400 )); }  # <path> <days>
+age_mins() { age_secs "$1" $(( $2 * 60 )); }     # <path> <minutes>
 
 # --- fixture ------------------------------------------------------------------
 CASE=0
@@ -428,7 +426,7 @@ run_svc --socket /run/helm.sock
 eq "$RC" 0 "(NOSTALE) a stale binary is still served"
 has "$OUT" "cached-binary ran:" "(NOSTALE) the stale binary is the one exec'd"
 absent "$RECORD" "(NOBUILD) the launcher does not build even when sources are newer"
-eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l)" "0" \
+eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" "0" \
    "(NOBUILD) the launcher creates no build scratch at all"
 
 # --- no binary at all ---------------------------------------------------------
@@ -484,7 +482,7 @@ case "$BUILT_TO" in
     "$STATE/bin/".helm-svc.build.*) ok "(ATOMIC) staging sits beside the binary, so the rename is atomic" ;;
     *) bad "(ATOMIC) staging was '$BUILT_TO', not a .helm-svc.build.* beside the binary" ;;
 esac
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) no staging file survives a successful build"
 
 # --- case: rebuilds when a source is newer ------------------------------------
@@ -730,7 +728,7 @@ has "$ERR" "BUILD FAILED" "(FAILKEEP) reports the failure"
 run_svc --socket /run/helm.sock
 has "$OUT" "cached-binary ran:" "(FAILKEEP) the previously-built binary is untouched and still serves"
 absent "$(run_dir_of)" "(FAILKEEP) the failed build's scratch does not survive"
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) the failed build's staging file does not survive either"
 
 # --- case: the 2,677 stranded staging files are reclaimed ---------------------

@@ -324,10 +324,13 @@ pace_args() { # <arm>
 # goes unseen is only as long as these two arms make it. Its rc is the same
 # guarantee read the other way: an arm that could not record a posture leaves
 # merge.sh validating one from an earlier tick, so it holds merge for the pass.
+# It reads every open PR in one batched call and keeps, in pr-posture.seen,
+# what each posture was derived from, so a PR nothing has touched since costs
+# no per-PR read and the arm's cost follows the PRs that moved.
 MERGE_HELD=0
 posture_rc=0
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(1) pr-posture" pr-facts.sh --posture-only ) || posture_rc=$?
+  run_pass "(1) pr-posture" pr-facts.sh --posture-only --seen "$STATE_DIR/pr-posture.seen" ) || posture_rc=$?
 if [ "$posture_rc" != 0 ]; then
   MERGE_HELD=1
   FAILED="${FAILED}pr-posture rc=$posture_rc; "
