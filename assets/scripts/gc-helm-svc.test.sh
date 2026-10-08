@@ -180,17 +180,13 @@ NO_SUCH_GC="$TMP/no-such-gc"
 
 # Backdate an entry past a sweep threshold. The sweep stats the entry itself, so
 # fill it BEFORE calling this — writing inside afterwards refreshes the
-# directory mtime and un-ages it.
-age_days() { # <path> <days>
-    local when
-    when="$(date -u -d "$2 days ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"d +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
+# directory mtime and un-ages it. GNU and BSD touch both read a UTC ISO-8601
+# stamp as UTC, whatever the local time zone.
+age_secs() { # <path> <seconds>
+    touch -d "$(jq -nr --argjson t "$(( $(date -u +%s) - $2 ))" '$t | todate')" "$1"
 }
-age_mins() { # <path> <minutes>
-    local when
-    when="$(date -u -d "$2 minutes ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"M +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
-}
+age_days() { age_secs "$1" $(( $2 * 86400 )); }  # <path> <days>
+age_mins() { age_secs "$1" $(( $2 * 60 )); }     # <path> <minutes>
 
 # --- fixture ------------------------------------------------------------------
 CASE=0

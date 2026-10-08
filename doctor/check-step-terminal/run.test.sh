@@ -81,7 +81,7 @@ BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
 run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
-iso_ago() { date -u -d "@$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ; }
+iso_ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
 step() { # id root [extra-metadata-json-fragment] [top-level-fragment] [status]
     printf '{"id":"%s","status":"%s"%s,"metadata":{"gc.root_bead_id":"%s"%s}}' \
         "$1" "${5:-open}" "${4:-}" "$2" "${3:-}"
