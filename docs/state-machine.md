@@ -424,7 +424,9 @@ other than this arm, such as a sitting that replies in-thread and resolves the
 thread, stops holding the merge. A comment written after the city's last reply in
 the thread stays outstanding, because a reply does not reopen a resolved thread,
 and a thread resolved with no reply from the city answers nothing. An unmarked
-reply under the city's login after the cutover is feedback, not an answer. A review body
+reply under the city's login after the cutover is feedback, not an answer. The
+write-back's awaiting answer says only that the comments before it wait on a
+person, so it is not an answer either. A review body
 above its watermark is answered once the thread read has answered every inline
 comment the review carries, since the body frames those comments. A review with
 no inline comment has no thread to answer it and stays on the watermark.
