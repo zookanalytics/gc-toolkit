@@ -155,6 +155,8 @@
 #               was filed and was not.
 #   (GONE)      tmux-spawn-thread.sh is deleted and nothing live still points
 #               at it (specs/ is a historical record and is exempt).
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

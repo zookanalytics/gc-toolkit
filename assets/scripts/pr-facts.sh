@@ -467,6 +467,19 @@ reconcile_status_label() { # <anchor> <pr-number>
     >/dev/null 2>&1 || true
   cur_labels=""
 }
+# The escalation keys this script files on an anchor to hold its PR's merge
+# until a person answers, for PR number $n: rework or close (pr-abandoned), a
+# moved base (pr-retargeted), feedback nothing routed (pr-comments), review
+# threads nobody engaged (pr-unengaged-threads), threads branch protection
+# requires resolved (merge-blocked-threads), and red checks parked to a person
+# (pr-fix-noncode, pr-fix-capped). A PR closed with a pre-recorded disposition
+# has no merge left to hold, so the disposition arm retires these visits. An arm
+# that files a new merge-holding visit adds its key here.
+MERGE_PATH_KEYS_JQ='
+  def merge_path_key($n):
+    test("^pr-(abandoned|retargeted|fix-noncode|fix-capped)\\." + $n + "$")
+    or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
+    or . == "merge-blocked-threads";'
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
   # Both stamps are re-checked here as well as queried: this id gets pr_number
   # written onto it, so a row that came back for another subject would stamp a
@@ -478,6 +491,72 @@ visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this si
     [ .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
           | select(((.metadata.escalation_key // "") | tostring) == $k)
           | .id ] | .[0] // empty' 2>/dev/null
+}
+# retract_dispose_visits <anchor> <num> <reading> — conclude the disposition
+# arm's refused-close report once the close it asked for has landed. Every visit
+# filed under pr-dispose-failed.<num> for the anchor is retracted moot through
+# escalate.sh's retract verb, which leaves one a person is engaged in to them.
+# Each visit is read back and reported. A visit still open and unengaged is
+# retried by the next full pass's sweep below.
+retract_dispose_visits() {
+  local a="$1" key="pr-dispose-failed.$2" reading="$3" vids v row st who
+  vids=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$key" \
+           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub \
+         | jq -r --arg k "$key" --arg s "$a" '.[]
+             | select(((.metadata.escalation_key // "") | tostring) == $k)
+             | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s) | .id' 2>/dev/null) || vids=""
+  [ -n "$vids" ] || return 0
+  [ -x "$ESCALATE" ] && "$ESCALATE" --retract --subject "$a" --key "$key" --message "$reading" >/dev/null 2>&1 </dev/null
+  for v in $vids; do
+    row=$(gc bd show "$v" --json 2>/dev/null | scrub)
+    st=$(printf '%s' "$row" | jq -r '.[0].status // ""' 2>/dev/null)
+    who=$(printf '%s' "$row" | jq -r '.[0] | ((.assignee // "") | tostring) as $w
+      | ((.metadata["gc.session_name"] // "") | tostring) as $n
+      | if $w != "" then $w elif $n != "" then "session " + $n else "" end' 2>/dev/null)
+    if [ "$st" = "closed" ]; then
+      echo "$PROG: $a — retracted its own pr-dispose-failed visit $v as moot (the close landed)"
+    elif [ "$st" = "in_progress" ] || [ -n "$who" ]; then
+      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is engaged (${who:-$st}); it is theirs to conclude" >&2
+    else
+      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is still ${st:-unreadable}; a full pass retracts it while it is open and unengaged" >&2
+    fi
+  done
+}
+# refresh_dispose_visits <anchor> <num> <message> <kids-note> — keep the
+# disposition arm's refused-close report current. escalate.sh files the visit
+# once and dedups every later refusal onto it, so a close refused for a new
+# reason would leave the visit naming an obstruction that has already cleared.
+# Each open visit under pr-dispose-failed.<num> for the anchor that nobody is
+# engaged in takes this pass's message as its description when that differs.
+# The note naming the parked children an earlier pass disposed is carried
+# forward: they are closed by now, so this pass names none, and the note is how
+# an operator who reverses the disposition knows what to restore.
+refresh_dispose_visits() {
+  local a="$1" key="pr-dispose-failed.$2" msg="$3" kids="$4" rows v old want
+  local kids_lead=" The branch's parked rework/rebase children ("
+  rows=$(gc bd list --status=open --metadata-field "escalation_key=$key" \
+           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    old=$(printf '%s' "$rows" | jq -r --arg v "$v" '.[] | select(.id == $v) | (.description // "")' 2>/dev/null)
+    want="$msg$kids"
+    if [ -z "$kids" ]; then
+      case "$old" in *"$kids_lead"*) want="$msg$kids_lead${old#*"$kids_lead"}" ;; esac
+    fi
+    [ "$old" = "$want" ] && continue
+    if gc bd update "$v" --description "$want" >/dev/null 2>&1; then
+      echo "$PROG: $a — refreshed its pr-dispose-failed visit $v with this pass's refusal"
+    else
+      echo "$PROG: $a — could not refresh its pr-dispose-failed visit $v; it still names an earlier refusal" >&2
+    fi
+  done <<REFRESH_EOF
+$(printf '%s' "$rows" | jq -r --arg k "$key" --arg s "$a" '.[]
+    | select(((.metadata.escalation_key // "") | tostring) == $k)
+    | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+    | .id' 2>/dev/null)
+REFRESH_EOF
 }
 mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
   # Atomic birth for a rework child: every identity key lands together, or the
@@ -509,7 +588,7 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
       --set-metadata merge_strategy=mr --set-metadata existing_pr="$prurl" \
       --set-metadata pr_url="$prurl" --set-metadata pr_number="$prnum" >/dev/null 2>&1 || true
   else
-    fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   fi
   [ -n "$fix" ] || return 1
   # The child now exists in the store (freshly created, or reuse-restamped); drop
@@ -976,6 +1055,45 @@ AV_EOF
   fi
 fi
 
+# --- retract the disposition arm's refused-close reports whose close landed ------
+# The disposition arm files a pr-dispose-failed.<num> visit when bead-rehome
+# refuses an anchor's close, and retracts it once a later pass's close lands. A
+# retract that does not land then is not retried by the arm, because the closed
+# anchor leaves the enumeration. So every full pass also reads the open visits
+# filed under that key family and retracts each whose subject now reads closed
+# with its disposition pointer (gc.superseded_by) recorded: the close the visit
+# asked for has landed. A subject closed without the pointer is left alone, since
+# its disposition is not on record. A visit someone is engaged in is theirs to
+# conclude, and a subject that does not read this pass leaves its visit for the
+# next. Like the sweep above, this runs before the no-anchors early-exit.
+if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+  if df_visits=$(bd_list --status=open --has-metadata-key=escalation_key); then
+    while IFS="$(printf '\t')" read -r dfsubj dfnum; do
+      [ -n "${dfsubj:-}" ] || continue
+      dfrow=$(gc bd show "$dfsubj" --json 2>/dev/null | scrub)
+      dfst=$(printf '%s' "$dfrow" | jq -r '.[0].status // empty' 2>/dev/null)
+      if [ -z "$dfst" ]; then
+        echo "$PROG: pr-dispose-failed.$dfnum — subject $dfsubj unreadable this pass; its visit is left for the next" >&2
+        continue
+      fi
+      dfsucc=$(printf '%s' "$dfrow" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null)
+      [ "$dfst" = "closed" ] && [ -n "$dfsucc" ] || continue
+      retract_dispose_visits "$dfsubj" "$dfnum" \
+        "PR#$dfnum's pre-recorded disposition is consummated: $dfsubj closed (-> $dfsucc) once the obstruction this visit reported cleared."
+    done <<DF_EOF
+$(printf '%s' "$df_visits" | jq -r '[ .[]? | select((.metadata.task_kind // "") == "visit")
+    | ((.metadata.escalation_key // "") | tostring) as $k
+    | select($k | test("^pr-dispose-failed\\.[0-9]+$"))
+    | ((.metadata["gc.continuation_group"] // "") | tostring) as $g
+    | select($g | test("^[A-Za-z0-9._-]+$"))
+    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+    | [$g, ($k | ltrimstr("pr-dispose-failed."))] ] | unique | .[] | @tsv' 2>/dev/null)
+DF_EOF
+  else
+    echo "$PROG: pr-dispose-failed visit sweep skipped — could not list visits (retry next pass)" >&2
+  fi
+fi
+
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
@@ -1146,25 +1264,69 @@ CHILDREN_EOF
             echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
           fi
         fi
-        # Retire any stale rework-or-close visit BEFORE the anchor's close, not
-        # after: an earlier pass may have filed it before the disposition marker
-        # was set, and it tracks the anchor — so bead-rehome's finalize gate would
-        # otherwise hold the close on the very question this pre-recorded
-        # disposition already answers. The marker on the anchor, not the visit, is
-        # what drives a retry, so retiring it here is safe even if the close below
-        # does not land this pass.
-        vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
-        if [ -n "$vid" ]; then
-          if "$VISIT_CLOSE" --visit "$vid" --outcome moot --force \
-               --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null; then
-            echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
-          else
-            echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
-          fi
+        # Retire this script's merge-path visits on the anchor BEFORE its close,
+        # not after. Each was filed to hold PR#$num's merge until a person
+        # answered it (MERGE_PATH_KEYS_JQ), possibly before the disposition marker
+        # was set, and each tracks the anchor, so bead-rehome's finalize gate would
+        # otherwise hold the close on a merge that no longer exists. The marker on
+        # the anchor, not the visit, is what drives a retry, so retiring them here
+        # is safe even if the close below does not land this pass. What a visit
+        # raised stays on the PR. A visit someone is engaged in is theirs to
+        # conclude and keeps holding the close, with one exception: the
+        # rework-or-close visit, whose question the pre-recorded disposition
+        # itself answers. The sitting that recorded the disposition can still
+        # hold it, so that one is retired over the claim. This arm's own
+        # pr-dispose-failed visit asks whether this close lands, so it is not
+        # retired here: the retry below excepts it at the gate.
+        mp_rows=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "gc.continuation_group=$id" \
+                    --limit=0 --json 2>/dev/null | scrub)
+        if printf '%s' "$mp_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+          while IFS=$'\t' read -r mpvid mpkey mpheld; do
+            [ -n "$mpvid" ] || continue
+            mpforce=()
+            if [ "$mpkey" = "pr-abandoned.$num" ]; then
+              mpforce=(--force)
+              mpwhy="the rework-or-close decision is made."
+            elif [ -n "$mpheld" ]; then
+              echo "$PROG: $id — visit $mpvid ($mpkey) is engaged ($mpheld); it holds the close until its holder concludes it" >&2
+              continue
+            else
+              mpwhy="PR#$num is closed, so the merge this visit held is gone; what it raised stays on the PR."
+            fi
+            if "$VISIT_CLOSE" --visit "$mpvid" --outcome moot ${mpforce[@]+"${mpforce[@]}"} \
+                 --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; $mpwhy" >/dev/null; then
+              echo "$PROG: $id — retired stale visit $mpvid ($mpkey; disposition was pre-recorded)"
+            else
+              echo "$PROG: $id — could not retire stale visit $mpvid; leaving it for the operator" >&2
+            fi
+          done <<MP_EOF
+$(printf '%s' "$mp_rows" | jq -r --arg s "$id" --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
+    .[] | select((.metadata.task_kind // "") == "visit")
+        | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+        | ((.metadata.escalation_key // "") | tostring) as $k
+        | select($k | merge_path_key($n))
+        | ((.assignee // "") | tostring) as $who
+        | ((.metadata["gc.session_name"] // "") | tostring) as $sess
+        | [.id, $k, (if $who != "" then $who elif $sess != "" then "session " + $sess
+                     elif (.status // "") == "in_progress" then "claimed" else "" end)] | @tsv' 2>/dev/null)
+MP_EOF
+        else
+          echo "$PROG: $id — could not list the visits on the anchor; any merge-path visit is left for the operator" >&2
         fi
+        # This arm's own escalation from an earlier refused close tracks the
+        # anchor too, and it asks for exactly this retry: "clear the obstruction
+        # and the next refinery pass retries". If the finalize gate held the
+        # retry on it, the anchor could not close even after that obstruction
+        # cleared. So the retry names the arm's key to the gate, which excepts
+        # every visit filed under it for this anchor that nobody is engaged in,
+        # and those visits are retracted moot once the close lands. A visit a
+        # person has engaged still holds the close and is theirs to conclude. A
+        # refused close leaves the visit open, so a standing obstruction keeps
+        # its one visit and nothing is re-filed.
+        EXCEPT_ARG=(--except-key "pr-dispose-failed.$num")
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
-                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
+                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} ${EXCEPT_ARG[@]+"${EXCEPT_ARG[@]}"} \
                    --note "PR#$num closed $disp_kind (disposition pre-recorded before the close)" 2>&1); rrc=$?
         else
           rout="bead-rehome.sh is not executable at $REHOME"; rrc=127
@@ -1172,6 +1334,8 @@ CHILDREN_EOF
         if [ "$rrc" -eq 0 ]; then
           disposed_n=$((disposed_n + 1))
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
+          retract_dispose_visits "$id" "$num" \
+            "PR#$num's pre-recorded disposition is consummated: $id closed ($disp_kind -> $disp_succ) once the obstruction this visit reported cleared."
           continue
         elif [ "$rrc" -eq 4 ]; then
           # Pointer would not stick — transient. Keep merge_result=pull_request
@@ -1190,8 +1354,9 @@ CHILDREN_EOF
           printf '%s\n' "$rout" >&2
           kids_disposed_note=""
           [ -n "$disposed_kids" ] && kids_disposed_note=" The branch's parked rework/rebase children ($disposed_kids) were ALREADY disposed (closed not-needed -> $disp_succ) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
-          escalate "$id" "pr-dispose-failed.$num" \
-            "PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand.$kids_disposed_note"
+          dmsg="PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand."
+          escalate "$id" "pr-dispose-failed.$num" "$dmsg$kids_disposed_note"
+          refresh_dispose_visits "$id" "$num" "$dmsg" "$kids_disposed_note"
           skipped=$((skipped + 1)); continue
         fi
       fi ;;

@@ -5,6 +5,8 @@
 # every shape the readers hand it; and no file in the pack posts to a pull
 # request any other way. A gh stub records each call's argv and the body it
 # would post; no network, no city.
+#
+# run-tests-scope: tree
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

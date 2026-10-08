@@ -75,6 +75,27 @@ working dir), `--headed`. Write the output to a path outside the pack's tracked
 tree — a demo MP4 is an artifact, not a committed file, and the engine warns
 when the output path is not covered by an LFS filter.
 
+## One-call capture and the rig-demo mol
+
+`assets/scripts/rig-demo-capture.sh` runs the three steps above (resolve the
+engine, lint, capture) as one call. It exits non-zero when anything stops the
+capture, including a run that leaves no MP4 behind. It carries no bead or
+routing logic, so a shell and a formula step drive it the same way. Its
+`--help` lists every flag:
+
+```bash
+assets/scripts/rig-demo-capture.sh --script demo.md --output <out.mp4> \
+  ( --serve-dir <dir> | --serve "<cmd>" | --base-url <url> ) [--mode proof] [--no-narrate]
+```
+
+`mol-rig-demo` runs that call as a pool workflow against any rig. It turns the
+scenario into a script (a ready one, or one written from a bead with
+`gc-demo-script`), captures, delivers the clip to a PR or records its path, and
+closes the bead it was poured on. `gc formula show mol-rig-demo` prints the
+pour line and every input. A pour must set exactly one app target
+(`serve_dir`, `serve_cmd`, or `base_url`), because nothing in the toolkit maps
+a rig to its app.
+
 ## Capture — you drive over Playwright MCP
 
 When the session is demo-gated and carries the `playwright` MCP server (the

@@ -98,7 +98,7 @@ onto bd-lib's readers, so the `gc bd:` notice strip lives in one place, put its
 pass exports to merge.sh. merge.sh's terminal re-assert then read its first
 check's rows and could pass a visit filed between the two. `finalize_gate_check`
 now runs every clause with the cache off (`local GC_RECONCILE_BD_CACHE=""`), and
-finalize-gate.test.sh case 21 reproduces the stale re-assert, failing without
+finalize-gate.test.sh case 26 reproduces the stale re-assert, failing without
 the fix.
 
 **I14's remedy is bd's.** `lifecycle.sh reopen` refuses a closed bead with no
