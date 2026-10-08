@@ -31,7 +31,7 @@ export STORES="$TMP/stores" CALLS="$TMP/calls.log" STATUS_JSON="$TMP/status.json
 
 # Fixtures are written relative to real time because the check ages them with
 # jq's `now`; every age below sits well clear of a minute boundary.
-ago() { date -u -d "$1 seconds ago" +%Y-%m-%dT%H:%M:%SZ; }
+ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
 # work <id> <assignee> <age-seconds> [merge_result] [branch] [issue_type]
 work() { jq -nc --arg id "$1" --arg a "$2" --arg u "$(ago "$3")" --arg mr "${4:-}" \
         --arg br "${5-polecat/$1}" --arg ty "${6:-task}" '
