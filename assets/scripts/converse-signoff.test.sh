@@ -42,6 +42,8 @@
 # test rather than a comment.
 #
 # Hermetic: reads the repo only; no gc, no city, no network.
+#
+# run-tests-scope: tree
 
 set -u
 

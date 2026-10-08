@@ -7,6 +7,8 @@
 # drifts the moment a rule is added upstream. It is legitimate only as the count
 # form of a work_query the same agent declares, and then it must agree with that
 # query.
+#
+# run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
