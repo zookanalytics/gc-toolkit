@@ -216,7 +216,7 @@ if stat -c %u -- / >/dev/null 2>&1; then STAT=(stat -c); MTIME=%Y; else STAT=(st
 # the entry's own, prints nothing.
 newest() {
     find -P "$1" -xdev -exec "${STAT[@]}" "$MTIME" -- {} + 2>/dev/null \
-        | awk '/^[0-9]+$/ { n++; if ($1 + 0 > m) m = $1 + 0 } END { if (n) print m }'
+        | awk '/^[0-9]+$/ { n++; if ($1 + 0 > m) m = $1 + 0 } END { if (n) print m + 0 }'
 }
 gib() { awk -v k="$1" 'BEGIN { printf "%.2f", k / 1048576 }'; }
 

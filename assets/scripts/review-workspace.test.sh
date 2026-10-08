@@ -320,6 +320,12 @@ gone_ok gc-review-tk-closed2         "while a closed review's workspace is taken
 OUT="$(run reap)"
 gone_ok gc-review-tk-ageless         "once its age reads, the entry ages out"
 
+# An entry last changed at the epoch has an age, the oldest one there is.
+mk gc-review-tk-epoch 1
+find "$R/gc-review-tk-epoch" -depth -exec touch -h -d 1970-01-01T00:00:00Z {} +
+OUT="$(run reap)"
+gone_ok gc-review-tk-epoch           "an entry last changed at the epoch ages out"
+
 REVIEW_WORKSPACE_IDLE_AFTER=abc bash "$SUT" reap >/dev/null 2>&1
 eq "$?" "2" "a horizon that is not a whole number is a usage error"
 REVIEW_WORKSPACE_IDLE_AFTER=0 bash "$SUT" reap >/dev/null 2>&1
