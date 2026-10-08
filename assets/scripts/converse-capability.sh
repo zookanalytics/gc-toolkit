@@ -44,15 +44,16 @@ converse_roster() {
 }
 
 # rig_carries_converse <rig-name> — 0 iff the resolved roster registers a
-# converse agent (base gc-toolkit.converse or a -<model> variant) for the rig.
-# Fail open: an unreadable/malformed/empty roster returns 0 (serviceable). The
-# "/" in the key stops one rig name matching another it is a prefix of.
+# converse-<model> sitting template for the rig, the only kind of converse
+# agent gc-helm engage can spawn. Fail open: an unreadable/malformed/empty
+# roster returns 0 (serviceable). The "/" in the key stops one rig name
+# matching another it is a prefix of.
 rig_carries_converse() {
     _rcc_rig="${1:-}"
     converse_roster
     [ -n "${_CONVERSE_ROSTER:-}" ] || return 0
     printf '%s' "$_CONVERSE_ROSTER" | jq -e --arg r "$_rcc_rig" \
         '[ .agents[]? | (.qualified_name // "")
-           | select(startswith($r + "/gc-toolkit.converse")) ] | length > 0' \
+           | select(startswith($r + "/gc-toolkit.converse-")) ] | length > 0' \
         >/dev/null 2>&1
 }

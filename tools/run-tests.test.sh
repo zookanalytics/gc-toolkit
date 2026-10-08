@@ -26,6 +26,10 @@
 #   - every file commits and tags with signing off, under a git config that
 #     signs both with a signer that always fails, and a git config entry the
 #     caller exported still reaches it;
+#   - every file runs under the physical path of the caller's TMPDIR, or of
+#     /tmp when it is unset, with no symlink and no trailing slash, while the
+#     same file run directly gets the TMPDIR as given; a TMPDIR that names no
+#     directory is a usage error;
 #   - a changed script reaches its sibling, every suite naming it on a line
 #     that is not a comment, and the sibling of every script naming it so, one
 #     hop and no further; no suite naming a longer name that ends in it, and
@@ -328,6 +332,36 @@ reset_state
 OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" signing_env bash "$FIX/signing.test.sh" 2>&1)"; RC=$?
 if [ "$RC" -ne 0 ]; then ok "the file run directly fails"; else bad "the file run directly fails" "it exited 0"; fi
 has "$OUT" "failed to write commit object" "because the commit could not be signed"
+
+echo "── tmpdir: every file runs under the physical path of the caller's TMPDIR ──"
+# A temp directory named through a symlink, with a trailing slash, stands in for
+# macOS's TMPDIR, which ends in a slash and sits under /var, a symlink to
+# /private/var.
+mkdir -p "$TMP/tmp-real"
+ln -s "$TMP/tmp-real" "$TMP/tmp-link"
+TMP_REAL="$(cd "$TMP/tmp-real" && pwd -P)"
+cat > "$FIX/tmpdir.test.sh" <<'F'
+#!/usr/bin/env bash
+printf '%s\n' "${TMPDIR-unset}" > "$RUNTESTS_FIXTURE_STATE/tmpdir"
+F
+reset_state
+TMPDIR="$TMP/tmp-link/" run "$FIX/tmpdir.test.sh"
+eq "$RC" 0 "a file runs under a TMPDIR named through a symlink"
+eq "$(cat "$STATE/tmpdir")" "$TMP_REAL" "it gets the directory's physical path, with no trailing slash"
+# The same file run directly gets the TMPDIR it was given: the physical path
+# above is the runner's doing.
+reset_state
+RUNTESTS_FIXTURE_STATE="$STATE" TMPDIR="$TMP/tmp-link/" bash "$FIX/tmpdir.test.sh"
+eq "$(cat "$STATE/tmpdir")" "$TMP/tmp-link/" "the file run directly gets the TMPDIR as given"
+reset_state
+OUT="$(unset TMPDIR; RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/tmpdir.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a file runs with TMPDIR unset"
+eq "$(cat "$STATE/tmpdir")" "$(cd /tmp && pwd -P)" "and gets the physical path of /tmp"
+reset_state
+TMPDIR="$TMP/no-such-dir" run "$FIX/tmpdir.test.sh"
+eq "$RC" 2 "a TMPDIR that names no directory is a usage error"
+has "$OUT" "cannot resolve the temp directory '$TMP/no-such-dir'" "…and named"
+if [ -e "$STATE/tmpdir" ]; then bad "and no file runs" "the fixture ran"; else ok "and no file runs"; fi
 
 # The affected subset is read from what a repo tracks, so its cases get a repo
 # whose tracked files are the fixtures. The runner sits in it as it does in the

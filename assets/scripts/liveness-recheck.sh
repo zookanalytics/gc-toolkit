@@ -178,7 +178,7 @@ fi
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 AGE=""
 if [ -n "$PASS_AT" ]; then
-    PASS_EPOCH=$(date -u -d "$PASS_AT" +%s 2>/dev/null || echo "")
+    PASS_EPOCH=$(jq -rn --arg t "$PASS_AT" '$t | fromdateiso8601' 2>/dev/null || echo "")
     NOW_EPOCH=$(date -u +%s 2>/dev/null || echo "")
     if [ -n "$PASS_EPOCH" ] && [ -n "$NOW_EPOCH" ] && [ "$NOW_EPOCH" -ge "$PASS_EPOCH" ]; then
         AGE=$(awk -v a="$PASS_EPOCH" -v b="$NOW_EPOCH" 'BEGIN { printf "%.1fh", (b - a) / 3600 }')
