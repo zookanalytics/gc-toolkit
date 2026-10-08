@@ -74,7 +74,7 @@ stateDiagram-v2
   abandoned --> [*]: human
   retargeted --> [*]: human
 
-  UN --> held: agents/converse — a sitting holds for an operator decision
+  UN --> held: converse-hold.sh — a sitting holds for an operator decision
   held --> UN: the ruling landed
 ```
 
@@ -142,8 +142,8 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
 | handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
-| unanchored → held | `agents/converse` hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `agents/converse` sign-off, via `lifecycle.sh`; or human | the ruling landed |
+| unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
+| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` clears
 the check marker and files one routed rework child that blocks the anchor — the
@@ -424,7 +424,9 @@ other than this arm, such as a sitting that replies in-thread and resolves the
 thread, stops holding the merge. A comment written after the city's last reply in
 the thread stays outstanding, because a reply does not reopen a resolved thread,
 and a thread resolved with no reply from the city answers nothing. An unmarked
-reply under the city's login after the cutover is feedback, not an answer. A review body
+reply under the city's login after the cutover is feedback, not an answer. The
+write-back's awaiting answer says only that the comments before it wait on a
+person, so it is not an answer either. A review body
 above its watermark is answered once the thread read has answered every inline
 comment the review carries, since the body frames those comments. A review with
 no inline comment has no thread to answer it and stays on the watermark.

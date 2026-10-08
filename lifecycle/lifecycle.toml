@@ -118,7 +118,7 @@ writer = "formulas/mol-refinery-patrol.toml (no commits on branch; via lifecycle
 [[transition]]
 from = "unanchored"
 to = "held"
-writer = "agents/converse, sitting hold (via lifecycle.sh)"
+writer = "assets/scripts/converse-hold.sh, a converse sitting's hold (via lifecycle.sh)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -178,7 +178,7 @@ writer = "human"
 [[transition]]
 from = "held"
 to = "unanchored"
-writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
+writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.sh); or human"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
@@ -780,14 +780,18 @@ keys = ["self_review_passed_sha", "aborted_at", "self_review_loop_attempts"]
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",
-  # The comment-batch disposition history: one
+  # The comment-batch disposition history, one ledger per id space: one
   # `<disposition>|<exclusive floor>|<inclusive mark>` record per batch, oldest
-  # first, joined by ";". It outlives the single-valued pr_comment_disposition
-  # because the bead a batch routed may not have closed when the next batch
-  # arrives, and a thread an earlier batch left unresolved still sits at or below
-  # the cumulative pr_comment_watermark. pr-facts.sh writes it as it routes each
-  # batch and reconciles it in the write-back sweep.
-  "pr_comment_batch",
+  # first, joined by ";". pr_comment_batch covers the inline comments,
+  # pr_review_batch the review bodies, and pr_issue_comment_batch the
+  # Conversation comments. A ledger outlives the single-valued
+  # pr_comment_disposition because the bead a batch routed may not have closed
+  # when the next batch arrives, and a comment an earlier batch left unanswered
+  # still sits at or below its space's cumulative watermark. pr-facts.sh writes
+  # all three as it routes each batch, reconciles the inline ledger in the
+  # write-back sweep, and reads the ledgers to mark each comment awaiting a person
+  # or resolved.
+  "pr_comment_batch", "pr_review_batch", "pr_issue_comment_batch",
   # The head oid the unengaged-review-thread visit was last filed against.
   # pr-facts.sh stamps it when it files that visit and reads it back to re-raise
   # only when a later head still carries the threads, so the same head never
