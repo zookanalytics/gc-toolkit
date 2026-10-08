@@ -44,8 +44,9 @@ exit 0
 HELM
 chmod +x "$SR/assets/scripts/gc-helm.sh"
 
-# gc stub. The visit names its subject via stall_root and the subject reads back
-# a takeaway, so the sign-off's readback passes. `bd update` is logged to
+# gc stub. The visit names its subject in gc.continuation_group, the sign-off is
+# handed it as --subject, and the subject reads back a takeaway, so the
+# sign-off's readback passes. `bd update` is logged to
 # $GC_UPDATE_LOG for the sign-off's PR-reminder-stash assertions, and it also
 # persists the gc.outcome / gc.outcome_reason it is handed; `bd close` records the
 # status; `bd show` reflects both back. That store model is what lets the shared
@@ -65,7 +66,7 @@ case "${2:-}" in
                 --arg o "$(cat "$O" 2>/dev/null)" \
                 --arg r "$(cat "$R" 2>/dev/null)" \
                 --arg s "$(cat "$ST" 2>/dev/null)" \
-                '[{id:"tk-vis",status:(if $s=="" then "open" else $s end),metadata:{stall_root:"tk-subj","gc.outcome":$o,"gc.outcome_reason":$r}}]' ;;
+                '[{id:"tk-vis",status:(if $s=="" then "open" else $s end),metadata:{"gc.continuation_group":"tk-subj","gc.outcome":$o,"gc.outcome_reason":$r}}]' ;;
       *)      jq -nc '[{id:"tk-subj",metadata:{"gc.takeaway":"we shipped it","gc.outcome":"moot"}}]' ;;
     esac ;;
   list)   printf '[]' ;;
@@ -87,7 +88,7 @@ echo "── converse-signoff.sh stashes the PR-reminder close text on the visit
 PVC_LOG="$TMPD/signoff.pvc"; : >"$PVC_LOG"
 GC_UPDATE_LOG="$TMPD/signoff.upd"; : >"$GC_UPDATE_LOG"
 ( PATH="$BIN:$PATH" GC_RIG_ROOT="$SR" PVC_LOG="$PVC_LOG" GC_UPDATE_LOG="$GC_UPDATE_LOG" \
-  bash "$SIGNOFF" --visit tk-vis --outcome "we shipped it" --ruled no --still-owed "await deploy" ) >/dev/null 2>&1
+  bash "$SIGNOFF" --visit tk-vis --subject tk-subj --outcome "we shipped it" --ruled no --still-owed "await deploy" ) >/dev/null 2>&1
 has "the stash lands on the visit" 'update tk-vis' "$GC_UPDATE_LOG"
 has "the takeaway is stashed as the summary" 'gc.pr_visit_summary=we shipped it' "$GC_UPDATE_LOG"
 has "what is still owed is stashed as the actions" 'gc.pr_visit_actions=still owed: await deploy' "$GC_UPDATE_LOG"

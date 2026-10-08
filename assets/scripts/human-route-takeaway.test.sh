@@ -17,6 +17,8 @@
 #     statement.
 #
 # A new writer that parks a bead and says nothing fails this suite.
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

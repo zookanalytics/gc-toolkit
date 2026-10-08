@@ -410,7 +410,9 @@ hasnt "$APIMENU" '▫' \
 
 # Backdate the file the picker reads: staleness is the cache's mtime, and
 # nothing else in the run has to move to make the map old.
-touch -d "@$(( $(date +%s) - 3700 ))" "$ROLES_CACHE"
+old_epoch=$(( $(date +%s) - 3700 ))
+old_stamp=$(date -d "@$old_epoch" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$old_epoch" +%Y%m%d%H%M.%S)
+touch -t "$old_stamp" "$ROLES_CACHE"
 STALEMENU="$(run_picker_api)"
 has "$STALEMENU" ' Sessions ▫ roles 1h old ' \
     "STALE: an old map is marked, with its age"
