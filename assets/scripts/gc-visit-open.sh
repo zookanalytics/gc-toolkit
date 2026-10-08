@@ -88,7 +88,12 @@ TITLE_MAX=200
 
 # derive_title <text> — one-line board label: whitespace collapsed, over-long
 # topics cut at a WORD boundary (an offset cut can slice a multi-byte char).
-derive_title() {
+# The body is a subshell under LC_ALL=C so that ${#var} counts bytes in every
+# shell. dash counts bytes in any locale, but bash, ksh and zsh count
+# characters under a UTF-8 locale, and /bin/sh is dash on Debian and bash on
+# macOS.
+derive_title() (
+    LC_ALL=C
     _dt=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -s ' ')
     _dt="${_dt# }"; _dt="${_dt% }"
     [ "${#_dt}" -le "$TITLE_MAX" ] && { printf '%s' "$_dt"; return 0; }
@@ -108,7 +113,7 @@ derive_title() {
         [ -n "$_dt_utf8" ] && _dt="$_dt_utf8"
     fi
     printf '%s…' "${_dt% }"
-}
+)
 
 # ── Argument parsing ─────────────────────────────────────────────────
 ARG=""; RIG=""; NO_REACT=""; SUBJ_TYPE=""; FORCE_TOPIC=""

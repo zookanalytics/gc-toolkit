@@ -209,11 +209,12 @@ export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 export TMPDIR="$TMP"
 
 # run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS
+# RUN_SH names the shell that runs the script; the default is sh, as shipped.
 run() {
     : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"
     export FAKE_DELIVERABLE="$1"; shift
     set +e
-    OUT="$(sh "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
+    OUT="$("${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
@@ -591,14 +592,34 @@ esac
 # token would silently retarget this case at the one shape it is not about.
 CJK_TOPIC="$(printf '\344\270\255%.0s' $(seq 1 600))"
 eq "$(bytes "$CJK_TOPIC")" "1800" "(PARAGRAPH) the CJK fixture is 600 unbroken 3-byte characters"
-run no -- "$CJK_TOPIC"
-TITLE="$(cat "$FAKE_TITLE")"
-[ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
-    && ok "(PARAGRAPH) an unbroken 600-character token is cut to fit ($(bytes "$TITLE") bytes)" \
-    || bad "(PARAGRAPH) an unbroken token was not cut ($(bytes "$TITLE") bytes)"
-printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
-    && ok "(PARAGRAPH) and is still valid UTF-8 — no half character at the cut" \
-    || bad "(PARAGRAPH) the cut left an incomplete multi-byte character"
+
+# The shell decides what the cap counts. dash counts ${#var} in bytes, but bash
+# counts characters under a UTF-8 locale, and /bin/sh is dash on Debian and
+# bash on macOS. So the cut runs under each of sh, bash and dash that is
+# installed, in a locale where bash is seen to count characters, rather than
+# only under whichever shell sh is on this host.
+CUT_LOCALE=""
+for l in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+    # shellcheck disable=SC2016  # the $(...) and ${#v} are the inner bash's
+    if [ "$(LC_ALL="$l" bash -c 'v=$(printf "\344\270\255"); printf %s "${#v}"' 2>/dev/null)" = 1 ]; then
+        CUT_LOCALE="$l"; break
+    fi
+done
+[ -n "$CUT_LOCALE" ] \
+    && ok "(PARAGRAPH) control: bash counts characters under $CUT_LOCALE" \
+    || bad "(PARAGRAPH) control: no candidate locale makes bash count characters, so the cuts below cannot fail"
+for cut_sh in sh bash dash; do
+    command -v "$cut_sh" >/dev/null 2>&1 || continue
+    LC_ALL="$CUT_LOCALE" RUN_SH="$cut_sh" run no -- "$CJK_TOPIC"
+    TITLE="$(cat "$FAKE_TITLE")"
+    eq "$RC" "0" "(PARAGRAPH) under $cut_sh an unbroken 600-character token files"
+    [ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
+        && ok "(PARAGRAPH) under $cut_sh the token is cut to fit ($(bytes "$TITLE") bytes)" \
+        || bad "(PARAGRAPH) under $cut_sh the token was not cut ($(bytes "$TITLE") bytes)"
+    printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
+        && ok "(PARAGRAPH) under $cut_sh it is still valid UTF-8, with no half character at the cut" \
+        || bad "(PARAGRAPH) under $cut_sh the cut left an incomplete multi-byte character"
+done
 
 # --- (FAILCLOSE) nothing half-filed -------------------------------------------
 : > "$FAKE_CALLS"
