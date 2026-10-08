@@ -381,6 +381,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/tmux-keeper-toggle.sh` | visit | Pins or unpins the keeper in the session picker. |
 | `assets/scripts/tmux-status-line-override.sh` | visit | Sets the gc-toolkit status bar. |
 | `assets/scripts/gc-toolkit-status-line.sh` | visit | Renders what that status bar shows. |
+| `assets/scripts/work-outcome.sh` | visit | The one `gc.work_outcome=no-op` stamp a visit gets before it closes, for the work-record gate `gc bd close` runs. Every visit closer sources it: `visit-close.sh`, the `gc-helm.sh` dismiss verb, `bead-rehome.sh` and `converse-claim.sh`. |
 | `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
 | `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
 | `formulas/mol-feedback-miner.toml` | feedback | Cold capture: records each corrective-feedback hit as one observation bead. |

@@ -215,6 +215,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=converse-capability.sh
 . "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
     || { echo "$PROG: cannot source converse-capability.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer so dismiss cannot diverge from them. Exposes
+# work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "${GC_WORK_OUTCOME_LIB:-$SCRIPT_DIR/work-outcome.sh}" \
+    || { echo "$PROG: cannot source work-outcome.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
@@ -2172,11 +2178,8 @@ cmd_dismiss() {
         # can read back empty while the call exits 0, the store behaviour meta_now
         # guards against on the takeaway path. So both are read back and repaired
         # once, and only a visit whose gc.outcome and gc.outcome_reason both read
-        # back enters the close ladder. gc.work_outcome=no-op rides both writes for
-        # the work-record gate `gc bd close` runs, because a visit ships no commit
-        # of its own. As in visit-close.sh it is not read back and does not gate
-        # the close: that gate only warns.
-        if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1; then
+        # back enters the close ladder.
+        if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1; then
             sitting_failed=1
             echo "$PROG: dismiss: could not stamp the outcome on visit $_v; it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
@@ -2184,7 +2187,7 @@ cmd_dismiss() {
         outcome_got=$(meta_now "$_v" gc.outcome)
         reason_got=$(meta_now "$_v" gc.outcome_reason)
         if [ "$outcome_got" != "dismissed" ] || [ "$reason_got" != "$_why" ]; then
-            gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1 || true
+            gc bd update "$_v" --set-metadata "gc.outcome=dismissed" --set-metadata "gc.outcome_reason=$_why" >/dev/null 2>&1 || true
             outcome_got=$(meta_now "$_v" gc.outcome)
             reason_got=$(meta_now "$_v" gc.outcome_reason)
         fi
@@ -2193,6 +2196,10 @@ cmd_dismiss() {
             echo "$PROG: dismiss: the outcome stamps on visit $_v did not read back (gc.outcome='${outcome_got:-<empty>}', gc.outcome_reason='${reason_got:-<empty>}'); it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
+        # The work-record gate the close runs wants gc.work_outcome.
+        # work-outcome.sh stamps it in a write of its own, so it never decides
+        # whether the visit closes.
+        work_outcome_noop "$_v" gc bd
         _closed_this=0
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
             closed_n=$((closed_n + 1)); _closed_this=1

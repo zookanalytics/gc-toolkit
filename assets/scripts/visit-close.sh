@@ -53,6 +53,12 @@ done
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer. Exposes work_outcome_noop.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || die "cannot source work-outcome.sh from $HERE"
+
 # meta_now <bead> <key> — the live value of one metadata key, or empty.
 meta_now() {
   gc bd show "$1" --json 2>/dev/null | scrub \
@@ -66,18 +72,15 @@ if [ -n "$SUBJECT" ]; then
     || echo "visit-close: could not append the reading to $SUBJECT — continuing to the visit stamp" >&2
 fi
 
-# Stamp the board keys, then read both back, repairing once. A store can exit 0
-# on a --set-metadata that wrote nothing, so the readback is the proof.
-# gc.work_outcome=no-op rides the stamp and its repair. A visit ships no commit of
-# its own (the work it routes lands on other beads, each with its own outcome), so
-# no-op is the honest value for the work-record gate `gc bd close` runs; shipped
-# would fail that gate's work_commit and work_branch checks instead. It is not
-# read back and does not gate the close: the gate only warns, so a dropped value
-# costs the ledger one field, while holding the visit open over it would strand
-# a sitting the board can otherwise report.
-gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1 || true
+# The work-record gate the close runs wants gc.work_outcome. work-outcome.sh
+# stamps it in a write of its own, so it never decides whether the visit closes.
+work_outcome_noop "$VISIT" gc bd
+
+# Stamp both keys, then read both back, repairing once. A store can exit 0 on a
+# --set-metadata that wrote nothing, so the readback is the proof.
+gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" >/dev/null 2>&1 || true
 if [ "$(meta_now "$VISIT" gc.outcome)" != "$OUTCOME" ] || [ "$(meta_now "$VISIT" gc.outcome_reason)" != "$REASON" ]; then
-  gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" --set-metadata "gc.work_outcome=no-op" >/dev/null 2>&1 || true
+  gc bd update "$VISIT" --set-metadata "gc.outcome=$OUTCOME" --set-metadata "gc.outcome_reason=$REASON" >/dev/null 2>&1 || true
 fi
 GOT_O=$(meta_now "$VISIT" gc.outcome)
 GOT_R=$(meta_now "$VISIT" gc.outcome_reason)

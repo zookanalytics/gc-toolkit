@@ -2,9 +2,12 @@
 # visit-close.test.sh — the shared guarded visit close (assets/scripts/visit-close.sh):
 # it appends the reading to the subject when one is named, stamps gc.outcome and
 # gc.outcome_reason on the visit, reads BOTH back, and only then closes — with the
-# reason as the bead's close_reason. The stamp also carries gc.work_outcome=no-op
-# for the work-record gate the close runs. A missing field, a stamp that will not read
+# reason as the bead's close_reason. A missing field, a stamp that will not read
 # back, and a close that does not take are each refused with a distinct exit code.
+# Before the close it also stamps gc.work_outcome=no-op for the work-record gate
+# the close runs (work-outcome.sh), in a write of its own: a store that refuses or
+# drops that key never holds the close, a dropped write is repaired, and a work
+# outcome the visit already records is left as it is.
 #
 # Hermetic: stubs gc, reads the repo only; no city, no network.
 set -u
@@ -86,6 +89,8 @@ has "the board-visible reason is stamped" 'set-metadata gc.outcome_reason=premis
 has "the work-record outcome is stamped no-op (a visit ships no commit)" 'set-metadata gc.work_outcome=no-op' "$LOG"
 is "the work-record outcome lands before the close the gate checks" \
     "$(grep -m1 -e 'gc.work_outcome=no-op' -e '^close ' "$LOG" | cut -d' ' -f1)" "update"
+is "the work-record outcome is a write of its own, apart from the board keys" \
+    "$(grep -F 'gc.work_outcome=' "$LOG" | grep -cF 'gc.outcome=')" "0"
 has "the close carries outcome+reason as its close_reason" \
     'close v-x --reason moot: premise died, subject already closed' "$LOG"
 
@@ -101,6 +106,82 @@ reset; RC=0
 ( PATH="$BIN:$PATH" LOG="$LOG" FAIL_STAMP=1 bash "$SUT" --visit v-x --outcome moot --reason r >/dev/null 2>&1 ) || RC=$?
 is "it exits 3" "$RC" "3"
 hasnt "the visit is NOT closed" 'close v-x' "$LOG"
+
+echo "── the work-record outcome never holds the close ──"
+# A second stub keeps gc.outcome, gc.outcome_reason and gc.work_outcome per key,
+# so the work stamp reads back exactly what landed. Knobs:
+#   REFUSE_WORK     an update naming gc.work_outcome exits 1 and records nothing
+#   DROP_WORK_ONCE  the first gc.work_outcome pair an update carries is lost
+#                   while the update exits 0 and lands its other keys; later
+#                   ones land
+WBIN="$TMPD/wbin"; WLOG="$TMPD/wlog"
+mkdir -p "$WBIN"
+cat >"$WBIN/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "bd" ] || exit 2
+case "${2:-}" in
+    update)
+        printf 'update %s\n' "$*" >>"$WLOG"
+        case " $* " in *" gc.work_outcome="*) [ -n "${REFUSE_WORK:-}" ] && exit 1 ;; esac
+        for a in "$@"; do
+            case "$a" in
+                gc.outcome=*)        printf '%s' "${a#gc.outcome=}" >"$WLOG.o" ;;
+                gc.outcome_reason=*) printf '%s' "${a#gc.outcome_reason=}" >"$WLOG.r" ;;
+                gc.work_outcome=*)
+                    if [ -n "${DROP_WORK_ONCE:-}" ] && [ ! -e "$WLOG.wdrop" ]; then
+                        : >"$WLOG.wdrop"
+                    else
+                        printf '%s' "${a#gc.work_outcome=}" >"$WLOG.w"
+                    fi ;;
+            esac
+        done ;;
+    close)  printf 'close %s\n' "$*" >>"$WLOG"; printf 'closed' >"$WLOG.st" ;;
+    show)   jq -nc \
+              --arg o "$(cat "$WLOG.o" 2>/dev/null)" \
+              --arg r "$(cat "$WLOG.r" 2>/dev/null)" \
+              --arg w "$(cat "$WLOG.w" 2>/dev/null)" \
+              --arg s "$(cat "$WLOG.st" 2>/dev/null)" \
+              '[{id:"v-x",status:(if $s=="" then "open" else $s end),
+                 metadata:({"gc.outcome":$o,"gc.outcome_reason":$r}
+                   + (if $w == "" then {} else {"gc.work_outcome":$w} end))}]' ;;
+    *) exit 2 ;;
+esac
+STUB
+chmod +x "$WBIN/gc"
+wreset() { : >"$WLOG"; rm -f "$WLOG.o" "$WLOG.r" "$WLOG.w" "$WLOG.wdrop" "$WLOG.st"; }
+# wrun [VAR=val ...] — visit-close.sh against the second stub, knobs inline.
+wrun() { ( env PATH="$WBIN:$PATH" WLOG="$WLOG" "$@" bash "$SUT" --visit v-x --outcome moot --reason r >/dev/null 2>&1 ); }
+
+wreset; RC=0; wrun || RC=$?
+is "it exits 0" "$RC" "0"
+is "the work outcome reads no-op" "$(cat "$WLOG.w" 2>/dev/null)" "no-op"
+is "…written once, on a store that keeps it" "$(grep -cF 'gc.work_outcome=' "$WLOG")" "1"
+
+# The key the gate only warns about must never hold the close: refused on its
+# own write, it costs the ledger one field and the sitting still ends.
+wreset; RC=0; wrun REFUSE_WORK=1 || RC=$?
+is "a store that refuses gc.work_outcome still closes the visit" "$RC" "0"
+is "…the board keys still read back" "$(cat "$WLOG.o" 2>/dev/null)|$(cat "$WLOG.r" 2>/dev/null)" "moot|r"
+has "…and the close runs" 'close v-x --reason moot: r' "$WLOG"
+
+# The store lands the write's other keys and loses this one while exiting 0, so
+# only the read-back sees it. Once the visit closes no re-run reaches it.
+wreset; RC=0; wrun DROP_WORK_ONCE=1 || RC=$?
+is "a dropped gc.work_outcome write still closes the visit" "$RC" "0"
+is "…after it is written once more" "$(grep -cF 'gc.work_outcome=no-op' "$WLOG")" "2"
+is "…and reads no-op" "$(cat "$WLOG.w" 2>/dev/null)" "no-op"
+LASTW=$(grep -nF 'gc.work_outcome=no-op' "$WLOG" | tail -1 | cut -d: -f1)
+FIRSTC=$(grep -n '^close ' "$WLOG" | head -1 | cut -d: -f1)
+if [ -n "$LASTW" ] && [ -n "$FIRSTC" ] && [ "$LASTW" -lt "$FIRSTC" ]; then
+    ok "…before the close the gate checks"
+else
+    bad "…before the close the gate checks" "last work write at line '${LASTW:-none}', first close at line '${FIRSTC:-none}'"
+fi
+
+wreset; printf 'abandoned' >"$WLOG.w"; RC=0; wrun || RC=$?
+is "a visit that records a work outcome still closes" "$RC" "0"
+is "…with nothing written over it" "$(grep -cF 'gc.work_outcome=' "$WLOG")" "0"
+is "…which still reads as it was" "$(cat "$WLOG.w")" "abandoned"
 
 echo "── a close that does not take is reported (exit 4) ──"
 reset; RC=0
