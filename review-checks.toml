@@ -42,8 +42,8 @@ purpose = "Which specialist checks does this diff warrant?"
 phase = "pre-open"
 
 [checks.demo]
-method = "skills/gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
-purpose = "Was the operator-watched surface recorded doing the thing?"
+method = "skills/review-demo/SKILL.md"
+purpose = "Does this change need a visual to be understood, and is the right one delivered?"
 phase = "open-as-draft"
 
 [checks.arch]

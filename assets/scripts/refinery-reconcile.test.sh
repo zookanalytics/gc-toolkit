@@ -134,6 +134,7 @@ has "$posture_line" "|myrig/gc-toolkit.refinery|" "the posture arm ran as BEADS_
 hasnt "$posture_line" "--fix-pool" "the posture arm dispatches nothing, so it takes no pools"
 hasnt "$posture_line" "--deadline" "the posture arm is never paced: merge needs every posture current"
 hasnt "$posture_line" "--cursor" "…so it takes no cursor either"
+has "$posture_line" "--seen $TMP/state/myrig/pr-posture.seen" "…but keeps what each posture was read from in the rig's pass state dir"
 at() { grep -n "^$1" "$ARM_LOG" | head -1 | cut -d: -f1; }
 posture_at=$(at 'pr-facts.*--posture-only')
 merge_at=$(at 'merge.sh')
