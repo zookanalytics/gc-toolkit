@@ -13,11 +13,19 @@
 # City scope: session beads live in the city store and their work can sit in
 # any rig's store, so one pass reads the whole city. A pass skipped or cut short
 # costs only the close the next pass takes instead; the close is idempotent.
+#
+# The 600s timeout sits above the longest pass the script allows. No read starts
+# after its 240s budget (POOL_SLOT_REAP_BUDGET_S), so a pass ends within the
+# budget, plus one read that started just before it ran out, plus the last
+# candidate's close tail: the close, the read that settles a failed close,
+# and the ledger append. Each of those calls is stopped by 65s (a 60s bound and
+# a 5s SIGKILL grace), so a pass ends within 500s, and the timeout never lands
+# between a close and its ledger entry.
 [order]
 description = "Close asleep pool session beads that hold a slot with no runtime and no work past a grace window (e.g. after gc session kill); record each in the incident ledger"
 trigger = "cooldown"
 interval = "5m"
 exec = "$PACK_DIR/assets/scripts/pool-slot-reap.sh"
-timeout = "300s"
+timeout = "600s"
 scope = "city"
 idempotent = true

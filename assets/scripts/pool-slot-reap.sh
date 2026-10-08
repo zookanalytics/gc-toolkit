@@ -18,16 +18,18 @@
 # This pass is the backstop. It closes a session bead with `gc session close`
 # only when all of these hold:
 #   - the bead is pool-managed (session_origin=ephemeral, pool_managed=true, or
-#     a pool_slot), and is neither a configured named session nor a manual one;
+#     a pool_slot), and is neither a named session (configured_named_session=true
+#     or session_origin=named) nor a manual one;
 #   - its persisted state is asleep (or drained), and both its slept_at and any
 #     wake_requested_at are older than the grace window;
 #   - it carries no deliberate hold: no user-hold, wait-hold, quarantine,
 #     context-churn or rate_limit sleep, no held_until, quarantined_until or
 #     wait_hold marker, and no pin_awake;
-#   - no bead in any rig's store is open or in_progress under its id, its
+#   - no bead in any rig's store is open, in_progress or hooked under its id, its
 #     session_name, its configured named identity, or, unless it sits in an
 #     ordinary numbered pool (below), its alias or a prior alias;
-#   - a second read just before the close finds the same lifecycle facts.
+#   - just before the close, a second read finds the same lifecycle facts and a
+#     second work search on that read still finds no such bead.
 #
 # Runtime liveness comes from the persisted state. The controller heals a row
 # whose runtime it sees alive back to awake on its next tick, and a
@@ -51,10 +53,18 @@
 # namepool and a cap other than 1 is in an ordinary numbered pool. A namepool
 # name or a canonical singleton's name stays with its session, so it is searched.
 #
-# Blocked work does not keep a bead open either. It is parked behind a hold a
-# human or an edge releases, and nothing executes it until that release
-# re-homes it. Core's close gates count open and in_progress work only, for the
-# same reason.
+# Work keeps the bead while it is open, in_progress or hooked. A hooked bead is
+# as live as an in_progress one. Core's close releases only open and in_progress
+# work, and the witness's orphan recovery reads only those two statuses, so a
+# hooked bead assigned to a closed session would go on naming it with nothing to
+# release it.
+#
+# Blocked, deferred and pinned work does not keep a bead. Blocked and deferred
+# work is parked behind a hold, an edge or a date, and nothing executes it until
+# that release. molecule-hold.sh leaves a held step blocked and still assigned
+# to the session that held it, so counting blocked work would keep the bead of
+# every pool session that ever held a molecule. Pinned is bd's frozen status,
+# and nothing in the pack or core pins work to a pool session.
 #
 # Each close is recorded as one `cleanup` entry in the city's incident ledger
 # (gc-deacon-ledger.sh), naming the bead, its slot and why it slept. The
@@ -62,8 +72,15 @@
 #
 # City scope: session beads live in the city store and their work can sit in
 # any rig's store, so one pass reads the whole city. A pass skipped or cut short
-# costs only the close the next pass takes instead. Candidates past the pass
-# budget are deferred to the next pass, not dropped.
+# costs only the close the next pass takes instead.
+#
+# The pass budget bounds the reads. No read starts once POOL_SLOT_REAP_BUDGET_S
+# has passed since the pass began, and a candidate whose reads it cuts off is
+# deferred to the next pass, not dropped. A candidate whose reads all finished
+# is never cut off: its close, the read that settles a failed close, and its
+# ledger entry run whatever the clock says. Every gc call is bounded (below), so
+# a pass ends within the budget plus one read and that three-call tail, and the
+# order's timeout sits above that sum.
 #
 # Bias: an unreadable probe closes NOTHING. A bead that cannot be read, a store
 # that cannot be queried, or a second read that differs from the first leaves
@@ -73,9 +90,13 @@
 # matches no configured agent or agents of both kinds.
 #
 # Environment:
-#   POOL_SLOT_REAP_GRACE_S   seconds a bead must have been asleep (default 900)
-#   POOL_SLOT_REAP_BUDGET_S  seconds after which remaining candidates are
-#                            deferred to the next pass (default 240)
+#   POOL_SLOT_REAP_GRACE_S         seconds a bead must have been asleep
+#                                  (default 900)
+#   POOL_SLOT_REAP_BUDGET_S        seconds after which no read starts and the
+#                                  remaining candidates are deferred to the next
+#                                  pass (default 240)
+#   POOL_SLOT_REAP_CALL_TIMEOUT_S  seconds each gc call may run before it is
+#                                  stopped (default 60)
 #
 # Usage:
 #   pool-slot-reap.sh            close ghost pool sessions, print a summary
@@ -104,26 +125,48 @@ LEDGER="${POOL_SLOT_REAP_LEDGER:-$HERE/gc-deacon-ledger.sh}"
 GRACE_S="${POOL_SLOT_REAP_GRACE_S:-900}"
 BUDGET_S="${POOL_SLOT_REAP_BUDGET_S:-240}"
 CALL_TIMEOUT_S="${POOL_SLOT_REAP_CALL_TIMEOUT_S:-60}"
+KILL_AFTER_S=5
 for knob in GRACE_S BUDGET_S CALL_TIMEOUT_S; do
     case "${!knob}" in
         ''|*[!0-9]*) echo "$PROG: POOL_SLOT_REAP_$knob must be a whole number of seconds (got '${!knob}')" >&2; exit 2 ;;
     esac
 done
 
-# Every gc call is bounded where the host has timeout(1), so one hung store read
-# costs this candidate and not the pass. stdin is closed so no call can consume
-# the candidate enumeration.
+# The statuses under which assigned work keeps a session bead (see above).
+LIVE_WORK="open,in_progress,hooked"
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+
+# Every gc call is bounded where the host has timeout(1): SIGTERM after
+# CALL_TIMEOUT_S, then SIGKILL KILL_AFTER_S later where timeout takes -k, so a
+# call that ignores SIGTERM still ends. One hung store read then costs this
+# candidate and not the pass. stdin is closed so no call can consume the
+# candidate enumeration.
 if command -v timeout >/dev/null 2>&1; then
-    call() { timeout "$CALL_TIMEOUT_S" "$@" </dev/null; }
+    if timeout -k 1 1 true >/dev/null 2>&1; then
+        call() { timeout -k "$KILL_AFTER_S" "$CALL_TIMEOUT_S" "$@" </dev/null; }
+    else
+        call() { timeout "$CALL_TIMEOUT_S" "$@" </dev/null; }
+    fi
 else
     call() { "$@" </dev/null; }
 fi
+# timeout(1) exits 124 when it stopped the call with SIGTERM and 137 when it
+# had to send SIGKILL.
+timed_out() { [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
 
 START="$(date -u +%s)"
+over_budget() { [ $(( $(date -u +%s) - START )) -ge "$BUDGET_S" ]; }
 
 # Every session, every state. A non-object answer, or one without a .sessions
 # array, is a listing we cannot trust: close nothing and say so with exit 1.
-sessions_json="$(call "$GC" session list --state all --json 2>/dev/null)" || sessions_json=""
+sessions_json="$(call "$GC" session list --state all --json 2>/dev/null | scrub)" || sessions_json=""
 if ! printf '%s' "$sessions_json" | jq -e 'type=="object" and (.sessions|type=="array")' >/dev/null 2>&1; then
     echo "$PROG: could not read the session list — closing nothing" >&2
     exit 1
@@ -156,7 +199,7 @@ fi
 # Every rig's store, the city's own included: work assigned to a session can
 # sit in any of them. The roster's city path is also where the incident ledger
 # runs, so each close is recorded in the city whose stores this pass searched.
-rigs_json="$(call "$GC" rig list --json 2>/dev/null)" || rigs_json=""
+rigs_json="$(call "$GC" rig list --json 2>/dev/null | scrub)" || rigs_json=""
 CITY_PATH="$(printf '%s' "$rigs_json" | jq -r '(.city_path // "") | strings' 2>/dev/null)"
 STORE_LIST=()
 mapfile -t STORE_LIST < <(printf '%s' "$rigs_json" | jq -r '[.rigs[]? | (.path // "") | select(. != "") | . + "/.beads"] | unique | .[]' 2>/dev/null)
@@ -172,7 +215,7 @@ fi
 # and a failed read leaves AGENTS null, so every alias is searched as an owner.
 # So does a config that fails core's validation, because the controller refuses
 # to load one and keeps running the config it had.
-cfg_json="$(call "$GC" config show --json --city "$CITY_PATH" 2>/dev/null)" || cfg_json=""
+cfg_json="$(call "$GC" config show --json --city "$CITY_PATH" 2>/dev/null | scrub)" || cfg_json=""
 AGENTS="$(printf '%s' "$cfg_json" | jq -c '
     if .validation.ok == true then
         [.config.Agents[] | {dir: ((.Dir // "") | tostring), name: ((.Name // "") | tostring),
@@ -212,7 +255,8 @@ classify() { # <bead-id> <show-json>
             | (if $woke != null and $slept != null and $woke > $slept then $woke else $slept end) as $since
             | (if ($b.issue_type // "") != "session" then ["skip", "not a session bead"]
                elif ($b.status // "") != "open" then ["skip", "already " + ($b.status // "closed")]
-               elif s("configured_named_session") == "true" then ["keep", "named session"]
+               elif s("configured_named_session") == "true" or s("session_origin") == "named"
+                 then ["keep", "named session"]
                elif s("session_origin") == "manual" or s("manual_session") == "true" then ["keep", "manual session"]
                elif (s("session_origin") != "ephemeral" and s("pool_managed") != "true" and s("pool_slot") == "")
                  then ["keep", "not pool-managed"]
@@ -230,16 +274,16 @@ classify() { # <bead-id> <show-json>
         | map(tostring) | join("\u001f")' 2>/dev/null
 }
 
-# The identities work can be assigned to this session under: its id, its
-# session_name, its configured named identity, and its alias and any prior
-# alias. The aliases are left out for a bead in an ordinary numbered pool: one
-# with a pool_slot whose template names only agents AGENTS marks not stable. A
-# template names an agent by its dir, the part before the last "/", and its
-# name, the part after the last "." (agent names hold no dot). The binding
-# between them is not in the config read, so agents of two bindings can match,
-# and the aliases are left out only when none of them is stable.
+# The identities work can be assigned to this session under, as a JSON array:
+# its id, its session_name, its configured named identity, and its alias and
+# any prior alias. The aliases are left out for a bead in an ordinary numbered
+# pool: one with a pool_slot whose template names only agents AGENTS marks not
+# stable. A template names an agent by its dir, the part before the last "/",
+# and its name, the part after the last "." (agent names hold no dot). The
+# binding between them is not in the config read, so agents of two bindings can
+# match, and the aliases are left out only when none of them is stable.
 identities() { # <bead-id> <show-json>
-    printf '%s' "$2" | jq -r --arg id "$1" --argjson agents "$AGENTS" '
+    printf '%s' "$2" | jq -c --arg id "$1" --argjson agents "$AGENTS" '
         (if type == "array" then (map(select((.id // "") == $id)) | first)
          elif type == "object" and (.id // "") == $id then . else null end) as $b
         | ($b.metadata // {}) as $m
@@ -251,39 +295,38 @@ identities() { # <bead-id> <show-json>
         | (s("pool_slot") != "" and ($cfg | length) > 0 and ($cfg | all(.stable | not))) as $numbered
         | ([$b.id, s("session_name"), s("configured_named_identity")]
            + (if $numbered then [] else [s("alias")] + (s("alias_history") | split(",")) end))
-        | map((. // "") | tostring | gsub("^\\s+|\\s+$"; "")) | map(select(. != "")) | unique | .[]' 2>/dev/null
+        | map((. // "") | tostring | gsub("^\\s+|\\s+$"; "")) | map(select(. != "")) | unique' 2>/dev/null
 }
 
-# held_work <identity>... -> prints "none", "held <store> <bead>", or
-# "unreadable <store> <identity>". Session beads are not work, as in core's own
-# guard. The first store answer that is not a JSON array ends the search
-# unreadable: a failed read is not an empty one. "none" is printed only after
-# every store was asked about every identity, so a search that ran short never
-# reads as a proven no.
+# held_work <identities-json> -> prints "none", "held <store> <bead>",
+# "deferred <store>" or "unreadable <store>". One read per store lists every
+# bead in a live work status, and jq keeps those assigned to one of the
+# identities. Session beads are not work, as in core's own guard. A store answer
+# that is not an array of rows ends the search unreadable, because a failed read
+# is not an empty one, and no read starts once the budget is spent. So "none" is
+# printed only after every store answered.
 held_work() {
-    local store ident out first asked=0
-    [ "$#" -gt 0 ] || { printf 'unreadable - no identities\n'; return 0; }
+    local store out found
+    printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+        || { printf 'unreadable - no identities\n'; return 0; }
     for store in "${STORE_LIST[@]}"; do
-        for ident in "$@"; do
-            out="$(call "$GC" bd list --db "$store" --assignee "$ident" --status open,in_progress \
-                --limit 0 --include-infra --include-ephemeral --json 2>/dev/null)" || out=""
-            if ! printf '%s' "$out" | jq -e 'type=="array"' >/dev/null 2>&1; then
-                printf 'unreadable %s %s\n' "$store" "$ident"; return 0
-            fi
-            first="$(printf '%s' "$out" | jq -r '[.[] | select((.issue_type // "") != "session")] | first | .id // empty' 2>/dev/null)" || {
-                printf 'unreadable %s %s\n' "$store" "$ident"; return 0
-            }
-            if [ -n "$first" ]; then
-                printf 'held %s %s\n' "$store" "$first"; return 0
-            fi
-            asked=$((asked + 1))
-        done
+        over_budget && { printf 'deferred %s\n' "$store"; return 0; }
+        out="$(call "$GC" bd list --db "$store" --status "$LIVE_WORK" --brief \
+            --limit 0 --include-infra --include-ephemeral --json 2>/dev/null | scrub)" || out=""
+        found="$(printf '%s' "$out" | jq -er --argjson ids "$1" '
+            if type != "array" then error("not a row list") else . end
+            | [.[] | if type != "object" then error("not a row") else . end
+                   | select(((.assignee // "") | tostring) as $a | any($ids[]; . == $a))
+                   | select((.issue_type // "") != "session")]
+            | if length == 0 then "none" else "held " + ((.[0].id // "-") | tostring) end' 2>/dev/null)" \
+            || { printf 'unreadable %s\n' "$store"; return 0; }
+        case "$found" in
+            none) ;;
+            held\ *) printf 'held %s %s\n' "$store" "${found#held }"; return 0 ;;
+            *) printf 'unreadable %s\n' "$store"; return 0 ;;
+        esac
     done
-    if [ "$asked" -eq $(( ${#STORE_LIST[@]} * $# )) ]; then
-        printf 'none\n'
-    else
-        printf 'unreadable - asked %s of %s store reads\n' "$asked" "$(( ${#STORE_LIST[@]} * $# ))"
-    fi
+    printf 'none\n'
 }
 
 closed=0; kept=0; skipped=0; deferred=0; unrecorded=0
@@ -325,13 +368,13 @@ while IFS= read -r sid; do
     processed=$((processed + 1))
     slot=""
 
-    if [ $(( $(date -u +%s) - START )) -ge "$BUDGET_S" ]; then
+    if over_budget; then
         tally deferred "$sid" "the pass budget (${BUDGET_S}s) ran out"; continue
     fi
 
     # Fields arrive through process substitution, never a here-string: a read
     # that fails leaves them empty, and an empty verdict is a skip.
-    show="$(call "$GC" bd show "$sid" --json 2>/dev/null)" || true
+    show="$(call "$GC" bd show "$sid" --json 2>/dev/null | scrub)" || true
     verdict=""; detail=""; reason=""; slept=""; fp=""
     IFS=$'\037' read -r verdict detail slot reason slept fp < <(classify "$sid" "$show")
     case "$verdict" in
@@ -341,25 +384,35 @@ while IFS= read -r sid; do
         *)    tally skipped "$sid" "unreadable: the bead read could not be classified"; continue ;;
     esac
 
-    ID_LIST=()
-    mapfile -t ID_LIST < <(identities "$sid" "$show")
-    work="$(held_work "${ID_LIST[@]}")"
+    work="$(held_work "$(identities "$sid" "$show")")"
     case "$work" in
         none) ;;
-        held\ *)
-            tally kept "$sid" "work ${work##* } is assigned to it"; continue ;;
-        *)
-            tally skipped "$sid" "assigned work could not be read (${work#unreadable })"; continue ;;
+        held\ *)     tally kept "$sid" "work ${work##* } is assigned to it"; continue ;;
+        deferred\ *) tally deferred "$sid" "the pass budget (${BUDGET_S}s) ran out during its work search"; continue ;;
+        *)           tally skipped "$sid" "assigned work could not be read (${work#unreadable })"; continue ;;
     esac
 
-    # The second read: the work search above takes seconds, and a session someone
-    # has just woken, held, or reassigned must not be closed on the first read.
-    show2="$(call "$GC" bd show "$sid" --json 2>/dev/null)" || true
+    # The second look. The work search takes seconds. A session someone has just
+    # woken or held shows it in the lifecycle facts the fingerprint carries (its
+    # state, sleep, wake request, hold markers and pending create), so the bead
+    # is read again and any change keeps it. Work assigned to it meanwhile sits on
+    # other beads, so the search runs again on the second read's identities.
+    if over_budget; then
+        tally deferred "$sid" "the pass budget (${BUDGET_S}s) ran out before its second read"; continue
+    fi
+    show2="$(call "$GC" bd show "$sid" --json 2>/dev/null | scrub)" || true
     verdict2=""; fp2=""
     IFS=$'\037' read -r verdict2 _ _ _ _ fp2 < <(classify "$sid" "$show2")
     if [ "$verdict2" != "eligible" ] || [ "$fp2" != "$fp" ]; then
         tally kept "$sid" "its lifecycle changed during the pass"; continue
     fi
+    work="$(held_work "$(identities "$sid" "$show2")")"
+    case "$work" in
+        none) ;;
+        held\ *)     tally kept "$sid" "work ${work##* } is assigned to it on the second search"; continue ;;
+        deferred\ *) tally deferred "$sid" "the pass budget (${BUDGET_S}s) ran out during its second work search"; continue ;;
+        *)           tally skipped "$sid" "assigned work could not be read on the second search (${work#unreadable })"; continue ;;
+    esac
 
     line="${sid} ${slot} (sleep_reason=${reason:-none}, asleep since ${slept}): no runtime, no assigned work"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -368,10 +421,25 @@ while IFS= read -r sid; do
 "
         continue
     fi
-    if ! call "$GC" session close "$sid" >/dev/null 2>&1; then
-        tally skipped "$sid" "gc session close failed; left for the next pass"
-        echo "$PROG: could not close $sid — left for the next pass" >&2
-        continue
+
+    # The close is bounded like every call, and a close its bound cut off may
+    # already have committed. So a close that exits non-zero, whatever the exit,
+    # is followed by one more read: a bead that now reads closed is counted and
+    # recorded as this pass's close, and one that does not is left for the next
+    # pass.
+    call "$GC" session close "$sid" >/dev/null 2>&1; close_rc=$?
+    if [ "$close_rc" -ne 0 ]; then
+        settled=""
+        after="$(call "$GC" bd show "$sid" --json 2>/dev/null | scrub)" || true
+        IFS=$'\037' read -r _ settled _ < <(classify "$sid" "$after")
+        if [ "$settled" = "already closed" ]; then
+            how="exited $close_rc"; timed_out "$close_rc" && how="timed out"
+            line="${line}; the close call ${how} after the bead closed"
+        else
+            tally skipped "$sid" "gc session close failed (exit $close_rc); left for the next pass"
+            echo "$PROG: could not close $sid (gc session close exit $close_rc) — left for the next pass" >&2
+            continue
+        fi
     fi
     closed=$((closed + 1))
     closed_lines="${closed_lines}  ${line}
