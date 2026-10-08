@@ -19,6 +19,8 @@
 # reads.
 #
 # Hermetic: reads the pack's own formula sources. No city, network, or build.
+#
+# run-tests-scope: tree
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
