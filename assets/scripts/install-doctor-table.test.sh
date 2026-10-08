@@ -15,6 +15,8 @@
 # which is not a check, is never counted as a row.
 #
 # Hermetic: reads the repo tree; no city, no network.
+#
+# run-tests-scope: tree
 
 set -u
 
