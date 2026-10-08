@@ -16,8 +16,8 @@ Three readers derived a lane's green from the pre-`signoff_verdict` shape — a
 closed review bead carrying `gc.outcome=recorded` and **no** `signoff_verdict`
 — as if it were an approve:
 
-- `assets/scripts/lane-state.sh` (the green derivation `merge.sh`, `pr-open.sh`,
-  the liveness sweep and the board all read)
+- `assets/scripts/lane-state.sh` (the green derivation that `merge.sh`,
+  `pr-open.sh` and `gate-ensure.sh` run; `merge.sh` gates the merge on it)
 - `assets/scripts/review-outcome.sh` `backing_ids` (the idempotency guard that
   decides whether `back-lane` files a fresh approve bead)
 - `doctor/check-gate-marker-provenance/run.sh` RESOLVE A (the auditor that is
