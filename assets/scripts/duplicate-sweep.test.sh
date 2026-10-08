@@ -17,7 +17,8 @@
 # (dispatch metadata, an assignee, a convoy tracking it, a deferred dispatch
 # armed as the live counter-case is) and every landing proof (closed with its
 # rejection_reason gone and dispatched, or shipped; not disposed, retired,
-# no-op or on another anchor) refuses on its own; the review-open hold; a
+# no-op or on another anchor; a promotion to an anchor of its own counts only
+# once merged) refuses on its own; the review-open hold; a
 # prior pointer finished or refused; the earliest-filed of two landed
 # siblings; and idempotence.
 set -uo pipefail
@@ -468,6 +469,31 @@ for spec in \
   out=$(run)
   eq "$(bstatus O1)" "open" "a closed sibling carrying $label is not a landing"
 done
+
+echo "# a sibling promoted to an anchor of its own landed only if it merged"
+# The promotion unsets rejection_reason, so the closed branch cannot stand on
+# that field alone.
+for mr in pre_open_gate pull_request abandoned retargeted blocked refused_false_completion held; do
+  twin_scene '' "{\"merge_result\":\"$mr\"}"
+  out=$(run)
+  eq "$(bstatus O1)" "open" "a closed sibling at merge_result=$mr is not a landing"
+  has "$out" "no other child of review R1 on anchor A1 has landed" "…so the twin is held ($mr)"
+done
+twin_scene '' '{"merged_target":"main"}'
+out=$(run)
+eq "$(bstatus O1)" "open" "a promotion moved back to unanchored keeps its merged_target, and is not a landing"
+has "$out" "no other child of review R1 on anchor A1 has landed" "…so the twin is held"
+twin_scene '' '{"merge_result":"merged","merged_target":"main","merged_sha":"abc1234"}'
+out=$(run)
+eq "$(bstatus O1)" "closed" "a promoted sibling whose own PR merged has landed"
+eq "$(meta O1 gc.superseded_by)" "L1" "…and the twin is pointed at it"
+
+echo "# a promoted sibling whose PR was abandoned, then closed by hand, keeps the real twin"
+twin_scene '' '{"merge_result":"abandoned","merged_target":"main","check_set":"codex","pr_url":"https://github.com/o/r/pull/9","pr_number":"9"}'
+out=$(run)
+eq "$(bstatus O1)" "open" "the abandoned promotion is not a landing"
+eq "$(live_blockers A1)" "O1" "…and the twin still holds its anchor"
+eq "$(rehome_args)" "" "…with no disposal attempted"
 
 echo "# a closed sibling never dispatched is another twin, not a landing"
 twin_scene '' '{"gc.execution_routed_to":"","work_dir":"","prepare_mode":""}'

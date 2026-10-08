@@ -234,11 +234,19 @@ CANDS_EOF
 #     duplicate_of), recording no outcome but shipped (scaffolding-sweep's
 #     gc.outcome=moot is a retirement, not a landing), and dispatched, by its
 #     metadata or by a convoy tracking it. It either records
-#     work_outcome=shipped or is closed with its rejection_reason gone:
-#     signoff.sh stamps that field on every child, and the refinery's landing
-#     transition unsets it, so a closed child still carrying it was closed
-#     without landing. A closed child that was never dispatched is another
-#     twin, not a landing.
+#     work_outcome=shipped or is closed with its rejection_reason gone.
+#     signoff.sh stamps that field on every child, so a closed child still
+#     carrying it was closed without landing. Its absence proves less: the
+#     polecat's workspace-setup unsets it when it resumes the branch, and the
+#     refinery unsets it when it lands the child on the anchor's branch, when
+#     it merges the child, and when it promotes the child to an anchor of its
+#     own. A promoted child landed only if its merge_result is merged, and the
+#     promotion stamps merged_target, which a later move back to unanchored
+#     keeps. So a closed child counts only with merge_result=merged, or with
+#     neither a merge_result nor a merged_target. The test rests on every
+#     other close of a started child carrying one of the markers above; a
+#     bare hand close of one reads as a landing. A closed child that was never
+#     dispatched is another twin, not a landing.
 # The branch, target and PR fields are the work order signoff.sh stamps on
 # every child, naming the anchor's branch and PR, so they say nothing about
 # what this child did and are not read. Closing the twin releases its blocks
@@ -305,7 +313,9 @@ while IFS=$'\t' read -r id review anchor held_flag prior; do
       | (if s("gc.work_outcome") != "" then s("gc.work_outcome") else s("work_outcome") end) as $wo
       | select($wo == "" or $wo == "shipped")
       | select($wo == "shipped"
-               or ((((.status // "") | ascii_downcase) == "closed") and s("rejection_reason") == ""))
+               or ((((.status // "") | ascii_downcase) == "closed") and s("rejection_reason") == ""
+                   and (s("merge_result") == "merged"
+                        or (s("merge_result") == "" and s("merged_target") == ""))))
       | { id, created_at: (.created_at // ""),
           evidence: (if $wo == "shipped" then "work_outcome=shipped"
                      elif s("gc.execution_routed_to") != "" then "gc.execution_routed_to=" + s("gc.execution_routed_to")

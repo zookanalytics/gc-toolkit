@@ -441,9 +441,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    tracks it, which is the edge every pour mints. It requires the review to be
    closed, since close_review is signoff.sh's last write. It requires a sibling
    naming the same review and anchor to have landed: dispatched, not itself
-   disposed or retired, and either closed with `rejection_reason` unset, which
-   the refinery's landing transition does, or recording
-   `work_outcome=shipped`. Closing the twin releases its blocks edge, and the
+   disposed or retired, and either recording `work_outcome=shipped` or closed
+   with `rejection_reason` unset. signoff.sh stamps that field on every child.
+   The polecat unsets it when it resumes the branch, and the refinery unsets
+   it when it lands the child, merges it, or promotes it to an anchor of its
+   own. So a closed sibling counts only with `merge_result=merged`, or with
+   neither a `merge_result` nor the `merged_target` a promotion stamps. A bare
+   hand close of a child whose polecat had begun still reads as a landing.
+   Closing the twin releases its blocks edge, and the
    pass then stamps `duplicate_of` on it, so pr-stack.sh keeps it off the
    branch's bead list. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
