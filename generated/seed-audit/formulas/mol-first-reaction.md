@@ -16,10 +16,10 @@ reaction, and drains.
    human on, ending in the one line the terminal step acts on.
 3. **Dispose, don't close.** The reaction ends in ONE of five exits — route
    the bead to a pool or to the named agent whose work it is, recommend an
-   action on a visit the operator can Accept, hold it on an edge, route it to a
-   validating closer, or file a plain visit — chosen from the card. The
-   reaction never closes the bead itself; where a bead should close, the closer
-   pool confirms and closes it.
+   action the operator can Accept, hold it on an edge, route it to a validating
+   closer, or put a question to the operator as a human gate — chosen from the
+   card. The reaction never closes the bead itself; where a bead should close,
+   the closer pool confirms and closes it.
 4. **mr-only for code.** A reaction is notes-only by default; code it
    produces takes the gated `mr` path, never `direct`, never a push to main.
 

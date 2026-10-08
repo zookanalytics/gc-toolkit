@@ -114,6 +114,17 @@ cat > "$TMP/helm" <<'HELM'
 #!/usr/bin/env bash
 printf 'HELM %s\n' "$*" >> "$FAKE_LOG"
 [ -n "${FAKE_HELM_FAILS:-}" ] && exit 4
+# demand files the human gate a ruling or recommend holds on, and names it the
+# way gc-helm.sh does: a `demand <id> blocks <gated> …` line on stdout.
+# FAKE_DEMAND_FAILS models a gate that did not file (gc-helm.sh exits 4);
+# FAKE_DEMAND_NOID a demand that exits 0 but names no gate.
+if [ "${1:-}" = demand ]; then
+  [ -n "${FAKE_DEMAND_FAILS:-}" ] && exit 4
+  [ -n "${FAKE_DEMAND_NOID:-}" ] && exit 0
+  printf 'blocks edge: %s depends on %s\n' "$2" "${FAKE_GATE_ID:-tk-gate1}"
+  printf 'demand %s blocks %s (by proactive): %s\n' "${FAKE_GATE_ID:-tk-gate1}" "$2" "$3"
+  exit 0
+fi
 # Model gc-helm.sh takeaway --release retiring the pour stamp as provenance. The
 # shared-state file stands in for gc.execution_routed_to; a run that does not opt
 # in (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm no longer depends on
@@ -223,8 +234,8 @@ export FAKE_POOL_DEAD=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.nosuch
 eq "$RC" "2" "(ACTPOOL) a pool that cannot claim refuses the exit"
 hasnt "HELM" "$LOG" "(ACTPOOL) …and the bead is not released"
-has "address it with --assign" "$ERR" "(ACTPOOL) …and the refusal names the named-agent address before a visit"
-has "only when the next move is the operator's" "$ERR" "(ACTPOOL) …keeping the visit for the operator's own move"
+has "address it with --assign" "$ERR" "(ACTPOOL) …and the refusal names the named-agent address before the operator"
+has "only when the next move is the operator's" "$ERR" "(ACTPOOL) …keeping the operator's exits for the operator's own move"
 unset FAKE_POOL_DEAD
 
 : > "$FAKE_LOG"; RC=0
@@ -467,47 +478,117 @@ eq "$RC" "2" "(BLKASSIGN) a --then-assign agent that cannot be handed the bead i
 hasnt "HELM" "$LOG" "(BLKASSIGN) …and the bead is not released"
 unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 
-# ── ruling: the visit is the wait, named as a blocks edge on the subject ─────
-# The visit re-asks the question, so the subject waits on it: the ruling exit
-# passes --waiting-on <visit>, and the edge is verified to have landed the way
-# the blocked exit's is. The FAKE dep list answers with the visit so the
-# verification passes (a dropped edge is the (BLKEDGE) case, on the blocked exit).
-export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+# ── ruling: the human gate is the wait, filed by the exit itself ─────────────
+#   (RUL)      the exit files the gate through gc-helm.sh demand, the takeaway
+#              as its question, and holds the subject on it
+#   (RULTOPIC) the gate is filed under the topic first-reaction
+#   (RULORDER) record, then gate, then release: the gate is the act
+#   (RULGATE)  a gate that did not file, or that demand did not name, fails
+#              the exit before the release, and the record stands for a re-run
+#   (RULEDGE)  a hold that did not land fails the exit
+#   (RULVISIT) --visit holds the subject on a visit the caller filed, no gate
+# The gate is the escalation's state; gate-visit-sweep files the visit that
+# resolves it, so the exit files no visit. The FAKE dep list answers with the
+# gate so the hold verification passes.
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
-    --takeaway "needs a ruling: which default" --visit tk-visit1
+    --takeaway "needs a ruling: which default"
 eq "$RC" "0" "(RUL) a ruling disposition succeeds"
-has "gc.first_reaction_target=tk-visit1" "$LOG" "(RUL) the visit it filed is recorded"
+has "HELM demand tk-sub needs a ruling: which default --by proactive --topic first-reaction --body" "$LOG" \
+   "(RUL) it files the human gate, the takeaway as the gate's question"
+# gc-helm.sh demand keeps one open gate per gated bead and topic. With no topic
+# it matches on the subject alone: it refreshes a converse sitting's lone demand
+# on the subject in place, overwriting the question that sitting holds, and stops
+# on a subject that carries two. The reaction's own topic files beside them.
+has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
+   "(RULTOPIC) the gate is filed under the first reaction's own topic"
+# The body spans lines, so read the demand call up to the release that follows
+# it; the record UPDATE that also carries the reason sits before this range.
+has "the trade-off is the operator's" "$(sed -n '/^HELM demand/,/^HELM takeaway/p' "$FAKE_LOG")" \
+   "(RUL) …with the reason in the gate's body"
+has "gc.first_reaction_target=tk-gate1" "$LOG" "(RUL) the gate it filed is recorded"
 has "HELM takeaway tk-sub needs a ruling: which default --by proactive --release" "$LOG" \
    "(RUL) the bead is released back to the human"
 hasnt "--route" "$LOG" "(RUL) …not routed to a pool"
-has "--waiting-on tk-visit1" "$LOG" "(RUL) …and held by the visit edge"
-# A ruling names the visit as its wait: the subject waits on a person, the visit
-# bead is what re-asks, and --waiting-on records that wait as a blocks edge so
+has "--waiting-on tk-gate1" "$LOG" "(RUL) …and held by the gate's edge"
+# A ruling names the gate as its wait: the subject waits on a person, the gate
+# is what a person owes, and --waiting-on records that wait as a blocks edge so
 # doctor/check-wait-is-an-edge reads a graph state rather than reporting prose.
 hasnt "--no-wait" "$LOG" "(RUL) …and never claims nothing is waiting"
+hasnt "CREATE" "$LOG" "(RUL) …and files no visit: gate-visit-sweep files it"
+has "disposed as ruling (tk-gate1)" "$OUT" "(RUL) …and reports the gate it disposed onto"
+REC_L=$(grep -n -m1 'gc.first_reaction=ruling' "$FAKE_LOG" | cut -d: -f1)
+DEM_L=$(grep -n -m1 '^HELM demand' "$FAKE_LOG" | cut -d: -f1)
+TAK_L=$(grep -n -m1 '^HELM takeaway' "$FAKE_LOG" | cut -d: -f1)
+{ [ -n "$REC_L" ] && [ -n "$DEM_L" ] && [ -n "$TAK_L" ] && [ "$REC_L" -lt "$DEM_L" ] && [ "$DEM_L" -lt "$TAK_L" ]; } \
+   && ok "(RULORDER) the record, then the gate, then the release" \
+   || bad "(RULORDER) the record, then the gate, then the release (record=$REC_L demand=$DEM_L takeaway=$TAK_L)"
 
+export FAKE_DEMAND_FAILS=1
 run tk-sub --disposition ruling --reason "r" --takeaway "t"
-eq "$RC" "2" "(RUL) a ruling with no visit is refused"
+eq "$RC" "4" "(RULGATE) a gate that did not file fails the exit"
+has "gc.first_reaction=ruling" "$LOG" "(RULGATE) …the record was written first and stands"
+hasnt "HELM takeaway" "$LOG" "(RULGATE) …and the subject is not released onto a gate that does not exist"
+has "re-run this command" "$ERR" "(RULGATE) …and the failure names the retry"
+unset FAKE_DEMAND_FAILS
 
-# ── recommend: the visit offers Accept ───────────────────────────────────────
+export FAKE_DEMAND_NOID=1
+run tk-sub --disposition ruling --reason "r" --takeaway "t"
+eq "$RC" "4" "(RULGATE) a demand that names no gate fails the exit"
+hasnt "HELM takeaway" "$LOG" "(RULGATE) …before the release"
+unset FAKE_DEMAND_NOID
+
+export FAKE_DEPS_JSON='[]'
+run tk-sub --disposition ruling --reason "r" --takeaway "t"
+eq "$RC" "4" "(RULEDGE) a gate edge that is not on the subject fails the exit"
+has "not held by tk-gate1" "$ERR" "(RULEDGE) …naming the gate it is not held by"
+
+export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
+    --takeaway "needs a ruling: which default" --visit tk-visit1
+eq "$RC" "0" "(RULVISIT) a ruling held on a caller's visit succeeds"
+hasnt "HELM demand" "$LOG" "(RULVISIT) …and files no gate"
+has "gc.first_reaction_target=tk-visit1" "$LOG" "(RULVISIT) …the visit is recorded"
+has "--waiting-on tk-visit1" "$LOG" "(RULVISIT) …and holds the subject"
+
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit sl-foreign
+eq "$RC" "2" "(RULVISIT) a visit in another store is refused"
+eq "$LOG" "" "(RULVISIT) …and nothing was written"
+
+: > "$FAKE_LOG"; RC=0
+OUT="$("$SCRIPT" tk-sub --disposition ruling --reason "r" --takeaway "t" --dry-run 2>"$TMP/err")" || RC=$?
+LOG="$(cat "$FAKE_LOG")"
+eq "$RC" "0" "(RULDRY) a dry run succeeds"
+has "would file a human gate on tk-sub" "$OUT" "(RULDRY) …saying it would file the gate"
+hasnt "HELM" "$LOG" "(RULDRY) …and files nothing"
+hasnt "UPDATE" "$LOG" "(RULDRY) …and records nothing"
+
+# ── recommend: the gate's visit offers Accept ────────────────────────────────
 # recommend names a determinable action (converse/operator authority) and stamps
 # gc.recommended_formula on the subject. That stamp is the whole difference
 # between a plain Discuss-only ruling visit and a recommendation visit the
 # operator can Accept, and it rides the record write — before the act — so a
 # half-written recommendation is still visible. recommend files and holds on the
-# same visit shape ruling does.
-export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+# same human gate ruling does, and the stamp lands before the gate is filed, so
+# the visit gate-visit-sweep files for the gate offers Accept from the start.
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 run tk-sub --disposition recommend --reason "retire the PR, supersede its anchor — operator authority" \
     --takeaway "recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" \
-    --visit tk-visit1 --recommended-formula mol-x
+    --recommended-formula mol-x
 eq "$RC" "0" "(RECO) a recommend disposition succeeds"
 has "gc.recommended_formula=mol-x" "$LOG" "(RECO) the recommended formula is stamped on the subject"
 has "gc.first_reaction=recommend" "$LOG" "(RECO) …alongside the disposition record"
-has "--waiting-on tk-visit1" "$LOG" "(RECO) …and the visit holds the subject, the ruling visit shape"
-RECO_UL=$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1); RECO_HL=$(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1)
-{ [ -n "$RECO_UL" ] && [ -n "$RECO_HL" ] && [ "$RECO_UL" -lt "$RECO_HL" ]; } \
-   && ok "(RECO) …in the record write, before the act" \
-   || bad "(RECO) …in the record write, before the act (UPDATE=$RECO_UL HELM=$RECO_HL)"
+has "HELM demand tk-sub recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" "$LOG" \
+   "(RECO) …it files the human gate, as ruling does"
+has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
+   "(RECO) …under the first reaction's own topic"
+has "--waiting-on tk-gate1" "$LOG" "(RECO) …and the gate holds the subject, the ruling shape"
+RECO_UL=$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1)
+RECO_DL=$(grep -n -m1 '^HELM demand' "$FAKE_LOG" | cut -d: -f1)
+RECO_HL=$(grep -n -m1 '^HELM takeaway' "$FAKE_LOG" | cut -d: -f1)
+{ [ -n "$RECO_UL" ] && [ -n "$RECO_DL" ] && [ -n "$RECO_HL" ] && [ "$RECO_UL" -lt "$RECO_DL" ] && [ "$RECO_DL" -lt "$RECO_HL" ]; } \
+   && ok "(RECO) …in the record write, before the gate and the release" \
+   || bad "(RECO) …in the record write, before the gate and the release (UPDATE=$RECO_UL demand=$RECO_DL takeaway=$RECO_HL)"
 
 # recommend REQUIRES the flag it exists to carry: no --recommended-formula is a
 # usage error naming ruling as the flagless alternative.
@@ -517,10 +598,13 @@ eq "$RC" "2" "(RECO) recommend with no --recommended-formula is refused"
 eq "$LOG" "" "(RECO) …and writes nothing"
 has "is --disposition ruling" "$ERR" "(RECO) …naming ruling as the flagless alternative"
 
-# recommend needs a visit like ruling — the operator lands on it.
+# --visit holds a recommend on a visit the caller filed, the way it does a ruling.
+export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
 run tk-sub --disposition recommend --reason "operator authority" \
-    --takeaway "recommend: execute via mol-x — Accept or Discuss" --recommended-formula mol-x
-eq "$RC" "2" "(RECO) recommend with no --visit is refused"
+    --takeaway "recommend: execute via mol-x — Accept or Discuss" --visit tk-visit1 --recommended-formula mol-x
+eq "$RC" "0" "(RECO) a recommend held on a caller's visit succeeds"
+hasnt "HELM demand" "$LOG" "(RECO) …and files no gate"
+has "--waiting-on tk-visit1" "$LOG" "(RECO) …the visit holds the subject"
 
 # A recommended formula that does not resolve is a usage error, refused before the
 # record: Accept slings this exact name, so a typo would stamp a live
@@ -592,6 +676,13 @@ run tk-sub --disposition recommend --reason "operator authority" \
 eq "$RC" "4" "(RECOGUARD) a silently dropped recommendation set refuses the exit"
 hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so no Discuss-only visit is filed"
 has "did not land" "$ERR" "(RECOGUARD) …and the refusal names the key that did not land"
+# The gate brings the visit, so the guard must refuse before the gate is filed:
+# a gate filed over a dropped recommendation gets a visit that offers only
+# Discuss.
+run tk-sub --disposition recommend --reason "operator authority" \
+    --takeaway "recommend: execute via mol-x — Accept or Discuss" --recommended-formula mol-x
+eq "$RC" "4" "(RECOGUARD) the same drop on the gate form refuses the exit"
+hasnt "HELM demand" "$LOG" "(RECOGUARD) …before the gate is filed, so no visit can offer only Discuss"
 unset FAKE_DROP_RECO
 
 # The same drop, but the lone retry lands it: the act proceeds.
@@ -711,7 +802,7 @@ unset FAKE_SHOW_JSON
 # roster gate the actionable exit uses, same fallback.
 FAKE_POOL_DEAD=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "2" "(CLOSE) a closer pool that cannot claim is refused"
-has "File the visit instead" "$ERR" "(CLOSE) …and the refusal names the exit that reaches a human"
+has "Put it to the operator instead" "$ERR" "(CLOSE) …and the refusal names the exit that reaches a human"
 hasnt "SLING" "$LOG" "(CLOSE) …and nothing is slung"
 unset FAKE_POOL_DEAD
 
@@ -793,10 +884,14 @@ has "at 2026-09-03T04:45:05Z" "$ERR" "(REACTED) …its timestamp"
 has "-> gc-toolkit/gc-toolkit.polecat" "$ERR" "(REACTED) …and its target"
 
 # takeaway --release reopens the bead on every exit, so the ruling exit is
-# re-released just the same and the guard covers it too.
+# re-released just the same and the guard covers it too — ahead of the gate, so
+# a re-offered run files nothing.
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
 eq "$RC" "2" "(REACTED) …the ruling exit too"
 hasnt "HELM" "$LOG" "(REACTED) …with no re-release"
+run tk-sub --disposition ruling --reason "r" --takeaway "t"
+eq "$RC" "2" "(REACTED) …and the gate form of the ruling exit"
+hasnt "HELM demand" "$LOG" "(REACTED) …which files no second gate"
 
 # gc.proactive_reaction=1 alone (the record stamps absent) still proves the
 # release landed, so a second dispose is refused.
@@ -834,6 +929,17 @@ has "the prior act did not land" "$ERR" "(RESUME) …announcing the resume"
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
 eq "$RC" "0" "(RESUME) …and every exit resumes, not just actionable"
 has "HELM takeaway tk-sub" "$LOG" "(RESUME) …the ruling act is re-attempted"
+# A partial whose gate already filed resumes through demand again, under the
+# same topic, which refreshes the gate the first run filed instead of filing a
+# second.
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
+run tk-sub --disposition ruling --reason "r" --takeaway "t"
+eq "$RC" "0" "(RESUME) the gate form resumes"
+has "HELM demand tk-sub" "$LOG" "(RESUME) …asking demand for the subject's gate again"
+has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
+   "(RESUME) …under the topic the first run filed it under"
+has "HELM takeaway tk-sub" "$LOG" "(RESUME) …and re-attempting the release"
+export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
 unset FAKE_SHOW_JSON
 
 # ── The store is pinned to the subject's own rig ─────────────────────────────

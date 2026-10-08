@@ -577,12 +577,14 @@ hasnt "$ARM" "gc mail send" "it escalates rather than mails; a polecat's mail bu
 has "$ARM" "escalate.sh" "and it escalates through escalate.sh"
 
 # The arm executed, against helpers that can refuse. This drives the LIVE-conflict
-# path (a foreign owner still in the session list), where the drain is gated on
-# BOTH the escalation and the hold: escalate.sh records the release path,
+# path (an in_progress bead under a foreign owner the liveness probe cannot rule
+# out: the fake gc answers nothing for `session list`), where the drain is gated
+# on BOTH the escalation and the hold: escalate.sh records the release path,
 # molecule-hold.sh quiesces the molecule, and the arm drains only after both
-# land. The finished-work path (a completed hand-off or a merge_result) drains on
-# the hold ALONE and files no visit — the gate's own test covers it. Each stub
-# records its call and returns a code the runner controls.
+# land. The finished-work path (a closed bead, a completed hand-off, or a
+# merge_result) drains on the hold ALONE and files no visit — the gate's own
+# test covers it, with the unreadable and parked paths. Each stub records its
+# call and returns a code the runner controls.
 mkdir -p "$TMP/armpack/assets/scripts"
 cat > "$TMP/armpack/assets/scripts/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
@@ -603,7 +605,7 @@ run_arm() {
   : > "$TMP/arm.log"; : > "$GC_LOG"
   printf '%s\n' "$ARM" | sed 's|{{convoy_id}}|cv-1|g' > "$TMP/arm.sh"
   local rc=0
-  OWNER_LIVE=1 WORK_BEAD_ID=tk-work WORK_STATUS=in_progress WORK_OWNER=other-session \
+  WORK_BEAD_ID=tk-work WORK_BEAD_JSON='[{"status":"in_progress","assignee":"other-session","metadata":{}}]' \
     ARM_LOG="$TMP/arm.log" ARM_HOLD_RC="$1" ARM_ESC_RC="${2:-0}" \
     GC_PACK_DIR="$TMP/armpack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     bash "$TMP/arm.sh" >/dev/null 2>&1 || rc=$?
@@ -612,6 +614,7 @@ run_arm() {
 
 eq "$(run_arm 0)" "1" "the refusal arm exits 1"
 has "$(cat "$TMP/arm.log")" "ESCALATE --subject tk-work" "it files an escalation on the work bead"
+has "$(cat "$TMP/arm.log")" "--key polecat-duplicate-dispatch" "under the live-conflict key: this drives the in-flight path"
 has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.load-context" "it holds its own step"
 has "$(gclog)" "runtime drain-ack" "an escalation and a hold that both landed are followed by the drain"
 

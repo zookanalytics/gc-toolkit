@@ -8,8 +8,9 @@
 # Owns everything upstream of the visit (rig, subject bead, path choice);
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
-# PREFERRED slings mol-first-reaction (framing card, reaction files the
-# visit); FALLBACK files the visit directly — taken on --no-react, whenever
+# PREFERRED slings mol-first-reaction (framing card; a reaction that puts the
+# topic to the operator files a human gate, and gate-visit-sweep files that
+# gate's visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
 # a sling into a downed pool fails invisibly; today's tool always says yes),
 # and when the subject already carries a first reaction (gc-helm react exit 5)
@@ -67,9 +68,10 @@ on demand.
   -h, --help     This help.
 
 Without --no-react the topic is handed to a proactive first reaction, which
-writes a framing card and files the visit itself — but ONLY when that pool can
-actually run. When it cannot (auto-spawn disabled, or the city is at the
-session cap) this falls back to filing the visit directly and says so.
+writes a framing card and, when it puts the topic back to you, files a human
+gate whose visit gate-visit-sweep files — but ONLY when that pool can actually
+run. When it cannot (auto-spawn disabled, or the city is at the session cap)
+this falls back to filing the visit directly and says so.
 EOF
 }
 
@@ -342,7 +344,7 @@ board; this body is the record. Ask before assuming scope."
         --db "$RIG_PATH/.beads" --json 2>/dev/null)
     SUBJ_RC=$?
     SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
-    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
     if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
         # A refused create STATES its reason in .error — surface it (tk-wp50s).
         SUBJ_ERR=$(printf '%s' "$SUBJ_JSON" | jq -r '.error // .[0].error // empty' 2>/dev/null)
