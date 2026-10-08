@@ -82,10 +82,11 @@ USAGE
 
 # The closed review beads that currently back this lane green — the approve half
 # lane-state.sh reads, minus its in-flight test: a closed task_kind=review bead
-# for (anchor, lane) carrying reviewed_oid, either signoff_verdict=approve and
-# not superseded, or a legacy no-verdict gc.outcome=recorded. Ids on stdout, one
-# per line; exit 2 when the store would not read so a caller never mistakes an
-# unreadable store for "nothing backs the lane".
+# for (anchor, lane) carrying reviewed_oid and signoff_verdict=approve, not
+# superseded. A close with no signoff_verdict names no verdict (signoff stamps
+# gc.outcome=recorded on every close, approve and request-changes alike), so it
+# backs no lane. Ids on stdout, one per line; exit 2 when the store would not
+# read so a caller never mistakes an unreadable store for "nothing backs the lane".
 backing_ids() { # <anchor> <lane>
   local anchor="$1" lane="$2" rows
   rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
@@ -98,7 +99,7 @@ backing_ids() { # <anchor> <lane>
           | select((($m.reviewed_oid // "") | tostring) != "")
           | (($m.signoff_verdict // "") | tostring) as $sv
           | (($m["gc.outcome"] // "") | tostring) as $oc
-          | select(($sv == "approve" and $oc != "superseded") or ($sv == "" and $oc == "recorded")) ]
+          | select($sv == "approve" and $oc != "superseded") ]
     | .[].id' 2>/dev/null
 }
 
@@ -187,7 +188,7 @@ cmd_back_lane() {
   title="lane $lane converged: validator ruled no further review — anchor $anchor"
   desc=$(printf 'The validator ruled lane %s converged on anchor %s at %s: no further whole-diff review is warranted. This closed approve outcome is what lane-state.sh reads to derive green once nothing else holds the lane. The reviewed_oid is a dispatch pin, not a claim that green is bound to that commit.%s' \
     "$lane" "$anchor" "$oid" "${batch:+ Batch: $batch.}")
-  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$id" ] || { warn "could not create the approve outcome bead for lane $lane on $anchor"; exit 2; }
   local note="validator: lane $lane converged at $oid"
   [ -n "$reason" ] && note="$note — $reason"

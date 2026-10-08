@@ -26,7 +26,7 @@ mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha" "$TMP/beta"
 
 # Fixtures are written relative to real time because the check dates a molecule
 # with jq's `now`. Each age is read when its fixture is written.
-ago() { date -u -d "$1 seconds ago" +%Y-%m-%dT%H:%M:%SZ; }
+ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
 OLD=$((200 * 60))       # past the 120m default bound
 FRESH=$((10 * 60))      # inside it
 

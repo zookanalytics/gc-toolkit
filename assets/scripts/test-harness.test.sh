@@ -162,6 +162,34 @@ eq "$(view7 a,b)" "third" "pr view queue: …consumed, so the next read takes th
 eq "$(view7 a,b)" "fixture" "pr view queue: the fixture answers once the queue is empty"
 eq "$(find "$Q" -type f | wc -l | tr -d ' ')" "0" "pr view queue: every queued file was consumed"
 
+# The gc bd dep stub holds one edge per (issue, depends_on) pair, as real bd
+# does. A second type on a taken pair is refused with exit 1 and writes nothing,
+# whichever form wrote either edge. The same type again is a no-op that exits 0,
+# and the reversed pair is a different pair. A stub that appends every edge
+# accepts two edges on one pair, a state no real store can hold, so a writer
+# that needs both passes here and fails against bd; the rule is pinned here.
+: > "$STUB_DEPS"
+gc bd dep add tk-kd tk-blk --type discovered-from
+if err=$(gc bd dep tk-blk --blocks tk-kd 2>&1); then
+  bad "a blocks edge on a pair that already carries discovered-from was accepted"
+else
+  ok "a blocks edge on a pair that already carries discovered-from is refused"
+fi
+has "$err" "dependency tk-kd -> tk-blk already exists with type \"discovered-from\" (requested \"blocks\")" "...with bd's already-exists error naming the pair and both types"
+eq "$(cat "$STUB_DEPS")" "tk-kd|discovered-from|tk-blk" "...and the refused edge writes nothing"
+: > "$STUB_DEPS"
+gc bd dep tk-blk --blocks tk-kd
+if gc bd dep add tk-kd tk-blk --type discovered-from 2>/dev/null; then
+  bad "a discovered-from edge on a pair a blocks edge holds was accepted"
+else
+  ok "a discovered-from edge on a pair a blocks edge holds is refused (dep add form)"
+fi
+eq "$(cat "$STUB_DEPS")" "tk-blk|blocks|tk-kd" "...and the refused edge writes nothing"
+if gc bd dep add tk-kd tk-blk --type blocks; then ok "re-adding a pair with the type it carries exits 0"; else bad "re-adding a pair with the type it carries failed"; fi
+eq "$(grep -c . "$STUB_DEPS")" "1" "...and leaves one edge on the pair"
+if gc bd dep add tk-blk tk-kd --type related; then ok "the reversed pair is a different pair: a related edge lands beside the blocks edge"; else bad "the reversed pair was refused as if it were the same pair"; fi
+has "$(cat "$STUB_DEPS")" "tk-blk|related|tk-kd" "...and is stored"
+
 # The gc bd update stub stores a --set-metadata value with real bd's typing. A
 # value that parses as a JSON number, true, false or null is stored typed, so
 # `k=1` reads back as the number 1, and a jq compare of it against the string
@@ -197,6 +225,68 @@ eq "$(stored_json quoted)" '"\"x\""' "a quoted JSON string keeps its quotes"
 eq "$(stored_json arr)"    '"[1]"'   "a JSON array is stored as its raw text"
 eq "$(stored_json obj)"    '"{}"'    "a JSON object is stored as its raw text"
 eq "$(stored_json empty)"  '""'      "an empty value is stored as the empty string"
+
+# The gc bd update stub replaces a description the way real bd does, under
+# either spelling of the flag, and leaves the rest of the bead as it was.
+store '[{"id":"tk-desc","status":"open","assignee":"","title":"d","description":"first","notes":"n","metadata":{"k":"v"}}]'
+gc bd update tk-desc --description "second, with a space" >/dev/null
+eq "$(jq -r '.[0].description' "$STUB_STORE")" "second, with a space" "update --description replaces the description"
+gc bd update tk-desc -d third >/dev/null
+eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
+eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
+
+# part: tools/run-tests.sh runs a suite with parts once per part, exporting the
+# run's part and every declared one. Each probe runs in a subshell, so the
+# failure an undeclared name records is read back from its output rather than
+# counted against this suite.
+out=$(unset RUN_TESTS_PART RUN_TESTS_PARTS; part alpha; echo "alpha=$?"; part beta; echo "beta=$?")
+has "$out" "alpha=0" "part: run directly, every part runs"
+has "$out" "beta=0" "…the second part too"
+out=$(export RUN_TESTS_PART=beta RUN_TESTS_PARTS="alpha beta"; base=$FAIL
+      part alpha; echo "alpha=$?"; part beta; echo "beta=$? declared-fails=$((FAIL - base))"
+      part gamma; echo "gamma=$? undeclared-fails=$((FAIL - base))")
+has "$out" "alpha=1" "part: under run-tests a run skips every other part"
+has "$out" "beta=0 declared-fails=0" "…executes its own, and records no failure for a declared name"
+has "$out" "gamma=1 undeclared-fails=1" "…while a group under a name the header never declared fails the run"
+has "$out" "part 'gamma' is not declared" "…naming that group"
+out=$(export RUN_TESTS_PART=beta; unset RUN_TESTS_PARTS; base=$FAIL
+      part gamma; echo "gamma=$? fails=$((FAIL - base))"; part beta; echo "beta=$?")
+has "$out" "gamma=1 fails=0" "part: one part picked by hand, with no declared list, skips the others without failing"
+has "$out" "beta=0" "…and runs the part it names"
+
+# tomllib_python: each probe's PATH holds stand-in interpreters and a directory
+# with only the grep and sort the search runs, so no real Python on the host is
+# found. A stand-in answers the two questions the search asks: whether tomllib
+# imports, and which version it is.
+PYT="$TMP/python"
+mkdir -p "$PYT/tools" "$PYT/new" "$PYT/old" "$PYT/versioned" "$PYT/oldversioned"
+ln -s "$(command -v grep)" "$(command -v sort)" "$PYT/tools/"
+fake_python() { # <path> <version> <yes|no: tomllib imports>
+  local rc=1
+  [ "$3" = yes ] && rc=0
+  printf '#!/bin/sh\ncase "$2" in\n  *tomllib*) exit %s ;;\n  *platform*) echo %s ;;\nesac\n' "$rc" "$2" > "$1"
+  chmod +x "$1"
+}
+fake_python "$PYT/new/python3" 3.12.3 yes
+fake_python "$PYT/old/python3" 3.9.6 no
+fake_python "$PYT/versioned/python3.11" 3.11.9 yes
+fake_python "$PYT/versioned/python3.13" 3.13.1 yes
+fake_python "$PYT/versioned/python3.14-config" 3.14.0 yes
+fake_python "$PYT/oldversioned/python3.10" 3.10.4 no
+out=$(PATH="$PYT/new:$PYT/versioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "0" "tomllib_python: a python3 with tomllib is found"
+eq "$out" "$PYT/new/python3" "…and printed by its path, ahead of any versioned name"
+out=$(PATH="$PYT/old:$PYT/versioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "0" "tomllib_python: a python3 without tomllib is passed over for a versioned one that has it"
+eq "$out" "$PYT/versioned/python3.13" "…the newest python3.N, and never a name such as python3.14-config"
+out=$(PATH="$PYT/old:$PYT/oldversioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "1" "tomllib_python: with no Python that has tomllib, it returns 1"
+eq "$out" "tomllib needs Python 3.11 or newer, and PATH has $PYT/old/python3 3.9.6, $PYT/oldversioned/python3.10 3.10.4" \
+  "…and names every Python it found, with its version"
+# shellcheck disable=SC2123  # a PATH with no Python on it is the case under test
+out=$(PATH="$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "1" "tomllib_python: with no Python at all, it returns 1"
+eq "$out" "tomllib needs Python 3.11 or newer, and PATH has no python3" "…and says there is none"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

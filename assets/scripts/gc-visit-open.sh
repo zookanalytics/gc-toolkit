@@ -8,13 +8,14 @@
 # Owns everything upstream of the visit (rig, subject bead, path choice);
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
-# PREFERRED slings mol-first-reaction (framing card, reaction files the
-# visit); FALLBACK files the visit directly — taken on --no-react, whenever
+# PREFERRED slings mol-first-reaction (framing card; a reaction that puts the
+# topic to the operator files a human gate, and gate-visit-sweep files that
+# gate's visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
 # a sling into a downed pool fails invisibly; today's tool always says yes),
-# and when the subject already carries a first reaction so the sling is a no-op
-# that dispatches nothing (gc-helm react exit 5): nothing would file the visit,
-# so this does.
+# and when the subject already carries a first reaction (gc-helm react exit 5)
+# or a live workflow already drives it (exit 6), so the sling is a no-op that
+# dispatches nothing: nothing would file the visit, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy, tk-lzdty) · 4 runtime failure.
 set -u
@@ -56,20 +57,23 @@ operator draws it off the board and `gc-helm engage` spawns a converse sitting
 on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
-                 override with GC_VISIT_DEFAULT_RIG). Ignored for a bead id —
-                 an existing bead's own rig is authoritative.
+                 override with GC_VISIT_DEFAULT_RIG). Refused with exit 2 for
+                 a bead id, a PR number, or a PR URL, because an existing
+                 bead's own rig is authoritative.
   --no-react     Skip the proactive first reaction and file the visit now.
                  Faster and unconditional; you lose the framing card.
   --type <t>     Subject bead type (default: task, or decision when the topic
-                 reads as a question).
+                 reads as a question). Refused with exit 2 for a bead id, a PR
+                 number, or a PR URL, because an existing bead keeps its type.
   --topic        Treat the argument as a topic even if it looks like a bead id,
                  a PR number, or a PR URL.
   -h, --help     This help.
 
 Without --no-react the topic is handed to a proactive first reaction, which
-writes a framing card and files the visit itself — but ONLY when that pool can
-actually run. When it cannot (auto-spawn disabled, or the city is at the
-session cap) this falls back to filing the visit directly and says so.
+writes a framing card and, when it puts the topic back to you, files a human
+gate whose visit gate-visit-sweep files — but ONLY when that pool can actually
+run. When it cannot (auto-spawn disabled, or the city is at the session cap)
+this falls back to filing the visit directly and says so.
 EOF
 }
 
@@ -86,7 +90,12 @@ TITLE_MAX=200
 
 # derive_title <text> — one-line board label: whitespace collapsed, over-long
 # topics cut at a WORD boundary (an offset cut can slice a multi-byte char).
-derive_title() {
+# The body is a subshell under LC_ALL=C so that ${#var} counts bytes in every
+# shell. dash counts bytes in any locale, but bash, ksh and zsh count
+# characters under a UTF-8 locale, and /bin/sh is dash on Debian and bash on
+# macOS.
+derive_title() (
+    LC_ALL=C
     _dt=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -s ' ')
     _dt="${_dt# }"; _dt="${_dt% }"
     [ "${#_dt}" -le "$TITLE_MAX" ] && { printf '%s' "$_dt"; return 0; }
@@ -106,7 +115,7 @@ derive_title() {
         [ -n "$_dt_utf8" ] && _dt="$_dt_utf8"
     fi
     printf '%s…' "${_dt% }"
-}
+)
 
 # ── Argument parsing ─────────────────────────────────────────────────
 ARG=""; RIG=""; NO_REACT=""; SUBJ_TYPE=""; FORCE_TOPIC=""
@@ -342,7 +351,7 @@ board; this body is the record. Ask before assuming scope."
         --db "$RIG_PATH/.beads" --json 2>/dev/null)
     SUBJ_RC=$?
     SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
-    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
     if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
         # A refused create STATES its reason in .error — surface it (tk-wp50s).
         SUBJ_ERR=$(printf '%s' "$SUBJ_JSON" | jq -r '.error // .[0].error // empty' 2>/dev/null)
@@ -407,12 +416,16 @@ if [ -n "$REACT" ]; then
     # No reaction was dispatched, so nothing downstream will file the visit —
     # fall through and file it directly; a conversation beats a bead nobody is
     # coming to. gc-helm react exit 5 is the already-reacted no-op (the guard
-    # slung nothing because a first reaction happens once), distinct from a real
-    # sling failure: name the actual cause so the visit body the converse
-    # session reads is accurate.
+    # slung nothing because a first reaction happens once) and exit 6 the
+    # live-workflow no-op (the guard slung nothing because a reaction never races
+    # work in flight), both distinct from a real sling failure: name the actual
+    # cause so the visit body the converse session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
         note "$PROG: subject $SUBJECT already carries a first reaction — no new reaction was slung; filing the visit directly"
         REACT_WHY="no: subject already carries a first reaction (a first reaction happens once)"
+    elif [ "$REACT_RC" -eq 6 ]; then
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was slung; filing the visit directly"
+        REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     else
         note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
         REACT_WHY="no: the first-reaction sling failed"

@@ -220,12 +220,14 @@ NTS_LINE=$(grep -nE '^NOTHING_TO_SALVAGE=0' "$TOML" | head -1 | cut -d: -f1)
   || bad "nothing-to-salvage gate must be defined before any 'git add -A' (got nts@${NTS_LINE:-none} add@${FIRST_ADD:-none})"
 
 echo "--- formula still parses as TOML ---"
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$TOML" <<'PY' && ok "formula still parses as TOML" || bad "formula failed to parse as TOML"
+if TOML_PY="$(tomllib_python)"; then
+  "$TOML_PY" - "$TOML" <<'PY' && ok "formula still parses as TOML" || bad "formula failed to parse as TOML"
 import sys, tomllib
 with open(sys.argv[1], "rb") as f:
     tomllib.load(f)
 PY
+else
+  echo "skip - formula still parses as TOML: $TOML_PY"
 fi
 
 echo "---"
