@@ -113,11 +113,14 @@ mk_sut_dir() { # <dir> <file>...
   # bd-lib.sh (the shared bead-store reads) and pace-lib.sh (the cadence arms'
   # visit order and time budget) are libraries SUTs source by sibling path, and
   # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
-  # the same way; copy them beside the SUT so those sources resolve in the
-  # private dir. They sit beside this harness, so they are found whatever the
+  # the same way. pr-post.sh is the single writer of the city's PR posts and the
+  # owner of the provenance definition every feedback reader asks, so a SUT that
+  # posts or reads feedback runs it by sibling path. Copy all four beside the SUT
+  # so those calls resolve in the private dir; cp keeps pr-post.sh's executable
+  # bit. They sit beside this harness, so they are found whatever the
   # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   return 0
@@ -283,9 +286,11 @@ case "$verb" in
       *" $id "*) case " $* " in *" --status=closed "*)
         echo "gc: simulated close refusal for $id" >&2; exit 1 ;; esac ;;
     esac
-    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""
+    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0
     while [ $# -gt 0 ]; do
       case "$1" in
+        --description=*) desc="${1#--description=}"; desc_set=1 ;;
+        --description|-d) shift; desc="${1-}"; desc_set=1 ;;
         --set-metadata) shift; sets+=("${1:-}") ;;
         --set-metadata=*) sets+=("${1#--set-metadata=}") ;;
         --unset-metadata) shift; unsets+=("${1:-}") ;;
@@ -356,6 +361,12 @@ case "$verb" in
         'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
         "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
     fi
+    if [ "$desc_set" = 1 ]; then
+      case ",$drops," in *",description,"*) : ;; *)
+        jq -c --arg id "$id" --arg d "$desc" \
+          'map(if .id == $id then .description = $d else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+      esac
+    fi
     mv "$tmp" "$S"
     echo "updated $id"
     ;;
@@ -402,6 +413,26 @@ case "$verb" in
     # blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
     # depends_on=B). Queries honor --direction (down = follow the id's own
     # dependency rows; up = rows depending on the id) and -t/--type.
+    #
+    # Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
+    # type. Re-adding a pair with the type it already carries is a no-op that
+    # exits 0; asking for any other type is refused with exit 1 and writes
+    # nothing. The reversed pair is a different pair. Both writers below store
+    # through dep_put, so no write through the stub leaves two edges on one
+    # pair, a state bd refuses to create.
+    dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
+      local issue="$1" on="$3" have
+      [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
+      have=$(awk -F'|' -v i="$issue" -v d="$on" '
+        { if ($2 == "blocks") { ri=$3; rd=$1 } else { ri=$1; rd=$3 }
+          if (ri == i && rd == d) { print $2; exit } }' "$D")
+      if [ -z "$have" ]; then
+        printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$D"
+      elif [ "$have" != "$2" ]; then
+        echo "Error: dependency $issue -> $on already exists with type \"$have\" (requested \"$2\"); remove it first with 'bd dep remove' then re-add" >&2
+        return 1
+      fi
+    }
     case "${1:-}" in
       list)
         [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
@@ -447,9 +478,9 @@ case "$verb" in
         # ("A|blocks|B" = A blocks B), so a blocks add swaps its operands to match;
         # every other edge type keeps the source-first orientation.
         if [ "$ty" = "blocks" ]; then
-          printf '%s|%s|%s\n' "$b" "$ty" "$a" >> "$D"
+          dep_put "$b" "$ty" "$a" || exit 1
         else
-          printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D"
+          dep_put "$a" "$ty" "$b" || exit 1
         fi ;;
       remove|rm)
         # gc bd dep remove <issue> <depends-on>: drop the edge with that
@@ -467,7 +498,7 @@ case "$verb" in
         # STUB_DEP_FAIL="id id2" — refuse to attach an edge whose src is named,
         # modelling a dep write that reports failure so a fail-closed caller retries.
         case " ${STUB_DEP_FAIL:-} " in *" $src "*) echo "gc bd dep: simulated refusal for $src" >&2; exit 1 ;; esac
-        [ "${1:-}" = "--blocks" ] && printf '%s|%s|%s\n' "$src" "blocks" "${2:-}" >> "$D" ;;
+        [ "${1:-}" = "--blocks" ] && { dep_put "$src" blocks "${2:-}" || exit 1; } ;;
     esac
     ;;
   *) echo "gc bd stub: unsupported '$verb'" >&2; exit 2 ;;

@@ -186,10 +186,17 @@ LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-t
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
 # <<< review-lease-keepalive
 # >>> review-workspace-add
+# The worktree is made in the rig's repository, named by path, so the
+# session's cwd cannot pick the repo. Without --repo, add uses the current
+# directory's repository, and an empty --repo does the same, so an
+# unresolvable rig fails closed.
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID") || exit 1
+REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
 # <<< review-workspace-add
 # run the suites the diff touches through hb, e.g. `hb bash -c '<suite>'`;
@@ -329,12 +336,20 @@ if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
   FILED="unfiled — duplicate probe unreadable"
 else
   FILED=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
-  [ -n "$FILED" ] || FILED=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json | jq -r '.id // .[0].id')
+  if [ -z "$FILED" ]; then
+    FILED_JSON=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json)
+    FILED=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+    if [ -z "$FILED" ]; then
+      CREATE_ERR=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+      FILED="unfiled — bd create returned no id${CREATE_ERR:+: $CREATE_ERR}"
+    fi
+  fi
 fi
 echo "$FILED"
 ```
-An unreadable probe files nothing. Say so in the verdict rather than filing
-blind, and the next round re-probes.
+An unreadable probe files nothing, and neither does a create that returns no
+id. Say so in the verdict rather than filing blind, and the next round
+re-probes.
 
 **6. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step:

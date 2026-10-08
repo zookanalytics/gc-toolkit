@@ -166,10 +166,15 @@ PH_HOME="[[HOME]]"
 # against agents/dog/agent.toml, adjacent in sort order, which conflicted. With
 # the path on its own line only the hash moves, and the next record's path line
 # is the separation.
+#
+# A symlinked input is an input of its own, recorded under the link's path and
+# hashed through the link. A sub-pack links root fragments its prompts compose
+# (packs/gascity-keeper/template-fragments/), and the render reads whatever the
+# link resolves to, so a link moved to another file has to move a record.
 digest_inputs() {
     local root="$1"
     find "$root/agents" "$root/template-fragments" "$root/formulas" "$root/packs" \
-        -type f \( -name '*.md' -o -name '*.toml' \) -print 2>/dev/null | LC_ALL=C sort
+        \( -type f -o -type l \) \( -name '*.md' -o -name '*.toml' \) -print 2>/dev/null | LC_ALL=C sort
     printf '%s\n' "$root/pack.toml"
     printf '%s\n' "$root/assets/scripts/render-seed-audit.sh"
 }

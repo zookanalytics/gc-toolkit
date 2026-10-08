@@ -12,6 +12,8 @@
 # damage lands somewhere else entirely. An uncapped per-instance agent whose
 # patrol reconciles one wisp per rig has its instances burning each other's
 # in-flight wisps, and nothing in the agent's own config looks wrong.
+#
+# run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
