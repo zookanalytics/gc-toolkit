@@ -17,8 +17,9 @@
 #     and so does a typed non-string value (`false`) — read, never a jq abort;
 #   * an ASSIGNED gate (a task a named person owes) gets no visit;
 #   * a gate whose gated bead is NOT open gets no visit and is named on stderr;
-#   * a visit already standing for the gated bead — matched by stall_root, which
-#     `open` alone cannot see — is recorded on the gate without a second filing;
+#   * a visit already standing for the gated bead — matched by the shared visit
+#     identity, here a tracks edge beside an empty gc.continuation_group stamp —
+#     is recorded on the gate without a second filing;
 #   * a non-human gate (an EXPLICIT await_type other than human, e.g. a timer)
 #     is left alone, while a legacy demand that records no await_type at all is
 #     swept like a current human gate;
@@ -98,8 +99,8 @@ chmod +x "$BIN/helm-stub"
 # --has-metadata-key, but the sweep's own jq must drop it too, so the stub
 # returns it deliberately); g5 is assigned to a person; g6 already carries a
 # visit stamp; g7 gates a bead that is NOT in the live set; g8's gated bead is
-# already under a live sitting whose visit names it only as stall_root; g9
-# carries a typed (boolean) opt-out; tk-glegacy is a legacy demand
+# already under a live sitting whose visit names it only by its tracks edge
+# (the stamp landed empty); g9 carries a typed (boolean) opt-out; tk-glegacy is a legacy demand
 # (issue_type=decision, no await_type) that must be swept like a current human
 # gate (its id avoids the tk-g1 prefix so a substring check cannot alias it);
 # tk-gvis gates a bead that is ITSELF a visit (an anchored hold files its
@@ -120,15 +121,15 @@ cat > "$TMP/gates.json" <<'JSON'
  {"id":"tk-gvis","issue_type":"gate","await_type":"human","status":"open","title":"anchored hold, demand on the visit","metadata":{"gc.demand_for":"tk-vself"}}
 ]
 JSON
-# Live fixture: every gated bead except tk-w7, plus the sitting on tk-run whose
-# visit names tk-w8 as its stall_root.
+# Live fixture: every gated bead except tk-w7, plus the sitting whose visit
+# tracks tk-w8.
 cat > "$TMP/live.json" <<'JSON'
 [
  {"id":"tk-w1","status":"open"},{"id":"tk-w2","status":"open"},{"id":"tk-w3","status":"open"},
  {"id":"tk-w5","status":"open"},{"id":"tk-w6","status":"open"},{"id":"tk-w8","status":"open"},
- {"id":"tk-w9","status":"open"},{"id":"tk-wlegacy","status":"open"},{"id":"tk-run","status":"open"},
- {"id":"tk-vis8","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-run","stall_root":"tk-w8"},
-  "dependencies":[{"type":"tracks","depends_on_id":"tk-run"}]},
+ {"id":"tk-w9","status":"open"},{"id":"tk-wlegacy","status":"open"},
+ {"id":"tk-vis8","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":""},
+  "dependencies":[{"type":"tracks","depends_on_id":"tk-w8"}]},
  {"id":"tk-vself","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-vself"}}
 ]
 JSON
@@ -156,7 +157,7 @@ hasnt "$(cat "$HELM_LOG")" "open tk-w5" "(ASSIGNED) a gate assigned to a person 
 hasnt "$(cat "$HELM_LOG")" "open tk-w6" "(ONESHOT) a gate already stamped gc.gate_visit is never re-offered"
 hasnt "$(cat "$HELM_LOG")" "open tk-w7" "(CLOSEDWORK) a gate whose gated bead is not open files nothing"
 has  "$ERR" "tk-g7 blocks tk-w7, which is not open" "(CLOSEDWORK) …and names the gate that outlived its work"
-hasnt "$(cat "$HELM_LOG")" "open tk-w8" "(HELD) a gated bead already under a sitting (by stall_root) gets no second visit"
+hasnt "$(cat "$HELM_LOG")" "open tk-w8" "(HELD) a gated bead already under a sitting (by its tracks edge) gets no second visit"
 has  "$(cat "$GC_LOG")" "bd update tk-g8 --set-metadata gc.gate_visit=tk-vis8" "(HELD) …and that sitting's visit is recorded on the gate"
 hasnt "$(cat "$HELM_LOG")" "open tk-vself" "(SELFVISIT) a gate whose gated bead is itself a visit files no visit-on-a-visit"
 has  "$(cat "$GC_LOG")" "bd update tk-gvis --set-metadata gc.gate_visit=tk-vself" "(SELFVISIT) …and the gated visit is self-recorded as the gate's visit"

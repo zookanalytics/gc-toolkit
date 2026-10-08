@@ -17,6 +17,8 @@
 #       from the working directory, which on a third-party checkout would let
 #       that repository supply the code judging its own writes
 #   (5) the script it names exists, is executable, and parses
+#
+# run-tests-scope: tree
 
 set -u
 
