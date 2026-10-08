@@ -410,7 +410,7 @@ reset_world
 pool_bead s-a '{"alias":"rig/pack.polecat","alias_history":"old/one,old/two"}'
 sessions s-a:asleep:false
 run
-has "$CLOSED" "close s-a" "a candidate with six identities and no work is closed"
+has "$CLOSED" "close s-a" "a candidate with five identities and no work is closed"
 eq "$(grep -c '^bd list ' "$QUERIES")" "6" "its two work searches read each of the three stores once each"
 
 # --- (SLOTALIAS / STABLE) which aliases name the session ------------------------
