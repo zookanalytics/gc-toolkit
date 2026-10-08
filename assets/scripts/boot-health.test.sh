@@ -75,7 +75,7 @@ export PATH="$TMP/bin:$PATH"
 export BOOT_HEALTH_CALL_TIMEOUT=0
 
 NOW="$(date +%s)"
-iso() { date -u -d "@$1" '+%Y-%m-%dT%H:%M:%SZ'; }
+iso() { jq -rn --argjson s "$1" '$s | todateiso8601'; }
 wisp() { # $1=status  $2=age seconds
     printf '[{"id":"lx-wisp-t","title":"mol-deacon-patrol","status":"%s","updated_at":"%s"}]' \
         "$1" "$(iso $((NOW - $2)))"
@@ -163,6 +163,15 @@ hasnt "$BODY" "--status=in_progress" \
 run 2 STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
 eq "$(mailed)" yes "absent wisp reports"
 has "$(cat "$TMP/body")" "no live patrol wisp" "absent-wisp text asserts no status"
+
+# The report names the second the episode went cold, as a UTC timestamp. The
+# state is seeded with a known second, so the expected text is fixed here
+# rather than computed the way the script computes it.
+reset
+printf '%s\n' '#boot-health-state-v2' 'pane_hash=' 'cold_since=1791443608' 'last_report=0' > "$TMP/state/state"
+pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+eq "$(grep -cxF '  cold since      2026-10-08T07:13:28Z' "$TMP/body" || true)" 1 \
+   "report names when the episode went cold, as a UTC timestamp"
 
 # --- (e) The wisp survives a flood of unrelated rows. ------------------------
 # --limit=0 lifts the default 50-row cap; the title match keeps the answer to
