@@ -13,7 +13,10 @@ path it adds to `docs/architecture.md`.
 
 ## The gap
 
-Read in the gascity fork at `92344d46d`, the build the city runs.
+Read in the gascity fork at `92344d46d`, the build the city ran when the pass
+was written. The core facts added in review (what `gc session close` releases,
+how a cap is read) were read at `1a3bda7a6`, the build the city runs on
+2026-10-08, and are the same at `92344d46d`.
 
 - **Every open pool session bead holds its slot.** `claimFreshPoolSlotInfo`
   (`cmd/gc/build_desired_state.go`) marks a slot occupied for every open session
@@ -64,7 +67,12 @@ them.
   template "gascity/gc-toolkit.polecat" is held by session lx-wisp-hwfu2` lines,
   still printing on 2026-10-06. A dry run of the reaper against the live city
   names it as the one bead it would close. Its reason is on the freeable list, so a predicate
-  keyed on the reason alone would not catch it.
+  keyed on the reason alone would not catch it. Core closed it on 2026-10-08,
+  when the city first started on a new host: `reapPreBootSessionBeads`
+  (`cmd/gc/session_beads.go`) closes a bead last started before the host booted,
+  and it runs only while the runtime server is entirely absent. The supervisor
+  log reads `reaped pre-boot session bead lx-wisp-hwfu2 ... — runtime server
+  absent`. That path does not reach a ghost on a running host.
 
 ## What the pack can see
 
@@ -77,13 +85,18 @@ Everything the predicate needs is readable without core changes:
   `pool_managed`, `session_origin`, `pool_slot`, `configured_named_session`,
   `held_until`, `quarantined_until`, `wait_hold`, `pin_awake`, `alias`,
   `alias_history`, `session_name`, `template`.
-- `gc bd list --db <rig>/.beads --assignee <who> --status open,in_progress
-  --include-infra --include-ephemeral --limit 0 --json`, once per store and
-  identity, answers whether any work is assigned. The store roster comes from
-  `gc rig list --json`. An exec order runs with the city root as its working
-  directory and `GC_CITY` set (`orderExecEnvWithError` in
-  `cmd/gc/order_store.go`, the `execRun` call in `cmd/gc/order_dispatch.go`),
-  so the roster read resolves the city.
+- `gc bd list --db <rig>/.beads --status open,in_progress,hooked --brief
+  --include-infra --include-ephemeral --limit 0 --json`, once per store, lists every bead in a live work status, and jq keeps the ones assigned
+  to one of the session's identities. `--brief` leaves out only the free-text
+  fields: on the live city on 2026-10-08 the gc-toolkit store's brief listing
+  carried the same id, assignee, status and type on every assigned row as the
+  full one. The store roster comes from `gc rig list --json`. An exec order
+  runs with the city root as its working directory and `GC_CITY` set
+  (`orderExecEnvWithError` in `cmd/gc/order_store.go`, the `execRun` call in
+  `cmd/gc/order_dispatch.go`), so the roster read resolves the city.
+- Every answer passes through the pack's control-character scrub before jq
+  reads it, because one raw C0 byte inside a string, such as a TAB in a title,
+  makes jq reject the whole answer.
 - `gc config show --json --city <path>` gives each configured agent's
   `Namepool`, `NamepoolNames` and `MaxActiveSessions`, which tell an ordinary
   numbered pool from a namepool or a canonical singleton. It leaves out the
@@ -104,10 +117,13 @@ runtime the controller could see for that long.
 `pool-slot-reap.sh` closes a bead with `gc session close` when all of these hold:
 
 1. **Pool-managed, not named, not manual.** Core's own definitions:
-   `session_origin=ephemeral`, `pool_managed=true` or a `pool_slot`; never
-   `configured_named_session=true`, because a closed named bead keeps its alias
-   reservation and blocks re-creation; never a manual session, which
-   `converse-reap` owns.
+   `session_origin=ephemeral`, `pool_managed=true` or a `pool_slot`; never a
+   named session, because a closed named bead keeps its alias reservation and
+   blocks re-creation; never a manual session, which `converse-reap` owns. A
+   bead is named when it carries `configured_named_session=true` or
+   `session_origin=named`, the birth path the runtime stamps on a named
+   session (`docs/gascity-agents.md`), so a named bead without the configured
+   flag is still kept, even when it also reads pool-managed or slotted.
 2. **Persisted state asleep or drained.**
 3. **No deliberate hold.** user-hold, wait-hold, quarantine, context-churn and
    rate_limit sleeps, a `held_until`, `quarantined_until` or `wait_hold` marker,
@@ -118,16 +134,33 @@ runtime the controller could see for that long.
    later, are older than `POOL_SLOT_REAP_GRACE_S` (900). Core frees a freeable
    bead on the tick its runtime goes, so the window gives core the first move,
    and a fresh `gc session wake` keeps a bead out of the pass.
-5. **No work.** Nothing open or in_progress, in any store, under the bead's id,
-   `session_name`, configured named identity, `alias` or any prior alias.
-   Blocked work does not count, matching core's close gates: it is parked behind
-   a hold a human or an edge releases. The numbered slot name (`agent_name`) is
-   not searched. It passes to the slot's next holder, and core's guards never
-   treat it as an owner. The same goes for the alias and prior aliases of a bead
-   in an ordinary numbered pool, as the next section explains.
-6. **Unchanged on a second read.** The work search takes seconds, so the bead is
-   read again just before the close, and any change to its lifecycle facts keeps
-   it.
+5. **No work.** Nothing open, in_progress or hooked, in any store, under the
+   bead's id, `session_name`, configured named identity, `alias` or any prior
+   alias. Core's close gates count open and in_progress only, and the pass also
+   counts hooked. A hooked bead is as live as an in_progress one
+   (`docs/gascity-dispatch-containment.md`). `gc session close` releases only
+   open and in_progress work (`unclaimWorkAssignedToRetiredSessionBead`), and
+   the witness's orphan recovery lists only those two statuses
+   (`mol-witness-patrol`), so a hooked bead assigned to a closed session would
+   go on naming it with nothing to release it. Blocked, deferred and pinned
+   work does not count. Blocked and deferred work is parked behind a hold, an
+   edge or a date, and nothing executes it until that release.
+   `molecule-hold.sh` leaves a held step blocked and still assigned to the
+   session that held it, so counting blocked work would keep the bead of every
+   pool session that ever held a molecule. Pinned is bd's frozen status, and no
+   script or formula in the pack and no core path pins work to a pool session.
+   On 2026-10-08 no store held a hooked or pinned bead, or a blocked or deferred
+   one with an assignee. The
+   numbered slot name (`agent_name`) is not searched. It passes to the slot's
+   next holder, and core's guards never treat it as an owner. The same goes for
+   the alias and prior aliases of a bead in an ordinary numbered pool, as the
+   next section explains.
+6. **Unchanged on a second look.** The work search takes seconds, so the bead is
+   read again just before the close, and any change to its lifecycle facts (its
+   state, sleep, wake request, hold markers or pending create) keeps it. Work
+   assigned to the session meanwhile sits on other beads, which that read cannot
+   see, so the work search then runs again on the second read's identities, and
+   anything it finds keeps the bead.
 
 The sleep reason is not part of the predicate beyond the holds in step 3. The
 killed case motivated it, but `lx-wisp-hwfu2` shows a freeable reason can hold a
@@ -171,6 +204,11 @@ be sure, it leans toward keeping the bead:
   pass keeps it, because the remedy's first constraint is never to close a
   session bead that holds assigned work, and keeping one costs at most the slot
   it holds.
+- An unset cap and a cap of 0 rebind, as in core. `EffectiveMaxActiveSessions`
+  returns the configured value with nil meaning unlimited, and
+  `UsesCanonicalSingletonPoolIdentity` holds only for a cap of exactly 1
+  (`internal/config/session_capacity.go`), so core drops the alias of such a
+  slotted bead, and the pass leaves it out the same way.
 - A config that `gc config show` reports invalid (`validation.ok` false) counts
   as unreadable. The controller's reload refuses a config that fails agent,
   service or webhook validation and keeps running the one it had
@@ -182,14 +220,26 @@ the same shape as a numbered slot, and it is still the session's own name.
 
 ## Cost and cadence
 
-The order runs every five minutes with a 300 s timeout. A pass with any asleep
+The order runs every five minutes with a 600 s timeout. A pass with any asleep
 row reads the rig roster and the agent config once, the config in under a
 second. A bead that fails the cheap checks costs one `gc bd show`. An eligible
-one costs one read per store and identity, plus the second read, the close and
-the ledger write. Against the
-live city that was about 25 s for `lx-wisp-hwfu2` across six stores and three
-identities. Candidates left when `POOL_SLOT_REAP_BUDGET_S` (240) runs out are
-deferred to the next pass. A killed ghost is therefore closed between 15 and
+one costs two bead reads, one read per store for each of its two work
+searches, the close and the ledger write. The search it replaced made one read
+per store and identity, 18 for three identities across six stores, and put an
+eligible candidate at about 25 s on 2026-10-06. On 2026-10-08 a `--dry-run` of
+one synthetic eligible candidate against the live stores, alternating the two
+versions twice under a load average of 30 to 44, took 82 s and 32 s with the
+old search's 18 store reads, and 20 s and 16 s with the new pass's 12, its
+second search included.
+
+`POOL_SLOT_REAP_BUDGET_S` (240) bounds the reads: none starts after it runs
+out, and a candidate cut off mid-read is deferred to the next pass. A candidate
+whose reads all finished always gets its close, the read that settles a
+failed close, and its ledger write. Each gc call is stopped after 60 s, with
+SIGKILL 5 s after SIGTERM, so a pass ends within 240 + 65 for the last read +
+3 × 65 for that tail = 500 s. The 600 s timeout sits above that, so it cannot
+land between a close and its ledger entry, and the co-located test fails if
+the budget or a bound grows past it. A killed ghost is closed between 15 and
 about 20 minutes after the kill.
 
 ## The authority to close
@@ -216,6 +266,20 @@ starts a ghost's runtime inside the same controller tick as the close, before
 the heal marks the bead awake, would be stopped. The bead has been a ghost for
 the whole grace window by then, and the pool spawns a fresh session for any
 demand.
+
+Work assigned to the session between its second work search and the close is
+not seen. `gc session close` releases, after it closes the bead, the open and
+in_progress work it finds under the bead's id, session name and configured
+named identity (`cmdSessionClose` calls
+`unclaimWorkAssignedToRetiredSessionBead`), so a claim landing in that window
+returns to the queue instead of naming a closed session. Hooked or
+alias-form work landing in that window is not released.
+
+A close that exits non-zero may already have committed, as when its 60 s bound
+cuts it off after the bead's close (`Manager.CloseDetailed` closes the bead as
+its last step that can fail). So the pass reads the bead once more after any
+failed close: it records the close when the bead reads closed, and leaves a
+bead that reads open for the next pass.
 
 ## Core alternative, not taken
 
