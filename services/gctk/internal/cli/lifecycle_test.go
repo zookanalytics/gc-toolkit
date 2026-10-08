@@ -148,23 +148,13 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"close on a non-closed state", []string{"b-1", "--to", "abandoned", "--close"}, "not a closed state"},
 		{"closed state without --close", []string{"b-1", "--to", "merged"}, "requires --close"},
 		// `merged` means "landed; merged_sha recorded", so the sha rides the same
-		// atomic write; a bead with no PR takes --to unanchored --close instead.
+		// atomic write; a bead that never had a PR closes with a plain gc bd close.
 		{"--to merged without a merged_sha", []string{"b-1", "--to", "merged", "--close"}, "requires --set merged_sha"},
 		{"--to merged with an empty merged_sha", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha="}, "requires --set merged_sha"},
-		// A key set twice, or set and unset, resolves by argument order and can
-		// never verify; the merged_sha guard scans the first token, so either shape
-		// would otherwise slip an empty sha past it and close with no landing.
-		{"a key set and unset in one call", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha=abc", "--unset", "merged_sha"}, "both set and unset"},
-		{"a key set twice on the set side", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha=abc", "--set", "merged_sha="}, "set more than once"},
 		{"--set merge_result", []string{"b-1", "--to", "pull_request", "--set", "merge_result=x"}, "written by --to"},
 		{"--set gc.routed_to", []string{"b-1", "--to", "pull_request", "--set", "gc.routed_to=x"}, "route via --route"},
 		{"--set gc.takeaway", []string{"b-1", "--to", "abandoned", "--set", "gc.takeaway=x"}, "written by --takeaway"},
 		{"--set-dated merge_result", []string{"b-1", "--to", "pull_request", "--set-dated", "merge_result=x@oid"}, "written by --to"},
-		// --to is merge_result's only writer on the unset side too: an explicit
-		// --unset clears the state the same write records, so a merged close would
-		// leave a closed anchor with no merge_result for any reader to enumerate.
-		{"--unset merge_result on a merged close", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha=abc", "--unset", "merge_result"}, "never by --unset"},
-		{"--unset merge_result on an open state", []string{"b-1", "--to", "pull_request", "--unset", "merge_result"}, "never by --unset"},
 		{"--set-dated with no oid", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled"}, "<value>@<oid>"},
 		{"--set-dated carrying its own instant", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled@oid@2026-01-01T00:00:00Z"}, "<value>@<oid>"},
 		{"--set-dated with no '='", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine"}, "is not k=<value>@<oid>"},

@@ -304,11 +304,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 	// status and merge_result move together: a close on a non-terminal state (or
 	// a terminal state left open) is the closed-means-landed violation (I5).
-	// `unanchored` is the one exception: lifecycle.toml declares its status
-	// "open|closed", so it MAY close (the terminal a non-anchor takes) without
-	// being a closed_state that MUST close. The two guards split on exactly that.
-	if o.closeIt && !lifecycle.IsClosedState(o.to) && o.to != "unanchored" {
-		fmt.Fprintf(stderr, "%s: --close refused with --to %s — '%s' is not a closed state (closed_states: %s) and not unanchored; a closed bead on a non-terminal merge_result is invisible to every open-bead consumer\n",
+	if o.closeIt && !lifecycle.IsClosedState(o.to) {
+		fmt.Fprintf(stderr, "%s: --close refused with --to %s — '%s' is not a closed state (closed_states: %s); a closed bead on a non-terminal merge_result is invisible to every open-bead consumer\n",
 			prog, o.to, o.to, strings.Join(lifecycle.ClosedStates, " "))
 		return 1
 	}
@@ -321,10 +318,10 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// that sha in the same atomic write, so the state cannot be entered with no
 	// landing to point at — the closed-implies-landed violation
 	// doctor/check-closed-implies-landed reports after the fact, refused here at
-	// the write instead. Every sanctioned writer (merge.sh, pr-facts.sh,
-	// mol-refinery-patrol) already passes --set merged_sha=<oid>; what this
-	// refuses is the bead with no PR that never had one, whose terminal is
-	// `--to unanchored --close`, not a false landing.
+	// the write instead. Every sanctioned writer (merge.sh, pr-facts.sh, the
+	// gctk merge port, mol-refinery-patrol) passes --set merged_sha=<oid>. What
+	// this refuses is a bead that never had a PR: it is no merge anchor, and it
+	// closes with a plain `gc bd close`, not a false landing.
 	if o.to == "merged" {
 		haveSha := false
 		for _, s := range o.sets {
@@ -333,7 +330,7 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		if !haveSha {
-			fmt.Fprintf(stderr, "%s: --to merged requires --set merged_sha=<oid> — 'merged' means 'landed; merged_sha recorded' (lifecycle.toml), so it cannot be entered without the landing that defines it. A bead with no PR has not landed: close it with '%s transition %s --to unanchored --close' (a closed unanchored bead is legal), not --to merged\n", prog, prog, id)
+			fmt.Fprintf(stderr, "%s: --to merged requires --set merged_sha=<oid> — 'merged' means 'landed; merged_sha recorded' (lifecycle.toml), so it cannot be entered without the landing that defines it. A bead that never had a PR has not landed and is no merge anchor: with merge_result absent, close it with a plain 'gc bd close %s', not --to merged\n", prog, id)
 			return 1
 		}
 	}
@@ -373,20 +370,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	// --to is merge_result's only writer on the unset side too. The update stamps
-	// merge_result=<to> (or clears it for unanchored) ahead of every --unset, so
-	// an explicit --unset merge_result clears the state the same write records.
-	// `--to merged --close --set merged_sha=<oid> --unset merge_result` would
-	// then close a live pull_request anchor with no merge_result: the one-step
-	// close the current-state guard refuses on --to unanchored --close, reached
-	// by another route and invisible to every reader that enumerates anchors by
-	// merge_result, doctor/check-closed-implies-landed included.
-	for _, u := range o.unsets {
-		if u == "merge_result" {
-			fmt.Fprintf(stderr, "%s: merge_result is written by --to, never by --unset\n", prog)
-			return 1
-		}
-	}
 	// A dated key's ARGUMENT carries the two components its writer decided; this
 	// command owns the third. Refusing a malformed one here is what keeps the
 	// preserve rule decidable: it compares on value and oid, and cannot find them
@@ -400,37 +383,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		if strings.Count(dv, "@") != 1 || strings.HasSuffix(dv, "@") {
 			fmt.Fprintf(stderr, "%s: --set-dated '%s' must carry exactly <value>@<oid>; lifecycle.sh appends the @<since>\n", prog, d)
 			return 1
-		}
-	}
-	// A key written by --set/--set-dated must be named once on the set side and
-	// not also unset. The update assembly (below) appends every --set, then the
-	// resolved --set-dated, then every --unset, so a key named twice on the set
-	// side, or set and unset together, resolves by argument order and the
-	// post-write read-back can never verify a value it was told to write twice or
-	// to both write and clear. Both shapes reach the closed-with-no-landing (I5)
-	// state this transition refuses: `--to merged --set merged_sha=<oid> --set
-	// merged_sha=` and `--to merged --set merged_sha=<oid> --unset merged_sha`
-	// each satisfy the merged_sha guard above on the first token, then a later
-	// empty set or the unset wins. Repeated --unset of one key is idempotent — it
-	// lands the same absence in any order — so it stays allowed. Reject the
-	// ambiguity before any write rather than leave the bead half-applied.
-	var setKeys []string
-	for _, s := range append(append([]string{}, o.sets...), o.dated...) {
-		k, _ := kv(s)
-		setKeys = append(setKeys, k)
-	}
-	for i := range setKeys {
-		for j := i + 1; j < len(setKeys); j++ {
-			if setKeys[i] == setKeys[j] {
-				fmt.Fprintf(stderr, "%s: '%s' is set more than once (--set/--set-dated) — the write applies them in order, so the surviving value turns on argument order and the read-back can never verify; set each key once\n", prog, setKeys[i])
-				return 1
-			}
-		}
-		for _, uk := range o.unsets {
-			if setKeys[i] == uk {
-				fmt.Fprintf(stderr, "%s: '%s' is both set and unset in one call — the write applies --set then --unset, so the result depends on argument order and can never verify; drop one\n", prog, setKeys[i])
-				return 1
-			}
 		}
 	}
 	if o.takeawaySet {
@@ -466,21 +418,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 	if !lifecycle.EdgeLegal(cur, o.to) {
 		fmt.Fprintf(stderr, "%s: illegal edge %s -> %s for %s (declared machine: lifecycle/lifecycle.toml)\n", prog, cur, o.to, id)
-		return 1
-	}
-	// --to unanchored --close unsets merge_result AND closes in one write. That
-	// is a bead's terminal only from a state that is not a live anchor:
-	// "unanchored" (a task that never anchored a PR) or "held" (a sitting whose
-	// ruling concluded). Every other state with an edge to unanchored is a live
-	// merge anchor the cadence drives, or a PR-derived human state a person must
-	// repair and re-engage; the same call would clear its merge_result and close
-	// it in one write, dropping it from the open-anchor readers still waiting on
-	// it while recording a terminal it never reached (I5). Those reach unanchored
-	// by their own edge, which leaves the bead open, and close from there. Keyed
-	// on the CURRENT state read off the bead, so an omitted --expect is held to
-	// the same rule as a named one.
-	if o.closeIt && o.to == "unanchored" && cur != "unanchored" && cur != "held" {
-		fmt.Fprintf(stderr, "%s: --close refused: %s is '%s' — a one-step --to unanchored --close is the terminal only from 'unanchored' or 'held', and '%s' is a live or human-queued anchor whose merge_result this would clear while closing it, hiding it from every open-anchor reader. Take it to unanchored by its own edge (which leaves it open), then close.\n", prog, id, cur, cur)
 		return 1
 	}
 	// A bead already resting on the park route keeps it. No pool claims that

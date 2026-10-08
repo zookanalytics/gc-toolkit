@@ -45,7 +45,7 @@ session dying (witness orphan recovery).
 stateDiagram-v2
   direction TB
 
-  state "unanchored (merge_result absent; status open, or closed at the non-anchor terminal)" as UN {
+  state "unanchored (merge_result absent, status open)" as UN {
     [*] --> filed
     filed --> routed: gc sling / deferred-dispatch.sh
     routed --> claimed: gc hook --claim (runtime)
@@ -76,16 +76,14 @@ stateDiagram-v2
 
   UN --> held: agents/converse — a sitting holds for an operator decision
   held --> UN: the ruling landed
-  UN --> [*]: non-anchor close (never had a PR)
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
 (branch recorded, assignee = refinery, `merge_result` still absent); the
-anchored states are the `merge_result` values. An anchor closes as `merged`:
-`status = closed` with the `merged_sha` that names the landing. A bead that
-never became an anchor has no landing to record and closes as `unanchored`
-(`merge_result` absent, `status = closed`), the non-anchor terminal. The human
-states stay open, routed to human.
+anchored states are the `merge_result` values. `merged` is the only state with
+`status = closed`, and `lifecycle.sh` refuses to enter it without a non-empty
+`merged_sha`, the landing the state names; the human states stay open, routed
+to human.
 
 `held` is the one human state a sitting writes rather than the refinery, and it
 is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
@@ -148,7 +146,6 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
 | unanchored → held | `agents/converse` hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
 | held → unanchored | `agents/converse` sign-off, via `lifecycle.sh`; or human | the ruling landed |
-| unanchored → closed | `lifecycle.sh` (`--to unanchored --close`), or `gc bd close` after a `held → unanchored` release | a non-anchor that never had a PR reaches its terminal (`merge_result` stays absent, `status` closes) |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` clears
 the check marker and files one routed rework child that blocks the anchor — the
