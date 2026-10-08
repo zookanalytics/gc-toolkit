@@ -14,11 +14,11 @@
 # the store its prefix names; a review that is not closed and a status that
 # cannot be read hold at any age; a bead the ledger no longer has, a name with no
 # bead, and a name with anything after the bead id age out on the idle horizon,
-# measured by the newest entry inside; a process standing in a workspace or
-# holding a file in it holds it until it exits, and a /proc walk that reads
-# nothing holds everything; a symlink is unlinked and its target kept; --dry-run
-# removes nothing; unreadable rigs reap nothing; and the pass reads no directory
-# but the one it was given.
+# measured by the newest entry inside, and one whose age cannot be read is held;
+# a process standing in a workspace or holding a file in it holds it until it
+# exits, and an lsof listing that reads nothing or fails holds everything; a
+# symlink is unlinked and its target kept; --dry-run removes nothing; unreadable
+# rigs reap nothing; and the pass reads no directory but the one it was given.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,10 +80,12 @@ chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 status() { printf '%s\t%s\n' "$1" "$2" >> "$STUB_STATUS"; }
 
-# Age every entry under <path> to <hours> old, the path itself included.
+# Age every entry under <path> to <hours> old, the path itself included. GNU
+# and BSD touch -d both read a UTC ISO-8601 stamp.
 age() { # <path> <hours>
-    local ts=$(($(date +%s) - $2 * 3600))
-    find "$1" -depth -exec touch -h -d "@$ts" {} +
+    local at
+    at="$(jq -nr --argjson t "$(($(date +%s) - $2 * 3600))" '$t | todate')"
+    find "$1" -depth -exec touch -h -d "$at" {} +
 }
 
 # --- path ----------------------------------------------------------------------
@@ -102,7 +104,7 @@ eq "$WT" "$WS/gc-review-tk-abc/wt" "add prints the worktree path inside the work
 eq "$(git -C "$WT" rev-parse HEAD)" "$C1" "the worktree is at the commit"
 eq "$(git -C "$WT" symbolic-ref -q HEAD || echo detached)" "detached" "the worktree is detached"
 if is_registered "$WT"; then ok "the worktree is registered in the repository"; else bad "the worktree is registered in the repository"; fi
-eq "$(stat -c %a "$WS/gc-review-tk-abc")" "700" "the workspace is private to its user"
+eq "$(ls -ld "$WS/gc-review-tk-abc" | cut -c1-10)" "drwx------" "the workspace is private to its user"
 
 touch "$WT/marker"
 eq "$(bash "$SUT" add --review-bead tk-abc --oid "$C1" 2>/dev/null)" "$WT" "add at the same commit prints the same path"
@@ -226,9 +228,13 @@ mk other-tenant 100
 
 (cd "$R/gc-review-tk-held" && exec sleep 120) & PIDS+=("$!"); HELD_PID=$!
 (exec 3< "$R/gc-review-tk-fdheld/log"; exec sleep 120) & PIDS+=("$!"); FD_PID=$!
+# A backgrounded subshell forks first and only then changes directory or opens
+# its file, so wait for lsof, the probe the reap reads, to show both.
+lists() { # <pid> <path>
+    lsof -w -n -P -F n -p "$1" 2>/dev/null | awk -v n="n$2" '$0 == n { f = 1 } END { exit f ? 0 : 1 }'
+}
 for _ in $(seq 50); do
-    [ "$(readlink "/proc/$HELD_PID/cwd" 2>/dev/null)" = "$R/gc-review-tk-held" ] \
-        && [ "$(readlink "/proc/$FD_PID/fd/3" 2>/dev/null)" = "$R/gc-review-tk-fdheld/log" ] && break
+    lists "$HELD_PID" "$R/gc-review-tk-held" && lists "$FD_PID" "$R/gc-review-tk-fdheld/log" && break
     sleep 0.1
 done
 
@@ -279,18 +285,40 @@ has "$OUT" "kept 2 of reviews not closed, 2 in use, 1 unreadable, 4 active" "and
 
 kill "$HELD_PID" "$FD_PID" 2>/dev/null; wait "$HELD_PID" "$FD_PID" 2>/dev/null
 
-# A /proc walk that reads nothing at all cannot prove a workspace unheld.
-NOPROC="$TMP/noproc-bin"; mkdir -p "$NOPROC"
-printf '#!/usr/bin/env bash\n[ "$1" = /proc ] && exit 1\nexec %s "$@"\n' "$(command -v find)" > "$NOPROC/find"
-chmod +x "$NOPROC/find"
-OUT="$(PATH="$NOPROC:$PATH" run reap)"
-kept_ok gc-review-tk-held            "a /proc probe that reads nothing holds every workspace"
+# An lsof that lists nothing at all, or that fails after listing part of the
+# host, cannot prove a workspace unheld.
+NOLSOF="$TMP/nolsof-bin"; mkdir -p "$NOLSOF"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$NOLSOF/lsof"
+FAILLSOF="$TMP/faillsof-bin"; mkdir -p "$FAILLSOF"
+printf '#!/usr/bin/env bash\nprintf "p1\\nfcwd\\nn/\\n"\nexit 1\n' > "$FAILLSOF/lsof"
+chmod +x "$NOLSOF/lsof" "$FAILLSOF/lsof"
+OUT="$(PATH="$NOLSOF:$PATH" run reap)"
+kept_ok gc-review-tk-held            "an lsof that lists nothing holds every workspace"
+has "$OUT" "2 in use" "and counts them as in use"
+OUT="$(PATH="$FAILLSOF:$PATH" run reap)"
+kept_ok gc-review-tk-held            "an lsof that fails holds every workspace, whatever it listed first"
 has "$OUT" "2 in use" "and counts them as in use"
 
 OUT="$(run reap)"
 gone_ok gc-review-tk-held            "once the process exits, the next pass takes the workspace"
 gone_ok gc-review-tk-fdheld          "and the one whose file it held"
 has "$OUT" "removed 2 workspaces" "the next pass counts them"
+
+# An age that cannot be read is not idle. stat answers every read but the mtime,
+# so the ledger and ownership gates still run, and a closed review's workspace
+# is taken in the same pass.
+mk gc-review-tk-ageless 48
+mk gc-review-tk-closed2 1;       status tk-closed2 closed
+NOMTIME="$TMP/nomtime-bin"; mkdir -p "$NOMTIME"
+printf '#!/usr/bin/env bash\ncase " $* " in *" %%Y "* | *" %%m "*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v stat)" > "$NOMTIME/stat"
+chmod +x "$NOMTIME/stat"
+OUT="$(PATH="$NOMTIME:$PATH" run reap --dry-run)"
+has "$OUT" "keep   $R/gc-review-tk-ageless (age unreadable)" "the dry run names an unreadable age as the reason to keep"
+OUT="$(PATH="$NOMTIME:$PATH" run reap)"
+kept_ok gc-review-tk-ageless         "an entry whose age cannot be read is held past the horizon"
+gone_ok gc-review-tk-closed2         "while a closed review's workspace is taken in the same pass"
+OUT="$(run reap)"
+gone_ok gc-review-tk-ageless         "once its age reads, the entry ages out"
 
 REVIEW_WORKSPACE_IDLE_AFTER=abc bash "$SUT" reap >/dev/null 2>&1
 eq "$?" "2" "a horizon that is not a whole number is a usage error"
