@@ -42,7 +42,7 @@ done
 INDEX=$(mktemp); FOUND=""
 for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
   [ -n "$c" ] || continue
-  git -C "$c" show "$REVIEWED_OID:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
+  git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
 done
 [ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$INDEX"
 ```
@@ -107,7 +107,7 @@ above. Filing is recording, not proposing: the distiller judges it and a
 reviewed PR writes the index.
 
 ```bash
-OBS=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
+OBS_JSON=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
   -t task -l learning -l observation -d "## Statement
 <what a reviewer could not classify the diff against>
 
@@ -115,12 +115,14 @@ OBS=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHO
 Triage on $ANCHOR at $REVIEWED_OID.
 
 ## Proposed norm
-<draft — explicitly non-binding>" --json | jq -r '.id // .[0].id')
+<draft — explicitly non-binding>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" --set-metadata task_kind=observation \
   --set-metadata obs.category=review-index-gap \
   --set-metadata "obs.scope=repo:${GC_RIG:-unknown}" \
   --set-metadata obs.source=self --set-metadata obs.directive=standing \
-  --set-metadata "obs.provenance=bead:$ANCHOR:turn:$(date -u +%Y-%m-%d)" \
+  --set-metadata "obs.provenance=bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
   --set-metadata gc.outcome=recorded --status=closed
 ```
 
