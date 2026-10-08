@@ -66,7 +66,9 @@ jobs:
     # The same draft gate as test.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: macos-latest
-    timeout-minutes: 30
+    # The same suite takes the macOS runner more than twice as long as
+    # ubuntu's, so its limit is higher.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -79,20 +81,23 @@ jobs:
       # The image's only bash is /bin/bash 3.2, and run-tests.sh and every
       # suite need bash 5. run-tests.sh bounds each run with timeout(1), and
       # refinery-reconcile.sh takes its lock with flock(1); macOS ships
-      # neither. The host installs all three from Homebrew. coreutils links
-      # only the GNU names macOS lacks, such as timeout and nproc, and installs
-      # the rest under a g prefix, so date, stat, touch and the like stay BSD.
-      - name: Install bash 5, coreutils and flock
+      # neither. tmux-visit-prompt.test.sh runs tmux-bindings.sh under /bin/sh
+      # against a real tmux server, and skips that case without tmux. The host
+      # installs all four from Homebrew. coreutils links only the GNU names
+      # macOS lacks, such as timeout and nproc, and installs the rest under a
+      # g prefix, so date, stat, touch and the like stay BSD.
+      - name: Install bash 5, coreutils, flock and tmux
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
           HOMEBREW_NO_ENV_HINTS: "1"
-        run: brew install bash coreutils flock
+        run: brew install bash coreutils flock tmux
 
       # This job tests the BSD userland only while the runner resolves the
       # tools the host does. Without a tomllib python3, the suites that read
-      # TOML skip and still pass. A GNU tool ahead of /usr/bin on PATH lets a
-      # GNU-only construct pass. Either drift fails this step by name instead.
+      # TOML skip and still pass, and without tmux one case does the same. A
+      # GNU tool ahead of /usr/bin on PATH lets a GNU-only construct pass. Any
+      # such drift fails this step by name instead.
       - name: Check the runner resolves the host's tools
         run: |
           sw_vers
@@ -102,7 +107,7 @@ jobs:
           env bash --version | head -n 1
           python3 -c 'import sys, tomllib; print(sys.executable, sys.version.split()[0], "has tomllib")' \
             || { echo "::error::python3 ($(command -v python3)) has no tomllib"; fail=1; }
-          for t in jq go git timeout flock; do
+          for t in jq go git timeout flock tmux; do
             p="$(command -v "$t")" || { echo "::error::$t is not on PATH"; fail=1; continue; }
             echo "$t: $p"
           done
