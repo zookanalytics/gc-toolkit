@@ -4,12 +4,14 @@
 # lint-learned.test.sh; this suite is about what a detector does and does not
 # call a finding.
 #
+# run-tests-scope: tree
+#
 # It lives here rather than beside its subject because the runner executes
 # every executable in lint-learned.d/ as a detector, so a test file in that
 # directory would be run as one.
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
-# bd-helper-in-scope, bd-notes-replace.
+# bd-helper-in-scope, bd-notes-replace, pr-post-bypass, id-read-unguarded.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -144,6 +146,116 @@ chmod +x "$TMP/shim/sed"
 OUT="$(PATH="$TMP/shim:$PATH" "$DET" "$TMP/clean.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed mask exits 2, not 0 and not 1"
 has "$OUT" "detector cannot scan it" "and says which file it could not scan"
+
+# ── id-read-unguarded ───────────────────────────────────────────────────
+#
+# Fixtures spell the alternative's `//` as @OR@: the runner scans every tracked
+# file, so the shape written literally here would be a finding against the test
+# that proves the finding.
+DET_ID="$HERE/lint-learned.d/id-read-unguarded.sh"
+[ -x "$DET_ID" ] || { echo "no detector at $DET_ID"; exit 1; }
+runid() { OUT="$("$DET_ID" "$@" 2>&1)"; RC=$?; }
+plantid() { sed 's#@OR@#//#g' > "$1"; }
+
+echo "── id-read-unguarded: what is a finding ──"
+
+# Silencing jq's stderr does not make the read correct: an array answer still
+# crashes at `.id` and reads as "no id" for a bead that was filed.
+plantid "$TMP/id-violations.sh" <<'FIX'
+#!/usr/bin/env bash
+id=$(gc bd create "t" -t task --json | jq -r '.id @OR@ .[0].id')
+id=$(gc bd create "t" -t task --json 2>/dev/null | jq -r '.id @OR@ .[0].id @OR@ empty' 2>/dev/null)
+id=$(gc bd update "$X" --json | jq -r '.[0].id @OR@ .id')
+id=$(printf '%s' "$J" | jq -r '.id@OR@.[0].id')
+  -d "body" --json | jq -r '.id @OR@ .[0].id')
+FIX
+runid "$TMP/id-violations.sh"
+eq "$RC" 1 "a file with an unguarded id read exits 1"
+for n in 2 3 4 5 6; do
+    has "$OUT" "id-violations.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 5 "nothing else is reported"
+has "$OUT" "id-read-unguarded" "the finding names the rule"
+has "$OUT" 'if type == "array" then (.[0].id // empty) else (.id // empty) end' "the finding names the guarded read"
+
+echo "── id-read-unguarded: what is not ──"
+
+plantid "$TMP/id-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+# jq -r '.id @OR@ .[0].id' is the shape the rule bans; a comment only states it
+id=$(gc bd create "t" -t task --json | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+first=$(printf '%s' "$LIST" | jq -r '.[0].id // empty')
+one=$(printf '%s' "$OBJ" | jq -r '.id // empty')
+other=$(printf '%s' "$J" | jq -r '.idx @OR@ .[0].idx')
+longer=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].identity')
+FIX
+runid "$TMP/id-clean.sh"
+eq "$RC" 0 "the guarded read, one-shape reads, a longer key and a comment are clean"
+eq "$OUT" "" "a clean file prints nothing"
+
+echo "── id-read-unguarded: fences run, prose quotes ──"
+
+plantid "$TMP/id-doc.md" <<'FIX'
+# A doc
+
+Never read an id as `jq -r '.id @OR@ .[0].id'`; this line is prose.
+
+```bash
+OBS=$(gc bd create "obs" --json | jq -r '.id @OR@ .[0].id')
+# jq -r '.id @OR@ .[0].id' in a comment inside the fence
+```
+
+~~~
+id=$(jq -r '.[0].id @OR@ .id' <<< "$J")
+~~~
+FIX
+runid "$TMP/id-doc.md"
+eq "$RC" 1 "an unguarded read inside a doc's fence is a finding"
+has "$OUT" "id-doc.md:6:" "a backtick fence is scanned"
+has "$OUT" "id-doc.md:11:" "a tilde fence is scanned"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "prose outside a fence, and a comment inside one, are not"
+
+plantid "$TMP/id-formula.toml" <<'FIX'
+[[steps]]
+id = "file"
+description = """
+Never write `.id @OR@ .[0].id` in a step.
+```bash
+BEAD=$(gc bd create "t" --json | jq -r '.id @OR@ .[0].id')
+```
+"""
+FIX
+runid "$TMP/id-formula.toml"
+eq "$RC" 1 "a formula step's fenced read is a finding"
+has "$OUT" "id-formula.toml:6:" "and it is the fenced line that is reported"
+hasnt "$OUT" "id-formula.toml:4:" "the step's prose is not"
+
+echo "── id-read-unguarded: scope ──"
+
+# The dated records quote the shape, renders duplicate their sources, and the
+# detectors state the shapes they hunt.
+mkdir -p "$TMP/specs/tk-x" "$TMP/generated" "$TMP/lint-learned.d"
+for p in specs/tk-x/notes.sh generated/render.sh lint-learned.d/other.sh; do
+    plantid "$TMP/$p" <<'FIX'
+id=$(jq -r '.id @OR@ .[0].id' <<< "$J")
+FIX
+done
+runid "$TMP/specs/tk-x/notes.sh" "$TMP/generated/render.sh" "$TMP/lint-learned.d/other.sh"
+eq "$RC" 0 "specs/, generated/ and lint-learned.d/ are skipped"
+plantid "$TMP/id-other.txt" <<'FIX'
+id=$(jq -r '.id @OR@ .[0].id' <<< "$J")
+FIX
+runid "$TMP/id-other.txt" "$TMP/no-such-file.sh"
+eq "$RC" 0 "a file outside *.sh, *.toml and *.md, and a path that is not a file, drop out"
+
+echo "── id-read-unguarded: a detector that cannot scan says so ──"
+
+mkdir -p "$TMP/shim-id"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$TMP/shim-id/grep"
+chmod +x "$TMP/shim-id/grep"
+OUT="$(PATH="$TMP/shim-id:$PATH" "$DET_ID" "$TMP/id-clean.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a scan that cannot read its files exits 2, not 0 and not 1"
+has "$OUT" "detector cannot scan" "and says so"
 
 # ── mktemp-untemplated ──────────────────────────────────────────────────
 #
@@ -1327,6 +1439,175 @@ chmod +x "$TMP/shim-awk/awk"
 OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_NR" "$TMP/replace.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
 has "$OUT" "detector cannot scan it" "and says which file it could not scan"
+
+echo "── pr-post-bypass: what is a finding ──"
+
+# Spelled with placeholders, so the file that tests the detector is not itself a
+# finding when the runner scans the whole tree: @GH@ -> gh, @MUT@ ->
+# addPullRequestReviewThreadReply, @ADDC@ -> addComment.
+DET_PP="$HERE/lint-learned.d/pr-post-bypass.sh"
+[ -x "$DET_PP" ] || { echo "no detector at $DET_PP"; exit 1; }
+runpp() { OUT="$("$DET_PP" "$@" 2>&1)"; RC=$?; }
+plantpp() { sed -e 's/@GH@/gh/g' -e 's/@MUT@/addPullRequestReviewThreadReply/g' -e 's/@ADDC@/addComment/g' > "$1"; }
+
+# Every shape a post takes, one per line, so each assertion names its line. A
+# continued command is reported at the line it opens on.
+plantpp "$TMP/pp-violations.sh" <<'FIX'
+#!/usr/bin/env bash
+@GH@ pr comment "$PR" --repo "$R" --body "x"
+out=$(@GH@ pr review "$PR" --comment --body-file "$F")
+if @GH@ issue comment 5 --body "hi"; then :; fi
+GH_TOKEN="$T" @GH@ pr comment 7 --body x
+msg="$(@GH@ pr comment 8 --body y)"
+x=`@GH@ pr review 9 --approve`
+[ -n "$P" ] && @GH@ pr comment "$P" --body z || true
+@GH@ api --method PATCH "repos/$R/issues/comments/$ID" --hostname h -f body="$B"
+gh_api_origin -X POST "repos/$R/pulls/$N/comments" -f body="$B" -f path=a
+@GH@ api "repos/$R/pulls/$N/comments/$C/replies" -f body="$B"
+@GH@ api -X PUT "repos/$R/pulls/$N/reviews/$RID" -f body="$B"
+@GH@ api graphql -f query='mutation($t:ID!,$b:String!){@MUT@(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' -f t="$T" -f b="$B"
+@GH@ api "repos/$R/issues/$N/comments" \
+  -f body="$B"
+[ -n "$S" ] && @GH@ pr comment "$S" --repo "$Q" \
+  --body "Superseded" >/dev/null 2>&1 || true
+if ! @GH@ pr comment 1 --body x; then echo no; fi
+FIX
+runpp "$TMP/pp-violations.sh"
+eq "$RC" 1 "a file that posts around the helper exits 1"
+for n in 2 3 4 5 6 7 8 9 10 11 12 13 14 16 18; do
+    has "$OUT" "pp-violations.sh:$n:" "line $n is reported"
+done
+hasnt "$OUT" "pp-violations.sh:15:" "a continuation line is judged with the line it continues"
+hasnt "$OUT" "pp-violations.sh:17:" "…for a gh pr comment too"
+eq "$(printf '%s\n' "$OUT" | grep -c 'pp-violations.sh:')" 15 "one finding per post"
+has "$OUT" 'pp-violations.sh:3: posts with `gh pr review`' "the finding names the gh verb"
+has "$OUT" 'pp-violations.sh:4: posts with `gh issue comment`' "…a conversation comment through the issue API included"
+has "$OUT" 'pp-violations.sh:13: calls the GraphQL mutation `addPullRequestReviewThreadReply`' "a mutation finding names the mutation"
+has "$OUT" "pp-violations.sh:9: writes a PR comment or review through \`gh api\`" "a REST write is named as one"
+has "$OUT" "pr-post-bypass" "the finding names the rule"
+
+# A GraphQL document is a string, so the field call is read wherever it sits: on
+# a line of a multi-line document, or in a here-doc body.
+plantpp "$TMP/pp-documents.sh" <<'FIX'
+#!/usr/bin/env bash
+Q='mutation($s:ID!,$b:String!){
+  @ADDC@(input:{subjectId:$s,body:$b}){clientMutationId}
+}'
+@GH@ api graphql -f query="$Q" -f s="$S" -f b="$B"
+D=$(cat <<'GQL'
+mutation { @ADDC@ (input: {subjectId: "x", body: "y"}) { clientMutationId } }
+GQL
+)
+FIX
+runpp "$TMP/pp-documents.sh"
+eq "$RC" 1 "a mutation in a multi-line document or a here-doc is a finding"
+has "$OUT" "pp-documents.sh:3:" "the field call inside a multi-line string is reported"
+has "$OUT" "pp-documents.sh:7:" "the field call inside a here-doc body is reported"
+eq "$(printf '%s\n' "$OUT" | grep -c 'pp-documents.sh:')" 2 "the graphql call carrying the document is not a second finding"
+
+# Fenced code in a formula or a prompt is a recipe an agent runs verbatim.
+plantpp "$TMP/pp-formula.toml" <<'FIX'
+[steps.reply]
+description = """
+Reply on the PR like this:
+
+```bash
+@GH@ pr comment "$PR" --body "done"
+```
+
+Prose that mentions @GH@ pr comment is not a recipe.
+"""
+FIX
+runpp "$TMP/pp-formula.toml"
+eq "$RC" 1 "a post in a formula's fenced recipe is a finding"
+has "$OUT" "pp-formula.toml:6:" "the fenced post is reported"
+hasnt "$OUT" "pp-formula.toml:9:" "prose outside the fence is not"
+plantpp "$TMP/pp-prompt.md" <<'FIX'
+# Guide
+
+Never run `@GH@ pr comment` by hand.
+
+```bash
+@GH@ pr review "$PR" --comment --body x
+```
+# >>> snippet
+@GH@ issue comment 3 --body y
+# <<< snippet
+FIX
+runpp "$TMP/pp-prompt.md"
+eq "$RC" 1 "a post in a prompt's fenced code is a finding"
+has "$OUT" "pp-prompt.md:6:" 'the ``` fenced post is reported'
+has "$OUT" "pp-prompt.md:9:" "the marker-fenced post is reported"
+hasnt "$OUT" "pp-prompt.md:3:" "an inline code span in prose is not"
+
+# A close or reopen handed a comment posts that comment.
+plantpp "$TMP/pp-close.sh" <<'FIX'
+#!/usr/bin/env bash
+@GH@ pr close "$N" --repo "$Q" --comment "$CMT" >/dev/null 2>&1
+if @GH@ pr reopen 5 -c "back again"; then :; fi
+@GH@ issue close 3 --comment="done"
+[ -n "$P" ] && @GH@ pr close "$P" --repo "$Q" \
+  --comment "Superseded" || true
+FIX
+runpp "$TMP/pp-close.sh"
+eq "$RC" 1 "a close or reopen that carries a comment is a finding"
+for n in 2 3 4 5; do
+    has "$OUT" "pp-close.sh:$n:" "line $n is reported"
+done
+hasnt "$OUT" "pp-close.sh:6:" "a continued close is judged with the line it opens on"
+eq "$(printf '%s\n' "$OUT" | grep -c 'pp-close.sh:')" 4 "one finding per commented close"
+has "$OUT" 'pp-close.sh:2: posts a comment with `gh pr close --comment`' "the finding names the gh verb"
+has "$OUT" 'pp-close.sh:3: posts a comment with `gh pr reopen --comment`' "…a reopen included"
+has "$OUT" 'pp-close.sh:4: posts a comment with `gh issue close --comment`' "…and the issue pair"
+
+echo "── pr-post-bypass: what is not ──"
+
+# Reads, writes that post no body, strings, comments, here-doc prose, a stub
+# that names the mutation, and the helper's own call are none of them posts.
+plantpp "$TMP/pp-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+# @GH@ pr comment 12 --body "a comment line"
+echo "run @GH@ pr comment 12 later"
+printf '%s\n' '@GH@ pr review --approve'
+"$SUT" --message "why" -- @GH@ issue comment 5 --repo a/b
+cat <<'EOF'
+Never run `@GH@ pr review --approve`; $(@GH@ pr comment) is for pr-post.sh.
+EOF
+raw=$(@GH@ api "repos/$R/issues/$N/comments" --paginate --hostname "$H")
+@GH@ api "repos/$R/pulls/$N/comments?per_page=100" --paginate --jq '.[]'
+@GH@ api -X PUT "repos/$R/pulls/$N/reviews/$RID/dismissals" -f message="m"
+@GH@ api -X POST "repos/$R/issues/comments/$C/reactions" -f content=EYES
+@GH@ api -X POST "repos/$R/pulls/$N/requested_reviewers" -f "reviewers[]=$L"
+case "$q" in *@MUT@*) echo stub ;; esac
+echo '{"data":{"@MUT@":{"clientMutationId":null}}}'
+hasnt "$(cat "$LOG")" "@MUT@" "never replied twice"
+"$PR_POST" comment --repo "$Q" --pr "$N" --body "$B"
+gh_api_origin() { @GH@ api --hostname "$H" "$@"; }
+@GH@ pr view 12 --json comments
+@GH@ pr checkout 12
+@GH@ pr close "$N" --repo "$Q" >/dev/null 2>&1
+@GH@ pr close 5 --delete-branch && bash -c 'echo closed'
+@GH@ pr reopen 5 --repo "$Q"
+FIX
+runpp "$TMP/pp-clean.sh"
+eq "$RC" 0 "reads, dismissals, reactions, strings, comments, here-doc prose, stubs and uncommented closes are clean"
+[ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
+
+# The helper is the one place the raw calls belong, and the detector skips its
+# own directory and dated records.
+mkdir -p "$TMP/pp-exempt/lint-learned.d" "$TMP/pp-exempt/specs"
+plantpp "$TMP/pp-exempt/pr-post.sh" <<'FIX'
+#!/usr/bin/env bash
+@GH@ pr comment "$PR" --repo "$R" --body "$BODY"
+FIX
+cp "$TMP/pp-exempt/pr-post.sh" "$TMP/pp-exempt/lint-learned.d/other-detector.sh"
+plantpp "$TMP/pp-exempt/specs/record.md" <<'FIX'
+```bash
+@GH@ pr comment 5 --body "what an old spec ran"
+```
+FIX
+runpp "$TMP/pp-exempt/pr-post.sh" "$TMP/pp-exempt/lint-learned.d/other-detector.sh" "$TMP/pp-exempt/specs/record.md"
+eq "$RC" 0 "pr-post.sh, lint-learned.d/ and specs/ are skipped"
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"

@@ -297,14 +297,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    `review-wedge` key rather than holding the anchor in silence. It escalates
    on the second consecutive sighting, because `mol-review`'s failure arm
    closes its chain before it restores the bead's route. No dispatch goes out
-   while anything is acting on the anchor — an open `must-fix` finding on any
-   lane, a fix unit in flight, a validation pass in flight, or a full review
-   already in flight on the lane — which is the QUIESCENCE predicate one
-   authority computes so it cannot disagree with itself about whether a review
-   was already out. The same authority also releases that hold: it closes a
-   `must-fix` finding once every fix unit answering it has closed, so a fix that
-   has landed on the branch stops holding the re-gate rather than wedging the
-   anchor at `pre_open_gate`. A review that read a mid-change diff would raise
+   while anything is acting on the anchor — a fix unit in flight (including the
+   one answering an open `must-fix` finding on any lane), a validation pass in
+   flight, or a full review already in flight on the lane — which is the
+   QUIESCENCE predicate one authority computes so it cannot disagree with itself
+   about whether a review was already out. The hold names the actor. A
+   `must-fix` finding no fix unit answers is a demand on the anchor, not an
+   actor: it holds the merge through its `blocks` edge and keeps the anchor
+   `progressing`, but it does not hold the dispatch, and the arm reports it as
+   unanswered. The same authority also releases a finding: on the first pass
+   after every fix unit answering a `must-fix` finding has closed, it closes the
+   finding, so a fix that has landed on the branch stops holding the publish
+   and the merge. A review that read a mid-change diff would raise
    only the no-op rework the declination texts are full of. There is no dispatch
    ceiling: quiescence forbids the redundant round a ceiling would have bounded,
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
@@ -344,7 +348,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
-   rework child or a visit. The posture write is idempotent, so re-running it
+   rework child or a visit. Feedback is every review, inline comment and
+   conversation comment that is not the city's own post
+   ([state-machine.md](state-machine.md#operator-feedback)), whoever wrote it.
+   The posture write is idempotent, so re-running it
    here after arm 1 costs nothing when nothing changed. The routing runs in two
    places by design: arm 4 picks the feedback up ahead of the slow arms, and this
    arm re-runs the same routing idempotently — a landed batch's watermark and
@@ -373,8 +380,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    batch has nothing left owing. The reactions are written first and bounded per
    pass; when the cap or a failed write leaves one owing, that pass replies to
    and resolves nothing, so no thread is answered over a comment still awaiting
-   its acknowledgement. A thread a human answered after the city's own is left
-   open, and so is one holding a comment above the mark: no batch covers that
+   its acknowledgement. A thread with a post after the city's own reply that is
+   not itself the city's own is left open, and so is one holding a comment above
+   the mark: no batch covers that
    comment, so nothing has answered it, and resolving would put the thread past
    every later pass. A `visit:` disposition earns the reaction but never a
    reply, because no commit answered it. Idempotence is read back off GitHub,
@@ -473,12 +481,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    arm 3 composes that region only at `pre_open_gate` and an open anchor never
    returns there, so the published `## Summary` — the merge surface, and the
    squash commit message — would otherwise keep describing superseded work. When
-   the region is a well-formed marker pair whose summary is behind the anchor's
-   current `pr_summary`, this arm recomposes and re-splices it; a region already
-   current, a legacy markerless body (arm 3's adoption path establishes that), or
-   a malformed shape is left alone. The recompose uses `refresh` mode: the
-   reworked head has not re-signed-off, so the handoff bullet names the head and
-   defers to the PR's checks rather than repeating arm 3's pre-open sign-off line.
+   the region is a well-formed marker pair whose handoff bullet names a head other
+   than the PR's or says the PR opened green (a CI result the static body cannot
+   know), or whose summary is behind the anchor's current `pr_summary`, this arm
+   recomposes and re-splices it; a region already current, a legacy markerless
+   body (arm 3's adoption path establishes that), or a malformed shape is left
+   alone. The recompose uses `refresh` mode: the reworked head has not
+   re-signed-off, so the handoff bullet names the head and defers to the PR's
+   checks rather than repeating arm 3's pre-open sign-off line.
 
    The title: arm 3 writes it once, at create, composed from the anchor's title
    (a conventional-commit type, the title, then the bead id), and the squash

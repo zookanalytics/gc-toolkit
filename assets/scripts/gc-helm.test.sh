@@ -2293,7 +2293,7 @@ case "$1 ${2:-}" in
       resolve)
         rid="${4:-}"
         case "$rid" in *NORESOLVE*) exit 1 ;; esac
-        [ -n "$rid" ] && sed -i "/ $rid\$/d" "$D_GATE_EDGES" 2>/dev/null || true ;;
+        [ -n "$rid" ] && sed -i.bak "/ $rid\$/d" "$D_GATE_EDGES" 2>/dev/null && rm -f "$D_GATE_EDGES.bak" || true ;;
     esac ;;
   "bd update")
     # A gate id carrying NOSTAMP models the stamp write failing after the gate
@@ -2316,7 +2316,7 @@ case "$1 ${2:-}" in
     if [ "$pairs" -le 1 ]; then
       case "$*" in
         *"gc.takeaway_settled="*)
-          case "$3" in *STUCK*) ;; *) sed -i "/^$3|/d" "$D_SETTLED" 2>/dev/null || true ;; esac ;;
+          case "$3" in *STUCK*) ;; *) sed -i.bak "/^$3|/d" "$D_SETTLED" 2>/dev/null && rm -f "$D_SETTLED.bak" || true ;; esac ;;
       esac
     fi ;;
   "bd dep")
@@ -2324,7 +2324,7 @@ case "$1 ${2:-}" in
     # the call fails AND nothing is recorded, so the read-back sees no edge.
     # On a demand id that is every edge; on a TARGET id it is that one edge,
     # while the rest of the call's edges land.
-    case "$*" in *NOEDGE*) sed -i '$d' "$D_LOG"; exit 1 ;; esac ;;
+    case "$*" in *NOEDGE*) sed -i.bak '$d' "$D_LOG" && rm -f "$D_LOG.bak"; exit 1 ;; esac ;;
 esac
 exit 0
 GC2
@@ -2672,8 +2672,8 @@ grep -q 'cap is 140' <<< "$DERR" \
 printf '[]\n' > "$D_LIST"
 
 # ── demand --topic: one open demand per (gated bead, topic) ───────────────────
-# Under a standing scope two sittings resolve $ITEM to one shared bucket and each
-# files a demand on it. Keyed on the gated bead alone, the second refreshes the
+# Under a standing scope two sittings share one bucket subject and each files a
+# demand on it. Keyed on the gated bead alone, the second refreshes the
 # first's gate in place and overwrites the operator question it holds. --topic
 # scopes the demand to the sitting (its escalation_key), so each keeps its own.
 
@@ -2753,6 +2753,33 @@ unset D_CREATE_MODE
 printf 'tk-dem1\n' > "$D_NEXTID"
 printf '[]\n' > "$D_LIST"
 
+# (TOPICBESIDE) a producer with a question of its own files under its own topic
+# beside whatever demands the bead already carries, the way the first reaction's
+# ruling and recommend exits do (first-reaction-dispose.sh, topic
+# first-reaction). A topic-scoped lookup matches neither a bare demand nor a
+# sibling topic's, so the call files its own gate and refreshes neither. The same
+# call with no topic matches on the bead alone: it stops on a bead carrying two
+# demands, and beside a lone sibling it refreshes that sibling's gate in place.
+printf '[{"id":"tk-demBare","status":"open","metadata":{"gc.demand_for":"tk-kid"}},{"id":"tk-demK","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-b"}}]\n' > "$D_LIST"
+printf 'tk-demFR\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recommend retiring the PR" --by proactive --topic first-reaction
+eq "$DRC" "0" "(TOPICBESIDE) a topic-scoped demand succeeds beside a bare and a sibling-topic demand"
+grep -qE -- '--await-id=gc-demand:tk-kid:first-reaction( |$)' <<< "$(d_gate)" \
+  && ok "(TOPICBESIDE) …filing a gate of its own" \
+  || bad "(TOPICBESIDE) no gate was filed under its own topic: $(d_gate)"
+grep -qE '^bd update tk-dem(Bare|K) ' <<< "$(d_update)" \
+  && bad "(TOPICBESIDE) a demand the bead already carried was refreshed: $(d_update)" \
+  || ok "(TOPICBESIDE) …and refreshing neither demand the bead already carried"
+demand_run tk-kid "operator: recommend retiring the PR" --by proactive
+eq "$DRC" "4" "(TOPICBESIDE) the same call with no topic stops on a bead carrying two demands"
+printf '[{"id":"tk-demK","status":"open","metadata":{"gc.demand_for":"tk-kid","gc.demand_topic":"finding-b"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: recommend retiring the PR" --by proactive
+grep -q '^bd update tk-demK ' <<< "$(d_update)" \
+  && ok "(TOPICBESIDE) …and beside a lone sibling it refreshes that sibling's gate in place" \
+  || bad "(TOPICBESIDE) the no-topic call did not refresh the lone sibling: $(d_update)"
+printf 'tk-dem1\n' > "$D_NEXTID"
+printf '[]\n' > "$D_LIST"
+
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
 # A trap is process-global: one installed inside a helper and left there
 # rewrites how every later line of the caller answers a signal, and outlives
@@ -2792,7 +2819,7 @@ grep -q 'RIGS\[\[' <<< "$EOUT" \
 grep -q 'TRAPDELTA\[\]' <<< "$EOUT" \
   && ok "(ENUM) …and left the caller's trap table as it found it" \
   || bad "(ENUM) the helper changed the caller's traps (out: $EOUT)"
-eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l)" "0" \
+eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
    "(ENUM) …and removed its stderr capture"
 
 echo ""

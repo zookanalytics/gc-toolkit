@@ -8,9 +8,10 @@
 #
 #   (DIRECT)    --no-react files the visit NOW, through gc-helm.sh open —
 #               the script must never hand-roll a gate-visit block of its own.
-#   (SINGLE)    the react path files NO visit: mol-first-reaction's
-#               advance-and-drain step files it, and a second one would split
-#               the conversation into two sittings of the same subject.
+#   (SINGLE)    the react path files NO visit: a reaction that puts the
+#               subject to the operator files a human gate, gate-visit-sweep
+#               files that gate's visit, and a second one would split the
+#               conversation into two sittings of the same subject.
 #   (SHED)      the whole reason the fallback exists. `gc sling` is
 #               fire-and-forget and returns 0 whether or not anything will
 #               ever pick the bead up, so an unguarded react path leaves the
@@ -33,7 +34,9 @@
 #               suspended rig (agents paused, see LIVENESS) still files.
 #   (SUBJECT)   an existing bead is its own subject — no second bead is
 #               minted — and a contradictory --rig/--type is refused rather
-#               than ignored.
+#               than ignored, for a bead id and a PR reference alike. The
+#               --help text is held to the same refusal, since it is where the
+#               operator learns the contract.
 #   (SHAPE)     "dolt-latency" is a topic, "tk-abc12" is a bead id, and the
 #               difference is the RIG PREFIX, not the hyphen. A prefix-shaped
 #               string no ledger answers for must not become a bead literally
@@ -208,11 +211,12 @@ export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 export TMPDIR="$TMP"
 
 # run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS
+# RUN_SH names the shell that runs the script; the default is sh, as shipped.
 run() {
     : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"
     export FAKE_DELIVERABLE="$1"; shift
     set +e
-    OUT="$(sh "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
+    OUT="$("${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
@@ -429,6 +433,25 @@ eq "$RC" "2" "(SUBJECT) --rig on an existing bead is refused, not ignored"
 eq "$CALLS" "" "(SUBJECT) and files nothing"
 run no tk-abc12 --type decision
 eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
+run no 615 --rig gascity
+eq "$RC" "2" "(SUBJECT) --rig on a PR reference is refused, not ignored"
+eq "$CALLS" "" "(SUBJECT) and files nothing"
+run no 615 --type decision
+eq "$RC" "2" "(SUBJECT) --type on a PR reference is refused"
+
+# --help is where the operator learns this contract, so each flag's entry is
+# held to the refusals above. help_entry prints a flag's line and the
+# deeper-indented lines that continue it, lowercased so the checks ignore case.
+help_entry() {
+    awk -v f="$1" '$1 == f { on = 1; print; next } on && /^   / { print; next } { on = 0 }' <<< "$2" \
+        | tr '[:upper:]' '[:lower:]'
+}
+run no --help
+for flag in --rig --type; do
+    entry="$(help_entry "$flag" "$ERR")"
+    has "$entry" "refused" "(SUBJECT) --help says $flag is refused for an existing bead"
+    hasnt "$entry" "ignored" "(SUBJECT) --help never says $flag is ignored"
+done
 
 # --- (ORIGIN) the origin is recorded as a KEY, not only as prose --------------
 # The description sentence ("Operator-origin intake, filed by …") is for a human
@@ -590,14 +613,34 @@ esac
 # token would silently retarget this case at the one shape it is not about.
 CJK_TOPIC="$(printf '\344\270\255%.0s' $(seq 1 600))"
 eq "$(bytes "$CJK_TOPIC")" "1800" "(PARAGRAPH) the CJK fixture is 600 unbroken 3-byte characters"
-run no -- "$CJK_TOPIC"
-TITLE="$(cat "$FAKE_TITLE")"
-[ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
-    && ok "(PARAGRAPH) an unbroken 600-character token is cut to fit ($(bytes "$TITLE") bytes)" \
-    || bad "(PARAGRAPH) an unbroken token was not cut ($(bytes "$TITLE") bytes)"
-printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
-    && ok "(PARAGRAPH) and is still valid UTF-8 — no half character at the cut" \
-    || bad "(PARAGRAPH) the cut left an incomplete multi-byte character"
+
+# The shell decides what the cap counts. dash counts ${#var} in bytes, but bash
+# counts characters under a UTF-8 locale, and /bin/sh is dash on Debian and
+# bash on macOS. So the cut runs under each of sh, bash and dash that is
+# installed, in a locale where bash is seen to count characters, rather than
+# only under whichever shell sh is on this host.
+CUT_LOCALE=""
+for l in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+    # shellcheck disable=SC2016  # the $(...) and ${#v} are the inner bash's
+    if [ "$(LC_ALL="$l" bash -c 'v=$(printf "\344\270\255"); printf %s "${#v}"' 2>/dev/null)" = 1 ]; then
+        CUT_LOCALE="$l"; break
+    fi
+done
+[ -n "$CUT_LOCALE" ] \
+    && ok "(PARAGRAPH) control: bash counts characters under $CUT_LOCALE" \
+    || bad "(PARAGRAPH) control: no candidate locale makes bash count characters, so the cuts below cannot fail"
+for cut_sh in sh bash dash; do
+    command -v "$cut_sh" >/dev/null 2>&1 || continue
+    LC_ALL="$CUT_LOCALE" RUN_SH="$cut_sh" run no -- "$CJK_TOPIC"
+    TITLE="$(cat "$FAKE_TITLE")"
+    eq "$RC" "0" "(PARAGRAPH) under $cut_sh an unbroken 600-character token files"
+    [ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
+        && ok "(PARAGRAPH) under $cut_sh the token is cut to fit ($(bytes "$TITLE") bytes)" \
+        || bad "(PARAGRAPH) under $cut_sh the token was not cut ($(bytes "$TITLE") bytes)"
+    printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
+        && ok "(PARAGRAPH) under $cut_sh it is still valid UTF-8, with no half character at the cut" \
+        || bad "(PARAGRAPH) under $cut_sh the cut left an incomplete multi-byte character"
+done
 
 # --- (FAILCLOSE) nothing half-filed -------------------------------------------
 : > "$FAKE_CALLS"

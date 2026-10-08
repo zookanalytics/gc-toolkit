@@ -39,6 +39,8 @@ TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-find-work-gating-guard-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
@@ -70,8 +72,12 @@ bash -n "$TMP/preopen.sh" && ok "pre-open-recorded-pr: valid bash" \
 # extracts the RAW file text while the agent runs the PARSED string, so a
 # backslash anywhere in a marked block means the two texts differ and this test
 # stops pinning what actually runs.
-python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$TOML" 2>/dev/null \
-    && ok "formula parses as TOML" || bad "formula parses as TOML" "tomllib rejected it"
+if TOML_PY="$(tomllib_python)"; then
+  "$TOML_PY" -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$TOML" 2>/dev/null \
+      && ok "formula parses as TOML" || bad "formula parses as TOML" "tomllib rejected it"
+else
+  echo "skip - formula parses as TOML: $TOML_PY"
+fi
 for blk in select preopen; do
   grep -q '[\]' "$TMP/$blk.sh" \
     && bad "$blk: no backslash (TOML would eat it)" "found a backslash" \

@@ -63,13 +63,15 @@ strip_summary_heading() { # <text>
 # dispatch text demoted below it when both exist, and the refinery handoff facts.
 #
 # The last handoff bullet states the gate posture, and its wording is the one
-# thing that turns on the mode. `open` (create and pre_open_gate adoption) records
-# that the declared gates signed off pre-open at this head and the PR opened green
-# — a fact true at that moment. `refresh` (an already-open PR whose anchor summary
-# a rework restamped) must not repeat that claim at the reworked head: the gates
-# have not re-signed-off there, and one of them may be actively requesting
-# changes. It names the current head and points to the PR's own checks for the
-# live status instead.
+# thing that turns on the mode. Neither mode states a CI result: the body is
+# static and CI state is live, so the bullet that names the pre-open gates points
+# to the PR's checks for it. `open` (create and pre_open_gate adoption) records
+# that the declared gates signed off pre-open at this head, a fact true at that
+# moment. `refresh` (an already-open PR whose anchor summary a rework restamped)
+# must not repeat that claim at the reworked head: the gates have not
+# re-signed-off there, and one of them may be actively requesting changes. It
+# names the current head and points to the PR's own checks for the live status
+# instead.
 #
 # <phased> is the anchor's resolved gate set (prs_resolve_phased at <head_oid>);
 # the two bands the bullets name are partitioned from it here.
@@ -115,7 +117,7 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
     fi
   else
     if [ -n "$greened" ]; then
-      printf -- '- Gates `%s` signed off pre-open at `%.8s`; PR opened green.\n' "$greened" "$head_oid"
+      printf -- '- Gates `%s` signed off pre-open at `%.8s`. For CI status, see the PR checks.\n' "$greened" "$head_oid"
     else
       printf -- '- Anchor declares no pre-open gate (`check_set=%s`); opened at `%.8s`.\n' "$checkset" "$head_oid"
     fi
@@ -179,6 +181,25 @@ prs_region_names_head() { # <body-file> <head_oid>
     *"$needle"*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# 0 = the managed region's handoff bullet says the PR "opened green"; 1 = it does
+# not. That is a CI result, and the body is static while CI state is live, so
+# compose never writes it, and a post-open refresh treats a region carrying it as
+# behind whatever its summary and head say. Only the composed handoff block is
+# read, the lines under the region's last `## Refinery handoff` heading, and the
+# bullet is matched whole. A summary or dispatch text above that heading, or
+# operator text outside the markers, can quote the words without reading as the
+# claim, so a quote never leaves a region stale on every pass.
+prs_region_says_opened_green() { # <body-file>
+  awk -v o="$PRS_MARK_OPEN" -v c="$PRS_MARK_CLOSE" '
+    $0 == o { inreg = 1; next }
+    $0 == c { inreg = 0; handoff = 0; next }
+    !inreg { next }
+    /^##[ \t]+Refinery handoff[ \t]*$/ { handoff = 1; hit = 0; next }
+    handoff && /^- Gates `[^`]*` signed off pre-open at `[^`]*`; PR opened green\.$/ { hit = 1 }
+    END { exit hit ? 0 : 1 }
+  ' "$1"
 }
 
 # 0 = exactly one well-formed pair (replace in place); 1 = neither marker (a body a

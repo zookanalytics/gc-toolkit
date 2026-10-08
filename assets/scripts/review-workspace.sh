@@ -41,6 +41,7 @@
 #     nothing inside it has changed for REVIEW_WORKSPACE_IDLE_AFTER (24h).
 # A named bead that is not closed holds its workspace at any age, and so does
 # one whose status cannot be read: an unreadable ledger is not a closed review.
+# An entry whose age cannot be read is held the same way.
 #
 # Env: REVIEW_WORKSPACE_DIR, REVIEW_WORKSPACE_IDLE_AFTER (seconds).
 # Exit: 0 done, or nothing to do · 1 add could not make the worktree, remove
@@ -96,16 +97,19 @@ gone() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 
 # Remove one entry; succeed only when it is gone. Worktrees inside go first,
 # deepest first so a nested one is not orphaned by its parent's removal, each
-# through its own repository. Then the tree, made writable first: a read-only
-# subtree (a Go module cache) refuses rm, and a swallowed refusal frees
-# nothing. chmod -R does not follow the symlinks it meets inside the tree.
+# through its own repository; a path's depth is its count of '/', counted here
+# because find's -printf is GNU-only. Then the tree, made writable first: a
+# read-only subtree (a Go module cache) refuses rm, and a swallowed refusal
+# frees nothing. chmod -R does not follow the symlinks it meets inside the tree.
 teardown() { # <absolute path>
-    local p="$1" g
+    local p="$1" g s
     if [ -d "$p" ] && [ ! -L "$p" ]; then
         while IFS= read -r -d '' g; do
+            g="${g#*$'\t'}"
             git -C "${g%/.git}" worktree remove --force --force "${g%/.git}" >/dev/null 2>&1 || true
-        done < <(find -P "$p" -xdev -name .git -type f -printf '%d\t%p\0' 2>/dev/null \
-                   | sort -z -t "$(printf '\t')" -k1,1rn | cut -z -f2-)
+        done < <(find -P "$p" -xdev -name .git -type f -print0 2>/dev/null \
+                   | while IFS= read -r -d '' g; do s="${g//[!\/]/}"; printf '%d\t%s\0' "${#s}" "$g"; done \
+                   | sort -z -t "$(printf '\t')" -k1,1rn)
         chmod -R u+w "$p" 2>/dev/null || true
     fi
     rm -rf -- "$p" 2>/dev/null || true
@@ -189,26 +193,35 @@ bead_state() { # <id> <store>
     fi
 }
 
-# Whether a process has its cwd, or an open file, inside <path>. Read fresh
-# for each removal, because the gap between deciding and removing is a race.
-# find walks /proc rather than a glob over it, which silently drops the
-# entries it cannot stat (docs/worktree-reclaim.md, "Rails"). A walk of /proc
-# always races exiting processes, so find's own status says nothing and only
-# awk's answer counts; a walk that read no process at all, not even this one,
-# is a broken probe and reads as in use.
+# Whether a process has its cwd, or a file open, inside <path>. Read fresh for
+# each removal, because the gap between deciding and removing is a race. lsof
+# lists the cwd and open files of every process this user can see, on Linux
+# and macOS alike, and exits 0 on a walk it completed. A listing that failed,
+# or that names no file at all, not even lsof's own, is a broken probe and
+# reads as in use.
 in_use() { # <path>
-    { find /proc -mindepth 2 -maxdepth 2 -name cwd -type l -printf '%l\n' 2>/dev/null || true
-      find /proc -mindepth 3 -maxdepth 3 -path '/proc/[0-9]*/fd/*' -type l -printf '%l\n' 2>/dev/null || true
-    } | awk -v p="$1" 'index($0, p "/") == 1 || $0 == p { f = 1 } END { exit (NR == 0 || f) ? 0 : 1 }'
+    local listing
+    listing="$(lsof -w -n -P -F n 2>/dev/null)" || return 0
+    awk -v p="$1" 'sub(/^n/, "") { n++; if (index($0, p "/") == 1 || $0 == p) f = 1 }
+                   END { exit (n == 0 || f) ? 0 : 1 }' <<< "$listing"
 }
 
+# GNU stat takes its format after -c and BSD stat after -f. Both read %u as the
+# owner's uid, of a symlink itself rather than what it names; the mtime in
+# epoch seconds is %Y in GNU and %m in BSD.
+if stat -c %u -- / >/dev/null 2>&1; then STAT=(stat -c); MTIME=%Y; else STAT=(stat -f); MTIME=%m; fi
+
 # Newest mtime anywhere inside, directories included, so one stale file cannot
-# condemn a workspace that is still in use.
-newest() { find -P "$1" -xdev -printf '%T@\n' 2>/dev/null | awk '{ t = int($1); if (t > m) m = t } END { print m + 0 }'; }
+# condemn a workspace that is still in use. A walk that read no mtime, not even
+# the entry's own, prints nothing.
+newest() {
+    find -P "$1" -xdev -exec "${STAT[@]}" "$MTIME" -- {} + 2>/dev/null \
+        | awk '/^[0-9]+$/ { n++; if ($1 + 0 > m) m = $1 + 0 } END { if (n) print m + 0 }'
+}
 gib() { awk -v k="$1" 'BEGIN { printf "%.2f", k / 1048576 }'; }
 
 cmd_reap() {
-    local rigs prefix path d e name hit id st age kb seen=" " now dirs=()
+    local rigs prefix path d e name hit id st mt age kb seen=" " now dirs=()
     local took_closed=0 took_idle=0 took_kb=0 failed=0
     local kept_live=0 kept_unread=0 kept_active=0 kept_held=0
     rigs="$(gc rig list --json 2>/dev/null \
@@ -241,7 +254,7 @@ cmd_reap() {
         seen="$seen$d "
         for e in "$d"/gc-review-*; do
             gone "$e" && continue
-            [ "$(stat -c %u -- "$e" 2>/dev/null)" = "$UID_NUM" ] || continue
+            [ "$("${STAT[@]}" %u -- "$e" 2>/dev/null)" = "$UID_NUM" ] || continue
             name="${e##*/}"
             hit="$(bead_of "$name")"; id="${hit%%$'\t'*}"
             st=missing
@@ -253,7 +266,11 @@ cmd_reap() {
                 live)    kept_live=$((kept_live + 1)); keep "$e" "review $id not closed"; continue ;;
                 unknown) kept_unread=$((kept_unread + 1)); keep "$e" "status of $id unreadable"; continue ;;
             esac
-            age=$((now - $(newest "$e")))
+            mt="$(newest "$e")"
+            if [ -z "$mt" ]; then
+                kept_unread=$((kept_unread + 1)); keep "$e" "age unreadable"; continue
+            fi
+            age=$((now - mt))
             if [ "$age" -ge "$IDLE_AFTER" ]; then
                 take "$e" "no live review named, idle $((age / 3600))h" && took_idle=$((took_idle + 1))
             else

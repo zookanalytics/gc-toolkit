@@ -113,11 +113,14 @@ mk_sut_dir() { # <dir> <file>...
   # bd-lib.sh (the shared bead-store reads) and pace-lib.sh (the cadence arms'
   # visit order and time budget) are libraries SUTs source by sibling path, and
   # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
-  # the same way; copy them beside the SUT so those sources resolve in the
-  # private dir. They sit beside this harness, so they are found whatever the
+  # the same way. pr-post.sh is the single writer of the city's PR posts and the
+  # owner of the provenance definition every feedback reader asks, so a SUT that
+  # posts or reads feedback runs it by sibling path. Copy all four beside the SUT
+  # so those calls resolve in the private dir; cp keeps pr-post.sh's executable
+  # bit. They sit beside this harness, so they are found whatever the
   # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   return 0
@@ -283,9 +286,11 @@ case "$verb" in
       *" $id "*) case " $* " in *" --status=closed "*)
         echo "gc: simulated close refusal for $id" >&2; exit 1 ;; esac ;;
     esac
-    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""
+    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0
     while [ $# -gt 0 ]; do
       case "$1" in
+        --description=*) desc="${1#--description=}"; desc_set=1 ;;
+        --description|-d) shift; desc="${1-}"; desc_set=1 ;;
         --set-metadata) shift; sets+=("${1:-}") ;;
         --set-metadata=*) sets+=("${1#--set-metadata=}") ;;
         --unset-metadata) shift; unsets+=("${1:-}") ;;
@@ -355,6 +360,12 @@ case "$verb" in
       jq -c --arg id "$id" --arg n "$note" \
         'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
         "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+    fi
+    if [ "$desc_set" = 1 ]; then
+      case ",$drops," in *",description,"*) : ;; *)
+        jq -c --arg id "$id" --arg d "$desc" \
+          'map(if .id == $id then .description = $d else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+      esac
     fi
     mv "$tmp" "$S"
     echo "updated $id"
@@ -894,4 +905,25 @@ part() { # <name>
     esac
   fi
   [ "$RUN_TESTS_PART" = "$1" ]
+}
+
+# A Python whose standard library has tomllib (3.11 and newer), for a suite that
+# reads a formula or an order with it. A host's python3 can be older (macOS
+# ships 3.9) while a newer one sits on PATH under its versioned name, so the
+# search tries python3 and then each python3.N on PATH, newest first. It prints
+# the path of the first one that imports tomllib and returns 0. With none, it
+# prints what PATH does have and returns 1, and the suite skips the checks that
+# need tomllib with that text as the reason.
+tomllib_python() {
+  local name path ver found=""
+  for name in python3 $(compgen -c python3. 2>/dev/null | grep -xE 'python3\.[0-9]+' | sort -t. -k2,2nr -u); do
+    path="$(command -v "$name")" || continue
+    if "$path" -c 'import tomllib' >/dev/null 2>&1; then
+      printf '%s\n' "$path"; return 0
+    fi
+    ver="$("$path" -c 'import platform; print(platform.python_version())' 2>/dev/null)"
+    found="${found:+$found, }$path${ver:+ $ver}"
+  done
+  printf 'tomllib needs Python 3.11 or newer, and PATH has %s\n' "${found:-no python3}"
+  return 1
 }
