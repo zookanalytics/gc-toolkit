@@ -25,7 +25,9 @@ were folded into their twins on 2026-10-05.
 The fix ships with this finding. Every formula copy now reuses the conversation
 visit already open on its subject before it files, and never reuses an
 escalation visit. `assets/scripts/gate-visit.test.sh` executes every formula
-copy against both cases.
+copy against both cases. PR #1043 landed first and replaced
+`mol-first-reaction`'s copy with a human gate, so three formula copies carry the
+check.
 
 ## The question
 
@@ -36,8 +38,9 @@ any is a volume source worth gating.
 
 ## Who files keyless visits
 
-Six places create a `task_kind=visit` bead, and each is a marked copy of the
-`gate-visit` snippet. Only `escalate.sh`'s copy stamps `escalation_key`.
+When this was measured, six places created a `task_kind=visit` bead, and each
+was a marked copy of the `gate-visit` snippet. Only `escalate.sh`'s copy stamps
+`escalation_key`.
 
 | filer | reached by | open-visit check at filing, before this change |
 |---|---|---|
@@ -123,7 +126,7 @@ the held one, the other keeps the subject showing as owed with the same ask.
   nuisance, and a visit never filed asks nobody.
 - `gate-visit.test.sh` runs the canonical copy against eleven listing shapes and
   runs every formula copy against the reuse case and the escalation case. The
-  suite fails on each of these mutants: main's four copies, and in a single copy
+  suite fails on each of these mutants: main's three copies, and in a single copy
   dropping the escalation filter, the status filter, the `task_kind` check, the
   tracks-edge coverage, the lowest-id choice, or the reuse branch.
 - A read-only run of the lookup against the live store found tk-g83dov for
@@ -131,10 +134,12 @@ the held one, the other keeps the subject showing as owed with the same ask.
   its subject is held on. It found nothing for tk-c22a1q and tk-p9549d, which
   have only escalation visits open.
 
-PR #1043 (tk-q8fkah), in flight, moves `mol-first-reaction` from filing a visit
-to filing a human gate, which `gate-visit-sweep` then turns into a visit through
-`gc-helm.sh open`. That removes the copy where every duplicate came from. The
-reuse check covers it until then, and the other three copies after.
+PR #1043 (tk-q8fkah) landed first. It moved `mol-first-reaction` from filing a
+visit to filing a human gate, which `gate-visit-sweep` turns into a visit
+through `gc-helm.sh open`, the filer that already folds into an open visit. That
+removed the copy where every duplicate came from, so this change leaves
+`mol-first-reaction` as main has it, and the reuse check covers the other three
+copies.
 
 ## Not changed, and why
 
@@ -151,7 +156,8 @@ reuse check covers it until then, and the other three copies after.
   holds that wait on no person, a finished duplicate dispatch or blockers with a
   re-dispatch armed, file no visit. A keyless visit is never a hold's release
   path, and it outlives the molecule: the dispose closes only the root and its
-  step beads, so a first-reaction visit and the subject's hold on it stay intact.
+  step beads, so a first reaction's gate, the visit filed for it, and the
+  subject's hold stay intact.
 - **The create in the formula copies is still two writes**, a create and then
   the stamps. tk-6t09b8 tracks making it one write, and tk-vxw40 tracks the same
   for `gc-helm.sh open`. A visit whose stamps never landed has no
