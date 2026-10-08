@@ -486,10 +486,12 @@ type Tile struct {
 	// too. A rig the board holds no pull request URL for keeps the bare branch.
 	PRBranchURL string `json:"pr_branch_url"`
 
-	// PRPhase is who must act on this merge anchor next — `working`,
-	// `needs-review`, or `needs-attention` — the same status: taxonomy
-	// pr-status-label.sh projects to the GitHub PR list, so the board and the
-	// label read one vocabulary rather than two. Empty on a non-merge row.
+	// PRPhase is this merge anchor's PR status. On a live anchor it is who must act
+	// next — `working`, `needs-review`, or `needs-attention` — the same status:
+	// taxonomy pr-status-label.sh projects to the GitHub PR list, so the board and
+	// the label read one vocabulary rather than two. On a closed anchor it is the
+	// PR's resolved state, `merged` or `closed`, so a done row names how its PR
+	// ended rather than freezing on its last live value. Empty on a non-merge row.
 	PRPhase string `json:"pr_phase"`
 
 	// Phase is this bead's liveness in the shared tri-state vocabulary —
