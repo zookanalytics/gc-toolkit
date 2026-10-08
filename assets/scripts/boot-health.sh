@@ -27,7 +27,18 @@ PEEK_LINES="${BOOT_HEALTH_PEEK_LINES:-30}"
 CALL_TIMEOUT="${BOOT_HEALTH_CALL_TIMEOUT:-15}"
 KILL_AFTER="${BOOT_HEALTH_KILL_AFTER:-5}"
 
-BUSY_RE="${BOOT_HEALTH_BUSY:-esc to interrupt|ctrl.{0,2}c to (stop|interrupt)}"
+# Busy markers: both CLIs print these while mid-turn. Held as one single-quoted
+# literal, because a `}` inside ${VAR:-default} closes the expansion early.
+DEFAULT_BUSY='esc to interrupt|ctrl.{0,2}c to (stop|interrupt)'
+BUSY_RE="${BOOT_HEALTH_BUSY:-$DEFAULT_BUSY}"
+# grep exits 2 on a pattern it rejects, and the busy test reads that as "not
+# busy", so an override grep rejects gives way to the default markers.
+BUSY_RC=0
+grep -Eq -- "$BUSY_RE" </dev/null >/dev/null 2>&1 || BUSY_RC=$?
+if [ "$BUSY_RC" -gt 1 ]; then
+    echo "boot-health: BOOT_HEALTH_BUSY is not a valid ERE — using the default busy markers"
+    BUSY_RE="$DEFAULT_BUSY"
+fi
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime/packs/gc-toolkit}"
