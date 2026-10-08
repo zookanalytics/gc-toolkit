@@ -52,9 +52,13 @@ run sl-abc12
 eq "$OUT" "signal-loom" "a signal-loom bead resolves to signal-loom"
 
 # Fail closed: every unresolved shape refuses with empty stdout, so a caller
-# binding GC_RIG=$(...) gets nothing to bind rather than a guess.
+# binding GC_RIG=$(...) gets nothing to bind rather than a guess. The exit code
+# then says WHICH refusal it is — 1 for a subject that names no placeable bead
+# (an unknown prefix, or no prefix segment at all), 3 for a bead-shaped id whose
+# store could not be read (an unreadable rig set, or a prefix two rigs carry) —
+# so escalate.sh can bucket the first as ephemeral and fail closed on the second.
 run zz-abc12
-eq "$RC" "1" "an unknown prefix refuses (rc)"
+eq "$RC" "1" "an unknown prefix is a proven no-such-bead (exit 1)"
 eq "$OUT" "" "  ... printing no rig to stdout"
 has "$ERR" "no rig carries the prefix 'zz'" "  ... and naming the prefix it could not place"
 
@@ -64,14 +68,27 @@ eq "$OUT" "" "  ... printing no rig to stdout"
 
 STUB_RIGS='{"rigs":[{"name":"one","prefix":"dup","path":"/a"},{"name":"two","prefix":"dup","path":"/b"}]}' \
   run dup-abc12
-eq "$RC" "1" "a prefix two rigs carry refuses rather than picking one"
+eq "$RC" "3" "a prefix two rigs carry is unproven (exit 3), not a proven no-such-bead"
 eq "$OUT" "" "  ... printing no rig to stdout"
 has "$ERR" "carried by 2 rigs" "  ... and saying how many carry it"
 
 STUB_RIGS_FAIL=1 run tk-3y6toq
-eq "$RC" "1" "an unreadable rig list refuses"
+eq "$RC" "3" "an unreadable rig list is unproven (exit 3), a store that could not be read"
 eq "$OUT" "" "  ... printing no rig to stdout"
 has "$ERR" "could not read" "  ... reported apart from 'no such prefix', which has a different repair"
+
+# Only bead-store.sh can prove a no. A helper that cannot be run asked no store,
+# so its refusal is unproven (3), never the proven no-such-bead (1) that
+# escalate.sh redirects onto the triage subject.
+GC_BEAD_STORE_TOOL="$TMP/no-such-bead-store.sh" run tk-3y6toq
+eq "$RC" "3" "a missing bead-store.sh is unproven (exit 3), not a proven no-such-bead"
+eq "$OUT" "" "  ... printing no rig to stdout"
+has "$ERR" "cannot execute" "  ... and saying the store helper could not be run"
+
+printf '#!/usr/bin/env bash\necho gc-toolkit\n' > "$TMP/bead-store-noexec.sh"
+GC_BEAD_STORE_TOOL="$TMP/bead-store-noexec.sh" run tk-3y6toq
+eq "$RC" "3" "a bead-store.sh that is not executable is unproven (exit 3) too"
+eq "$OUT" "" "  ... and nothing it would answer is read"
 
 run
 eq "$RC" "2" "no argument is a usage error"
@@ -84,6 +101,30 @@ eq "$RC" "2" "--help is a usage error"
 export GC_RIG=gc-toolkit
 BOUND=$(GC_RIG="$("$SUT" gc-yxpj8)" sh -c 'printf "[%s]" "$GC_RIG"')
 eq "$BOUND" "[gascity]" "the output binds straight into GC_RIG with no trailing junk"
+
+# The city's own store answers to its rig name in this mode, but `gc bd` ignores
+# that name as GC_RIG. --db prints the path, which selects every store.
+run lx-abc12
+eq "$OUT" "loomington" "a city-store bead names the city's rig"
+run --db lx-abc12
+eq "$RC" "0" "--db resolves a city-store bead (rc)"
+eq "$OUT" "/c/.beads" "  ... to the city's own .beads path"
+run --db gc-yxpj8
+eq "$OUT" "/c/rigs/gascity/.beads" "--db resolves a rig bead to that rig's .beads path, whatever the caller's GC_RIG"
+
+# A rig carries the prefix, so the bead may be real: its store is unproven (3),
+# not a proven no-such-bead (1).
+STUB_RIGS='{"rigs":[{"name":"unbound","prefix":"ub","path":""}]}' run --db ub-abc12
+eq "$RC" "3" "--db refuses a rig that reports no path as unproven (exit 3)"
+eq "$OUT" "" "  ... printing no path to stdout"
+has "$ERR" "reports no path" "  ... and saying why"
+run --db zz-abc12
+eq "$RC" "1" "--db refuses an unknown prefix as a proven no-such-bead (exit 1)"
+eq "$OUT" "" "  ... printing no path to stdout"
+run --db
+eq "$RC" "2" "--db with no bead is a usage error"
+run --db tk-3y6toq extra
+eq "$RC" "2" "--db with a second argument is a usage error"
 
 echo
 echo "escalation-rig: $PASS passed, $FAIL failed"

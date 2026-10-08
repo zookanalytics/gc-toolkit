@@ -45,7 +45,7 @@ usage() {
 usage: patrol-finding.sh --key <situation-key> --title <one line>
                          --message <text> [options]
 
-  --key       names the SITUATION, not the wording: one open bead per key,
+  --key       names the SITUATION, not the wording: one live bead per key,
               narrowed to --about when that is given. [A-Za-z0-9._-] only.
               Two findings that need separate work need separate keys, so
               encode what distinguishes them (`dolt-backup-<db>`). A doctor
@@ -173,23 +173,28 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
-# find_by_key <status-list> -> the id of the bead already holding this finding,
-# or empty when the store is readable and holds none. Returns NON-ZERO without
-# printing when the lookup itself could not be trusted: the list command exited
-# non-zero, or its output was not a JSON array. A caller must treat that as
-# "unknown", never as "none" — an empty result read as "no existing finding"
-# files the duplicate this script exists to prevent, during the very store-read
-# failure it is meant to survive.
+# Every status a finding's bead can hold and still be its live record; only
+# `closed` ends one. One comma list, because a repeated --status flag keeps only
+# its last value.
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+
+# rows_by_key <status-list> -> the beads already holding this finding, as a
+# JSON array in listing order, or `[]` when the store is readable and holds
+# none. Returns NON-ZERO without printing when the lookup itself could not be
+# trusted: the list command exited non-zero, or its output was not a JSON
+# array. A caller must treat that as "unknown", never as "none" — an empty
+# result read as "no existing finding" files the duplicate this script exists
+# to prevent, during the very store-read failure it is meant to survive.
 #
 # The key rides the listing so the store does the narrowing, and --about rides
 # it too when given: a truncated window filtered client-side would miss its
 # own match and file a duplicate every pass. --limit=0 removes the window
-# entirely, which the key filter can afford. The matched row is then re-checked
-# field by field, because a listing that silently ignored a filter would match
+# entirely, which the key filter can afford. Each row is then re-checked field
+# by field, because a listing that silently ignored a filter would match
 # everything, and because "no --about" means the finding.about key is ABSENT —
 # a condition --metadata-field cannot express.
-find_by_key() {
-  local statuses="$1" out ids
+rows_by_key() {
+  local statuses="$1" out
   # Capture the listing and its exit status BEFORE the parse: piping straight
   # into jq (as before) let a failed list emit an empty string that the parser
   # read as "no match", so the fail-open path and the no-match path were the
@@ -201,12 +206,36 @@ find_by_key() {
   # A listing that is not a JSON array — an error object, a truncated payload,
   # the empty string — cannot be read as "no match". Fail closed.
   printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
-  ids=$(printf '%s' "$out" \
-    | jq -r --arg k "$KEY" --arg a "$ABOUT" \
-        '.[] | select(((.metadata["finding.key"] // "") == $k)
-                  and ((.metadata["finding.about"] // "") == $a)) | .id' 2>/dev/null) \
+  printf '%s' "$out" \
+    | jq -c --arg k "$KEY" --arg a "$ABOUT" --arg st "$statuses" \
+        '($st | split(",")) as $want
+         | [ .[] | select(((.metadata["finding.key"] // "") == $k)
+                      and ((.metadata["finding.about"] // "") == $a)
+                      and ((.status // "") as $s | $want | any(. == $s))) ]' 2>/dev/null \
     || return 2
-  printf '%s' "${ids%%$'\n'*}"
+}
+
+# find_by_key <status-list> -> the id of the first bead rows_by_key lists, or
+# empty when it lists none. Non-zero exactly when rows_by_key is.
+find_by_key() {
+  local rows
+  rows=$(rows_by_key "$1") || return 2
+  printf '%s' "$rows" | jq -r '.[0].id // empty' 2>/dev/null || return 2
+}
+
+# waits_on_open <blocker-id>... -> 0 while one of the blockers is still open, 1
+# once every one of them reads closed, and 1 when there are none. A blocker
+# counts as closed only when a read shows it closed. One whose read fails, or
+# that no store answers for, is still waited on, because reading it as closed
+# would file a second bead on the strength of a failed read. `gc bd show`
+# resolves an id by its prefix in whichever rig's store holds it, so a blocker
+# filed in another rig is read where it lives.
+waits_on_open() {
+  local b
+  for b in "$@"; do
+    [ "$(bd_json show "$b" | jq -r '.[0].status // empty' 2>/dev/null)" = "closed" ] || return 0
+  done
+  return 1
 }
 
 SCOPE_LABEL="${SCOPE:-unscoped}"
@@ -221,13 +250,47 @@ if [ -n "$DRY" ]; then
 fi
 
 # ── The finding already has a bead ───────────────────────────────────
-# Its recurrence belongs on that bead. This is the whole point: the open bead
+# Its recurrence belongs on that bead. This is the whole point: the live bead
 # spans the recurrence, where an open VISIT did not — a sitting closes each
 # visit before the next sweep runs, so the dedup window never covered the gap
 # and one situation filed a visit per tick.
-if ! EXISTING=$(find_by_key "open,in_progress"); then
-  warn "dedup lookup failed (list exited non-zero, or its output was not a JSON array) for $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot create a duplicate of a bead that may already be open. Re-run when the store is readable."
+#
+# Every live status is read, not just open and in_progress: a bead parked at
+# blocked, deferred, hooked or pinned is still the finding's bead, and a lookup
+# blind to it files a second bead beside it. A bead held at blocked keeps the
+# recurrence only while something it waits on is still open. `bd ready` skips a
+# blocked bead whatever its edges say, and the status stays set after its
+# blockers close. So once nothing it waits on is open, no pool is offered that
+# bead again, and a recurrence recorded on it starts no reaction. That
+# recurrence is news, filed below. Otherwise the recurrence goes to a live
+# bead: first one not held at blocked, then a held one still waiting on an open
+# blocker.
+if ! LIVE=$(rows_by_key "$LIVE_STATUSES"); then
+  warn "dedup lookup failed (list exited non-zero, or its output was not a JSON array) for $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot create a duplicate of a bead that may already be live. Re-run when the store is readable."
   exit 1
+fi
+EXISTING=$(printf '%s' "$LIVE" | jq -r '[.[] | select(.status != "blocked")][0].id // empty' 2>/dev/null)
+HELD=""; HELD_ON=""
+if [ -z "$EXISTING" ]; then
+  # `bd list` carries each bead's outgoing edges on its row, keyed `.type` with
+  # the target in `.depends_on_id`; `bd show` keys them `.dependency_type` and
+  # `.id`, and leaves out an edge into another store. Both spellings are read.
+  # Only a `blocks` edge is a wait: the `tracks` edge --about adds names the
+  # bead the finding is about.
+  if ! HELD_ROWS=$(printf '%s' "$LIVE" | jq -r '.[] | select(.status == "blocked")
+      | [ .id, ([ (.dependencies // [])[]
+                  | select(((.type // .dependency_type // "") | tostring) == "blocks")
+                  | ((.depends_on_id // .id // "") | tostring)
+                  | select(. != "") ] | unique | join(" ")) ] | @tsv'); then
+    warn "could not read the blockers of the blocked bead holding $DEDUP_SCOPE — refusing to file, because a bead that may still be waiting would get a second one beside it. Re-run when the store is readable."
+    exit 1
+  fi
+  while IFS=$'\t' read -r id on; do
+    [ -n "$id" ] || continue
+    # shellcheck disable=SC2086  # $on is space-separated bead ids, one field each
+    if waits_on_open $on; then EXISTING="$id"; break; fi
+    [ -n "$HELD" ] || { HELD="$id"; HELD_ON="$on"; }
+  done <<< "$HELD_ROWS"
 fi
 if [ -n "$EXISTING" ]; then
   ROW=$(bd_json show "$EXISTING")
@@ -257,11 +320,14 @@ $MESSAGE"
   exit 1
 fi
 
-# ── Recurring after a close is news, and gets its own bead ────────────
+# ── Recurring after its bead let go is news, and gets its own bead ────
 # A finding whose bead was closed as fixed, firing again, means the fix did
-# not hold. That is worth one new bead — and only one: the next recurrence
-# finds THIS bead open above.
-if ! PRIOR=$(find_by_key "closed"); then
+# not hold. A bead held at blocked with nothing open left to wait on is the
+# same news before anyone has closed it, and it is the predecessor to name,
+# not an older closed bead. That is worth one new bead — and only one: the next
+# recurrence finds THIS bead open above.
+PRIOR="$HELD"
+if [ -z "$PRIOR" ] && ! PRIOR=$(find_by_key "closed"); then
   warn "dedup lookup failed (list exited non-zero, or its output was not a JSON array) for the closed-bead probe of $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot create a duplicate. Re-run when the store is readable."
   exit 1
 fi
@@ -272,10 +338,24 @@ BODY="$MESSAGE
 Filed by the $SCOPE_LABEL patrol under finding key \`$KEY\`. A recurrence
 updates \`finding.occurrences\` and \`finding.last_seen\` on this bead rather
 than filing another, and appends a note when the finding text changes."
-[ -n "$PRIOR" ] && BODY="$BODY
+if [ -n "$HELD" ] && [ -n "$HELD_ON" ]; then
+  BODY="$BODY
+
+This finding fired again while $HELD was held at blocked and everything it
+waited on (${HELD_ON// /, }) had closed, so what those beads delivered did not
+stop it. Read that bead before re-deriving the cause."
+elif [ -n "$HELD" ]; then
+  BODY="$BODY
+
+This finding fired again while $HELD was held at blocked with no blocker to
+wait on, so nothing in the graph will release it to take the recurrence. Read
+that bead before re-deriving the cause."
+elif [ -n "$PRIOR" ]; then
+  BODY="$BODY
 
 This finding fired again after $PRIOR was closed, so the earlier fix did not
 hold. Read that bead before re-deriving the cause."
+fi
 
 # Every stamp rides the create. A bead whose finding.key landed in a second
 # write that failed is a bead the next sweep cannot find, and it files again —
@@ -293,7 +373,7 @@ META=$(jq -nc \
 
 set -- -t "$TYPE" --title "$TITLE" -d "$BODY" --metadata "$META"
 [ -n "$PRIORITY" ] && set -- "$@" --priority "$PRIORITY"
-BEAD=$(gc bd create "$@" --json 2>/dev/null | scrub | jq -r '.id // .[0].id // ""' 2>/dev/null)
+BEAD=$(gc bd create "$@" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 
 # `bd create --json` can answer with an empty id for a bead it did create, and
 # a blind retry would file the duplicate this script exists to prevent. The key
@@ -323,7 +403,11 @@ if [ "$GOT_KEY" != "$KEY" ]; then
   exit 1
 fi
 
-echo "$PROG: filed $BEAD for $DEDUP_SCOPE${PRIOR:+ (recurrence of closed $PRIOR)}"
+if [ -n "$HELD" ]; then
+  echo "$PROG: filed $BEAD for $DEDUP_SCOPE (recurrence of $HELD, held at blocked with nothing open to wait on)"
+else
+  echo "$PROG: filed $BEAD for $DEDUP_SCOPE${PRIOR:+ (recurrence of closed $PRIOR)}"
+fi
 
 # ── Hand it to the first reaction ────────────────────────────────────
 # The reaction is what disposes the finding: routed to a pool, held on an
