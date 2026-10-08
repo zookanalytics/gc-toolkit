@@ -26,6 +26,8 @@
 #   (ARMED-DROP)    …among them a full arm record and an arm capped at its failure cap
 #   (DISPATCH-KEEP) …while a raw input, and a bead whose keys are blank, stay candidates
 #   (ARMED-SWEEP)   a scan --sling sweep reacts to raw input and never to those beads
+#   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
+#                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
 # bash, not sh.
@@ -535,6 +537,40 @@ IDS="$(live_scan STUB_CONVOYS=locked | jq -r '.[].id' | sort | tr '\n' ' ')"
 ERR="$(cat "$TMP/scan.err")"
 has "$IDS" "tk-scan-driven" "(INFLIGHT-READS) with the convoy read failing, the driven bead stays a candidate"
 has "$ERR" "could not read the workflow roots or the open convoys" "(INFLIGHT-READS) …and the sweep logs that it went unfiltered"
+
+# Both drops in one sweep, on the live read path. Each fixture case above
+# exercises one drop, and the live case above feeds no bead with a dispatch path.
+# Here the movable-forward ready read returns one bead per dispatch-path key, read
+# from the shared definition, beside tk-scan-driven, which the stub's convoy read
+# ties to a live workflow root, and tk-scan-free, which has neither. A second stub
+# answers that read and passes every other call to the first.
+jq -n --arg keys "$PATH_KEYS" '
+  [ {"id":"tk-scan-driven", "issue_type":"task", "description":"queued for a reaction", "title":"driven",
+     "created_at":"2026-01-01T00:00:00Z", "metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.proactive"}},
+    {"id":"tk-scan-free", "issue_type":"task", "description":"never slung", "title":"free",
+     "created_at":"2026-01-02T00:00:00Z", "metadata":{}} ]
+  + [ $keys | split("\n")[] | select(length > 0)
+      | {"id": ("tk-scan-path-" + .), "issue_type": "task", "description": "a bead with a dispatch path",
+         "title": ("dispatch path " + .), "created_at": "2026-01-03T00:00:00Z",
+         "metadata": {(.): "gc-toolkit/gc-toolkit.polecat"}} ]' > "$TMP/ready-both.json"
+BOTH="$TMP/stub-both"
+mkdir -p "$BOTH"
+cat > "$BOTH/gc" <<SH
+#!/bin/sh
+case "\$*" in
+  "bd ready --unassigned --exclude-type=epic --json --sort oldest --limit 0") cat "$TMP/ready-both.json" ;;
+  *) exec "$STUB/gc" "\$@" ;;
+esac
+SH
+chmod +x "$BOTH/gc"
+
+echo "# the live path drops a bead with a dispatch path and a bead a live workflow drives in one sweep"
+IDS="$(env -u GC_PROACTIVE_FIXTURE PATH="$BOTH:$PATH" bash "$SCRIPT" scan --json 2>"$TMP/scan.err" | jq -r '.[].id' | sort | tr '\n' ' ')"
+for k in $PATH_KEYS; do
+    hasnt "$IDS" "tk-scan-path-$k" "(BOTH-READS) the live path drops the bead carrying $k"
+done
+hasnt "$IDS" "tk-scan-driven" "(BOTH-READS) …and, in the same sweep, the bead a live workflow drives"
+has "$IDS" "tk-scan-free" "(BOTH-READS) …and keeps the bead with neither"
 
 echo "# the live reads: a live root names a convoy that tracks the bead"
 set +e
