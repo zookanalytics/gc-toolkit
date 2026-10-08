@@ -23,10 +23,11 @@ TMPD="$(mktemp -d "${TMPDIR:-/tmp}/demo-deliver.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 HOMEDIR="$TMPD/home"; mkdir -p "$HOMEDIR"
 
-# A symlink farm of just the coreutils the script calls, and a stub dir ahead of
-# it. env -i means only these are on PATH — no host gh, gc, node, or anything else.
+# A symlink farm of just the coreutils the script and its sibling posting helper
+# (pr-post.sh) call, and a stub dir ahead of it. env -i means only these are on
+# PATH — no host gh, gc, node, or anything else.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head tail grep git jq; do
+for c in bash sed tr head tail grep git jq dirname; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
@@ -147,6 +148,7 @@ has "pr comment 41" "$GH" "posts a comment on PR 41"
 has "--repo github.com/acme/widgets" "$GH" "the post is pinned to our origin"
 has "--attach $MP4" "$GH" "the file is attached inline"
 has "Demo capture for this PR" "$GH" "a factual default body is included"
+has "<!-- gc:city -->" "$GH" "the delivery carries the city's provenance mark (posted through pr-post.sh)"
 has "delivered $MP4 to PR#41" "$out" "it reports the delivery"
 
 echo "# gh version compare is numeric: 2.101.0 is NOT below 2.99.0"

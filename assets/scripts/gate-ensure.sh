@@ -15,28 +15,29 @@
 # check.<g> marker. A lane that derives green is settled; otherwise the lane
 # owes a review, has one in flight, or the anchor is mid-change, and a fresh
 # dispatch goes out only when QUIESCENCE holds: no review is dispatched while
-# anything is acting on the anchor — an open must-fix finding on any lane, a
-# fix unit in flight, a validation pass in flight, or a full review already in
-# flight on the lane. That predicate forbids the same head being read twice
-# WHILE a review is live or the anchor is being acted on; once a request-changes
-# review has CLOSED, the per-head bar (reviewed_at_head) forbids it, refusing a
-# second whole-diff review at a head already carrying a recorded, non-superseded
-# verdict — the durable backstop for the window between the close and the fix
-# unit and findings it files, which the transient quiescence beads do not yet
-# cover. A dispatch stamps metadata + a blocks edge first (fail-closed), takes
-# its body from review-dispatch-body.sh, then pours formula and route in one
-# call (gc sling <review-pool> <bead> --on mol-review), pinned to the live head
-# (signoff.sh binds the verdict) with fix_target_pool for the rework route.
-# An unstamped orphan is adopted by its title, never twinned; a failed sling is
-# never retried in-pass (a re-pour mints a second workflow root). Reach carried
-# by the pour ALONE is qualified before it counts: a review whose workflow is
-# spent (every step closed but the finalizer) can never produce a verdict, so
-# it is escalated through escalate.sh under one deduped situation key rather
-# than holding the anchor in silence. There is no dispatch ceiling: quiescence
-# forbids the redundant round the ceiling used to bound, and the runaway shapes
-# left — a reviewer that dies after claim, a fix unit filed with its edge
-# reversed — stop the PR moving and are caught by liveness-sweep.sh's stale-gate
-# pass, not by a count on the check.
+# anything is acting on the anchor — a fix unit in flight (including one
+# answering an open must-fix finding on any lane), a validation pass in flight,
+# or a full review already in flight on the lane. A must-fix finding no fix unit
+# answers holds the merge, not the dispatch. That predicate forbids the same
+# head being read twice WHILE a review is live or the anchor is being acted on;
+# once a request-changes review has CLOSED, the per-head bar (reviewed_at_head)
+# forbids it, refusing a second whole-diff review at a head already carrying a
+# recorded, non-superseded verdict — the durable backstop for the window between
+# the close and the fix unit and findings it files, which the transient
+# quiescence beads do not yet cover. A dispatch stamps metadata + a blocks edge
+# first (fail-closed), takes its body from review-dispatch-body.sh, then pours
+# formula and route in one call (gc sling <review-pool> <bead> --on mol-review),
+# pinned to the live head (signoff.sh binds the verdict) with fix_target_pool for
+# the rework route. An unstamped orphan is adopted by its title, never twinned;
+# a failed sling is never retried in-pass (a re-pour mints a second workflow
+# root). Reach carried by the pour ALONE is qualified before it counts: a review
+# whose workflow is spent (every step closed but the finalizer) can never
+# produce a verdict, so it is escalated through escalate.sh under one deduped
+# situation key rather than holding the anchor in silence. There is no dispatch
+# ceiling: quiescence forbids the redundant round the ceiling used to bound, and
+# the runaway shapes left — a reviewer that dies after claim, a fix unit filed
+# with its edge reversed — stop the PR moving and are caught by
+# liveness-sweep.sh's stale-gate pass, not by a count on the check.
 # A lane entering validating — an open task_kind=validation bead on the anchor
 # (quiescence clause c), opened by pr-facts.sh on a human feedback batch or the
 # machine-review path — gets mol-validate dispatched ONTO that pass so the
@@ -115,9 +116,10 @@ BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
 ESCALATOR="$SCRIPTS_DIR/escalate.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The shared graph-derivation helpers: lane green (the settled state) and the
-# anchor's open must-fix findings (quiescence clause a). Invoked as subprocesses
-# so every reader derives the same way; a missing or unreadable one fails closed
-# (holds the dispatch), never dispatches blind.
+# fix unit answering the anchor's open must-fix findings (quiescence clause a),
+# with the findings no fix unit answers. Invoked as subprocesses so every reader
+# derives the same way; a missing or unreadable one fails closed (holds the
+# dispatch), never dispatches blind.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
 # The one resolver of the check index: the dispatch loop asks it for the lanes
@@ -276,26 +278,39 @@ open_validation_pass() { # <anchor-id>
 
 # Quiescence — the anchor-wide half of "no review while anything acts on the
 # anchor", computed once per anchor and consulted before every dispatch (a fresh
-# pour and a stranded re-sling alike). Sets three globals: quiesce_hold (non-empty
-# = an actor is on the anchor, hold the dispatch), quiesce_reason (why, for the
-# log), and quiesce_unreadable (a probe could not answer — fail closed, hold and
-# retry next pass). The clauses, in order, first hold wins:
-#   (a) an open must-fix finding on the anchor, on ANY lane    [finding.sh]
-#   (b) a fix unit in flight resolving a finding on the anchor [open_rework_child]
-#   (c) a validation pass in flight on the anchor              [open_validation_pass]
+# pour and a stranded re-sling alike). Sets four globals: quiesce_hold (non-empty
+# = an actor is on the anchor, hold the dispatch), quiesce_reason (that actor, for
+# the log), quiesce_unanswered (the open must-fix findings no fix unit is
+# answering), and quiesce_unreadable (a probe could not answer — fail closed, hold
+# and retry next pass). The clauses, in order, first hold wins:
+#   (a) a fix unit in flight answering an open must-fix finding, ANY lane [finding.sh fix-in-flight]
+#   (b) a fix unit in flight resolving a finding on the anchor            [open_rework_child]
+#   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays
 # with inflight_review at the dispatch site. Each clause is an open-bead query;
-# none reads a check.<g> marker.
+# none reads a check.<g> marker, and each hold names a bead that is open.
+#
+# An open must-fix finding is a demand on the anchor, not an actor on it. The fix
+# unit answering it is what changes the diff, so clause (a) holds on that fix unit
+# and names it. Clause (b) cannot stand in for it: it sees only a request-changes
+# rework child, never the fix unit pr-facts.sh files for a human batch. A must-fix
+# finding nothing answers, with no fix unit in flight and no validation pass, sits
+# on a diff no one is changing, which is not the mid-change read quiescence
+# forbids. It holds no dispatch: a lane short of green dispatches as it would
+# without the finding, still subject to the per-head bar. It still holds the
+# merge through its blocks edge, and the settle decision still reads it as owed,
+# so it is reported here once per anchor instead of being named as an actor.
 compute_quiescence() { # <anchor-id>
-  quiesce_hold=""; quiesce_reason=""; quiesce_unreadable=0
-  local mf rc fu vp
-  # (a) open must-fix finding, any lane. A missing tool reads as unreadable, not
-  # as an all-clear: dispatching against a diff whose findings cannot be read is
-  # exactly the mid-change read quiescence exists to forbid.
-  mf=$("$FINDING" open-must-fix --anchor "$1" 2>/dev/null); rc=$?
+  quiesce_hold=""; quiesce_reason=""; quiesce_unanswered=""; quiesce_unreadable=0
+  local fif rc fu fst mf vp
+  # (a) the fix unit answering an open must-fix finding, any lane. A missing tool
+  # reads as unreadable, not as an all-clear: dispatching against a diff whose
+  # findings cannot be read is exactly the mid-change read quiescence forbids.
+  fif=$("$FINDING" fix-in-flight --anchor "$1" 2>/dev/null); rc=$?
   case "$rc" in
-    0) quiesce_hold=1; quiesce_reason="open must-fix finding $(printf '%s' "$mf" | head -1)"; return 0 ;;
-    1) : ;;                              # readable, none open
+    0) read -r fu fst mf <<<"$fif"
+       quiesce_hold=1; quiesce_reason="fix unit $fu is $fst, answering must-fix finding $mf"; return 0 ;;
+    1) quiesce_unanswered=$(printf '%s' "$fif" | tr '\n' ' ' | sed 's/ *$//') ;;
     *) quiesce_unreadable=1; return 0 ;; # 2 unreadable, or the tool is missing
   esac
   # (b) fix unit in flight (a live blocks-dep child carrying source_review_bead).
@@ -304,6 +319,9 @@ compute_quiescence() { # <anchor-id>
   # (c) validation pass in flight.
   if ! vp=$(open_validation_pass "$1"); then quiesce_unreadable=1; return 0; fi
   if [ -n "$vp" ]; then quiesce_hold=1; quiesce_reason="validation pass $vp in flight"; return 0; fi
+  if [ -n "$quiesce_unanswered" ]; then
+    echo "$PROG: $1 must-fix finding(s) $quiesce_unanswered open with no fix unit or validation pass answering them; they hold the merge, not review dispatch"
+  fi
   return 0
 }
 
@@ -693,10 +711,11 @@ STRAY
   # non-green lane to reach the dispatch decision computes it, and a fully green
   # anchor computes it once at the settle decision below (settling asserts nothing
   # is owed, which an open must-fix finding, fix unit, or validation pass
-  # contradicts). compute_quiescence sets the three quiesce_* globals below.
+  # contradicts). compute_quiescence sets the four quiesce_* globals below.
   quiesce_computed=0
   quiesce_hold=""
   quiesce_reason=""
+  quiesce_unanswered=""
   quiesce_unreadable=0
   # Lanes that derive LOCAL green this pass. Their still-unvalidated findings are
   # moot and close in one batched call after the gate loop — one finding-set read
@@ -705,13 +724,14 @@ STRAY
 
   # Close any must-fix finding on this anchor whose fix unit has landed — every
   # blocks-blocker closed. The fix unit's close leaves the finding it answered
-  # unblocked but open, and nothing else closes it, so the open finding holds
-  # the re-gate quiescence below forever: a landed fix wedged at pre_open_gate.
-  # This is the close review-cycle-architecture.md assigns here, run before the
-  # lane-state and quiescence reads so a landed fix no longer reads as owed and
-  # a lane an approve already backs reads green rather than provoking a dispatch.
-  # Best-effort: an unreadable store leaves the finding open, and quiescence
-  # below (which reads the same findings) fails the dispatch closed.
+  # unblocked but open, and nothing else closes it, so the open finding would
+  # hold the publish (pr-open.sh) and the merge (merge.sh) with its fix already
+  # on the branch. This is the close review-cycle-architecture.md assigns here,
+  # run before the lane-state and quiescence reads so a landed fix no longer
+  # reads as owed and a lane an approve already backs reads green rather than
+  # provoking a dispatch. Best-effort: an unreadable store leaves the finding
+  # open, and quiescence below (which reads the same findings) fails the
+  # dispatch closed.
   "$FINDING" close-answered --anchor "$id" >/dev/null 2>&1 || true
 
   # Dispatch is scoped to the anchor's stage, which advances with the PR: before
@@ -857,7 +877,7 @@ STRAY
           [ -n "$REVIEW_POOL" ] || { skipped=$((skipped + 1)); continue; }
           # Quiescence gates the re-sling too: re-routing an inert review pours a
           # read against the same mid-change diff a fresh dispatch would. Hold it
-          # until the fix, validation pass, or must-fix finding clears.
+          # until the fix unit or the validation pass clears.
           if [ -n "$quiesce_hold" ]; then
             mach_progress=1
             echo "$PROG: $id check '$g' has a stranded review $rid but the anchor is quiesced ($quiesce_reason); no re-sling"
@@ -897,11 +917,11 @@ STRAY
     fi
 
     # No in-flight review to raise the check. Quiescence forbids a fresh dispatch
-    # while a fix unit, a validation pass, or a must-fix finding is out — clause
-    # (b) is exactly the rework child a request-changes filed, so the lane being
-    # fixed reads as owed the fix, not a new review, and inflight_review never
-    # sees that child (it is not a review bead). The predicate was computed
-    # above; consult it here.
+    # while a fix unit or a validation pass is out — clause (a) is the fix unit
+    # answering a must-fix finding and clause (b) the rework child a
+    # request-changes filed, so the lane being fixed reads as owed the fix, not a
+    # new review, and inflight_review never sees that child (it is not a review
+    # bead). The predicate was computed above; consult it here.
     if [ -n "$quiesce_hold" ]; then
       echo "$PROG: $id check '$g' is quiesced ($quiesce_reason); the anchor is being acted on, so no review is dispatched"
       held=$((held + 1)); continue
@@ -1043,18 +1063,19 @@ GATES
   # and the operator's move is the same one either way.
   if [ -n "$head" ]; then
     # Settling asserts nothing is owed, which is more than every lane deriving
-    # green: an open must-fix finding, an in-flight fix unit, or a validation
-    # pass acts on the anchor as a whole, not on a lane this loop visited. That
-    # is quiescence, the predicate the dispatch decision already consults. A
+    # green: an in-flight fix unit or a validation pass acts on the anchor as a
+    # whole, not on a lane this loop visited, and an open must-fix finding is
+    # owed whether or not a fix unit answers it yet. That is quiescence plus its
+    # unanswered findings, the read the dispatch decision already consults. A
     # fully green anchor lets the loop skip the lazy compute, so run it here
-    # before settling and fail closed — a hold, or a probe that cannot answer,
-    # is progressing, not settled.
+    # before settling and fail closed — a hold, an unanswered must-fix finding,
+    # or a probe that cannot answer is progressing, not settled.
     if [ "$mach_wedge" = 0 ] && [ "$mach_progress" = 0 ]; then
       if [ "$quiesce_computed" = 0 ]; then
         quiesce_computed=1
         compute_quiescence "$id"
       fi
-      if [ -n "$quiesce_hold" ] || [ "$quiesce_unreadable" = 1 ]; then
+      if [ -n "$quiesce_hold" ] || [ -n "$quiesce_unanswered" ] || [ "$quiesce_unreadable" = 1 ]; then
         mach_progress=1
       fi
     fi
