@@ -88,15 +88,17 @@ The questions are the lens, not a checklist to exhaust. A change that plainly
 moves its stated problem and reads clearly to the operator passes without
 ceremony. That is the common case.
 
-## The recording is the `demo` check's
+## The visual is the `demo` check's
 
 The check index (`review-checks.toml`) carries a separate `demo` check that
-produces and grades the recording of an operator-watched surface; triage decides
-whether it runs. You do neither. Your only demo concern is the one folded into
-presentation: when the change is one the operator must watch to trust and the PR
-offers nothing to watch, that is a presentation finding you name, pointing at the
-demo tooling (`skills/gc-demo-script/SKILL.md`, `skills/demo-capture/SKILL.md`).
-Whether a recording that exists proves its claim is not your call.
+decides whether a change needs a visual to be understood, then delivers and
+grades the right one: a visual the repo already carries, a screenshot, or a
+narrated video. Triage decides whether it runs. You do neither. Your only visual
+concern is the one folded into presentation: when the change is one the operator
+must see to trust and the PR gives them nothing to look at, that is a
+presentation finding you name, pointing at the `demo` check's method
+(`skills/review-demo/SKILL.md`). Whether a visual that exists proves its claim is
+not your call.
 
 ## Two verdicts
 
