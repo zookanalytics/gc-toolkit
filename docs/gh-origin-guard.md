@@ -1,6 +1,6 @@
 ---
 name: gh origin guard
-description: The PreToolUse hook that refuses agent-typed gh writes aimed outside a repository we own — which verbs it covers, how it resolves the target, what it deliberately does not cover. Read it before changing the guard or adding an agent.
+description: The PreToolUse hook that refuses agent-typed gh writes aimed outside a repository we own, and posts on one we own that carry no city mark — which verbs it covers, how it resolves the target, what it deliberately does not cover. Read it before changing the guard or adding an agent.
 ---
 
 # gh origin guard
@@ -23,6 +23,11 @@ targets is not one the session owns. `gh issue new` and `gh pr new`, gh's
 aliases for the two create verbs, are folded to `create` and refused the same
 way.
 
+`gh api` reaches the same REST endpoints. A call whose method writes — POST,
+PATCH, PUT, or DELETE, set with `-X`/`--method` or defaulted to POST by gh when
+fields are added — is refused when its endpoint names a repository the session
+does not own. The repository comes from the endpoint path, not from a flag.
+
 Reads are untouched. `gh issue view`, `gh pr view`, `gh pr diff`, `gh search`
 and the rest reach any repository normally, so research on an upstream project
 keeps working.
@@ -30,6 +35,57 @@ keeps working.
 A refusal names the repository it stopped, names the repositories the session
 may write to, and points at the prepare-a-command path so the agent learns the
 route instead of only meeting a wall.
+
+On a repository the session does own, a post is held to one more rule, below.
+
+## Posts carry the city's mark
+
+The city posts under the same GitHub login an operator's review tools can use,
+so `assets/scripts/pr-facts.sh` tells the city's own posts from feedback by the
+mark `assets/scripts/pr-post.sh` appends, not by the author
+([state-machine.md](state-machine.md#operator-feedback)). An unmarked post under
+the city's login reads back as feedback, and the reconcile routes it into a
+rework child whose fixer answers the city's own words. A write that passes the
+origin rule and posts is therefore refused unless its body carries the mark.
+`tools/lint-learned.d/pr-post-bypass.sh` holds the pack's scripts and recipes to
+the same rule; the guard holds the commands an agent types, which no lint sees.
+
+The posts it reads:
+
+- `gh pr comment`, `gh issue comment` and `gh pr review`. The body comes from
+  `--body`/`-b` or from the file `--body-file`/`-F` names, the last one given
+  winning, the way gh reads them. `--delete-last` posts nothing and passes.
+- `gh api` with a writing method on a comment, reply or review endpoint:
+  `issues/<n>/comments`, `issues/comments/<id>`, `pulls/<n>/comments` and the
+  paths under it, and `pulls/<n>/reviews` and the paths under it. The body is
+  the `body` field, or the file a typed `body=@<path>` field or `--input` names.
+  A reaction, a dismissal, a reviewer re-request and a DELETE carry no body and
+  pass.
+- `gh api graphql` with a mutation that posts or edits a comment or review
+  body, such as a thread reply. Its body rides in a variable of any name, so the
+  call passes when any field value, or a file a typed field names, carries the
+  mark. It names no repository, so the origin rule does not measure it.
+
+A body carries the mark by `pr-post.sh`'s own definition (`gc_city_marked`, which
+`pr-post.sh own-def` prints and the guard reads from beside itself):
+`<!-- gc:city -->`, or the write-back's `<!-- gc-writeback -->`. The guard reads
+a body it can see: an inline value, or a file it can open, resolved against the
+directory the call runs in. A body the shell builds as the command runs
+(`--body "$(cat f)"`, `--body "$B"`), standard input, and an editor or browser
+body cannot be read, so they are refused. An approval and a change request are
+refused whatever their body carries, because the city posts COMMENT reviews
+only.
+
+A post found inside a here-document body is not held to the mark. A body is far
+more often text an agent is writing, a note or a doc that names these commands,
+than commands it runs, and the mark rule would refuse every such mention. The
+origin rule still reads a body, so a body fed to a shell is measured as before.
+Quote state starts fresh on each side of a body, so a quote inside one cannot
+hide the commands after it.
+
+The refusal names `pr-post.sh` by its path beside the guard. The helper appends
+the mark, so posting through it is the fix, and a body that already carries the
+mark may be posted as it is.
 
 ## The boundary is an origin, not an organization
 
@@ -93,6 +149,30 @@ Host, owner, and name are all compared, lowercased. The host is part of the
 identity, because dropping it would let the same owner and name on a different
 forge read as a repository we own.
 
+`gh api` is resolved from its endpoint, because it names the repository there
+rather than in `--repo`. The guard reads `repos/OWNER/REPO` from the endpoint
+path, accepting a leading slash and a full REST URL, and maps the api host
+(`api.github.com`, or `HOST/api/v3` on an enterprise forge) back to the forge
+host a remote names. A full URL names its own host. Any other endpoint resolves
+on the forge `--hostname` names, or else on the host an unqualified owner/name
+is completed with.
+
+The method, the fields, and the endpoint are read from the flags the way gh
+parses them. A single-dash token is a run of shorthand flags, so `-iX POST` sets
+the method and `-iftitle=x` adds a field, just as `-i -X POST` and
+`-i -f title=x` do.
+
+`{owner}` and `{repo}` placeholders, and gh's older `:owner` and `:repo`
+spellings, are filled from the repository `GH_REPO` names, or else from the
+working directory's `origin`. gh fills them before it reads the host or the
+path, and the guard does the same. Only the owner and the name come from that
+repository. The host stays the one the endpoint names, and a concrete owner or
+name beside a placeholder stays in the target. So
+`https://gitlab.example.com/api/v3/repos/{owner}/{repo}/issues` run from our
+checkout is a write to `gitlab.example.com`, not to our origin, and
+`repos/someone/{repo}/issues` is a write to `someone`'s repository. An endpoint
+naming no repository is handled under what the guard does not cover.
+
 ## What the session owns
 
 `GC_RIG_ROOT` is authoritative and narrow. A rig agent is measured against its
@@ -117,6 +197,12 @@ A write verb whose target cannot be established is refused. If no repository we
 own can be resolved, or the target resolves to nothing, there is no way to show
 the write lands somewhere we own, and "outside" is the safe reading.
 
+The subject of that rule is a write aimed at a repository. A `gh api` write to a
+`repos/OWNER/REPO` endpoint with no concrete owner and name, including one whose
+placeholders have no `GH_REPO` or `origin` to fill them, is such a write and is
+refused; an endpoint that names no repository at all is not, and is left alone
+rather than refused.
+
 The cost of that choice is small. Every `gh` write in this repo lives inside a
 script, and those scripts run in a rig checkout where the origin resolves.
 
@@ -127,8 +213,11 @@ The hook inspects the command an agent types into Bash. These are outside it:
 - **`gh` inside a script.** Running `assets/scripts/pr-open.sh` shows the hook
   that command, not the `gh` calls the script makes. Those scripts already pin
   `--repo` to an origin they resolve themselves.
-- **`gh api`.** The REST endpoints reach the same writes. The ruling names the
-  five porcelain verbs and the guard implements exactly those.
+- **graphql and non-repository `gh api` endpoints.** A `gh api` write to a
+  `repos/OWNER/REPO` endpoint is covered, but a graphql mutation carries its
+  repository in the query body, and an endpoint such as `gists` or `user` names
+  no repository to measure. The origin rule leaves both alone; a graphql
+  mutation that posts is still held to the mark.
 - **Codex agents.** `dog` and `polecat-codex` never read
   `.claude/settings.json`, so no `.claude` hook reaches them.
 - **A missing `jq`.** The hook parses its payload with `jq` and stays silent
