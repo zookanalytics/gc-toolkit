@@ -311,16 +311,23 @@ if command -v /usr/bin/time >/dev/null 2>&1; then
     ROOTS=20; WINDOW=1000; SMALL_N=2000; BIG_N=20000
     jq -cn --argjson n "$ROOTS" '[range(0;$n) | {id: ("rw-" + (.|tostring)), status: "open"}]' \
         > "$TMP/stores/alpha.roots.json"
+    # GNU time prints the peak RSS in KB under -f '%M'. BSD time has no -f: -l adds
+    # the rusage table, whose "maximum resident set size" macOS reports in bytes.
+    if /usr/bin/time -f '%M' -o /dev/null true 2>/dev/null; then
+        TIME_RSS=(-f '%M'); rss_kb() { cat "$1"; }
+    else
+        TIME_RSS=(-l);      rss_kb() { awk '/maximum resident set size/ { print int($1 / 1024) }' "$1"; }
+    fi
     peak_rss() {  # open-step count -> peak RSS in KB across the check and its children
         jq -cn --argjson n "$1" --argjson r "$ROOTS" --arg ua "$RECENT" '[range(0;$n)
             | {id: ("sw-" + (.|tostring)), status: "open", updated_at: $ua,
                metadata: {"gc.root_bead_id": ("rw-" + ((. % $r) | tostring))}}]' \
             > "$TMP/stores/alpha.steps.json"
-        /usr/bin/time -f '%M' -o "$TMP/rss" \
+        /usr/bin/time "${TIME_RSS[@]}" -o "$TMP/rss" \
             env RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" GC_DOCTOR_ROOT_CHUNK="$WINDOW" \
             bash "$CHECK" > "$TMP/scale.out" 2>&1
         echo "$?" > "$TMP/scale.rc"
-        cat "$TMP/rss"
+        rss_kb "$TMP/rss"
     }
     RSS_SMALL=$(peak_rss "$SMALL_N")
     RSS_BIG=$(peak_rss "$BIG_N")

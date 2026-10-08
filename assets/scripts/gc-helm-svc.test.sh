@@ -172,8 +172,10 @@ hasnt()   { case "$1" in *"$2"*) bad "$3 (unexpectedly got: $1)" ;; *) ok "$3" ;
 [ -f "$BUILD" ] && ok "gc-helm-build.sh present" || bad "gc-helm-build.sh missing at $BUILD"
 
 # A pid the kernel cannot have handed out: allocation stops below pid_max, so
-# this one is dead by construction and no case can flake on pid reuse.
-DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 32768) + 7 ))
+# this one is dead by construction and no case can flake on pid reuse. Linux
+# reads pid_max from /proc; macOS has no /proc and never allocates a pid above
+# 99999 (XNU's PID_MAX).
+DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 99999) + 7 ))
 
 # A gc that is not there, so the service listing is unavailable.
 NO_SUCH_GC="$TMP/no-such-gc"
