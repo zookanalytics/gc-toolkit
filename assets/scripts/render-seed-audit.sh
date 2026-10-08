@@ -166,10 +166,15 @@ PH_HOME="[[HOME]]"
 # against agents/dog/agent.toml, adjacent in sort order, which conflicted. With
 # the path on its own line only the hash moves, and the next record's path line
 # is the separation.
+#
+# A symlinked input is an input of its own, recorded under the link's path and
+# hashed through the link. A sub-pack links root fragments its prompts compose
+# (packs/gascity-keeper/template-fragments/), and the render reads whatever the
+# link resolves to, so a link moved to another file has to move a record.
 digest_inputs() {
     local root="$1"
     find "$root/agents" "$root/template-fragments" "$root/formulas" "$root/packs" \
-        -type f \( -name '*.md' -o -name '*.toml' \) -print 2>/dev/null | LC_ALL=C sort
+        \( -type f -o -type l \) \( -name '*.md' -o -name '*.toml' \) -print 2>/dev/null | LC_ALL=C sort
     printf '%s\n' "$root/pack.toml"
     printf '%s\n' "$root/assets/scripts/render-seed-audit.sh"
 }
@@ -313,10 +318,13 @@ if [ "$MODE" = "install-hook" ]; then
     top="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repo: $ROOT"
     hookdir="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)/hooks"
     # Refuse to shadow hooks somebody already installed by hand: core.hooksPath
-    # replaces .git/hooks wholesale rather than layering on top of it.
+    # replaces .git/hooks wholesale rather than layering on top of it. A listing
+    # that fails refuses too, because a hook it could not see is a hook it could
+    # shadow. BSD find has no -printf, so basename names the files.
     existing=""
     if [ -d "$hookdir" ]; then
-        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -printf '%f\n' 2>/dev/null)"
+        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -exec basename {} \;)" \
+            || die "could not list $hookdir, so hand-installed hooks there cannot be ruled out"
     fi
     if [ -n "$existing" ]; then
         printf 'refusing to set core.hooksPath: %s already holds hand-installed hook(s):\n' "$hookdir" >&2
@@ -437,19 +445,31 @@ open(sys.argv[2], "w", encoding="utf-8").write(src.replace("@@ROOT@@", os.enviro
     rm -f "$CITY/city.toml.in"
 }
 
-# Every gc call runs through here. `env -i` is not tidiness: an inherited
-# GC_CITY would point the render at the operator's live city, and inherited
+# Every gc call runs through here, and the render has to be hermetic against two
+# ambient inputs: the environment and the working directory.
+#
+# `env -i` handles the environment. It is not tidiness: an inherited GC_CITY
+# would point the render at the operator's live city, and inherited
 # GC_RIG/GC_AGENT/GC_SESSION_* leak the CALLER's identity into the rendered
 # prompt (a polecat running this by hand renders its own agent name and worktree
-# path into the artifact). Scrubbing is what makes the output depend on the
-# scenario alone.
+# path into the artifact).
+#
+# `cd "$CITY"` handles the working directory, which `env -i` does not scrub. `gc`
+# discovers a city by walking up from cwd, and this script runs from whatever
+# worktree invoked it, which for every polecat is one nested inside the live
+# city. The explicit `--city "$CITY"` is meant to settle which city is in scope,
+# but whether an explicit flag beats cwd discovery is the running binary's call,
+# and the synthetic city exists precisely so the render depends on nothing
+# outside this repo. Running from "$CITY" makes the upward walk resolve the
+# synthetic city under either precedence, so scrubbing the environment and
+# pinning the cwd are together what make the output depend on the scenario alone.
 gcq() {
-    env -i \
+    ( cd "$CITY" && env -i \
         PATH="$PATH" \
         HOME="$HOME" \
         TERM=dumb \
         NO_COLOR=1 \
-        gc --city "$CITY" "$@"
+        gc --city "$CITY" "$@" )
 }
 
 synth_city
@@ -502,9 +522,9 @@ fi
 # fallback" rule below: claude, codex, gemini and control-dispatcher legitimately
 # ARE the builtin worker prompt, and banning it outright would fail them.
 PACK_AGENTS=""
-while IFS= read -r adir; do
-    PACK_AGENTS="${PACK_AGENTS} $(basename "$adir")"
-done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -printf '%h\n' 2>/dev/null | LC_ALL=C sort)
+while IFS= read -r atoml; do
+    PACK_AGENTS="${PACK_AGENTS} $(basename "$(dirname "$atoml")")"
+done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -print 2>/dev/null | LC_ALL=C sort)
 
 # ------------------------------------------------------------------ inventory
 #

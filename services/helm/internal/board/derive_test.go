@@ -1008,7 +1008,7 @@ func TestRuledInFlightIsInProgress(t *testing.T) {
 //
 // The two look identical on the anchor — WaitingOn is empty in both the
 // "nothing outstanding" case and the "never learned" one — and reading the
-// empty set as an answer is the hazard. A per-anchor Dolt timeout or schema
+// empty set as an answer is the hazard. A Dolt timeout or schema
 // skew would otherwise stand an answered row down and tell the operator to
 // close or extend a question whose routed work the board never checked
 // (tk-fhd705). Not standing it down costs a glance; standing it down on an
@@ -2747,9 +2747,10 @@ func TestDemandBlockerIsNotProgressing(t *testing.T) {
 }
 
 // TestApprovalClauseIsTotalOverThePosture. The mapping has to cover every value
-// pr-facts.sh can record: a partial one leaves the rest to be invented, and
-// `not_required` in particular has to be reachable from an ordinary row, or the
-// coverage sentence never clears for a repository with no protection rule.
+// pr-facts.sh can record: a partial one leaves the rest to be invented. Under the
+// universal approval rule only `approved` is met; every other posture, `none`
+// included, owes the approval, so none renders as a merge GitHub or the city's
+// own rule will let through.
 func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 	at := fixtureNow.Add(-5 * time.Hour)
 	cases := []struct {
@@ -2763,8 +2764,10 @@ func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 		{postureChangesRequested, ApprovalRequired, true,
 			"GitHub keeps the veto standing across pushes; in the settled tail the operator clears it by re-reviewing"},
 		{postureApproved, ApprovalMet, false, "approved"},
-		{postureCommented, ApprovalNotRequired, false, "a comment-only review does not gate the merge"},
-		{postureNone, ApprovalNotRequired, false, "no protection rule and no review"},
+		{postureCommented, ApprovalRequired, true,
+			"a comment-only review has not approved, and approval is universal — the merge still owes one"},
+		{postureNone, ApprovalRequired, true,
+			"no reviewDecision (an integration/* base, or a repo with no required-review rule) still owes the universal approval"},
 	}
 	for _, c := range cases {
 		t.Run(c.posture, func(t *testing.T) {
@@ -2928,7 +2931,7 @@ func TestConversationAxisIsHonestlyUnknown(t *testing.T) {
 	b := BuildBoard([]Anchor{
 		mergeAnchor("tk-c", map[string]string{
 			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
-			"pr_posture": dated(postureNone, headLive, fixtureNow),
+			"pr_posture": dated(postureApproved, headLive, fixtureNow),
 		}),
 	}, fixtureNow, false, nil, Facts{})
 
@@ -2936,8 +2939,8 @@ func TestConversationAxisIsHonestlyUnknown(t *testing.T) {
 	if tile.PRConversation != ConversationUnknown {
 		t.Errorf("pr_conversation = %q, want unknown in this phase", tile.PRConversation)
 	}
-	// This row is settled, approved-not-required and owed by nobody. It is
-	// still not an all-clear, because where the conversation stands is unread.
+	// This row is settled and its approval is met, so nobody is owed a move on it.
+	// It is still not an all-clear, because where the conversation stands is unread.
 	if tile.Owed {
 		t.Error("nothing here makes the row owed")
 	}

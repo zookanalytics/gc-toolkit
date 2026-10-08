@@ -18,6 +18,8 @@
 #
 # A prompt is a durable control channel, so a runnable recipe in one counts
 # exactly as much as a formula step.
+#
+# run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."

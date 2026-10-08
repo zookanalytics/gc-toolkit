@@ -416,20 +416,20 @@ become a new way to hide a stranded child.
 Three properties carry over from the disposition rule, and one is new:
 
 - **Derived, never stored** — so a re-opened question stands back up by itself.
-- **The wait clause is not decoration.** It is why `waitingEdges` is read for
-  `decision` and `human` and not for `parked` alone: with no edges gathered,
+- **The wait clause is not decoration.** It is why `needsWaitingEdges` lists
+  `decision` and `human`, not `parked` alone: with no edges gathered,
   "every wait landed" is vacuously true and an answered decision whose routed
   work is still open would stand down anyway. Nothing errors and no field goes
   missing — the only symptom is a row that quietly stopped asking too early.
 - **An empty wait set only counts when it was READ.** The clause fires on the
-  absence of open waits, and a failed per-anchor dependency query produces that
-  same absence — so a Dolt timeout would stand an answered row down and invite
-  the operator to close or extend a question whose routed work the board never
-  checked. `waitingEdges` therefore reports a read failure as
-  `Anchor.WaitingUnknown` rather than as an empty set, and `ruled` refuses it
-  (tk-fhd705). `gc-helm.sh` needs no counterpart: there `waiting_on` rides on
-  the same payload that produced the anchor, so a failed read drops the row
-  rather than leaving it standing with its edges missing.
+  absence of open waits, and a failed dependency read produces that same
+  absence — so a Dolt timeout would stand an answered row down and invite the
+  operator to close or extend a question whose routed work the board never
+  checked. `attachEdges` therefore reports a failed read as
+  `Anchor.WaitingUnknown` rather than as an empty set, and `ruled` and
+  `ruledInFlight` both refuse it (tk-fhd705). The read is one batched query per
+  rig and status pass, so one failure flags every anchor that reads waits, epic
+  and convoy included.
 - **The settled stand-down is LOW, not NORMAL.** NORMAL is stale-bumped past
   fourteen days, which would put `tk-z130v` — thirty days old — straight back in
   the band it was standing down from. The in-flight case above is deliberately
@@ -497,7 +497,7 @@ field would be lying on a normal day.
 |---|---|---|
 | `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `unknown` (see below) | — |
-| `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
+| `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
@@ -540,14 +540,21 @@ and its specific cause is spelled out in `needs` as `blocked: <reason>`, read
 from `pr.machine_reason`. It is distinct from `settled`, which is the merge
 cadence's ordinary wait on a review or the merge pass.
 
-**Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
-for the `codex` gate is owed once it has held past three days
-(`preOpenStaleThresholdDays`) with nothing advancing it — no review or rework a
-live session is working, and the gate not yet green. Childless it would otherwise
-band `LOW` and read `in the merge cadence` (a stale `progressing` marker) or
-`position unknown`, so it sinks with no age; the signal bands it `ELEVATED`, dates
-it from the anchor's `updated_at`, and its `needs` names the codex gate and why it
-is stuck — `no review has run`, `findings open`, or `reviewed, not advanced`.
+**Stalled at a pre-open check.** A merge anchor parked at `pre_open_gate` is owed
+once it has held past three days (`preOpenStaleThresholdDays`) with a check not
+yet green and nothing advancing it, meaning no review or rework a live session is
+working. Its checks are the lanes its `check_set` declares, split by the rule
+`merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
+and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
+is green when its `check.<lane>` marker reads `green`. A legacy `codex` lane counts
+like any other, and a `check_set` that declares no lane is never a stalled check.
+Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a
+stale `progressing` marker) or `position unknown`, so it sinks with no age; the
+signal bands it `ELEVATED`, dates it from the anchor's `updated_at`, and its
+`needs` names the first lane in declared order that is not green, with why the
+anchor is stuck: `correctness check stalled — no review has run`, `findings
+open`, or `reviewed, not advanced`. The reason reads every review and rework child
+on the anchor, because a rework title names no lane.
 Routed-ness is not liveness: a review routed to a pool no session is draining is
 itself the stall, not a healthy hold, so the suppression turns on a live worker
 (`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A
@@ -1378,6 +1385,12 @@ curl --unix-socket /tmp/helm.sock http://x/helm | jq .
 GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board
 GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board --json --limit=0 | jq length
 ```
+
+helm-svc links ICU through Dolt's go-icu-regex, a cgo package. On macOS,
+Homebrew installs icu4c keg-only, off cgo's default search path, so a bare
+`go build` or `go test` there needs it named first:
+`export CGO_CPPFLAGS="-I$(brew --prefix icu4c)/include" CGO_LDFLAGS="-L$(brew --prefix icu4c)/lib"`.
+`gc-helm-build.sh` adds both flags itself.
 
 Discovery env:
 

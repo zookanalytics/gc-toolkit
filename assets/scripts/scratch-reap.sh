@@ -1,26 +1,55 @@
 #!/usr/bin/env bash
-# scratch-reap.sh — remove the scratch of Claude Code sessions that have gone
-# inactive.
+# scratch-reap.sh — remove the scratch of Claude Code sessions that have ended
+# or gone inactive.
 #
 # Every agent session gets a private tree under the harness scratch root
-# ($TMPDIR/claude-<uid>/<project-slug>/<session-id>/): a scratchpad, task
-# output, shell snapshots. Nothing reclaims it when the session ends, so the
-# trees are a standing floor under the per-uid tmpfs quota, and the binding
-# limit is that quota rather than tmpfs capacity — `df` reports free space the
-# quota will not hand out. Exhausting it is a city-wide outage rather than a
-# disk problem: every command that prints fails with empty output while silent
-# ones still succeed.
+# (/tmp/claude-<uid>/<project-slug>/<session-id>/): a scratchpad, task output,
+# shell snapshots. Claude Code puts the root under $CLAUDE_CODE_TMPDIR in place
+# of /tmp when that is set, and never under TMPDIR. Nothing reclaims a tree when
+# the session ends, so the trees are a standing floor under the per-uid tmpfs
+# quota, and the binding limit is that quota rather than tmpfs capacity — `df`
+# reports free space the quota will not hand out. Exhausting it is a city-wide
+# outage rather than a disk problem: every command that prints fails with empty
+# output while silent ones still succeed.
 #
-# One rule. A session tree untouched for INACTIVE_AFTER is removed whole, and
-# files loose above the session trees age the same way. A tree is aged by the
-# NEWEST entry anywhere inside it, directories included, so one stale file
-# cannot condemn a session that is still working.
+# Two rules. The horizon: a session tree untouched for INACTIVE_AFTER is
+# removed whole, and files loose above the session trees age the same way. A
+# tree is aged by the NEWEST entry anywhere inside it, directories included, so
+# one stale file cannot condemn a session that is still working.
 #
-# A session with a running child process is held whatever its mtime: Claude
-# Code exports CLAUDE_CODE_SESSION_ID to its children, so /proc names the
-# sessions that are certainly alive. The signal is one-directional — a session
+# A session with a running process is held whatever its mtime. Claude Code
+# exports CLAUDE_CODE_SESSION_ID to every command it runs and writes the
+# command's output to a file in the session's tree, so a process carrying the
+# id, or holding a file open or standing anywhere inside the tree, belongs to a
+# session that is certainly alive. macOS hides the environment of its own
+# system binaries from every other process, which is why the open files are
+# read as well as the environments. The signal is one-directional — a session
 # between turns owns no process and does not appear — so it only ever protects,
-# and the horizon carries the rest.
+# and the horizon carries the rest. When either reading cannot be taken, no
+# session tree is taken at all.
+#
+# Ended sessions: a tree whose session has ended is removed at the next pass
+# rather than at the horizon. A session has ended when nothing can still own its
+# tree, and three readings decide that, each only ever holding a tree:
+#   - No process names its id, in CLAUDE_CODE_SESSION_ID or on a command line.
+#     gc launches every agent session with --session-id or --resume, so an agent
+#     between turns is named by its own claude process.
+#   - No process standing in the session's project directory, or below it,
+#     started before the tree was last written. Claude Code keeps its main
+#     process in the directory it was launched from and names the tree after
+#     that directory, so a session minted inside a running process (a /clear,
+#     an interactive session) is written after that process started.
+#   - No open gc session in any registered city holds the id as its key. A
+#     sleeping session that wakes by --resume reuses its tree, and gc's list is
+#     the only record of it, so a list that cannot be read in full judges
+#     nothing and every tree waits for the horizon.
+# A tree goes only when its last write is ENDED_AFTER older than the pass and
+# than the earliest process standing in its directory, which covers a session
+# starting mid-pass and the one-second resolution of a start time. Only a tree
+# Claude Code wrote is judged: a UUID-named tree under a project directory
+# named for an absolute path. A project name over 200 characters carries a hash
+# of the path that cannot be recomputed here, so those trees wait for the
+# horizon as well.
 #
 # A caller retiring a specific session names it with --session <id>: that one
 # tree goes now, without the horizon and without the running-process hold. The
@@ -41,10 +70,12 @@
 #   scratch-reap.sh                reap, print one summary line
 #   scratch-reap.sh --dry-run      report the plan, touch nothing
 #   scratch-reap.sh --session <id> remove exactly that session's tree now
-# Env: SCRATCH_REAP_ROOT, SCRATCH_REAP_INACTIVE_AFTER, SCRATCH_REAP_BUDGET
-#      (seconds, except the root).
+# Env: SCRATCH_REAP_ROOT, SCRATCH_REAP_INACTIVE_AFTER, SCRATCH_REAP_ENDED_AFTER,
+#      SCRATCH_REAP_BUDGET (seconds, except the root); SCRATCH_REAP_GC, the gc
+#      binary that lists the open sessions; CLAUDE_CODE_TMPDIR, which moves the
+#      default root as it moves Claude Code's.
 # Exit: 0 reaped or nothing to do · 2 usage or an unsafe root.
-# Callers: the scratch-reap exec order (horizon pass); the cycle-recycle hook
+# Callers: the scratch-reap exec order (full pass); the cycle-recycle hook
 # (--session, the retiring session's own tree). See docs/scratch-reclaim.md.
 set -euo pipefail
 
@@ -71,11 +102,15 @@ if [ -n "$SESSION" ]; then
 fi
 
 UID_NUM="$(id -u)"
-ROOT="${SCRATCH_REAP_ROOT:-${TMPDIR:-/tmp}/claude-$UID_NUM}"
+# The root Claude Code writes, not one drawn from TMPDIR: macOS sets TMPDIR for
+# every process, and a root under it names a directory no session writes.
+ROOT="${SCRATCH_REAP_ROOT:-${CLAUDE_CODE_TMPDIR:-/tmp}/claude-$UID_NUM}"
 INACTIVE_AFTER="${SCRATCH_REAP_INACTIVE_AFTER:-86400}" # 24h
+ENDED_AFTER="${SCRATCH_REAP_ENDED_AFTER:-600}"         # 10m
 BUDGET="${SCRATCH_REAP_BUDGET:-240}"
+GC="${SCRATCH_REAP_GC:-gc}"
 
-for v in INACTIVE_AFTER BUDGET; do
+for v in INACTIVE_AFTER ENDED_AFTER BUDGET; do
     case "${!v}" in
         '' | *[!0-9]*) echo "$PROG: SCRATCH_REAP_$v must be a whole number of seconds" >&2; exit 2 ;;
     esac
@@ -132,44 +167,174 @@ fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/gctk-scratch-reap.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-LIVE="$WORK/live"; REMOVE_LIST="$WORK/remove"
+LIVE="$WORK/live"; HELD="$WORK/held"; NAMED="$WORK/named"; OCCUPIED="$WORK/occupied"
+REMOVE_LIST="$WORK/remove"; ENDED_LIST="$WORK/ended"; KEYS="$WORK/gc-keys"
 STRAY_LIST="$WORK/stray"; STRAY_LINK_LIST="$WORK/stray-links"
-BIG_TREE_LIST="$WORK/big-tree"; BIG_STRAY_LIST="$WORK/big-stray"
-: > "$LIVE"; : > "$REMOVE_LIST"; : > "$STRAY_LIST"; : > "$STRAY_LINK_LIST"
-: > "$BIG_TREE_LIST"; : > "$BIG_STRAY_LIST"
+BIG_TREE_LIST="$WORK/big-tree"; BIG_STRAY_LIST="$WORK/big-stray"; BIG_ENDED_LIST="$WORK/big-ended"
+SKIP_REASON="$WORK/skip"
+: > "$LIVE"; : > "$HELD"; : > "$NAMED"; : > "$OCCUPIED"; : > "$REMOVE_LIST"; : > "$ENDED_LIST"
+: > "$KEYS"; : > "$STRAY_LIST"; : > "$STRAY_LINK_LIST"
+: > "$BIG_TREE_LIST"; : > "$BIG_STRAY_LIST"; : > "$BIG_ENDED_LIST"
+: > "$WORK/environs"; : > "$WORK/procs"; : > "$WORK/cwds"
 
-# Sessions with a running child. Best-effort and quiet: most of /proc belongs
-# to other uids and is unreadable, which is the expected case, not an error.
-# environ is NUL-separated, so -a reads it as text and -o cuts the one setting
-# out of it.
-grep -aho 'CLAUDE_CODE_SESSION_ID=[A-Za-z0-9-]*' /proc/[0-9]*/environ 2>/dev/null \
+# START comes before every reading of the processes. The ended rule takes only
+# a tree quiet for ENDED_AFTER before START, so a session that starts while the
+# pass runs, which no reading below can see, owns only trees the rule holds.
+START=$(date +%s)
+
+# Every reading below only ever holds a tree, so one that cannot be taken holds
+# everything it would have protected. A live-session reading that fails sets
+# LIVE_SKIP, and no session tree is taken; a reading the ended rule needs that
+# fails sets ENDED_SKIP, and no tree is judged ended. A listing that does not
+# show this very process has not read the host, whatever else it printed.
+LIVE_SKIP=""; ENDED_SKIP=""
+
+# Session ids in the environments of this uid's processes. Linux exposes each
+# environment under /proc, where most entries belong to other uids and are
+# unreadable, the expected case rather than an error; environ is NUL-separated,
+# so -a reads it as text and -o cuts the one setting out of it. Without /proc,
+# `ps -E` prints the environment after the command line, and a listing that
+# shows none for this process, which has one, shows none at all.
+if [ -r "/proc/$$/environ" ]; then
+    grep -aho 'CLAUDE_CODE_SESSION_ID=[A-Za-z0-9-]*' /proc/[0-9]*/environ > "$WORK/environs" 2>/dev/null || true
+elif ! { ps -u "$UID_NUM" -ww -E -o pid= -o args= > "$WORK/environs" 2>/dev/null \
+         && awk -v me="$$" '$1 == me && / [A-Za-z_][A-Za-z0-9_]*=/ { f = 1 } END { exit !f }' "$WORK/environs"; }; then
+    LIVE_SKIP="process environments could not be read"
+fi
+LC_ALL=C grep -ao 'CLAUDE_CODE_SESSION_ID=[A-Za-z0-9-]*' "$WORK/environs" 2>/dev/null \
     | sed 's/^CLAUDE_CODE_SESSION_ID=//' > "$LIVE" || true
 sort -u -o "$LIVE" "$LIVE"
-LIVE_N=$(wc -l < "$LIVE")
+LIVE_N=$(($(wc -l < "$LIVE")))
 
-START=$(date +%s)
+# Every process on the host with its elapsed time and its command line, the
+# two readings the ended rule takes from the process table.
+if ! { ps -A -ww -o pid= -o etime= -o args= > "$WORK/procs" 2>/dev/null \
+       && awk -v me="$$" '$1 == me { f = 1 } END { exit !f }' "$WORK/procs"; }; then
+    ENDED_SKIP="process start times could not be read"
+fi
+
+# Session ids on a command line. gc starts an agent as `claude --session-id
+# <id>` and wakes one as `claude --resume <id>`, so a session between turns is
+# still named by its own process. Every UUID on every command line counts,
+# which only ever holds more.
+LC_ALL=C grep -aoE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' \
+    "$WORK/procs" > "$NAMED" 2>/dev/null || true
+
+# The files this uid's processes hold open and the directories they stand in,
+# read by lsof on Linux and macOS alike. A process holding a file inside a
+# session tree, or standing in it, holds that tree; the directory every process
+# stands in feeds the ended rule below.
+if lsof -w -n -P -u "$UID_NUM" -F pfn > "$WORK/open" 2>/dev/null && grep -qx "p$$" "$WORK/open"; then
+    awk -v root="$ROOT" -v cwdsfile="$WORK/cwds" -v heldfile="$HELD" '
+    /^p/ { pid = substr($0, 2); fd = ""; next }
+    /^f/ { fd = substr($0, 2); next }
+    /^n/ {
+        name = substr($0, 2)
+        if (fd == "cwd") printf "%s\t%s\n", pid, name > cwdsfile
+        if (index(name, root "/") == 1 && split(substr(name, length(root) + 2), c, "/") >= 2)
+            print c[1] "/" c[2] > heldfile
+    }' "$WORK/open"
+else
+    LIVE_SKIP="${LIVE_SKIP:-open files could not be read}"
+fi
+
+# The directories this uid's processes stand in, each keyed by the project name
+# Claude Code derives from a path (every character outside [A-Za-z0-9] becomes
+# '-') and carrying the earliest start of a process standing in it or below it.
+# Runs of '-' are collapsed in the key and in the names it is matched against:
+# Claude Code replaces a non-ASCII character per UTF-16 unit and this pass per
+# byte, and a coarser key only ever holds more. A process absent from the
+# process table started after it, so it is dated START; one whose elapsed time
+# does not parse is dated to the epoch, so it holds every tree in its directory.
+LC_ALL=C awk -F'\t' -v now="$START" -v procsfile="$WORK/procs" '
+function claim(dir, since,    key) {
+    key = dir; gsub(/[^A-Za-z0-9]/, "-", key); gsub(/-+/, "-", key)
+    if (!(key in first) || since < first[key]) first[key] = since
+}
+# Seconds in an elapsed time, [[dd-]hh:]mm:ss, or -1 when it is not one.
+function secs(t,    d, i, n, p) {
+    d = 0
+    if ((i = index(t, "-")) > 0) { d = substr(t, 1, i - 1); t = substr(t, i + 1) }
+    n = split(t, p, ":")
+    if (d !~ /^[0-9]+$/ || n < 2 || n > 3) return -1
+    for (i = 1; i <= n; i++) if (p[i] !~ /^[0-9]+$/) return -1
+    return d * 86400 + (n == 3 ? p[1] * 3600 + p[2] * 60 + p[3] : p[1] * 60 + p[2])
+}
+BEGIN {
+    while ((getline line < procsfile) > 0) {
+        if (split(line, f, " ") < 2 || f[1] !~ /^[0-9]+$/) continue
+        s = secs(f[2]); started[f[1]] = (s < 0) ? 0 : now - s
+    }
+    close(procsfile)
+}
+{
+    pid = $1
+    dir = $2; for (i = 3; i <= NF; i++) dir = dir "\t" $i
+    sub(/ \(deleted\)$/, "", dir)
+    if (substr(dir, 1, 1) != "/") next
+    since = (pid in started) ? started[pid] : now
+    claim("/", since)
+    n = split(dir, part, "/"); up = ""
+    for (i = 2; i <= n; i++) if (part[i] != "") { up = up "/" part[i]; claim(up, since) }
+}
+END { for (k in first) printf "%s\t%d\n", k, first[k] }
+' "$WORK/cwds" > "$OCCUPIED" 2>/dev/null || true
+
 BEFORE_KB="$(tree_kb "$ROOT")"; BEFORE_KB="${BEFORE_KB:-0}"
 
-# One walk answers every question. Malformed rows — a newline in a filename
-# splits one entry across two lines — fail the type test and are skipped, which
-# loses a reap rather than misdirecting one.
-remove_n=0; remove_b=0; stray_n=0; stray_b=0
-keep_n=0; keep_b=0; live_n=0; live_b=0
-{ find -P "$ROOT" -mindepth 1 -xdev -printf '%y\t%T@\t%s\t%p\n' 2>/dev/null || true; } \
+# One walk answers every question. find's -printf is GNU-only, so the walk
+# hands its entries to stat, which takes its format after -c in GNU and after
+# -f in BSD; each prints the mode string, the mtime in epoch seconds, the size
+# in bytes and the path, of a symlink itself rather than what it names.
+# Malformed rows — a newline in a filename splits one entry across two lines —
+# fail the type test and are skipped, which loses a reap rather than
+# misdirecting one. Every path the walk keeps comes from one line and carries
+# no newline, so the lists it writes hold one path per line, and the readers
+# below turn each newline into the NUL that xargs -0 splits on. BSD awk drops a
+# \0 written in a printf format, so a list cannot carry the NUL itself.
+if stat -c %Y -- / >/dev/null 2>&1; then STAT=(stat -c $'%A\t%Y\t%s\t%n')
+else STAT=(stat -f $'%Sp\t%m\t%z\t%N'); fi
+remove_n=0; remove_b=0; stray_n=0; stray_b=0; ended_n=0; ended_b=0
+keep_n=0; keep_b=0; live_n=0; live_b=0; candidate_n=0; candidate_b=0
+{ find -P "$ROOT" -mindepth 1 -xdev -exec "${STAT[@]}" -- {} + 2>/dev/null || true; } \
   | awk -v root="$ROOT" -v now="$START" -v inactive_after="$INACTIVE_AFTER" \
-        -v livefile="$LIVE" -v removefile="$REMOVE_LIST" \
+        -v ended_after="$ENDED_AFTER" -v livefile="$LIVE" -v heldfile="$HELD" \
+        -v namedfile="$NAMED" -v blind="${LIVE_SKIP:+1}" \
+        -v occupiedfile="$OCCUPIED" -v removefile="$REMOVE_LIST" -v endedfile="$ENDED_LIST" \
         -v strayfile="$STRAY_LIST" -v straylinkfile="$STRAY_LINK_LIST" \
-        -v bigtreefile="$BIG_TREE_LIST" -v bigstrayfile="$BIG_STRAY_LIST" '
+        -v bigtreefile="$BIG_TREE_LIST" -v bigstrayfile="$BIG_STRAY_LIST" \
+        -v bigendedfile="$BIG_ENDED_LIST" '
+# A session nothing can still own, judged only for a tree Claude Code wrote: a
+# UUID-named tree under a project name drawn from an absolute path, short enough
+# to carry no hash.
+function ended(k, slug, id,    p, key, anchor) {
+    if (slug !~ /^-[A-Za-z0-9-]*$/ || length(slug) > 200) return 0
+    if (split(id, p, "-") != 5 || id !~ /^[0-9A-Fa-f-]+$/) return 0
+    if (length(p[1]) != 8 || length(p[2]) != 4 || length(p[3]) != 4 || length(p[4]) != 4 || length(p[5]) != 12) return 0
+    if (tolower(id) in named) return 0
+    key = slug; gsub(/-+/, "-", key)
+    anchor = now
+    if ((key in first) && first[key] < anchor) anchor = first[key]
+    return newest[k] + ended_after <= anchor
+}
 BEGIN {
     FS = "\t"
     while ((getline id < livefile) > 0) if (id != "") live[id] = 1
     close(livefile)
+    while ((getline k < heldfile) > 0) if (k != "") held[k] = 1
+    close(heldfile)
+    while ((getline id < namedfile) > 0) if (id != "") named[tolower(id)] = 1
+    close(namedfile)
+    while ((getline line < occupiedfile) > 0) if (split(line, f, "\t") == 2) first[f[1]] = f[2] + 0
+    close(occupiedfile)
     skip = length(root) + 2   # strip "<root>/"
     big_floor = 8 * 1024 * 1024
 }
-$1 != "f" && $1 != "d" && $1 != "l" { next }
+# The mode string opens with the type: - a file, d a directory, l a symlink.
+$1 !~ /^[-dl]/ || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ { next }
 {
-    typ = $1; mt = $2 + 0; sz = $3 + 0
+    typ = substr($1, 1, 1); if (typ == "-") typ = "f"
+    mt = $2 + 0; sz = $3 + 0
     path = $4; for (i = 5; i <= NF; i++) path = path "\t" $i
     rel = substr(path, skip)
     n = split(rel, c, "/")
@@ -182,7 +347,7 @@ $1 != "f" && $1 != "d" && $1 != "l" { next }
     if (n < 2 || (n == 2 && typ != "d")) {
         if (typ != "d" && now - mt >= inactive_after) {
             out = (typ == "l") ? straylinkfile : strayfile
-            printf "%s\0", path > out
+            printf "%s\n", path > out
             stray_n++; stray_b += sz
             if (sz >= big_floor) printf "%d\t%s\n", sz, path > bigstrayfile
         }
@@ -200,17 +365,76 @@ $1 != "f" && $1 != "d" && $1 != "l" { next }
 END {
     for (k in session) {
         split(k, c, "/")
-        if (c[2] in live)                    { live_skipped++; live_bytes += bytes[k] }
-        else if (now - newest[k] >= inactive_after) { printf "%s/%s\0", root, k > removefile; rm_n++; rm_b += bytes[k]; doomed[k] = 1 }
+        if (blind)                           { keep_n++; keep_b += bytes[k] }
+        else if ((c[2] in live) || (k in held)) { live_skipped++; live_bytes += bytes[k] }
+        else if (now - newest[k] >= inactive_after) { printf "%s/%s\n", root, k > removefile; rm_n++; rm_b += bytes[k]; doomed[k] = 1 }
+        else if (ended(k, c[1], c[2]))       { printf "%s\t%s\t%d\n", tolower(c[2]), k, bytes[k] > endedfile; cand_n++; cand_b += bytes[k]; ending[k] = 1 }
         else                                 { keep_n++; keep_b += bytes[k] }
     }
-    for (p in big_sz) if (big_key[p] in doomed) printf "%d\t%s\n", big_sz[p], p > bigtreefile
-    printf "remove_n=%d\nremove_b=%d\nstray_n=%d\nstray_b=%d\nkeep_n=%d\nkeep_b=%d\nlive_n=%d\nlive_b=%d\n", \
-        rm_n, rm_b, stray_n, stray_b, keep_n, keep_b, live_skipped, live_bytes
+    for (p in big_sz) {
+        if (big_key[p] in doomed)      printf "%d\t%s\n", big_sz[p], p > bigtreefile
+        else if (big_key[p] in ending) printf "%s\t%d\t%s\n", big_key[p], big_sz[p], p > bigendedfile
+    }
+    printf "remove_n=%d\nremove_b=%d\nstray_n=%d\nstray_b=%d\nkeep_n=%d\nkeep_b=%d\nlive_n=%d\nlive_b=%d\ncandidate_n=%d\ncandidate_b=%d\n", \
+        rm_n, rm_b, stray_n, stray_b, keep_n, keep_b, live_skipped, live_bytes, cand_n, cand_b
 }' > "$WORK/plan" || true
 
 # shellcheck disable=SC1090  # a generated key=value file, not a script
 . "$WORK/plan"
+
+# The ids gc can still wake a session into: the key of every open session in
+# every city registered for this user, one per line. A registered city whose
+# directory is gone holds no sessions. Any other failure writes its reason and
+# returns non-zero, because a list read in part would let the ended rule take
+# the tree of a sleeping session it never saw.
+gc_session_keys() {
+    local cities city list
+    command -v "$GC" >/dev/null 2>&1 || { echo "$GC not found" > "$SKIP_REASON"; return 1; }
+    command -v jq >/dev/null 2>&1 || { echo "jq not found" > "$SKIP_REASON"; return 1; }
+    cities="$(timeout 30 "$GC" cities --json 2>/dev/null | jq -r '.cities[]?.path // empty' 2>/dev/null)" \
+        || { echo "the city registry could not be read" > "$SKIP_REASON"; return 1; }
+    [ -n "$cities" ] || { echo "no city is registered" > "$SKIP_REASON"; return 1; }
+    while IFS= read -r city; do
+        [ -d "$city" ] || continue
+        list="$(timeout 30 "$GC" session list --state all --json --city "$city" 2>/dev/null)" \
+            || { echo "the session list of $city could not be read" > "$SKIP_REASON"; return 1; }
+        printf '%s' "$list" | jq -r '
+            if (.sessions | type) == "array" then .sessions[] else error("no session list") end
+            | select((.closed // false) != true and (.state // "") != "closed")
+            | .session_key // empty' 2>/dev/null \
+            || { echo "the session list of $city is not a session list" > "$SKIP_REASON"; return 1; }
+    done <<< "$cities"
+}
+
+# Trees the walk judged ended go unless gc holds their id. The list is read
+# only when there is a tree to judge, and an unreadable list keeps every one.
+if [ "$candidate_n" -gt 0 ]; then
+    if [ -z "$ENDED_SKIP" ] && gc_session_keys > "$KEYS"; then
+        awk -F'\t' -v root="$ROOT" -v keysfile="$KEYS" -v removefile="$REMOVE_LIST" \
+            -v bigendedfile="$BIG_ENDED_LIST" -v bigtreefile="$BIG_TREE_LIST" '
+        BEGIN {
+            while ((getline k < keysfile) > 0) if (k != "") open[tolower(k)] = 1
+            close(keysfile)
+        }
+        $1 in open { held_n++; held_b += $3; next }
+        { printf "%s/%s\n", root, $2 >> removefile; taken[$2] = 1; n++; b += $3 }
+        END {
+            while ((getline line < bigendedfile) > 0) {
+                split(line, f, "\t")
+                if (f[1] in taken) printf "%s\n", substr(line, length(f[1]) + 2) >> bigtreefile
+            }
+            printf "ended_n=%d\nended_b=%d\nheld_n=%d\nheld_b=%d\n", n, b, held_n, held_b
+        }' "$ENDED_LIST" > "$WORK/ended-plan" || true
+        held_n=0; held_b=0
+        # shellcheck disable=SC1090  # a generated key=value file, not a script
+        . "$WORK/ended-plan"
+        keep_n=$((keep_n + held_n)); keep_b=$((keep_b + held_b))
+    else
+        [ -n "$ENDED_SKIP" ] || ENDED_SKIP="$(cat "$SKIP_REASON" 2>/dev/null || true)"
+        ENDED_SKIP="${ENDED_SKIP:-the open sessions could not be read}"
+        keep_n=$((keep_n + candidate_n)); keep_b=$((keep_b + candidate_b))
+    fi
+fi
 
 # The largest files this pass is taking, so a recurring writer stays visible in
 # the order log rather than only in the total. It reads both tiers, and a tier
@@ -223,7 +447,14 @@ big_report() { # <printf format taking MiB then path>
 
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "$PROG: DRY RUN — root $ROOT"
-    echo "  would remove $remove_n session trees ($(gib "$remove_b") GiB) and delete $stray_n stray files ($(gib "$stray_b") GiB)"
+    echo "  would remove $remove_n session trees past the horizon ($(gib "$remove_b") GiB) and delete $stray_n stray files ($(gib "$stray_b") GiB)"
+    echo "  would remove $ended_n trees of ended sessions ($(gib "$ended_b") GiB)"
+    if [ -n "$LIVE_SKIP" ]; then
+        echo "  no session tree judged: $LIVE_SKIP — every tree is kept"
+    fi
+    if [ -n "$ENDED_SKIP" ]; then
+        echo "  ended sessions not judged: $ENDED_SKIP — their $candidate_n trees wait for the horizon"
+    fi
     echo "  would keep $keep_n trees ($(gib "$keep_b") GiB); $live_n live sessions held ($(gib "$live_b") GiB), $LIVE_N session ids seen running"
     big_report "  large: %.0f MiB  %s"
     exit 0
@@ -240,15 +471,18 @@ over_budget() { [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - START)) -ge "$BUDGET" 
 # trees are where the bytes are, and a pass that spent its budget walking
 # should still take them. A tier that yields reports zero and names no files,
 # never its plan — what it left behind is the next pass's to take and report.
+each() { # <list> <command>...: run the command over the list's paths
+    tr '\n' '\0' < "$1" | xargs -0 -r "${@:2}" 2>/dev/null || true
+}
 STOPPED=""
 if [ -s "$REMOVE_LIST" ]; then
-    xargs -0 -r chmod -R u+w < "$REMOVE_LIST" 2>/dev/null || true
-    xargs -0 -r rm -rf       < "$REMOVE_LIST" 2>/dev/null || true
+    each "$REMOVE_LIST" chmod -R u+w
+    each "$REMOVE_LIST" rm -rf
 fi
 if { [ -s "$STRAY_LIST" ] || [ -s "$STRAY_LINK_LIST" ]; } && ! over_budget; then
-    xargs -0 -r chmod u+w < "$STRAY_LIST" 2>/dev/null || true
-    xargs -0 -r rm -f     < "$STRAY_LIST" 2>/dev/null || true
-    xargs -0 -r rm -f     < "$STRAY_LINK_LIST" 2>/dev/null || true
+    each "$STRAY_LIST" chmod u+w
+    each "$STRAY_LIST" rm -f
+    each "$STRAY_LINK_LIST" rm -f
 elif [ -s "$STRAY_LIST" ] || [ -s "$STRAY_LINK_LIST" ]; then
     STOPPED="stray"; stray_n=0; : > "$BIG_STRAY_LIST"
 fi
@@ -261,9 +495,15 @@ AFTER_KB="$(tree_kb "$ROOT")"; AFTER_KB="${AFTER_KB:-0}"
 FREED_KB=$((BEFORE_KB - AFTER_KB))
 [ "$FREED_KB" -ge 0 ] || FREED_KB=0
 
-printf '%s: freed %s GiB (%s -> %s GiB) in %ss — removed %d session trees, deleted %d stray files; kept %d trees, held %d live\n' \
+printf '%s: freed %s GiB (%s -> %s GiB) in %ss — removed %d session trees past the horizon and %d of ended sessions, deleted %d stray files; kept %d trees, held %d live\n' \
     "$PROG" "$(gib $((FREED_KB * 1024)))" "$(gib $((BEFORE_KB * 1024)))" "$(gib $((AFTER_KB * 1024)))" \
-    "$(($(date +%s) - START))" "$remove_n" "$stray_n" "$keep_n" "$live_n"
+    "$(($(date +%s) - START))" "$remove_n" "$ended_n" "$stray_n" "$keep_n" "$live_n"
+if [ -n "$LIVE_SKIP" ]; then
+    echo "$PROG: no session tree judged — $LIVE_SKIP; every tree is kept"
+fi
+if [ -n "$ENDED_SKIP" ]; then
+    echo "$PROG: ended sessions not judged — $ENDED_SKIP; their $candidate_n trees wait for the horizon"
+fi
 if [ -n "$STOPPED" ]; then
     echo "$PROG: yielded at the $STOPPED batch — ${BUDGET}s budget spent; the next pass takes it"
 fi
