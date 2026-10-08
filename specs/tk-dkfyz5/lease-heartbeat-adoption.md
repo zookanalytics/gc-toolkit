@@ -90,9 +90,13 @@ Two properties keep a mis-aimed keepalive from passing unnoticed:
 
 ### Deliberately not wired
 
-- **Converse sittings.** Their long holds are operator-paced *idle* waits, not
-  blocking commands, so an in-session wrapper has nothing to wrap. Session-level
-  `pin-keepalive` already keeps those sessions alive.
+- **Converse sittings.** A sitting takes its work through `converse-claim.sh`,
+  which runs `gc hook --claim`, so what it holds carries a lease. Its long holds
+  are operator-paced *idle* waits, not blocking commands, so an in-session
+  wrapper has nothing to wrap, and the lease lapses during the wait as it does
+  in the `implement` phase below. `pin-keepalive.sh` does not refresh it: it
+  pins only configured named sessions, which a sitting is not, and a pin
+  exempts a session from config-drift restarts without touching any lease.
 - **The patrols** (refinery, witness, deacon). They self-assign their wisp with
   `gc bd update --assignee`, not `gc hook --claim`, so they carry no lease to
   refresh.
