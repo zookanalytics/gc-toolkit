@@ -19,6 +19,9 @@
 #   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
 #      way the halt arm does, in three writes the claim guard accepts, and
 #      refuses the arm outright when the run has a diff to land.
+#   6. SESSION PINS — every terminal exit that lets go of the bead removes the
+#      claim's gc.session_id and gc.session_name in its first write, the same
+#      pair at all three.
 #
 # This EXECUTES the real snippets extracted verbatim from the formula (between
 # the markers) against a fake `git`/`gc`, so the test cannot drift from the
@@ -169,6 +172,9 @@ case "$1 $2" in
     # and held.
     shift 2
     id="$1"; argv="$*"
+    # $FAKE_TITLE_REFUSE refuses any title write, as bd refuses a title it will
+    # not store, so the handoff can be shown to survive a refused retitle.
+    case " $argv " in *' --title '*) [ -n "${FAKE_TITLE_REFUSE:-}" ] && { printf 'Error: title refused\n' >&2; exit 1; } ;; esac
     cur_status=in_progress; cur_assignee=lx-holder
     if [ -s "${FAKE_LOG:-/dev/null}" ]; then
       beadlines=$(grep -F "UPDATE|$id " "$FAKE_LOG" 2>/dev/null || true)
@@ -728,6 +734,40 @@ eq "$(run_consume_anchor "$TMP/summary.txt" '')" \
    "0|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;" \
    "fresh work: the summary rides the metadata write, then status=open, then assignee"
 
+# --- 3e. A retitle follows the anchor. ----------------------------------------
+# The merge cadence composes the PR title from the anchor's title, so a retitle
+# written to a rework child is never read, the same as a summary would not be.
+# It is a write of its own ahead of the handoff, so a title bd refuses cannot
+# roll the handoff back.
+# run_consume_title <anchor-title> <gating-anchor> -> "<rc>|<log>"
+run_consume_title() {
+  : > "$TMP/log"
+  printf 'set -euo pipefail\n' > "$TMP/title-consume.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/title-consume.sh"
+  local rc=0
+  LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
+    GATING_ANCHOR="$2" ANCHOR_TITLE="$1" bash "$TMP/title-consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+HANDOFF3="UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;UPDATE|tk-work --assignee=gc-toolkit.refinery;"
+
+eq "$(run_consume_title 'Compare heads, not names' tk-anchor)" \
+   "0|UPDATE|tk-anchor --title Compare heads, not names;$HANDOFF3" \
+   "child: the retitle is written to the anchor, ahead of the three handoff writes"
+
+eq "$(run_consume_title 'Compare heads, not names' '')" \
+   "0|UPDATE|tk-work --title Compare heads, not names;$HANDOFF3" \
+   "fresh work: the claimed bead is the anchor, retitled in a write of its own ahead of the handoff"
+
+eq "$(run_consume_title '' tk-anchor)" "0|$HANDOFF3" \
+   "no retitle composed: no title write at all"
+
+eq "$(run_consume_title '   ' tk-anchor)" "0|$HANDOFF3" \
+   "a whitespace-only title is no retitle"
+
+eq "$(FAKE_TITLE_REFUSE=1 run_consume_title 'Compare heads, not names' tk-anchor)" "0|$HANDOFF3" \
+   "a refused retitle costs the title, and the handoff still lands whole"
+
 # A hold that did not land must not drain. molecule-hold.sh exits non-zero when
 # it cannot resolve the step, when duplicate step beads make that ambiguous,
 # when the blocking write is refused, or when a route on the molecule root or a
@@ -1011,8 +1051,8 @@ eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/
 # clearing the assignee while in_progress is refused by the claim guard, so the
 # metadata clears the route first, --status=open lands next, and --assignee last.
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
-   "tk-work --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to= --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
-   "halt arm first write: branch + target + branch_ready + halt_reason + cleared route, --append-notes"
+   "tk-work --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
+   "halt arm first write: branch + target + branch_ready + halt_reason + cleared route + session pins removed, --append-notes"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --status=open" \
    "halt arm second write: --status=open alone, while the bead is still assigned"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 3p)" "tk-work --assignee=" \
@@ -1060,8 +1100,9 @@ eq "$CTRL_RC|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
 # the formula at all — the bead kept gc.routed_to, which IS a pool's offer
 # predicate, and the pool handed the same finished work to the next polecat.
 # It releases the bead with the halt arm's fields — status, assignee, cleared
-# route, halt_reason, appended notes — minus the three that describe a branch.
-# Two arms, one convention for what releasing a bead means.
+# route, removed session pins, halt_reason, appended notes — minus the three
+# that describe a branch. Two arms, one convention for what releasing a bead
+# means.
 
 # run_store <script> [env assignments...] -> "<rc>"; trace left in $TMP/log.
 run_store() {
@@ -1108,8 +1149,8 @@ eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/
 # the guard), then --status=open from the holder, then the plain --assignee. The
 # intermediate — open, still assigned, unrouted — no pool query can see.
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
-   "tk-work --set-metadata halt_reason=store_only --set-metadata gc.routed_to= --append-notes Store-only exit: filed tk-filed,gc-filed. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>" \
-   "first write: halt_reason + cleared route + the filed record, --append-notes not --notes"
+   "tk-work --set-metadata halt_reason=store_only --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Store-only exit: filed tk-filed,gc-filed. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>" \
+   "first write: halt_reason + cleared route + session pins removed + the filed record, --append-notes not --notes"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --status=open" \
    "second write: --status=open alone, while the bead is still assigned"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 3p)" "tk-work --assignee=" \
@@ -1122,6 +1163,18 @@ eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" 
 eq "$(printf '%s\n' "$STORE" | grep -o -- '--set-metadata gc.routed_to=[^ ]*' | sort -u)" \
    "$(printf '%s\n' "$HALT" | grep -o -- '--set-metadata gc.routed_to=[^ ]*' | sort -u)" \
    "store-only arm clears the route exactly as the halt arm does"
+
+# The session pins go with the assignee at every exit that lets go of the bead.
+# The runtime's detached-handoff orphan sweep recovers a pool route from a pin
+# left on a released bead, and the witness's orphan scan resolves an owner from
+# it, so each exit must remove the same pair the refinery handoff removes.
+pin_unsets() { printf '%s\n' "$1" | grep -o -- '--unset-metadata gc\.session_[a-z]*' | sort -u | tr '\n' ' '; }
+eq "$(pin_unsets "$CONSUME")" "--unset-metadata gc.session_id --unset-metadata gc.session_name " \
+   "the refinery handoff removes both session pins"
+eq "$(pin_unsets "$STORE")" "$(pin_unsets "$CONSUME")" \
+   "store-only arm removes the session pins exactly as the refinery handoff does"
+eq "$(pin_unsets "$HALT")" "$(pin_unsets "$CONSUME")" \
+   "halt arm removes the session pins exactly as the refinery handoff does"
 case "$STORE" in
   *'gc.routed_to=""'*) ok  "store-only arm clears gc.routed_to" ;;
   *)                   bad "store-only arm does not clear gc.routed_to — the pool re-offers the bead" ;;

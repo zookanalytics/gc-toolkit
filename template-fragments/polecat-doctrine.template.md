@@ -137,11 +137,11 @@ your claimed bead everything else.
 | your step beads | **you**, via `assets/scripts/step-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
-- **Never close the work bead** — no `bd close`, no `--status=closed` — even
-  if the work looks already merged, and equally when it is a child whose
-  anchor is elsewhere. Hand it to the refinery with a note: merge-push is
-  where a bead leaves the anchor class and closes, and it is the only thing
-  that verifies a merge.
+- **Never close the work bead** — no `bd close`, no
+  `bd update --status=closed` — even if the work looks already merged, and
+  equally when it is a child whose anchor is elsewhere. Hand it to the
+  refinery with a note: merge-push is where a bead leaves the anchor class
+  and closes, and it is the only thing that verifies a merge.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
@@ -168,6 +168,8 @@ diagnosis, added requirements, reviewer corrections — at the exact moment the
 bead is handed to the people who need it, and nothing downstream can miss a
 note it never saw. This applies to every write in the done sequence,
 including the `auto_push=false` halt arm.
+
+{{ template "pool-worker-no-consent-ui" . }}
 
 ## Escalation
 
