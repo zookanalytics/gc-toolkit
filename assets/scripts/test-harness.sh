@@ -288,9 +288,11 @@ case "$verb" in
       *" $id "*) case " $* " in *" --status=closed "*)
         echo "gc: simulated close refusal for $id" >&2; exit 1 ;; esac ;;
     esac
-    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""
+    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0
     while [ $# -gt 0 ]; do
       case "$1" in
+        --description=*) desc="${1#--description=}"; desc_set=1 ;;
+        --description|-d) shift; desc="${1-}"; desc_set=1 ;;
         --set-metadata) shift; sets+=("${1:-}") ;;
         --set-metadata=*) sets+=("${1#--set-metadata=}") ;;
         --unset-metadata) shift; unsets+=("${1:-}") ;;
@@ -360,6 +362,12 @@ case "$verb" in
       jq -c --arg id "$id" --arg n "$note" \
         'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
         "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+    fi
+    if [ "$desc_set" = 1 ]; then
+      case ",$drops," in *",description,"*) : ;; *)
+        jq -c --arg id "$id" --arg d "$desc" \
+          'map(if .id == $id then .description = $d else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+      esac
     fi
     mv "$tmp" "$S"
     echo "updated $id"

@@ -80,23 +80,44 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
+# --retract is the counterpart: it closes every OPEN visit for the situation
+# that nobody is engaged in as moot, leaves an engaged one (claimed, or bound by
+# assignee or session) to its holder, and is a no-op success when none matches.
+# STUB_RETRACT_FAIL makes a retract fail having closed nothing.
 cat > "$SD/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
-subj=""; key=""
+subj=""; key=""; msg=""; retract=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) shift; subj="${1:-}" ;;
     --key)     shift; key="${1:-}" ;;
+    --message) shift; msg="${1:-}" ;;
+    --retract) retract=1 ;;
   esac
   shift || true
 done
 [ -n "$subj" ] && [ -n "$key" ] || exit 2
+if [ "$retract" = 1 ]; then
+  [ -z "${STUB_RETRACT_FAIL:-}" ] || exit 1
+  open=$(jq -r --arg s "$subj" --arg k "$key" '
+    .[] | select((.status // "open") == "open")
+      | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+      | select(((.metadata.escalation_key // "") | tostring) == $k)
+      | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+      | .id' "${STUB_STORE:?}")
+  rrc=0
+  for v in $open; do
+    gc bd update "$v" --status=closed --set-metadata gc.outcome=moot \
+      --set-metadata "gc.outcome_reason=$msg" >/dev/null || rrc=1
+  done
+  exit "$rrc"
+fi
 have=$(jq -r --arg s "$subj" --arg k "$key" '
   [ .[] | select((.status // "open") != "closed")
     | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
@@ -118,27 +139,36 @@ export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # pre-recorded disposition through. The contract that matters here: on success
 # it stamps gc.superseded_by and CLOSES the origin; STUB_REHOME_RC models the
 # refusals it reports without closing (4 transient, 5/6 a human is needed).
-# It also models the real open-children hold: the close is NOT --force, so an
-# OPEN bead that still `blocks` the origin refuses it with exit 5 (bead-rehome.sh
-# :254-263). Without that, a stub that closed straight through a blocking rework
-# child would green-light the strand pr-facts's dispose-children-first order
-# exists to prevent — an anchor stranded open behind a rework child it cannot
-# close.
+# It also models the two real holds on that close, each exit 5, in the real
+# order. The finalize gate runs first, and it is the real finalize-gate.sh: an
+# OPEN visit on the origin holds the close, except a visit filed under the key
+# --except-key names that nobody is engaged in. Without it, a stub that ignored
+# visits would pass an anchor its own escalation holds forever. Then the close is
+# NOT --force, so an OPEN bead that still `blocks` the origin refuses it. Without
+# that, a stub that closed straight through a blocking rework child would
+# green-light the strand pr-facts's dispose-children-first order exists to
+# prevent — an anchor stranded open behind a rework child it cannot close.
 cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_REHOME_LOG:?}"
-origin=""; succ=""; store=""
+origin=""; succ=""; store=""; except=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --origin)          shift; origin="${1:-}" ;;
     --successor)       shift; succ="${1:-}" ;;
     --successor-store) shift; store="${1:-}" ;;
+    --except-key)      shift; except="${1:-}" ;;
   esac
   shift || true
 done
 rc="${STUB_REHOME_RC:-0}"
 if [ "$rc" != "0" ]; then echo "bead-rehome (stub): refusing rc=$rc" >&2; exit "$rc"; fi
+fg=(check "$origin"); [ -n "$except" ] && fg+=(--except-key "$except")
+if ! why=$("$(dirname "$0")/finalize-gate.sh" "${fg[@]}" 2>/dev/null); then
+  echo "bead-rehome (stub): the close is held: $why (exit 5)" >&2
+  exit 5
+fi
 # Real close: drop ONLY the origin->successor wait edge, then close WITHOUT
 # --force. Any OTHER open blocker (a rework child that blocks this anchor) refuses
 # the close, leaving the bead OPEN and pointed — exit 5, the shape pr-facts reads
@@ -492,6 +522,262 @@ eq "$(bstatus F2m)" "open" "…but the anchor close is still refused (another bl
 has "$(cat "$STUB_ESC_LOG")" "--subject F2m --key pr-dispose-failed.33" "escalated under the dispose-failed key"
 has "$(cat "$STUB_ESC_LOG")" "K5" "…the escalation names the child that was already disposed"
 has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it if the disposition is wrong"
+
+# A refused close escalates under pr-dispose-failed.<num>, and that visit tracks
+# the anchor. It reports this arm's own failed close and asks for the next pass's
+# retry, so the retry names its key to the finalize gate, which excepts the visit
+# while nobody is engaged in it, and retracts it moot once the close lands. Held
+# by it instead, the anchor could not close even after the obstruction it
+# reported cleared. dvisit seeds the visit escalate.sh files: stamped with its key
+# and its subject's group, and tracked onto the subject by the edge each case
+# seeds beside it. An assignee seeds a visit someone has engaged.
+dvisit() { # id subject key [status] [assignee]
+  printf '{"id":"%s","status":"%s","assignee":"%s","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
+    "$1" "${4:-open}" "${5:-}" "$3" "$2"
+}
+# How many visits in the store carry a situation key, whatever their status.
+nvisits() { jq --arg k "$1" '[ .[] | select((.metadata.escalation_key // "") == $k) ] | length' "$STUB_STORE"; }
+# Filings of a situation, apart from its retraction: a filing's argv begins
+# with --subject, a retraction's with --retract.
+filings() { grep -c -- "^--subject $1 --key $2 " "$STUB_ESC_LOG"; }
+
+echo "# the arm's own pr-dispose-failed visit does not hold the retry it asks for"
+: > "$STUB_DEPS"
+store "[$(anchor F2n 120 ',"gc.pr_close_disposition_kind":"re-homed","gc.pr_close_disposition_successor":"tk-n"'), $(dvisit VN F2n pr-dispose-failed.120), {\"id\":\"OB\",\"status\":\"closed\",\"title\":\"former blocker\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'VN|tracks|F2n\nOB|blocks|F2n\n' > "$STUB_DEPS"   # the visit's edge, and the obstruction it reported, since closed
+printf '%s' "$(prview 120 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_120.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2n)" "closed" "the anchor closes once the obstruction its escalation reported has cleared"
+eq "$(meta F2n 'gc.superseded_by')" "tk-n" "…through the sanctioned terminal close"
+has "$(cat "$STUB_REHOME_LOG")" "--origin F2n --successor tk-n --kind re-homed --except-key pr-dispose-failed.120" "bead-rehome is told the arm's own visits do not hold this retry"
+eq "$(bstatus VN)" "closed" "the arm's own visit is retracted once the close lands"
+eq "$(meta VN 'gc.outcome')" "moot" "…closed moot: the obstruction it reported is gone"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject F2n --key pr-dispose-failed.120" "…through escalate.sh's retract verb"
+eq "$(filings F2n pr-dispose-failed.120)" "0" "…and nothing is re-filed"
+has "$out" "retracted its own pr-dispose-failed visit VN" "the retraction is reported"
+
+echo "# a pr-dispose-failed visit a person has claimed still holds the close"
+: > "$STUB_DEPS"
+store "[$(anchor F2o 121 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-o"'), $(dvisit VC F2o pr-dispose-failed.121 in_progress)]"
+printf 'VC|tracks|F2o\n' > "$STUB_DEPS"
+printf '%s' "$(prview 121 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_121.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2o)" "open" "the anchor is left OPEN while a person holds the visit"
+has "$out" "held by open visit VC" "…held by the claimed visit"
+eq "$(bstatus VC)" "in_progress" "the claimed visit is its holder's to conclude"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…so nothing retracts it"
+eq "$(nvisits pr-dispose-failed.121)" "1" "…and no second visit is filed beside it"
+
+echo "# a pr-dispose-failed visit bound by assignee (engaged, not yet claimed) still holds the close"
+# Engage binds the visit's assignee while it is still open, before the sitting's
+# claim promotes it. The board reads that as engaged, and so does the gate.
+: > "$STUB_DEPS"
+store "[$(anchor F2oa 124 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-oa"'), $(dvisit VE F2oa pr-dispose-failed.124 open lx-sitting)]"
+printf 'VE|tracks|F2oa\n' > "$STUB_DEPS"
+printf '%s' "$(prview 124 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_124.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2oa)" "open" "the anchor is left OPEN while a person is engaging the visit"
+has "$out" "held by open visit VE" "…held by the engaged visit"
+eq "$(bstatus VE)" "open" "the engaged visit is untouched"
+eq "$(meta VE 'gc.outcome')" "<absent>" "…with no outcome stamped on it"
+
+echo "# twin pr-dispose-failed visits on the anchor are both excepted"
+# escalate.sh files a second visit when its dedup listing is unreadable. Both
+# carry the arm's key and the anchor's stamp, so neither holds the retry.
+: > "$STUB_DEPS"
+store "[$(anchor F2t 125 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-t"'), $(dvisit VT1 F2t pr-dispose-failed.125), $(dvisit VT2 F2t pr-dispose-failed.125)]"
+printf 'VT1|tracks|F2t\nVT2|tracks|F2t\n' > "$STUB_DEPS"
+printf '%s' "$(prview 125 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_125.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2t)" "closed" "the anchor closes with twin visits of the arm's own situation open"
+hasnt "$out" "held by open visit VT" "…neither twin holds it"
+eq "$(bstatus VT1)" "closed" "…and once it lands the first twin is retracted"
+eq "$(bstatus VT2)" "closed" "…and the second as well"
+has "$out" "retracted its own pr-dispose-failed visit VT2" "…each one reported"
+
+echo "# a standing obstruction keeps its one visit; the pass after it clears closes the anchor"
+: > "$STUB_DEPS"
+store "[$(anchor F2p 122 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-p"'), $(dvisit VS F2p pr-dispose-failed.122), {\"id\":\"BS\",\"status\":\"open\",\"title\":\"open must-fix finding\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'VS|tracks|F2p\nBS|blocks|F2p\n' > "$STUB_DEPS"
+printf '%s' "$(prview 122 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_122.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2p)" "open" "an anchor still blocked stays OPEN"
+has "$out" "has an OPEN blocker" "…refused for the obstruction itself, not for its own visit"
+eq "$(bstatus VS)" "open" "the visit stays open while the obstruction stands"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…nothing retracts it"
+eq "$(nvisits pr-dispose-failed.122)" "1" "…and the escalation dedups onto it rather than filing a second"
+# The obstruction clears (arm 10 retires a disposed anchor's findings), and the
+# next pass retries the close the visit asked for.
+jq -c 'map(if .id == "BS" then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/store.next" && mv "$TMP/store.next" "$STUB_STORE"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus F2p)" "closed" "the next pass after the obstruction clears closes the anchor"
+eq "$(bstatus VS)" "closed" "…and retracts the visit that reported it"
+eq "$(meta VS 'gc.outcome')" "moot" "…as moot"
+
+echo "# another open visit on the anchor still holds the close; only the arm's own is excepted"
+: > "$STUB_DEPS"
+store "[$(anchor F2q 123 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-q"'), $(dvisit VQ F2q pr-dispose-failed.123), $(dvisit VR F2q an-unrelated-question)]"
+printf 'VQ|tracks|F2q\nVR|tracks|F2q\n' > "$STUB_DEPS"
+printf '%s' "$(prview 123 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_123.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2q)" "open" "the anchor is left OPEN"
+has "$out" "held by open visit VR" "…held by the visit the arm does not own"
+eq "$(bstatus VQ)" "open" "the arm's own visit stays open: the close it asks for has not landed"
+eq "$(bstatus VR)" "open" "…and the other visit is untouched"
+
+# A visit's description: the report a person reads when they open or engage it.
+vdesc() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .description) // "<absent>"' "$STUB_STORE"; }
+# The arm's own visit as an earlier pass filed it: its description names the
+# obstruction that pass hit, and the parked children it disposed, if any.
+dvisit_desc() { # id subject key description [assignee]
+  jq -nc --arg id "$1" --arg s "$2" --arg k "$3" --arg d "$4" --arg a "${5:-}" \
+    '{id: $id, status: "open", assignee: $a, title: "visit", description: $d, notes: "",
+      metadata: {escalation_key: $k, "gc.continuation_group": $s, task_kind: "visit", "gc.routed_to": "human"}}'
+}
+
+echo "# a close refused for a new reason refreshes the visit's description"
+# escalate.sh dedups every later refusal onto the visit it filed first, so the
+# arm rewrites that visit's description when this pass's refusal differs. The
+# note naming the children an earlier pass disposed is carried forward.
+: > "$STUB_DEPS"
+OLD_REPORT="PR#131 was closed with a pre-recorded disposition, but bead-rehome.sh could not consummate it (rc=5): has an OPEN blocker BOLD. The anchor is left OPEN carrying the marker. The branch's parked rework/rebase children (K9) were ALREADY disposed (closed not-needed -> tk-x) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
+store "[$(anchor F2x 131 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-x"'), $(dvisit_desc VX F2x pr-dispose-failed.131 "$OLD_REPORT"), $(dvisit VR2 F2x an-unrelated-question)]"
+printf 'VX|tracks|F2x\nVR2|tracks|F2x\n' > "$STUB_DEPS"
+printf '%s' "$(prview 131 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_131.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2x)" "open" "the close is refused, now by another open visit"
+has "$(vdesc VX)" "held by open visit VR2" "the visit's description names this pass's obstruction"
+hasnt "$(vdesc VX)" "BOLD" "…and no longer the blocker an earlier pass hit"
+has "$(vdesc VX)" "The branch's parked rework/rebase children (K9) were ALREADY disposed" "…while the children an earlier pass disposed stay named"
+has "$out" "refreshed its pr-dispose-failed visit VX" "the refresh is reported"
+eq "$(nvisits pr-dispose-failed.131)" "1" "…on the one visit, with nothing re-filed"
+REFRESHED="$(vdesc VX)"
+out=$(run)
+eq "$(vdesc VX)" "$REFRESHED" "a pass refused for the same reason leaves the description as it is"
+hasnt "$out" "refreshed its pr-dispose-failed visit VX" "…and writes nothing"
+
+echo "# a visit someone is engaged in keeps its description"
+: > "$STUB_DEPS"
+store "[$(anchor F2y 132 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-y"'), $(dvisit_desc VY F2y pr-dispose-failed.132 "an earlier report" lx-sitting)]"
+printf 'VY|tracks|F2y\n' > "$STUB_DEPS"
+printf '%s' "$(prview 132 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_132.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2y)" "open" "the engaged visit holds the close"
+eq "$(vdesc VY)" "an earlier report" "…and its description is left to the person in it"
+
+echo "# a retract that does not land after the close is retried by the next full pass"
+# The closed anchor leaves the enumeration, so the arm never reaches it again.
+# The sweep ahead of the anchor loop reads the open visit, finds its subject
+# closed with the disposition pointer recorded, and retracts it.
+: > "$STUB_DEPS"
+store "[$(anchor F2r 126 ',"gc.pr_close_disposition_kind":"re-homed","gc.pr_close_disposition_successor":"tk-r"'), $(dvisit VF F2r pr-dispose-failed.126)]"
+printf 'VF|tracks|F2r\n' > "$STUB_DEPS"
+printf '%s' "$(prview 126 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_126.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_RETRACT_FAIL=1 run)
+eq "$(bstatus F2r)" "closed" "the anchor closes"
+eq "$(bstatus VF)" "open" "…but the retract did not land, so its visit is still open"
+has "$out" "visit VF is still open; a full pass retracts it" "…and the pass says a full pass retries it"
+out=$(run_posture)
+eq "$(bstatus VF)" "open" "a posture-only pass leaves it"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus VF)" "closed" "the next full pass retracts it"
+eq "$(meta VF 'gc.outcome')" "moot" "…as moot"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject F2r --key pr-dispose-failed.126" "…through the same retract verb"
+has "$out" "retracted its own pr-dispose-failed visit VF" "…and reports it"
+
+echo "# the sweep retracts only a visit whose subject closed with its pointer, and nobody engaged"
+# A subject closed with no gc.superseded_by has no disposition on record, a
+# visit someone is engaged in is theirs to conclude, and a subject that does
+# not read this pass is left for the next.
+: > "$STUB_DEPS"
+store "[$(anchor F2u 128 '' | jq -c '.status = "closed"'), $(dvisit VU F2u pr-dispose-failed.128), $(anchor F2v 129 ',"gc.superseded_by":"tk-v"' | jq -c '.status = "closed"'), $(dvisit VV F2v pr-dispose-failed.129 open lx-sitting), $(dvisit VG GHOST pr-dispose-failed.130)]"
+printf 'VU|tracks|F2u\nVV|tracks|F2v\n' > "$STUB_DEPS"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus VU)" "open" "a visit whose subject closed with no disposition pointer is left"
+eq "$(bstatus VV)" "open" "a visit someone is engaged in is left"
+eq "$(bstatus VG)" "open" "a visit whose subject does not read is left"
+has "$out" "subject GHOST unreadable this pass" "…and the unreadable subject is reported"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…and none of them is retracted"
+
+echo "# the sweep's retract runs through the real escalate.sh and visit-close.sh"
+# Every other case drives escalate.sh's contract through the stub above. This
+# one runs the real verb against a subject already closed, the shape the sweep
+# meets: escalate.sh reads the open visits for the situation, and visit-close.sh
+# folds the reading onto the subject, stamps the outcome, and closes the visit.
+# GC_RIG names the store, since no rig set is served here to derive it from.
+SD2="$TMP/scripts-real-escalate"
+mk_sut_dir "$SD2" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/escalate.sh"
+cp "$SD/bead-rehome.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh" "$SD2/"
+: > "$STUB_DEPS"
+store "[$(anchor F2w 127 ',"gc.superseded_by":"tk-w"' | jq -c '.status = "closed"'), $(dvisit VW F2w pr-dispose-failed.127)]"
+printf 'VW|tracks|F2w\n' > "$STUB_DEPS"
+out=$(GC_RIG=gc-toolkit "$SD2/pr-facts.sh" --fix-pool "$FIX" --review-pool "$REV" 2>&1)
+eq "$(bstatus VW)" "closed" "the real retract closes the visit on the closed anchor"
+eq "$(meta VW 'gc.outcome')" "moot" "…moot, stamped by visit-close.sh"
+has "$(meta VW 'gc.outcome_reason')" "PR#127's pre-recorded disposition is consummated" "…with the sweep's reading as its reason"
+has "$(notes F2w)" "visit VW closed moot" "…and the reading folded onto the closed subject's notes"
+has "$out" "retracted its own pr-dispose-failed visit VW" "the retraction is reported"
+
+echo "# a pre-recorded disposition retires the PR's other merge-path visits before the close"
+# Each was filed to hold the PR's merge until a person answered it. The PR is
+# closed with its disposition recorded, so there is no merge left to hold, and
+# none of them may keep the anchor from closing.
+mpvisit() { # id subject key [status] [assignee]
+  printf '{"id":"%s","status":"%s","assignee":"%s","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
+    "$1" "${4:-open}" "${5:-}" "$3" "$2"
+}
+: > "$STUB_DEPS"
+store "[$(anchor F2z 133 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-z"'), $(mpvisit VC1 F2z pr-comments.133.5.7), $(mpvisit VU1 F2z pr-unengaged-threads.133.sha-133), $(mpvisit VB1 F2z merge-blocked-threads), $(mpvisit VT3 F2z pr-retargeted.133), $(mpvisit VN3 F2z pr-fix-noncode.133 deferred), $(mpvisit VK3 F2z pr-fix-capped.133)]"
+printf 'VC1|tracks|F2z\nVU1|tracks|F2z\nVB1|tracks|F2z\nVT3|tracks|F2z\nVN3|tracks|F2z\nVK3|tracks|F2z\n' > "$STUB_DEPS"
+printf '%s' "$(prview 133 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_133.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2z)" "closed" "the anchor closes in the same pass"
+for v in VC1 VU1 VB1 VT3 VN3 VK3; do
+  eq "$(bstatus "$v")" "closed" "merge-path visit $v is retired"
+done
+eq "$(meta VC1 'gc.outcome')" "moot" "…closed moot"
+has "$(meta VC1 'gc.outcome_reason')" "F2z disposed (folded -> tk-z)" "…naming the disposition"
+has "$(meta VC1 'gc.outcome_reason')" "the merge this visit held is gone" "…and why its question is moot"
+has "$out" "retired stale visit VC1 (pr-comments.133.5.7" "each retirement is reported with its key"
+eq "$(filings F2z pr-dispose-failed.133)" "0" "…and no dispose-failed visit is filed"
+
+echo "# an engaged merge-path visit keeps holding the close"
+# A person in that conversation concludes it. Only the rework-or-close visit is
+# retired over a claim, because the disposition answers its question.
+: > "$STUB_DEPS"
+store "[$(anchor F2za 134 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-za"'), $(mpvisit VCE F2za pr-comments.134.1.2 open lx-sitting)]"
+printf 'VCE|tracks|F2za\n' > "$STUB_DEPS"
+printf '%s' "$(prview 134 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_134.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus VCE)" "open" "the engaged feedback visit is left to its holder"
+eq "$(bstatus F2za)" "open" "…and it holds the anchor's close"
+has "$out" "VCE (pr-comments.134.1.2) is engaged (lx-sitting)" "…which the pass reports"
+has "$out" "held by open visit VCE" "…and names as the hold"
+
+echo "# a visit for another PR, or under a key this script does not file, is not retired"
+: > "$STUB_DEPS"
+store "[$(anchor F2zb 135 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-zb"'), $(mpvisit VO F2zb pr-comments.999.1.2), $(mpvisit VQ2 F2zb an-unrelated-question)]"
+printf 'VO|tracks|F2zb\nVQ2|tracks|F2zb\n' > "$STUB_DEPS"
+printf '%s' "$(prview 135 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_135.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus VO)" "open" "another PR's feedback visit is left"
+eq "$(bstatus VQ2)" "open" "a visit under another key is left"
+eq "$(bstatus F2zb)" "open" "…and they still hold the anchor's close"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"
@@ -1323,6 +1609,268 @@ eq "$(meta_pinned P1 pr_posture)" "commented@sha-40" "a comment above the mark i
 eq "$(meta P1 pr_comment_watermark)" "5009" "the watermark advanced past it"
 eq "$(meta P1 pr_comment_disposition)" "rework:new-5" "the new batch got its own child (the first batch took new-2, its pass new-3, its finding new-4)"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
+
+echo "# a comment answered elsewhere (its thread resolved) is NOT unanswered — no false merge hold (tk-91ftmj)"
+# The watermark advances only when THIS script routes, so a comment a sitting
+# answered in-thread and resolved never moves it; without a path-independent read
+# it reads unanswered forever and files a visit carrying pr_number that holds the
+# merge. A resolved review thread is that path-independent "answered" signal.
+store "[$(anchor AE1 470)]"
+printf '%s' "$(prview 470 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_470.json"
+echo '[]' > "$GH_DIR/reviews_470.json"
+printf '[{"id":5001,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":3},{"id":5002,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.sh","line":3,"in_reply_to_id":5001}]' > "$GH_DIR/comments_470.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-470","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-470","databaseId":5001,"fullDatabaseId":"5001","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-470b","databaseId":5002,"fullDatabaseId":"5002","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_470.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+eq "$(meta_pinned AE1 pr_posture)" "review_required@sha-470" "a resolved-thread comment falls back to the standing posture, not commented"
+hasnt "$out" "routed to rework" "the answered comment routes nothing"
+eq "$(meta AE1 pr_comment_disposition)" "<absent>" "…and no disposition is recorded"
+eq "$(meta AE1 pr_comment_watermark)" "<absent>" "…and the watermark does not advance"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…nor is the fix pool woken"
+
+echo "# a resolved comment is dropped even when a higher-id unresolved one remains (tk-91ftmj)"
+# The filter is per-comment, not all-or-nothing: the resolved comment (higher id)
+# is dropped while the unresolved one still routes, so the watermark stops at the
+# unresolved id — proof the higher resolved id was not counted.
+store "[$(anchor AE2 471)]"
+printf '%s' "$(prview 471 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_471.json"
+echo '[]' > "$GH_DIR/reviews_471.json"
+printf '[{"id":5101,"user":{"login":"human1"},"body":"still open","path":"a.sh","line":1},{"id":5109,"user":{"login":"human1"},"body":"answered","path":"b.sh","line":2},{"id":5110,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"b.sh","line":2,"in_reply_to_id":5109}]' > "$GH_DIR/comments_471.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-471a","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-471a","databaseId":5101,"fullDatabaseId":"5101","author":{"login":"human1"},"body":"still open","reactionGroups":[]}]}},{"id":"T-471b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-471b","databaseId":5109,"fullDatabaseId":"5109","author":{"login":"human1"},"body":"answered","reactionGroups":[]},{"id":"NC-471c","databaseId":5110,"fullDatabaseId":"5110","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_471.json"
+out=$(run)
+eq "$(meta_pinned AE2 pr_posture)" "commented@sha-471" "the unresolved comment still makes the PR commented"
+has "$out" "routed to rework" "…and it routes"
+eq "$(meta AE2 pr_comment_watermark)" "5101" "the watermark stops at the unresolved comment; the higher resolved id was dropped"
+
+echo "# a thread read that fails counts the batch unfiltered — a failed read never drops an objection (tk-91ftmj)"
+# The thread IS resolved, so a successful read would drop the comment; the forced
+# read failure must fall back to counting it, never to silently answering it.
+store "[$(anchor AE3 472)]"
+printf '%s' "$(prview 472 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_472.json"
+echo '[]' > "$GH_DIR/reviews_472.json"
+printf '[{"id":5201,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1},{"id":5202,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.sh","line":1,"in_reply_to_id":5201}]' > "$GH_DIR/comments_472.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-472","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-472","databaseId":5201,"fullDatabaseId":"5201","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-472b","databaseId":5202,"fullDatabaseId":"5202","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_472.json"
+out=$(STUB_GQL_READ_FAIL=1 run)
+has "$out" "review-thread resolution unreadable" "the failed read is reported"
+has "$out" "routed to rework" "…and the comment is counted unfiltered and routes — never dropped on a failed read"
+eq "$(meta AE3 pr_comment_watermark)" "5201" "…and the watermark advances"
+
+echo "# a comment id past 2^31 is matched by fullDatabaseId, not the 32-bit databaseId"
+# Review-comment ids already exceed a GraphQL Int. The thread here carries the id
+# only as fullDatabaseId (a BigInt string) with databaseId null, the shape GitHub
+# leaves once it retires the deprecated field, so a reader of databaseId matches
+# nothing and routes the answered comment.
+store "[$(anchor AE4 473)]"
+printf '%s' "$(prview 473 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_473.json"
+echo '[]' > "$GH_DIR/reviews_473.json"
+printf '[{"id":4203522112,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1},{"id":4203522150,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.sh","line":1,"in_reply_to_id":4203522112}]' > "$GH_DIR/comments_473.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-473","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-473","databaseId":null,"fullDatabaseId":"4203522112","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-473b","databaseId":null,"fullDatabaseId":"4203522150","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_473.json"
+out=$(run)
+eq "$(meta_pinned AE4 pr_posture)" "review_required@sha-473" "the answered comment past 2^31 is dropped: not commented"
+hasnt "$out" "routed to rework" "…and it routes nothing"
+
+echo "# one thread read serves every reader on an anchor visit"
+# The incident's shape: the city replied unmarked, before the PR's provenance
+# cutover, so the reply is the city's own and answers the human comment. The
+# answered-comment read drops that comment, which leaves the unmarked reply for
+# the unengaged-thread count to ask about. Both read this PR's threads in one
+# posture pass, and the second reuses the first's nodes rather than reading the
+# connection again.
+store "[$(anchor AE5 474 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 474 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_474.json"
+echo '[]' > "$GH_DIR/reviews_474.json"
+printf '[{"id":5401,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1,"created_at":"2026-10-06T10:00:00Z"},{"id":5402,"user":{"login":"gc-city-bot"},"body":"fixed","path":"a.sh","line":1,"in_reply_to_id":5401,"created_at":"2026-10-06T11:00:00Z"}]' > "$GH_DIR/comments_474.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-474","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-474a","databaseId":5401,"fullDatabaseId":"5401","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-474b","databaseId":5402,"fullDatabaseId":"5402","author":{"login":"gc-city-bot"},"body":"fixed","createdAt":"2026-10-06T11:00:00Z","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_474.json"
+: > "$STUB_GH_LOG"
+out=$(run_posture)
+eq "$(meta_pinned AE5 pr_posture)" "review_required@sha-474" "the answered comment and the resolved thread hold nothing"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "1" "…and the two readers took one thread read between them"
+
+echo "# a comment written after our last reply in a resolved thread is still outstanding"
+# A reply does not reopen a resolved thread. The reviewer's "no, still broken"
+# (5503) came after the city's reply (5502), so it is not answered, while the
+# comment that reply answered (5501) is. The batch routes, and its mark stops at
+# the outstanding comment.
+store "[$(anchor AE6 475)]"
+printf '%s' "$(prview 475 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_475.json"
+echo '[]' > "$GH_DIR/reviews_475.json"
+printf '[{"id":5501,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1},{"id":5502,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.sh","line":1,"in_reply_to_id":5501},{"id":5503,"user":{"login":"human1"},"body":"no, this is still broken","path":"a.sh","line":1,"in_reply_to_id":5501}]' > "$GH_DIR/comments_475.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-475","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-475a","databaseId":5501,"fullDatabaseId":"5501","author":{"login":"human1"},"body":"please fix","reactionGroups":[]},{"id":"NC-475b","databaseId":5502,"fullDatabaseId":"5502","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]},{"id":"NC-475c","databaseId":5503,"fullDatabaseId":"5503","author":{"login":"human1"},"body":"no, this is still broken","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_475.json"
+out=$(run)
+eq "$(meta_pinned AE6 pr_posture)" "commented@sha-475" "the comment after our reply makes the PR commented"
+has "$out" "routed to rework" "…and it routes"
+eq "$(meta AE6 pr_comment_watermark)" "5503" "…through the outstanding comment"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AE6") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "no, this is still broken" "the work order carries the outstanding comment"
+hasnt "$CB" "(comment 5501)" "…and not the one our reply answered"
+
+echo "# a thread resolved with no reply of ours answers nothing"
+# Resolution alone does not say the city answered: the comment routes as it would
+# have with no thread read at all.
+store "[$(anchor AE7 476)]"
+printf '%s' "$(prview 476 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_476.json"
+echo '[]' > "$GH_DIR/reviews_476.json"
+printf '[{"id":5601,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1}]' > "$GH_DIR/comments_476.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-476","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-476","databaseId":5601,"fullDatabaseId":"5601","author":{"login":"human1"},"body":"please fix","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_476.json"
+out=$(run)
+eq "$(meta_pinned AE7 pr_posture)" "commented@sha-476" "a resolved thread with no reply of ours stays commented"
+eq "$(meta AE7 pr_comment_watermark)" "5601" "…and its comment routes"
+
+echo "# an unmarked reply under our login after the provenance cutover answers nothing"
+# A reply of ours is a post that is the city's own. An unmarked one under our own
+# login after the cutover is feedback, an operator's or a model's run on the
+# city's account, so it answers nothing in the thread it sits in: both comments
+# route.
+store "[$(anchor AE10 485 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 485 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_485.json"
+echo '[]' > "$GH_DIR/reviews_485.json"
+printf '[{"id":5901,"user":{"login":"human1"},"body":"please fix","path":"a.sh","line":1,"created_at":"2026-10-07T01:00:00Z"},{"id":5902,"user":{"login":"gc-city-bot"},"body":"this is still broken","path":"a.sh","line":1,"in_reply_to_id":5901,"created_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/comments_485.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-485","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-485a","databaseId":5901,"fullDatabaseId":"5901","author":{"login":"human1"},"body":"please fix","createdAt":"2026-10-07T01:00:00Z","reactionGroups":[]},{"id":"NC-485b","databaseId":5902,"fullDatabaseId":"5902","author":{"login":"gc-city-bot"},"body":"this is still broken","createdAt":"2026-10-07T02:00:00Z","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_485.json"
+out=$(run)
+eq "$(meta_pinned AE10 pr_posture)" "commented@sha-485" "the unmarked post after the cutover answers nothing: commented"
+eq "$(meta AE10 pr_comment_watermark)" "5902" "…and both comments route, the unmarked post as feedback"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AE10") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "please fix" "the work order carries the comment the unmarked post did not answer"
+has "$CB" "this is still broken" "…and the unmarked post itself"
+
+echo "# a batch routed by another space never lowers the comment watermark"
+# 5701 was routed (mark 5701); 5702 arrived and both threads were answered, so
+# the threads drop every comment and the filtered count is 0. A Conversation
+# comment then routes the batch, and the transition writes the comment mark
+# back: it has to stay at 5701, or every answered comment under it would route
+# again the moment its thread lost the answer.
+store "[$(anchor AE8 477 ',"pr_comment_watermark":5701')]"
+printf '%s' "$(prview 477 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_477.json"
+echo '[]' > "$GH_DIR/reviews_477.json"
+printf '[{"id":5701,"user":{"login":"human1"},"body":"one","path":"a.sh","line":1},{"id":5702,"user":{"login":"human1"},"body":"two","path":"b.sh","line":1},{"id":5703,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.sh","line":1,"in_reply_to_id":5701},{"id":5704,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"b.sh","line":1,"in_reply_to_id":5702}]' > "$GH_DIR/comments_477.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-477a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-477a","databaseId":5701,"fullDatabaseId":"5701","author":{"login":"human1"},"body":"one","reactionGroups":[]},{"id":"NC-477c","databaseId":5703,"fullDatabaseId":"5703","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}},{"id":"T-477b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-477b","databaseId":5702,"fullDatabaseId":"5702","author":{"login":"human1"},"body":"two","reactionGroups":[]},{"id":"NC-477d","databaseId":5704,"fullDatabaseId":"5704","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_477.json"
+printf '[{"id":7701,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/issue_comments_477.json"
+out=$(run)
+has "$out" "routed to rework" "the Conversation comment routes the batch"
+eq "$(meta AE8 pr_comment_watermark)" "5701" "…and the comment mark stays where it was, never 0"
+eq "$(meta AE8 pr_issue_comment_watermark)" "7701" "…while the Conversation mark advances"
+
+echo "# a dismissal never lowers the review watermark"
+# Review 900 was routed (mark 900) and then dismissed, so the highest counted
+# review is the older 800. A Conversation comment routing the batch writes the
+# review mark back, and it stays at 900.
+store "[$(anchor AE9 478 ',"pr_review_watermark":900')]"
+printf '%s' "$(prview 478 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_478.json"
+printf '[{"id":800,"user":{"login":"human1"},"state":"COMMENTED","body":"older"},{"id":900,"user":{"login":"human1"},"state":"DISMISSED","body":"retired"}]' > "$GH_DIR/reviews_478.json"
+echo '[]' > "$GH_DIR/comments_478.json"
+printf '[{"id":7801,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/issue_comments_478.json"
+out=$(run)
+has "$out" "routed to rework" "the Conversation comment routes the batch"
+eq "$(meta AE9 pr_review_watermark)" "900" "…and the review mark stays at the dismissed review's id, never the older 800"
+
+echo "# a review whose every inline comment its thread answered is answered, body and all"
+# The incident's shape: a COMMENTED review with a summary body over its inline
+# comments, each answered by the city in-thread and resolved. Dropping only the
+# comments left the review id above its mark, so the batch still fired and the
+# false hold stood.
+store "[$(anchor AF1 479)]"
+printf '%s' "$(prview 479 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_479.json"
+printf '[{"id":9100,"user":{"login":"human1"},"state":"COMMENTED","body":"Sticking with comments on the docs change."}]' > "$GH_DIR/reviews_479.json"
+printf '[{"id":9101,"user":{"login":"human1"},"body":"one","path":"a.md","line":1,"pull_request_review_id":9100},{"id":9102,"user":{"login":"human1"},"body":"two","path":"b.md","line":1,"pull_request_review_id":9100},{"id":9103,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.md","line":1,"in_reply_to_id":9101,"pull_request_review_id":9110},{"id":9104,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"b.md","line":1,"in_reply_to_id":9102,"pull_request_review_id":9111}]' > "$GH_DIR/comments_479.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-479a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-479a","databaseId":9101,"fullDatabaseId":"9101","author":{"login":"human1"},"body":"one","reactionGroups":[]},{"id":"NC-479c","databaseId":9103,"fullDatabaseId":"9103","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}},{"id":"T-479b","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-479b","databaseId":9102,"fullDatabaseId":"9102","author":{"login":"human1"},"body":"two","reactionGroups":[]},{"id":"NC-479d","databaseId":9104,"fullDatabaseId":"9104","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_479.json"
+out=$(run)
+eq "$(meta_pinned AF1 pr_posture)" "review_required@sha-479" "the answered review holds nothing: not commented"
+hasnt "$out" "routed to" "…and routes nothing, neither a rework nor a visit"
+eq "$(meta AF1 pr_review_watermark)" "<absent>" "…and no batch moved the review mark"
+
+echo "# a review with one inline comment still outstanding keeps its body in the batch"
+# Comment 9201 was answered and 9202 was not, so the review is not answered: its
+# body and 9202 route, and 9201 does not.
+store "[$(anchor AF2 480)]"
+printf '%s' "$(prview 480 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_480.json"
+printf '[{"id":9200,"user":{"login":"human1"},"state":"COMMENTED","body":"Two things below."}]' > "$GH_DIR/reviews_480.json"
+printf '[{"id":9201,"user":{"login":"human1"},"body":"first thing","path":"a.md","line":1,"pull_request_review_id":9200},{"id":9202,"user":{"login":"human1"},"body":"second thing","path":"b.md","line":1,"pull_request_review_id":9200},{"id":9203,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.md","line":1,"in_reply_to_id":9201,"pull_request_review_id":9210}]' > "$GH_DIR/comments_480.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-480a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-480a","databaseId":9201,"fullDatabaseId":"9201","author":{"login":"human1"},"body":"first thing","reactionGroups":[]},{"id":"NC-480c","databaseId":9203,"fullDatabaseId":"9203","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}},{"id":"T-480b","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-480b","databaseId":9202,"fullDatabaseId":"9202","author":{"login":"human1"},"body":"second thing","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_480.json"
+out=$(run)
+eq "$(meta_pinned AF2 pr_posture)" "commented@sha-480" "the review with an outstanding comment keeps the PR commented"
+eq "$(meta AF2 pr_review_watermark)" "9200" "…its body routes"
+eq "$(meta AF2 pr_comment_watermark)" "9202" "…with the outstanding comment"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AF2") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "Two things below." "the work order carries the review body"
+has "$CB" "second thing" "…and the outstanding comment"
+hasnt "$CB" "first thing" "…and not the comment its thread answered"
+
+echo "# a review submitted late over comments the mark already passed still routes"
+# The mark passed 9301 before review 9300 (opened earlier, submitted later) became
+# visible. The review is answered only on the threads' word, never the mark's:
+# 9301's thread is open, so the body routes.
+store "[$(anchor AF3 481 ',"pr_comment_watermark":9305')]"
+printf '%s' "$(prview 481 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_481.json"
+printf '[{"id":9300,"user":{"login":"human1"},"state":"COMMENTED","body":"Late review body."}]' > "$GH_DIR/reviews_481.json"
+printf '[{"id":9301,"user":{"login":"human1"},"body":"late comment","path":"a.md","line":1,"pull_request_review_id":9300}]' > "$GH_DIR/comments_481.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-481","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-481","databaseId":9301,"fullDatabaseId":"9301","author":{"login":"human1"},"body":"late comment","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_481.json"
+out=$(run)
+eq "$(meta_pinned AF3 pr_posture)" "commented@sha-481" "the late review is outstanding"
+eq "$(meta AF3 pr_review_watermark)" "9300" "…and its body routes"
+
+echo "# answered feedback is read once: the answered marks let later passes skip the threads"
+# Nothing routes answered feedback, so no watermark moves past it. The first read
+# records how far the threads answered past each watermark, and a pass whose newest
+# feedback sits at or below those marks reads no threads at all. The city's reply
+# carries the write-back marker, as its replies do, so the unengaged-thread
+# backstop (which reads the threads for an unmarked comment of ours) asks nothing.
+store "[$(anchor AG1 482)]"
+printf '%s' "$(prview 482 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_482.json"
+printf '[{"id":9400,"user":{"login":"human1"},"state":"COMMENTED","body":"Summary of the review."}]' > "$GH_DIR/reviews_482.json"
+printf '[{"id":9401,"user":{"login":"human1"},"body":"answered comment","path":"a.md","line":1,"pull_request_review_id":9400},{"id":9402,"user":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","path":"a.md","line":1,"in_reply_to_id":9401,"pull_request_review_id":9410}]' > "$GH_DIR/comments_482.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-482a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-482a","databaseId":9401,"fullDatabaseId":"9401","author":{"login":"human1"},"body":"answered comment","reactionGroups":[]},{"id":"NC-482b","databaseId":9402,"fullDatabaseId":"9402","author":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_482.json"
+: > "$STUB_GH_LOG"
+out=$(run_posture)
+eq "$(meta_pinned AG1 pr_posture)" "review_required@sha-482" "the answered review and comment hold nothing"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "1" "…the first pass reads the threads once"
+eq "$(meta AG1 pr_comment_answered)" "9401" "…and records how far they answered the comments"
+eq "$(meta AG1 pr_review_answered)" "9400" "…and the reviews"
+: > "$STUB_GH_LOG"
+out=$(run_posture)
+eq "$(meta_pinned AG1 pr_posture)" "review_required@sha-482" "the next pass still drops the answered feedback"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "0" "…without reading the threads"
+# A new comment above the mark brings the read back, and it routes alone.
+printf '[{"id":9401,"user":{"login":"human1"},"body":"answered comment","path":"a.md","line":1,"pull_request_review_id":9400},{"id":9402,"user":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","path":"a.md","line":1,"in_reply_to_id":9401,"pull_request_review_id":9410},{"id":9405,"user":{"login":"human1"},"body":"a new comment","path":"b.md","line":1,"pull_request_review_id":9420}]' > "$GH_DIR/comments_482.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-482a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-482a","databaseId":9401,"fullDatabaseId":"9401","author":{"login":"human1"},"body":"answered comment","reactionGroups":[]},{"id":"NC-482b","databaseId":9402,"fullDatabaseId":"9402","author":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","reactionGroups":[]}]}},{"id":"T-482c","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-482c","databaseId":9405,"fullDatabaseId":"9405","author":{"login":"human1"},"body":"a new comment","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_482.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "reviewThreads(first:100" "a comment above the mark brings the thread read back"
+eq "$(meta_pinned AG1 pr_posture)" "commented@sha-482" "…the new comment makes the PR commented"
+eq "$(meta AG1 pr_comment_watermark)" "9405" "…and routes"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AG1") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "a new comment" "the work order carries the new comment"
+hasnt "$CB" "answered comment" "…and not the answered one"
+hasnt "$CB" "Summary of the review." "…nor the answered review body"
+
+echo "# a read brought back by a new comment re-reads what the mark covered"
+# The mark passed 9501 when its thread was answered. The thread has since been
+# unresolved; that alone routes nothing, but the new comment 9505 brings the read
+# back, which finds 9501 outstanding too, so both route.
+store "[$(anchor AG2 483 ',"pr_comment_answered":9501')]"
+printf '%s' "$(prview 483 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_483.json"
+echo '[]' > "$GH_DIR/reviews_483.json"
+printf '[{"id":9501,"user":{"login":"human1"},"body":"reopened comment","path":"a.md","line":1},{"id":9502,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.md","line":1,"in_reply_to_id":9501},{"id":9505,"user":{"login":"human1"},"body":"a new comment","path":"b.md","line":1}]' > "$GH_DIR/comments_483.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-483a","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-483a","databaseId":9501,"fullDatabaseId":"9501","author":{"login":"human1"},"body":"reopened comment","reactionGroups":[]},{"id":"NC-483b","databaseId":9502,"fullDatabaseId":"9502","author":{"login":"gc-city-bot"},"body":"fixed\n\n<!-- gc:city -->","reactionGroups":[]}]}},{"id":"T-483c","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-483c","databaseId":9505,"fullDatabaseId":"9505","author":{"login":"human1"},"body":"a new comment","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_483.json"
+out=$(run)
+eq "$(meta AG2 pr_comment_watermark)" "9505" "the batch routes"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AG2") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "reopened comment" "the work order carries the comment whose thread was unresolved"
+has "$CB" "a new comment" "…beside the new one"
+
+echo "# a thread read that fails drops only what the answered mark covers"
+# 9601 was confirmed answered (mark 9601) before the read began to fail. The new
+# comment 9605 routes, unfiltered, and the confirmed 9601 stays out of the batch.
+store "[$(anchor AG3 484 ',"pr_comment_answered":9601')]"
+printf '%s' "$(prview 484 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_484.json"
+echo '[]' > "$GH_DIR/reviews_484.json"
+printf '[{"id":9601,"user":{"login":"human1"},"body":"confirmed comment","path":"a.md","line":1},{"id":9602,"user":{"login":"gc-city-bot"},"body":"fixed\\n\\n<!-- gc:city -->","path":"a.md","line":1,"in_reply_to_id":9601},{"id":9605,"user":{"login":"human1"},"body":"a new comment","path":"b.md","line":1}]' > "$GH_DIR/comments_484.json"
+printf '%s\n' '{"reviews":[],"threads":[]}' > "$GH_DIR/threads_484.json"
+out=$(STUB_GQL_READ_FAIL=1 run)
+has "$out" "review-thread resolution unreadable" "the failed read is reported"
+eq "$(meta AG3 pr_comment_watermark)" "9605" "…the new comment routes"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AG3") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "a new comment" "the work order carries the new comment"
+hasnt "$CB" "confirmed comment" "…and not the one the mark confirmed"
 
 echo "# a feedback batch past the OS per-argument limit still renders"
 # tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
