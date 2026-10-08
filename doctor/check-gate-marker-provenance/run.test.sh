@@ -18,6 +18,8 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
+# BSD wc pads its count with spaces, and eq compares strings.
+wc() { command wc "$@" | tr -d ' '; }
 
 mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/gh" "$TMP/alpha"
 git init -q "$TMP/alpha"
