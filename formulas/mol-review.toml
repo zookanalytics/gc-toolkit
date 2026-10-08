@@ -443,6 +443,12 @@ Do not post the review yourself, do not touch `check.*`, do not file rework
 beads or finding beads (signoff.sh files the findings from your
 `findings.json`), and never run `gh pr review --approve`.
 
+Pass on this same call any flag the check section of this bead's dispatch note
+names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+When signoff.sh refuses a verdict for a missing or invalid flag, it has written
+nothing, so re-run the call with the flag corrected; that is still the one
+verdict.
+
 **2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
 is the dispatch pin and the posted artifact's audit label, never a marker, and
 nothing in the cadence compares a marker to a head. A rebase or a new commit
