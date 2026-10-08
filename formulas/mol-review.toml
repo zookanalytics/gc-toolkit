@@ -135,9 +135,10 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 # reads through learning-recurrence.sh --inventory. Anchors live here, not
 # beside the dimension: the step description below renders into a step bead,
 # where an HTML comment is noise in the text the reviewer reads. One line per
-# adopted dimension, naming the "What to check" bullet it amended:
+# adopted entry, naming the "What to check" bullet it amended:
 # <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
 # <!-- rule:tk-wamr3 src:pr:#105 (operator feedback) adopted:2026-09-03 --> Comments
+# <!-- rule:tk-v32d2u src:pr:#1015:comment:4180705562, pr:#1025:comment:4180671214, visit:tk-cm64ub1 (operator feedback) adopted:2026-10-06 --> Comments
 # <!-- rule:tk-0rhvews src:pr:#964:comment:4171895604, pr:#1117:comment:4198995344 (operator feedback) adopted:2026-10-07 --> Testing
 
 [[steps]]
@@ -227,7 +228,11 @@ finding this diff carries, not the first one that appears.
   code is complex or the comment is making a simple thing look complex. A
   comment that explains a real why earns its place, so this is not a case for
   stripping comments. Tests and fixtures matter less here than the code they
-  exercise.
+  exercise. A docs/ page is held to the same rule: a section that restates a
+  component's usage, commands, flags, environment or tests from its header,
+  skill or formula is duplicated prose, so a component's page carries its
+  rationale and the invariants other components rely on. A page with nothing
+  else left is not warranted.
 - **The PR as published** — the `## Summary` is the human-facing
   merge-decision surface, so it must holistically and currently account for
   the ENTIRE branch diff you just read, not one contributor's share of it. A

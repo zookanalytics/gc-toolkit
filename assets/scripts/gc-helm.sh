@@ -63,7 +63,8 @@ parks it on the board (gc.routed_to=human); its --reason is the short title
 tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
 (origin=manual, backstop-exempt), assigns the visit to the session's runtime
-name so the session's own claim adopts it with no pool routing, and attaches;
+name so the session's own claim adopts it with no pool routing, and attaches
+once the reconciler has started it;
 --model picks the converse variant (opus, the work tier, is the default),
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
@@ -226,6 +227,12 @@ ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
 # that it closed). Best-effort and self-silencing when the subject has no PR;
 # overridable so a hermetic test can point it at a fixture.
 VISIT_COMMENT_TOOL="${GC_VISIT_COMMENT_TOOL:-$SCRIPT_DIR/pr-visit-comment.sh}"
+# The longest engage waits, in seconds, for the reconciler to start the sitting
+# it spawned before attaching to it. 120 is the default `gc session new` puts on
+# the same wait. Overridable, so a slow controller can be given longer and a
+# hermetic test can reach the bound.
+ENGAGE_WAIT_TIMEOUT="${GC_HELM_ENGAGE_WAIT_TIMEOUT:-120}"
+case "$ENGAGE_WAIT_TIMEOUT" in ''|*[!0-9]*) ENGAGE_WAIT_TIMEOUT=120 ;; esac
 TAB=$(printf '\t')
 
 # Bust the retired bash board's gather cache so a straggler reader never
@@ -3776,30 +3783,87 @@ cmd_engage() {
     printf '[debug] visit=%s sitting=%s (%s) routed_to=%s cont_group=%s work_dir=%s\n' \
         "$VISIT" "$sid" "$sname" "${_eng_routed:-?}" "$bead" "${swork_dir:-?}" >&2
 
-    # A freshly spawned sitting self-starts from the prompt its launch delivers.
-    # `gc session new` puts the rendered converse prompt on argv (every converse
-    # provider resolves to prompt_mode=arg) and step 1 of that prompt is the claim
-    # block, so a claude sitting (opus, fable) claims its visit, re-checks the
-    # premise, preps, and posts its framing with no keystrokes. Sending it a kick
-    # as well is worse than redundant. engage would deliver the kick while that
-    # self-started turn is still running, so the harness holds it as a deferred
-    # reminder and releases it after the framing lands, and the operator reads a
-    # stale "begin now" once per engage.
+    # A freshly spawned sitting self-starts from the prompt its launch delivers,
+    # and only the reconciler's launch delivers one. `gc session new --no-attach`
+    # records the sitting as start-pending. The reconciler then launches it with
+    # the rendered converse prompt on argv (every converse provider resolves to
+    # prompt_mode=arg), and step 1 of that prompt is the claim block. So a claude
+    # sitting (opus, fable) claims its visit, re-checks the premise, preps, and
+    # posts its framing with no keystrokes. Sending it a kick as well is worse
+    # than redundant. engage would deliver the kick while that self-started turn
+    # is still running, so the harness holds it as a deferred reminder and
+    # releases it after the framing lands, and the operator reads a stale
+    # "begin now" once per engage.
     #
-    # codex is the exception. gascity delivers its prompt the same way, but the
-    # codex CLI is not trusted to consume an argv prompt at launch: its pool slots
-    # carry no prompt template and are primed by an explicit nudge instead. A
-    # codex sitting can wake idle at its prompt, so it keeps a START directive
-    # kick. A bare poke reads as a connectivity check and does not begin the loop,
-    # so the kick names the action. An idle session takes it at once, with no
-    # in-flight turn for the harness to defer it behind. The kick precedes the
-    # attach so the operator lands on a started sitting, and on the --no-attach
-    # board-picker path it starts the sitting for whoever attaches later. A failed
-    # kick is not fatal: the visit is bound, so report it and let the operator
-    # start it by hand.
+    # An attach must not reach the sitting before the reconciler does.
+    # `gc session attach` on a sitting the reconciler has not launched yet
+    # launches it itself, from the stored command with no prompt, and that
+    # sitting idles at its input until someone types into it. So the attach path
+    # waits for the launch first (engage_await_start), the same wait
+    # `gc session new` runs before its own attach, and attaches only a started
+    # sitting. --no-attach attaches nothing, so it does not wait.
+    #
+    # codex is the exception to self-starting. gascity delivers its prompt the
+    # same way, but the codex CLI is not trusted to consume an argv prompt at
+    # launch: its pool slots carry no prompt template and are primed by an
+    # explicit nudge instead. A codex sitting can wake idle at its prompt, so it
+    # keeps a START directive kick. A bare poke reads as a connectivity check and
+    # does not begin the loop, so the kick names the action. An idle session takes
+    # it at once, with no in-flight turn for the harness to defer it behind. The
+    # kick follows the start wait and precedes the attach, so the operator lands
+    # on a started sitting. On the --no-attach board-picker path it starts the
+    # sitting for whoever attaches later; a kick that reaches the sitting before
+    # its launch does not launch it, because gc queues the nudge and delivers it
+    # once the reconciler has. A failed kick is not fatal: the visit is bound, so
+    # report it and let the operator start it by hand.
     #
     # A --reason is filed into the visit body by cmd_open, so every sitting reads
     # it when it claims. The kick also carries it, for the one provider kicked.
+    #
+    # engage_await_start returns 0 once the sitting's `gc session list` row reads
+    # `active`, which it does only once the runtime is running; before the launch
+    # it reads start-pending or creating. It returns 2 when the sitting ended
+    # first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. A closed sitting
+    # drops out of the list when gc reads it from the store, and stays listed
+    # with an empty state when gc reads it from the supervisor, so both a row
+    # that leaves the list and an empty state mean it ended, as does
+    # failed-create. A sitting not listed yet may only lag the supervisor's read
+    # cache, so it is waited on, and so is a listing that did not read.
+    # start_state keeps the last state read, for the messages below.
+    engage_await_start() {
+        _start_deadline=$(( $(date +%s) + ENGAGE_WAIT_TIMEOUT ))
+        _start_seen=0; _start_told=0; start_state=""
+        while :; do
+            start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
+                if type == "object" and ((.sessions // null) | type) == "array"
+                then (first(.sessions[] | select((.id // "") == $id)
+                            | if (.state // "") == "" then "closed" else .state end)
+                      // "unlisted")
+                else "unreadable" end' 2>/dev/null || true)
+            case "$start_state" in
+                active) return 0 ;;
+                closed|failed-create) return 2 ;;
+                unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
+                ''|unreadable) ;;
+                *) _start_seen=1 ;;
+            esac
+            [ "$(date +%s)" -lt "$_start_deadline" ] || return 1
+            if [ "$_start_told" = 0 ]; then
+                printf '  waiting up to %ss for the reconciler to start %s...\n' "$ENGAGE_WAIT_TIMEOUT" "$sname"
+                _start_told=1
+            fi
+            sleep 1
+        done
+    }
+    start_rc=0
+    if [ "$engage_attach" = "1" ]; then
+        engage_await_start || start_rc=$?
+        if [ "$start_rc" -eq 2 ]; then
+            echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Visit $VISIT is still bound to it; unbind it to put it back on the board: gc bd update $VISIT --assignee \"\"" >&2
+            exit 4
+        fi
+    fi
+
     case "$engage_model" in
         opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
         *)
@@ -3811,9 +3875,15 @@ cmd_engage() {
             ;;
     esac
 
-    # The summary already printed the attach line; on the default path we attach.
+    # The summary already printed the attach line; on the default path we attach
+    # a started sitting. One still unstarted at the bound is left unattached,
+    # because the attach would launch it without its prompt.
     if [ "$engage_attach" = "1" ]; then
-        gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+        if [ "$start_rc" -eq 0 ]; then
+            gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+        else
+            echo "$PROG: engage: the reconciler has not started $sname after ${ENGAGE_WAIT_TIMEOUT}s (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
+        fi
     fi
     return 0
 }

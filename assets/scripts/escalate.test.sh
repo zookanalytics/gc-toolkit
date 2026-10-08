@@ -681,7 +681,7 @@ has "$out" "repointed" "and says so"
 
 echo "# an ephemeral subject is filed on a durable standing subject"
 # The sitting writes its outcome and its takeaway to the subject
-# (agents/converse/prompt.template.md step 7). A wisp is burned at the end of
+# (agents/_converse/prompt.template.md step 7). A wisp is burned at the end of
 # its iteration, so a visit filed on one carries both writes to a bead that is
 # gone before anyone claims it.
 reset
