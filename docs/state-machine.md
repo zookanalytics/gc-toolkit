@@ -74,7 +74,7 @@ stateDiagram-v2
   abandoned --> [*]: human
   retargeted --> [*]: human
 
-  UN --> held: agents/converse — a sitting holds for an operator decision
+  UN --> held: converse-hold.sh — a sitting holds for an operator decision
   held --> UN: the ruling landed
 ```
 
@@ -142,8 +142,8 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
 | handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
-| unanchored → held | `agents/converse` hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `agents/converse` sign-off, via `lifecycle.sh`; or human | the ruling landed |
+| unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
+| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` clears
 the check marker and files one routed rework child that blocks the anchor — the

@@ -79,6 +79,15 @@
 # commit each of those commits needs a reachable signing agent. No test may
 # depend on one.
 #
+# Every file runs with TMPDIR set to the physical path of the caller's temp
+# directory (/tmp when TMPDIR is unset), with no symlink in it and no trailing
+# slash. A test builds the paths it expects from TMPDIR, while the scripts it
+# tests print paths they resolve: `pwd` drops a doubled slash, `pwd -P` and git,
+# which records a worktree by its physical path, resolve a symlink too. On macOS
+# TMPDIR ends in a slash and sits under /var, a symlink to /private/var, so
+# there a path built from it and the same path resolved compare unequal. A file
+# run directly, outside the runner, gets the caller's TMPDIR as it is.
+#
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error.
 
@@ -361,6 +370,11 @@ esac
 export "GIT_CONFIG_KEY_$cfg_n=commit.gpgsign" "GIT_CONFIG_VALUE_$cfg_n=false" \
        "GIT_CONFIG_KEY_$((cfg_n + 1))=tag.gpgsign" "GIT_CONFIG_VALUE_$((cfg_n + 1))=false" \
        "GIT_CONFIG_COUNT=$((cfg_n + 2))"
+
+# The physical temp directory every file runs with (see the header).
+tmp_real="$(cd -- "${TMPDIR:-/tmp}" && pwd -P)" || {
+  echo "run-tests: cannot resolve the temp directory '${TMPDIR:-/tmp}'" >&2; exit 2; }
+export TMPDIR="$tmp_real"
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$LOGDIR"' EXIT
