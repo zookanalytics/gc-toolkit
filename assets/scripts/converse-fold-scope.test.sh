@@ -322,9 +322,12 @@ echo "── a suspended store is not queried ──"
 # live session to hold a sitting, so it is skipped: a lower-id stamp there does
 # not fold a live sitting elsewhere.
 rm -f "$FIXDIR"/*.json
-rigs r1 r2:suspended
+rigs r1 r2
 store r1 "$(visit v-one sub sess-1)"
-store r2 "$(visit v-zero sub sess-0)"
+store r2 "$(visit v-low sub sess-0)"
+is "positive control: with r2 live, v-one folds into the lower-id sitting there" \
+    "$(holder v-one sub)" "v-low"
+rigs r1 r2:suspended
 is "a lower-id sitting in a suspended store is not a holder" "$(holder v-one sub)" "v-one"
 
 echo "── every store unreadable resolves no holder (hold, never fold) ──"
