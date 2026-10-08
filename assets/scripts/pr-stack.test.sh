@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/pr-stack.sh — the beads-on-this-branch
-# section of an open PR's body.
+# section of an open PR's body, its summary region, and its title.
 # Covers: the bead's own acceptance scenario (a second bead lands its work on
 # an open PR's branch and the body names it); each of the three ledger keys;
 # the single-bead PR that stays untouched; idempotence across a second pass;
-# the title never being edited; a closed or foreign PR being left alone; a row
-# that recorded no work — a closed duplicate, a no-op outcome carrying the
+# a stacked bead never renaming the PR; a closed or foreign PR being left alone;
+# a row that recorded no work — a closed duplicate, a no-op outcome carrying the
 # anchor branch, or a rework child still routed to a pool before its fix is
 # pushed — never entering the ledger; and every unreadable read leaving the
-# body exactly as it stands.
+# body exactly as it stands. The title: a retitled anchor reaching its open PR
+# in an edit of its own, composed as the create composes it; idempotence; a hand
+# edit on the PR composed back from the anchor; whitespace never a difference;
+# only a pull_request anchor's PR retitled; an unreadable PR title or an untitled
+# anchor leaving the title as it stands; and a failed title edit costing the
+# body refresh nothing.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,10 +37,27 @@ rider() { # id key value created title [status]
   printf '{"id":"%s","status":"%s","title":"%s","created_at":"%s","metadata":{"%s":"%s"}}' \
     "$1" "${6:-closed}" "$5" "$4" "$2" "$3"
 }
-# The PR the anchor points at.
-pr() { # num state branch [body] [head-oid]
-  printf '{"number":%s,"state":"%s","headRefName":"%s","headRefOid":"%s","title":"PR %s","body":%s}' \
-    "$1" "$2" "$3" "${5:-feedface00000000}" "$1" "$(jq -Rs . <<<"${4-}")" > "$GH_DIR/pr_view_$1.json"
+# The title pr-open.sh opened PR <num> with: the store's anchor recording that
+# pr_number, composed by the shared cc_title and suffixed with its id. A PR with
+# no anchor in the store keeps a plain placeholder.
+# shellcheck source=pr-summary-region.sh
+. "$SD/pr-summary-region.sh"
+opened_title() { # num
+  local row
+  row=$(jq -c --arg n "$1" '[ .[]
+      | select((((.metadata // {}).merge_result // "") | tostring) != "")
+      | select((((.metadata // {}).pr_number // "") | tostring) == $n) ] | .[0] // empty' "$STUB_STORE")
+  if [ -z "$row" ]; then printf 'PR %s' "$1"; return 0; fi
+  printf '%s (%s)' "$(cc_title "$(jq -r '.title // ""' <<<"$row")" "$(jq -r '.issue_type // ""' <<<"$row")")" \
+    "$(jq -r '.id' <<<"$row")"
+}
+# The PR the anchor points at. It carries the title it was opened with unless a
+# scenario names another, so a pass over a PR nobody retitled has no title to write.
+pr() { # num state branch [body] [head-oid] [title]
+  local t="${6-}"
+  [ -n "$t" ] || t=$(opened_title "$1")
+  printf '{"number":%s,"state":"%s","headRefName":"%s","headRefOid":"%s","title":%s,"body":%s}' \
+    "$1" "$2" "$3" "${5:-feedface00000000}" "$(jq -n --arg t "$t" '$t')" "$(jq -Rs . <<<"${4-}")" > "$GH_DIR/pr_view_$1.json"
 }
 body() { jq -r '.body' "$GH_DIR/pr_view_$1.json"; }
 title() { jq -r '.title' "$GH_DIR/pr_view_$1.json"; }
@@ -64,8 +86,9 @@ has "$b" '- `B` — Lane-B migration impl _(merged in from `polecat/B`)_' \
     "the stacked bead is named, and says its work arrived by a merge"
 has "$b" '## Summary' "the composed summary survives"
 has "$b" '- Issue: `A`' "…and so does the refinery handoff block"
-eq "$(title 10)" "PR 10" "the title is untouched"
-hasnt "$(cat "$STUB_GH_LOG")" "--title" "no title edit was even attempted"
+eq "$(title 10)" "chore: Investigate V2 patch timing (A)" \
+   "a stacked bead never renames the PR: the title still names the anchor"
+hasnt "$(cat "$STUB_GH_LOG")" "--title" "…so no title edit was even attempted"
 
 echo "# a second pass over unchanged state writes nothing"
 : > "$STUB_GH_LOG"
@@ -305,12 +328,14 @@ anchor_sum() { # id branch num check_set pr_summary [desc]
     "$1" "$1" "${6:-}" "$2" "$3" "$4" "$5"
 }
 # A published gc:pr-summary region carrying <summary> and the open-mode pre-open
-# sign-off line at <oldhead>, as pr-open.sh composed it at open.
-opened_region() { # id branch checkset summary oldhead
+# sign-off line at <oldhead>, as pr-open.sh composed it at open. <gate-bullet>
+# replaces that last handoff bullet.
+opened_region() { # id branch checkset summary oldhead [gate-bullet]
+  local gate="- Gates \`$3\` signed off pre-open at \`$5\`. For CI status, see the PR checks."
   printf '%s\n' \
     '<!-- gc:pr-summary -->' '## Summary' '' "$4" '' \
     '## Refinery handoff' '' "- Issue: \`$1\`" "- Source branch: \`$2\`" '- Target: `main`' \
-    "- Gates \`$3\` signed off pre-open at \`$5\`; PR opened green." \
+    "${6:-$gate}" \
     '<!-- /gc:pr-summary -->'
 }
 
@@ -352,9 +377,28 @@ out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
 hasnt "$out" "summary region refreshed" "…and reports no refresh"
 
+echo "# the opened-region fixture is byte-for-byte what pr-open's composer writes at open"
+# The no-churn case below, and the stale-region cases around it, model a PR as
+# pr-open.sh opened it, so the model is pinned to the shared composer: an
+# open-mode wording this fixture does not carry fails here instead of leaving
+# those cases testing a body no writer produces. The gates are resolved first and
+# handed to the composer, as pr-open.sh does, against the fixed index above.
+# shellcheck source=pr-summary-region.sh
+composed_open=$(. "$SD/pr-summary-region.sh" && phased=$(prs_resolve_phased 'correctness' abcdef1234567890) && {
+  printf '%s\n' "$PRS_MARK_OPEN"
+  compose_managed 'CURRENT: the summary.' '' X polecat/X main 'correctness' abcdef1234567890 '' '' open "$phased"
+  printf '%s\n' "$PRS_MARK_CLOSE"
+})
+eq "$(opened_region X polecat/X 'correctness' 'CURRENT: the summary.' 'abcdef12')" "$composed_open" \
+   "the fixture matches compose_managed's open mode"
+hasnt "$composed_open" 'opened green' "…and the open-mode bullet states no CI result"
+has "$composed_open" '- Gates `correctness` signed off pre-open at `abcdef12`. For CI status, see the PR checks.' \
+    "…naming the gates' sign-off and pointing to the PR checks for CI"
+
 echo "# a PR whose region already carries the anchor summary is not churned"
-# The region matches the anchor pr_summary, so an opened-green PR keeps its
-# 'signed off pre-open' line rather than being rewritten to the refresh wording.
+# The region matches the anchor pr_summary and names the current head, so a PR as
+# pr-open opened it keeps its 'signed off pre-open' line rather than being
+# rewritten to the refresh wording.
 store "[$(anchor_sum X polecat/X 210 'correctness' 'CURRENT: the summary the region already carries.')]"
 CURR_X=$(opened_region X polecat/X 'correctness' 'CURRENT: the summary the region already carries.' 'abcdef12')
 pr 210 OPEN polecat/X "$CURR_X" abcdef12000000
@@ -362,8 +406,76 @@ before_x=$(body 210)
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the current region is left alone"
-has "$(body 210)" 'signed off pre-open' "…and its opened-green handoff line is not churned"
+has "$(body 210)" 'signed off pre-open' "…and its open-mode handoff line is not churned"
 eq "$(body 210)" "$before_x" "the body is byte-identical"
+
+echo "# a handoff bullet that says the PR opened green is refreshed at a current summary and head"
+# 'PR opened green' reads as a CI result, which a static body cannot know. The
+# summary matches and the region names the current head, so only the bullet's
+# claim makes this region behind, and the refresh drops it.
+store "[$(anchor_sum G polecat/G 270 'correctness,codex' 'CURRENT: the summary a green-claim region already carries.')]"
+GREEN_G=$(printf '%s\n\n%s' \
+  "$(opened_region G polecat/G 'correctness,codex' 'CURRENT: the summary a green-claim region already carries.' '5555aaaa' \
+     '- Gates `correctness,codex` signed off pre-open at `5555aaaa`; PR opened green.')" \
+  'Operator note: keep this line.')
+pr 270 OPEN polecat/G "$GREEN_G" 5555aaaa00000000
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#270 summary region refreshed" "the green-claim region is refreshed"
+b=$(body 270)
+hasnt "$b" 'opened green' "the CI claim is gone from the body"
+has "$b" '- Head `5555aaaa`; gates `correctness,codex`; see the PR checks for current status.' \
+    "the handoff bullet names the head and defers to the PR checks"
+has "$b" 'CURRENT: the summary a green-claim region already carries.' "the current summary is kept"
+has "$b" 'Operator note: keep this line.' "operator text outside the markers is preserved"
+eq "$(grep -c 'pr edit 270' "$STUB_GH_LOG")" "1" "exactly one body edit"
+
+echo "# that green-claim refresh is idempotent: a second pass writes nothing"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
+hasnt "$out" "summary region refreshed" "…and reports no refresh"
+
+echo "# the green-claim words quoted outside the handoff block never make a region stale"
+# A summary can quote the claim on a line of its own, and so can operator text
+# below the markers. Only the composed handoff bullet is the claim; reading a quote
+# as one would rewrite the region on every pass.
+GREEN_QUOTE='- Gates `correctness` signed off pre-open at `6666bbbb`; PR opened green.'
+store "[$(anchor_sum Q polecat/Q 280 'correctness' 'CURRENT: drops the line that read\n\n- Gates `correctness` signed off pre-open at `6666bbbb`; PR opened green.')]"
+CURR_Q=$(printf '%s\n\n%s\n%s' \
+  "$(opened_region Q polecat/Q 'correctness' "$(printf '%s\n\n%s' 'CURRENT: drops the line that read' "$GREEN_QUOTE")" '6666bbbb')" \
+  'Operator note quoting the old bullet:' "$GREEN_QUOTE")
+pr 280 OPEN polecat/Q "$CURR_Q" 6666bbbb00000000
+before_q=$(body 280)
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a quoted claim is not read as the region's own"
+eq "$(body 280)" "$before_q" "the body is byte-identical"
+
+echo "# the green-claim check reads only the bullets under the region's last handoff heading"
+# Each body quotes the claim where a reader might mistake it for the region's own:
+# in a region with no handoff block, under a handoff heading a summary wrote
+# above the composed one, and below the markers, bare or under a handoff heading
+# of its own. The last body carries it as the region's own bullet, the positive
+# control that also proves the library sourced.
+# shellcheck source=pr-summary-region.sh
+claim_of() { ( . "$SD/pr-summary-region.sh" && prs_region_says_opened_green "$1" ) && echo claim || echo none; }
+PB="$TMP/claim-body"
+OG='- Gates `correctness` signed off pre-open at `7777cccc`; PR opened green.'
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' "$OG" '<!-- /gc:pr-summary -->' > "$PB"
+eq "$(claim_of "$PB")" none "a region with no handoff block carries no claim, whatever its summary quotes"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' "$OG" '' \
+  '## Refinery handoff' '' '- Issue: `P`' '<!-- /gc:pr-summary -->' > "$PB"
+eq "$(claim_of "$PB")" none "only the block under the last handoff heading is the composed one"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' \
+  '<!-- /gc:pr-summary -->' '' "$OG" > "$PB"
+eq "$(claim_of "$PB")" none "a claim below the markers is not the region's"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' \
+  '<!-- /gc:pr-summary -->' '' '## Refinery handoff' '' "$OG" > "$PB"
+eq "$(claim_of "$PB")" none "…nor is one under a handoff heading of its own below them"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' "$OG" \
+  '<!-- /gc:pr-summary -->' > "$PB"
+eq "$(claim_of "$PB")" claim "the region's own handoff bullet is the claim"
 
 echo "# a rework moved the head but left the summary unchanged; the stale handoff line is refreshed"
 # The region's summary already matches the anchor, so the text comparison alone
@@ -414,13 +526,13 @@ out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the markerless body is not rewritten"
 eq "$(body 230)" "$LEGACY_Z" "…and is left byte-identical"
 
-echo "# a pre_open_gate anchor's summary is arm 6's to refresh on adoption, not this arm's"
-store "[$(printf '{"id":"PG","status":"open","title":"anchor PG","description":"","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pre_open_gate","branch":"polecat/PG","pr_number":"250","merged_target":"main","check_set":"correctness","pr_summary":"NEW: a summary arm 6 will publish on adoption."}}')]"
+echo "# a pre_open_gate anchor's summary is arm 3's to refresh on adoption, not this arm's"
+store "[$(printf '{"id":"PG","status":"open","title":"anchor PG","description":"","created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"pre_open_gate","branch":"polecat/PG","pr_number":"250","merged_target":"main","check_set":"correctness","pr_summary":"NEW: a summary arm 3 will publish on adoption."}}')]"
 STALE_PG=$(opened_region PG polecat/PG 'correctness' 'OLD PG summary.' 'ffff6666')
 pr 250 OPEN polecat/PG "$STALE_PG" 9999888800000000
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the pre_open_gate anchor's summary is left for arm 6"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the pre_open_gate anchor's summary is left for arm 3"
 eq "$(body 250)" "$STALE_PG" "…and the body is byte-identical"
 
 echo "# a refresh whose edit fails is reported and retried, the body untouched"
@@ -432,6 +544,132 @@ out=$(STUB_PR_EDIT_RC=1 "$SUT" 2>&1)
 has "$out" "PR#240 body edit failed" "the failed edit is reported"
 hasnt "$out" "summary region refreshed" "…and no refresh is counted"
 eq "$(body 240)" "$before_v" "the body never changed"
+
+echo "# pacing: --deadline stops the walk after one PR and --cursor resumes after it"
+# Three single-bead anchors, enumerated out of id order. A deadline of epoch 1
+# has always passed, so a pass reads exactly one PR.
+store "[$(anchor S3 polecat/S3 33), $(anchor S1 polecat/S1 31), $(anchor S2 polecat/S2 32)]"
+pr 31 OPEN polecat/S1 "$OPENER_BODY"; pr 32 OPEN polecat/S2 "$OPENER_BODY"; pr 33 OPEN polecat/S3 "$OPENER_BODY"
+SCUR="$TMP/stack.cursor"; rm -f "$SCUR"
+views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$SCUR" 2>&1); rc=$?
+eq "$rc" 0 "a paced pass exits 0"
+eq "$(views)" "31" "a passed deadline reads the lowest id's PR and no other"
+has "$out" "visited 1 PRs before the deadline; the next pass resumes at S2" "…and names where the next pass resumes"
+eq "$(cat "$SCUR" 2>/dev/null)" "S1" "the cursor records the anchor finished"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$SCUR" 2>&1)
+eq "$(views)" "32" "the next pass resumes after the cursor"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(views)" "33,31,32" "with no pacing args every PR is read, in the enumerated order"
+has "$out" "visited 3 of 3 PRs" "…and the walk reports all three"
+
+# An open anchor carrying an issue_type and a title, for the PR title.
+anchor_t() { # id branch num issue_type title [merge_result]
+  printf '{"id":"%s","status":"open","issue_type":"%s","title":%s,"created_at":"2026-01-01T00:00:00Z","metadata":{"merge_result":"%s","branch":"%s","pr_number":"%s"}}' \
+    "$1" "$4" "$(jq -n --arg t "$5" '$t')" "${6:-pull_request}" "$2" "$3"
+}
+
+echo "# a rework retitled the anchor; the open PR's title is composed from it again"
+# pr-open writes the title once, at create, and the squash commit takes its subject
+# from it. The anchor now names the reworked work, so the PR title follows it.
+store "[$(anchor_t TA polecat/TA 300 bug 'Reject a moved head at merge')]"
+pr 300 OPEN polecat/TA "$OPENER_BODY" "" "fix: Reject a moved head at open (TA)"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+eq "$rc" 0 "the pass completes"
+eq "$(title 300)" "fix: Reject a moved head at merge (TA)" \
+   "the PR title is the anchor's current title, typed and suffixed as the create does"
+has "$out" "PR#300 title now composed from the anchor" "the retitle is reported"
+has "$out" "1 retitled" "…and counted"
+eq "$(grep -c -- '--title' "$STUB_GH_LOG")" "1" "exactly one title edit"
+hasnt "$(cat "$STUB_GH_LOG")" "--body-file" "a body already current is not rewritten alongside it"
+eq "$(body 300)" "$OPENER_BODY" "…and stays byte-identical"
+
+echo "# the retitle is idempotent: a second pass over the composed title writes nothing"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
+has "$out" "0 retitled" "…and counts no retitle"
+
+echo "# a title edited on the PR itself is composed back from the anchor"
+# The anchor owns the title, so a retitle is made there; a name typed into the PR
+# alone is replaced on the next pass rather than kept beside a different anchor.
+store "[$(anchor_t TB polecat/TB 310 feature 'Support integration branches')]"
+pr 310 OPEN polecat/TB "$OPENER_BODY" "" "WIP: renamed by hand on the PR"
+"$SUT" >/dev/null 2>&1
+eq "$(title 310)" "feat: Support integration branches (TB)" "the hand-edited title is replaced by the anchor's"
+
+echo "# an anchor title that already opens with a conventional type is not double-prefixed"
+store "[$(anchor_t TC polecat/TC 320 task 'fix(pr-stack): keep the PR title current')]"
+pr 320 OPEN polecat/TC "$OPENER_BODY" "" "chore: an older name (TC)"
+"$SUT" >/dev/null 2>&1
+eq "$(title 320)" "fix(pr-stack): keep the PR title current (TC)" \
+   "the anchor's own type is kept and no derived type is prepended"
+
+echo "# a title that differs only in whitespace is current, not rewritten every pass"
+# Both sides are spaced differently from the composition: the anchor title, and
+# the stored PR title. Neither is a difference in words.
+store "[$(anchor_t TD polecat/TD 330 bug 'Tolerate  doubled   spaces ')]"
+pr 330 OPEN polecat/TD "$OPENER_BODY" "" "$(printf 'fix:  Tolerate doubled spaces (TD)\n')"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "--title" "no title edit for a whitespace-only difference"
+has "$out" "0 retitled" "…and none counted"
+
+echo "# only a pull_request anchor's PR is retitled"
+# The scope the summary refresh keeps: pre_open_gate is arm 3's state to adopt and
+# flip, and a held anchor is parked for a person's decision.
+store "[$(anchor_t TE polecat/TE 340 bug 'A new name' held),
+        $(anchor_t TF polecat/TF 350 bug 'A new name' pre_open_gate)]"
+pr 340 OPEN polecat/TE "$OPENER_BODY" "" "fix: An old name (TE)"
+pr 350 OPEN polecat/TF "$OPENER_BODY" "" "fix: An old name (TF)"
+: > "$STUB_GH_LOG"
+"$SUT" >/dev/null 2>&1
+hasnt "$(cat "$STUB_GH_LOG")" "--title" "neither a held nor a pre_open_gate anchor's PR is retitled"
+eq "$(title 340),$(title 350)" "fix: An old name (TE),fix: An old name (TF)" "…and both titles stand"
+
+echo "# a PR whose title reads back empty is never retitled blind"
+store "[$(anchor_t TG polecat/TG 360 bug 'A title')]"
+pr 360 OPEN polecat/TG "$OPENER_BODY"
+jq 'del(.title)' "$GH_DIR/pr_view_360.json" > "$TMP/x" && mv "$TMP/x" "$GH_DIR/pr_view_360.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+eq "$rc" 0 "the pass completes"
+hasnt "$(cat "$STUB_GH_LOG")" "--title" "an unread title is not written over"
+
+echo "# an anchor with no title leaves the PR's title as it stands"
+store "[$(anchor_t TH polecat/TH 370 bug '  ')]"
+pr 370 OPEN polecat/TH "$OPENER_BODY" "" "fix: what it opened as (TH)"
+: > "$STUB_GH_LOG"
+"$SUT" >/dev/null 2>&1
+hasnt "$(cat "$STUB_GH_LOG")" "--title" "no bare type-and-id title is published"
+eq "$(title 370)" "fix: what it opened as (TH)" "…and the title stands"
+
+echo "# a failed title edit is reported and retried, and costs the body refresh nothing"
+# A gh that refuses every title edit and serves everything else from the stub.
+TITLEFAIL="$TMP/titlefail"
+mkdir -p "$TITLEFAIL"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'if [ "${1:-} ${2:-}" = "pr edit" ]; then case " $* " in *" --title "*) printf "%s\n" "$*" >> "$STUB_GH_LOG"; exit 1 ;; esac; fi' \
+  "exec \"$BIN/gh\" \"\$@\"" > "$TITLEFAIL/gh"
+chmod +x "$TITLEFAIL/gh"
+store "[$(anchor_sum TJ polecat/TJ 380 'correctness' 'NEW: the reworked TJ summary.')]"
+STALE_TJ=$(opened_region TJ polecat/TJ 'correctness' 'OLD TJ summary.' 'aaaa0000')
+pr 380 OPEN polecat/TJ "$STALE_TJ" bbbb000000000000 "chore: an old name (TJ)"
+: > "$STUB_GH_LOG"
+out=$(PATH="$TITLEFAIL:$PATH" "$SUT" 2>&1)
+has "$(cat "$STUB_GH_LOG")" "--title chore: anchor TJ (TJ)" "the title edit was attempted"
+has "$out" "PR#380 title edit failed" "the refused title is reported"
+has "$out" "0 retitled" "…and not counted as retitled"
+has "$out" "PR#380 summary region refreshed" "the body edit beside it still lands"
+has "$(body 380)" 'NEW: the reworked TJ summary.' "…publishing the reworked summary"
+eq "$(title 380)" "chore: an old name (TJ)" "the title is unchanged"
+out=$("$SUT" 2>&1)
+has "$out" "1 retitled" "the next pass retries the title"
+eq "$(title 380)" "chore: anchor TJ (TJ)" "…and lands it"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

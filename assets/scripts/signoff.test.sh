@@ -319,8 +319,7 @@ OID_HEAD=$(oid head); OID_OVR1=$(oid ovr1); OID_PIN=$(oid pin)
 OID_OVR2=$(oid ovr2); OID_MOVED=$(oid moved); OID_NEWHEAD=$(oid newhead)
 OID_OLD=$(oid old)
 OID_DEAD=$(oid dead); OID_LIVE=$(oid live); OID_BASE=$(oid base)
-OID_PRELIVE=$(oid prelive); OID_LIVEPIN=$(oid livepin)
-OID_SHORT=$(printf '%s' "$OID_DEAD" | cut -c1-9)
+OID_LIVEPIN=$(oid livepin)
 export STUB_LSREMOTE="$OID_HEAD" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
 : > "$STUB_GH_ALL"
 unset GC_RIG 2>/dev/null || true
@@ -362,6 +361,7 @@ eq "$rc" 0 "approve exits 0"
 has "$(cat "$STUB_GH_LOG")" "pr review 42 --repo github.com/o/r --comment" "artifact posted as a pinned COMMENT"
 has "$(cat "$STUB_GH_BODY")" "tk-anc" "the posted body carries the anchor link"
 has "$(cat "$STUB_GH_BODY")" "VERDICT body: findings here" "the posted body carries the verdict notes"
+has "$(cat "$STUB_GH_BODY")" "<!-- gc:city -->" "the posted verdict carries the city's provenance mark (posted through pr-post.sh)"
 eq "$(meta tk-anc check.correctness)" "green" "check.correctness records the lane green"
 eq "$(status rv-1)" "closed" "review bead closed"
 eq "$(meta rv-1 gc.outcome)" "recorded" "review bead closed with gc.outcome=recorded"
@@ -987,6 +987,22 @@ hasnt "$(cat "$STUB_GH_LOG")" "reviews/222/dismissals" "a human's block is NEVER
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/333/dismissals" "a block at the reviewed commit stands"
 eq "$(meta tk-anc signoff_dismissed)" "111@$OID_HEAD" "signoff_dismissed pairs the retraction"
 
+echo "# supersede: past the anchor's provenance cutover, only the city's own review is ours to dismiss"
+# The same login runs model reviews (an operator's /code-review) and posts the
+# city's verdicts. Past pr_provenance_since an unmarked review under it is
+# feedback; a marked one, or an unmarked one from before the cutover, is ours.
+reset "$(printf '%s' "$ANCHOR_PR" | jq -c '.metadata.pr_provenance_since = "2026-10-07T00:00:00Z"')"
+export STUB_REVIEWS='{"id":444,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T01:00:00Z","body":"model review: fix the race"}
+{"id":555,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T02:00:00Z","body":"verdict\n\n<!-- gc:city -->"}
+{"id":666,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-06T23:00:00Z","body":"an older block of ours"}'
+"$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/444/dismissals" "an unmarked review under our login after the cutover is feedback, never dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/555/dismissals" "a marked review of ours past the cutover is dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/666/dismissals" "an unmarked review of ours from before the cutover is still ours"
+export STUB_REVIEWS='{"id":111,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":222,"user":{"login":"a-human"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":333,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_HEAD"'"}'
+
 echo "# supersede holds on a moved head"
 reset "$ANCHOR_PR"
 STUB_PR_HEAD="$OID_NEWHEAD" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
@@ -1035,12 +1051,15 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$TMP/
 eq "$rc" 0 "a malformed findings file still lands the verdict"
 has "$(cat "$STUB_CREATED")" "Rework PR#42" "…and still files the rework child that holds the merge"
 
-# --- approve closes the lane's still-unruled findings ---------------------------
-echo "# approve closes the lane's unvalidated findings"
+# --- approve is a pure verdict-recorder: it resolves no findings -----------------
+# Stage-3 resolution — closing a green lane's still-unvalidated findings as moot —
+# is gate-ensure.sh's, the single owner. signoff records the verdict only, so the
+# finding tool is never invoked to resolve on an approve verdict.
+echo "# approve resolves no findings (gate-ensure owns stage-3 resolution)"
 reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "approve exits 0"
-has "$(cat "$STUB_FINDING_LOG")" "close-unvalidated --anchor tk-anc --lane correctness" "approve closes the lane's still-unruled findings"
+hasnt "$(cat "$STUB_FINDING_LOG")" "close-unvalidated" "approve does NOT resolve findings — gate-ensure resolves a green lane's unvalidated findings as moot"
 
 # --- the standing prohibition: the city never approves its own PRs ----------------
 if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then

@@ -62,6 +62,10 @@ PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 # opens, so the validator polecat that claims it names the method. Same builder
 # pr-facts.sh uses for the human feedback batch's pass. Overridable for the test.
 VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
+# The single writer of the city's PR posts. A post-open verdict goes through it
+# so the review carries the city's mark, and the superseded-block dismissal asks
+# its definition of the city's own review (gc_city_own) rather than the login.
+PR_POST="$HERE/pr-post.sh"
 
 usage() {
   cat >&2 <<'U'
@@ -421,7 +425,7 @@ post_artifact() {
   if [ -n "$POST_OPEN" ]; then
     # COMMENT for both verdicts, NEVER --approve: approval is external/human,
     # and the merge is held by the recorded marker, not by a bot review.
-    gh pr review "$PR_NUMBER" --repo "$PR_REPO_Q" --comment --body-file "$BODY_FILE" >/dev/null 2>&1 \
+    "$PR_POST" review --repo "$PR_REPO_Q" --pr "$PR_NUMBER" --body-file "$BODY_FILE" >/dev/null 2>&1 \
       || warn "could not post the review comment on PR#$PR_NUMBER; the recorded marker still governs"
   else
     # Pre-open, the bead's notes are the only copy of the body. pr-open.sh
@@ -572,7 +576,9 @@ ensure_validation_pass() {
 
 # A pass at a new head retracts the city's OWN superseded CHANGES_REQUESTED,
 # else the PR stays BLOCKED on a dead commit while the bead reads green.
-# Guards, all fail-closed: our handle only (a human's block is a real veto);
+# Guards, all fail-closed: our own review only — one pr-post.sh marked, or one
+# under our handle from before the anchor's provenance cutover (gc_city_own); a
+# human's block, or an unmarked review under our handle after it, is a real veto;
 # a commit other than the reviewed one; the reviewed commit still the live
 # head; auto-merge definitely disarmed (with it armed, a dismissal can let
 # GitHub merge server-side, past the approval rule merge.sh enforces);
@@ -580,17 +586,20 @@ ensure_validation_pass() {
 # so no dismissal goes unrecorded.
 dismiss_superseded() {
   [ -n "$POST_OPEN" ] || return 0
-  local handle live raw rc stale rid paired
+  local handle live raw rc stale rid paired owndef since
   handle=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
   [ -n "$handle" ] || return 0
+  owndef=$("$PR_POST" own-def 2>/dev/null) && [ -n "$owndef" ] || return 0
+  # Passed on as found: gc_city_cutover reads a malformed stamp as no cutover.
+  since=$(row_meta "$ANCHOR_ROW" pr_provenance_since)
   live=$(live_head)
   [ "$live" = "$REVIEWED_OID" ] || return 0
   raw=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json autoMergeRequest 2>/dev/null) || return 0
   printf '%s' "$raw" | jq -e 'type == "object" and has("autoMergeRequest") and .autoMergeRequest == null' >/dev/null 2>&1 || return 0
   raw=$(gh api --hostname "$PR_HOST" --paginate "repos/$PR_REPO/pulls/$PR_NUMBER/reviews?per_page=100" --jq '.[]' 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] || return 0
-  stale=$(printf '%s' "$raw" | jq -rs --arg h "$handle" --arg oid "$REVIEWED_OID" \
-    '.[] | select((.user.login // "") == $h and .state == "CHANGES_REQUESTED" and (.commit_id // "") != $oid) | .id' 2>/dev/null)
+  stale=$(printf '%s' "$raw" | jq -rs --arg h "$handle" --arg since "$since" --arg oid "$REVIEWED_OID" "$owndef"'
+    .[] | select(gc_city_own($h; $since) and .state == "CHANGES_REQUESTED" and (.commit_id // "") != $oid) | .id' 2>/dev/null)
   for rid in $stale; do
     gc bd update "$ANCHOR" --set-metadata "signoff_dismissed=$rid@$REVIEWED_OID" >/dev/null 2>&1 || true
     paired=$(row_meta "$(bd_json show "$ANCHOR")" signoff_dismissed)
@@ -749,11 +758,14 @@ if [ "$VERDICT" = "approve" ]; then
   # reviewed commit.
   [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
     --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
-  # The lane found nothing this round, so its still-unruled findings from
-  # earlier rounds are answered: close them. Validated findings (the validator's)
-  # and any a fix unit still blocks are left alone. Best-effort — this is
-  # cleanup, never a check the verdict depends on.
-  "$FINDING" close-unvalidated --anchor "$ANCHOR" --lane "$CHECK_NAME" --reason "lane green at $REVIEWED_OID" >/dev/null 2>&1 || true
+  # signoff records the verdict; it does not resolve findings. Closing this lane's
+  # still-unvalidated findings as moot belongs to gate-ensure.sh, the single owner
+  # of stage-3 resolution: it derives the green lane state and computes quiescence,
+  # so the one reader that holds the re-gate is the one that releases it, and the
+  # two cannot disagree. The close lands on gate-ensure's next reconcile pass — or,
+  # if the anchor merges or closes before that pass, on gate-ensure's orphaned
+  # sweep, which sheds a closed anchor's still-unvalidated findings (no validator
+  # runs on closed work), so the deferral strands nothing.
   echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID$WIDEN_SUMMARY; review $REVIEW_BEAD closed"
   exit 0
 fi
