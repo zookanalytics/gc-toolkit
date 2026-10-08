@@ -138,7 +138,8 @@ BRANCH_NAME="<branch-name>"   # from `as <branch>`, else empty
 META=$(jq -n --arg shas "$SHAS" --arg keeper "$GC_AGENT" --arg branch "$BRANCH_NAME" \
   '{commit_sha:$shas, requesting_keeper:$keeper}
    + (if $branch == "" then {} else {branch_name:$branch} end)')
-BEAD=$(gc bd create "Prep upstream PR ($(printf '%s' "$SHAS" | wc -w | tr -d ' ') commits)" \
+SHA_COUNT=$(printf '%s' "$SHAS" | wc -w | tr -d ' ')
+BEAD=$(gc bd create "Prep upstream PR ($SHA_COUNT commits)" \
   -t task --metadata "$META" --json | jq -r '.id')
 gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-pr-prep \
   --var commit_sha="$SHAS" \
@@ -441,6 +442,14 @@ worktree.
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,

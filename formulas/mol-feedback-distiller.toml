@@ -327,7 +327,9 @@ ones from this rig's open beads (an unreadable listing aborts the run,
 `--outcome fail`, exit — same fail-safe as step 1). Seed a new pattern
 bead per new cluster:
 ```bash
-PATTERN=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --json | jq -r '.id // .[0].id')
+PATTERN_JSON=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --json)
+PATTERN=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$PATTERN" ] || { CREATE_ERR=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "could not seed the pattern bead${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$PATTERN" --set-metadata task_kind=feedback-pattern
 ```
 
@@ -389,7 +391,10 @@ file.
 
 Check live prompt-update beads AND the open PRs of closed ones (the
 pipeline closes the bead at PR-open, so a bead-only query misses in-flight
-PRs). Cap survivors at {{max_beads_per_run}}, strongest-reasoned first.
+PRs). A concurrent peer distiller pour files ordinary prompt-update beads too,
+so this same dedup is what keeps a non-atomic double-pour from double-filing: the
+later run's survivors empty here and it finalizes as a no-op. Cap survivors at
+{{max_beads_per_run}}, strongest-reasoned first.
 Then close this step (non-terminal; the session carries the survivors and
 the consumed-observation map forward):
 ```bash
@@ -410,6 +415,16 @@ title = "File one prompt-update bead per proposal, stamp consumed observations, 
 needs = ["judge-and-cluster"]
 description = """
 The TERMINAL step — the one place this workflow drains, on every path.
+
+This step MUST finalize on every path it can reach: close its own bead, then
+`gc runtime drain-ack`. Never leave it `open` or `blocked`, and never hold the
+molecule here. The order that pours this formula is single-flight on an open
+root — the root closes only when this step closes, and the cooldown gate counts
+an open root with any non-closed descendant as a run still in flight. A step
+left blocked here therefore stalls the whole distiller cadence, which a human
+then has to clear by hand with `gc order sweep-tracking --include-wisps
+feedback-distiller`. A run with nothing to file finalizes the same as a full
+one; it never blocks.
 
 ## 0. Carry the run disposition
 
@@ -434,6 +449,15 @@ fi
 `DISTILL_RUN` unset: rebuild via load-and-gate §1-§3; never file on a
 guess. A `gated` run reaches here normally with an empty consumed map and
 possibly retirement proposals — file those like any survivor.
+
+A run whose corpus a concurrent peer pour already holds is redundant, not
+blocked. The order's single-flight gate is not atomic, so two molecules can
+judge the same observations at once; judge-and-cluster §6 dedups every proposal
+a peer has already filed, so a redundant run arrives here with an empty survivor
+set and finalizes as a no-op — it files nothing, closes, and drains. When a peer
+races past that dedup the cost is one extra prompt-update bead, which the
+operator's review and the next run's veto sweep absorb. Ceding that way is cheap;
+a blocked step, which wedges the cadence above, never is.
 
 ## 1. File one bead per surviving proposal
 
@@ -471,8 +495,9 @@ BODY="## Rule
 ## Reasoning
 <the rubric's stated judgment — the D3 reviewer must be able to judge from the PR alone>"
 
-BEAD=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json | jq -r '.id // .[0].id')
-[ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { echo "WARN: could not create prompt-update bead for $PATTERN; skipping" >&2; continue; }
+BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json)
+BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create prompt-update bead for $PATTERN${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
 # target=main + merge_strategy=mr ride the standard pool worker -> refinery
 # pipeline; routing (stamp, don't sling) IS the dispatch.
 gc bd update "$BEAD" --set-metadata task_kind=prompt-update --set-metadata target=main --set-metadata merge_strategy=mr --set-metadata gc.routed_to="$POOL"
@@ -516,10 +541,12 @@ SUBJECT="$PATTERN"
 # >>> gate-visit
 # Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
 POOL="human"
-VISIT=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
-  -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json | jq -r '.id // .[0].id')
+VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
+  -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json)
+VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-  || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
+  || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+       echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
   --set-metadata "task_kind=visit"

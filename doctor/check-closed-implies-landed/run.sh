@@ -97,6 +97,25 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     exit 1
 fi
 
+# A `<<<` here-string is backed by a temp file in $TMPDIR; under disk pressure
+# that file cannot be created, the redirection fails silently (this check is
+# set -u, not set -e), and the loop it feeds runs zero times — a non-empty set
+# read as empty, which this check would otherwise report as a clean all-clear.
+# Each enumeration below is staged into a file under this checked, templated temp
+# dir and read with a plain `< "$file"`, which keeps the loop in the current
+# shell so the finding arrays survive it; a staging failure is loud, never a
+# forged all-clear. The dir and its files die with this process.
+ENUM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-closed-implies-landed.XXXXXX" 2>/dev/null) || {
+    echo "cannot determine whether closed anchors landed (I5)"
+    detail "could not create a temp directory to stage the store enumerations (mktemp -d failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+}
+trap 'rm -rf "$ENUM_TMP" 2>/dev/null' EXIT
+if ! printf '%s\n' "$scopes" > "$ENUM_TMP/scopes"; then
+    echo "cannot determine whether closed anchors landed (I5)"
+    detail "could not stage the store enumeration (temp-file write failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+fi
 while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
@@ -143,6 +162,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
     [ -n "$rows" ] || continue
+    if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
+        warnings+=("$label: could not stage the merge_result enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
+        continue
+    fi
     n_child=0; n_disposed=0
     while IFS=$'\037' read -r kind id mr pr; do
         [ -n "$kind" ] || continue
@@ -157,11 +180,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             exempt-child)    n_child=$((n_child + 1)) ;;
             exempt-disposed) n_disposed=$((n_disposed + 1)) ;;
         esac
-    done <<< "$rows"
+    done < "$ENUM_TMP/rows"
     if [ $((n_child + n_disposed)) -gt 0 ]; then
         notes+=("$label: $((n_child + n_disposed)) closed bead(s) carry merge_result but are not anchors, so they were not judged ($n_child child of a bead holding the same work, $n_disposed disposed via gc.superseded_by)")
     fi
-done <<< "$scopes"
+done < "$ENUM_TMP/scopes"
 
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")

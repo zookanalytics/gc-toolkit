@@ -57,7 +57,7 @@ POST /helm/dismiss  -> { bead, verb, message }   close the subject's open visit
                     — the write routes; see *Actuating from the board*
 ```
 
-A `Tile` carries 49 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 50 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -71,7 +71,7 @@ stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
-section cluster_key group_root
+section cluster_key group_root group_parent
 ```
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
@@ -93,13 +93,20 @@ how-badly.
 `group_root` is the board's PRIMARY grouping axis, and every tile carries one:
 the id of the dependency family the row belongs to — the top-most anchor its
 parent-child and `blocks` edges climb to, its own id when it climbs to nothing
-(`board.assignGroupRoots`). The city overview groups by it — `helm-svc board
---all` and the web dashboard body render one block per family
-(`board.GroupByFamily`), the root as the header and its members beneath it in
-`board.SectionOrder`, with `●` on the rows that want a person; there `section`
-is the within-family band. The default operator queue (`helm-svc board`) stays
-flat and owed-first, banded by `section` (`board.GroupBySection`).
-`specs/tk-492ssx/` records the family model.
+(`board.assignGroupRoots`). The city overview groups by it: `helm-svc board
+--all` renders one block per family (`board.GroupByFamily`), the root as the
+header and its members one level beneath it in `board.SectionOrder`, with `●` on
+the rows that want a person; there `section` is the within-family band. The
+default operator queue (`helm-svc board`) stays flat and owed-first, banded by
+`section` (`board.GroupBySection`). `specs/tk-492ssx/` records the family model.
+
+`group_parent` is the same climb's IMMEDIATE step: the id of the row's direct
+parent one anchor up, empty at a family root. Where `group_root` names the top
+of the family, `group_parent` names the next step toward it, so a surface can
+render the family as the nested containment tree it is — a sub-epic above its
+own children rather than flat beside them. The web dashboard body nests each
+family by it (`flattenFamilies` in `web/src/App.tsx`); the CLI board renders one
+level deep.
 
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
 that are one template (a visit family, a signoff cap); a renderer folds them
@@ -490,7 +497,7 @@ field would be lying on a normal day.
 |---|---|---|
 | `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `unknown` (see below) | — |
-| `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
+| `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
@@ -533,14 +540,21 @@ and its specific cause is spelled out in `needs` as `blocked: <reason>`, read
 from `pr.machine_reason`. It is distinct from `settled`, which is the merge
 cadence's ordinary wait on a review or the merge pass.
 
-**Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
-for the `codex` gate is owed once it has held past three days
-(`preOpenStaleThresholdDays`) with nothing advancing it — no review or rework a
-live session is working, and the gate not yet green. Childless it would otherwise
-band `LOW` and read `in the merge cadence` (a stale `progressing` marker) or
-`position unknown`, so it sinks with no age; the signal bands it `ELEVATED`, dates
-it from the anchor's `updated_at`, and its `needs` names the codex gate and why it
-is stuck — `no review has run`, `findings open`, or `reviewed, not advanced`.
+**Stalled at a pre-open check.** A merge anchor parked at `pre_open_gate` is owed
+once it has held past three days (`preOpenStaleThresholdDays`) with a check not
+yet green and nothing advancing it, meaning no review or rework a live session is
+working. Its checks are the lanes its `check_set` declares, split by the rule
+`merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
+and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
+is green when its `check.<lane>` marker reads `green`. A legacy `codex` lane counts
+like any other, and a `check_set` that declares no lane is never a stalled check.
+Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a
+stale `progressing` marker) or `position unknown`, so it sinks with no age; the
+signal bands it `ELEVATED`, dates it from the anchor's `updated_at`, and its
+`needs` names the first lane in declared order that is not green, with why the
+anchor is stuck: `correctness check stalled — no review has run`, `findings
+open`, or `reviewed, not advanced`. The reason reads every review and rework child
+on the anchor, because a rework title names no lane.
 Routed-ness is not liveness: a review routed to a pool no session is draining is
 itself the stall, not a healthy hold, so the suppression turns on a live worker
 (`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A

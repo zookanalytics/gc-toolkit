@@ -62,7 +62,7 @@ done
 # gc: bd show answers $FAKE_META (or nothing when FAKE_BD_FAILS=1); drain-ack
 # is recorded. lifecycle.sh: records its argv, lives under a fake rig root so
 # the block's candidate resolution finds it.
-mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
+mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts" "$TMP/rig-nopr/assets/scripts"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
@@ -70,6 +70,7 @@ case "$1 $2" in
   "bd show") [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 1
              printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update") shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
+  "agent list") printf '%s' "${FAKE_AGENTS:-}"; exit 0 ;;
 esac
 exit 0
 GC
@@ -78,20 +79,29 @@ cat > "$TMP/rig/assets/scripts/lifecycle.sh" <<'LC'
 printf 'LIFECYCLE|%s\n' "$*" >> "$FAKE_LOG"
 exit 0
 LC
-chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/lifecycle.sh"
+# The repool proves the polecat route through the sibling pool-route.sh; the real
+# script runs here against the stubbed `gc agent list` ($FAKE_AGENTS). A second
+# rig root carries lifecycle.sh but NOT pool-route.sh, for the fail-closed case
+# where the route cannot be proved at all.
+cp "$HERE/pool-route.sh" "$TMP/rig/assets/scripts/pool-route.sh"
+cp "$TMP/rig/assets/scripts/lifecycle.sh" "$TMP/rig-nopr/assets/scripts/lifecycle.sh"
+chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/lifecycle.sh" \
+         "$TMP/rig/assets/scripts/pool-route.sh" "$TMP/rig-nopr/assets/scripts/lifecycle.sh"
 export PATH="$TMP/bin:$PATH"
 
-# run <block#> <meta-json|-> [rig-root] -> "<rc>|<log>"
+# run <block#> <meta-json|-> [rig-root] [agents-json] [gc-rig] -> "<rc>|<log>"
 run() {
   : > "$TMP/log"
   local rc=0 fails=0 meta="$2"
   [ "$meta" = "-" ] && { fails=1; meta='{}'; }
   # cwd = $TMP (not a git repo) so the block's `git rev-parse --show-toplevel`
   # fallback cannot resolve the real repo and shadow the stub lifecycle.sh.
+  # GC_RIG defaults empty and the roster unreadable, so pool-route.sh returns the
+  # bare pool name UNVERIFIED and the existing cases keep asserting that name.
   ( cd "$TMP" && \
-    WORK=tk-work REJECT_REASON="conflict with main" GC_RIG="" \
+    WORK=tk-work REJECT_REASON="conflict with main" GC_RIG="${5-}" \
     GC_RIG_ROOT="${3-$TMP/rig}" GC_CITY_PATH="" \
-    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_LOG="$TMP/log" \
+    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_AGENTS="${4-}" FAKE_LOG="$TMP/log" \
     bash "$TMP/run-$1.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -124,6 +134,32 @@ for i in 1 2; do
     && bad "block $i: no direct bead writes" "found a gc bd update" \
     || ok "block $i: no direct bead writes (lifecycle.sh is the writer)"
 done
+
+# --- The repool proves the route before it stamps it. ---------------------------
+# Both blocks are byte-identical (asserted above), so the route gate is exercised
+# once. pool-route.sh qualifies the bare pool name with GC_RIG and proves it
+# against the live agent set: a rejection repooled to a name no pool claims sits
+# unclaimed with a rejection_reason nobody reads, which is the strand it gates.
+echo "── route gate ──"
+
+# Readable roster that carries the polecat pool + a rig to qualify into: the
+# repool routes to the proven, rig-qualified identity, not the bare name.
+eq "$(run 1 '{}' "$TMP/rig" '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}' gc-toolkit)" \
+   "0|LIFECYCLE|transition tk-work --to unanchored --assignee  --route gc-toolkit/gc-toolkit.polecat --set rejection_reason=conflict with main;" \
+   "readable roster + GC_RIG -> repool routes to the proven rig-qualified pool"
+
+# Readable roster that does NOT carry the polecat pool: the route is refused, so
+# the block fails closed (drains, leaves the bead with the refinery) rather than
+# stamp an address nothing claims.
+eq "$(run 1 '{}' "$TMP/rig" '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"}]}' gc-toolkit)" \
+   "1|DRAIN;" \
+   "readable roster, no polecat identity -> fail closed (no unclaimable repool)"
+
+# pool-route.sh absent from the pack: the route cannot be proved, so the block
+# fails closed rather than repool to an unvalidated address.
+eq "$(run 1 '{}' "$TMP/rig-nopr")" \
+   "1|DRAIN;" \
+   "pool-route.sh missing -> fail closed, never repools unproven"
 
 # --- One reading of the merge strategy. -----------------------------------------
 # handle-failures decides whether the branch survives a rejection; merge-push
@@ -245,6 +281,33 @@ grep -q '^DELETE-REFUSED|polecat/tk-work$' "$TMP/log" \
   && ok "(18c) the delete was actually attempted (the case is not vacuous)" \
   || bad "(18c) the delete was actually attempted (the case is not vacuous)"
 unset FAKE_DELETE_FAILS
+
+# A target under polecat/ is another bead's per-bead PR head. Work landing there
+# folds into that PR; opening a nested branch -> polecat/* PR is never the
+# intent. The refinery resolves such a bead to direct and KEEPS its branch (the
+# branch carries the fold), with no operator picking a strategy by hand.
+# (19) fold-in target -> direct, branch kept (not a nested PR, not a deleted branch).
+arm "{$BR,\"target\":\"polecat/tk-anchor\"}" >/dev/null
+eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(19) fold-in target polecat/* + no own PR -> branch kept"
+grep -q 'folds into the PR at polecat/tk-anchor' "$TMP/out" \
+  && ok "(19b) kept for the fold reason (strategy resolved to direct, not mr)" \
+  || bad "(19b) kept for the fold reason (strategy resolved to direct, not mr)"
+
+# (20) A non-polecat non-default target (integration/*, a named branch) is NOT a
+#      fold-in: it stays mr so convoy/integration work keeps its review PR.
+arm "{$BR,\"target\":\"integration/cv-1\"}" >/dev/null
+eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(20) integration/* target -> branch kept"
+grep -q 'the PR pipeline needs the branch' "$TMP/out" \
+  && ok "(20b) integration/* target -> stays mr (not flipped to a fold-in direct)" \
+  || bad "(20b) integration/* target -> stays mr (not flipped to a fold-in direct)"
+
+# (21) A bead already recording its own PR keeps mr even under a polecat/ target:
+#      the recorded PR is reused, not folded over.
+arm "{$BR,\"target\":\"polecat/tk-anchor\",\"existing_pr\":\"https://github.com/o/r/pull/7\"}" >/dev/null
+eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(21) polecat/ target + own existing_pr -> branch kept (mr)"
+grep -q 'the PR pipeline needs the branch' "$TMP/out" \
+  && ok "(21b) own existing_pr keeps mr, not flipped to a fold-in direct" \
+  || bad "(21b) own existing_pr keeps mr, not flipped to a fold-in direct"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -435,10 +435,14 @@ sits below it.
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- State a decision or an action so the operator can accept or reject it
-  without looking anything up. A bare bead id, a title, or a pointer to a
-  queue is not a decision.
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+- State an operator-facing decision, brief, or sign-off so it is
+  answerable in about a minute: lead with the plain-language stake and
+  what each option costs, keep it to one screen, and let the operator
+  accept or reject without looking anything up. An identifier — a bead
+  id, title, path, or queue pointer — is a parenthetical reference for
+  looking something up or cross-referencing it. It carries no weight on
+  its own and is never the noun that carries the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -486,6 +490,14 @@ sits below it.
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
      mechanik, proactive, witness, refinery, and keeper. Holds the authoring
@@ -517,7 +529,7 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
-OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation -d "## Statement
 <the generalizable point>
 
@@ -528,7 +540,9 @@ OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" 
 <draft rule text — explicitly non-binding>
 
 ## Context
-<optional: what the diff was doing>" --json | jq -r '.id // .[0].id')
+<optional: what the diff was doing>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" \
   --set-metadata task_kind=observation \
   --set-metadata "obs.category=<free-slug>" \

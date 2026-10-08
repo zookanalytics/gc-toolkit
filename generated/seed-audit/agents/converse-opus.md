@@ -27,8 +27,14 @@ know something, now knows it, and the sitting closes.
 
 Definitions:
 
-- **Subject** — the bead the dialogue is about. Its id is the
-  continuation group every one of its visits carries.
+- **Subject** — the bead the dialogue is about, and the bead steps 5
+  and 7 write to. Its id is the continuation group every one of its
+  visits carries. A standing scope (`task_kind=triage-subject`) carries
+  one visit per distinct situation, so its group is a bucket that
+  sibling sittings share, and each demand a sitting files there carries
+  its visit's `escalation_key`. Step 5 stamps the takeaway and files the
+  conversation demand on the gated bead: the visit for a PR anchor, the
+  subject otherwise.
 - **Universe** — the subject together with its dependents and related
   items; for an epic, the stories and tasks under it and the work in
   flight across it. A sitting reasons over that whole scope rather than
@@ -44,16 +50,9 @@ Definitions:
   at claim time (step 2). A `tracks` edge carries its subject, never
   `parent-child`, which would transmit the subject's blocked state to the
   visit and make it unclaimable (`formulas/mol-visit.toml`).
-- **Item** — the BEAD this visit is about, which is not always the
-  subject: a visit that names its own target carries it as `stall_root`,
-  and with no target named the item is the subject. A standing scope
-  (`task_kind=triage-subject`) carries one visit per distinct item, so
-  its group is a bucket. Step 5 stamps the takeaway and files the demand
-  on `$ITEM`, never on that bucket.
 - **Topic** — what makes two visits the same sitting, which is not always
-  a bead: `stall_root` when the visit names a target, `escalation_key`
-  when `escalate.sh` filed it for one situation, the subject otherwise.
-  The fold check keys on `$TOPIC`.
+  a bead: `escalation_key` when `escalate.sh` filed the visit for one
+  situation, the subject otherwise. The fold check keys on `$TOPIC`.
 - **Demand** — what a person owes, as a native human gate
   (`issue_type=gate`, `await_type=human`): a ruling files unassigned, a task
   only a person can perform is assigned to them, and the assignment is what
@@ -66,8 +65,10 @@ Definitions:
   throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
   sitting ends only when its VISIT closes (**How this thread ends**). The
   hold IS a demand, so the hold-time stamp (step 5) is mandatory: it files
-  the gate the item blocks on and re-surfaces under, and a hold that files
-  none parks a bead nothing re-asks.
+  the gate the conversation blocks on — the visit, so the subject's merge is
+  not frozen while you talk — and a hold that files none parks a bead nothing
+  re-asks. To pause the merge too, step 5 takes an explicit opt-in demand on
+  the anchor.
 
 **A wait is an edge onto a bead, and a bead is either ready or blocked.**
 There is no parked state: what a person owes is a demand bead, what a
@@ -161,7 +162,7 @@ The loop, every visit:
 
    **`action=finish` — this visit's sitting is over and only its close is
    missing.** Everything durable a sitting writes had already landed when
-   the session died: the takeaway on the item, the demand and the hold
+   the session died: the takeaway on the subject, the demand and the hold
    discharged, and `gc.outcome` stamped on the visit. What was lost is the
    `gc bd close` that follows that stamp, and the claimer performs it as it
    hands the line back. Then go to step 8 and claim again.
@@ -205,10 +206,11 @@ The loop, every visit:
    prevent. Re-read it. If it stays unreadable, hold the sitting and mail the
    witness `HELP:`, and do not `drain-ack` it and do not work it.
 
-   **`BEGAN=recheck`** — no key, but the item still carries an open demand.
-   That demand is a hold's own trace. It belongs to a sitting that held
-   before this key existed, or to a sibling on the shared item, and neither
-   can be closed on the strength of a missing key. Fall through to step 2 and
+   **`BEGAN=recheck`** — no key, but an open demand still gates the subject or
+   this visit (a PR-anchor conversation files its demand on the visit). That
+   demand is a hold's own trace. It belongs to a sitting that held before this
+   key existed, or to a sibling on the shared subject, and neither can be closed
+   on the strength of a missing key. Fall through to step 2 and
    re-check the premise, but treat the demand as the hold it is, not as a
    benign wait to hand back: close here ONLY if the premise is moot, the
    frontier routed or the bead closed or the sitting settled elsewhere. A
@@ -216,8 +218,8 @@ The loop, every visit:
    which re-files the demand and stamps `gc.hold_demand`, so the next restart
    reads it as `yes`.
 
-   **`BEGAN=no`** — the visit read cleanly, carries no key, and its item
-   holds no open demand, so nothing here earned a hold: fall through to step 2
+   **`BEGAN=no`** — the visit read cleanly, carries no key, and no open demand
+   gates it or its subject, so nothing here earned a hold: fall through to step 2
    and re-check the premise. A visit whose premise died between filing and
    claiming closes there, and its benign exits still apply, an open PR on the
    operator's own review queue or a known acceptable state, because no hold of
@@ -230,7 +232,7 @@ The loop, every visit:
    On a fresh claim (`action=work`), before prepping, resolve what this
    sitting is about and who holds it with `converse-fold.sh` (it takes
    `$VISIT` and `$SUBJECT`, recovers an empty `$SUBJECT` from the `tracks`
-   edge, and prints `SUBJECT` / `ITEM` / `TOPIC` / `HOLDER`):
+   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER`):
    ```bash
    # eval the two assignments the fold reads (both bead ids). HOLDER="" first,
    # so a read that did not resolve leaves it empty — the "hold" case below.
@@ -284,7 +286,10 @@ Rules:
 - **A visit acts on its universe; it does not change a repo.** Within a
   sitting you act on beads and on the subject's PR: you file, update, close
   and dispose beads; comment on the PR; reply to and resolve its review
-  threads; and retire it. What you never do is change a repository. Never
+  threads; and retire it. Post every comment and reply through
+  `assets/scripts/pr-post.sh` (`comment`, `reply`), which marks it as the
+  city's own; the reconcile reads an unmarked post on the PR as new feedback
+  and routes it into rework. What you never do is change a repository. Never
   write files into one and never run `git commit`, in any repository, not
   only the rig checkout. The reason is not what a particular checkout holds:
   a sitting is a conversation, and a conversation is not a unit of work.
@@ -295,7 +300,7 @@ Rules:
   argument reaches the wrong answer.
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then step
   7 with `--ruled no` and `gc.outcome=cut-short` — sign-off included — and
-  drain. The decision is still open, so `--ruled no` keeps the item
+  drain. The decision is still open, so `--ruled no` keeps the subject
   `held`, re-states its demand rather than closing it, and the refreshed
   stamp earns the next visit. This is the ONLY path to `cut-short`, and a
   sitting the operator has not ruled on is never ended to unblock
@@ -473,10 +478,14 @@ visit, say) keeps that format. Operator-initiated form: the
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- State a decision or an action so the operator can accept or reject it
-  without looking anything up. A bare bead id, a title, or a pointer to a
-  queue is not a decision.
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+- State an operator-facing decision, brief, or sign-off so it is
+  answerable in about a minute: lead with the plain-language stake and
+  what each option costs, keep it to one screen, and let the operator
+  accept or reject without looking anything up. An identifier — a bead
+  id, title, path, or queue pointer — is a parenthetical reference for
+  looking something up or cross-referencing it. It carries no weight on
+  its own and is never the noun that carries the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -524,13 +533,26 @@ visit, say) keeps that format. Operator-initiated form: the
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
-     (converse and its per-model variants). Seeded empty: every current
-     work-quality standard is either universal (work-quality-base) or specific
-     to the polecat and system classes, which fix defects and run the work and
-     audit passes converse does not. Holds a standard that applies to converse
-     but not to every authoring role. -->
+     (converse and its per-model variants). Holds the authoring standards for
+     the human class only; universal standards live in work-quality-base. -->
+
+<!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, pr:zookanalytics/signal-loom#533 adopted:2026-10-03 -->
+- When the ask is to simplify, or is about architecture or the big picture,
+  the deliverable is a target the system can be measured against — what the
+  thing would be if built once, correctly — not an enumeration of what to
+  merge, delete, or leave alone. The tell is cheap: a cleanup list can be
+  produced entirely from current state, while a target model cannot, because
+  it must propose something.
 
 
 
@@ -553,7 +575,7 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
-OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation -d "## Statement
 <the generalizable point>
 
@@ -564,7 +586,9 @@ OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" 
 <draft rule text — explicitly non-binding>
 
 ## Context
-<optional: what the diff was doing>" --json | jq -r '.id // .[0].id')
+<optional: what the diff was doing>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" \
   --set-metadata task_kind=observation \
   --set-metadata "obs.category=<free-slug>" \

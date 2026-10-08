@@ -61,11 +61,13 @@
       "pr_approval": "",
       "section": "stalled",
       "group_root": "tk-eemvf",
+      "group_parent": "",
       "acceptable": false,
       "accept_formula": "",
       "pr_branch_url": "",
       "pr_phase": "",
-      "phase": "needs-review"
+      "phase": "needs-review",
+      "recommendation": null
     },
     {
       "id": "gt-1a2b3",
@@ -115,11 +117,13 @@
       "section": "cleanup",
       "cluster_key": "all 2 closed — graduate",
       "group_root": "gt-1a2b3",
+      "group_parent": "",
       "acceptable": false,
       "accept_formula": "",
       "pr_branch_url": "",
       "pr_phase": "",
-      "phase": "needs-review"
+      "phase": "needs-review",
+      "recommendation": null
     },
     {
       "id": "tk-01n5cc",
@@ -170,11 +174,13 @@
       "pr_owed_since": "2026-08-08T11:02:00Z",
       "section": "review",
       "group_root": "tk-01n5cc",
+      "group_parent": "",
       "acceptable": true,
       "accept_formula": "mol-dispose-pr",
       "pr_branch_url": "",
       "pr_phase": "needs-attention",
-      "phase": "needs-attention"
+      "phase": "needs-attention",
+      "recommendation": null
     },
     {
       "id": "tk-9tbbk",
@@ -225,11 +231,13 @@
       "pr_approval": "",
       "section": "done",
       "group_root": "tk-9tbbk",
+      "group_parent": "",
       "acceptable": false,
       "accept_formula": "",
       "pr_branch_url": "",
       "pr_phase": "",
-      "phase": ""
+      "phase": "",
+      "recommendation": null
     }
   ],
   "sittings": [

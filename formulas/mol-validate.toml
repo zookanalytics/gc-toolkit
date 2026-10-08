@@ -173,7 +173,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "triage-findings"
-title = "Decisions 1 and 2: rule each finding must-fix, deferred, or declined"
+title = "Decisions 1 and 2: rule each finding must-fix, deferred, declined, or needs-you"
 needs = ["load-dispatch"]
 description = """
 Each block is its own shell, so re-derive the pins AND re-read the batch first.
@@ -224,13 +224,15 @@ dependency edge by hand:
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition must-fix
   ```
 - **deferred** — a real objection, but fixing it now introduces risk or might
-  break something, so it lands as a tracked bead and needs fresh work once the
-  PR merges. `finding.sh` wires `--discovered-from`, which records provenance
-  and holds nothing, and appends your `--reason` to the finding — a deferred
-  finding blocks nothing, so that note is the only place whoever picks it up
-  after the merge can read why it was left. Always give one.
+  break something, so it becomes tracked later-work. `finding.sh` files a
+  follow-up bead carrying the objection and your `--reason`, gates it behind the
+  anchor so it dispatches once the anchor merges, records the follow-up id as the
+  reply the raiser's PR thread receives, and closes the finding. The follow-up is
+  the claimable later-work; once the finding closes it holds neither the merge
+  nor the review. Always give a `--reason` — it is the whole justification for
+  deferring, and it rides into both the follow-up and the raiser's thread.
   ```bash
-  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition deferred --reason "<why fixing now is riskier than deferring>"
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition deferred --reason "<why fixing now is riskier than deferring, and what the follow-up must do>"
   ```
 - **declined** — not a real objection: cosmetic, already handled on this branch,
   or mistaken. The finding closes with the reason and takes no edge, and one
@@ -260,6 +262,19 @@ dependency edge by hand:
   a question the diff already answers — is declined like a machine finding, with
   no `--reply`: there is no objection to overrule, so none is owed an answer.
 
+- **needs-you** — a human comment this pass genuinely cannot judge: it turns on
+  product intent, a business fact, or a call that is the operator's to make, not
+  one you can weigh against the diff. `finding.sh` files a visit (board-visible,
+  routed to the operator), records its id as the reply the raiser's PR thread
+  receives, and leaves the finding OPEN. An open finding holds the review
+  changes-requested until the operator rules the visit, so the decision is visible
+  — a visit plus a PR comment — never a silent park; their ruling then
+  re-dispositions this finding. Reserve it for what you cannot judge: a comment
+  you can weigh is must-fix or declined, and one you can defer is deferred.
+  ```bash
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
+  ```
+
 **Check every exit status.** `finding.sh set-disposition` stamps the
 disposition FIRST and wires the edge second, so a non-zero exit can leave a
 finding reading `must-fix` while nothing blocks the anchor — an objection that
@@ -267,22 +282,28 @@ looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
 exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
-leave the chain open for the next claim to resume. A declined human finding's
-`--reply` rides the same guard: `set-disposition` stamps the owed answer BEFORE
-it closes the finding and exits non-zero if that stamp does not stick, so a
-decline the raiser would never hear leaves the finding unvalidated and the pass
-open to retry rather than closing over a silent overrule.
+leave the chain open for the next claim to resume. The rulings that owe an answer
+ride the same guard: a declined finding's `--reply`, a deferred finding's
+follow-up and its reply, and a needs-you finding's visit and its reply are all
+recorded BEFORE the finding is closed or left open, and `set-disposition` exits
+non-zero if any does not stick — so an answer the raiser would never hear leaves
+the finding unruled and the pass open to retry rather than closing over a silent
+overrule or a deferral with no tracked follow-up.
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
-to the merge predicate, so an objection you neither must-fixed nor declined is
-silently dropped. An empty batch means only that nothing is left to rule — the
-reviewer found nothing, or an earlier pass already ruled it all. It settles
-nothing about decision 3: carry on to `rule-convergence` and judge convergence
-there on the batch's own evidence, never on the emptiness of this read.
+to the merge predicate, so an objection you leave unruled is silently dropped. An
+empty batch means only that nothing is left to rule — the reviewer found nothing,
+or an earlier pass already ruled it all. It settles nothing about decision 3:
+carry on to `rule-convergence` and judge convergence there on the batch's own
+evidence, never on the emptiness of this read.
 
-A deferred finding needs a bead someone can pick up later; filing that follow-up
-work is the fix-unit dispatch the check authority owns (tk-o1bzbm), not this pass.
-This pass rules the disposition; it does not create or route fix units.
+A deferred finding's follow-up is filed by `finding.sh` as the ruling runs — a
+bead armed to its fix pool and gated behind the anchor, so it dispatches once
+the merge lands — so a deferral never leaves an unclaimable orphan.
+The must-fix set is answered by a separate fix-unit dispatch the check authority
+owns (tk-o1bzbm), not this pass: this pass rules dispositions and lets the
+primitive file a deferral's follow-up; it does not create or route must-fix fix
+units.
 
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `rule-convergence`:
@@ -294,7 +315,7 @@ done
 ```
 
 **Exit criteria:** every finding in the batch carries a ruled disposition
-(must-fix, deferred, or declined), none left unvalidated, this step closed.
+(must-fix, deferred, declined, or needs-you), none left unvalidated, this step closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 

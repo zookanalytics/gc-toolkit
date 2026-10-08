@@ -31,6 +31,10 @@ type fakeStore struct {
 	// Read tallies, for the batched-edge-read acceptance test: the edge reads
 	// must not scale with the number of anchors.
 	searchN, depnN, depyN int
+
+	// calls records every SearchIssues filter, so a test can assert the shape of
+	// the query the gather asked — which pass reads lite, which reads full.
+	calls []beads.IssueFilter
 }
 
 // SearchIssues answers both gather shapes: the type-keyed anchor queries, and
@@ -40,12 +44,14 @@ type fakeStore struct {
 // and still pass.
 func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.IssueFilter) ([]*beads.Issue, error) {
 	f.searchN++
+	f.calls = append(f.calls, filter)
 	// An id-keyed read is the one shape with no status scope, and that is the
 	// point of it: the sitting gather resolves a subject bead whether or not it
 	// has since closed. It is matched first so the scope rule below stays a
 	// rule about the SEARCHES.
 	if len(filter.IDs) > 0 {
-		return f.searchByIDs(filter)
+		out, err := f.searchByIDs(filter)
+		return liteProject(out, filter), err
 	}
 
 	// Every other gather query must scope its statuses; a fake that ignored the
@@ -82,13 +88,41 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 		if err, bad := f.failType[kind]; bad {
 			return nil, err
 		}
-		return f.matching(f.issues[kind], filter), nil
+		return liteProject(f.matching(f.issues[kind], filter), filter), nil
 	}
 	out, err := f.searchByMetadata(filter)
 	if err != nil {
 		return nil, err
 	}
-	return f.matching(out, filter), nil
+	return liteProject(f.matching(out, filter), filter), nil
+}
+
+// liteProject mirrors the library's lite SELECT: with filter.Lite set it returns
+// COPIES whose six HeavyDropList columns (description, design, acceptance_criteria,
+// notes, waiters, payload) are zeroed and IsLitePartial is true, so a test sees
+// exactly what a lite read hands back. Copies, not mutations: the fixtures are
+// shared across a gather's many reads, and a full read after a lite one must
+// still find the heavy fields.
+func liteProject(in []*beads.Issue, filter beads.IssueFilter) []*beads.Issue {
+	if !filter.Lite {
+		return in
+	}
+	out := make([]*beads.Issue, len(in))
+	for i, iss := range in {
+		if iss == nil {
+			continue
+		}
+		c := *iss
+		c.Description = ""
+		c.Design = ""
+		c.AcceptanceCriteria = ""
+		c.Notes = ""
+		c.Waiters = nil
+		c.Payload = ""
+		c.IsLitePartial = true
+		out[i] = &c
+	}
+	return out
 }
 
 // searchByIDs models `id IN (...)`, which is what the shared SQL builder emits
@@ -806,6 +840,120 @@ func TestReviewReworkChildrenAreAdmittedAsTiles(t *testing.T) {
 	}
 }
 
+// withDesc stamps a description on an issue fixture — the one heavy TEXT column
+// this source reads (crossRigRefs scans an open anchor's prose).
+func withDesc(iss *beads.Issue, desc string) *beads.Issue {
+	iss.Description = desc
+	return iss
+}
+
+// TestClosedPassReadsLiteLivePassReadsFull pins the projection split. The live
+// anchor pass reads full, so a bead's description reaches the board and
+// crossRigRefs can weigh an open anchor by the other-rig ids in its prose. The
+// closed/DONE pass reads lite and drops the heavy TEXT columns, because a SevDone
+// row orders by recency and reads none of them. The fake honours Lite by blanking
+// the HeavyDropList columns, so a dropped description on the closed anchor and a
+// present one on the live anchor are the two reads.
+func TestClosedPassReadsLiteLivePassReadsFull(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	store := &fakeStore{issues: map[string][]*beads.Issue{
+		"epic": {
+			withDesc(issue("tk-live", "live epic", "epic", 2, testNow.Add(-time.Hour), ""), "blocks sl-aa111 downstream"),
+			withDesc(closedIssue("tk-done", "done epic", "epic", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), ""), "closed once sl-bb222 landed"),
+		},
+	}}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	i, ok := findAnchor(res, "tk-live")
+	if !ok {
+		t.Fatal("live epic anchor missing")
+	}
+	if res.Anchors[i].Description == "" {
+		t.Error("live anchor must carry its description: the live pass reads full so crossRigRefs can weigh the open anchor")
+	}
+
+	j, ok := findAnchor(res, "tk-done")
+	if !ok {
+		t.Fatal("closed epic anchor missing")
+	}
+	if got := res.Anchors[j].Description; got != "" {
+		t.Errorf("closed anchor description must be dropped by the lite closed pass, got %q", got)
+	}
+}
+
+// TestGatherQueryShapesHonourLite asserts the projection the gather ASKS for, per
+// pass, over the recorded filters. The typed and metadata-keyed anchor queries
+// read lite on the closed pass and full on the live pass; the edge hydration (an
+// id-keyed read) always reads lite. The sitting and workflow-root queries read
+// full and are excluded here by their distinct shape — they scope with Statuses
+// (so Status is nil) or MetadataFields, never a bare Status plus IssueType or
+// HasMetadataKey — and with no sittings the only id-keyed read is the hydration.
+func TestGatherQueryShapesHonourLite(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	store := &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"epic": {issue("tk-live", "live epic", "epic", 2, testNow, "")},
+			// A closed merge anchor exercises the metadata-keyed closed pass.
+			"task": {closedIssue("tk-done-merge", "landed", "task", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), `{"merge_result":"merged"}`)},
+		},
+		depsUp: map[string][]*beads.IssueWithDependencyMetadata{
+			// A child edge makes the gather hydrate a far end.
+			"tk-live": {withDepType(child("tk-child", "open", testNow, ""), "parent-child")},
+		},
+	}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store})
+
+	if _, err := src.Gather(context.Background()); err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	var sawClosedTyped, sawLiveTyped, sawClosedMeta, sawHydrate bool
+	for _, c := range store.calls {
+		switch {
+		case len(c.IDs) > 0: // edge hydration — the only id-keyed read with no sittings
+			sawHydrate = true
+			if !c.Lite {
+				t.Errorf("edge hydration must read lite: %+v", c)
+			}
+		case c.Status == nil: // join shape (sittings, workflow roots) — not an anchor pass
+			continue
+		case c.IssueType != nil && *c.Status == beads.StatusClosed:
+			sawClosedTyped = true
+			if !c.Lite {
+				t.Errorf("closed typed anchor query must read lite: type=%s", *c.IssueType)
+			}
+		case c.IssueType != nil && *c.Status == beads.StatusOpen:
+			sawLiveTyped = true
+			if c.Lite {
+				t.Errorf("live typed anchor query must read full (crossRigRefs needs description): type=%s", *c.IssueType)
+			}
+		case c.HasMetadataKey != "" && *c.Status == beads.StatusClosed:
+			sawClosedMeta = true
+			if !c.Lite {
+				t.Errorf("closed metadata anchor query must read lite: key=%s", c.HasMetadataKey)
+			}
+		case c.HasMetadataKey != "" && *c.Status == beads.StatusOpen:
+			if c.Lite {
+				t.Errorf("live metadata anchor query must read full: key=%s", c.HasMetadataKey)
+			}
+		}
+	}
+	if !sawClosedTyped || !sawLiveTyped {
+		t.Errorf("expected both a closed and a live typed anchor query (closed=%v live=%v)", sawClosedTyped, sawLiveTyped)
+	}
+	if !sawClosedMeta {
+		t.Error("expected a closed metadata-keyed anchor query (HasMetadataKey)")
+	}
+	if !sawHydrate {
+		t.Error("expected an edge-hydration id-keyed query")
+	}
+}
+
 // TestWaitingEdgeFailureIsUnknownNotEmpty is the fail-closed half of the read
 // above: WHICH kinds pay the `blocks` read is pinned there, what a FAILED read
 // reports is pinned here.
@@ -1341,6 +1489,49 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 	}
 	if res.Facts.OwnerState["gc-toolkit__polecat-lx-live"] != "active" {
 		t.Errorf("session states carried: %v", res.Facts.OwnerState)
+	}
+}
+
+// TestGatherAnchorOwnWorkflowCountsOnItsTile pins the in-flight join across the
+// gather/board boundary for an anchor that is itself the slung work bead. Its
+// input convoy tracks the anchor's own bead, so the gather keys Facts.Inflight
+// by the anchor's id, and the tile built from that gather must count the live
+// molecule. The board tests hand-build their Facts, so only a board fed by a
+// real gather proves the producer and the reader agree on the key.
+func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
+	st := populatedStore()
+	st.issues["task"] = append(st.issues["task"],
+		issue("tk-slung", "Land the slung fix", "task", 2, testNow,
+			`{"merge_result":"pre_open_gate","branch":"polecat/tk-slung"}`),
+		issue("tk-root9", "mol-polecat-work", "task", 2, testNow,
+			`{"gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+	)
+	// An idle child, so a tile that missed the anchor's own molecule would band
+	// stranded rather than merely read zero.
+	st.depsUp["tk-slung"] = []*beads.IssueWithDependencyMetadata{
+		withDepType(child("tk-kid", "open", testNow, ""), "parent-child"),
+	}
+	st.depsDown["tk-icv9"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-slung", "open", testNow, ""), "tracks")}
+
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st}, withGCClient(liveGC()))
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if got := res.Facts.Inflight["tk-slung"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+		t.Fatalf("the join is keyed by the convoy's member, here the anchor's own bead: got %v", res.Facts.Inflight)
+	}
+
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == "tk-slung" })
+	if i < 0 {
+		t.Fatalf("the merge anchor has no tile among %d", len(b.Tiles))
+	}
+	tl := b.Tiles[i]
+	if tl.InProgressLive != 1 || tl.InFlight != 1 || tl.Stranded {
+		t.Errorf("the anchor's own live molecule counts on its tile: in_progress_live=%d in_flight=%d stranded=%v (want 1, 1, false)",
+			tl.InProgressLive, tl.InFlight, tl.Stranded)
 	}
 }
 

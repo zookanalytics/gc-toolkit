@@ -52,6 +52,13 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; exit 1; }
 
+# The one definition of the standing kinds, shared with liveness-sweep.sh, the
+# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
+# classify block splices in.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=standing-kinds.sh
+. "$HERE/standing-kinds.sh" || { echo "liveness-recheck: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -198,9 +205,9 @@ CENSUS=$(jq -n \
     --arg demand_state "$DEMAND_STATE" '
   def meta: (.metadata // {});
   def mv($k): ((meta[$k] // "") | tostring);
-  # Standing-record idioms (never claimable, never close) — the SAME list as
-  # standing_kinds in liveness-sweep.sh; liveness-recheck.test.sh pins the pair.
-  def standing_kinds: ["triage-subject", "feedback-pattern"];
+  # Standing-record idioms (never claimable, never close): standing_kinds,
+  # from standing-kinds.sh, the list liveness-sweep.sh classifies by.
+  '"$STANDING_KINDS_JQ"'
   (($beadfile[0] // []) | map({key: .id, value: .}) | from_entries) as $by
   | (if $ready == null then null
      else ($ready | map({key: ., value: true}) | from_entries) end) as $readyset
@@ -215,10 +222,14 @@ CENSUS=$(jq -n \
                      + (if ($b | mv("merge_result")) != "" then ["merge_result=" + ($b | mv("merge_result"))] else [] end)
                      + (if ($b | mv("pr_number"))   != "" then ["pr=" + ($b | mv("pr_number"))] else [] end))
                     | join("  ")}
-         elif ((($b.assignee // "") != "") or (($b | mv("gc.routed_to")) != "")) then
+         # A work bead under execution carries gc.execution_routed_to while
+         # assignee and gc.routed_to are empty, so a worked test on those two
+         # alone misreads in-flight work as idle and a sitting re-dispatches it.
+         elif ((($b.assignee // "") != "") or (($b | mv("gc.routed_to")) != "") or (($b | mv("gc.execution_routed_to")) != "")) then
            {verdict: "worked",
             detail: ((if ($b.assignee // "") != "" then ["assignee=" + $b.assignee] else [] end)
-                     + (if ($b | mv("gc.routed_to")) != "" then ["routed_to=" + ($b | mv("gc.routed_to"))] else [] end))
+                     + (if ($b | mv("gc.routed_to")) != "" then ["routed_to=" + ($b | mv("gc.routed_to"))] else [] end)
+                     + (if ($b | mv("gc.execution_routed_to")) != "" then ["execution_routed_to=" + ($b | mv("gc.execution_routed_to"))] else [] end))
                     | join("  ")}
          elif ((standing_kinds | index($b | mv("task_kind"))) != null) then
            {verdict: "standing",

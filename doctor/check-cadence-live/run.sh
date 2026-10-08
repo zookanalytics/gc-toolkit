@@ -7,11 +7,15 @@
 # the history read is LOAD-BEARING: any positive limit returns city-store rows
 # only under a RIG column, so the answer looks city-wide and is not.
 # Condition-triggered orders (no interval) get the registration arm alone.
-# `gc order list` omits disabled orders, so a disabled clock presents as a
-# missing registration — the right thing to say about it either way.
-# A third arm asks whether the DEPLOYED gctk binary is the one this checkout
-# describes: the cadence's data plane is compiled now, so orders that fire on
-# schedule can still be running logic several commits old.
+# `gc order list` omits orders disabled in city.toml (an `[[orders.overrides]]`
+# `enabled = false`, or an `[orders] skip` entry), so the registration arm reads
+# city.toml and reports a documented disable as a NOTE: a missing registration
+# the config does not explain stays an error, and a stopped clock (arm 2) keeps
+# its own error rather than being buried beside an intended disable.
+# A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
+# the one this checkout describes: lifecycle.sh execs it and has no other
+# implementation, and orders that fire on schedule can still be running logic
+# several commits old.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -110,6 +114,48 @@ else
 fi
 is_suspended() { [ -n "$suspended_rigs" ] && printf '%s\n' "$suspended_rigs" | grep -qxF "$1"; }
 
+# Orders disabled in city.toml are absent from `gc order list`, so the
+# registration arm would read a deliberate disable as a missing registration.
+# Collect the (name, rig) pairs city.toml disables — an `[[orders.overrides]]`
+# block with `enabled = false` (its `rig`, or `*` when unscoped) or an
+# `[orders] skip` entry (city-wide) — so the arm reports a match as a NOTE, not
+# an error. No readable city config (the doctor runner passes GC_CITY_PATH)
+# leaves the set empty and every missing registration a finding, as before.
+city_root="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+disabled_specs=""
+if [ -n "$city_root" ] && [ -f "$city_root/city.toml" ]; then
+    disabled_specs=$(awk '
+        function flush() {
+            if (ovr && name != "" && enabled == "false") print name "\t" (rig == "" ? "*" : rig)
+            ovr = 0; name = ""; rig = ""; enabled = ""
+        }
+        /^[[:space:]]*\[\[orders\.overrides\]\]/ { flush(); ovr = 1; sec = "ovr";    next }
+        /^[[:space:]]*\[orders\]/                { flush();          sec = "orders"; next }
+        /^[[:space:]]*\[/                        { flush();          sec = "other";  next }
+        sec == "orders" && /^[[:space:]]*skip[[:space:]]*=/ {
+            line = $0
+            while (match(line, /"[^"]*"/)) {
+                s = substr(line, RSTART + 1, RLENGTH - 2)
+                if (s != "") print s "\t*"
+                line = substr(line, RSTART + RLENGTH)
+            }
+            next
+        }
+        ovr && /^[[:space:]]*name[[:space:]]*=/    { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); name = v;    next }
+        ovr && /^[[:space:]]*rig[[:space:]]*=/     { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); rig = v;     next }
+        ovr && /^[[:space:]]*enabled[[:space:]]*=/ { v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v); enabled = v; next }
+        END { flush() }
+    ' "$city_root/city.toml" 2>/dev/null)
+fi
+# True when city.toml explains a missing registration: the order carries a
+# deliberate disable for this rig, or an unscoped one. rig="" asks the city-wide
+# question, which only an unscoped (`*`) disable answers.
+is_disabled() {
+    [ -n "$disabled_specs" ] || return 1
+    printf '%s\n' "$disabled_specs" | awk -F'\t' -v n="$1" -v r="$2" '
+        $1 == n && ($2 == "*" || $2 == r) { hit = 1 } END { exit hit ? 0 : 1 }'
+}
+
 while IFS=$'\t' read -r name secs scope; do
     [ -n "$name" ] || continue
     # Rig-bound registrations by name; a city registration has rig == "" and
@@ -127,12 +173,21 @@ while IFS=$'\t' read -r name secs scope; do
         fi
         while read -r rig; do
             [ -n "$rig" ] || continue
-            printf '%s\n' "$reg_rigs" | grep -qxF "$rig" \
-                || errors+=("$name: rig $rig imports this pack but has NO registration for this order — its pass never runs there (a city.toml enabled=false override presents the same way)")
+            printf '%s\n' "$reg_rigs" | grep -qxF "$rig" && continue
+            if is_disabled "$name" "$rig"; then
+                notes+=("$name: deliberately disabled on rig $rig (city.toml enabled=false or skip) — its pass is intentionally not running there")
+            else
+                errors+=("$name: rig $rig imports this pack but has NO registration for this order — its pass never runs there")
+            fi
         done <<< "$pack_rigs"
     else
-        [ "${reg_count:-0}" -gt 0 ] 2>/dev/null \
-            || errors+=("$name: scope=\"$scope\" order has NO live registration anywhere — its pass never runs (a city.toml enabled=false override presents the same way)")
+        if [ "${reg_count:-0}" -gt 0 ] 2>/dev/null; then
+            :
+        elif is_disabled "$name" ""; then
+            notes+=("$name: deliberately disabled (city.toml enabled=false or skip) — its pass is intentionally not running")
+        else
+            errors+=("$name: scope=\"$scope\" order has NO live registration anywhere — its pass never runs")
+        fi
     fi
 
     # Arm 2 — fired within max(3×interval, 15m). Condition orders opt out.
@@ -177,6 +232,10 @@ done <<< "$order_rows"
 # A mismatch WARNS rather than errors. The build order has minutes of lag by
 # design and the state self-heals on the next tick; what an operator needs is to
 # see it, and the board's PACK row is where a persistent one shows up.
+#
+# A MISSING binary is an error, like an order that never runs: lifecycle.sh has
+# nothing else to exec, so every lifecycle transition is refused until the
+# gctk-build order publishes one.
 gctk_bin="${GCTK_BIN:-}"
 if [ -z "$gctk_bin" ]; then
     # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
@@ -192,8 +251,10 @@ fi
 # instead, and the subtree that commit holds is the comparable identity.
 gctk_mod="$dir/services/gctk"
 tree_rev=$(git -C "$gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)
-if [ -z "$gctk_bin" ] || [ ! -x "$gctk_bin" ]; then
-    notes+=("gctk: no binary deployed — the cadence is running the shell fallbacks, which is the supported state until the last port lands")
+if [ -z "$gctk_bin" ]; then
+    warnings+=("gctk: no city named (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT) and no GCTK_BIN — the deployed binary was NOT checked")
+elif [ ! -x "$gctk_bin" ]; then
+    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh execs it and has no other implementation, so every lifecycle transition is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
 elif [ -z "$tree_rev" ]; then
     warnings+=("gctk: cannot read this checkout's services/gctk revision (\`git -C $gctk_mod rev-parse HEAD:./\`) — the deployed binary cannot be compared against it")
 else
@@ -235,6 +296,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every shipped order is registered and fired inside its window"
+echo "OK: every shipped order is registered and fired inside its window, or deliberately disabled"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

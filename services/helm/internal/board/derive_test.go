@@ -2747,9 +2747,10 @@ func TestDemandBlockerIsNotProgressing(t *testing.T) {
 }
 
 // TestApprovalClauseIsTotalOverThePosture. The mapping has to cover every value
-// pr-facts.sh can record: a partial one leaves the rest to be invented, and
-// `not_required` in particular has to be reachable from an ordinary row, or the
-// coverage sentence never clears for a repository with no protection rule.
+// pr-facts.sh can record: a partial one leaves the rest to be invented. Under the
+// universal approval rule only `approved` is met; every other posture, `none`
+// included, owes the approval, so none renders as a merge GitHub or the city's
+// own rule will let through.
 func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 	at := fixtureNow.Add(-5 * time.Hour)
 	cases := []struct {
@@ -2763,8 +2764,10 @@ func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 		{postureChangesRequested, ApprovalRequired, true,
 			"GitHub keeps the veto standing across pushes; in the settled tail the operator clears it by re-reviewing"},
 		{postureApproved, ApprovalMet, false, "approved"},
-		{postureCommented, ApprovalNotRequired, false, "a comment-only review does not gate the merge"},
-		{postureNone, ApprovalNotRequired, false, "no protection rule and no review"},
+		{postureCommented, ApprovalRequired, true,
+			"a comment-only review has not approved, and approval is universal — the merge still owes one"},
+		{postureNone, ApprovalRequired, true,
+			"no reviewDecision (an integration/* base, or a repo with no required-review rule) still owes the universal approval"},
 	}
 	for _, c := range cases {
 		t.Run(c.posture, func(t *testing.T) {
@@ -2928,7 +2931,7 @@ func TestConversationAxisIsHonestlyUnknown(t *testing.T) {
 	b := BuildBoard([]Anchor{
 		mergeAnchor("tk-c", map[string]string{
 			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
-			"pr_posture": dated(postureNone, headLive, fixtureNow),
+			"pr_posture": dated(postureApproved, headLive, fixtureNow),
 		}),
 	}, fixtureNow, false, nil, Facts{})
 
@@ -2936,8 +2939,8 @@ func TestConversationAxisIsHonestlyUnknown(t *testing.T) {
 	if tile.PRConversation != ConversationUnknown {
 		t.Errorf("pr_conversation = %q, want unknown in this phase", tile.PRConversation)
 	}
-	// This row is settled, approved-not-required and owed by nobody. It is
-	// still not an all-clear, because where the conversation stands is unread.
+	// This row is settled and its approval is met, so nobody is owed a move on it.
+	// It is still not an all-clear, because where the conversation stands is unread.
 	if tile.Owed {
 		t.Error("nothing here makes the row owed")
 	}
@@ -3187,5 +3190,50 @@ func TestDemandFoldYieldsToLiveWork(t *testing.T) {
 	}
 	if idle.Needs != "decide the layout" {
 		t.Errorf("the demand's ask becomes the subject's needs: %q", idle.Needs)
+	}
+}
+
+// A recommendation row carries the first-reaction card to the operator's accept
+// point. When a subject is acceptable — a recommended formula plus an open,
+// un-engaged visit — its notes (the Proposal and Decision-needed an operator
+// weighs) reach the wire as Tile.Recommendation, trimmed but with the card's
+// section structure intact. Off an acceptable row the field stays null, so the
+// wire never carries every bead's notes.
+func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
+	const card = "## Proposal\nDo the thing.\n\n## Decision needed\nAccept or redirect."
+	subject := func(id string) Anchor {
+		return Anchor{
+			ID: id, Title: id, Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata: map[string]string{"gc.recommended_formula": "mol-polecat-work"},
+			Notes:    "\n\n" + card + "\n\n",
+		}
+	}
+	openVisit := func(id string) Facts {
+		return Facts{Sittings: []Sitting{{Subject: id, Status: "open"}}}
+	}
+
+	// Acceptable row: the card reaches the wire, trimmed, structure intact.
+	tile := computeTile(subject("tk-rec"), fixtureNow, openVisit("tk-rec"))
+	if !tile.Acceptable {
+		t.Fatal("precondition: a recommended formula + open un-engaged visit is acceptable")
+	}
+	if tile.Recommendation == nil {
+		t.Fatal("an acceptable row carries its first-reaction card as recommendation")
+	}
+	if *tile.Recommendation != card {
+		t.Errorf("recommendation is the notes, trimmed, card structure intact:\n got %q\nwant %q", *tile.Recommendation, card)
+	}
+
+	// Same notes, but no open visit → not acceptable → no card on the wire.
+	if got := computeTile(subject("tk-rec"), fixtureNow, Facts{}).Recommendation; got != nil {
+		t.Errorf("off an acceptable row the wire carries no card: got %q", *got)
+	}
+
+	// Acceptable, but whitespace-only notes → null, never an empty string.
+	empty := subject("tk-rec")
+	empty.Notes = "   \n"
+	if got := computeTile(empty, fixtureNow, openVisit("tk-rec")).Recommendation; got != nil {
+		t.Errorf("whitespace-only notes is null, not an empty recommendation: got %q", *got)
 	}
 }

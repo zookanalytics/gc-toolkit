@@ -94,6 +94,22 @@ case "$1 ${2:-}" in
     _live="${LIVE_SITTINGS-$VIS_OWNER}"
     jq -n --arg live "$_live" \
       '{sessions:[ $live | split(" ")[] | select(. != "") | {session_name:., name:., id:., state:"running", closed:false} ]}' ;;
+  "agent list")
+    # The import-resolved roster rig_carries_converse reads — capability comes
+    # from here, NOT from a glob of $RIG_PATH's checkout. Default: gc-toolkit
+    # carries converse (base + variants), so engage's converse guard passes.
+    # $NO_CONVERSE drops the converse entries (the roster shows the rig without
+    # converse — an HQ root, or a rig that does not import the pack); it keeps a
+    # proactive entry to prove the guard is converse-specific. $ROSTER_BROKEN
+    # fails the listing and $ROSTER_MALFORMED prints non-roster JSON, both to
+    # exercise the fail-open path.
+    if [ -n "${ROSTER_BROKEN:-}" ]; then echo "agent list: data plane down" >&2; exit 1; fi
+    if [ -n "${ROSTER_MALFORMED:-}" ]; then printf '{"not":"a roster"}\n'; exit 0; fi
+    if [ -n "${NO_CONVERSE:-}" ]; then
+      jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.proactive"}]}'
+    else
+      jq -n '{agents:[ "gc-toolkit/gc-toolkit.converse","gc-toolkit/gc-toolkit.converse-opus","gc-toolkit/gc-toolkit.converse-fable","gc-toolkit/gc-toolkit.converse-codex" | {qualified_name:.} ]}'
+    fi ;;
   "bd show")
     id="$3"
     if [ "$id" = "tk-vis" ]; then
@@ -183,7 +199,16 @@ case "$1 ${2:-}" in
       [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ASSIGNEE" ;;
     esac ;;
   "bd create")
-    printf 'bd create %s\n' "$*" >> "$CALLS"; jq -n '{id:"tk-vis"}' ;;
+    printf 'bd create %s\n' "$*" >> "$CALLS"
+    # --new-subject creates the SUBJECT bead with --metadata (and --db); cmd_open
+    # creates the VISIT with neither. Distinguish so each returns its own id.
+    # $SUBJ_CREATE_FAIL makes the subject create fail (bare error object, no id).
+    case "$*" in
+      *--metadata*)
+        if [ -n "${SUBJ_CREATE_FAIL:-}" ]; then jq -n '{error:"store write refused"}'
+        else jq -n --arg i "${NEW_SUBJECT_ID:-tk-newsubj}" '{id:$i}'; fi ;;
+      *) jq -n '{id:"tk-vis"}' ;;
+    esac ;;
   "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS"
               # engage probes the visit's blockers (dep list --direction=down)
               # before spawning: default none. $VIS_BLOCKERS injects OPEN "blocks"
@@ -210,13 +235,15 @@ mkdir -p "$TMP/agents/converse-opus" "$TMP/agents/converse-fable" \
          "$TMP/agents/converse-codex" "$TMP/agents/converse"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
-# The subject rig's checkout, which engage's converse-template guard globs for
-# converse-<model> templates ($path/agents/converse-*). $TMP/rig carries them, so
-# the default cases pass the guard; $TMP/rig-bare is a rig checkout with none, for
-# the refusal case. Distinct from GC_HELM_AGENTS_DIR above (the pack's own
-# model-menu dir).
+# The subject rig's checkout. Converse CAPABILITY now comes from the resolved
+# roster (gc agent list), not a glob of this tree, so these converse-* dirs no
+# longer gate engage — they stay only as a realistic checkout. $TMP/rig-bare is a
+# checkout with NO converse templates but a .beads ledger: the importer case
+# proves engage still proceeds from it when the roster registers converse.
+# Distinct from GC_HELM_AGENTS_DIR above (the pack's own model-menu dir).
 mkdir -p "$TMP/rig/agents/converse-opus" "$TMP/rig/agents/converse-fable" \
-         "$TMP/rig/agents/converse-codex" "$TMP/rig-bare"
+         "$TMP/rig/agents/converse-codex" "$TMP/rig/.beads" \
+         "$TMP/rig-bare" "$TMP/rig-bare/.beads"
 export RIG_PATH="$TMP/rig"
 
 # run_engage <bead> [extra-args...] -> RC/OUT, with per-case env preset by caller.
@@ -574,20 +601,37 @@ eq "$RC" 4 "(NORIG) an unknown prefix exits 4"
 has "$OUT" "matches no rig" "(NORIG) …saying so"
 hasnt "$CALLED" "session new" "(NORIG) …and spawns nothing"
 
-echo "# a subject whose rig carries no converse template is refused with no side effect"
-# An HQ / city-store bead resolves to a rig checkout that carries no
-# converse-<model> template, so no converse sitting could spawn there. engage
-# refuses BEFORE it files a visit or exports GC_RIG, rather than half-acting and
-# failing at the spawn. $TMP/rig-bare is such a checkout (no agents/converse-*).
+echo "# a subject whose rig carries no converse is refused with no side effect"
+# An HQ / city-store root carries no converse in the resolved roster, so no
+# converse sitting could spawn there. engage refuses BEFORE it files a visit or
+# exports GC_RIG, rather than half-acting and failing at the spawn. Capability is
+# read from the roster (gc agent list), not the checkout — $NO_CONVERSE makes the
+# roster show gc-toolkit without converse (a proactive-only entry remains, to
+# prove the guard is converse-specific).
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
-export RIG_PATH="$TMP/rig-bare"
+export NO_CONVERSE=1
 printf 'open' > "$VIS_STATUS"
 run_engage tk-vis --no-attach
-eq "$RC" 4 "(NOCONVERSE) a rig with no converse template exits 4"
+eq "$RC" 4 "(NOCONVERSE) a rig with no converse exits 4"
 has "$OUT" "carries no converse template" "(NOCONVERSE) …saying why"
 hasnt "$CALLED" "session new" "(NOCONVERSE) …spawning nothing"
 hasnt "$CALLED" "bd create" "(NOCONVERSE) …filing no visit"
 hasnt "$CALLED" "bd update" "(NOCONVERSE) …binding nothing"
+unset NO_CONVERSE
+
+echo "# an importer whose CHECKOUT holds no converse template is still engageable (roster-sourced)"
+# The tk-353e79 regression: capability must come from the import-resolved roster,
+# not a glob of the rig's checkout. Only the pack-source rig keeps agents/converse-*
+# in its tree; every importer obtains converse through the roster. $TMP/rig-bare is
+# a checkout with no converse templates, yet the default roster registers converse
+# for gc-toolkit — so engage clears the converse guard and spawns, where the old
+# glob predicate would have refused.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+export RIG_PATH="$TMP/rig-bare"
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(IMPORTER) an importer with converse in the roster but not the checkout engages"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IMPORTER) …spawning the converse sitting"
 export RIG_PATH="$TMP/rig"
 
 echo "# attach behaviour: default attaches, --no-attach does not"
@@ -886,6 +930,105 @@ run_engage tk-subj --reason x --template discuss-broadly --no-input --no-attach
 eq "$RC" 2 "(IA-REASON-TEMPLATE) --reason and --template together exit 2"
 has "$OUT" "both set the opening message" "(IA-REASON-TEMPLATE) …saying why"
 hasnt "$CALLED" "bd create" "(IA-REASON-TEMPLATE) …and nothing filed"
+
+echo "# --new-subject: file a fresh marked subject in a chosen rig, then engage it"
+# One-shot: --rig names the rig, the positional is the subject title. The subject
+# is created MARKED (gc.reaction_owned=1 + gc.origin=operator) in that rig's
+# .beads store, then the ONE visit is filed and a sitting spawned. The marker is
+# what keeps the async first-reaction/proactive worker from filing a second visit.
+export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage "ship the new intake flow" --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 0 "(NEWSUBJ) --new-subject --rig --no-input exits 0"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ) the subject is created with the gc.reaction_owned marker"
+has "$SUBJ_CREATE" "gc.origin" "(NEWSUBJ) …and gc.origin=operator (honest origin; the force-to-visit invariant is preserved)"
+has "$SUBJ_CREATE" "--db $TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
+has "$SUBJ_CREATE" "ship the new intake flow" "(NEWSUBJ) …titled with the subject text"
+has "$OUT" "filed subject tk-newsubj in rig 'gc-toolkit'" "(NEWSUBJ) reports the filed subject"
+has "$CALLED" "session new converse-opus --alias tk-vis --no-attach" "(NEWSUBJ) then engages the one visit it filed"
+# The title doubles as the opener when no --reason/--template is given: the visit
+# cmd_open files carries it (visit title tail is the opener).
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+has "$VISIT_CREATE" "ship the new intake flow" "(NEWSUBJ-OPENER) the title doubles as the visit's opener"
+# The marker outlives a SUCCESSFUL engage (it is what stands the async worker
+# down); the abort backstop must be disarmed once the visit is filed, so a clean
+# engage never revokes it. (The disarm's control; its arm is NEWSUBJ-ABORT below.)
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ) a successful engage keeps the marker — the backstop is disarmed once the visit is filed"
+
+echo "# --new-subject one-shot without --rig is refused (no id prefix to derive a rig)"
+export BEAD_KIND=task
+run_engage "some topic" --new-subject --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-NORIG) --new-subject --no-input without --rig exits 2"
+has "$OUT" "needs a rig" "(NEWSUBJ-NORIG) …naming the fault"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-NORIG) …and no subject was created"
+
+echo "# --new-subject and --subject are mutually exclusive"
+run_engage --new-subject --subject tk-subj --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-CONFLICT) --new-subject with --subject exits 2"
+has "$OUT" "pass only one" "(NEWSUBJ-CONFLICT) …saying why"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-CONFLICT) …and nothing created"
+
+echo "# --rig without --new-subject is refused (an existing subject's rig comes from its id)"
+export BEAD_KIND=task
+run_engage tk-subj --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-RIG-ALONE) --rig without --new-subject exits 2"
+has "$OUT" "applies only with --new-subject" "(NEWSUBJ-RIG-ALONE) …naming the fault"
+
+echo "# --new-subject with an unknown rig is refused before any create"
+run_engage "x" --new-subject --rig nope --no-input --no-attach
+eq "$RC" 4 "(NEWSUBJ-BADRIG) an unknown --rig exits 4"
+has "$OUT" "matches no rig" "(NEWSUBJ-BADRIG) …naming the unknown rig"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-BADRIG) …and nothing created"
+
+echo "# --new-subject one-shot with no subject text is refused"
+run_engage --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-NOTITLE) a missing subject text exits 2"
+has "$OUT" "needs a subject" "(NEWSUBJ-NOTITLE) …naming the fault"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-NOTITLE) …and nothing created"
+
+echo "# --new-subject whose subject create fails aborts without spawning"
+export SUBJ_CREATE_FAIL=1
+run_engage "doomed subject" --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 4 "(NEWSUBJ-CREATEFAIL) a failed subject create exits 4"
+has "$OUT" "could not create the subject" "(NEWSUBJ-CREATEFAIL) …naming the fault"
+hasnt "$CALLED" "session new" "(NEWSUBJ-CREATEFAIL) …and no sitting spawned"
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-CREATEFAIL) …and no cleanup runs — nothing was created to clean up"
+unset SUBJ_CREATE_FAIL
+
+echo "# --new-subject whose post-create gate aborts still files the subject's one visit"
+# The subject is created MARKED before the gates that can still refuse the live
+# engage (here an unknown --model, like the suspended/not-running rig and unknown
+# --template gates). An abort there must not leave the operator-origin subject with
+# no visit: the async worker will not supply one (gc-proactive drops a marked bead,
+# mol-first-reaction consumes-and-ignores it, and even unmarked a first reaction
+# does not force a visit for gc.origin=operator). So the backstop files the one
+# parked visit itself (via cmd_open, carrying the opener) and LEAVES the marker,
+# exactly as a successful engage does, so the async worker still stands down.
+export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-ABORT) the subject was already created with the marker (the abort is post-create)"
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+has "$VISIT_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one parked visit, carrying its opener"
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-ABORT) …and LEAVES the marker, exactly as a successful engage does"
+has "$OUT" "parked on the helm board" "(NEWSUBJ-ABORT) …and tells the operator the visit is parked for them to engage"
+hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
+
+echo "# --new-subject interactive: a lone converse rig auto-selects; prompts title, then model"
+# One converse-capable rig in the stub, so the rig step auto-selects (reads no
+# input); the answers then feed the title prompt and the model prompt (Enter=Opus).
+export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage_tty 'draft the Q3 plan\n\n' --new-subject --no-attach
+eq "$RC" 0 "(NEWSUBJ-IA) interactive --new-subject exits 0"
+has "$OUT" "the only converse-capable rig" "(NEWSUBJ-IA) the lone converse rig auto-selects"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+has "$SUBJ_CREATE" "draft the Q3 plan" "(NEWSUBJ-IA) the typed title becomes the subject"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-IA) …created with the marker"
+has "$CALLED" "session new converse-opus" "(NEWSUBJ-IA) …then a sitting spawns (Opus, the Enter default)"
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"

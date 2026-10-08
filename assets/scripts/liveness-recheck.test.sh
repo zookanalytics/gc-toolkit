@@ -33,9 +33,10 @@
 #   2. THE WIRING that makes it fire. liveness-sweep.sh stamps the id lists
 #      and the visit.recheck PATH (covered by liveness-sweep.test.sh); here the
 #      converse loop's claim-time hook is asserted to read `visit.recheck` as a
-#      PATH and run it, never to eval a command string, and the stamp key /
-#      standing-kinds list are pinned against liveness-sweep.sh so the writer
-#      and the reader cannot drift apart.
+#      PATH and run it, never to eval a command string, and the stamp key is
+#      pinned against liveness-sweep.sh so the writer and the reader cannot
+#      drift apart. Every kind in the shared standing-kinds list re-checks as
+#      standing.
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no gh.
 set -u
 
@@ -189,6 +190,29 @@ printf '%s' "$T" | grep -q "a sitting ended here" \
     && ok "its bucket says the takeaway is a record, not a wait" \
     || bad "its bucket says the takeaway is a record, not a wait" "no recorded bucket in the report"
 
+echo "── every kind in the shared standing-kinds list re-checks as standing ──"
+# The re-check and liveness-sweep.sh both read their standing kinds from
+# assets/scripts/standing-kinds.sh, so they cannot disagree about which records
+# are held by design. standing-kinds.test.sh asserts that both source it; here
+# each listed kind runs through the re-check itself. The kinds are read from the
+# shared definition, so a kind added there is covered with no edit to this file.
+# shellcheck source=standing-kinds.sh
+. "$ROOT/assets/scripts/standing-kinds.sh"
+KINDS="$(jq -nr "$STANDING_KINDS_JQ"'standing_kinds[]')"
+[ -n "$KINDS" ] && ok "the shared definition lists the standing kinds" \
+    || bad "the shared definition lists the standing kinds" "standing_kinds read back empty"
+SB='[]'; SR='[]'; SIDS=""
+for k in $KINDS; do
+    SB="$(printf '%s' "$SB" | jq -c --argjson b "$(bead "s-$k" open "$(jq -nc --arg k "$k" '{task_kind: $k}')")" '. + [$b]')"
+    SR="$(printf '%s' "$SR" | jq -c --arg id "s-$k" '. + [{id: $id}]')"
+    SIDS="${SIDS:+$SIDS,}s-$k"
+done
+printf '%s' "$SB" > "$STUB_BEADS"; printf '%s' "$SR" > "$STUB_READY"
+C="$("$SCRIPT" --ids "$SIDS" --json 2>/dev/null)"
+for k in $KINDS; do
+    eq "$(verdict_of "$C" "s-$k")" "standing" "a task_kind=$k record re-checks as standing"
+done
+
 echo "── an assignee alone marks a bead worked, and closed beats every other signal ──"
 jq -nc --argjson b "[
   $(bead b-assigned open   '{}')
@@ -198,6 +222,19 @@ jq -nc '[{id:"b-assigned"},{id:"b-cr"}]' > "$STUB_READY"
 C="$("$SCRIPT" --ids "b-assigned,b-cr" --json 2>/dev/null)"
 eq "$(verdict_of "$C" b-assigned)" "worked"   "an assignee alone is enough to read as worked"
 eq "$(verdict_of "$C" b-cr)"       "resolved" "closed outranks a leftover route — the disposition differs"
+
+echo "── a work bead marked only by gc.execution_routed_to reads as worked ──"
+# A slung work bead's claim moves its pool route to gc.execution_routed_to and
+# leaves assignee and gc.routed_to empty. It is unassigned and unblocked, so it
+# stays in the ready set — which is why the miss surfaced as "idle", not
+# "not-ready", and a sitting re-slung work already in flight.
+jq -nc --argjson b "[$(bead b-exec open '{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}')]" '$b' > "$STUB_BEADS"
+jq -nc '[{id:"b-exec"}]' > "$STUB_READY"
+C="$("$SCRIPT" --ids "b-exec" --json 2>/dev/null)"
+eq "$(verdict_of "$C" b-exec)" "worked" "an execution route alone reads as worked, not idle"
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-exec")] | .[0].detail | test("execution_routed_to=gc-toolkit/gc-toolkit.polecat")' >/dev/null 2>&1 \
+    && ok "the worked detail names the execution route" \
+    || bad "the worked detail names the execution route" "$(printf '%s' "$C" | jq -r '[.new[] | select(.id == "b-exec")] | .[0].detail')"
 
 # --- 2. report-don't-hide on every failure path ------------------------------
 echo "── the bead read failing prints NO census (a partial one looks complete) ──"
@@ -365,21 +402,6 @@ echo "── a visit with no stamp runs nothing and says nothing ──"
 jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
 OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 eq "$OUT" "" "an unstamped visit produces no hook output (the ordinary case, not an error)"
-
-echo "── the standing-record list agrees across the sweep and the re-check ──"
-# The other string that has to agree across two files, read out of each side for
-# the same reason as the stamp key above (bead tk-rw2ra). These two cannot share
-# code — one is a jq program inside a TOML formula description, the other this
-# standalone script — and a drifted pair fails INVISIBLY in both directions: the
-# sweep stops filing an idiom the re-check still calls idle, or the re-check
-# holds one the sweep is still filing, and either way the disagreement shows up
-# only as a bead a sitting cannot disposition.
-kinds_of() { sed -n 's/.*def standing_kinds: *\(\[[^]]*\]\);.*/\1/p' "$1" | head -1 | tr -d ' '; }
-F_KINDS="$(kinds_of "$SWEEP")"
-[ -n "$F_KINDS" ] && ok "the sweep names a standing_kinds list" \
-    || bad "the sweep names a standing_kinds list" "no def standing_kinds in $SWEEP"
-eq "$(kinds_of "$SCRIPT")" "$F_KINDS" \
-   "the standing records the sweep excludes are the ones the re-check holds"
 
 echo
 echo "liveness-recheck: $PASS passed, $FAIL failed"

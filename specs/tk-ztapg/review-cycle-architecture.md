@@ -193,8 +193,10 @@ that worker completes, all three are answered.
 | `anchor_bead` | the gating anchor |
 | `finding.lane` | the lane whose review raised it, or `human` |
 | `finding.key` | the lane's name plus a normalized locus and message; the dedup handle |
-| `finding.disposition` | `unvalidated`, `must-fix`, `deferred`, or `declined` |
+| `finding.disposition` | `unvalidated`, `must-fix`, `deferred`, `declined`, or `needs-you` |
 | `finding.source` | `machine:<lane>` or `human:<login>` |
+| `finding.follow_up` | the claimable later-work bead a `deferred` finding filed |
+| `finding.visit` | the open visit a `needs-you` finding filed for the operator |
 
 `finding.key` is what keeps a re-raised objection from becoming a second bead.
 `tk-elc0x` names this shape, and the design it cites is
@@ -222,9 +224,17 @@ only `blocks` as well, but the contrast it draws there is with `tracks` and
 
 | Disposition | Edge | Effect |
 |---|---|---|
-| `must-fix` | anchor `blocks` on the finding | holds the merge and the anchor's close |
-| `deferred` | finding `discovered-from` the anchor | records where it came from, holds nothing |
-| `declined` | none | closed with the validator's reason |
+| `must-fix` | anchor `blocks` on the finding | holds the merge and the anchor's close until the fix unit lands |
+| `deferred` | follow-up `discovered-from` the anchor | finding closed; a claimable follow-up carries the later work |
+| `declined` | none | finding closed with the validator's reason |
+| `needs-you` | none; the finding stays open | a visit carries the operator's decision; the open finding holds the review |
+
+Every ruling ends the finding closed or converts it to a visit. That is the
+invariant this cycle keeps: a ruled finding never stays open holding nothing. A
+`must-fix` closes when its fix unit lands; `deferred` and `declined` close as the
+validator rules them; `needs-you` stays open on purpose, and the open finding is
+what holds its human review changes-requested until the operator rules the visit
+and that ruling re-dispositions the finding.
 
 A `must-fix` blocker needs no new merge code. `merge.sh` already reads every
 live `blocks` blocker of the anchor into its in-flight hold, through a
@@ -235,10 +245,16 @@ therefore stops the anchor closing as well as the PR merging, which is what
 makes the merge predicate structural instead of a rule each reader has to
 remember.
 
-`deferred` needs an edge outside both sets. `merge.sh` reads `blocks` downward
-and `parent-child` upward, and `discovered-from` is neither ready-blocking nor
-read by either probe, so a deferred finding stays open across the merge holding
-nothing.
+`deferred` is a real objection not fixed in this PR, so it becomes tracked
+later-work. `finding.sh` files a follow-up bead carrying the objection and the
+deferral reason, hangs the `discovered-from` edge from that follow-up to the
+anchor, records the follow-up id as the reply the raiser's thread receives, and
+closes the finding. `merge.sh` reads `blocks` downward and `parent-child`
+upward, so `discovered-from` is neither ready-blocking nor read by either probe:
+it names where the follow-up came from and holds nothing. The follow-up — a
+claimable bead, not the finding — is what outlives the merge; the finding,
+answered by that follow-up and the reply posted to its raiser, closes, which
+lets its human review auto-dismiss once every finding clears.
 
 A `declined` finding raised by a human owes one thing a machine's does not: the
 raiser hears why. The validator rules it on the merits like any finding — the
@@ -251,6 +267,17 @@ finding closes, so the content key re-adopts the still-standing objection as a
 fresh finding, which re-opens the human validation pass and re-holds the anchor.
 A human objection is weighed and answered, never held as one only its raiser may
 withdraw.
+
+`needs-you` is the ruling for a human comment the validator cannot judge — one
+that turns on product intent, a business fact, or a call that is the operator's
+to make, not one the pass can weigh against the diff. `finding.sh` files a visit
+(board-visible, routed to the operator), records its id as the reply the raiser's
+thread receives, and leaves the finding open. The open finding holds the human
+review changes-requested, so the merge waits — but visibly, as a visit on the
+board and a comment on the PR, never a silent park. The operator rules the visit
+and that ruling re-dispositions the finding: a `must-fix` to fix, a `declined` to
+overrule, a `deferred` to track for later. It is the escape hatch the three
+merits-rulings leave open, because not every objection is the pass's to settle.
 
 The earlier design's mistake was the shape, not the edge. It attached the
 finding to the anchor with `parent-child`, which states decomposition and
@@ -287,6 +314,16 @@ Closing runs the edges backwards. When the fix unit closes, the findings it
 blocked become unblocked, and `gate-ensure.sh`, which already owns lane state
 and computes quiescence, closes each finding whose blockers have all closed.
 The lane leaves `fixing` when no must-fix finding on this lane is open.
+
+A fix unit closes when its addressing action completes, and the finding
+resolves off that one signal regardless of the form the fix takes. A code fix
+completes by landing: merge-push closes the fix unit when its commit reaches
+the branch. A PR artifact completes by delivery: `demo-deliver.sh` closes the
+fix unit on a successful attach, so a delivered demo is a landed fix unit the
+same way a merged commit is. An artifact lands no commit. The fix unit
+therefore carries the delivery's durable evidence, the attached comment's URL,
+and the write-back cites that artifact in place of a head commit, so a resolved
+thread never claims a commit the fix did not make.
 
 Today's rework child is already a fix unit in this shape. `signoff.sh` writes
 it a `blocks` edge onto the anchor and routes it to the fix-target pool, while
@@ -344,18 +381,67 @@ validator's prompt would be neither.
 The value of that variable is deliberately out of scope. Build the surface,
 leave the tuning.
 
+### Stage-3 resolution: one owner, no proxy
+
+Ruling a finding's disposition is the validator's act; resolving a finding —
+closing it once it has been addressed — is `gate-ensure.sh`'s. It is the single
+owner of stage-3 resolution, resolving every finding that reached stage 1 from one
+normalized signal, the same way regardless of the item's form, through three
+derivations:
+
+- **Addressed.** A finding whose fix unit has closed resolves. The resolver reads
+  the fix unit's closed status without caring how it closed, so every addressing
+  form that closes the fix unit (see *The fix unit*) resolves its finding
+  identically.
+- **Moot.** A still-unvalidated finding on a lane that re-reviewed clean resolves
+  as moot. The signal is LOCAL backing — a non-superseded approve review bead for
+  the lane, read with `lane-state.sh green --no-remote` — never the operator's
+  GitHub approval. A human approval settles a lane for the merge, but it is the
+  human's reaction to the work, not the addressing of a finding, so the moot
+  derivation excludes the GitHub-approval fallback (see below).
+- **Orphaned on close.** A still-unvalidated finding whose anchor has left the open
+  set — merged, disposed, closed by hand — resolves as moot. `gate-ensure.sh` reads
+  open anchors only, so once the anchor closes no pass revisits it, the finding can
+  no longer be validated (no validator runs on closed work), and it would otherwise
+  sit open forever. The signal is the anchor being gone, swept once per pass across
+  every open unvalidated finding, never any approve.
+
+No finding resolves on a proxy for the addressing action. A re-approval is the
+human's reaction to a fix, not the fix itself, so it resolves no finding; the
+operator's GitHub approval is a review the lane reads for green at merge, never a
+per-finding resolution signal — which is why the moot derivation keys on local
+backing and excludes the GitHub-approval fallback. The orphaned-on-close derivation
+is no exception: it keys on the anchor's lifecycle ending, a fact independent of any
+approval. All three derivations live in `gate-ensure.sh`, the reader that computes
+lane state and quiescence, so the one component that holds the re-gate is the one
+that releases it and the two cannot disagree.
+
 ## Quiescence
 
 **No full review is dispatched while anything is acting on the anchor.**
 Concretely, a lane may not be dispatched while any of these hold:
 
-- a must-fix finding on this anchor is open, on any lane
+- the fix unit answering an open must-fix finding on this anchor is in flight, on any lane
 - a fix unit resolving a finding on this anchor is in flight
 - a validation pass on this anchor is in flight
 - a full review on this lane is in flight
 
 Every clause is an open-bead query. Quiescence reads no lane marker, so dropping
 the marker leaves it unchanged — it was graph-native already.
+
+The first two clauses read one fact from two sides. The first starts at the
+finding: its live `blocks` blocker, or for a finding whose close-ordering edge
+was missed, the live fix unit on its lane. That covers the fix unit `pr-facts.sh`
+files for a human batch, which the second clause, reading the anchor's
+request-changes rework child, cannot see. The hold names that fix unit.
+
+An open must-fix finding is not itself on the list. It is a demand on the
+anchor, not an actor on it. When no fix unit answers it and no validation pass
+is open, nothing is changing the diff, so the mid-change read the clauses exist
+to prevent cannot happen, and a lane short of green is dispatched, still subject
+to the per-head bar below. The finding still holds the merge through its
+`blocks` edge (the merge predicate's second condition), and the anchor still
+reads `progressing` rather than `settled`.
 
 The fourth clause is what retires the 83: two actors disagreeing about whether
 a review was already out is exactly how the same head got read twice, and one
