@@ -287,5 +287,18 @@ out=$(GC_RECONCILE_BD_CACHE="$TMP/bd-cache" "$SUT" check A26 2>/dev/null); rc=$?
 eq "$rc" 1 "re-assert under the same pass cache sees the visit filed since: exit 1"
 has "$out" "V26" "the re-assert names the visit the cache would have hidden"
 
+# 27. --except-key excepts a visit, so it reaches the open-visit clause only. A
+# stewarded epic whose one visit is excepted is still held until it is ruled
+# close with its outcome, and passes once it is.
+store "[$(epic_bead E27 open '{"epic_hypothesis":"h"}'), $(evisit V27 open E27 dispose-failed.27)]"
+printf 'V27|tracks|E27\n' > "$STUB_DEPS"
+out=$("$SUT" check E27 --except-key dispose-failed.27 2>/dev/null); rc=$?
+eq "$rc" 1 "an unruled epic whose only visit is excepted: exit 1"
+has "$out" "no valid epic_ruling" "the hold is the ruling clause's, not the excepted visit's"
+store "[$(epic_bead E27r open '{"epic_hypothesis":"h","epic_ruling":"close","epic_ruling_reason":"held"}'), $(evisit V27r open E27r dispose-failed.27)]"
+printf 'V27r|tracks|E27r\n' > "$STUB_DEPS"
+out=$("$SUT" check E27r --except-key dispose-failed.27 2>/dev/null); rc=$?
+eq "$rc" 0 "an epic ruled close with its outcome whose only visit is excepted: exit 0"
+
 echo "----- finalize-gate: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

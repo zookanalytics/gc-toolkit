@@ -88,7 +88,9 @@ the epic as an absent ruling does, and so does a value outside the enum. An epic
 with no hypothesis predates the model, and a disposed epic (`gc.superseded_by`)
 carries a recorded terminal reason, so both pass. A non-epic bead is untouched
 ([epic-stewardship.md](epic-stewardship.md)). The clause reads the bead itself
-(`gc bd show`), so that read runs for every finalize, epic or not.
+(`gc bd show`), so that read runs for every finalize, epic or not. The
+`--except-key` exception excepts a visit, so it never releases an epic this
+clause holds.
 
 Neither finalize path wired today reaches an undisposed epic: `merge.sh`
 finalizes merge anchors, and `bead-rehome.sh` stamps the disposition before it
