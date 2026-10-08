@@ -75,7 +75,7 @@ export PATH="$TMP/bin:$PATH"
 export BOOT_HEALTH_CALL_TIMEOUT=0
 
 NOW="$(date +%s)"
-iso() { date -u -d "@$1" '+%Y-%m-%dT%H:%M:%SZ'; }
+iso() { jq -rn --argjson s "$1" '$s | todateiso8601'; }
 wisp() { # $1=status  $2=age seconds
     printf '[{"id":"lx-wisp-t","title":"mol-deacon-patrol","status":"%s","updated_at":"%s"}]' \
         "$1" "$(iso $((NOW - $2)))"
@@ -163,6 +163,15 @@ hasnt "$BODY" "--status=in_progress" \
 run 2 STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
 eq "$(mailed)" yes "absent wisp reports"
 has "$(cat "$TMP/body")" "no live patrol wisp" "absent-wisp text asserts no status"
+
+# The report names the second the episode went cold, as a UTC timestamp. The
+# state is seeded with a known second, so the expected text is fixed here
+# rather than computed the way the script computes it.
+reset
+printf '%s\n' '#boot-health-state-v2' 'pane_hash=' 'cold_since=1791443608' 'last_report=0' > "$TMP/state/state"
+pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+eq "$(grep -cxF '  cold since      2026-10-08T07:13:28Z' "$TMP/body" || true)" 1 \
+   "report names when the episode went cold, as a UTC timestamp"
 
 # --- (e) The wisp survives a flood of unrelated rows. ------------------------
 # --limit=0 lifts the default 50-row cap; the title match keeps the answer to
@@ -350,6 +359,37 @@ noledger_pass
 noledger_pass
 eq "$(mailed)" no "no ledger to pin: declines to report rather than guessing"
 eq "$(grep -c -- '--db' "$TMP/argv" || true)" 0 "no ledger to pin: the query is not even attempted"
+
+# --- (k) Every busy marker reaches grep. -------------------------------------
+# The pane speaks only when the ledger is unreadable, and that path never mails,
+# so a recognized marker shows in the episode clock instead: a readable absent
+# wisp opens the clock, then an unreadable pass over the SAME pane clears it
+# only if the pane reads busy. The ctrl alternative carries the pattern's only
+# braces, and GNU grep reads a broken interval as literal text while still
+# matching the esc form, so the ctrl forms show the whole default reaching grep.
+busy_clears() { # $1=pane, rest=env assignments; yes when the episode cleared
+    local pane="$1"; shift
+    reset
+    pass STUB_PANE="$pane" STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0 "$@"
+    pass STUB_PANE="$pane" STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0 "$@"
+    if [ "$(state_get cold_since)" = 0 ]; then echo yes; else echo no; fi
+}
+for marker in 'esc to interrupt' 'ctrl+c to interrupt' 'ctrl-c to stop'; do
+    eq "$(busy_clears "patrol step ($marker)")" yes "busy marker '$marker' reads busy"
+done
+eq "$(busy_clears 'patrol step (waiting)')" no "a pane with no busy marker leaves the clock standing"
+reset
+hasnt "$(pass_out STUB_WISPS='[]')" "not a valid ERE" "grep accepts the default markers, so no fallback is named"
+
+# An override grep rejects gives way to the default markers, and says so; one
+# grep accepts replaces them.
+eq "$(busy_clears 'patrol step (ctrl+c to interrupt)' BOOT_HEALTH_BUSY='busy (unclosed')" yes \
+   "an override grep rejects gives way to the default markers"
+reset
+has "$(pass_out STUB_WISPS='[]' BOOT_HEALTH_BUSY='busy (unclosed')" "BOOT_HEALTH_BUSY is not a valid ERE" \
+    "an override grep rejects is named"
+eq "$(busy_clears 'patrol step (ctrl+c to interrupt)' BOOT_HEALTH_BUSY='no such marker')" no \
+   "an override grep accepts replaces the default markers"
 
 echo
 echo "boot-health.test.sh: $PASS passed, $FAIL failed"

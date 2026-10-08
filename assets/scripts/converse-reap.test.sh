@@ -4,7 +4,7 @@
 # converse-reap ends a converse sitting once its visit has closed: converse is
 # spawn-on-engagement, the manual session is exempt from every pool backstop, and
 # closing the visit (sign-off or dismiss) does not close the session, so a settled
-# sitting leaks a max_active_sessions slot until this pass closes it.
+# sitting leaks a live session until this pass closes it.
 #
 # Runs the REAL converse-reap.sh with a stubbed `gc` (CONVERSE_REAP_GC) — no live
 # city, sessions, or store. The stub answers `session list` from a fixture file,
@@ -182,7 +182,8 @@ has "$CLOSED" "close s-gone" "UNREADABLE-VISIT: other settled sittings are still
 # --- a session that will not close -------------------------------------------
 # The close is the one operation this order performs, so a session that fails to
 # close is reported on stderr and counted skipped, and must NOT appear among the
-# reaped list on stdout — otherwise the summary would claim a slot it never freed.
+# reaped list on stdout — otherwise the summary would claim a sitting it never
+# closed.
 # stdout and stderr are captured apart: the failure line names the sitting on
 # stderr too, so a combined capture could not tell it from a reaped-list entry.
 build_world

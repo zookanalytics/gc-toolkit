@@ -4,7 +4,8 @@
 # engage is the spawn-on-engagement entry point that replaces the retired
 # converse routed-pool: it spawns a manual converse-<model> sitting, binds the
 # picked visit to that session's runtime NAME (so the session's own
-# `gc hook --claim` adopts it with no pool routing), and attaches.
+# `gc hook --claim` adopts it with no pool routing), and attaches once the
+# reconciler has started it.
 #
 # Runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a stubbed `gc` on
 # PATH — no live city, Dolt, network, or sessions. Covered:
@@ -34,11 +35,26 @@
 #   (CLOSED)  a closed explicit visit is refused before spawning (exit 4)
 #   (BLOCKED) a blocked explicit visit is refused before spawning (exit 4)
 #   (NOSPAWN) a session new that returns no identity aborts without assigning
-#   (RACE)    a bind whose --if-assignee guard is rejected (a concurrent engage
-#             won in the spawn window) does not overwrite the winner, CLOSES the
-#             loser sitting (a suspended one keeps its alias, so the re-run the
-#             message advertises would be refused at `session new`), and exits 4
+#   (TAKEN)   a bind whose --if-assignee guard is rejected (another writer took
+#             or closed the visit in the spawn window) does not overwrite the
+#             holder, CLOSES the sitting it spawned (a suspended one keeps its
+#             alias, so the re-run the message advertises would be refused at
+#             `session new`), and exits 4
+#   (ALIAS)   a spawn refused because a session holds the visit's alias spawns
+#             nothing, waits for the holder's bind and points at the winner, and
+#             names the holder as left over, to close, only after the wait
+#   (RACE-CONCURRENT) two engages of one visit run at once against a stub that
+#             reserves the alias under a lock, as gascity does: one spawns and
+#             binds, and the other spawns nothing and points at the winner
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
+#   (START-*) the attach waits until the sitting's `gc session list` state reads
+#             active, because an attach that reaches a sitting the reconciler
+#             has not started launches it without its prompt. A sitting still
+#             unstarted at GC_HELM_ENGAGE_WAIT_TIMEOUT is left unattached, with
+#             the attach to run later; one that ends first exits 4 at once; a
+#             sitting not yet listed, or a listing that fails, is waited through.
+#             (NOATTACH-*) --no-attach does not wait, and (KICK-AFTER-START) a
+#             codex kick on the attach path follows the wait
 #   (BOUND-EXISTING) engaging a SUBJECT that binds a pre-existing visit names that
 #             visit's subject and offers --reason to open a fresh one instead; an
 #             explicit visit id and a freshly filed visit get no such hint
@@ -72,6 +88,10 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 SNAME="gc-toolkit__converse-1"
 SID="gc-77"
+# A mkdir lock, so two concurrent engages see one atomic check-and-write: the
+# alias reservation below, and the compare-and-swap of a REAL_CAS bd update.
+stub_lock()   { _t=0; until mkdir "$1" 2>/dev/null; do sleep 0.02; _t=$((_t + 1)); [ "$_t" -lt 1500 ] || break; done; }
+stub_unlock() { rmdir "$1" 2>/dev/null || true; }
 case "$1 ${2:-}" in
   "rig list")
     # suspended/running are injected per-case via $RIG_SUSPENDED/$RIG_RUNNING.
@@ -90,10 +110,45 @@ case "$1 ${2:-}" in
     # dead-sitting-reclaim case sets $LIVE_SITTINGS explicitly (space-separated
     # session names; empty = none live, so a bound owner reads as gone).
     # $SESSION_LIST_BROKEN makes the listing FAIL, so the probe fails closed.
+    #
+    # Once `session new` has spawned the sitting, each listing also carries that
+    # sitting's own row, which engage's start wait reads. Its state walks
+    # $START_STATES, one entry per listing, the last repeating: "active" (the
+    # default: the reconciler has started it), start-pending, creating, or a
+    # token. "gone" lists no row, the way a closed session reads from the store;
+    # "blank" lists an empty state, the way it reads from the supervisor; and
+    # "broken" fails the listing.
+    printf 'session list\n' >> "$CALLS"
     if [ -n "${SESSION_LIST_BROKEN:-}" ]; then echo "session list: data plane down" >&2; exit 1; fi
+    _st=""
+    if [ -s "$SPAWNED" ]; then
+      _n=$(( $(cat "$POLLS" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$POLLS"
+      set -- ${START_STATES:-active}
+      [ "$_n" -le $# ] || _n=$#
+      eval "_st=\${$_n}"
+      [ "$_st" = broken ] && { echo "session list: data plane down" >&2; exit 1; }
+    fi
     _live="${LIVE_SITTINGS-$VIS_OWNER}"
-    jq -n --arg live "$_live" \
-      '{sessions:[ $live | split(" ")[] | select(. != "") | {session_name:., name:., id:., state:"running", closed:false} ]}' ;;
+    # $ALIAS_HOLDER adds the sitting that holds tk-vis's alias, stored qualified
+    # the way gascity stores a multi-session template's alias. $ALIAS_DECOYS adds,
+    # ahead of it, an open sitting of ANOTHER visit whose alias shares the prefix
+    # and a CLOSED sitting that once held tk-vis's alias; neither holds it. In
+    # the concurrent race the sittings the stub spawned are listed too.
+    _spawned=""
+    if [ -n "${ALIAS_REGISTRY:-}" ]; then
+      for _f in "$ALIAS_REGISTRY"/held.*; do
+        [ -f "$_f" ] && _spawned="$_spawned $(cat "$_f")=${_f##*/held.}"
+      done
+    fi
+    jq -n --arg live "$_live" --arg st "$_st" --arg sid "$SID" --arg sn "$SNAME" \
+          --arg holder "${ALIAS_HOLDER:-}" --arg decoys "${ALIAS_DECOYS:-}" --arg spawned "$_spawned" \
+      '{sessions:([ $live | split(" ")[] | select(. != "") | {session_name:., name:., id:., state:"running", closed:false} ]
+         + (if $st == "" or $st == "gone" then []
+            else [{id:$sid, session_name:$sn, name:$sn, state:(if $st == "blank" then "" else $st end)}] end)
+         + (if $decoys != "" then [{id:"gc-90", session_name:"s-gc-90", alias:"gc-toolkit/gc-toolkit.tk-vis2", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false},
+                                   {id:"gc-91", session_name:"s-gc-91", alias:"gc-toolkit/gc-toolkit.tk-vis", template:"gc-toolkit/gc-toolkit.converse-opus", state:"closed", closed:true}] else [] end)
+         + (if $holder != "" then [{id:$holder, session_name:("s-" + $holder), name:"gc-toolkit/gc-toolkit.tk-vis", alias:"gc-toolkit/gc-toolkit.tk-vis", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false}] else [] end)
+         + [ $spawned | split(" ")[] | select(. != "") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:("gc-toolkit/gc-toolkit." + .[1]), template:"gc-toolkit/gc-toolkit.converse-opus", state:"creating", closed:false} ])}' ;;
   "agent list")
     # The import-resolved roster rig_carries_converse reads — capability comes
     # from here, NOT from a glob of $RIG_PATH's checkout. Default: gc-toolkit
@@ -113,6 +168,20 @@ case "$1 ${2:-}" in
   "bd show")
     id="$3"
     if [ "$id" = "tk-vis" ]; then
+      # Once a spawn is refused at the alias ($ALIAS_REFUSED exists), the
+      # refused engage polls this visit. The change it waits for lands on the
+      # $AFTER_REFUSAL_READS-th read: a concurrent engage's bind
+      # ($AFTER_REFUSAL_ASSIGNEE) or a status change ($AFTER_REFUSAL_STATUS).
+      # $AFTER_REFUSAL_UNREADABLE makes every read after the refusal fail.
+      if [ -f "$ALIAS_REFUSED" ]; then
+        if [ -n "${AFTER_REFUSAL_UNREADABLE:-}" ]; then echo "bd show: data plane down" >&2; exit 1; fi
+        _reads=$(( $(cat "$ALIAS_REFUSED.reads" 2>/dev/null || echo 0) + 1 ))
+        printf '%s' "$_reads" > "$ALIAS_REFUSED.reads"
+        if [ -n "${AFTER_REFUSAL_READS:-}" ] && [ "$_reads" -ge "$AFTER_REFUSAL_READS" ]; then
+          [ -n "${AFTER_REFUSAL_ASSIGNEE:-}" ] && printf '%s' "$AFTER_REFUSAL_ASSIGNEE" > "$ASSIGNEE"
+          [ -n "${AFTER_REFUSAL_STATUS:-}" ] && printf '%s' "$AFTER_REFUSAL_STATUS" > "$VIS_STATUS"
+        fi
+      fi
       st="$(cat "$VIS_STATUS" 2>/dev/null || echo open)"
       who="$(cat "$ASSIGNEE" 2>/dev/null)"; [ -n "$who" ] || who="$VIS_OWNER"
       # The subject rides on the gc.continuation_group stamp by default. A case may
@@ -153,6 +222,44 @@ case "$1 ${2:-}" in
     # Record the rig context engage supplies: `gc session new` resolves a bare
     # template through GC_DIR/cwd, so engage must point it at the subject's rig.
     printf 'GC_DIR=%s\n' "${GC_DIR-<unset>}" >> "$CALLS"
+    # gascity checks an alias and creates the session holding it inside one
+    # city-wide lock, and refuses an alias an open session holds before creating
+    # anything, on stderr, with the sentinel "session alias already exists" and
+    # the alias in its stored qualified form.
+    if [ -n "${ALIAS_REGISTRY:-}" ]; then
+      # The concurrent race. Each spawn first waits at a barrier until
+      # $SPAWN_BARRIER spawns have arrived, so every engage has passed its
+      # pre-spawn guards before any reserves; then the alias is checked and
+      # taken under one lock. The first spawn holds it, and records how many
+      # spawns had arrived when it reserved; a later one is refused.
+      _al=$(printf '%s\n' "$*" | sed -n 's/.* --alias \([^ ]*\).*/\1/p')
+      stub_lock "$ALIAS_REGISTRY/lock"
+      _arr=$(( $(cat "$ALIAS_REGISTRY/arrivals" 2>/dev/null || echo 0) + 1 ))
+      printf '%s' "$_arr" > "$ALIAS_REGISTRY/arrivals"
+      stub_unlock "$ALIAS_REGISTRY/lock"
+      _i=0
+      while [ "$(cat "$ALIAS_REGISTRY/arrivals")" -lt "${SPAWN_BARRIER:-1}" ] && [ "$_i" -lt 600 ]; do sleep 0.05; _i=$((_i + 1)); done
+      stub_lock "$ALIAS_REGISTRY/lock"
+      if [ -f "$ALIAS_REGISTRY/held.$_al" ]; then
+        _holder=$(cat "$ALIAS_REGISTRY/held.$_al")
+        stub_unlock "$ALIAS_REGISTRY/lock"
+        echo "gc session new: session alias already exists: \"gc-toolkit/gc-toolkit.$_al\" already belongs to $_holder" >&2
+        exit 1
+      fi
+      cat "$ALIAS_REGISTRY/arrivals" > "$ALIAS_REGISTRY/arrivals-at-reserve"
+      _sid="gc-$$"
+      printf '%s' "$_sid" > "$ALIAS_REGISTRY/held.$_al"
+      stub_unlock "$ALIAS_REGISTRY/lock"
+      printf 'spawned %s\n' "$_sid" >> "$CALLS"
+      jq -n --arg id "$_sid" --arg n "s-$_sid" --arg a "gc-toolkit/gc-toolkit.$_al" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:$a, template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
+      exit 0
+    fi
+    if [ -n "${ALIAS_HELD:-}" ]; then
+      # Scripted: the session $ALIAS_HELD already holds the alias.
+      : > "$ALIAS_REFUSED"
+      echo "gc session new: session alias already exists: \"gc-toolkit/gc-toolkit.tk-vis\" already belongs to $ALIAS_HELD" >&2
+      exit 1
+    fi
     if [ -n "${SPAWN_EMPTY:-}" ]; then
       echo "gc session new: agent \"converse-opus\" not found in city.toml" >&2; jq -n '{ok:true}'
     elif [ -n "${ALIAS_COLLIDE:-}" ] && case "$*" in *"--alias v-"*) false ;; *) true ;; esac; then
@@ -161,6 +268,7 @@ case "$1 ${2:-}" in
       # sentinel "invalid session alias"; only the v- retry passes here.
       echo 'gc session new: invalid session alias: "gc-62297" conflicts with session ID syntax' >&2; jq -n '{ok:true}'
     else
+      printf '%s' "$SID" > "$SPAWNED"
       jq -n --arg id "$SID" --arg n "$SNAME" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:"tk-vis", template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
     fi ;;
   "session attach")
@@ -174,15 +282,40 @@ case "$1 ${2:-}" in
   "bd update")
     printf 'bd update %s\n' "$*" >> "$CALLS"
     _a="$*"
+    if [ -n "${REAL_CAS:-}" ]; then
+      # bd's --if-assignee/--if-status guard, checked and written under one
+      # lock, as the store does: a mismatch writes nothing and exits 13.
+      shift 3
+      _ifa_set=0; _ifa=""; _ifs=""; _new_set=0; _new=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --if-assignee) _ifa_set=1; _ifa="${2-}"; shift 2 ;;
+          --if-status)   _ifs="${2-}"; shift 2 ;;
+          --assignee)    _new_set=1; _new="${2-}"; shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      stub_lock "$ASSIGNEE.lock"
+      _cur="$(cat "$ASSIGNEE" 2>/dev/null)"; [ -n "$_cur" ] || _cur="${VIS_OWNER:-}"
+      _cst="$(cat "$VIS_STATUS" 2>/dev/null || echo open)"
+      if { [ "$_ifa_set" = 1 ] && [ "$_cur" != "$_ifa" ]; } || { [ -n "$_ifs" ] && [ "$_cst" != "$_ifs" ]; }; then
+        stub_unlock "$ASSIGNEE.lock"; exit 13
+      fi
+      [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ASSIGNEE"
+      stub_unlock "$ASSIGNEE.lock"
+      exit 0
+    fi
     # Model the real `bd update --if-assignee/--if-status` guard: on a mismatch
     # it writes nothing and exits 13 (vs 1 for other failures). $RACE_LOST forces
-    # the guarded bind to lose — a concurrent engage took the visit in the spawn
-    # window — and records the winner so the read-back `bd show` reports who holds
-    # it. An unconditional update (no --if-assignee) always writes, as before.
+    # the guarded bind to lose: another writer took the visit in the spawn window.
+    # It records that holder ($RACE_WINNER; set it empty for none) and the visit's
+    # new status ($RACE_STATUS) so the read-back `bd show` reports them. An
+    # unconditional update (no --if-assignee) always writes, as before.
     case "$_a" in
       *" --if-assignee "*)
         if [ -n "${RACE_LOST:-}" ]; then
-          printf '%s' "${RACE_WINNER:-gc-toolkit__converse-9}" > "$ASSIGNEE"
+          printf '%s' "${RACE_WINNER-gc-toolkit__converse-9}" > "$ASSIGNEE"
+          [ -n "${RACE_STATUS:-}" ] && printf '%s' "$RACE_STATUS" > "$VIS_STATUS"
           exit 13
         fi
         # $BIND_FAIL: the guarded bind fails for a reason other than the race
@@ -224,7 +357,8 @@ GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
-export CALLS="$TMP/calls" ASSIGNEE="$TMP/assignee" VIS_STATUS="$TMP/vstatus"
+export CALLS="$TMP/calls" ASSIGNEE="$TMP/assignee" VIS_STATUS="$TMP/vstatus" ALIAS_REFUSED="$TMP/alias-refused"
+export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
 unset GC_HELM_FIXTURE || true
 export TMPDIR="$TMP"
 
@@ -251,7 +385,7 @@ export RIG_PATH="$TMP/rig"
 # suite is launched from ([ -t 0 ] is false); the interactive path is driven by
 # run_engage_tty below.
 run_engage() {
-    : > "$CALLS"; : > "$ASSIGNEE"
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
     set +e
     OUT="$(sh "$SCRIPT" engage "$@" </dev/null 2>"$TMP/err")"; RC=$?
     set -e
@@ -265,7 +399,7 @@ run_engage() {
 # order. The answer string is a printf %b format, so lines are '\n'-separated.
 run_engage_tty() {
     _ans="$1"; shift
-    : > "$CALLS"; : > "$ASSIGNEE"
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
     set +e
     OUT="$(printf '%b' "$_ans" | GC_HELM_ASSUME_TTY=1 sh "$SCRIPT" engage "$@" 2>"$TMP/err")"; RC=$?
     set -e
@@ -337,7 +471,7 @@ echo "# engage supplies the subject's rig context so a bare template resolves"
 # runs) engage must point GC_DIR at the subject's rig or nothing spawns.
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
-: > "$CALLS"; : > "$ASSIGNEE"
+: > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"
 set +e
 OUT="$(cd "$TMP" && sh "$SCRIPT" engage tk-vis --no-attach 2>"$TMP/err")"; RC=$?
 set -e
@@ -460,34 +594,159 @@ eq "$(cat "$ASSIGNEE")" "" "(NOSPAWN) …and the visit is not assigned"
 unset SPAWN_EMPTY
 printf 'open' > "$VIS_STATUS"
 
-echo "# a lost bind race: the visit was taken in the spawn window — do not overwrite"
-# `gc session new` takes real time, so a second engage can pass the same
-# open/unassigned/unblocked guards and reach the bind before this one does. The
-# bind is conditional (--if-assignee "" --if-status open), so the loser's update
-# writes nothing and exits 13. It must NOT overwrite the winner, must suspend the
-# sitting it spawned (which holds nothing), and must point the operator at the
-# winner. The stub rejects the guarded update and records the winner as the owner.
-# Run on codex, the one provider engage kicks: the loser aborts before the kick
-# block, so "never kicked" here proves the abort precedes it rather than passing
-# vacuously the way an un-kicked claude sitting would.
+echo "# a visit another writer takes in the spawn window is not overwritten"
+# Another engage of this visit never reaches the bind, because the alias refuses
+# it (the ALIAS and RACE-CONCURRENT cases below), but `gc session new` takes real
+# time and any other writer can change the visit in that window. The bind is
+# conditional (--if-assignee "" --if-status open), so it writes nothing and exits
+# 13. The sitting this engage spawned holds nothing and is closed, and the
+# operator is pointed at whoever holds the visit now. The stub rejects the
+# guarded update and records that holder.
+# Run on codex, the one provider engage kicks: the abort precedes the kick block,
+# so "never kicked" here proves that order rather than passing vacuously the way
+# an un-kicked claude sitting would.
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 export RACE_LOST=1 RACE_WINNER="gc-toolkit__converse-8"
 run_engage tk-vis --model codex --no-attach
-eq "$RC" 4 "(RACE) a lost bind race exits 4"
-has "$CALLED" "session new" "(RACE) …the sitting did spawn — the race is in the bind window, past the pre-spawn guards"
-has "$CALLED" "bd update tk-vis --if-assignee" "(RACE) …the bind is conditional, so the store rejects the loser (exit 13)"
-eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-8" "(RACE) …the assignee stays the winner, never the loser"
-has "$CALLED" "session close gc-77" "(RACE) …the stranded loser sitting is closed"
-has "$OUT" "not overwriting" "(RACE) …and the operator is told the winner was not overwritten"
-hasnt "$CALLED" "session nudge" "(RACE) …and the loser codex sitting is never kicked — the abort precedes the kick"
+eq "$RC" 4 "(TAKEN) a bind lost to another writer exits 4"
+has "$CALLED" "session new" "(TAKEN) …the sitting did spawn: the visit changed after the pre-spawn guards read it"
+has "$CALLED" "bd update tk-vis --if-assignee" "(TAKEN) …the bind is conditional, so the store rejects it (exit 13)"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-8" "(TAKEN) …the assignee stays the holder, never this engage's sitting"
+has "$CALLED" "session close gc-77" "(TAKEN) …the sitting that holds nothing is closed"
+has "$OUT" "not overwriting" "(TAKEN) …and the operator is told the holder was not overwritten"
+has "$OUT" "gc session attach gc-toolkit__converse-8" "(TAKEN) …and is pointed at the holder"
+hasnt "$CALLED" "session nudge" "(TAKEN) …and the closed codex sitting is never kicked — the abort precedes the kick"
 unset RACE_LOST RACE_WINNER
+
+echo "# a visit closed in the spawn window: nothing to bind and no holder to attach to"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+export RACE_LOST=1 RACE_WINNER="" RACE_STATUS=closed
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(TAKEN-CLOSED) a bind lost to a close exits 4"
+has "$CALLED" "session close gc-77" "(TAKEN-CLOSED) …the spawned sitting is closed"
+has "$OUT" "became 'closed'" "(TAKEN-CLOSED) …and the operator is told the visit closed"
+hasnt "$OUT" "session attach" "(TAKEN-CLOSED) …not pointed at a holder that does not exist"
+unset RACE_LOST RACE_WINNER RACE_STATUS
+printf 'open' > "$VIS_STATUS"
+
+echo "# an engage refused at the alias waits for the winner's bind, then points at the winner"
+# gascity checks an alias and creates the session holding it under one city-wide
+# lock, and engage spawns under the visit id, so of two engages of one visit the
+# second is refused at `gc session new` having spawned nothing. Its alias holder
+# is the engage that won, about to bind the visit. The refused engage waits for
+# that bind, then points the operator at the winner; it must never tell them to
+# close a sitting that may be the one that won. The bind lands on the second
+# read, so an engage that read the visit only once would name the winner as left
+# over and tell the operator to close it.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+export ALIAS_HELD="gc-81" ALIAS_HOLDER="gc-81" AFTER_REFUSAL_READS=2 AFTER_REFUSAL_ASSIGNEE="s-gc-81" GC_HELM_ENGAGE_BIND_WAIT=5
+run_engage tk-vis --model codex --no-attach
+eq "$RC" 4 "(ALIAS-BOUND) an engage refused at the alias exits 4"
+has "$CALLED" "session new converse-codex --alias tk-vis" "(ALIAS-BOUND) …after its spawn was refused"
+has "$OUT" "engaged by 's-gc-81'" "(ALIAS-BOUND) …reporting the winner once its bind lands"
+has "$OUT" "gc session attach s-gc-81" "(ALIAS-BOUND) …and pointing the operator at it to attach"
+hasnt "$OUT" "gc session close" "(ALIAS-BOUND) …never telling them to close the sitting that won"
+hasnt "$CALLED" "bd update" "(ALIAS-BOUND) …writing nothing to the visit"
+hasnt "$CALLED" "session close" "(ALIAS-BOUND) …closing nothing"
+hasnt "$CALLED" "session nudge" "(ALIAS-BOUND) …and kicking nothing, since it spawned nothing"
+unset AFTER_REFUSAL_READS AFTER_REFUSAL_ASSIGNEE
+printf 'open' > "$VIS_STATUS"
+
+echo "# a holder that never binds is named as left over, and closing it is suggested only then"
+# An engage that stopped between its spawn and its bind leaves a sitting that
+# holds the alias and nothing else, and the visit stays parked. Once the wait
+# ends with the visit still unbound, the refused engage names that sitting and
+# says to close it if no other engage of the visit is running. The holder is
+# matched by the whole final segment of its alias, so another visit's sitting
+# whose alias shares the prefix, and a closed sitting, are never named.
+export ALIAS_DECOYS=1 GC_HELM_ENGAGE_BIND_WAIT=1
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(ALIAS-LEFTOVER) a holder that never binds exits 4"
+has "$OUT" "did not bind the visit within 1s" "(ALIAS-LEFTOVER) …after waiting for a bind that never came"
+has "$OUT" "gc session close gc-81" "(ALIAS-LEFTOVER) …naming the holder to close"
+has "$OUT" "If no other engage of tk-vis is still running" "(ALIAS-LEFTOVER) …only on the condition that no engage is still binding it"
+hasnt "$OUT" "gc-90" "(ALIAS-LEFTOVER) …never another visit's sitting whose alias shares the prefix"
+hasnt "$OUT" "gc-91" "(ALIAS-LEFTOVER) …nor a closed sitting that once held the alias"
+hasnt "$CALLED" "session close" "(ALIAS-LEFTOVER) …and it closes nothing itself"
+unset ALIAS_HOLDER
+
+echo "# an alias holder gone by the end of the wait: re-run"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(ALIAS-GONE) an alias no open session holds any more exits 4"
+has "$OUT" "no open session holds it now" "(ALIAS-GONE) …saying the holder is gone"
+has "$OUT" "re-run" "(ALIAS-GONE) …and that a re-run will spawn"
+hasnt "$OUT" "gc session close" "(ALIAS-GONE) …with nothing to close"
+unset ALIAS_DECOYS
+
+echo "# an unreadable session list names no holder and proves none gone"
+export ALIAS_HOLDER="gc-81" SESSION_LIST_BROKEN=1
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(ALIAS-LISTFAIL) an unreadable session list exits 4"
+has "$OUT" "could not be read to name it" "(ALIAS-LISTFAIL) …saying the holder could not be named"
+hasnt "$OUT" "no open session holds it now" "(ALIAS-LISTFAIL) …never claiming the holder is gone"
+hasnt "$OUT" "gc session close" "(ALIAS-LISTFAIL) …and naming nothing to close"
+unset ALIAS_HOLDER SESSION_LIST_BROKEN
+
+echo "# a visit closed during the wait is reported as not open"
+export AFTER_REFUSAL_READS=1 AFTER_REFUSAL_STATUS=closed
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(ALIAS-CLOSED) a visit closed while the engage waited exits 4"
+has "$OUT" "is 'closed', not open" "(ALIAS-CLOSED) …saying so"
+hasnt "$OUT" "gc session close" "(ALIAS-CLOSED) …and naming nothing to close"
+unset AFTER_REFUSAL_READS AFTER_REFUSAL_STATUS
+printf 'open' > "$VIS_STATUS"
+
+echo "# a visit unreadable through the wait is no proof the holder is left over"
+export ALIAS_HOLDER="gc-81" AFTER_REFUSAL_UNREADABLE=1
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(ALIAS-UNREAD) an unreadable visit exits 4"
+has "$OUT" "could not be read" "(ALIAS-UNREAD) …saying the visit could not be read"
+hasnt "$OUT" "gc session close" "(ALIAS-UNREAD) …and never telling the operator to close the holder"
+unset ALIAS_HELD ALIAS_HOLDER AFTER_REFUSAL_UNREADABLE GC_HELM_ENGAGE_BIND_WAIT
+
+echo "# two concurrent engages of one visit: the alias admits one, and the other spawns nothing"
+# A real race, not a scripted one. Both engages start together, and the stub's
+# spawn holds each at a barrier until both have arrived, so both have read the
+# visit open and unassigned and passed every pre-spawn guard before either
+# reserves anything. The stub then reserves the alias under one lock, as gascity
+# does, and runs every bind as bd's compare-and-swap under one lock.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+REG="$TMP/alias-registry"; rm -rf "$REG"; mkdir -p "$REG"
+: > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
+set +e
+for r in a b; do
+  ( ALIAS_REGISTRY="$REG" SPAWN_BARRIER=2 REAL_CAS=1 \
+      sh "$SCRIPT" engage tk-vis --no-attach --no-input </dev/null >"$TMP/race-$r.out" 2>&1
+    echo "$?" > "$TMP/race-$r.rc" ) &
+done
+wait
+set -e
+RC_A="$(cat "$TMP/race-a.rc")"; RC_B="$(cat "$TMP/race-b.rc")"
+CALLED="$(cat "$CALLS")"
+eq "$(cat "$REG/arrivals-at-reserve" 2>/dev/null)" "2" "(RACE-CONCURRENT) both engages had passed the pre-spawn guards when the first reserved the alias"
+eq "$(grep -c '^session new ' "$CALLS" || true)" "2" "(RACE-CONCURRENT) both engages attempted the spawn"
+eq "$(grep -c '^spawned ' "$CALLS" || true)" "1" "(RACE-CONCURRENT) exactly one sitting was spawned"
+WIN_SID="$(sed -n 's/^spawned //p' "$CALLS" | head -n1)"
+LOSER=""
+if [ "$RC_A" = 0 ] && [ "$RC_B" = 4 ]; then LOSER=b; elif [ "$RC_A" = 4 ] && [ "$RC_B" = 0 ]; then LOSER=a; fi
+[ -n "$LOSER" ] && ok "(RACE-CONCURRENT) one engage succeeds and the other exits 4" \
+  || bad "(RACE-CONCURRENT) expected one engage to exit 0 and the other 4 (got a=$RC_A b=$RC_B)"
+eq "$(cat "$ASSIGNEE")" "s-$WIN_SID" "(RACE-CONCURRENT) the visit is bound once, to the sitting that was spawned"
+eq "$(grep -c 'bd update tk-vis --if-assignee' "$CALLS" || true)" "1" "(RACE-CONCURRENT) only the winner writes the visit; the refused engage never reaches the bind"
+LOSER_OUT="$(cat "$TMP/race-${LOSER:-b}.out")"
+has "$LOSER_OUT" "gc session attach s-$WIN_SID" "(RACE-CONCURRENT) the refused engage points the operator at the winner's sitting"
+hasnt "$LOSER_OUT" "gc session close" "(RACE-CONCURRENT) …and never tells them to close it"
+hasnt "$CALLED" "session close" "(RACE-CONCURRENT) no sitting is closed, because none was spawned that holds nothing"
 
 echo "# a failed bind (not the race): the sitting spawned but nothing holds the visit"
 # A non-13 bd-update failure (a transient store error, not the guarded-race
 # rejection) leaves the visit open and unassigned, but the sitting has already
-# spawned. It must be suspended — a converse slot sets nudge=\"\"/idle_timeout=0
+# spawned. It must be closed — a converse slot sets nudge=\"\"/idle_timeout=0
 # and has no idle-claim rescue — and the operator told to re-run, not to
-# hand-assign a visit to a suspended sitting.
+# hand-assign a visit to a closed sitting.
 # codex again, so "never kicked" proves the abort precedes the kick block.
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 export BIND_FAIL=1
@@ -496,14 +755,14 @@ eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
 has "$CALLED" "session new" "(BIND-FAIL) …the sitting did spawn"
 has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(cat "$ASSIGNEE")" "" "(BIND-FAIL) …the visit stays unassigned"
-hasnt "$OUT" "Assign by hand" "(BIND-FAIL) …the operator is not told to hand-assign to a suspended sitting"
+hasnt "$OUT" "Assign by hand" "(BIND-FAIL) …the operator is not told to hand-assign to a closed sitting"
 hasnt "$CALLED" "session nudge" "(BIND-FAIL) …and the closed codex sitting is never kicked into a turn it cannot serve"
 unset BIND_FAIL
 
 echo "# a bind another writer stomps: read-back shows a different holder"
-# The guarded bind succeeds, but a concurrent engage overwrites the assignee in
-# the window before the read-back. This sitting holds nothing; suspend it and
-# point the operator at the holder that won.
+# The guarded bind succeeds, but another writer overwrites the assignee in the
+# window before the read-back. This sitting holds nothing; close it and point
+# the operator at the holder.
 export BIND_STOMP="gc-toolkit__converse-8"
 run_engage tk-vis --no-attach
 eq "$RC" 4 "(STOMP) a stomped bind exits 4"
@@ -513,7 +772,7 @@ unset BIND_STOMP
 
 echo "# a bind that does not persist: read-back finds the visit still unassigned"
 # The bind returns success but nothing sticks. The sitting spawned and holds
-# nothing, so suspend it and tell the operator to re-run — the visit is unchanged.
+# nothing, so close it and tell the operator to re-run — the visit is unchanged.
 export BIND_NOPERSIST=1
 run_engage tk-vis --no-attach
 eq "$RC" 4 "(NOPERSIST) a non-persisting bind exits 4"
@@ -653,6 +912,96 @@ if [ -n "$nudge_line" ] && [ -n "$attach_line" ] && [ "$nudge_line" -lt "$attach
 else
   bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
 fi
+
+echo "# the attach waits for the reconciler to start the sitting"
+# `gc session attach` on a sitting the reconciler has not launched yet launches it
+# itself, with no prompt, and the sitting idles until someone types into it. So
+# the attach path polls the sitting's state in `gc session list` and attaches
+# only once it reads active, never while it is start-pending or creating.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis
+eq "$(cat "$POLLS")" 1 "(START-ACTIVE) a sitting already started is read once"
+hasnt "$OUT" "waiting up to" "(START-ACTIVE) …and attached with no wait announced"
+
+START_STATES="start-pending creating active" run_engage tk-vis
+eq "$RC" 0 "(START-WAIT) an engage whose sitting starts on the third listing exits 0"
+eq "$(cat "$POLLS")" 3 "(START-WAIT) …reading the sitting until it reads active"
+last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+if [ -n "$last_poll" ] && [ -n "$attach_line" ] && [ "$last_poll" -lt "$attach_line" ]; then
+  ok "(START-WAIT) …and attaching only after the listing that reads it active"
+else
+  bad "(START-WAIT) expected the last listing (line ${last_poll:-none}) before the attach (line ${attach_line:-none})"
+fi
+has "$OUT" "waiting up to 120s for the reconciler to start gc-toolkit__converse-1" \
+    "(START-WAIT) …telling the operator what it waits on, and for how long"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=2 START_STATES="start-pending" run_engage tk-vis
+eq "$RC" 0 "(START-TIMEOUT) a sitting still unstarted at the bound exits 0: the visit is bound and the sitting may yet start"
+hasnt "$CALLED" "session attach" "(START-TIMEOUT) …and is NOT attached, since the attach would launch it without its prompt"
+polls=$(cat "$POLLS")
+if [ "${polls:-0}" -ge 2 ]; then
+  ok "(START-TIMEOUT) …after reading it more than once"
+else
+  bad "(START-TIMEOUT) expected at least 2 listings before giving up (got ${polls:-0})"
+fi
+has "$OUT" "the reconciler has not started gc-toolkit__converse-1 after 2s" "(START-TIMEOUT) …saying the reconciler has not started it"
+has "$OUT" "start-pending" "(START-TIMEOUT) …naming the state it last read"
+has "$OUT" "gc session attach gc-77" "(START-TIMEOUT) …and giving the attach to run once it is up"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_engage tk-vis
+eq "$RC" 4 "(START-CLOSED) a sitting listed and then gone from the list (closed, read from the store) exits 4"
+hasnt "$CALLED" "session attach" "(START-CLOSED) …without attaching"
+eq "$(cat "$POLLS")" 2 "(START-CLOSED) …at the first listing it is gone from, not at the bound"
+has "$OUT" "ended before the reconciler started it (its state in 'gc session list': gone)" "(START-CLOSED) …saying the sitting ended"
+has "$OUT" "gc bd update tk-vis --assignee" "(START-CLOSED) …and how to put its still-bound visit back on the board"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="blank" run_engage tk-vis
+eq "$RC" 4 "(START-BLANK) a sitting listed with an empty state (closed, read from the supervisor) exits 4"
+hasnt "$CALLED" "session attach" "(START-BLANK) …without attaching"
+eq "$(cat "$POLLS")" 1 "(START-BLANK) …at the first listing"
+has "$OUT" "state in 'gc session list': closed" "(START-BLANK) …naming it closed"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="failed-create" run_engage tk-vis
+eq "$RC" 4 "(START-FAILED) a sitting whose create failed exits 4"
+hasnt "$CALLED" "session attach" "(START-FAILED) …without attaching"
+has "$OUT" "state in 'gc session list': failed-create" "(START-FAILED) …naming the state"
+
+# A sitting not listed yet may only lag the supervisor's read cache, and a
+# listing that fails says nothing about the sitting, so neither ends the wait.
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="gone gone active" run_engage tk-vis
+eq "$RC" 0 "(START-UNLISTED) a sitting not yet listed is waited on, not read as closed"
+has "$CALLED" "session attach gc-77" "(START-UNLISTED) …and attached once it reads active"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="broken active" run_engage tk-vis
+eq "$RC" 0 "(START-UNREADABLE) a listing that fails is waited through"
+has "$CALLED" "session attach gc-77" "(START-UNREADABLE) …and the sitting attached once a listing reads it active"
+
+echo "# --no-attach has no attach to gate, so it does not wait"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_engage tk-vis --no-attach
+eq "$RC" 0 "(NOATTACH-NOWAIT) --no-attach on an unstarted sitting exits 0"
+polls=$(cat "$POLLS")
+eq "${polls:-0}" 0 "(NOATTACH-NOWAIT) …without reading the sitting's state"
+hasnt "$OUT" "waiting up to" "(NOATTACH-NOWAIT) …or announcing a wait"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_engage tk-vis --model codex --no-attach
+has "$CALLED" "session nudge gc-77" "(NOATTACH-KICK) a codex sitting on --no-attach is kicked without a start wait"
+
+echo "# for codex, the kick follows the start wait"
+START_STATES="start-pending active" run_engage tk-vis --model codex
+last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
+nudge_line=$(printf '%s\n' "$CALLED" | grep -n '^session nudge' | head -1 | cut -d: -f1 || true)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+if [ -n "$last_poll" ] && [ -n "$nudge_line" ] && [ -n "$attach_line" ] \
+   && [ "$last_poll" -lt "$nudge_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
+  ok "(KICK-AFTER-START) the codex kick reaches a started sitting and precedes the attach"
+else
+  bad "(KICK-AFTER-START) expected listing (${last_poll:-none}) < nudge (${nudge_line:-none}) < attach (${attach_line:-none})"
+fi
+GC_HELM_ENGAGE_WAIT_TIMEOUT=1 START_STATES="start-pending" run_engage tk-vis --model codex
+has "$CALLED" "session nudge gc-77" "(TIMEOUT-KICK) a codex sitting unstarted at the bound is still kicked, so it begins once it starts"
+hasnt "$CALLED" "session attach" "(TIMEOUT-KICK) …but not attached"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_engage tk-vis --model codex
+hasnt "$CALLED" "session nudge" "(CLOSED-NOKICK) a codex sitting that ended before it started is not kicked"
 
 echo "# a suspended subject rig is refused before anything spawns"
 # engage spawns a sitting the reconciler must sustain; on a suspended rig the

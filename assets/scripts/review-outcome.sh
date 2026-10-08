@@ -82,10 +82,11 @@ USAGE
 
 # The closed review beads that currently back this lane green — the approve half
 # lane-state.sh reads, minus its in-flight test: a closed task_kind=review bead
-# for (anchor, lane) carrying reviewed_oid, either signoff_verdict=approve and
-# not superseded, or a legacy no-verdict gc.outcome=recorded. Ids on stdout, one
-# per line; exit 2 when the store would not read so a caller never mistakes an
-# unreadable store for "nothing backs the lane".
+# for (anchor, lane) carrying reviewed_oid and signoff_verdict=approve, not
+# superseded. A close with no signoff_verdict names no verdict (signoff stamps
+# gc.outcome=recorded on every close, approve and request-changes alike), so it
+# backs no lane. Ids on stdout, one per line; exit 2 when the store would not
+# read so a caller never mistakes an unreadable store for "nothing backs the lane".
 backing_ids() { # <anchor> <lane>
   local anchor="$1" lane="$2" rows
   rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
@@ -98,7 +99,7 @@ backing_ids() { # <anchor> <lane>
           | select((($m.reviewed_oid // "") | tostring) != "")
           | (($m.signoff_verdict // "") | tostring) as $sv
           | (($m["gc.outcome"] // "") | tostring) as $oc
-          | select(($sv == "approve" and $oc != "superseded") or ($sv == "" and $oc == "recorded")) ]
+          | select($sv == "approve" and $oc != "superseded") ]
     | .[].id' 2>/dev/null
 }
 

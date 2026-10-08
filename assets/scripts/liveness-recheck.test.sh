@@ -44,7 +44,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-recheck.sh"
 SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
-PROMPT="$ROOT/agents/converse/prompt.template.md"
+PROMPT="$ROOT/agents/_converse/prompt.template.md"
 # The claim-time re-check lives in the converse prep skill (steps 3–4); it calls
 # the hook script, which reads the visit.recheck stamp as a path and runs it.
 PREP="$ROOT/skills/converse-prep/SKILL.md"
@@ -312,6 +312,18 @@ eq "$(printf '%s' "$C" | jq -r '.subject')" "tk-subject"           "the subject 
 "$SCRIPT" tk-visit 2>/dev/null | grep -q "2026-08-12T00:10:00Z" \
     && ok "the report leads with the census cut" \
     || bad "the report leads with the census cut" "no pass timestamp in the header"
+# 1786493400 is that cut, 2026-08-12T00:10:00Z. The script reads the clock
+# between the two samples taken here, so its age matches what one of them
+# gives. HST10 is ten hours behind UTC, so a parse that read the cut as local
+# time would be ten hours out.
+age_at() { awk -v a=1786493400 -v b="$1" 'BEGIN { printf "%.1fh", (b - a) / 3600 }'; }
+T0=$(date -u +%s)
+AGE=$(TZ=HST10 "$SCRIPT" tk-visit --json 2>/dev/null | jq -r '.age')
+T1=$(date -u +%s)
+case "$AGE" in
+    "$(age_at "$T0")"|"$(age_at "$T1")") ok "the census reports how long ago the cut was ($AGE)" ;;
+    *) bad "the census reports how long ago the cut was" "got '$AGE' want '$(age_at "$T0")'" ;;
+esac
 
 echo "── an id in both lists is counted once, as NEW (the agenda outranks the background) ──"
 jq -nc '[{metadata: {"sweep.new_ids": "b-idle", "sweep.carried_ids": "b-idle,b-held"}}]' > "$STUB_VISIT"
