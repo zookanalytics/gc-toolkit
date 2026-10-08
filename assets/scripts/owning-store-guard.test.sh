@@ -21,6 +21,8 @@ TOML="$ROOT/formulas/mol-witness-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-owning-store-guard-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -107,12 +109,14 @@ FIRST_RM=$(grep -nE '^[[:space:]]*(if ! )?git .*worktree remove' "$TOML" | head 
   && ok "the guard is defined before the first 'git worktree remove' in the formula" \
   || bad "the guard must precede any 'git worktree remove' (guard@${GUARD_LINE:-none} rm@${FIRST_RM:-none})"
 
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$TOML" <<'PY' && ok "formula still parses as TOML" || bad "formula failed to parse as TOML"
+if TOML_PY="$(tomllib_python)"; then
+  "$TOML_PY" - "$TOML" <<'PY' && ok "formula still parses as TOML" || bad "formula failed to parse as TOML"
 import sys, tomllib
 with open(sys.argv[1], "rb") as f:
     tomllib.load(f)
 PY
+else
+  echo "skip - formula still parses as TOML: $TOML_PY"
 fi
 
 echo
