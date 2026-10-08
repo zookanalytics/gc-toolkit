@@ -187,7 +187,7 @@ cmd_back_lane() {
   title="lane $lane converged: validator ruled no further review — anchor $anchor"
   desc=$(printf 'The validator ruled lane %s converged on anchor %s at %s: no further whole-diff review is warranted. This closed approve outcome is what lane-state.sh reads to derive green once nothing else holds the lane. The reviewed_oid is a dispatch pin, not a claim that green is bound to that commit.%s' \
     "$lane" "$anchor" "$oid" "${batch:+ Batch: $batch.}")
-  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$id" ] || { warn "could not create the approve outcome bead for lane $lane on $anchor"; exit 2; }
   local note="validator: lane $lane converged at $oid"
   [ -n "$reason" ] && note="$note — $reason"

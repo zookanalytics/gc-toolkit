@@ -180,15 +180,17 @@ for v in ADD REMOVE QREMOVE; do
 done
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$PACK/assets/scripts/"
 cd "$REPO" || exit 1
+# The add lines refuse to run without a rig root, so each run names this
+# repository as the rig.
 for n in 1 2; do
-    GOT="$(GC_PACK_DIR="$PACK" REVIEW_BEAD=tk-fx REVIEWED_OID="$C1" bash -c "$ADD
+    GOT="$(GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fx REVIEWED_OID="$C1" bash -c "$ADD
 pwd -P" 2>/dev/null)"
     eq "$GOT" "$WS/gc-review-tk-fx/wt" "block $n running the formula's add lines stands in the review's worktree"
 done
 eq "$(git -C "$WS/gc-review-tk-fx/wt" rev-parse HEAD)" "$C1" "at the reviewed commit"
 GC_PACK_DIR="$PACK" REVIEW_BEAD=tk-fx SC="$PACK/assets/scripts/step-close.sh" bash -c "$REMOVE" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fx"; then bad "the verdict step's remove line takes the workspace"; else ok "the verdict step's remove line takes the workspace"; fi
-GC_PACK_DIR="$PACK" REVIEW_BEAD=tk-fq REVIEWED_OID="$C1" bash -c "$ADD" >/dev/null 2>&1
+GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fq REVIEWED_OID="$C1" bash -c "$ADD" >/dev/null 2>&1
 REVIEW_BEAD=tk-fq SC="$PACK/assets/scripts/step-close.sh" bash -c "$QREMOVE" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fq"; then bad "the quorum's remove line takes the workspace"; else ok "the quorum's remove line takes the workspace"; fi
 
