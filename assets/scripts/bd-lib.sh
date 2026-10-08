@@ -10,11 +10,12 @@
 #
 # Every read goes through `gc bd`, never `bd`: `bd` takes its store from the
 # ambient environment, so a stale one answers from the wrong store or trips the
-# circuit breaker (tools/lint-learned.d/raw-bd-invocation.sh). The JSON is piped
-# through `scrub`, which strips the C0 bytes a JSON string may not carry raw —
-# one such byte aborts jq on the whole payload. `scrub` is a name resolved at
-# call time, so the fenced copy below defines it for these helpers; a sourcing
-# script keeps its own `# >>> control-char-scrub` block for its own direct
+# circuit breaker (tools/lint-learned.d/raw-bd-invocation.sh). Both readers strip
+# the `gc bd:` rig-store notice line (a store can emit it on stdout) and pipe the
+# JSON through `scrub`, which strips the C0 bytes a JSON string may not carry raw
+# — either contaminant otherwise aborts jq on the whole payload. `scrub` is a name
+# resolved at call time, so the fenced copy below defines it for these helpers; a
+# sourcing script keeps its own `# >>> control-char-scrub` block for its own direct
 # scrubs, and the copies stay byte-identical (formula bodies carry no include
 # mechanism, so an identical copy is the pack's sharing idiom for that block).
 
@@ -26,8 +27,13 @@
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-# bd_json <gc-bd-args...> — one `gc bd` read as JSON, control chars scrubbed.
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+# bd_json <gc-bd-args...> — one `gc bd` read as JSON, the `gc bd:` rig-store
+# notice line stripped and control chars scrubbed. The notice (a store can emit
+# it on stdout) is removed with a text-mode grep BEFORE scrub, while the newline
+# that delimits its line still stands; one such line otherwise aborts jq on the
+# whole payload. stdin is /dev/null so a call inside a `while read` loop cannot
+# consume the loop's own driving input, the guard bd_list already carries.
+bd_json() { gc bd "$@" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub; }
 
 # bd_list memoization — opt-in, off by default.
 #
@@ -104,7 +110,11 @@ bd_list() {
   fi
   raw=$(gc bd list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
+  # Strip the `gc bd:` rig-store notice (a store can emit it on stdout) with a
+  # text-mode grep before scrub removes the newline that delimits its line; one
+  # such line otherwise fails the type==array check below and reads as "could
+  # not tell" on every call in a notice-emitting store.
+  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub)
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   if [ -n "$cache_file" ]; then
     printf '%s' "$raw" > "$cache_file.$$.tmp" 2>/dev/null \

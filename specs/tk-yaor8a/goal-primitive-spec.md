@@ -1,9 +1,23 @@
 ---
 name: Goal Primitive Spec
-description: The goal contract carried at epic altitude: measured baselines and operator-graded qualities embedded in the epic body, advanced in batches and judged by an independent reader at evaluation checkpoints. Covers the verdict taxonomy, judge independence, and the tamper-evident contract; automation waits on the goals experiment (tk-h2s7hj.4).
+description: Retired as a separate primitive — the epic is the goal's home (docs/epics.md, "Direction: Features and Epic Checkpoints"). The goal contract carried at epic altitude: measured baselines and operator-graded qualities embedded in the epic body, advanced in batches and judged by an independent reader at evaluation checkpoints. Covers the verdict taxonomy, judge independence, and the tamper-evident contract. Read the retirement banner before citing any part of it.
 ---
 
 # Goal Primitive
+
+> **Retired as a separate primitive — read this before citing anything below.**
+>
+> A goal is not its own primitive. This spec already carried a goal at epic
+> altitude, with no goal bead and no `goal.*` metadata, so the epic model is its
+> home ([docs/epics.md](../../docs/epics.md), "Direction: Features and Epic
+> Checkpoints"). The operator sitting tk-089mt7x (2026-10-07) folded four of its
+> ideas into the epic contract: the checkpoint shape (Section 5), judge
+> independence (Section 3), the measured and graded criteria (Section 2), and
+> the backstop invariant (Sections 2 and 6). It unified the verdicts with the
+> epic ruling: `not-yet` is continue, and `met`, `impossible`, `stalled`, and
+> `exhausted` are each close, with the verdict recorded as the close's outcome
+> (Section 4). The follow-on epic tk-wmwcdlc builds the consolidation. The rest
+> of this document is a point-in-time record and is not rewritten.
 
 A goal is a measurable condition about the world, carried at epic altitude as a
 contract embedded in the epic's body. It generates work until the condition is

@@ -77,6 +77,10 @@ harness_init() {
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
+  # STUB_SHOW_NOTICE: when set to a rig name, `gc bd show` leads its stdout with a
+  # `gc bd: answering from the rig "<name>" store` notice line, the contaminant a
+  # real read can carry. Unset leaves the JSON clean.
+  export STUB_SHOW_NOTICE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
@@ -216,6 +220,7 @@ case "$verb" in
     if [ -n "${STUB_SHOW_HOOK:-}" ] && [ -x "${STUB_SHOW_HOOK:-}" ]; then
       "$STUB_SHOW_HOOK" "$id" || true
     fi
+    [ -n "${STUB_SHOW_NOTICE:-}" ] && printf 'gc bd: answering from the rig "%s" store\n' "$STUB_SHOW_NOTICE"
     jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$S"
     ;;
   list)

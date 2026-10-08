@@ -84,6 +84,7 @@ and `render-seed-audit.sh --check` verifies it exactly.
 - [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
 - [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, and when it closes
+- [docs/epic-stewardship.md](docs/epic-stewardship.md) — how an epic is held open until its hypothesis is ruled closed, and the Epic Checkpoint layer that is direction
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
 - [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota

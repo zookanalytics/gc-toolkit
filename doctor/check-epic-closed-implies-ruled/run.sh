@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# doctor/check-epic-closed-implies-ruled — I14: a closed epic was ruled closed.
+# An epic closes on a ruling on its hypothesis, never as a side effect of its last
+# unit merging (docs/epics.md). The ruling is continue, shift, or close, and only
+# close is terminal; a close ruling carries its outcome (epic_ruling_reason). A
+# CLOSED issue_type=epic carrying a hypothesis but not the close ruling with its
+# outcome was therefore closed by hand without its ruling, on a ruling that keeps
+# it open, or with no outcome (error). finalize-gate.sh
+# clause_epic_ruling_recorded applies the same predicate to the close paths that
+# run the gate, and this is the after-the-fact backstop for a bare `gc bd close`,
+# which runs no gate.
+# One shape is out of scope: an epic carrying gc.superseded_by was retired into a
+# successor by bead-rehome.sh, which IS an explicit terminal state (the same
+# exemption check-closed-implies-landed makes) — a deliberate disposition, not a
+# silent close.
+# Read-only, ledger-only, offline-safe. Exit 0=OK 1=Warning 2=Error. stdout:
+# first line = message, then "  - detail" lines. Probes bounded; an UNREADABLE
+# store warns (1), never passes.
+
+set -u
+
+errors=(); warnings=(); notes=()
+# >>> doctor-budget
+# One deadline for the whole check, anchored at process start. `gc doctor
+# --check-timeout` (default 60s) abandons an overrunning check and discards
+# everything it had buffered, so a check that has not printed by then is never
+# heard. A per-probe constant does not hold that line: the probes below run
+# once per rig, so their ceilings sum. Each probe gets the time still left
+# instead, capped at half the budget so one wedged store cannot eat the rest,
+# and a probe that no longer fits is refused with 124 — `timeout`'s own expiry
+# code, which every caller's "this store was NOT checked" arm already handles.
+# GC_DOCTOR_CHECK_TIMEOUT overrides the default, in whole seconds. Nothing
+# exports it: the runner passes GC_CITY_PATH and GC_PACK_DIR and no budget.
+BUDGET_DEFAULT=60; BUDGET_RESERVE=5; BUDGET_MIN_PROBE=2
+budget_now() { if [ -n "${EPOCHSECONDS:-}" ]; then printf %s "$EPOCHSECONDS"; else date +%s; fi; }
+budget_init() {
+    BUDGET_TOTAL="${GC_DOCTOR_CHECK_TIMEOUT:-$BUDGET_DEFAULT}"; BUDGET_TOTAL="${BUDGET_TOTAL%s}"
+    case "$BUDGET_TOTAL" in ''|*[!0-9]*) BUDGET_TOTAL="$BUDGET_DEFAULT" ;; esac
+    BUDGET_CAP=$(( BUDGET_TOTAL / 2 ))
+    BUDGET_DEADLINE=$(( $(budget_now) - SECONDS + BUDGET_TOTAL - BUDGET_RESERVE ))
+}
+budget_slice() {
+    local left=$(( BUDGET_DEADLINE - $(budget_now) ))
+    [ "$left" -le "$BUDGET_CAP" ] || left="$BUDGET_CAP"
+    [ "$left" -ge 0 ] || left=0
+    printf %s "$left"
+}
+budget_spent() { [ "$(budget_slice)" -lt "$BUDGET_MIN_PROBE" ]; }
+run_bounded() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@" </dev/null; else "$@" </dev/null; fi; }
+# A probe fed from a pipe cannot borrow run_bounded's </dev/null.
+run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+budget_init
+# <<< doctor-budget
+detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+
+# `gc rig list` names the stores this check scans, and it can fail transiently:
+# a momentary Dolt or lock blip returns a non-zero rc a later call clears. This
+# check files an all-rigs BLOCKING finding when it cannot enumerate, so a single
+# blip must not stand in for "stores unscannable" — retry a non-zero rc a bounded
+# number of times, each attempt drawn from the same doctor budget. An rc of 0 is
+# never retried: rc=0 with no rigs is a genuinely empty city.
+RIGS_MAX_ATTEMPTS=3
+rigs_attempt=0
+while : ; do
+    rigs_attempt=$((rigs_attempt + 1))
+    rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+    [ "$rigs_rc" -eq 0 ] && break
+    [ "$rigs_attempt" -ge "$RIGS_MAX_ATTEMPTS" ] && break
+    budget_spent && break
+    sleep 1
+done
+scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
+    | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)]
+    | join("\u001f")' 2>/dev/null)
+if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
+    echo "cannot determine whether closed epics were ruled (I14)"
+    detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths after $rigs_attempt attempt(s); there is no set of bead stores to scan."
+    exit 1
+fi
+
+# bash backs a `<<<` here-string longer than a pipe buffer with a temp file in
+# $TMPDIR. Under disk pressure that file cannot be created, the redirection fails
+# without stopping this check (it is set -u, not set -e), and the loop it feeds
+# runs zero times: a non-empty set read as empty, which falls through to the OK
+# line. Each enumeration below is staged into a file under this checked, templated
+# temp dir and read with a plain `< "$file"`, which keeps the loop in the current
+# shell so the finding arrays survive it. A staging failure is loud, never a
+# forged all-clear. The dir and its files die with this process.
+ENUM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-epic-closed-implies-ruled.XXXXXX" 2>/dev/null) || {
+    echo "cannot determine whether closed epics were ruled (I14)"
+    detail "could not create a temp directory to stage the store enumerations (mktemp -d failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+}
+trap 'rm -rf "$ENUM_TMP" 2>/dev/null' EXIT
+if ! printf '%s\n' "$scopes" > "$ENUM_TMP/scopes"; then
+    echo "cannot determine whether closed epics were ruled (I14)"
+    detail "could not stage the store enumeration (temp-file write failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
+    exit 1
+fi
+while IFS=$'\037' read -r rig_name rig_path suspended; do
+    [ -n "$rig_path" ] || continue
+    label="${rig_name:-<city>}"
+    if [ "$suspended" = "true" ]; then
+        notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
+        continue
+    fi
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --type=epic --status closed \
+        --json --limit 0 2>/dev/null); rc=$?
+    if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
+        # `--limit 0` lists every closed epic, and an empty store returns `[]`,
+        # not empty output — so empty here is an unreadable probe, not "no epics".
+        warnings+=("$label: could not list closed epics in $rig_path/.beads (rc=$rc) — this store was NOT checked")
+        continue
+    fi
+    # A closed epic is judged only once it has entered stewardship — i.e. carries
+    # a recorded hypothesis. One closed without a hypothesis predates the model
+    # (there is no ruling to expect of an epic the stewardship contract never
+    # reached), so it is exempt, which also keeps this a forward regression
+    # detector: a store of pre-stewardship epics reports clean.
+    # bd returns an {"error":...} object when a query does not resolve
+    # (bead-context.sh). Iterating it with `.[]?` would yield zero rows at exit 0
+    # and report the store OK; `error` on a non-array aborts jq non-zero, caught
+    # below as "NOT checked" — an all-clear is only a clean array.
+    rows=$(printf '%s' "$raw" | scrub | jq -r '
+        (if type != "array" then error("not an array") else .[] end)
+        | select(((.status // "") | tostring) == "closed")
+        | (.metadata // {}) as $m
+        | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id
+        | ((($m.epic_ruling // "") | tostring)) as $ruling
+        | ((($m.epic_hypothesis // "") | tostring)) as $hyp
+        | ((($m["gc.superseded_by"] // "") | tostring)) as $disposed
+        | ((($m.epic_ruling_reason // "") | tostring | test("\\S"))) as $reasoned
+        # "ruled" only for the close ruling with its outcome recorded: close is the
+        # one terminal ruling docs/epics.md defines, and it carries its outcome. A
+        # close with no outcome is "noreason"; continue and shift keep an epic open,
+        # so a closed epic carrying either is "nonterminal"; an off-enum value
+        # ("pending", a typo) is not a ruling and reads as unruled. The finalize
+        # gate applies the same predicate.
+        | (if ($ruling == "close" and $reasoned) then "ruled"
+           elif $disposed != "" then "exempt-disposed"
+           elif $hyp == "" then "exempt-legacy"
+           elif $ruling == "close" then "noreason"
+           elif ($ruling == "continue" or $ruling == "shift") then "nonterminal"
+           else "unruled" end) as $verdict
+        | [$verdict, $id, ($ruling | gsub("[[:cntrl:]]"; " "))] | join("\u001f")' 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        warnings+=("$label: closed-epic listing from $rig_path/.beads could not be parsed — this store was NOT checked")
+        continue
+    fi
+    [ -n "$rows" ] || continue
+    if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
+        warnings+=("$label: could not stage the closed-epic enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
+        continue
+    fi
+    n_disposed=0; n_legacy=0
+    while IFS=$'\037' read -r kind id ruling; do
+        [ -n "$kind" ] || continue
+        # Recording the ruling on the closed epic clears the finding; no reopen is
+        # needed for that. An epic is not a merge anchor, so lifecycle.sh refuses
+        # to reopen it, and the reopen offered here is bd's own.
+        remedy="If the close stands, record its ruling and outcome: \`gc bd --db $rig_path/.beads update $id --set-metadata epic_ruling=close --set-metadata epic_ruling_reason=\"<outcome>\"\`. If the epic should go on, reopen it (\`gc bd --db $rig_path/.beads reopen $id\`) and record continue or shift. If it was retired into a successor, record that disposition (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)."
+        case "$kind" in
+            unruled)
+                errors+=("$label epic $id: CLOSED carrying a hypothesis but no close ruling (epic_ruling '${ruling:-<none>}') — an epic closes on the close ruling, the one terminal ruling of continue/shift/close, never by its last unit merging (docs/epics.md). $remedy") ;;
+            noreason)
+                errors+=("$label epic $id: CLOSED on the close ruling but no outcome (epic_ruling_reason) — a close ruling carries its outcome: the hypothesis held, was disproven, stalled, or ran past its cost (docs/epics.md). $remedy") ;;
+            nonterminal)
+                errors+=("$label epic $id: CLOSED on the non-terminal ruling '$ruling' — continue and shift keep an epic open, and it closes only on the close ruling (docs/epics.md). $remedy") ;;
+            exempt-disposed) n_disposed=$((n_disposed + 1)) ;;
+            exempt-legacy)   n_legacy=$((n_legacy + 1)) ;;
+        esac
+    done < "$ENUM_TMP/rows"
+    if [ "$n_disposed" -gt 0 ]; then
+        notes+=("$label: $n_disposed closed epic(s) carry gc.superseded_by (retired into a successor), so they were not judged")
+    fi
+    if [ "$n_legacy" -gt 0 ]; then
+        notes+=("$label: $n_legacy closed epic(s) predate epic stewardship (no recorded hypothesis), so no ruling is expected of them")
+    fi
+done < "$ENUM_TMP/scopes"
+
+if budget_spent; then
+    warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
+fi
+if [ "${#errors[@]}" -ne 0 ]; then
+    echo "closed-but-unruled epics (I14): ${#errors[@]} epic(s)"
+    detail "${errors[@]}"
+    detail ${warnings[@]+"${warnings[@]}"}
+    detail ${notes[@]+"${notes[@]}"}
+    exit 2
+fi
+if [ "${#warnings[@]}" -ne 0 ]; then
+    echo "epic-closed-implies-ruled holds with gaps (I14)"
+    detail "${warnings[@]}"
+    detail ${notes[@]+"${notes[@]}"}
+    exit 1
+fi
+echo "OK: every closed epic that carries a hypothesis was ruled closed with its outcome, or carries an explicit disposition"
+detail ${notes[@]+"${notes[@]}"}
+exit 0
