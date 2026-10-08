@@ -56,7 +56,7 @@
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
 # timeout; run directly, the file runs every part in order.
-# run-tests-parts: reconcile posture feedback writeback checks
+# run-tests-parts: reconcile posture feedback writeback checks pacing
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -4170,18 +4170,32 @@ unset GC_RECONCILE_BD_CACHE
 twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
 
+fi # part checks
+
+# ==== part pacing: the paced walks, their visit order, and the posture basis ====
+if part pacing; then
+
+# One node of the batched open-PR read, matching prview's PR for the same number.
+open_node() { # num [mergeState] [reviewDecision] [jq-edit]
+  printf '{"number":%s,"state":"OPEN","isDraft":false,"url":"https://github.com/zook/gc-toolkit/pull/%s","headRefName":"polecat/x%s","headRefOid":"sha-%s","baseRefName":"main","isCrossRepository":false,"headRepository":{"name":"gc-toolkit"},"headRepositoryOwner":{"login":"zook"},"reviewDecision":"%s","mergeStateStatus":"%s","updatedAt":"2026-10-01T00:00:00Z","reviews":{"totalCount":0,"nodes":[]},"comments":{"totalCount":0,"nodes":[]}}' \
+    "$1" "$1" "$1" "$1" "${3:-}" "${2:-CLEAN}" | jq -c "${4:-.}"
+}
+open_prs() { local IFS=,; printf '[%s]' "$*" > "$GH_DIR/open_prs.json"; }
+pf_views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -; }
+FAR() { echo "$(( $(date +%s) + 600 ))"; }
+
 echo "# pacing: --deadline stops the per-anchor walk after one anchor and --cursor resumes after it"
 # Three clean OPEN PRs, enumerated out of id order. A deadline of epoch 1 has
 # always passed, so a paced pass reads exactly one PR; the posture-only mode
 # ignores the pacing pair, because merge.sh needs every posture current.
 store "[$(anchor PP3 83), $(anchor PP1 81), $(anchor PP2 82)]"
 for n in 81 82 83; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
-PFCUR="$TMP/pr-facts.cursor"; rm -f "$PFCUR"
-pf_views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{print $3}' | awk '!seen[$0]++' | paste -sd, -; }
+open_prs "$(open_node 81)" "$(open_node 82)" "$(open_node 83)"
+PFCUR="$TMP/pr-facts.cursor"; rm -f "$PFCUR" "$PFCUR".*
 : > "$STUB_GH_LOG"
 out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
 eq "$(pf_views)" "81" "a passed deadline reads the lowest id's PR and no other"
-has "$out" "visited 1 of 3 PR anchors before the deadline; the next pass resumes at PP2" "…and names where the next pass resumes"
+has "$out" "visited 1 of 3 PR anchors (0 needing action first) before the deadline; the next pass resumes at PP2" "…and names where the next pass resumes"
 eq "$(cat "$PFCUR" 2>/dev/null)" "PP1" "the cursor records the anchor finished"
 : > "$STUB_GH_LOG"
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
@@ -4197,7 +4211,8 @@ echo "# pacing: an anchor the walk skips for free does not spend its one visit p
 # PQ2.
 store "[$(anchor PQ1 x), $(anchor PQ2 84)]"
 printf '%s' "$(prview 84 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_84.json"
-rm -f "$PFCUR"
+open_prs "$(open_node 84)"
+rm -f "$PFCUR" "$PFCUR".*
 : > "$STUB_GH_LOG"
 out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$PFCUR" 2>&1)
 eq "$(pf_views)" "84" "the visit goes to the first anchor that costs a read"
@@ -4217,20 +4232,290 @@ for n in 191 192 193; do
   threads "$n" "$(one_thread "$n")"
   printf '[]' > "$GH_DIR/issue_comments_$n.json"
 done
-WBCUR="$TMP/pr-facts-wb.cursor"; rm -f "$WBCUR" "$WBCUR.writeback"
+open_prs "$(open_node 191)" "$(open_node 192)" "$(open_node 193)"
+WBCUR="$TMP/pr-facts-wb.cursor"; rm -f "$WBCUR" "$WBCUR".*
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
 eq "$(reacted 191 NC-191),$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false,false" "past the deadline the sweep still acknowledges one anchor, the lowest id"
-has "$out" "write-back visited 1 of 3 anchors with routed comments before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
+has "$out" "write-back visited 1 of 3 anchors with routed comments (0 with something new first) before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
 eq "$(cat "$WBCUR.writeback" 2>/dev/null)" "WP1" "the sweep records its progress on a cursor of its own"
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
 eq "$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false" "the next pass resumes the sweep after its cursor"
-out=$("$SUT" --fix-pool "$FIX" --deadline "$(( $(date +%s) + 600 ))" --cursor "$WBCUR" 2>&1)
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
 eq "$(reacted 193 NC-193)" "true" "a deadline that has not passed lets the sweep reach every anchor"
 has "$out" "write-back visited 3 of 3 anchors with routed comments" "…and reports the whole sweep"
 out=$("$SUT" --fix-pool "$FIX" 2>&1)
 hasnt "$out" "write-back visited" "an unpaced pass reports no write-back pacing"
 
-fi # part checks
+echo "# write-back: an anchor with something new to answer goes ahead of the rotation"
+# Every anchor was seen by the sweep above. A watermark moving on WP3 is a
+# batch routed since; its live child closing is work that answers one. Each
+# puts WP3 ahead of WP1, which the rotation would reach first.
+rm -f "$WBCUR" "$WBCUR.writeback" "$WBCUR.writeback.first"
+bmut WP3 '.metadata.pr_comment_watermark = "150"'
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
+has "$out" "write-back visited 2 of 3 anchors with routed comments (1 with something new first)" "a moved watermark puts the anchor first, and the rest still get their visit"
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
+has "$out" "(0 with something new first)" "once visited, it rotates with the rest"
+bmut KP3 '.status = "closed"'
+bmut KP3 '.metadata.anchor_bead = "WP3"'
+bmut KP2 '.metadata.anchor_bead = "WP2"'
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
+has "$out" "(1 with something new first)" "a live child appearing on WP2 moves its mark"
+bmut KP2 '.status = "closed"'
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
+has "$out" "(1 with something new first)" "…and that child closing moves it again"
+
+echo "# posture basis: a PR nothing touched since its posture was derived costs no per-PR read"
+store "[$(anchor PB1 301 "$UTCUT"), $(anchor PB2 302 "$UTCUT")]"
+for n in 301 302; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+open_prs "$(open_node 301)" "$(open_node 302)"
+BASIS="$TMP/pr-posture.seen"; rm -f "$BASIS"
+run_basis() { : > "$STUB_GH_LOG"; "$SUT" --posture-only --seen "$BASIS" 2>&1; }
+out=$(run_basis)
+eq "$(pf_views)" "301,302" "with no basis yet every posture is read per PR"
+has "$out" "0 unchanged since the basis they were derived from, 2 read per PR" "…and the summary says so"
+eq "$(meta_pinned PB1 pr_posture),$(meta_pinned PB2 pr_posture)" "none@sha-301,none@sha-302" "…and records each posture"
+out=$(run_basis)
+eq "$(pf_views)" "301,302" "the next pass derives each posture again, to confirm the basis the first derivation recorded"
+has "$out" "0 unchanged since the basis they were derived from, 2 read per PR" "…so it keeps none yet"
+out=$(run_basis)
+eq "$(pf_views)" "" "the pass after reads no PR whose confirmed basis has not moved"
+hasnt "$(cat "$STUB_GH_LOG")" "/pulls/301/" "…and none of its feedback lists"
+has "$out" "2 unchanged since the basis they were derived from, 0 read per PR" "…and counts them kept"
+eq "$(meta_pinned PB1 pr_posture)" "none@sha-301" "…while the posture stands"
+
+echo "# posture basis: the merge state follows the batched read with no per-PR read"
+open_prs "$(open_node 301)" "$(open_node 302 DIRTY)"
+out=$(run_basis)
+eq "$(pf_views)" "" "a merge state that moved reads no PR"
+eq "$(meta PB2 pr_merge_state)" "DIRTY@sha-302" "…and is recorded from the batched read"
+eq "$(meta_pinned PB2 pr_posture)" "none@sha-302" "…beside the posture it kept"
+
+echo "# posture basis: a new review, a new comment, a push or a new review decision reads the PR again"
+# A PR read for a change is read once more on the pass after, which confirms its
+# new basis, so each step settles before the next one moves the other PR.
+open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]}')" "$(open_node 302 DIRTY)"
+out=$(run_basis)
+eq "$(pf_views)" "301" "a review the count shows reads that PR whole; the untouched one is kept"
+out=$(run_basis)
+eq "$(pf_views)" "301" "…and the pass after reads it once more, to confirm its new basis"
+open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]}')" "$(open_node 302 DIRTY '' '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
+out=$(run_basis)
+eq "$(pf_views)" "302" "a Conversation comment reads its PR again"
+run_basis >/dev/null
+open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]} | .updatedAt = "2026-10-02T00:00:00Z"')" "$(open_node 302 DIRTY '' '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
+out=$(run_basis)
+eq "$(pf_views)" "301" "an updatedAt that moved reads its PR again"
+run_basis >/dev/null
+open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]} | .updatedAt = "2026-10-02T00:00:00Z"')" "$(open_node 302 DIRTY APPROVED '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
+out=$(run_basis)
+eq "$(pf_views)" "302" "a review decision that moved reads its PR again"
+run_basis >/dev/null
+printf '%s' "$(prview 301 OPEN CLEAN MERGEABLE | jq -c '.headRefOid = "sha-301b"')" > "$GH_DIR/pr_view_301.json"
+open_prs "$(open_node 301 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9001}]} | .updatedAt = "2026-10-02T00:00:00Z" | .headRefOid = "sha-301b"')" "$(open_node 302 DIRTY APPROVED '.comments = {totalCount: 1, nodes: [{databaseId: 7001}]}')"
+out=$(run_basis)
+eq "$(pf_views)" "301" "a push reads its PR again"
+eq "$(meta_pinned PB1 pr_posture)" "none@sha-301b" "…and pins the posture to the new head"
+run_basis >/dev/null
+out=$(run_basis)
+eq "$(pf_views)" "" "with nothing moved, both are kept again"
+
+echo "# posture basis: a watermark or a posture another arm moved reads the PR again"
+bmut PB2 '.metadata.pr_issue_comment_watermark = "7001"'
+out=$(run_basis)
+eq "$(pf_views)" "302" "a watermark the routing advanced reads the PR again"
+run_basis >/dev/null
+bmut PB1 '.metadata.pr_posture = "commented@sha-301b@2026-10-01T00:00:00Z"'
+out=$(run_basis)
+eq "$(pf_views)" "301" "a posture the bead no longer carries is derived again, never restored from the basis"
+eq "$(meta_pinned PB1 pr_posture)" "none@sha-301b" "…and the derivation records what the PR says"
+out=$(run_basis)
+eq "$(pf_views)" "301" "…as a candidate the next pass confirms, since another arm read the PR otherwise"
+out=$(run_basis)
+eq "$(pf_views)" "" "…after which it is kept again"
+
+echo "# posture basis: a derivation is kept only once the next pass derives it again"
+# The batched read shows a review on PB6 that the review list does not return
+# yet: GitHub answered the two requests from different moments. The first
+# derivation reads none and records it only as a candidate, which keeps
+# nothing. The next pass derives again, now reads the review, and records it.
+store "[$(anchor PB6 306 "$UTCUT")]"
+printf '%s' "$(prview 306 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_306.json"
+open_prs "$(open_node 306 CLEAN '' '.reviews = {totalCount: 1, nodes: [{databaseId: 9306}]}')"
+rm -f "$BASIS"
+out=$(run_basis)
+eq "$(meta_pinned PB6 pr_posture)" "none@sha-306" "a review list behind the batched read derives none"
+printf '%s\n' '[{"id":9306,"user":{"login":"alice"},"state":"COMMENTED","body":"rename this","submitted_at":"2026-10-07T12:00:00Z"}]' > "$GH_DIR/reviews_306.json"
+out=$(run_basis)
+eq "$(pf_views)" "306" "the next pass derives the posture again rather than keep the first derivation's"
+eq "$(meta_pinned PB6 pr_posture)" "commented@sha-306" "…and records the review it now reads"
+rm -f "$GH_DIR/reviews_306.json"
+
+echo "# posture basis: a commented posture, or one an unengaged-thread candidate decided, keeps none"
+# PB3 holds an unanswered Conversation comment, so its posture is commented. PB4
+# holds a pre-cutover unmarked comment under our own login in a resolved thread:
+# no hold, but the answer turned on bead state the PR does not show.
+store "[$(anchor PB3 303 "$UTCUT"), $(anchor PB4 304 "$UTCUT")]"
+printf '%s' "$(prview 303 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_303.json"
+printf '%s\n' '[{"id":5003,"user":{"login":"alice"},"body":"please rename this","created_at":"2026-10-07T12:00:00Z"}]' > "$GH_DIR/issue_comments_303.json"
+printf '%s' "$(prview 304 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_304.json"
+printf '%s\n' '[{"id":104,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_304.json"
+echo '[]' > "$GH_DIR/reviews_304.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-304","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-304","databaseId":104,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_304.json"
+open_prs "$(open_node 303)" "$(open_node 304 CLEAN REVIEW_REQUIRED)"
+rm -f "$BASIS"
+out=$(run_basis)
+eq "$(meta_pinned PB3 pr_posture),$(meta_pinned PB4 pr_posture)" "commented@sha-303,review_required@sha-304" "the postures are recorded"
+out=$(run_basis)
+eq "$(pf_views)" "303,304" "…and both are read whole again on the next pass"
+
+echo "# posture basis: a derivation whose answered marks did not record keeps none, so the threads are read again"
+# PB7's only inline comment is answered in its resolved thread, so its posture is
+# none. The answered marks are what let the next derivation drop that comment
+# without reading the threads. While they fail to record, each derivation reads
+# the threads again, and a basis kept on two such derivations would skip the read.
+store "[$(anchor PB7 307 "$UTCUT")]"
+printf '%s' "$(prview 307 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_307.json"
+echo '[]' > "$GH_DIR/reviews_307.json"; echo '[]' > "$GH_DIR/issue_comments_307.json"
+printf '[{"id":9701,"user":{"login":"human1"},"body":"answered comment","path":"a.md","line":1},{"id":9702,"user":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","path":"a.md","line":1,"in_reply_to_id":9701}]' > "$GH_DIR/comments_307.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-307a","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-307a","databaseId":9701,"fullDatabaseId":"9701","author":{"login":"human1"},"body":"answered comment","reactionGroups":[]},{"id":"NC-307b","databaseId":9702,"fullDatabaseId":"9702","author":{"login":"gc-city-bot"},"body":"fixed <!-- gc-writeback -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_307.json"
+open_prs "$(open_node 307)"
+# A lifecycle.sh that refuses only the answered-marks write and passes every
+# other transition, the posture record included, to the real one.
+mv "$SD/lifecycle.sh" "$SD/lifecycle.real.sh"
+cat > "$SD/lifecycle.sh" <<'LCW'
+#!/usr/bin/env bash
+case " $* " in *" pr_comment_answered="*) echo "lifecycle (stub): answered marks refused" >&2; exit 1 ;; esac
+exec "$(dirname "$0")/lifecycle.real.sh" "$@"
+LCW
+chmod +x "$SD/lifecycle.sh"
+rm -f "$BASIS"
+out=$(run_basis)
+eq "$(meta_pinned PB7 pr_posture)" "none@sha-307" "the answered comment holds nothing"
+has "$out" "answered marks did not record" "…and the marks that did not record are named"
+run_basis >/dev/null
+out=$(run_basis)
+eq "$(pf_views)" "307" "the pass after two derivations whose marks did not record derives the posture again"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "1" "…and reads the threads again"
+mv "$SD/lifecycle.real.sh" "$SD/lifecycle.sh"
+out=$(run_basis)
+eq "$(meta PB7 pr_comment_answered)" "9701" "once the marks record"
+out=$(run_basis)
+eq "$(pf_views)" "307" "…the next pass derives the posture again to confirm the basis"
+eq "$(grep -c 'reviewThreads(first:100' "$STUB_GH_LOG")" "0" "…dropping the answered comment by its mark, with no thread read"
+out=$(run_basis)
+eq "$(pf_views)" "" "…and the pass after keeps the posture on its confirmed basis"
+
+echo "# posture basis: a changes_requested posture keeps its basis"
+store "[$(anchor PB5 305 "$UTCUT")]"
+printf '%s' "$(prview 305 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_305.json"
+open_prs "$(open_node 305 BLOCKED CHANGES_REQUESTED)"
+rm -f "$BASIS"
+out=$(run_basis)
+eq "$(meta_pinned PB5 pr_posture)" "changes_requested@sha-305" "the review decision decides the posture"
+out=$(run_basis)
+eq "$(pf_views)" "305" "…the next pass derives it again to confirm the basis"
+out=$(run_basis)
+eq "$(pf_views)" "" "…and nothing else can move it, so the pass after reads no PR"
+
+echo "# posture basis: a batched read that fails reads every PR per PR"
+out=$(STUB_OPEN_PRS_FAIL=1 run_basis)
+eq "$(pf_views)" "305" "the PR is read per PR"
+has "$out" "the batched open-PR read did not answer" "…and the failed read is named"
+
+echo "# done when: an approved PR gone DIRTY files its merge-in in the first pass, however far the rotation is from it"
+# Four approved PRs, the last of them conflicting, and a deadline that has
+# passed: the rotation reaches only the lowest id this pass. The merge-in owed
+# goes ahead of it.
+store "[$(anchor DW1 331 ',"pr_posture":"approved@sha-331@2026-10-01T00:00:00Z","pr_merge_state":"BLOCKED@sha-331"'),
+        $(anchor DW2 332 ',"pr_posture":"approved@sha-332@2026-10-01T00:00:00Z","pr_merge_state":"BLOCKED@sha-332"'),
+        $(anchor DW3 333 ',"pr_posture":"approved@sha-333@2026-10-01T00:00:00Z","pr_merge_state":"BLOCKED@sha-333"'),
+        $(anchor DW4 334 ',"pr_posture":"approved@sha-334@2026-10-01T00:00:00Z","pr_merge_state":"DIRTY@sha-334"')]"
+for n in 331 332 333; do printf '%s' "$(prview "$n" OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_$n.json"; done
+printf '%s' "$(prview 334 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_334.json"
+open_prs "$(open_node 331 BLOCKED APPROVED)" "$(open_node 332 BLOCKED APPROVED)" "$(open_node 333 BLOCKED APPROVED)" "$(open_node 334 DIRTY APPROVED)"
+DWCUR="$TMP/pr-facts-dw.cursor"; rm -f "$DWCUR" "$DWCUR".*
+: > "$STUB_GH_LOG"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$DWCUR" 2>&1)
+eq "$(pf_views)" "334,331" "the conflicting approved PR is read first, and the rotation still gets its visit"
+has "$out" "PR#334 conflicts with 'main'; filed merge-mode rework" "…and its merge-in is filed in this pass"
+has "$out" "(1 needing action first)" "…counted as needing action"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$DWCUR" 2>&1)
+has "$out" "(0 needing action first)" "with the merge-in in flight it owes nothing and rotates"
+eq "$(pf_views)" "332" "…so the rotation goes on after the cursor"
+
+echo "# done when: new review feedback is routed in the first pass, however far the rotation is from it"
+# The posture arm recorded commented for DF3, the highest id. The feedback arm
+# reaches it first, past a deadline that leaves the rotation one visit.
+store "[$(anchor DF1 341), $(anchor DF2 342), $(anchor DF3 343 ',"pr_posture":"commented@sha-343@2026-10-01T00:00:00Z"')]"
+for n in 341 342 343; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+printf '%s\n' '[{"id":5343,"user":{"login":"alice"},"body":"this name is misleading","created_at":"2026-10-07T12:00:00Z"}]' > "$GH_DIR/issue_comments_343.json"
+open_prs "$(open_node 341)" "$(open_node 342)" "$(open_node 343)"
+DFCUR="$TMP/pr-feedback-dw.cursor"; rm -f "$DFCUR" "$DFCUR".*
+: > "$STUB_GH_LOG"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline 1 --cursor "$DFCUR" 2>&1)
+eq "$(pf_views)" "343,341" "the PR with unrouted feedback is read first"
+has "$(meta DF3 pr_comment_disposition)" "rework:" "…and its feedback is routed in this pass"
+
+echo "# feedback arm: changes_requested goes first only when its PR changed since the arm's last visit"
+store "[$(anchor FC1 351), $(anchor FC2 352 ',"pr_posture":"changes_requested@sha-352@2026-10-01T00:00:00Z"')]"
+printf '%s' "$(prview 351 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_351.json"
+printf '%s' "$(prview 352 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_352.json"
+open_prs "$(open_node 351)" "$(open_node 352 BLOCKED CHANGES_REQUESTED)"
+FCCUR="$TMP/pr-feedback-cr.cursor"; rm -f "$FCCUR" "$FCCUR".*
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$FCCUR" 2>&1)
+has "$out" "(0 needing action first)" "a standing change request the arm has no last visit to compare with rotates"
+open_prs "$(open_node 351)" "$(open_node 352 BLOCKED CHANGES_REQUESTED '.reviews = {totalCount: 2, nodes: [{databaseId: 9352}]}')"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$FCCUR" 2>&1)
+has "$out" "(1 needing action first)" "a review since the arm's last visit puts it first"
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$FCCUR" 2>&1)
+has "$out" "(0 needing action first)" "…and once visited it rotates again"
+
+echo "# full walk: a PR that left the open list or changed since the last visit goes first; one with a rework in flight does not"
+store "[$(anchor FW1 361), $(anchor FW2 362),
+        $(anchor FW3 363 ',"pr_posture":"approved@sha-363@2026-10-01T00:00:00Z","pr_merge_state":"DIRTY@sha-363"'),
+        {\"id\":\"FW3-rw\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Merge main into PR#363\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"FW3\",\"branch\":\"polecat/x363\"}}]"
+for n in 361 362; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+printf '%s' "$(prview 363 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_363.json"
+open_prs "$(open_node 361)" "$(open_node 362)" "$(open_node 363 DIRTY APPROVED)"
+FWCUR="$TMP/pr-facts-fw.cursor"; rm -f "$FWCUR" "$FWCUR".*
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$FWCUR" 2>&1)
+has "$out" "(0 needing action first)" "a walk with no marks yet puts nothing first for a change, and a merge-in in flight owes nothing"
+eq "$(cut -f1 "$FWCUR.seen" | sort -u | paste -sd, -)" "FW1,FW2,FW3" "…and records a mark for every anchor"
+printf '%s' "$(prview 362 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_362.json"
+open_prs "$(open_node 361 CLEAN '' '.headRefOid = "sha-361b"')" "$(open_node 363 DIRTY APPROVED)"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$FWCUR" 2>&1)
+has "$out" "(2 needing action first)" "a PR gone from the open list and a push since the last visit both go first"
+eq "$(pf_views)" "361,363" "…the lower id ahead of the rotation, which still gets its visit"
+has "$out" "1 needing action wait for the next pass" "…and the merged one the deadline left is named for the next pass"
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$FWCUR" 2>&1)
+has "$out" "recorded FW2 — PR#362 is MERGED" "the next pass records the merge it was owed"
+
+echo "# full walk: an approved conflicting PR the conflict arm stands down on rotates, and goes first once released"
+# HD2 is under a merge_hold, HD3 a rebase_hold, and HD4 is armed to re-dispatch:
+# the conflict arm files no merge-in for any of them, so none takes a first visit
+# every pass. Releasing HD2's hold makes it owe the merge-in again.
+HD_APPROVED_DIRTY() { printf ',"pr_posture":"approved@sha-%s@2026-10-01T00:00:00Z","pr_merge_state":"DIRTY@sha-%s"%s' "$1" "$1" "$2"; }
+store "[$(anchor HD1 381),
+        $(anchor HD2 382 "$(HD_APPROVED_DIRTY 382 ',"merge_hold":"true"')"),
+        $(anchor HD3 383 "$(HD_APPROVED_DIRTY 383 ',"rebase_hold":"true"')"),
+        $(anchor HD4 384 "$(HD_APPROVED_DIRTY 384 ',"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"')")]"
+printf '%s' "$(prview 381 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_381.json"
+for n in 382 383 384; do printf '%s' "$(prview "$n" OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_$n.json"; done
+open_prs "$(open_node 381)" "$(open_node 382 DIRTY APPROVED)" "$(open_node 383 DIRTY APPROVED)" "$(open_node 384 DIRTY APPROVED)"
+HDCUR="$TMP/pr-facts-hd.cursor"; rm -f "$HDCUR" "$HDCUR".*
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$HDCUR" 2>&1)
+has "$out" "(0 needing action first)" "a held, rebase-held or armed approved conflicting PR is not put first"
+has "$out" "PR#382 conflicts but a hold is set" "…and the conflict arm stands down on it when the rotation reaches it"
+bmut HD2 'del(.metadata.merge_hold)'
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$HDCUR" 2>&1)
+has "$out" "(1 needing action first)" "with its hold released it goes first"
+has "$out" "PR#382 conflicts with 'main'; filed merge-mode rework" "…and its merge-in is filed"
+rm -f "$GH_DIR/open_prs.json"
+
+fi # part pacing
 
 echo
 echo "passed: $PASS  failed: $FAIL"

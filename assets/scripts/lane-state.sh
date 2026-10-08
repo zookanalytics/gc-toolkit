@@ -16,23 +16,27 @@
 #   backing   a closed task_kind=review bead whose anchor_bead is this anchor,
 #             carrying a reviewed_oid, and whose check_name is this lane (absent
 #             check_name resolves to correctness): it carries signoff_verdict=approve
-#             and is not superseded (gc.outcome is not superseded); OR, for a
-#             legacy bead written before the verdict stamp, carries no
-#             signoff_verdict with gc.outcome=recorded; OR the anchor's pr_number
-#             has an APPROVED GitHub review (an approval names no check, so it
-#             backs every lane).
-#             The reviewed_oid clause guards a local backing bead: a recorded
-#             verdict naming no reviewed commit is a stale or legacy row, so it
-#             cannot green a lane on its own. The GitHub-approval fallback is
-#             independent evidence and needs no such pin.
+#             and is not superseded (gc.outcome is not superseded); OR the
+#             anchor's pr_number has an APPROVED GitHub review (an approval names
+#             no check, so it backs every lane).
+#             signoff_verdict is the only stamp that names the verdict. signoff
+#             writes gc.outcome=recorded on every close, approve and
+#             request-changes alike, so recorded records only that a verdict was
+#             written, never that it was approve. A close carrying no
+#             signoff_verdict names no verdict this reader can trust, so it backs
+#             no lane locally; such a lane's green is corroborated only by the
+#             GitHub-approval fallback.
+#             The reviewed_oid clause guards a local backing bead: an approve
+#             naming no reviewed commit is a stale row, so it cannot green a lane
+#             on its own. The GitHub-approval fallback is independent evidence
+#             and needs no such pin.
 #   in flight an open review bead for this lane holds the lane out of green — the
 #             precedence that keeps green from co-existing with a live review.
 #
 # The non-superseded clause is why an approve does not back a lane forever: the
 # validator supersedes an approve bead to send a lane back to unreviewed
 # (stamping gc.outcome=superseded), so a superseded approve must stop backing the
-# lane. The legacy branch needs no such clause — a supersede stamp removes the
-# gc.outcome=recorded it requires.
+# lane.
 #
 # Two conditions the full derivation names are deliberately NOT read here: an
 # open must-fix finding (anchor-wide, subsumed by the merge predicate's own
@@ -116,7 +120,7 @@ cmd_green() {
           | select(((($m.reviewed_oid // "") | tostring)) != "")
           | (($m.signoff_verdict // "") | tostring) as $sv
           | ((($m["gc.outcome"] // "") | tostring)) as $oc
-          | select(($sv == "approve" and $oc != "superseded") or ($sv == "" and $oc == "recorded")) ]
+          | select($sv == "approve" and $oc != "superseded") ]
     | length > 0' 2>/dev/null)
   [ "$backed" = "true" ] && return 0
 

@@ -254,5 +254,39 @@ out=$(export RUN_TESTS_PART=beta; unset RUN_TESTS_PARTS; base=$FAIL
 has "$out" "gamma=1 fails=0" "part: one part picked by hand, with no declared list, skips the others without failing"
 has "$out" "beta=0" "…and runs the part it names"
 
+# tomllib_python: each probe's PATH holds stand-in interpreters and a directory
+# with only the grep and sort the search runs, so no real Python on the host is
+# found. A stand-in answers the two questions the search asks: whether tomllib
+# imports, and which version it is.
+PYT="$TMP/python"
+mkdir -p "$PYT/tools" "$PYT/new" "$PYT/old" "$PYT/versioned" "$PYT/oldversioned"
+ln -s "$(command -v grep)" "$(command -v sort)" "$PYT/tools/"
+fake_python() { # <path> <version> <yes|no: tomllib imports>
+  local rc=1
+  [ "$3" = yes ] && rc=0
+  printf '#!/bin/sh\ncase "$2" in\n  *tomllib*) exit %s ;;\n  *platform*) echo %s ;;\nesac\n' "$rc" "$2" > "$1"
+  chmod +x "$1"
+}
+fake_python "$PYT/new/python3" 3.12.3 yes
+fake_python "$PYT/old/python3" 3.9.6 no
+fake_python "$PYT/versioned/python3.11" 3.11.9 yes
+fake_python "$PYT/versioned/python3.13" 3.13.1 yes
+fake_python "$PYT/versioned/python3.14-config" 3.14.0 yes
+fake_python "$PYT/oldversioned/python3.10" 3.10.4 no
+out=$(PATH="$PYT/new:$PYT/versioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "0" "tomllib_python: a python3 with tomllib is found"
+eq "$out" "$PYT/new/python3" "…and printed by its path, ahead of any versioned name"
+out=$(PATH="$PYT/old:$PYT/versioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "0" "tomllib_python: a python3 without tomllib is passed over for a versioned one that has it"
+eq "$out" "$PYT/versioned/python3.13" "…the newest python3.N, and never a name such as python3.14-config"
+out=$(PATH="$PYT/old:$PYT/oldversioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "1" "tomllib_python: with no Python that has tomllib, it returns 1"
+eq "$out" "tomllib needs Python 3.11 or newer, and PATH has $PYT/old/python3 3.9.6, $PYT/oldversioned/python3.10 3.10.4" \
+  "…and names every Python it found, with its version"
+# shellcheck disable=SC2123  # a PATH with no Python on it is the case under test
+out=$(PATH="$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "1" "tomllib_python: with no Python at all, it returns 1"
+eq "$out" "tomllib needs Python 3.11 or newer, and PATH has no python3" "…and says there is none"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
